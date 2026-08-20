@@ -89,10 +89,34 @@ function readChangedPaths(baseSha, headSha) {
     .filter(Boolean);
 }
 
+function readMergeBase(baseSha, headSha) {
+  const mergeBase = execFileSync("git", ["merge-base", baseSha, headSha], {
+    encoding: "utf8",
+  }).trim();
+  if (!mergeBase) {
+    throw new Error("Unable to resolve the pull request merge base.");
+  }
+  return mergeBase;
+}
+
+function readTextFileAtRevision(revision, filePath) {
+  try {
+    return execFileSync("git", ["show", `${revision}:${filePath}`], {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
 export {
   findRenderedListItem,
   readChangedPaths,
+  readMergeBase,
   readRenderedSection,
+  readTextFileAtRevision,
   renderPrBody,
   renderedText,
 };

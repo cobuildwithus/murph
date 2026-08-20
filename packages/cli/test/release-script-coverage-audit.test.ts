@@ -1200,13 +1200,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'chatgpt-managed-browser.test.mjs'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt.sh'))).toBe(false)
     expect(existsSync(path.join(repoRoot, 'scripts', 'review-gpt-cli.sh'))).toBe(false)
-    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.134')
+    expect(rootPackageJson.devDependencies?.['@cobuild/review-gpt']).toBe('^0.5.136')
     expect(
       pnpmWorkspace
         .match(/^minimumReleaseAgeExclude:\n((?:  - .+\n)+)/mu)?.[1]
         ?.split('\n')
         .filter((line) => line.includes('@cobuild/review-gpt')),
-    ).toEqual(["  - '@cobuild/review-gpt@0.5.134'"])
+    ).toEqual(["  - '@cobuild/review-gpt@0.5.136'"])
     expect(
       pnpmWorkspace
         .match(/^patchedDependencies:\n((?:  .+\n)+)/mu)?.[1]
@@ -1390,7 +1390,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptReadme).toContain('An ephemeral per-run nonce')
     expect(reviewGptReadme).toContain('after at least 5 minutes of observed generation')
     expect(reviewGptReadme).toContain(
-      'A marked concrete-model response shorter than the trust threshold fails closed as untrusted',
+      'A marked concrete-model response may complete before the trust threshold only when the same snapshot exposes compatible concrete platform-model metadata',
     )
     expect(reviewGptReadme).toContain(
       'The threshold defaults to 5 minutes and can be raised or lowered',
@@ -1599,7 +1599,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(reviewGptConfig).toContain('model="gpt-5.6-sol"')
     expect(reviewGptConfig).toContain('thinking="current"')
     expect(reviewGptConfig).toContain(
-      'if [[ ! -x "$review_gpt_installed_browser_binary" && ! -d "$review_gpt_selected_browser_app" ]]',
+      'if [[ -z "${browser_binary_path:-}" \\',
+    )
+    expect(reviewGptConfig).toContain(
+      '&& "$review_gpt_selected_browser_lane" != "main" \\',
+    )
+    expect(reviewGptConfig).toContain(
+      '&& ! -x "$review_gpt_installed_browser_binary" \\',
+    )
+    expect(reviewGptConfig).toContain(
+      '&& ! -d "$review_gpt_selected_browser_app" ]]; then',
     )
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "Hercules" ;;')
     expect(reviewGptConfig).toContain('hercules) printf \'%s\\n\' "9444" ;;')
@@ -1643,7 +1652,7 @@ describe('monorepo release flow coverage audit', () => {
       'managed_browser_display_mode="${managed_browser_display_mode:-headful}"',
     )
     expect(reviewGptConfig).toContain(
-      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"',
+      'review_gpt_installed_browser_binary="${review_gpt_installed_browser_binary:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"',
     )
     expect(reviewGptConfig).toContain(
       'browser_binary_path="${browser_binary_path:-$review_gpt_installed_browser_binary}"',
@@ -2246,7 +2255,7 @@ describe('monorepo release flow coverage audit', () => {
       'Brave Browser',
     )
     const installedBrowserAssignment =
-      'review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"'
+      'review_gpt_installed_browser_binary="${review_gpt_installed_browser_binary:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"'
     const controlledConfig = readFileSync(
       path.join(repoRoot, 'scripts', 'review-gpt.config.sh'),
       'utf8',

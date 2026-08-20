@@ -19,6 +19,9 @@ import {
 } from "@murphai/contracts";
 import { createConfiguredDeviceSyncProvidersFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import {
+  resolveGoogleHealthFitbitMigrationSources,
+} from "@murphai/device-syncd/fitbit-migration";
 import { JUNCTION_COMPANION_HRV_OBSERVATION_INVALID_CODE } from "@murphai/device-syncd/junction-resources";
 import {
   addJunctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -36,6 +39,7 @@ import {
   parseHostedExecutionDeviceSyncRuntimeApplyRequest,
 } from "@murphai/device-syncd/hosted-runtime";
 import {
+  type DeviceConnectionSourceResourceAvailabilitySummary,
   type DeviceSyncAccount,
   type DeviceSyncJobRecord,
   type DeviceSyncProvider,
@@ -1218,6 +1222,129 @@ describe("hosted device-sync runtime", () => {
     }
   });
 
+  test.each(["warm", "cold"] as const)(
+    "sync replaces a stale local Google source when Web advances its epoch on a %s runtime",
+    async (runtimeState) => {
+      const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+        "hosted-device-sync-runtime-",
+      );
+      await mkdir(vaultRoot, { recursive: true });
+
+      const baseProvider = createFakeProvider();
+      const junctionProvider: DeviceSyncProvider = {
+        ...baseProvider,
+        provider: "junction",
+        descriptor: {
+          ...baseProvider.descriptor,
+          displayName: "Junction",
+          provider: "junction",
+        },
+      };
+      let service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+      const hostedConnectionId = "hosted_conn_google_source_epoch";
+      const buildGoogleSnapshot = (input: {
+        firstSeenAt: string;
+        lastDataAt: string | null;
+        lastSeenAt: string;
+        resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary;
+      }) => buildRuntimeSnapshot({
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: "junction-google-source-epoch",
+        provider: "junction",
+        sources: [{
+          displayName: "Google Health",
+          firstSeenAt: input.firstSeenAt,
+          lastDataAt: input.lastDataAt,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: input.lastSeenAt,
+          resourceCount: Object.keys(input.resourceAvailabilitySummary).length,
+          resourceAvailabilitySummary: input.resourceAvailabilitySummary,
+          sourceInstanceKey: "hosted_google_health_source",
+          sourceProviderSlug: "google_health",
+          status: "connected",
+        }],
+      });
+      let snapshot = buildGoogleSnapshot({
+        firstSeenAt: "2026-08-10T01:00:00.000Z",
+        lastDataAt: "2026-08-10T02:00:00.000Z",
+        lastSeenAt: "2026-08-10T02:00:00.000Z",
+        resourceAvailabilitySummary: {
+          activity: true,
+          historicalBackfillCompletedAt: "2026-08-10T02:00:00.000Z",
+        },
+      });
+      const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+        ...createNoDirtyStateDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("applyUpdates should not be called during hydration");
+        },
+        async createConnectLink() {
+          throw new Error("createConnectLink should not be called during hydration");
+        },
+        async fetchSnapshot() {
+          return snapshot;
+        },
+      };
+
+      try {
+        await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake("2026-08-10T02:05:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+
+        snapshot = buildGoogleSnapshot({
+          firstSeenAt: "2026-08-11T01:00:00.000Z",
+          lastDataAt: null,
+          lastSeenAt: "2026-08-11T01:00:00.000Z",
+          resourceAvailabilitySummary: {},
+        });
+        if (runtimeState === "cold") {
+          closeHostedRuntimeDeviceSyncService(service);
+          service = createDeviceSyncServiceForVault(vaultRoot, [junctionProvider]);
+        }
+
+        const state = await syncHostedDeviceSyncControlPlaneState({
+          deviceSyncPort,
+          wake: buildCronWake("2026-08-11T01:05:00.000Z"),
+          secret: DEVICE_SYNC_SECRET,
+          service,
+        });
+        const localAccountId = state.hostedToLocalAccountIds.get(hostedConnectionId);
+        assert.ok(localAccountId);
+        const [source] = getStore(service).listConnectionSources({
+          connectionId: localAccountId,
+        });
+
+        assert.deepEqual(source && {
+          firstSeenAt: source.firstSeenAt,
+          lastDataAt: source.lastDataAt,
+          lastErrorCode: source.lastErrorCode,
+          lastSeenAt: source.lastSeenAt,
+          resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+          status: source.status,
+        }, {
+          firstSeenAt: "2026-08-11T01:00:00.000Z",
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastSeenAt: "2026-08-11T01:00:00.000Z",
+          resourceAvailabilitySummary: {},
+          status: "connected",
+        });
+      } finally {
+        closeHostedRuntimeDeviceSyncService(service);
+        await cleanup();
+      }
+    },
+  );
+
   test("sync seeds hosted connection sources without overwriting unpublished local state", async () => {
     const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
       "hosted-device-sync-runtime-",
@@ -2392,6 +2519,336 @@ describe("hosted device-sync runtime", () => {
         sourceProviderSlug: "apple_health",
         status: "disconnected",
       }]);
+    } finally {
+      closeHostedRuntimeDeviceSyncService(service);
+      await cleanup();
+    }
+  });
+
+  test.each([
+    {
+      googleLastSeenAt: "2026-04-06T09:31:00.000Z",
+      timestampOrder: "different",
+    },
+    {
+      googleLastSeenAt: "2026-04-06T09:30:00.000Z",
+      timestampOrder: "identical",
+    },
+  ])("cold hydration preserves Fitbit and Google Health data authorities with $timestampOrder timestamps", async ({
+    googleLastSeenAt,
+  }) => {
+    const { cleanup, vaultRoot } = await createHostedRuntimeWorkspace(
+      "hosted-device-sync-runtime-fitbit-google-health-",
+    );
+    await mkdir(vaultRoot, { recursive: true });
+    const hostedConnectionId = "hosted_conn_fitbit_google_health";
+    const hostedFitbitSourceInstanceKey = "jxn_src_fitbit_authority";
+    const hostedGoogleSourceInstanceKey = "jxn_src_google_health_authority";
+    const fitbitSummary = {
+      activity: true,
+      canonicalCoverageBoundary_activity: "2026-04-05",
+      canonicalCoverageFinalizedAt_activity: "2026-04-06T08:00:00.000Z",
+    };
+    const googleSummary = {
+      activity: true,
+      historicalBackfillCompletedAt: "2026-04-06T09:00:00.000Z",
+    };
+    let jobSources: Array<{
+      firstSeenAt?: string;
+      resourceAvailabilitySummary?: Record<string, unknown>;
+      sourceInstanceKey?: string;
+      sourceProviderSlug: string;
+      status: string;
+    }> = [];
+    const baseProvider = createFakeProvider();
+    const junctionProvider: DeviceSyncProvider = {
+      ...baseProvider,
+      provider: "junction",
+      descriptor: {
+        ...baseProvider.descriptor,
+        displayName: "Junction",
+        provider: "junction",
+      },
+      jobExecutor: {
+        async executeJob(context, job) {
+          jobSources = (await context.listConnectionSources?.({
+            sourceProviderSlug: String(job.payload.sourceProviderSlug),
+          }) ?? []).map((source) => ({
+            firstSeenAt: source.firstSeenAt,
+            resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+            ...(source.sourceInstanceKey
+              ? { sourceInstanceKey: source.sourceInstanceKey }
+              : {}),
+            sourceProviderSlug: source.sourceProviderSlug,
+            status: source.status,
+          }));
+          return {};
+        },
+      },
+    };
+    let hostedSnapshot = buildRuntimeSnapshot({
+      capabilities: { connectionSourceApply: true },
+      connectionId: hostedConnectionId,
+      credential: {
+        credentialMetadata: {},
+        kind: "provider_config",
+        providerConfigKey: "junction",
+      },
+      externalAccountId: "junction-fitbit-google-health",
+      provider: "junction",
+      sources: [
+        {
+          displayName: "Fitbit",
+          firstSeenAt: "2026-03-01T00:00:00.000Z",
+          lastDataAt: "2026-04-05T23:59:59.000Z",
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: "2026-04-06T09:30:00.000Z",
+          resourceCount: 1,
+          resourceAvailabilitySummary: fitbitSummary,
+          sourceInstanceKey: hostedFitbitSourceInstanceKey,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        },
+        {
+          displayName: "Google Health",
+          firstSeenAt: "2026-04-06T08:30:00.000Z",
+          lastDataAt: "2026-04-06T09:20:00.000Z",
+          lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
+          lastErrorMessage: "Legacy access remains active.",
+          lastSeenAt: googleLastSeenAt,
+          resourceCount: 2,
+          resourceAvailabilitySummary: googleSummary,
+          sourceInstanceKey: hostedGoogleSourceInstanceKey,
+          sourceProviderSlug: "google_health",
+          status: "error",
+        },
+      ],
+    });
+    const appliedRequests: ApplyUpdatesRequest[] = [];
+    const deviceSyncPort: HostedRuntimeDeviceSyncPort = {
+      ...createNoDirtyStateDeviceSyncPortMethods(),
+      async applyUpdates(request) {
+        appliedRequests.push(request);
+        return {
+          appliedAt: "2026-04-06T10:05:01.000Z",
+          updates: [],
+          userId: "member_123",
+        };
+      },
+      async createConnectLink() {
+        throw new Error("createConnectLink should not be called");
+      },
+      async fetchSnapshot() {
+        return hostedSnapshot;
+      },
+    };
+    const service = createHostedRuntimeDeviceSyncService({
+      config: {
+        publicBaseUrl: "https://sync.example.test/device-sync",
+        stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+        vaultRoot,
+      },
+      deviceSyncPort,
+      providers: [junctionProvider],
+      secret: DEVICE_SYNC_SECRET,
+    });
+
+    try {
+      const firstState = await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:00:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const localAccountId = firstState.hostedToLocalAccountIds.get(hostedConnectionId);
+      assert.ok(localAccountId);
+      const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "fitbit",
+      });
+      const googleSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: localAccountId,
+        sourceProviderSlug: "google_health",
+      });
+      assert.ok(fitbitSourceInstanceKey);
+      assert.ok(googleSourceInstanceKey);
+      const firstSources = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      assert.deepEqual(
+        [...firstSources].sort((left, right) =>
+          left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+        ).map((source) => ({
+          resourceAvailabilitySummary: source.resourceAvailabilitySummary,
+          sourceInstanceKey: source.sourceInstanceKey,
+          sourceProviderSlug: source.sourceProviderSlug,
+          status: source.status,
+        })),
+        [
+          {
+            resourceAvailabilitySummary: fitbitSummary,
+            sourceInstanceKey: fitbitSourceInstanceKey,
+            sourceProviderSlug: "fitbit",
+            status: "connected",
+          },
+          {
+            resourceAvailabilitySummary: googleSummary,
+            sourceInstanceKey: googleSourceInstanceKey,
+            sourceProviderSlug: "google_health",
+            status: "error",
+          },
+        ],
+      );
+
+      const localGoogle = firstSources.find((source) =>
+        source.sourceProviderSlug === "google_health"
+      );
+      assert.ok(localGoogle, "Hydration should create the Google Health source.");
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: localGoogle.displayName,
+        firstSeenAt: "2026-04-05T08:30:00.000Z",
+        lastDataAt: localGoogle.lastDataAt,
+        lastErrorCode: localGoogle.lastErrorCode,
+        lastErrorMessage: localGoogle.lastErrorMessage,
+        lastSeenAt: localGoogle.lastSeenAt,
+        replaceFirstSeenAt: true,
+        resourceAvailabilitySummary: localGoogle.resourceAvailabilitySummary,
+        sourceInstanceKey: localGoogle.sourceInstanceKey,
+        sourceProviderSlug: localGoogle.sourceProviderSlug,
+        status: localGoogle.status,
+      });
+      const job = getStore(service).enqueueJob({
+        accountId: localAccountId,
+        availableAt: "2026-04-06T10:00:00.000Z",
+        kind: "backfill",
+        payload: { sourceProviderSlug: "google_health" },
+        provider: "junction",
+      });
+      await service.runWorkerOnce();
+      assert.equal(getStore(service).getJobById(job.id)?.status, "succeeded");
+      assert.deepEqual(jobSources, [{
+        firstSeenAt: "2026-04-06T08:30:00.000Z",
+        resourceAvailabilitySummary: googleSummary,
+        sourceInstanceKey: googleSourceInstanceKey,
+        sourceProviderSlug: "google_health",
+        status: "error",
+      }]);
+
+      getStore(service).upsertConnectionSource({
+        connectionId: localAccountId,
+        displayName: "Google Health",
+        firstSeenAt: "2026-04-06T08:30:00.000Z",
+        lastDataAt: "2026-04-06T10:02:00.000Z",
+        lastErrorCode: null,
+        lastErrorMessage: null,
+        lastSeenAt: "2026-04-06T10:02:00.000Z",
+        resourceAvailabilitySummary: {
+          ...googleSummary,
+          sleep: true,
+        },
+        sourceInstanceKey: googleSourceInstanceKey,
+        sourceProviderSlug: "google_health",
+        status: "connected",
+      });
+      await reconcileHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:05:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+        state: firstState,
+      });
+      const projectedSources = appliedRequests
+        .flatMap((request) => request.updates)
+        .flatMap((update) => update.sources ?? []);
+      assert.deepEqual(
+        projectedSources.map((source) => source.sourceProviderSlug),
+        ["google_health"],
+      );
+
+      const projectedGoogle = projectedSources[0];
+      assert.ok(projectedGoogle);
+      const projectedGoogleFirstSeenAt = projectedGoogle.firstSeenAt;
+      assert.ok(projectedGoogleFirstSeenAt);
+      hostedSnapshot = buildRuntimeSnapshot({
+        capabilities: { connectionSourceApply: true },
+        connectionId: hostedConnectionId,
+        credential: {
+          credentialMetadata: {},
+          kind: "provider_config",
+          providerConfigKey: "junction",
+        },
+        externalAccountId: "junction-fitbit-google-health",
+        provider: "junction",
+        sources: [
+          hostedSnapshot.connections[0]!.sources![0]!,
+          {
+            displayName: projectedGoogle.displayName ?? null,
+            firstSeenAt: projectedGoogleFirstSeenAt,
+            lastDataAt: projectedGoogle.lastDataAt ?? null,
+            lastErrorCode: projectedGoogle.lastErrorCode ?? null,
+            lastErrorMessage: projectedGoogle.lastErrorMessage ?? null,
+            lastSeenAt: projectedGoogle.lastSeenAt ?? null,
+            resourceCount: Object.keys(
+              projectedGoogle.resourceAvailabilitySummary ?? {},
+            ).length,
+            resourceAvailabilitySummary:
+              projectedGoogle.resourceAvailabilitySummary,
+            sourceInstanceKey: projectedGoogle.sourceInstanceKey,
+            sourceProviderSlug: projectedGoogle.sourceProviderSlug,
+            status: projectedGoogle.status,
+          },
+        ],
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:06:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      await syncHostedDeviceSyncControlPlaneState({
+        deviceSyncPort,
+        wake: buildCronWake("2026-04-06T10:07:00.000Z"),
+        secret: DEVICE_SYNC_SECRET,
+        service,
+      });
+      const secondSources = getStore(service).listConnectionSources({
+        connectionId: localAccountId,
+      });
+      assert.deepEqual(
+        [...secondSources].sort((left, right) =>
+          left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+        ).map((source) => [
+          source.sourceProviderSlug,
+          source.sourceInstanceKey,
+        ]),
+        [
+          ["fitbit", fitbitSourceInstanceKey],
+          ["google_health", googleSourceInstanceKey],
+        ],
+      );
+      const hydratedFitbit = secondSources.find((source) =>
+        source.sourceProviderSlug === "fitbit"
+      );
+      assert.equal(hydratedFitbit?.lastErrorCode, null);
+      assert.equal(hydratedFitbit?.status, "connected");
+      assert.deepEqual(
+        hydratedFitbit?.resourceAvailabilitySummary,
+        fitbitSummary,
+      );
+      const hydratedGoogle = secondSources.find((source) =>
+        source.sourceProviderSlug === "google_health"
+      );
+      assert.equal(hydratedGoogle?.lastErrorCode, null);
+      assert.equal(hydratedGoogle?.status, "connected");
+      assert.deepEqual(hydratedGoogle?.resourceAvailabilitySummary, {
+        ...googleSummary,
+        sleep: true,
+      });
+      const migration = resolveGoogleHealthFitbitMigrationSources(secondSources);
+      assert.equal(migration.legacy?.sourceProviderSlug, "fitbit");
+      assert.equal(migration.successor?.sourceProviderSlug, "google_health");
     } finally {
       closeHostedRuntimeDeviceSyncService(service);
       await cleanup();

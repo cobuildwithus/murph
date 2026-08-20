@@ -69,6 +69,7 @@ describe('release workflow guards', () => {
     )
     expect(workflow.match(/fail-fast: false/gu) ?? []).toHaveLength(2)
     expect(workflow).toContain('run: pnpm release:check:preflight')
+    expect(workflow).not.toContain('NODE_OPTIONS')
     expect(workflow).toContain('MURPH_PACKAGE_COVERAGE_SHARD: ${{ matrix.shard }}')
     expect(workflow).toContain('run: pnpm test:packages:coverage')
     expect(workflow).toContain('run: pnpm test:scenario-integrity')

@@ -891,9 +891,9 @@ for (const width of [768, 1280] as const) {
     });
     await expect(history).not.toHaveAttribute("open", "");
 
-    const currentReferrals = referralDetailsPreview.getByRole("list", {
-      name: "Current usage referrals",
-    });
+    const currentReferrals = referralDetailsPreview.locator(
+      'ul[aria-label="Current usage referrals"]',
+    );
     await expect(currentReferrals).toBeVisible();
     const referralDetailNames = [
       "Details for Start a group conversation: In progress, Ends Aug 3 at 12:00 PM UTC",
@@ -901,11 +901,13 @@ for (const width of [768, 1280] as const) {
       "Details for Start a group conversation: Reward pending, Qualified Jul 25",
     ];
     for (const name of referralDetailNames) {
-      await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);
+      await expect(
+        currentReferrals.locator(`summary[aria-label="${name}"]`),
+      ).toHaveCount(1);
     }
-    const referralDetailsSummary = currentReferrals.getByRole("button", {
-      name: referralDetailNames[0],
-    });
+    const referralDetailsSummary = currentReferrals.locator(
+      `summary[aria-label="${referralDetailNames[0]}"]`,
+    );
     const referralDetails = referralDetailsSummary.locator("..");
     await expect(referralDetails).not.toHaveAttribute("open", "");
     await referralDetails.evaluate((element) => {
@@ -934,7 +936,8 @@ for (const width of [768, 1280] as const) {
     ).toBeVisible();
     await expect(
       starterExhausted
-        .getByRole("button", { name: "Choose Pulse", exact: true })
+        .locator("button")
+        .filter({ hasText: "Choose Pulse" })
         .first(),
     ).toBeVisible();
 

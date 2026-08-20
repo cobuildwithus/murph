@@ -220,6 +220,27 @@ product-decision owners.
    material visual claim cannot be judged after the applicable fallback. For
    user-facing `apps/web` work, package only the selected redacted rendered
    evidence that helps a reviewer judge the changed claim.
+
+   For the Playwright fallback, prefer an existing design-proof capture spec.
+   If none covers the state, use the established `apps/web/e2e/pr-*-design-proof.spec.ts`
+   pattern for one task-scoped spec: run through `apps/web/playwright.config.ts`
+   so its smoke environment owns the dev server, open the anchored `/design` or
+   `/screenshots` state, block non-loopback requests, wait for fonts and two
+   animation frames, assert the production surface, and capture that surface
+   rather than a long full page. In a secondary worktree, choose a task-unique
+   port and Next dist suffix. For example:
+
+   ```bash
+   VIEWPORT_OVERFLOW_PORT=<unique-port> \
+   NEXT_DIST_DIR_SUFFIX=<task-slug>-proof \
+   DESIGN_PROOF_OUTPUT_DIR=../../.artifacts/review-gpt/<task-slug> \
+     pnpm --dir apps/web exec playwright test \
+       e2e/<capture-spec>.spec.ts --config playwright.config.ts --project chromium
+   ```
+
+   Inspect each selected image at native resolution, keep it ignored and
+   redacted under `.artifacts/review-gpt/`, and remove a one-off capture spec
+   after proof unless it adds durable regression value.
 7. Commit and push a review candidate from the task worktree, open or update the PR, and keep any active plan open. For plan-bearing work this is an intermediate scoped commit, not the final task commit; `scripts/finish-task` still owns plan closure later. Ensure the PR body contains the outcome, Product UX result, direct evidence, non-obvious surfaces, architecture and reuse, hot reply path impact, provider-input impact, deployment and changelog decisions, the change-shape breakdown, and applicable design proof required below.
 8. Prepare exactly one preliminary `completion-specialists` ReviewGPT pass against that pushed head using `agent-docs/operations/pr-reviewgpt-loop.md` § Preliminary Specialist Pass. This pass applies every relevant Product UX, prompt, frontend, and coverage lens together and does not establish or advance the final ReviewGPT round baseline. A tooling/evidence `INVALID` result is corrected and retried as the same pass; a substantive result is one specialist pass, not four audits.
 9. When the final ReviewGPT gate is selected, establish its immutable round-one baseline on the same exact pushed candidate head and launch the preliminary pass and final round 1 concurrently. When the final gate does not apply, launch the preliminary pass by itself. The candidate must already have focused local proof and a parent candidate review, but preliminary findings, plan closure, and the parent's final review do not need to finish before both ReviewGPT jobs start. Run both jobs concurrently with CI and keep their outputs and state separate.
@@ -282,7 +303,10 @@ Every PR includes:
   input. Name the measurement method and exclusions. If no provider-input
   surface changed, write `Not applicable` for both runtimes with the reason;
   do not claim a measured zero from authored prompt text alone.
-- **Design proof.** Required for every user-facing hosted Web UI change. Link a
+- **Design proof.** Required for every user-facing hosted Web UI change. An
+  existing `page.tsx` or `layout.tsx` route is exempt only when the checker
+  proves that its sole runtime change is an unreferenced static object-literal
+  `metadata` export with no viewport or theme metadata. Link a
   repository-owned, reviewer-openable absolute URL with a fragment to the
   production component on `/design?tab=components`, consent surface on
   `/design?tab=consent`, or composed page section/flow under

@@ -760,10 +760,9 @@ export function upsertPreparedConnectionSourceInTransaction(
       : null;
 
   if (existing) {
-    const firstSeenAt = earliestIsoTimestamp(
-      existing.firstSeenAt,
-      normalized.firstSeenAt,
-    );
+    const firstSeenAt = input.replaceFirstSeenAt
+      ? normalized.firstSeenAt
+      : earliestIsoTimestamp(existing.firstSeenAt, normalized.firstSeenAt);
 
     database.prepare(`
       update device_connection_source

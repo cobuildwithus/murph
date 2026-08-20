@@ -261,6 +261,10 @@ describe("deviceSyncProviderManifests", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
       payload: {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
+        historicalProofFirstSeenAt: { kind: "string", includeInHostedHint: true },
+        historicalProofSourceProviderSlug: { kind: "string", includeInHostedHint: true },
+        historicalProviderRecordsSeen: { kind: "boolean", includeInHostedHint: true },
+        historicalRecordsSeen: { kind: "boolean", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
@@ -599,6 +603,8 @@ describe("deviceSyncProviderManifests", () => {
         kind: "backfill",
         payload: {
           emptyBackfillAttempts: 2,
+          historicalProviderRecordsSeen: true,
+          historicalRecordsSeen: true,
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
           timeseriesResourceCursor,
@@ -609,6 +615,8 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toEqual({
       emptyBackfillAttempts: 2,
+      historicalProviderRecordsSeen: true,
+      historicalRecordsSeen: true,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
       timeseriesResourceCursor,
       workoutStreamCursor,

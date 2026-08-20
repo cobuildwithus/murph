@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  addDaysToIsoDate,
   extractIsoDatePrefix,
   formatTimeZoneDateTimeParts,
   ID_PREFIXES,
@@ -78,6 +79,9 @@ import {
   JUNCTION_SLEEP_TIME_IN_BED_SECOND_PATHS,
   JUNCTION_SLEEP_TOTAL_MINUTE_PATHS,
   JUNCTION_SLEEP_TOTAL_SECOND_PATHS,
+  isJunctionDailyCanonicalCoverageResource,
+  maxJunctionCanonicalCoverageBoundary,
+  normalizeJunctionCanonicalCoverageBoundary,
   JUNCTION_TIMESERIES_RESOURCE_POLICIES,
   isJunctionRawDirectIdentityContainerKey,
   isJunctionRawDirectIdentityKey,
@@ -113,6 +117,7 @@ import {
   selectJunctionWorkoutStreamCandidates,
 } from "./junction-bounded-features.ts";
 import {
+  normalizeKnownJunctionSourceProviderSlug,
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
@@ -188,6 +193,13 @@ export interface JunctionSnapshotInput {
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
+  canonicalCoverageFence?: JunctionCanonicalCoverageFence;
+  canonicalCoverageProviderPulledAt?: string;
+}
+
+export interface JunctionCanonicalCoverageFence {
+  readonly coverageBoundaryByResource: Readonly<Record<string, string | null>>;
+  readonly sourceProviderSlug: string;
 }
 
 export type JunctionTimeseriesWindowKind = "calendar_day" | "precise";
@@ -216,6 +228,33 @@ export interface JunctionSummaryNormalizationEvidenceWindow {
 export interface JunctionBloodPressureProviderRecordIdentityEvidence {
   readonly providerRecordCount: number;
   readonly repairStableExternalRefResourceIds: readonly (string | null)[];
+}
+
+export interface JunctionCanonicalCoverageEvidence {
+  readonly coverageBoundary: string;
+  readonly coverageFinalizedAt?: string;
+  readonly resource: string;
+  readonly sourceProviderSlug: string;
+}
+
+export interface JunctionCanonicalCoverageDerivationOptions {
+  readonly providerPulledAt?: string;
+}
+
+export interface JunctionCanonicalCoverageEvent {
+  readonly dataOrigin?: {
+    readonly sourceProviderSlug?: string;
+    readonly timeZoneOffsetMinutes?: number | null;
+  };
+  readonly dayKey?: string;
+  readonly endAt?: string;
+  readonly externalRef?: { readonly resourceType: string };
+  readonly fields?: Readonly<Record<string, unknown>>;
+  readonly kind: string;
+  readonly occurredAt: string;
+  readonly sample?: { readonly endAt?: string };
+  readonly timeZone?: string;
+  readonly workout?: { readonly endedAt?: string };
 }
 
 export interface JunctionDailyTimeseriesAggregateIdentity {
@@ -300,6 +339,11 @@ const junctionSnapshotSchema = z.object({
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.unknown().optional(),
+  canonicalCoverageFence: z.object({
+    coverageBoundaryByResource: z.record(z.string(), z.string().nullable()),
+    sourceProviderSlug: z.string(),
+  }).strict().optional(),
+  canonicalCoverageProviderPulledAt: z.string().optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -328,6 +372,11 @@ const RAW_SOURCE_NAME_KEYS = new Set([
   "displayname",
   "name",
 ]);
+
+const JUNCTION_CANONICAL_COVERAGE_RESOURCES: readonly string[] = [
+  ...JUNCTION_ALLOWED_SUMMARY_RESOURCES.filter((resource) => resource !== "profile"),
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
+];
 const RAW_SOURCE_LINKAGE_KEY_PARTS = [
   "connectionid",
   "providerconnectionid",
@@ -623,6 +672,8 @@ const JUNCTION_LOCAL_CALENDAR_DATE_PATHS = [
   "calendar_date",
   "localDate",
   "local_date",
+  "date",
+  "day",
 ] as const;
 const JUNCTION_MEAL_ITEM_CONTAINER_PATHS = [
   "data",
@@ -1219,6 +1270,10 @@ export function normalizeJunctionSnapshot(
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
   normalizeCompanionHrvRmssd(companionHrvRmssd, context);
+  applyJunctionCanonicalCoverageFence(
+    context,
+    snapshot.canonicalCoverageFence,
+  );
   finalizeJunctionTemporalAuthoritativeSets(context);
   assertJunctionTimeseriesOutputBounds({
     eventCount: events.length,
@@ -1248,6 +1303,249 @@ export function normalizeJunctionSnapshot(
     }),
   });
 }
+
+/**
+ * Derives provider cutover coverage only from the canonical events returned by
+ * the committed vault import. This deliberately does not replay raw Junction
+ * normalization: the stored event owns the canonical provider day or interval.
+ * Daily coverage becomes final only when a provider pull performed after its
+ * local day closed accepts that day. Inline payloads can advance the fence but
+ * cannot finalize it. Interval coverage remains anchored to its accepted end.
+ */
+export function deriveJunctionCanonicalCoverageEvidence(
+  events: readonly JunctionCanonicalCoverageEvent[],
+  options?: JunctionCanonicalCoverageDerivationOptions,
+): readonly JunctionCanonicalCoverageEvidence[] {
+  const coverageBySourceAndResource = new Map<string, {
+    evidence: JunctionCanonicalCoverageEvidence;
+    providerDayClosedAt?: string;
+  }>();
+  for (const event of events) {
+    const evidence = resolveJunctionCanonicalCoverageEvidence(event);
+    if (!evidence) {
+      continue;
+    }
+    const providerDayClosedAt = isJunctionDailyCanonicalCoverageResource(evidence.resource)
+      ? resolveJunctionProviderDayClosedAt(evidence.coverageBoundary, event)
+      : undefined;
+
+    const key = `${evidence.sourceProviderSlug}\u0000${evidence.resource}`;
+    const existing = coverageBySourceAndResource.get(key);
+    if (
+      !existing
+      || maxJunctionCanonicalCoverageBoundary(
+          evidence.resource,
+          existing.evidence.coverageBoundary,
+          evidence.coverageBoundary,
+        ) === evidence.coverageBoundary
+    ) {
+      coverageBySourceAndResource.set(
+        key,
+        existing?.evidence.coverageBoundary === evidence.coverageBoundary
+          ? {
+              evidence,
+              providerDayClosedAt: laterOptionalIsoTimestamp(
+                existing.providerDayClosedAt,
+                providerDayClosedAt,
+              ),
+            }
+          : { evidence, providerDayClosedAt },
+      );
+    }
+  }
+
+  const providerPulledAt = normalizeJunctionCoverageProviderPulledAt(
+    options?.providerPulledAt,
+  );
+  return [...coverageBySourceAndResource.values()]
+    .map(({ evidence, providerDayClosedAt }) =>
+      providerPulledAt
+        && providerDayClosedAt
+        && providerPulledAt >= providerDayClosedAt
+        ? { ...evidence, coverageFinalizedAt: providerPulledAt }
+        : evidence
+    )
+    .sort((left, right) =>
+      left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+      || left.resource.localeCompare(right.resource)
+    );
+}
+
+const JUNCTION_PROVIDER_DAY_LATEST_UNPROVEN_CLOSE_OFFSET_MINUTES = -12 * 60;
+
+function resolveJunctionProviderDayClosedAt(
+  dayKey: string,
+  event: JunctionCanonicalCoverageEvent,
+): string {
+  const timeZone = event.timeZone?.trim();
+  if (timeZone) {
+    const timeZoneClose = resolveJunctionProviderDayClosedAtInTimeZone(
+      dayKey,
+      timeZone,
+    );
+    if (timeZoneClose) {
+      return timeZoneClose;
+    }
+  }
+
+  const offsetMinutes = event.dataOrigin?.timeZoneOffsetMinutes;
+  if (
+    Number.isInteger(offsetMinutes)
+    && offsetMinutes !== null
+    && offsetMinutes !== undefined
+    && Math.abs(offsetMinutes) <= 24 * 60
+  ) {
+    return resolveJunctionProviderDayClosedAtOffset(dayKey, offsetMinutes);
+  }
+
+  // Junction's closed-calendar importer waits until a date has closed at
+  // UTC-12. Date-only accepted records therefore converge safely without
+  // borrowing the member's mutable vault timezone.
+  return resolveJunctionProviderDayClosedAtOffset(
+    dayKey,
+    JUNCTION_PROVIDER_DAY_LATEST_UNPROVEN_CLOSE_OFFSET_MINUTES,
+  );
+}
+
+function resolveJunctionProviderDayClosedAtInTimeZone(
+  dayKey: string,
+  timeZone: string,
+): string | undefined {
+  try {
+    const nextDayKey = addDaysToIsoDate(dayKey, 1);
+    const nominalNextDayMs = Date.parse(`${nextDayKey}T00:00:00.000Z`);
+    let lowerBoundMs = nominalNextDayMs - 36 * 60 * 60_000;
+    let upperBoundMs = nominalNextDayMs + 36 * 60 * 60_000;
+    if (
+      toLocalDayKey(lowerBoundMs, timeZone) > dayKey
+      || toLocalDayKey(upperBoundMs, timeZone) <= dayKey
+    ) {
+      return undefined;
+    }
+
+    while (upperBoundMs - lowerBoundMs > 1) {
+      const midpointMs = Math.floor((lowerBoundMs + upperBoundMs) / 2);
+      if (toLocalDayKey(midpointMs, timeZone) > dayKey) {
+        upperBoundMs = midpointMs;
+      } else {
+        lowerBoundMs = midpointMs;
+      }
+    }
+    return new Date(upperBoundMs).toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveJunctionProviderDayClosedAtOffset(
+  dayKey: string,
+  offsetMinutes: number,
+): string {
+  const nextDayKey = addDaysToIsoDate(dayKey, 1);
+  const nominalNextDayMs = Date.parse(`${nextDayKey}T00:00:00.000Z`);
+  return new Date(nominalNextDayMs - offsetMinutes * 60_000).toISOString();
+}
+
+function normalizeJunctionCoverageProviderPulledAt(
+  providerPulledAt: string | undefined,
+): string | undefined {
+  if (!providerPulledAt) {
+    return undefined;
+  }
+  const providerPulledAtMs = Date.parse(providerPulledAt);
+  if (!Number.isFinite(providerPulledAtMs)) {
+    return undefined;
+  }
+  const normalizedProviderPulledAt = new Date(providerPulledAtMs).toISOString();
+  return normalizedProviderPulledAt === providerPulledAt
+    ? normalizedProviderPulledAt
+    : undefined;
+}
+
+function applyJunctionCanonicalCoverageFence(
+  context: NormalizationContext,
+  fence: JunctionCanonicalCoverageFence | undefined,
+): void {
+  const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+    fence?.sourceProviderSlug,
+  );
+  if (!fence || !sourceProviderSlug) {
+    return;
+  }
+
+  const admittedEvents = context.events.filter((event) => {
+    if (
+      normalizeJunctionSourceProviderSlug(event.dataOrigin?.sourceProviderSlug)
+        !== sourceProviderSlug
+    ) {
+      return true;
+    }
+    const evidence = resolveJunctionCanonicalCoverageEvidence(event);
+    if (!evidence) {
+      return event.externalRef?.resourceType
+        === `junction-${slugify(sourceProviderSlug, "source")}-profile`;
+    }
+    if (!(evidence.resource in fence.coverageBoundaryByResource)) {
+      return true;
+    }
+    const legacyCoverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+      evidence.resource,
+      fence.coverageBoundaryByResource[evidence.resource],
+    );
+    return legacyCoverageBoundary !== null
+      && evidence.coverageBoundary > legacyCoverageBoundary;
+  });
+  context.events.splice(0, context.events.length, ...admittedEvents);
+}
+
+function resolveJunctionCanonicalCoverageEvidence(
+  event: JunctionCanonicalCoverageEvent,
+): JunctionCanonicalCoverageEvidence | null {
+  const sourceProviderSlug = normalizeJunctionSourceProviderSlug(
+    event.dataOrigin?.sourceProviderSlug,
+  );
+  const externalRefResourceType = event.externalRef?.resourceType;
+  if (!sourceProviderSlug || !externalRefResourceType) {
+    return null;
+  }
+
+  const resource = JUNCTION_CANONICAL_COVERAGE_RESOURCES.find((candidate) =>
+    externalRefResourceType
+      === `junction-${slugify(sourceProviderSlug, "source")}-${slugify(candidate, "resource")}`
+  );
+  if (!resource) {
+    return null;
+  }
+
+  const coverageBoundary = normalizeJunctionCanonicalCoverageBoundary(
+    resource,
+    isJunctionDailyCanonicalCoverageResource(resource)
+    ? event.dayKey
+    : resolveCanonicalEventIntervalEnd(event),
+  );
+  return coverageBoundary
+    ? { coverageBoundary, resource, sourceProviderSlug }
+    : null;
+}
+
+function resolveCanonicalEventIntervalEnd(
+  event: JunctionCanonicalCoverageEvent,
+): string | null {
+  if (event.kind === "sleep_session") {
+    return normalizeTimestamp(event.endAt ?? event.fields?.endAt) ?? null;
+  }
+  if (event.kind === "activity_session") {
+    const fieldsWorkout = asPlainObject(event.fields?.workout);
+    return normalizeTimestamp(event.workout?.endedAt ?? fieldsWorkout?.endedAt)
+      ?? normalizeTimestamp(event.occurredAt)
+      ?? null;
+  }
+  if (event.sample?.endAt) {
+    return normalizeTimestamp(event.sample.endAt) ?? null;
+  }
+  return normalizeTimestamp(event.occurredAt) ?? null;
+}
+
 
 export function classifyJunctionSummaryNormalizationEvidence(
   snapshot: Pick<
@@ -2346,19 +2644,66 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
       && (expectation.sourceInstanceId == null
         || resourceContext.origin.sourceInstanceId === expectation.sourceInstanceId);
     if (!valid) {
-      throw new JunctionSparseCalendarRepairNormalizationError();
+      throw junctionCalendarRefreshNormalizationError(
+        "sparse_interval.row_incomplete",
+        {
+          rowOrdinal: index + 1,
+          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+            resourceContext?.sourceProviderSlug,
+          ),
+          timestampKind: classifyJunctionNormalizationTimestampKind(startRaw),
+          timestampSemantics: timestamp?.timestampSemantics,
+        },
+      );
     }
   }
 }
 
+export type JunctionCalendarRefreshNormalizationFailureReason =
+  | "daily.timestamp_or_day_unresolved"
+  | "daily.value_missing"
+  | "daily.value_non_numeric"
+  | "daily.value_out_of_range"
+  | "source_context.unresolved"
+  | "source_day.outside_authorized_day"
+  | "sparse_interval.row_incomplete"
+  | "temporal.local_time_ambiguous_or_nonexistent"
+  | "temporal.timestamp_invalid"
+  | "temporal.timestamp_missing_or_non_string"
+  | "temporal.timestamp_semantics_mismatch";
+
+export type JunctionNormalizationTimestampKind =
+  | "absolute"
+  | "date_only"
+  | "floating"
+  | "invalid"
+  | "missing";
+
+export interface JunctionCalendarRefreshNormalizationDiagnostic {
+  reason: JunctionCalendarRefreshNormalizationFailureReason;
+  rowOrdinal?: number;
+  sourceProvider?: string;
+  timestampKind?: JunctionNormalizationTimestampKind;
+  timestampSemantics?: TimestampSemantics;
+}
+
 export class JunctionSparseCalendarRepairNormalizationError extends Error {
   readonly code = "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION";
+  readonly diagnostic: Readonly<JunctionCalendarRefreshNormalizationDiagnostic>;
   readonly retryable = true;
 
-  constructor() {
+  constructor(diagnostic: JunctionCalendarRefreshNormalizationDiagnostic) {
     super("Junction calendar refresh contained a row that could not be applied completely.");
     this.name = "JunctionSparseCalendarRepairNormalizationError";
+    this.diagnostic = diagnostic;
   }
+}
+
+function junctionCalendarRefreshNormalizationError(
+  reason: JunctionCalendarRefreshNormalizationFailureReason,
+  diagnostic: Omit<JunctionCalendarRefreshNormalizationDiagnostic, "reason">,
+): JunctionSparseCalendarRepairNormalizationError {
+  return new JunctionSparseCalendarRepairNormalizationError({ ...diagnostic, reason });
 }
 
 function pushJunctionBoundedTimeseriesFeatures(
@@ -3876,6 +4221,15 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   const seenFidelityRecords = new Set<string>();
 
   for (const [index, { entry, originFallback }] of entries.entries()) {
+    const timestampPaths = isJunctionSparseIntervalResource(input.resource)
+      ? JUNCTION_INTERVAL_START_TIMESTAMP_PATHS
+      : JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS;
+    const providerTimestamp = firstStringFromPaths(entry, timestampPaths)
+      ?? firstValueFromPaths(entry, timestampPaths);
+    const rowDiagnostic = {
+      rowOrdinal: index + 1,
+      timestampKind: classifyJunctionNormalizationTimestampKind(providerTimestamp),
+    };
     const resourceContext = buildResourceContext({
       entry,
       originFallback,
@@ -3891,13 +4245,22 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       // A complete-source-day replacement may not silently drop a delivered
       // row; an unowned row invalidates the day's replacement authority.
       if (ownsTemporalFeatures) {
-        throw new JunctionSparseCalendarRepairNormalizationError();
+        throw junctionCalendarRefreshNormalizationError(
+          "source_context.unresolved",
+          {
+            ...rowDiagnostic,
+            timestampSemantics: typeof providerTimestamp === "string"
+              ? inferTimestampSemantics(providerTimestamp)
+              : undefined,
+          },
+        );
       }
       continue;
     }
 
     const providerValue = firstValueFromPaths(entry, input.valuePaths);
-    const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
+    const numericProviderValue = firstNumberFromPaths(entry, input.valuePaths);
+    const value = input.normalizeValue(numericProviderValue, entry);
     const sparseStartRaw = isJunctionSparseIntervalResource(input.resource)
       ? firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS)
       : undefined;
@@ -3945,7 +4308,26 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       // certify a complete source day; fail the import instead of certifying a
       // lossy response as authoritative.
       if (ownsTemporalFeatures) {
-        throw new JunctionSparseCalendarRepairNormalizationError();
+        let reason: JunctionCalendarRefreshNormalizationFailureReason;
+        if (numericProviderValue === undefined) {
+          reason = providerValue === undefined || providerValue === null
+            ? "daily.value_missing"
+            : "daily.value_non_numeric";
+        } else if (value === undefined) {
+          reason = "daily.value_out_of_range";
+        } else {
+          reason = "daily.timestamp_or_day_unresolved";
+        }
+        throw junctionCalendarRefreshNormalizationError(reason, {
+          ...rowDiagnostic,
+          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+            resourceContext.sourceProviderSlug,
+          ),
+          timestampKind: classifyJunctionNormalizationTimestampKind(
+            timestamp.observedAtRaw ?? providerTimestamp,
+          ),
+          timestampSemantics: timestamp.timestampSemantics,
+        });
       }
       continue;
     }
@@ -4085,7 +4467,20 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       ? input.context.temporalFeatureSourceDay
       : undefined;
     const temporalSampleAt = temporalSourceDay
-      ? resolveJunctionTemporalFeatureInstant(timestamp, temporalSourceDay.timeZone)
+      ? resolveJunctionTemporalFeatureInstant(
+          timestamp,
+          temporalSourceDay.timeZone,
+          {
+            ...rowDiagnostic,
+            sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+              resourceContext.sourceProviderSlug,
+            ),
+            timestampKind: classifyJunctionNormalizationTimestampKind(
+              timestamp.observedAtRaw ?? providerTimestamp,
+            ),
+            timestampSemantics: timestamp.timestampSemantics,
+          },
+        )
       : null;
     if (temporalSourceDay && temporalSampleAt !== null) {
       temporalFeatureInputCount += 1;
@@ -4101,7 +4496,19 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           // The provider fetched the exact authorized window, so a row that
           // normalizes outside the target vault day (for example a fallback
           // timestamp) is a lossy normalization, not out-of-scope data.
-          throw new JunctionSparseCalendarRepairNormalizationError();
+          throw junctionCalendarRefreshNormalizationError(
+            "source_day.outside_authorized_day",
+            {
+              ...rowDiagnostic,
+              sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+                resourceContext.sourceProviderSlug,
+              ),
+              timestampKind: classifyJunctionNormalizationTimestampKind(
+                timestamp.observedAtRaw ?? providerTimestamp,
+              ),
+              timestampSemantics: timestamp.timestampSemantics,
+            },
+          );
         }
         const temporalKey = [
           resourceContext.externalRefResourceType,
@@ -4507,6 +4914,23 @@ export function parseJunctionCompleteDayTimestamp(
   };
 }
 
+function classifyJunctionNormalizationTimestampKind(
+  value: unknown,
+): JunctionNormalizationTimestampKind {
+  if (value === undefined || value === null || value === "") {
+    return "missing";
+  }
+  if (typeof value !== "string") {
+    return "invalid";
+  }
+
+  const parsed = parseJunctionCompleteDayTimestamp(value);
+  if (!parsed) {
+    return value.trim() ? "invalid" : "missing";
+  }
+  return parsed.kind === "date-only" ? "date_only" : parsed.kind;
+}
+
 // The importer's complete-day boundary is the one acceptance owner: the
 // single strict parse above yields semantics agreement, day membership, and
 // temporal-instant eligibility together. Date-only rows return null (day
@@ -4520,29 +4944,45 @@ export function parseJunctionCompleteDayTimestamp(
 function resolveJunctionTemporalFeatureInstant(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   timeZone: string,
+  diagnostic: Omit<
+    JunctionCalendarRefreshNormalizationDiagnostic,
+    "reason"
+  >,
 ): string | null {
   const raw = timestamp.observedAtRaw?.trim();
   if (!raw) {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError(
+      "temporal.timestamp_missing_or_non_string",
+      diagnostic,
+    );
   }
   const parsed = parseJunctionCompleteDayTimestamp(raw);
   if (!parsed) {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError("temporal.timestamp_invalid", diagnostic);
   }
   if (parsed.kind === "date-only") {
     if (timestamp.timestampSemantics !== "floating") {
-      throw new JunctionSparseCalendarRepairNormalizationError();
+      throw junctionCalendarRefreshNormalizationError(
+        "temporal.timestamp_semantics_mismatch",
+        diagnostic,
+      );
     }
     return null;
   }
   if (parsed.kind === "absolute") {
     if (timestamp.timestampSemantics === "floating") {
-      throw new JunctionSparseCalendarRepairNormalizationError();
+      throw junctionCalendarRefreshNormalizationError(
+        "temporal.timestamp_semantics_mismatch",
+        diagnostic,
+      );
     }
     return parsed.instant;
   }
   if (timestamp.timestampSemantics !== "floating") {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError(
+      "temporal.timestamp_semantics_mismatch",
+      diagnostic,
+    );
   }
   const [year, month, day] = parsed.dayKey.split("-").map(Number) as [
     number,
@@ -4575,7 +5015,10 @@ function resolveJunctionTemporalFeatureInstant(
         && resolved.second === second;
     });
   if (matches.length !== 1 || matches[0] === undefined) {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError(
+      "temporal.local_time_ambiguous_or_nonexistent",
+      diagnostic,
+    );
   }
   return new Date(matches[0] + parsed.millisecond).toISOString();
 }
@@ -5907,9 +6350,6 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   if (!sanitized) {
     return sanitized;
   }
-  const sanitizedSnapshot = Object.fromEntries(
-    Object.entries(sanitized).filter(([key]) => key !== "strictSparseCalendarRepair"),
-  );
   const connections = asArray(snapshot.connections).flatMap((connection) => {
     const normalized = asPlainObject(connection);
     return normalized ? [normalized] : [];
@@ -5929,6 +6369,16 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   if (!summaries && !timeseries) {
     return {};
   }
+
+  const {
+    canonicalCoverageFence: _canonicalCoverageFence,
+    canonicalCoverageProviderPulledAt: _canonicalCoverageProviderPulledAt,
+    strictSparseCalendarRepair: _strictSparseCalendarRepair,
+    ...sanitizedSnapshot
+  } = sanitized;
+  void _canonicalCoverageFence;
+  void _canonicalCoverageProviderPulledAt;
+  void _strictSparseCalendarRepair;
 
   return stripUndefined({
     ...sanitizedSnapshot,
