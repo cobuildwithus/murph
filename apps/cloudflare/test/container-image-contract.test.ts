@@ -907,14 +907,7 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain("model_auto_compact_token_limit = 132000");
     expect(hostedRunnerSmokeChild).toContain("runCodexVaultCliProof");
     expect(hostedRunnerSmokeChild).toContain('"memory-show"');
-    const vaultCliProofSource = hostedRunnerSmokeChild.slice(
-      hostedRunnerSmokeChild.indexOf("async function runCodexVaultCliProof"),
-      hostedRunnerSmokeChild.indexOf("function assertMemoryShowProof"),
-    );
-    expect(vaultCliProofSource).toContain(
-      "permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE",
-    );
-    expect(vaultCliProofSource).not.toContain(
+    expect(hostedRunnerSmokeChild).toContain(
       "permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE",
     );
     expect(hostedRunnerSmokeChild).toContain(
@@ -925,12 +918,6 @@ describe("hosted runner container image contract", () => {
     );
     expect(hostedRunnerSmokeChild).toContain(
       "options.includeOutputPreviewOnFailure === false",
-    );
-    expect(hostedRunnerSmokeChild).toContain(
-      "stderrDiagnostics=${classifySuppressedCommandStderr(result.stderr)}",
-    );
-    expect(hostedRunnerSmokeChild).toContain(
-      "function classifySuppressedCommandStderr(stderr: string)",
     );
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');

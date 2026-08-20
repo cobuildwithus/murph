@@ -86,6 +86,9 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
 } from './dynamic-tools/group-room-model.js'
 import {
+  MURPH_MEMBER_MEMORY_TOOL,
+} from './dynamic-tools/member-memory.js'
+import {
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
 } from './dynamic-tools/clinical-records.js'
 import {
@@ -124,6 +127,9 @@ export {
 export {
   MURPH_GROUP_ROOM_MODEL_TOOL,
 } from './dynamic-tools/group-room-model.js'
+export {
+  MURPH_MEMBER_MEMORY_TOOL,
+} from './dynamic-tools/member-memory.js'
 export {
   MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL,
 } from './dynamic-tools/clinical-records.js'
@@ -1531,6 +1537,7 @@ export const MURPH_DYNAMIC_TOOLS = [
 
 export type MurphDynamicTool =
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
+  | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
   | typeof MURPH_GROUP_CHALLENGE_RESPONSE_CARD_TOOL
   | typeof MURPH_GROUP_SEND_PROGRESS_UPDATE_TOOL

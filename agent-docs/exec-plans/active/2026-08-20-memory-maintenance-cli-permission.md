@@ -1,4 +1,4 @@
-# Restore hosted memory maintenance CLI access
+# Restore hosted memory maintenance through a host-owned tool
 
 Status: active
 Created: 2026-08-20
@@ -6,16 +6,18 @@ Updated: 2026-08-20
 
 ## Goal
 
-- Restore the existing silent hosted memory-maintenance job so it can execute
-  the bundled `vault-cli` from the immutable runner application tree while
-  retaining its narrow canonical-memory writes and network denial.
+- Restore the existing silent hosted memory-maintenance job by moving its
+  canonical-memory reads and writes behind one host-owned dynamic tool, with
+  shell access disabled and the vault workspace denied to the model runtime.
 
 ## Success criteria
 
-- The memory-maintenance permission profile can read `/app` but gains no other
-  new filesystem write or network authority.
-- The final runner-image smoke executes populated `memory show --format json`
-  under the exact memory-maintenance profile.
+- Only the exact engine-authorized overnight automation receives the memory
+  maintenance tool and its write authority.
+- The maintenance turn has shell, apps, plugins, web search, native memories,
+  and workspace access disabled while network remains denied.
+- Focused runtime proof reads and writes canonical memory through the trusted
+  host boundary, including a copy of the downloaded affected vault.
 - Focused tests and affected typechecks pass, exact-head CI is green, and both
   required ReviewGPT gates have no unresolved accepted findings.
 - Production deploy uses immediate runner convergence and reports the new
@@ -23,49 +25,60 @@ Updated: 2026-08-20
 
 ## Scope
 
-- In scope: the existing permission-profile owner, its snapshot coverage, the
-  runner-image smoke profile selection, release documentation, and the public
-  reliability recovery note.
-- Out of scope: automation schedules, prompts, delivery behavior, retries,
-  state ownership, database schema, Web runtime behavior, and member data.
+- In scope: the managed automation prompt, exact maintenance-tool planning and
+  execution authority, the existing permission-profile owner, focused runtime
+  and profile coverage, release documentation, and the public reliability
+  recovery note.
+- Out of scope: automation schedules, ordinary assistant prompts, delivery behavior, retries,
+  database schema, Web runtime behavior, ordinary-turn memory behavior, and
+  member data.
 
 ## Constraints
 
-- Technical constraints: preserve the dedicated network-denied profile and its
-  current workspace write allowlist; use the real bundled CLI path and existing
-  smoke owner rather than adding a test-only execution path.
+- Technical constraints: reuse canonical `@murphai/core` memory operations and
+  the existing tool-only maintenance-turn pattern; preserve the dedicated
+  network-denied profile while removing shell and workspace authority.
 - Product/process constraints: Product UX Patch; the job remains private and
   silent, no member message is introduced, and production evidence stays out
   of repository artifacts.
 
 ## Risks and mitigations
 
-1. Risk: granting a broader runner-tree capability than required.
-   Mitigation: add read-only `/app` access only to the existing profile and
-   retain all workspace write and network restrictions.
-2. Risk: coverage again proves a different profile from production.
-   Mitigation: make the existing final-image memory command select the exact
-   maintenance profile and lock that selection in the image contract test.
+1. Risk: exposing canonical-memory mutation to an ordinary or forged turn.
+   Mitigation: offer the tool only for the exact managed automation id and
+   require the same immutable authorization at execution.
+2. Risk: retaining a hidden shell or filesystem dependency.
+   Mitigation: use the shared native-capabilities-disabled thread config, deny
+   the complete workspace in the dedicated profile, and prove shell suppression
+   through the real Codex App Server scripted runtime.
 3. Risk: a stale warm runner keeps the broken bundle after deploy.
    Mitigation: use immediate container rollout and require managed-container
-   fingerprint convergence plus the exact-profile runner smoke.
+   fingerprint convergence plus the protected runner smoke.
 
 ## Tasks
 
-1. Add immutable application-tree read access to the memory-maintenance
-   permission profile and update its focused unit contract.
-2. Run the populated memory CLI proof under that profile in the runner smoke
-   and update its source contract and deploy documentation.
-3. Run focused tests, affected typechecks, and production-shaped direct proof.
-4. Push an exact candidate, complete preliminary and final ReviewGPT gates with
+1. Add one member-memory dynamic tool backed by canonical core operations and
+   gate it to the exact managed maintenance authority.
+2. Offer only that tool to member-memory maintenance, disable native
+   capabilities, and reduce its permission profile to workspace and network
+   denial.
+3. Update focused planning, dispatch, real App Server, profile, and release
+   smoke coverage; prove the affected downloaded vault through a private copy.
+4. Run focused tests, affected typechecks, and production-shaped direct proof.
+5. Push an exact candidate, complete preliminary and final ReviewGPT gates with
    CI, merge, and deploy through the protected production workflow.
-5. Verify convergence and recovery, update the incident, and retire the task
+6. Verify convergence and recovery, update the incident, and retire the task
    worktree.
 
 ## Decisions
 
-- Reuse the existing dedicated profile and existing runner smoke; no new
-  abstraction, permission owner, scheduler, retry, or state is warranted.
+- Reuse the existing group room-model maintenance architecture: the trusted
+  host owns canonical writes and Codex receives only a narrowly described tool.
+  No new service, scheduler, retry, state owner, or broad filesystem authority
+  is warranted.
+- Reject directory-wide `bank` write access. Canonical memory uses atomic
+  replacement and audited lock/operation files, so a shell filesystem allowlist
+  cannot both authorize the real write and remain file-scoped.
 - Treat the member experience as a Patch: scheduled private context maintenance
   works again without changing its timing, destination, or silent behavior.
 
@@ -76,41 +89,50 @@ Updated: 2026-08-20
 - Reaches: an established hosted member whose silent maintenance occurrence
   needs to read or update the canonical memory document; sparse or unchanged
   memory continues to complete silently with no member delivery.
-- Proof: the populated final-image memory command now runs through Codex App
-  Server under the exact production maintenance profile, while focused profile
-  coverage preserves its narrow writes and network denial.
+- Proof: the real App Server suppresses shell execution while the offered
+  host-owned tool reads and updates canonical memory through core, and the
+  dedicated profile denies the model direct workspace and network access.
 
 ## Product UX Walkthrough
 
 - Established history: the scheduled occurrence receives its existing bounded
   conversation evidence, reads the populated canonical memory document through
-  the bundled CLI, and may update only that document. No audience or delivery
-  is introduced.
+  the host-owned tool, and may update only that document. No audience or
+  delivery is introduced.
 - Sparse or unchanged history: the existing no-op/skip path remains unchanged
   and sends no message.
-- Failure and recovery: a missing or unreadable CLI remains a visible failed
-  tool result; the corrected immutable-tree read makes the normal command
-  reachable without widening workspace writes or network authority.
-- Result: Ready. This narrow Patch changes only CLI reachability, and the exact
-  production-shaped final-image proof is enforced by the existing release
-  smoke before deployment.
+- Failure and recovery: a missing vault or rejected canonical write returns a
+  generic failed tool result and makes no update; the model cannot fall back to
+  shell or arbitrary vault reads.
+- Result: Ready. This Patch changes only the private maintenance mechanism and
+  removes the invalid shell permission path without changing schedule,
+  evidence, saved-memory semantics, or delivery.
 
 ## Verification
 
-- Commands to run: focused hosted-execution and Cloudflare contract tests,
-  affected package/app typechecks, `git diff --check`, the final-image runner
-  smoke on native AMD64 CI, exact-head required CI, and protected deploy smoke.
-- Expected outcomes: the profile snapshot includes read-only `/app`, the
-  memory proof selects `murph-member-memory-maintenance`, the populated command
-  succeeds in the bundled runner, and the deployed smoke reports the expected
-  bundle fingerprint.
-- Local results: hosted-execution profile tests passed 4/4; Cloudflare container
-  contract tests passed 11/11; changelog tests passed 57/57; hosted-execution,
-  Cloudflare, and Web typechecks passed; `git diff --check` passed.
-- Native AMD64 result: the first exact-profile image run proved `/app` access
-  advanced the command to sandbox startup, then exposed a second exit-101
-  boundary before the Node CLI returned. Raw memory-command output remains
-  suppressed; fixed boolean classifications proved a Rust panic involving
-  bubblewrap, but no ordinary permission, missing-file, module, or seccomp
-  error. The next exact run narrows the remaining bubblewrap lifecycle classes
-  without emitting vault content.
+- Commands to run: focused assistant-engine App Server/planning/tool tests,
+  hosted-execution and Cloudflare contract tests, affected package/app
+  typechecks, `git diff --check`, the final-image runner smoke on native AMD64
+  CI, exact-head required CI, and protected deploy smoke.
+- Expected outcomes: only the exact automation receives `murph.member_memory`,
+  the turn uses the native-capabilities-disabled config and workspace-denied
+  profile, core reads/writes succeed, and the deployed smoke reports the
+  expected bundle fingerprint.
+- Local results: assistant-engine focused planning, authorization, provider,
+  replay-barrier, prompt, and managed-automation tests passed 270/270; the real
+  App Server tool-only scenario passed 1/1 with shell suppression and a
+  canonical host write; hosted-execution profile tests passed 4/4;
+  assistant-runtime config tests passed 44/44 with 4 skipped; Cloudflare
+  container contracts passed 11/11; changelog tests passed 45/45. The
+  assistant-engine dependency build and assistant-engine, hosted-execution,
+  assistant-runtime, Cloudflare, and Web typechecks passed; `git diff --check`
+  passed.
+- Private data proof: the host tool read, added, and updated canonical memory on
+  temporary copies of both distinct downloaded vault variants; the original
+  downloads were never mutated and no saved content was emitted.
+- Native AMD64 root-cause proof: read-only `/app` advanced the command to
+  sandbox startup, where the file-scoped writable memory path caused a Rust
+  panic involving bubblewrap synthetic mounts. Content-free diagnostics proved
+  `rustPanic`, `bubblewrap`, `syntheticMount`, and `mount`, with no ordinary
+  permission, missing-file, module, or seccomp error. This confirms the
+  file-as-directory sandbox construction rather than a CLI or vault-data bug.

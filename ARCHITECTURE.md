@@ -389,8 +389,11 @@ decrypted contact roster, or compatibility branch. The legacy `read_current`
 wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
 
-Immutable hosted memory consolidation remains an isolated one-shot automation
-with its network-denied memory-write profile. Reminder availability uses no
+Immutable hosted memory consolidation remains an isolated one-shot automation.
+Only its exact built-in id receives `murph.member_memory`; the host executes
+that narrow tool through canonical core memory operations while the Codex turn
+has shell/native capabilities disabled and its workspace and network denied.
+Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
 `skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
