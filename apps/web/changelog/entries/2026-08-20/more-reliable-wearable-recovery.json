@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "more-reliable-wearable-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "More reliable wearable recovery",
+    "summary": "Some established wearable connections that stopped processing updates because older setup state was incomplete can now recover automatically.",
+    "details": "Murph still verifies that the source is active before accepting new health data, and disconnected sources remain blocked.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": [2078]
+  }
+}
