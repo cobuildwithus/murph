@@ -63,6 +63,8 @@ Updated: 2026-08-20
   passed with 2 focused retry-policy tests.
 - `pnpm --dir packages/assistant-runtime typecheck` and
   `pnpm --dir apps/cloudflare typecheck` passed.
+- `pnpm --dir apps/web test:prepared -- test/changelog-fragments.test.ts`
+  passed with 7 tests, and `pnpm --dir apps/web typecheck` passed.
 - The full Cloudflare suite passed with 148 files, 2,612 tests, and 2 skipped.
 - `git diff --check` passed; exact-head CI and both required ReviewGPT stages
   remain pending.

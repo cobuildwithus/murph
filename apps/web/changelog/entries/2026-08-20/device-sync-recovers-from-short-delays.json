@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "device-sync-recovers-from-short-delays",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Device sync recovers from short delays",
+    "summary": "Connected health data now keeps its existing retry attempts when a temporary hosted storage interruption affects a sync.",
+    "details": "Only proven temporary read and save failures are retried; permission, malformed-data, and integrity failures still stop immediately.",
+    "relevanceTags": ["device-sync", "reliability", "wearables"],
+    "sourcePullRequests": [2095]
+  }
+}
