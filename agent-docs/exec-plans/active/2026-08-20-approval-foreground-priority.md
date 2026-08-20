@@ -115,6 +115,23 @@ Updated: 2026-08-20
   was checked before the exact due-approval predicate. The finding was
   accepted. The shared default selector now checks the exact approval first;
   explicit selectors and ordinary runtime-control serialization are unchanged.
+- A tooling-invalid round 4 response exposed another production-reachable
+  ownership split: `system_mailbox` processing applies its explicit model-free
+  wake filter before the default selector can choose a ready approval, so an
+  older device wake can still run first. The response was not accepted as gate
+  evidence because trusted capture found duplicate DOM representations and no
+  explicit model-confirmation line, but the underlying bug reproduced against
+  the real entrypoint path and is accepted independently.
+- Round 4 retrospective decision: the every-ready-approval guarantee applies
+  in every assistant-capable processing mode. Use the existing unfiltered
+  persisted mailbox selector as the single ownership decision before
+  entering either the ordinary foreground path or the optimized
+  `system_mailbox` path. An exact due approved-continuation selection upgrades
+  the existing invocation into the ordinary foreground path; otherwise
+  device-only work keeps the unchanged model-free path. This subordinates the
+  explicit model-free allowlist without adding a flag, queue, scheduler,
+  persisted priority, or a second ready-approval probe. The optional
+  `systemMailboxFrontier` rollout seam remains unused and unchanged.
 
 ## Product UX Walkthrough
 
@@ -135,7 +152,7 @@ Updated: 2026-08-20
 
 - Completed local proof:
   - `pnpm exec vitest run test/hosted-runtime-mailbox-state.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts test/hosted-runtime-workspace-entrypoint.test.ts`
-    passed 655 tests across all three files after the round 2 redesign.
+    passed 656 tests across all three files after the round 4 remediation.
   - `pnpm typecheck` in `packages/assistant-runtime` passed.
   - Focused changelog fragment, registry, and route tests passed 49 tests.
   - Web typecheck passed after generating the changelog fragments.
@@ -146,7 +163,12 @@ Updated: 2026-08-20
   path; its finding is accepted and the requirement-level continuation decision
   is recorded above. Round 3 produced one accepted backed-off-runtime-control
   finding; its reordered shared-selector fix passes the full 655-test proof and
-  typecheck. Round 4 and new exact-head CI remain pending.
+  typecheck. A tooling-invalid round 4 response found the system-mailbox
+  ownership split described above; its finding is accepted independently and
+  the required second retrospective is recorded. The corrected real-entrypoint
+  proof now runs both exact approved deliveries before device maintenance and
+  passes in the full 656-test proof. A valid round 4 retry and new exact-head CI
+  remain pending.
 - Expected outcome: synthetic approval delivery wins the first post-checkpoint
   selection; device work remains pending; all focused and exact-head checks are
   green; both ReviewGPT stages finish with no unresolved accepted findings.

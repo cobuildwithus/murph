@@ -391,7 +391,7 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   return oldestDueItem;
 }
 
-function isHostedApprovedContinuationSystemMailboxItem(
+export function isHostedApprovedContinuationSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
   return item.routeAction === "apply-runtime-control-request"

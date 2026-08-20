@@ -221,6 +221,7 @@ import type {
 } from "./hosted-runtime/image-generation.ts";
 import {
   findNextHostedSystemMailboxQueueItem,
+  isHostedApprovedContinuationSystemMailboxItem,
   readHostedSystemMailboxState,
   readHostedSystemMailboxHandledThroughSeq,
 } from "./hosted-runtime/system-mailbox-state.ts";
@@ -2976,7 +2977,23 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     }
     let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
     let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;
-    if (input.request.processingMode === "system_mailbox") {
+    const selectedSystemMailboxOwnerItem = systemMailboxProcessingMode
+      && !assistantExecutionBlocked
+      ? findNextHostedSystemMailboxQueueItem({
+          allowedRouteActions: null,
+          now: new Date().toISOString(),
+          state: await readHostedSystemMailboxState(restored.vaultRoot),
+        })
+      : null;
+    const systemMailboxForegroundOwnerSelected =
+      selectedSystemMailboxOwnerItem !== null
+      && isHostedApprovedContinuationSystemMailboxItem(
+        selectedSystemMailboxOwnerItem,
+      );
+    if (
+      input.request.processingMode === "system_mailbox"
+      && !systemMailboxForegroundOwnerSelected
+    ) {
       const systemMailboxResult =
         await returnSystemMailboxProcessingModeAfterInitialImport();
       const returnSystemMailboxResult = (): HostedWorkspaceInvocationResult => {
@@ -3013,6 +3030,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
       systemMailboxForegroundWakePrefetch = foregroundPrefetch;
       systemMailboxForegroundWakeResult = systemMailboxResult;
+      hostedCodexRuntime = await prepareInvocationCodexRuntime();
+    }
+    if (systemMailboxForegroundOwnerSelected) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
     }
     if (
