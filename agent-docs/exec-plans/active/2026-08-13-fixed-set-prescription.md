@@ -109,11 +109,29 @@ fix rather than a rollback below that floor. Web has no ordering dependency.
 6. Close this plan, merge, deploy through the documented hosted path, verify
    bounded production signals, and retire the worktree.
 
+## Product walkthrough
+
+Result: Ready.
+
+- Started an eight-set workout while a different older workout remained open;
+  the new start succeeded and the older record stayed untouched.
+- Stored one exact nine-repetition exercise prescription, then logged all eight
+  sets through fresh CLI instances with no provider-thread state. Every terse
+  completion inherited nine reps from the exact canonical exercise.
+- The set-eight write atomically stored its actual and an observed `endedAt`;
+  no finish-time question or second closure command was needed.
+- Started and completed the next finite workout while the oldest record still
+  remained open. Exact retry and correction paths kept the established end
+  boundary stable, while a clearly appended ninth set advanced it once.
+- Verified that targetless sessions remain open for optional additional sets,
+  exact card actions revalidate under a per-workout lock, and stale cards do not
+  retarget to another same-shaped workout.
+
 ## Verification
 
 - Focused contracts, operator-config, Assistant Engine, assistant-runtime,
-  vault-usecase, and CLI suites pass: 175 behavioral assertions across the
-  directly changed paths, plus all 322 contract tests and generated-schema
+  vault-usecase, and CLI suites pass: 152 behavioral assertions across the
+  directly changed paths, plus all 324 contract tests and generated-schema
   verification.
 - All affected package typechecks pass. Prepared CLI runtime generation and
   exact package-shape verification pass after regenerating the Incur CLI
