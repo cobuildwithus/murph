@@ -1,6 +1,6 @@
 # Junction profile replay migration
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -62,10 +62,10 @@ Updated: 2026-08-20
 2. [completed] Implement the smallest one-way legacy migration that preserves member edits
    and equal-revision conflict checks.
 3. [completed] Add focused canonical round-trip and negative conflict tests.
-4. [in progress] Run focused tests, affected typechecks, diff/privacy inspection, ReviewGPT,
+4. [completed] Run focused tests, affected typechecks, diff/privacy inspection, ReviewGPT,
    and exact-head CI.
-5. Merge, deploy, and verify the repeated profile failure stops without
-   changing accepted profile content.
+5. [completed] Hand off the green, reviewed, merge-ready PR with deployment and
+   post-deploy verification instructions to the parent release owner.
 
 ## Decisions
 
@@ -182,5 +182,20 @@ Updated: 2026-08-20
 - ReviewGPT runs started against the pre-regression head are non-authoritative
   for the corrected candidate; the new pushed head requires the normal fresh
   exact-head review gate.
-- ReviewGPT, exact-head CI, merge, deploy, and production convergence remain
-  pending under the parent task.
+- Merge, deploy, and production convergence remain pending under the parent
+  release task.
+- ReviewGPT final round 3 passed on exact head
+  `478cf6f8712a508676b939b1dcc08a1dcab8a6a1` after verifying every prior
+  finding, the completed retrospective direction, the production-shaped
+  scheduled reconcile, and the stable-ID/no-ID ownership split. It returned no
+  remaining Critical, High, complexity, purpose, or material UX finding.
+- All required GitHub checks passed on that exact head, including release app,
+  build/typecheck, assistant/platform/CLI coverage, PR evidence, runner
+  sandbox, bundle budget, fixture, hosted billing, overflow, and artifact
+  guards. The Vercel check reported success through the repository's ignored
+  build step, and the optional live Stripe browser matrix skipped as expected.
+- A current-`main` `git merge-tree --write-tree` completed without conflicts
+  after exact-head CI and final review. Merge, the single Cloudflare runner
+  deploy, and production convergence checks are explicitly handed off to the
+  parent release owner; this task does not merge or deploy.
+Completed: 2026-08-20
