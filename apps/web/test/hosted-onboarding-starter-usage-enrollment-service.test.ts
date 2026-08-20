@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => {
     readHostedStarterUsageGrantTx: vi.fn(),
     requireHostedInviteForBillingCheckout: vi.fn(),
     runWithHostedDomainRootUnwrapCache: vi.fn(),
-    sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
+    scheduleHostedSignupNotificationEmails: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
     unwrapHostedDomainRootForWeb: vi.fn(),
@@ -101,8 +101,8 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
-  sendHostedSignupNotificationEmailForMemberBestEffort:
-    mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/starter-usage-grant", () => ({
@@ -146,7 +146,6 @@ type ProviderWork = {
     | "kms-sign"
     | "kms-unwrap"
     | "messaging"
-    | "notification-email"
     | "runtime-wake"
     | "welcome-email";
   rootKeyId?: string;
@@ -397,10 +396,7 @@ describe("Starter usage enrollment owner", () => {
       .mockImplementation(async () => {
         await runProviderWork({ kind: "welcome-email" });
       });
-    mocks.sendHostedSignupNotificationEmailForMemberBestEffort
-      .mockImplementation(async () => {
-        await runProviderWork({ kind: "notification-email" });
-      });
+    mocks.scheduleHostedSignupNotificationEmails.mockReturnValue(undefined);
   });
 
   it("enrolls once across supported channels and emits activation effects once", async () => {
@@ -440,8 +436,16 @@ describe("Starter usage enrollment owner", () => {
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
-      .toHaveBeenCalledOnce();
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: [memberState.id],
+      prisma,
+    });
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mock
+        .invocationCallOrder[0],
+    );
   });
 
   it("keeps the Web signup email separate from companion conversation welcome", async () => {
@@ -463,8 +467,10 @@ describe("Starter usage enrollment owner", () => {
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .toHaveBeenCalledOnce();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
-      .toHaveBeenCalledOnce();
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: [memberState.id],
+      prisma,
+    });
   });
 
   it("re-signals a still-pending activation on repeated companion enrollment", async () => {
@@ -771,8 +777,10 @@ describe("Starter usage enrollment owner", () => {
         .not.toHaveBeenCalled();
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
         .not.toHaveBeenCalled();
-      expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
-        .toHaveBeenCalledOnce();
+      expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+        memberIds: [memberState.id],
+        prisma,
+      });
 
       if (!result.deferredActivationWake) {
         throw new Error("Expected one deferred activation wake.");

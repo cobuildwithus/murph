@@ -36,7 +36,7 @@ import {
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
-  sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails,
 } from "./signup-notification-email";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
@@ -486,6 +486,13 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     );
   })();
 
+  if (outcome.effects.signupNotificationEmailMemberId) {
+    scheduleHostedSignupNotificationEmails({
+      memberIds: [outcome.effects.signupNotificationEmailMemberId],
+      prisma,
+    });
+  }
+
   const deferredActivationWake = policy.instantStartAdmission
     ? buildHostedLinqInstantStartDeferredActivationWake(outcome.effects)
     : null;
@@ -728,12 +735,6 @@ async function runHostedStarterUsagePostCommitEffects(
   if (input.welcomeEmailMemberId) {
     await sendHostedSignupWelcomeEmailForMemberBestEffort({
       memberId: input.welcomeEmailMemberId,
-      prisma: input.prisma,
-    });
-  }
-  if (input.signupNotificationEmailMemberId) {
-    await sendHostedSignupNotificationEmailForMemberBestEffort({
-      memberId: input.signupNotificationEmailMemberId,
       prisma: input.prisma,
     });
   }

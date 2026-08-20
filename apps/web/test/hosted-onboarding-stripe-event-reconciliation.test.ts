@@ -58,7 +58,7 @@ const mocks = vi.hoisted(() => ({
   reconcileHostedAiUsageGateForBillingModeChangeTx: vi.fn(),
   refreshHostedBillingPlanSwitchToPulsePendingFieldsFromScheduleTx: vi.fn(),
   resolveStripeCustomerContext: vi.fn(),
-  sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
+  scheduleHostedSignupNotificationEmails: vi.fn(),
   sendHostedSignupWelcomeEmailForMember: vi.fn(),
   sendHostedSubscriptionCancellationEmailForMember: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
@@ -274,8 +274,8 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", async () => {
 });
 
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
-  sendHostedSignupNotificationEmailForMemberBestEffort:
-    mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/subscription-cancellation-email", () => ({
@@ -454,7 +454,7 @@ describe("hosted Stripe event reconciliation", () => {
       providerMessageId: "resend_email_123",
       status: "sent",
     });
-    mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mockResolvedValue(undefined);
+    mocks.scheduleHostedSignupNotificationEmails.mockReturnValue(undefined);
     mocks.sendHostedSubscriptionCancellationEmailForMember.mockResolvedValue({
       status: "sent",
     });
@@ -592,19 +592,19 @@ describe("hosted Stripe event reconciliation", () => {
       memberId: "member_123",
       prisma: prisma.client,
     });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
-      memberId: "member_123",
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
       prisma: prisma.client,
       sourceEventId: "evt_invoice_paid_123",
       sourceEventType: "invoice.paid",
     });
     expect(
-      mocks.sendHostedSignupWelcomeEmailForMember.mock.invocationCallOrder[0],
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
     ).toBeLessThan(
-      mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mock.invocationCallOrder[0],
+      mocks.sendHostedSignupWelcomeEmailForMember.mock.invocationCallOrder[0],
     );
     expect(
-      mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mock.invocationCallOrder[0],
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
     ).toBeLessThan(
       vi.mocked(prisma.client.hostedStripeEvent.updateMany).mock.invocationCallOrder.at(-1) ?? 0,
     );
@@ -697,7 +697,7 @@ describe("hosted Stripe event reconciliation", () => {
       }),
     );
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.sendHostedSubscriptionCancellationEmailForMember).not.toHaveBeenCalled();
     expect(
       mocks.prepareHostedStripeDirectMemberActivationCrypto,
@@ -715,6 +715,7 @@ describe("hosted Stripe event reconciliation", () => {
         subscriptionId: "sub_loser",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -754,6 +755,7 @@ describe("hosted Stripe event reconciliation", () => {
         subscriptionId: "sub_loser",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cleanupHostedStandardCheckoutLoser.mockRejectedValueOnce(
@@ -789,6 +791,7 @@ describe("hosted Stripe event reconciliation", () => {
         subscriptionId: "sub_loser",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cleanupHostedStandardCheckoutLoser.mockRejectedValue(
@@ -1217,6 +1220,7 @@ describe("hosted Stripe event reconciliation", () => {
         activatedMemberId: "member_123",
         hostedExecutionEventId: "dispatch_retry",
         hostedExecutionMailboxItemId: "mailbox_dispatch_retry",
+        newlyActivatedMemberIds: ["member_123"],
         runtimeRecheckMemberIds: ["member_123"],
         welcomeEmailMemberId: null,
       })
@@ -1224,6 +1228,7 @@ describe("hosted Stripe event reconciliation", () => {
         activatedMemberId: "member_123",
         hostedExecutionEventId: "dispatch_retry",
         hostedExecutionMailboxItemId: "mailbox_dispatch_retry",
+        newlyActivatedMemberIds: [],
         runtimeRecheckMemberIds: [],
         welcomeEmailMemberId: null,
       });
@@ -1255,7 +1260,19 @@ describe("hosted Stripe event reconciliation", () => {
     })).resolves.toMatchObject({ status: "completed" });
 
     expect(mocks.applyStripeInvoicePaid).toHaveBeenCalledTimes(2);
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledOnce();
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
+      prisma: prisma.client,
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+    });
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedRuntimeRecheckRuntime.mock.invocationCallOrder[0],
+    );
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
       activationResultJson: {
         activationMailboxItemIds: ["mailbox_dispatch_retry"],
@@ -1277,6 +1294,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeInvoicePaid.mockResolvedValueOnce({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1393,6 +1411,7 @@ describe("hosted Stripe event reconciliation", () => {
       expect(mocks.reconcileHostedAiUsageGateForBillingModeChangeTx)
         .toHaveBeenCalledOnce();
       expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+      expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
       expect(prisma.rows[0]).toEqual(expect.objectContaining({
         lastErrorCode: null,
         processedAt: expect.any(Date),
@@ -1916,6 +1935,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeInvoicePaid.mockResolvedValue({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -2142,6 +2162,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeInvoicePaid.mockResolvedValueOnce({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -2163,7 +2184,7 @@ describe("hosted Stripe event reconciliation", () => {
     });
 
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
   });
 
   it("uses checkout completion as a welcome candidate so invoice-before-checkout email ordering can recover", async () => {
@@ -2173,6 +2194,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -2197,7 +2219,7 @@ describe("hosted Stripe event reconciliation", () => {
       memberId: "member_123",
       prisma: prisma.client,
     });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
   });
 
   it("defers Pulse Trial provider authority to the locked checkout owner", async () => {
@@ -2268,6 +2290,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: null,
       cleanupPulseTrialStripeSubscriptionId: "sub_checkout_123",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription
@@ -2314,6 +2337,7 @@ describe("hosted Stripe event reconciliation", () => {
         subscriptionId: "sub_checkout_123",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cleanupHostedFamilySponsoredDirectSubscription
@@ -2355,6 +2379,7 @@ describe("hosted Stripe event reconciliation", () => {
         subscriptionId: "sub_checkout_123",
       },
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
     mocks.cleanupHostedFamilySponsoredDirectSubscription.mockRejectedValueOnce(
@@ -2395,6 +2420,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMembers: [],
       cleanupFamilySponsoredStripeSubscriptionId: "sub_123",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
     });
@@ -2444,6 +2470,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: null,
       cleanupFamilySponsoredStripeSubscriptionId: "sub_123",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -2487,6 +2514,7 @@ describe("hosted Stripe event reconciliation", () => {
       activatedMemberId: null,
       cleanupPulseTrialStripeSubscriptionId: "sub_123",
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
     });
@@ -2702,8 +2730,8 @@ describe("hosted Stripe event reconciliation", () => {
       memberId: "member_123",
       prisma: prisma.client,
     });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
-      memberId: "member_123",
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
       prisma: prisma.client,
       sourceEventId: "evt_invoice_paid_123",
       sourceEventType: "invoice.paid",
@@ -2821,22 +2849,16 @@ describe("hosted Stripe event reconciliation", () => {
       status: HostedStripeEventStatus.completed,
     }));
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
-      .toHaveBeenCalledTimes(2);
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
-      .toHaveBeenNthCalledWith(1, {
-        memberId: "member_family_owner",
-        prisma: prisma.client,
-        sourceEventId: event.id,
-        sourceEventType: event.type,
-      });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
-      .toHaveBeenNthCalledWith(2, {
-        memberId: "member_family_child",
-        prisma: prisma.client,
-        sourceEventId: event.id,
-        sourceEventType: event.type,
-      });
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledOnce();
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: [
+        "member_family_owner",
+        "member_family_child",
+      ],
+      prisma: prisma.client,
+      sourceEventId: event.id,
+      sourceEventType: event.type,
+    });
   });
 
   it("prepares Family candidates when a reused subscription still resolves its direct owner", async () => {
@@ -3504,6 +3526,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
     mocks.applyStripeSubscriptionUpdated.mockResolvedValueOnce({
+      newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
@@ -3541,7 +3564,7 @@ describe("hosted Stripe event reconciliation", () => {
       subscriptionCancellationEmailSentAt: expect.any(Date),
     }));
     expect(mocks.sendHostedSignupWelcomeEmailForMember).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
   });
 
   it("retries cancellation feedback email provider failures before completing the receipt", async () => {
@@ -3559,6 +3582,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",
@@ -3631,6 +3655,7 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.stripe.events.retrieve.mockResolvedValue(event);
     mocks.stripe.subscriptions.retrieve.mockResolvedValue(canonicalSubscription);
     mocks.applyStripeSubscriptionUpdated.mockResolvedValue({
+      newlyActivatedMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
         stripeSubscriptionId: "sub_123",

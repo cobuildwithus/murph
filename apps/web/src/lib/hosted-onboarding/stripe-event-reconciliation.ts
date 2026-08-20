@@ -108,7 +108,7 @@ import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
-  sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails,
 } from "./signup-notification-email";
 import {
   sendHostedSubscriptionCancellationEmailForMember,
@@ -932,6 +932,14 @@ async function processClaimedHostedStripeEvent(
           preflightProcessingContext,
         );
     const { memberId: processingMemberId, result } = processing;
+    if (result.newlyActivatedMemberIds.length > 0) {
+      scheduleHostedSignupNotificationEmails({
+        memberIds: result.newlyActivatedMemberIds,
+        prisma,
+        sourceEventId: claimed.eventId,
+        sourceEventType: claimed.type,
+      });
+    }
     if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
       throw new Error("Pulse Trial cleanup requires a direct billing member.");
     }
@@ -1019,14 +1027,6 @@ async function processClaimedHostedStripeEvent(
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
         prisma,
-      });
-    }
-    for (const memberId of new Set(result.newlyActivatedMemberIds)) {
-      await sendHostedSignupNotificationEmailForMemberBestEffort({
-        memberId,
-        prisma,
-        sourceEventId: claimed.eventId,
-        sourceEventType: claimed.type,
       });
     }
     if (result.subscriptionCancellationEmail) {

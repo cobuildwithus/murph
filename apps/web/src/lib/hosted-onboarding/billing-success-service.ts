@@ -20,7 +20,7 @@ import {
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import {
-  sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails,
 } from "./signup-notification-email";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
@@ -77,6 +77,12 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     prisma,
     session,
   });
+  if (activationOutcome.newlyActivatedMemberIds.length > 0) {
+    scheduleHostedSignupNotificationEmails({
+      memberIds: activationOutcome.newlyActivatedMemberIds,
+      prisma,
+    });
+  }
   if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
     await cleanupHostedFamilySponsoredDirectSubscription({
       memberId: invite.memberId,
@@ -123,13 +129,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     memberId: activationOutcome.welcomeEmailMemberId,
     prisma,
   });
-  for (const memberId of activationOutcome.newlyActivatedMemberIds) {
-    await sendHostedSignupNotificationEmailForMemberBestEffort({
-      memberId,
-      prisma,
-    });
-  }
-
   return getHostedInviteStatus({
     authenticatedMember: input.member,
     inviteCode: input.inviteCode,

@@ -9470,6 +9470,7 @@ describe("hosted Family plan", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -9510,6 +9511,7 @@ describe("hosted Family plan", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 

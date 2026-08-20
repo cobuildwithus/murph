@@ -1580,10 +1580,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   signup, and cancellation-feedback mail retain their existing bounded,
   idempotent Resend ownership. The internal signup email follows a committed
   member activation across Starter enrollment, Checkout success, and Stripe
-  reconciliation; a welcome-only or later paid-billing event is not signup
-  evidence. Later successful payments must not repeat activation side effects,
-  and email paths must not persist provider payloads or expose recipients in
-  logs.
+  reconciliation; its one post-response task is registered at the first
+  post-commit boundary, and both its read and attempt claim use canonical hosted
+  access, including Family sponsorship. A welcome-only or later paid-billing
+  event is not signup evidence. Later successful payments must not repeat
+  activation side effects, and email paths must not persist provider payloads
+  or expose recipients in logs.
 
   Reserved support escalation uses the existing product-feedback callback as a
   one-turn explicit action. A verified-private request for Murph human support

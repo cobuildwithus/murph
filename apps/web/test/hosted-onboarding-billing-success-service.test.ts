@@ -34,7 +34,7 @@ const mocks = vi.hoisted(() => {
     prepareHostedStripeCheckoutCompletion: vi.fn(),
     preparedCryptoDomainRoots: new Map(),
     signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
-    sendHostedSignupNotificationEmailForMemberBestEffort: vi.fn(),
+    scheduleHostedSignupNotificationEmails: vi.fn(),
     sendHostedSignupWelcomeEmailForMemberBestEffort: vi.fn(),
     readHostedMemberCoreState: vi.fn(),
     requireHostedInviteForAuthentication: vi.fn(),
@@ -87,8 +87,8 @@ vi.mock("@/src/lib/hosted-onboarding/signup-welcome-email", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
-  sendHostedSignupNotificationEmailForMemberBestEffort:
-    mocks.sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/stripe-billing-lookup", async () => {
@@ -175,7 +175,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockResolvedValue(undefined);
     mocks.cleanupHostedStandardCheckoutLoser.mockResolvedValue(undefined);
     mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mockResolvedValue(undefined);
-    mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mockResolvedValue(undefined);
+    mocks.scheduleHostedSignupNotificationEmails.mockReturnValue(undefined);
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "activating",
     }));
@@ -435,7 +435,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     );
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort).not.toHaveBeenCalled();
   });
 
@@ -654,7 +654,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
       prisma,
     });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).not.toHaveBeenCalled();
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).not.toHaveBeenCalled();
   });
 
@@ -686,8 +686,8 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       memberId: "member_123",
       prisma,
     });
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort).toHaveBeenCalledWith({
-      memberId: "member_123",
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
       prisma,
     });
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
@@ -697,15 +697,59 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       source: "checkout-success.activation",
     });
     expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mock.invocationCallOrder[0],
+    );
+    expect(
       mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mock.invocationCallOrder[0],
     ).toBeLessThan(
       mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mock.invocationCallOrder[0],
     );
-    expect(
-      mocks.sendHostedSignupWelcomeEmailForMemberBestEffort.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.sendHostedSignupNotificationEmailForMemberBestEffort.mock.invocationCallOrder[0],
+  });
+
+  it("registers a fresh activation notification before fallible Checkout cleanup", async () => {
+    const tx = {
+      __tag: "tx",
+      $queryRaw: vi.fn(async () => []),
+    };
+    const prisma = {
+      $transaction: vi.fn(
+        async (callback: (innerTx: typeof tx) => Promise<unknown>) => callback(tx),
+      ),
+    };
+    mocks.applyStripeCheckoutCompleted.mockResolvedValueOnce({
+      activatedMemberId: "member_123",
+      cleanupPulseTrialStripeSubscriptionId: "sub_cleanup_123",
+      hostedExecutionEventId: "wake_123",
+      newlyActivatedMemberIds: ["member_123"],
+      welcomeEmailMemberId: "member_123",
+    });
+    mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mockRejectedValueOnce(
+      new Error("cleanup unavailable"),
     );
+
+    await expect(reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "invite-code",
+      member: createAuthenticatedMember(),
+      prisma: prisma as never,
+      sessionId: "cs_123",
+    })).rejects.toThrow("cleanup unavailable");
+
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: ["member_123"],
+      prisma,
+    });
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.cancelHostedPulseTrialCheckoutLoserSubscription.mock
+        .invocationCallOrder[0],
+    );
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
+      .not.toHaveBeenCalled();
   });
 
   it("does not send a signup notification when Checkout only reuses a pending activation wake", async () => {
@@ -736,7 +780,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       .toHaveBeenCalledOnce();
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .toHaveBeenCalledOnce();
-    expect(mocks.sendHostedSignupNotificationEmailForMemberBestEffort)
+    expect(mocks.scheduleHostedSignupNotificationEmails)
       .not.toHaveBeenCalled();
   });
 
