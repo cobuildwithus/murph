@@ -346,6 +346,49 @@ describe("official Google Cloud KMS SDK boundary", () => {
     }
   });
 
+  it("retries one transient Decrypt call without repeating cold Workload Identity refresh", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let decryptCalls = 0;
+    googleSdkMocks.kmsCall = async (call) => {
+      if (call.method !== "decrypt") {
+        return defaultKmsResponse(call);
+      }
+      decryptCalls += 1;
+      if (decryptCalls === 1) {
+        throw { code: 14 };
+      }
+      return defaultKmsResponse(call);
+    };
+
+    try {
+      const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+      await expect(client.decrypt({
+        additionalAuthenticatedData: "domain=control",
+        ciphertext: Buffer.from(new Uint8Array([7, 8, 9])).toString("base64"),
+        keyName: KMS_KEY_NAME,
+      })).resolves.toEqual({ plaintext: new Uint8Array([1, 2, 3]) });
+
+      expect(decryptCalls).toBe(2);
+      expect(googleSdkMocks.authRequests.map((request) => request.kind)).toEqual(["sts", "iam"]);
+      expect(googleSdkMocks.kmsCalls).toHaveLength(2);
+      expect(googleSdkMocks.kmsCalls.every((call) =>
+        call.method === "decrypt"
+        && call.options.retry === null
+        && typeof call.options.timeout === "number"
+        && Number(call.options.timeout) > 0
+        && Number(call.options.timeout) <= 10_000
+      )).toBe(true);
+      expect(warning).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
+        expect.objectContaining({ providerReason: "UNAVAILABLE" }),
+      );
+    } finally {
+      random.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
   it("does not let one caller abort cancel a shared cold Workload Identity refresh", async () => {
     let releaseSts: (value: unknown) => void = () => undefined;
     const pendingSts = new Promise<unknown>((resolve) => {
