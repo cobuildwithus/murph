@@ -328,6 +328,11 @@ interface HostedGcpKmsRequestMetrics {
   providerPayloadBytes: number;
 }
 
+interface HostedGcpKmsSharedFailureDiagnostics {
+  failureStage: HostedGcpKmsFailureStage;
+  workloadIdentityRefreshObserved: boolean;
+}
+
 interface HostedGcpAuthRefreshContext {
   deadlineAtMs: number;
   signal: AbortSignal;
@@ -346,7 +351,8 @@ interface HostedGcpKmsEndpointConfiguration {
 const hostedGcpAuthRefreshContext = new AsyncLocalStorage<HostedGcpAuthRefreshContext>();
 const hostedGcpKmsAttemptDiagnosticsContext =
   new AsyncLocalStorage<HostedGcpKmsAttemptDiagnostics>();
-const hostedGcpKmsSharedFailureStages = new WeakMap<object, HostedGcpKmsFailureStage>();
+const hostedGcpKmsSharedFailureDiagnostics =
+  new WeakMap<object, HostedGcpKmsSharedFailureDiagnostics>();
 const defaultHostedGcpKmsDependencies: HostedGcpKmsClientDependencies = {
   createSdkTransport: createOfficialGcpKmsSdkTransport,
 };
@@ -1536,6 +1542,10 @@ async function runHostedGcpKmsFailureStage<T>(
     // not replaced by the surrounding auth-refresh or SDK initialization wait.
     diagnostics.lastFailureStage ??=
       readHostedGcpKmsSharedFailureStage(error) ?? stage;
+    // google-auth-library may wrap a transport error after its response
+    // interceptors run. Carry only the bounded stage provenance onto each
+    // wrapper so another waiter on the shared refresh sees the same diagnosis.
+    rememberHostedGcpKmsSharedFailureStage(error, diagnostics.lastFailureStage);
     throw error;
   } finally {
     finishHostedGcpKmsStage(stage);
@@ -1556,16 +1566,32 @@ function rememberHostedGcpKmsSharedFailureStage(
   stage: HostedGcpKmsFailureStage,
 ): void {
   if (error && typeof error === "object") {
-    hostedGcpKmsSharedFailureStages.set(error, stage);
+    hostedGcpKmsSharedFailureDiagnostics.set(error, {
+      failureStage: stage,
+      workloadIdentityRefreshObserved:
+        hostedGcpKmsAttemptDiagnosticsContext.getStore()
+          ?.workloadIdentityRefreshObserved ?? false,
+    });
   }
 }
 
 function readHostedGcpKmsSharedFailureStage(
   error: unknown,
 ): HostedGcpKmsFailureStage | null {
-  return error && typeof error === "object"
-    ? hostedGcpKmsSharedFailureStages.get(error) ?? null
-    : null;
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+  const sharedDiagnostics = hostedGcpKmsSharedFailureDiagnostics.get(error);
+  if (!sharedDiagnostics) {
+    return null;
+  }
+  if (sharedDiagnostics.workloadIdentityRefreshObserved) {
+    const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
+    if (diagnostics) {
+      diagnostics.workloadIdentityRefreshObserved = true;
+    }
+  }
+  return sharedDiagnostics.failureStage;
 }
 
 function startHostedGcpKmsStage(stage: HostedGcpKmsFailureStage): void {

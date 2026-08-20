@@ -493,6 +493,47 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   });
 
+  it("retains local checkpoint-recording failure provenance without inventing a timeout", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const recordFailureCause = Object.freeze(
+      new Error("Synthetic local checkpoint recording cause."),
+    );
+    const failure = Object.assign(
+      new Error("Hosted workspace snapshot session start failed.", {
+        cause: recordFailureCause,
+      }),
+      { phase: "session_complete_record_checkpoint" },
+    );
+    calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    expect(failure.cause).toBe(recordFailureCause);
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        redactedJson: expect.objectContaining({
+          snapshotSessionCompleteElapsedMs: expect.any(Number),
+          snapshotSessionCompleteFailurePhase: "session_complete_record_checkpoint",
+          snapshotStage: "checkpoint",
+        }),
+      }),
+    ]);
+    expect(lifecycleEntries[0]?.redactedJson).not.toHaveProperty(
+      "snapshotSessionCompleteTimeoutMs",
+    );
+  });
+
   it("does not wait for the queued finished record before returning a checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -1314,6 +1355,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotDirectR2UploadElapsedMs: expect.any(Number),
           snapshotElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
+          snapshotSessionCompleteElapsedMs: expect.any(Number),
+          snapshotSessionStartElapsedMs: expect.any(Number),
           webCheckpointAccepted: true,
           workspaceSnapshotEncryptedBytes: 18,
           workspaceSnapshotFileCount: expect.any(Number),

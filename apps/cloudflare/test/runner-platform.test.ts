@@ -3365,6 +3365,66 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
   });
 
+  it("classifies local checkpoint recording after successful snapshot publication", async () => {
+    const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });
+    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
+      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
+    );
+    const recordFailure = Object.freeze(
+      new Error("Synthetic local checkpoint recording failure."),
+    );
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot local checkpoint recording");
+      if (request.url.endsWith("/workspace-snapshots/start")) {
+        return createWorkspaceSnapshotSessionStartResponse({
+          dataKeyBase64,
+          objectKey: ref.objectKey,
+          snapshotId: ref.snapshotId,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/heartbeat`)) {
+        return new Response(JSON.stringify({ alive: true, ok: true }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
+      }
+      if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
+        return createWorkspaceSnapshotCompleteResponse(ref);
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+        recordCheckpoint: async () => {
+          throw recordFailure;
+        },
+      },
+    });
+
+    await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+    });
+    const failure = await platform.workspaceSnapshotPort!.completeSnapshotSession({
+      checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
+      ref,
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      cause: recordFailure,
+      phase: "session_complete_record_checkpoint",
+    });
+    expect(failure).not.toHaveProperty("timeoutMs");
+  });
+
   it("keeps snapshot heartbeat and stored headers through replay, then clears both", async () => {
     vi.useFakeTimers();
     const ref = createWorkspaceSnapshotV2Ref({ encryptedByteSize: 4 });

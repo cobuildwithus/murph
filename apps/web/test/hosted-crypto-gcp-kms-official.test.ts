@@ -646,6 +646,7 @@ describe("official Google Cloud KMS SDK boundary", () => {
         failureStage: "sts_exchange",
         outcome: "failed",
         providerReason: "UNAVAILABLE",
+        workloadIdentityRefreshObserved: true,
       }),
     );
   });
