@@ -25,9 +25,12 @@ import {
 } from "./native-ios-hosted-e2e-identity.mjs";
 import {
   buildDispatchInputs,
+  dispatchAndWait,
   inspectCurrentProductionSha,
+  inspectExactPrHead,
   inspectPrivateDispatchTag,
   inspectPrivateRun,
+  revalidateExactPrHead,
 } from "./native-ios-hosted-e2e-native.mjs";
 import {
   inspectBoundedCommandResult,
@@ -84,6 +87,48 @@ test("cross-repo contract is minimal, versioned, and names lifecycle ownership t
   }).identity_lifecycle, "non_destructive_existing_identity");
 });
 
+test("Web PR revalidation binds the exact PR number and head SHA", () => {
+  assert.equal(inspectExactPrHead({
+    head: { sha: SHA },
+    number: 123,
+  }, { expectedSha: SHA, prNumber: 123 }), true);
+  assert.throws(() => inspectExactPrHead({
+    head: { sha: "b".repeat(40) },
+    number: 123,
+  }, { expectedSha: SHA, prNumber: 123 }), /changed before private iOS dispatch/u);
+  assert.throws(() => inspectExactPrHead({
+    head: { sha: SHA },
+    number: 124,
+  }, { expectedSha: SHA, prNumber: 123 }), /unexpected pull request/u);
+});
+
+test("Web PR revalidation uses only the explicit repository token and exact pull request", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const calls = [];
+  try {
+    globalThis.fetch = async (url, init) => {
+      calls.push({ headers: init.headers, url: String(url) });
+      return new Response(JSON.stringify({ head: { sha: SHA }, number: 123 }), {
+        headers: { "content-type": "application/json" },
+      });
+    };
+    console.log = () => undefined;
+    await revalidateExactPrHead({
+      expectedSha: SHA,
+      prNumber: 123,
+      repository: "cobuildwithus/murph",
+      token: "web-controller-token",
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://api.github.com/repos/cobuildwithus/murph/pulls/123");
+    assert.equal(calls[0].headers.authorization, "Bearer web-controller-token");
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("PR selector targets Web candidates and leaves controller rollout to trusted default branch", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
@@ -93,11 +138,37 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
     workflow.includes("--jq '.[] | .filename, (.previous_filename // empty)'"),
     "renamed paths must be evaluated through previous_filename",
   );
+  const workflowConcurrency = workflow.slice(
+    workflow.indexOf("\nconcurrency:\n"),
+    workflow.indexOf("\njobs:\n"),
+  );
+  assert.match(
+    workflowConcurrency,
+    /group: native-ios-hosted-e2e-\$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.number \|\| github\.event\.deployment\.sha \|\| github\.run_id \}\}/u,
+    "workflow concurrency must retain only one running and one newest pending run per PR",
+  );
+  assert.match(workflowConcurrency, /cancel-in-progress: false/u);
+  assert.doesNotMatch(workflowConcurrency, /queue:/u);
   assert.match(
     workflow,
     /group: native-ios-hosted-e2e-live\n\s+queue: max\n\s+cancel-in-progress: false/u,
-    "trusted live runs must queue without replacing an existing pending run",
+    "the one destructive live slot must remain globally serialized without pending replacement",
   );
+  const liveStart = workflow.indexOf("  pr-live:\n");
+  const liveEnd = workflow.indexOf("\n  pr-required:\n", liveStart);
+  const liveJob = workflow.slice(liveStart, liveEnd);
+  const earlyHeadCheck = liveJob.indexOf("- name: Revalidate exact PR head before runner setup");
+  assert.ok(earlyHeadCheck >= 0, "the live job must revalidate before runner setup");
+  for (const laterStep of [
+    "- name: Checkout trusted control plane",
+    "- name: Setup pnpm",
+    "- name: Setup Node",
+    "- name: Install trusted control dependencies",
+  ]) {
+    assert.ok(liveJob.indexOf(laterStep) > earlyHeadCheck, `${laterStep} must follow head revalidation`);
+  }
+  assert.match(liveJob, /NATIVE_IOS_E2E_WEB_GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
+  assert.match(liveJob, /--pr-number "\$\{PR_NUMBER\}"/u);
   assert.equal(runWorkflowSelector(workflow, "apps/web/app/page.tsx"), "selected");
   assert.equal(TRUSTED_DEFAULT_BRANCH_CONTROLLERS.length, 5);
   for (const controller of TRUSTED_DEFAULT_BRANCH_CONTROLLERS) {
@@ -111,6 +182,87 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
     runWorkflowSelector(workflow, "agent-docs/product-specs/companion-app.md"),
     "neutral",
   );
+});
+
+test("commit status descriptions distinguish real-run proof from every non-run path", async () => {
+  const workflow = await readFile(
+    path.join(REPO_ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
+    "utf8",
+  );
+  const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
+  const baseEnv = {
+    LIVE_RESULT: "skipped",
+    SELECT_RESULT: "success",
+    SELECTED: "true",
+    SOURCE_RESULT: "success",
+    TRUSTED: "true",
+  };
+  const scenarios = [
+    [
+      { SELECT_RESULT: "failure" },
+      "failure",
+      "This controller run did not execute real native iOS hosted E2E: selection failed.",
+    ],
+    [
+      { SOURCE_RESULT: "failure" },
+      "failure",
+      "This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.",
+    ],
+    [
+      { SELECTED: "false" },
+      "success",
+      "This controller run did not execute real native iOS hosted E2E: path filter did not select the commit.",
+    ],
+    [
+      { TRUSTED: "false" },
+      "failure",
+      "This controller run did not execute real native iOS hosted E2E: trusted same-repository human head required.",
+    ],
+    [
+      { LIVE_RESULT: "success" },
+      "success",
+      "This controller run passed real native iOS hosted E2E for the exact commit.",
+    ],
+    [
+      { LIVE_RESULT: "failure" },
+      "failure",
+      "This status cannot determine whether real native iOS hosted E2E started; no passing proof was recorded.",
+    ],
+  ];
+  const tempDir = await mkdtemp(path.join(tmpdir(), "native-ios-status-proof-"));
+  try {
+    await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$GH_CAPTURE"
+`, { mode: 0o755 });
+    for (const [index, [overrides, expectedState, expectedDescription]] of scenarios.entries()) {
+      const capturePath = path.join(tempDir, `gh-${index}.args`);
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...baseEnv,
+          ...overrides,
+          GH_CAPTURE: capturePath,
+          GITHUB_REPOSITORY: "cobuildwithus/murph",
+          GITHUB_RUN_ID: "987",
+          GITHUB_SERVER_URL: "https://github.example.test",
+          PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          STATUS_SHA: SHA,
+        },
+      });
+      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
+      const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
+      assert.ok(ghArgs.includes(`state=${expectedState}`));
+      assert.ok(ghArgs.includes(`description=${expectedDescription}`));
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+
+  assert.ok(workflow.includes("This controller run has not executed real native iOS hosted E2E yet."));
+  assert.doesNotMatch(workflow, /PR does not require the hosted Web native E2E lane/u);
 });
 
 test("Vercel custom environment proof binds the dedicated id and slug", () => {
@@ -183,11 +335,17 @@ test("Vercel owns the one Junction namespace read by cleanup and the candidate",
     "utf8",
   );
   const runPrStart = controller.indexOf("async function runPr(args)");
+  const tokenRead = controller.indexOf('requiredEnv("NATIVE_IOS_E2E_WEB_GITHUB_TOKEN")', runPrStart);
+  const tokenDelete = controller.indexOf("delete process.env.NATIVE_IOS_E2E_WEB_GITHUB_TOKEN", runPrStart);
   const namespaceRead = controller.indexOf("readE2eJunctionClientUserIdNamespace()", runPrStart);
   const lifecycleStart = controller.indexOf("await runPrLifecycle", runPrStart);
   assert.ok(
-    runPrStart >= 0 && namespaceRead > runPrStart && lifecycleStart > namespaceRead,
-    "the Vercel namespace preflight must finish before cleanup, retirement, deployment, or dispatch",
+    runPrStart >= 0
+      && tokenRead > runPrStart
+      && tokenDelete > tokenRead
+      && namespaceRead > tokenDelete
+      && lifecycleStart > namespaceRead,
+    "the Web status token must leave process env before child-capable cleanup and deployment work",
   );
 });
 
@@ -380,6 +538,117 @@ test("destructive reset admits only lane-owned non-production deployments in the
       target: null,
       ...mutation,
     }, expected), /unrelated active deployment/u);
+  }
+});
+
+test("private iOS dispatch revalidates the Web head after tag proof and before dispatch", async () => {
+  const env = {
+    NATIVE_IOS_E2E_GITHUB_TOKEN: "private-ios-token",
+    NATIVE_IOS_E2E_IOS_EXPECTED_SHA: SHA,
+    NATIVE_IOS_E2E_IOS_REF: "native-e2e-v3",
+    NATIVE_IOS_E2E_IOS_REPOSITORY: "cobuildwithus/murph-ios",
+    NATIVE_IOS_E2E_IOS_WORKFLOW: "native-ios-hosted-e2e.yml",
+  };
+  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const calls = [];
+  try {
+    Object.assign(process.env, env);
+    globalThis.fetch = async (url, init = {}) => {
+      const value = String(url);
+      if (value.includes("/git/ref/tags/")) {
+        calls.push("tag");
+        return jsonResponse({ object: { sha: SHA, type: "commit" }, ref: "refs/tags/native-e2e-v3" });
+      }
+      if (value.endsWith("/pulls/123")) {
+        calls.push("revalidate");
+        return jsonResponse({ head: { sha: SHA }, number: 123 });
+      }
+      if (value.endsWith("/dispatches")) {
+        calls.push("dispatch");
+        assert.equal(init.method, "POST");
+        assert.equal(init.headers.authorization, "Bearer private-ios-token");
+        return jsonResponse({ workflow_run_id: 42 });
+      }
+      if (value.endsWith("/actions/runs/42")) {
+        calls.push("status");
+        return jsonResponse({
+          conclusion: "success",
+          event: "workflow_dispatch",
+          head_sha: SHA,
+          id: 42,
+          status: "completed",
+        });
+      }
+      throw new Error(`unexpected URL ${value}`);
+    };
+    console.log = () => undefined;
+
+    await dispatchAndWait({
+      correlationId: "murph-pr-123",
+      mode: "pr",
+      prHead: {
+        prNumber: 123,
+        repository: "cobuildwithus/murph",
+        token: "web-controller-token",
+      },
+      webBaseUrl: "https://candidate.example",
+      webSha: SHA,
+    });
+    assert.deepEqual(calls, ["tag", "revalidate", "dispatch", "status"]);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("failed Web head revalidation prevents private iOS dispatch", async () => {
+  const env = {
+    NATIVE_IOS_E2E_GITHUB_TOKEN: "private-ios-token",
+    NATIVE_IOS_E2E_IOS_EXPECTED_SHA: SHA,
+    NATIVE_IOS_E2E_IOS_REF: "native-e2e-v3",
+    NATIVE_IOS_E2E_IOS_REPOSITORY: "cobuildwithus/murph-ios",
+    NATIVE_IOS_E2E_IOS_WORKFLOW: "native-ios-hosted-e2e.yml",
+  };
+  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  let dispatchCalled = false;
+  try {
+    Object.assign(process.env, env);
+    globalThis.fetch = async (url) => {
+      const value = String(url);
+      if (value.includes("/git/ref/tags/")) {
+        return jsonResponse({ object: { sha: SHA, type: "commit" }, ref: "refs/tags/native-e2e-v3" });
+      }
+      if (value.endsWith("/pulls/123")) {
+        return jsonResponse({ head: { sha: "b".repeat(40) }, number: 123 });
+      }
+      dispatchCalled = true;
+      throw new Error(`unexpected URL ${value}`);
+    };
+    await assert.rejects(() => dispatchAndWait({
+      correlationId: "murph-pr-123",
+      mode: "pr",
+      prHead: {
+        prNumber: 123,
+        repository: "cobuildwithus/murph",
+        token: "web-controller-token",
+      },
+      webBaseUrl: "https://candidate.example",
+      webSha: SHA,
+    }), /changed before private iOS dispatch/u);
+    assert.equal(dispatchCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 
@@ -936,6 +1205,27 @@ test("PR lifecycle retains secret-safe primary and finalization stage names", as
     return true;
   });
 });
+
+function extractWorkflowStepScript(workflow, stepName) {
+  const stepStart = workflow.indexOf(`      - name: ${stepName}\n`);
+  assert.ok(stepStart >= 0, `${stepName} step must exist`);
+  const runMarker = "        run: |\n";
+  const scriptStart = workflow.indexOf(runMarker, stepStart);
+  assert.ok(scriptStart >= 0, `${stepName} script must exist`);
+  const scriptLines = [];
+  for (const line of workflow.slice(scriptStart + runMarker.length).split("\n")) {
+    if (!line.startsWith("          ")) break;
+    scriptLines.push(line.slice(10));
+  }
+  assert.ok(scriptLines.length > 0, `${stepName} script must be readable`);
+  return scriptLines.join("\n");
+}
+
+function jsonResponse(value) {
+  return new Response(JSON.stringify(value), {
+    headers: { "content-type": "application/json" },
+  });
+}
 
 function runWorkflowSelector(workflow, file) {
   const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
