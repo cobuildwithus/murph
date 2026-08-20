@@ -1,0 +1,41 @@
+name: Apply private-to-group context handoff patch
+
+on:
+  push:
+    branches:
+      - feat/private-to-group-context-handoff
+    paths:
+      - .github/workflows/apply-private-to-group-context-handoff.yml
+      - scripts/apply-private-to-group-context-handoff.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/private-to-group-context-handoff
+
+      - name: Apply bounded codemod
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i '4i const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX = "${HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX}";' scripts/apply-private-to-group-context-handoff.mjs
+          node scripts/apply-private-to-group-context-handoff.mjs
+
+      - name: Commit the implementation and remove the one-shot tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm scripts/apply-private-to-group-context-handoff.mjs .github/workflows/apply-private-to-group-context-handoff.yml
+          git add --all
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add private-to-group context handoff"
+          git push origin HEAD:feat/private-to-group-context-handoff
