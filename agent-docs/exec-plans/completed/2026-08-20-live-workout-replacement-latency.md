@@ -111,9 +111,9 @@ replacement-plus-completed-set write are intentionally outside this patch.
   changed from 27,715 tokens / 124,707 UTF-8 bytes to 27,718 / 124,718 (+3
   tokens / +11 bytes), entirely from adding `replace` to the CLI workout-family
   index. Group remained 22,503 tokens / 103,537 bytes. Tool/schema guidance and
-  all other first-request fields were unchanged. The deferred tracked-table skill
-  changes from 5,254 tokens / 26,607 bytes to 5,565 / 28,219 (+311 / +1,612)
-  only when selected and read; it is absent from the first request.
+  all other first-request fields were unchanged. The tracked-table skill is
+  deferred until selected and read, so its initial guidance plus later
+  approval/recovery corrections remain absent from the first request.
 - Preliminary specialist ReviewGPT found that the first candidate derived the
   destructive revision after approval and scoped the prompt too broadly. The
   remediation now carries the proposal-time revision through the CLI and core
@@ -143,7 +143,25 @@ replacement-plus-completed-set write are intentionally outside this patch.
   wrong-revision tombstone, and multiple active workouts even when the candidate
   looks exact, without adding event or audit rows. Core proof covers the expected
   tombstone after ordinary replacement and hosted receipt restoration.
-- Final ReviewGPT `PASS`, exact-head CI, and plan closure remain pending.
+- Final ReviewGPT round 5 reviewed exact pushed head
+  `18734b89734e0f5490566118b7df69fc87816eac` for about 55 minutes with the
+  requested compatible Pro model, verified every prior correction and the
+  paired canonical proof, returned `ROUND_OUTCOME: PASS`, and reported no other
+  qualifying issue.
+- Passed final focused typechecks for core, vault use cases, CLI, and assistant
+  engine; core replacement tests 3/3; CLI live-workout tests 8/8; tracked-table
+  tests 8/8; changelog-fragment tests 7/7; 207-scenario integrity; incremental
+  workspace build; and built CLI package-shape verification.
+- All exact-head GitHub checks passed, including both CLI hosts, build/typecheck,
+  assistant/CLI/platform coverage, app verification, release aggregate, runner
+  budget, foreground-state, billing, fixture, artifact, PR-evidence, and
+  marketing-overflow gates. The hosted-local Stripe browser matrix intentionally
+  skipped and Vercel accepted the configured ignored build.
+- A fresh fetch of current `origin/main` at
+  `4f660db4ac39ff53df62963180b8d6c53f317003` produced a clean
+  `git merge-tree --write-tree` result without updating the reviewed PR head.
+  The final parent diff/privacy review found no remaining accepted issue or
+  identifier leakage.
 
 ## Round 3 Architecture Retrospective
 
@@ -179,3 +197,6 @@ canonical-write/runtime boundary provides stable operation-id result replay, or
 atomically persists canonical state, the tool result, and foreground-input
 completion so post-commit command reinvocation cannot occur. Any cross-command
 solution belongs in that separate owner-level design.
+Status: completed
+Updated: 2026-08-20
+Completed: 2026-08-20
