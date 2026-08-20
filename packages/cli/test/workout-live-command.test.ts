@@ -325,6 +325,70 @@ test('live workout usecases fail closed on missing exact selectors and coordinat
   )
 })
 
+test('clearing fixed exercise repetitions stops value-less set logging', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-clear-reps-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const cli = createWorkoutCli()
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'America/New_York',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  const started = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Clear repetition rule', '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'add', 'Bench press',
+    '--workout-id', started.eventId,
+    '--order', '1',
+    '--sets', '1',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'set-reps', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1',
+    '--reps', '9',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  const cleared = requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'set-reps', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1',
+    '--clear',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(
+    cleared.entity.data.workout.exercises[0]?.memberRepsPerSet,
+    undefined,
+  )
+
+  const rejected = await run<ShowResult>(cli, [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1',
+    '--set-order', '1',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(rejected.envelope.ok, false)
+  if (rejected.envelope.ok) {
+    throw new Error('Expected value-less set logging to fail after clearing repetitions.')
+  }
+  assert.equal(rejected.envelope.error.code, 'invalid_option')
+
+  const unchanged = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', started.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(unchanged.entity.data.workout.exercises[0]?.sets, [
+    { order: 1 },
+  ])
+  assert.equal(unchanged.entity.data.workout.endedAt, undefined)
+})
+
 test('concurrent exact-workout mutations serialize without losing set updates', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-concurrent-',

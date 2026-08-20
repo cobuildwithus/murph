@@ -126,13 +126,44 @@ Result: Ready.
 - Verified that targetless sessions remain open for optional additional sets,
   exact card actions revalidate under a per-workout lock, and stale cards do not
   retarget to another same-shaped workout.
+- With an older and newer open workout, verified that Training displays the
+  newer record, puts its exact id in the existing continuation link, and waits
+  for that record rather than treating an update to the older workout as the
+  requested result.
+- The configured private real-model journey represents the member's input as
+  exactly `Set 8 done.` while durable reply-card context supplies the opaque
+  workout id. Its assertions require one final completed workout card, empty
+  companion text, canonical nine-repetition actuals, atomic `endedAt`, and a
+  new completed workout while the unrelated older record remains open.
 
 ## Verification
 
+- ReviewGPT's preliminary findings are resolved at their existing owners. One
+  turn now completes all requested workout mutations before attaching exactly
+  one final card, including a just-finished finite workout. Successful
+  `set-reps --clear` coverage exposed and fixed the generic editor restoring a
+  deleted nested value; the clear now uses its existing exact nested patch
+  surface. The configured private real-model journey supplies identity through
+  durable reply-card context around a member-authored `Set 8 done.`, then
+  requires one completed card, no companion prose or clarification, canonical
+  repetitions, atomic closure, and an unblocked next workout.
+- Final ReviewGPT round one found that the existing Training continuation CTA
+  displayed the newest open workout but sent a singleton-shaped generic
+  message. The current link rewrites the existing contact option with that
+  selected session's exact id. Focused Web proof covers SMS, Telegram, direct
+  email, parameter-based webmail, wrapped-mailto webmail, two simultaneous open
+  workouts, exact handoff polling, and the rendered CTA href without adding
+  focus state or another selector.
 - Focused contracts, operator-config, Assistant Engine, assistant-runtime,
   vault-usecase, and CLI suites pass: 152 behavioral assertions across the
   directly changed paths, plus all 324 contract tests and generated-schema
   verification.
+- Focused correction checks pass: 37 tracked-workout prompt/card assertions, 5
+  exact-workout CLI journeys, 36 real-vault workout-usecase assertions, and 43
+  Training/contact rendering and selection assertions. The opt-in real-model
+  file loads with 6 local checks passing and 74 credential-gated checks
+  skipped, and the Assistant Engine typecheck includes its configured workout
+  journey.
 - All affected package typechecks pass. Prepared CLI runtime generation and
   exact package-shape verification pass after regenerating the Incur CLI
   schema, generated TypeScript surface, and skill hash from the built entrypoint.
@@ -141,11 +172,16 @@ Result: Ready.
   code mode, identical synthetic direct/group turns with response cards
   available, and `gpt-tokenizer` 3.4.0 `o200k_harmony`. After normalizing private
   paths and provider-generated UUIDs, direct input changes from 29,446 tokens /
-  136,321 bytes to 29,447 / 136,330 (+1 token, +9 bytes); group changes from
-  25,946 / 120,827 to 25,947 / 120,836 (+1 token, +9 bytes). The complete
-  first-request delta is confined to two exact-workout phrases in the existing
-  response-card tool description. The larger tracked-workout instruction
-  rewrite remains deferred skill content and is not part of the initial request.
+  136,321 bytes to 29,458 / 136,387 (+12 tokens, +0.0408%; +66 bytes,
+  +0.0484%); group changes from 25,946 / 120,827 to 25,958 / 120,893 (+12
+  tokens, +0.0463%; +66 bytes, +0.0546%). The final correction was measured by
+  replacing the prior captured tool object with the exact final serialized
+  object and tokenizing both complete objects at their unchanged request
+  boundary; it adds 11 tokens and 57 bytes over the prior reviewed head. The
+  complete first-request delta remains confined to exact-workout and final-card
+  eligibility phrases in the existing response-card tool description. The
+  larger tracked-workout instruction rewrite remains deferred skill content and
+  is not part of the initial request.
 - The opt-in paid real-model journey compiles, but no supported provider
   credential is present locally. The protected production deployment's required
   live-model smoke remains the external model/auth proof.

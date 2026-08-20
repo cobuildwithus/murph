@@ -161,6 +161,15 @@ describe('assistant tracked workout table skill', () => {
       'A later explicit extra set remains valid when it names that completed workout and exact exercise/set',
     )
     expect(skill).toContain(
+      'Complete all workout mutations requested by the current member message in order',
+    )
+    expect(skill).toContain(
+      'attach exactly one refreshed structured workout card from the final verified exact snapshot',
+    )
+    expect(skill).toContain(
+      'A final write that closes a finite workout remains card-eligible as that just-finished workout.',
+    )
+    expect(skill).toContain(
       'Starting a new workout is independent of every older unfinished workout',
     )
     expect(skill).toContain('Saved target values remain in the workout format')
@@ -172,7 +181,7 @@ describe('assistant tracked workout table skill', () => {
       'refuses a structured replacement that omits a saved exercise or set',
     )
     expect(skill).toContain(
-      'After every verified private workout mutation that changes the snapshot',
+      'After completing all ordinary free-form workout mutations requested by the current message',
     )
     expect(skill).toContain(
       'use one verified structured workout card as the complete response on a supported private card route',

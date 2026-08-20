@@ -579,10 +579,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           startedAt,
           vault: workingDirectory,
         })
-        const commonInput: Omit<
-          CodexAppServerTurnInput,
-          'dynamicTools' | 'prompt'
-        > = {
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -614,6 +611,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             onboardingGuidance: false,
             turnTrigger: null,
           }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -652,6 +650,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(started.finalMessage).not.toMatch(/how many|which workout/iu)
         expect(matching).toHaveLength(1)
         const finiteWorkout = matching[0]!
+        expect(started.finalMessage.trim()).toBe('')
+        expect(started.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: finiteWorkout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'active' },
+        })
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
           name: 'Seated cable curl',
@@ -672,17 +679,30 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           })
         }
 
-        // Deliberately do not resume the provider session. The exact record id and
-        // canonical exercise prescription are the complete context for set eight.
+        // Deliberately do not resume the provider session. The member's terse
+        // message carries no id; production reply-card context supplies the exact
+        // durable marker, while the exercise prescription remains canonical.
         const finalSet = await executeRealCodexAppServerTurn({
           ...commonInput,
-          prompt: `For exact workout ${finiteWorkout.id}, Seated cable curl set 8 complete.`,
+          prompt: [
+            `Durable reply-card context identifies exact workout ${finiteWorkout.id}.`,
+            'The current member message is exactly: "Set 8 done."',
+          ].join(' '),
         })
         const completed = workoutSessionSchema.parse(
           (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
         )
 
         expect(finalSet.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+        expect(finalSet.finalMessage.trim()).toBe('')
+        expect(finalSet.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: finiteWorkout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'completed' },
+        })
         expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual(
           Array.from({ length: 8 }, () => 9),
         )
@@ -714,6 +734,15 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
 
         expect(nextTurn.finalMessage).not.toMatch(/finish time|duration|which workout/iu)
         expect(nextWorkouts).toHaveLength(1)
+        expect(nextTurn.finalMessage.trim()).toBe('')
+        expect(nextTurn.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: nextWorkouts[0]?.id,
+            kind: 'workout',
+          },
+          workout: { state: 'completed' },
+        })
         expect(nextWorkouts[0]?.workout.exercises[0]?.sets).toEqual([
           { order: 1, reps: 12 },
         ])

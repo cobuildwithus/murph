@@ -852,7 +852,13 @@ describe('murph.attach_response_card', () => {
       'Occurrence authority alone is not card intent',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'verified initial card after starting or exact-reading one canonical open workout',
+      'verified initial card after starting or exact-reading one canonical workout',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'including the just-completed final snapshot',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'the same exact open or just-finished workout',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'with multiple plausible workouts, do not infer authority',

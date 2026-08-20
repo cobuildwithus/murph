@@ -722,8 +722,13 @@ async function setLiveWorkoutExerciseRepsWithLockHeld(
   }
 
   if (clear) {
-    delete exercise.memberRepsPerSet
-  } else if (reps !== undefined) {
+    return editWorkoutRecord({
+      vault: shown.vault,
+      lookup: shown.entity.id,
+      clear: [`workout.exercises.${exerciseIndex}.memberRepsPerSet`],
+    })
+  }
+  if (reps !== undefined) {
     exercise.memberRepsPerSet = reps
   }
   exercises[exerciseIndex] = exercise
