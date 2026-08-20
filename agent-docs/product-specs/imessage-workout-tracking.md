@@ -159,8 +159,23 @@ set completion. It cannot move the write target to the next set. The last set
 coordinate the member explicitly named remains the only candidate. If that set
 still needs a result, Murph asks one narrow question about it. If the canonical
 result already matches, the acknowledgement causes no workout mutation. The
-sole exception is a contextual affirmative that accepts the exact bounded
-missing-workout recovery offer below.
+only exceptions are contextual affirmatives that accept the exact bounded
+ad-hoc replacement or missing-workout recovery offers below.
+
+When one active workout blocks a fully specified ad-hoc replacement, Murph
+reads the exact active event once and binds the deletion proposal to that event
+id and lifecycle revision. The proposal states the old workout title, that it
+will be deleted, and the replacement title, exercises, and stated set counts.
+Only an immediate unambiguous affirmative to that proposal, or a current-turn
+instruction that itself explicitly directs Murph to delete or replace the old
+workout with that fully described ad-hoc workout, authorizes the compound
+replacement. An ordinary request to start a workout is not deletion consent.
+The write revalidates the proposal-time id and revision under the canonical
+boundary and atomically commits the old tombstone and complete replacement. A
+missing, completed, changed, different, or non-sole active workout produces no
+mutation and requires a fresh bounded proposal. Saved-format starts and
+exact-reference reminder replies never use this ad-hoc replacement path; their
+specialized routine-identity and exact-end-time flows retain precedence.
 
 Every completion, correction, and acknowledgement follow-up first resolves the
 canonical active workout. A missing active workout fails closed. Murph does not

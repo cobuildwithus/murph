@@ -510,6 +510,17 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
       'The confirmed workout is no longer the active live workout.',
     )
   }
+  const currentRevision = requireWorkoutEventRevision(shown)
+  if (
+    !Number.isInteger(input.expectedRevision)
+    || input.expectedRevision < 1
+    || currentRevision !== input.expectedRevision
+  ) {
+    throw new VaultCliError(
+      'conflict',
+      'The confirmed workout changed after approval; replacement was not performed.',
+    )
+  }
   if (input.exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
     throw new VaultCliError(
       'invalid_option',
@@ -563,7 +574,7 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
   return replaceStructuredWorkoutRecord({
     vault: input.vault,
     eventId: workoutId,
-    expectedRevision: requireWorkoutEventRevision(shown),
+    expectedRevision: input.expectedRevision,
     draft: {
       occurredAt: startedAt,
       source: 'manual',

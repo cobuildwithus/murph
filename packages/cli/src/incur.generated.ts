@@ -335,7 +335,7 @@ declare module 'incur' {
       'workout list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'workout manifest': { args: { id: string }; options: { requestId?: string } }
       'workout payload-schema': { args: {}; options: {} }
-      'workout replace': { args: { name: string }; options: { requestId?: string; workoutId: string; confirmDelete?: boolean; exercise?: string[]; type?: string; note?: string; startedAt?: string } }
+      'workout replace': { args: { name: string }; options: { requestId?: string; workoutId: string; expectedRevision: number; confirmDelete?: boolean; exercise?: string[]; type?: string; note?: string; startedAt?: string } }
       'workout set clear': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number } }
       'workout set log': { args: { exercise?: string }; options: { requestId?: string; workoutId?: string; exerciseId?: string; exerciseOrder?: number; setOrder: number; requireExistingSet?: boolean; type?: "normal" | "warmup" | "dropset" | "failure"; note?: string; reps?: number; weight?: number; weightUnit?: "lb" | "kg"; durationSeconds?: number; distanceMeters?: number; rpe?: number; bodyweightKg?: number; assistanceKg?: number; addedWeightKg?: number } }
       'workout show': { args: { id: string }; options: { requestId?: string } }

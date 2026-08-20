@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises'
 import { Cli } from 'incur'
 import { afterAll } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { addActivitySession } from '@murphai/core'
+import { addActivitySession, readJsonlRecords } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   addLiveWorkoutExercise,
@@ -57,6 +57,7 @@ function isVaultCliErrorCode(error: unknown, code: string): boolean {
 
 interface WorkoutResult {
   eventId: string
+  ledgerFile: string
   activityType: string
   distanceKm: number | null
   note: string
@@ -78,9 +79,18 @@ interface ShowResult {
     id: string
     data: {
       durationMinutes?: number
+      lifecycle?: {
+        revision?: number
+      }
       workout: NonNullable<WorkoutResult['workout']>
     }
   }
+}
+
+function requireShownRevision(shown: ShowResult): number {
+  const revision = shown.entity.data.lifecycle?.revision
+  assert.equal(typeof revision, 'number')
+  return revision!
 }
 
 test('live workout commands keep one canonical session and target one set', async () => {
@@ -237,10 +247,17 @@ test('one command atomically replaces an explicitly approved active workout', as
     '--started-at', '2026-08-20T06:30:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
+  const approvedSnapshot = requireData((await run<ShowResult>(cli, [
+    'workout', 'active',
+    '--workout-id', oldWorkout.eventId,
+    '--vault', vaultRoot,
+  ])).envelope)
+  const approvedRevision = requireShownRevision(approvedSnapshot)
 
   const missingConfirmation = await run<WorkoutResult>(cli, [
     'workout', 'replace', 'Upper body',
     '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(approvedRevision),
     '--exercise', 'name=Pull-up;sets=3;mode=bodyweight',
     '--vault', vaultRoot,
   ])
@@ -255,6 +272,7 @@ test('one command atomically replaces an explicitly approved active workout', as
   const replacement = requireData((await run<WorkoutResult>(cli, [
     'workout', 'replace', 'Upper body',
     '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(approvedRevision),
     '--confirm-delete',
     '--exercise', 'name=Pull-up;sets=3;mode=bodyweight',
     '--exercise', 'name=Push-up;sets=2;mode=bodyweight',
@@ -307,6 +325,9 @@ test('replacement fails closed when a competing live workout exists', async () =
     '--started-at', '2026-08-20T06:30:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
+  const approvedSnapshot = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--workout-id', approved.eventId, '--vault', vaultRoot,
+  ])).envelope)
   const competing = await addActivitySession({
     vaultRoot,
     draft: {
@@ -326,6 +347,7 @@ test('replacement fails closed when a competing live workout exists', async () =
   const conflict = await run<WorkoutResult>(cli, [
     'workout', 'replace', 'Replacement workout',
     '--workout-id', approved.eventId,
+    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
     '--confirm-delete',
     '--exercise', 'name=Pull-up;sets=2',
     '--vault', vaultRoot,
@@ -340,6 +362,64 @@ test('replacement fails closed when a competing live workout exists', async () =
   ])).envelope)
   assert.equal(approvedStillActive.entity.id, approved.eventId)
   assert.equal(competingStillActive.entity.id, competing.eventId)
+})
+
+test('replacement rejects the proposal revision after the approved workout changes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-replace-stale-approval-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+  const approved = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Approved old workout',
+    '--started-at', '2026-08-20T06:30:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const proposalSnapshot = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--workout-id', approved.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  const proposalRevision = requireShownRevision(proposalSnapshot)
+
+  await addLiveWorkoutExercise({
+    vault: vaultRoot,
+    workoutId: approved.eventId,
+    name: 'Late correction',
+    order: 1,
+    setCount: 1,
+  })
+
+  const conflict = await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Replacement workout',
+    '--workout-id', approved.eventId,
+    '--expected-revision', String(proposalRevision),
+    '--confirm-delete',
+    '--exercise', 'name=Pull-up;sets=2',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(conflict.envelope.ok, false)
+
+  const unchanged = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(unchanged.entity.id, approved.eventId)
+  assert.ok(requireShownRevision(unchanged) > proposalRevision)
+  assert.equal(unchanged.entity.data.workout.exercises[0]?.name, 'Late correction')
+  const records = await readJsonlRecords({
+    vaultRoot,
+    relativePath: approved.ledgerFile,
+  })
+  assert.deepEqual(
+    [...new Set(records.map((record) => (record as { id?: string }).id))],
+    [approved.eventId],
+  )
+  assert.equal(records.some((record) =>
+    (record as { lifecycle?: { state?: string } }).lifecycle?.state === 'deleted'
+  ), false)
 })
 
 test('live workout usecases fail closed on invalid selectors and coordinates', async () => {

@@ -5990,6 +5990,12 @@
                           "pattern": "^evt_[0-9A-Za-z]+$",
                           "description": "Exact canonical id of the active workout the member approved deleting."
                         },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991,
+                          "description": "Exact lifecycle revision shown when deletion was approved."
+                        },
                         "confirmDelete": {
                           "description": "Required explicit acknowledgement that deletion was approved.",
                           "type": "boolean"

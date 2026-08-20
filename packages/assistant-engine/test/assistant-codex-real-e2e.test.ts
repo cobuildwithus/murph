@@ -26,6 +26,7 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { readVaultRawTolerant } from '@murphai/query'
+import { addLiveWorkoutExercise } from '@murphai/vault-usecases/workouts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -582,6 +583,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             assistantCliContract: [
               'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
+              'vault-cli workout replace <name> --workout-id <id> --expected-revision <n> --confirm-delete [--exercise name=...;sets=...]',
               'vault-cli workout exercise add <name> --order <n> [--sets <n>]',
               'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
@@ -678,7 +680,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           prompt: 'Second set complete.',
           resumeSessionId: firstCompletion.sessionId,
         })
-        await executeRealCodexAppServerTurn({
+        const acknowledgement = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: 'ok',
           resumeSessionId: secondCompletion.sessionId,
@@ -707,6 +709,94 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         expect(
           workout?.exercises[0]?.sets.map((set) => set.weightUnit ?? null),
         ).toEqual([null, null, null, null])
+
+        const activeEvent = vault.events.find((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success && parsed.data.endedAt === undefined
+        })
+        expect(activeEvent?.entityId).toBeTruthy()
+
+        const proposal = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt:
+            'Start a new ad-hoc workout named Upper body with 3 pull-up sets and 2 push-up sets.',
+          resumeSessionId: acknowledgement.sessionId,
+        })
+        const proposalCommands = readCapabilityRoutingActions(proposal.jsonEvents)
+          .flatMap((action) => action.kind === 'command' ? [action.command] : [])
+        expect(proposalCommands.some((command) =>
+          command.includes('workout replace'),
+        )).toBe(false)
+        expect(proposal.finalMessage).toMatch(/delete|replace/iu)
+        expect(proposal.finalMessage).toMatch(/upper body/iu)
+        expect(proposal.finalMessage).toMatch(/pull-up/iu)
+        expect(proposal.finalMessage).toMatch(/push-up/iu)
+        expect(proposal.finalMessage).toContain('?')
+
+        await addLiveWorkoutExercise({
+          vault: workingDirectory,
+          workoutId: activeEvent!.entityId,
+          name: 'Late correction',
+          order: 2,
+          setCount: 1,
+        })
+        const staleAcceptance = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'yes',
+          resumeSessionId: proposal.sessionId,
+        })
+        const staleCommands = readCapabilityRoutingActions(
+          staleAcceptance.jsonEvents,
+        ).flatMap((action) => action.kind === 'command' ? [action.command] : [])
+        const replacementCommands = staleCommands.filter((command) =>
+          command.includes('workout replace'),
+        )
+        expect(replacementCommands).toHaveLength(1)
+        expect(replacementCommands[0]).toMatch(/--expected-revision\s+\d+/u)
+        expect(staleAcceptance.finalMessage).toMatch(/changed/iu)
+        expect(staleAcceptance.finalMessage).toMatch(/not (?:replace|delete)|nothing/iu)
+        expect(staleAcceptance.finalMessage).toContain('?')
+
+        const afterStaleAcceptance = await readVaultRawTolerant(workingDirectory)
+        const activeAfterStale = afterStaleAcceptance.events.find((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success && parsed.data.endedAt === undefined
+        })
+        expect(activeAfterStale?.entityId).toBe(activeEvent!.entityId)
+        const activeWorkoutAfterStale = workoutSessionSchema.parse(
+          activeAfterStale?.attributes.workout,
+        )
+        expect(activeWorkoutAfterStale.exercises[1]?.name).toBe('Late correction')
+
+        const replacement = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: 'yes',
+          resumeSessionId: staleAcceptance.sessionId,
+        })
+        const successfulReplacementCommands = readCapabilityRoutingActions(
+          replacement.jsonEvents,
+        ).flatMap((action) => action.kind === 'command' ? [action.command] : [])
+          .filter((command) => command.includes('workout replace'))
+        expect(successfulReplacementCommands).toHaveLength(1)
+
+        const afterReplacement = await readVaultRawTolerant(workingDirectory)
+        const activeAfterReplacement = afterReplacement.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success && parsed.data.endedAt === undefined
+            ? [{ event, workout: parsed.data }]
+            : []
+        })
+        expect(activeAfterReplacement).toHaveLength(1)
+        expect(activeAfterReplacement[0]?.event.entityId).not.toBe(
+          activeEvent!.entityId,
+        )
+        expect(activeAfterReplacement[0]?.workout.exercises.map((exercise) => ({
+          name: exercise.name,
+          sets: exercise.sets.length,
+        }))).toEqual([
+          { name: 'Pull-up', sets: 3 },
+          { name: 'Push-up', sets: 2 },
+        ])
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

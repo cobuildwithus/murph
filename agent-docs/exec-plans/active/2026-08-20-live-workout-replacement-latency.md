@@ -33,9 +33,9 @@ Classification: Product UX Patch.
 ## Constraints
 
 - The canonical workout event remains the only mutable authority.
-- Replacement requires one exact active workout id plus explicit member intent
-  to delete it; missing, completed, changed, or competing active workouts fail
-  closed.
+- Replacement requires one proposal-time active workout id and lifecycle
+  revision plus explicit member intent to delete that snapshot; missing,
+  completed, changed, or competing active workouts fail closed.
 - Validate the complete replacement before the first canonical write.
 - Commit the old-workout tombstone and new-workout event atomically through the
   existing canonical event owner; do not add runtime state, a queue, or a
@@ -48,8 +48,8 @@ Classification: Product UX Patch.
 1. Add a core-owned atomic event replacement primitive and focused rollback,
    audit, and hosted-write receipt proof.
 2. Add one live-workout replacement use case that revalidates the exact active
-   workout under the existing workout lock and constructs initial placeholders
-   before calling the core primitive.
+   workout and proposal-time revision under the existing workout lock and
+   constructs initial placeholders before calling the core primitive.
 3. Expose the narrow `vault-cli workout replace` command with repeated bounded
    initial-exercise specifications.
 4. Update tracked-workout guidance and focused prompt coverage so the explicit
@@ -67,10 +67,11 @@ the new skill guidance must not reach a runner that lacks the new command.
 ## Product UX Walkthrough
 
 Ready. The affected person is a private messaging member who has already asked
-to replace one blocked live workout and explicitly approved deleting that exact
-old session. The replacement command revalidates the sole active id and revision,
-commits the old tombstone and complete new workout together, and returns the new
-canonical record for the ordinary workout-card response. Missing confirmation,
+to replace one blocked live workout with a fully specified ad-hoc session and
+explicitly approved deleting the exact old snapshot. The replacement command
+revalidates the proposal-time sole active id and revision, commits the old
+tombstone and complete new workout together, and returns the new canonical
+record for the ordinary workout-card response. Missing confirmation,
 a different or changed active workout, and multiple active workouts remain
 fail-closed. Saved-routine replacement and a combined replacement-plus-completed-
 set write are intentionally outside this patch.
@@ -81,8 +82,14 @@ set write are intentionally outside this patch.
 - Passed the focused core replacement tests, including hosted receipt replay,
   injected persistence rollback, and stale-revision rejection.
 - Passed the focused CLI live-workout tests, including explicit confirmation,
-  exact replacement, and competing-active failure.
+  exact replacement, competing-active failure, and rejection of a proposal-time
+  revision after an intervening edit without a tombstone or replacement event.
 - Passed the tracked-table skill regression tests.
+- Added a real-model conversation regression for proposal, intervening edit,
+  failed stale approval, fresh proposal, and successful replacement. The suite
+  typechecks, but live execution is unavailable in this checkout because its
+  required provider API key is not configured; the runner fails before a model
+  turn begins.
 - Passed the changelog-fragment generation and focused validation tests for the
   member-visible performance item.
 - Passed the incremental workspace build, generated CLI artifact refresh, and
@@ -105,5 +112,9 @@ set write are intentionally outside this patch.
   all other first-request fields were unchanged. The deferred tracked-table skill
   changes from 5,254 tokens / 26,607 bytes to 5,565 / 28,219 (+311 / +1,612)
   only when selected and read; it is absent from the first request.
-- Preliminary specialist ReviewGPT, final ReviewGPT, exact-head CI, and plan
-  closure remain pending until the review candidate is pushed.
+- Preliminary specialist ReviewGPT found that the first candidate derived the
+  destructive revision after approval and scoped the prompt too broadly. The
+  remediation now carries the proposal-time revision through the CLI and core
+  boundary, rejects changed state without mutation, and gives saved-format and
+  exact-reference reminder flows explicit precedence. Specialist re-review,
+  final ReviewGPT, exact-head CI, and plan closure remain pending.

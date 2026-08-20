@@ -47,6 +47,7 @@ export interface ReplaceLiveWorkoutExerciseInput {
 export interface ReplaceLiveWorkoutInput {
   vault: string
   workoutId: string
+  expectedRevision: number
   confirmDelete: boolean
   name: string
   activityType?: string

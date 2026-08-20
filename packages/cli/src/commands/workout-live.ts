@@ -39,6 +39,12 @@ const requiredWorkoutIdOption = z
   .regex(/^evt_[0-9A-Za-z]+$/u)
   .describe('Exact canonical id of the active workout the member approved deleting.')
 
+const expectedWorkoutRevisionOption = z
+  .number()
+  .int()
+  .min(1)
+  .describe('Exact lifecycle revision shown when deletion was approved.')
+
 const exerciseModeSchema = z.enum([
   'weight_reps',
   'bodyweight',
@@ -238,6 +244,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         args: { name: "'Upper body'" },
         options: {
           workoutId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+          expectedRevision: 1,
           confirmDelete: true,
           exercise: [
             "'name=Pull-up;sets=3;mode=bodyweight'",
@@ -251,6 +258,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
       'Use only after the member explicitly approves deleting the exact active workout. The old tombstone and complete replacement commit atomically.',
     options: withBaseOptions({
       workoutId: requiredWorkoutIdOption,
+      expectedRevision: expectedWorkoutRevisionOption,
       confirmDelete: z
         .boolean()
         .optional()
@@ -277,6 +285,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
       return replaceLiveWorkout({
         vault: options.vault,
         workoutId: options.workoutId,
+        expectedRevision: options.expectedRevision,
         confirmDelete: options.confirmDelete === true,
         name: args.name,
         activityType: options.type,

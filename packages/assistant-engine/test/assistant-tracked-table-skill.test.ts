@@ -121,6 +121,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout start')
     expect(skill).toContain('vault-cli workout active')
     expect(skill).toContain('vault-cli workout replace')
+    expect(skill).toContain('--expected-revision')
     expect(skill).toContain('--confirm-delete')
     expect(skill).toContain(
       'run exactly one `vault-cli workout replace` command',
@@ -129,7 +130,16 @@ describe('assistant tracked workout table skill', () => {
       'Do not separately delete, start, or add each exercise',
     )
     expect(skill).toContain(
-      'the approved id is still the sole active workout',
+      'the approval-bound revision is unchanged',
+    )
+    expect(skill).toContain(
+      'A saved format or an exact-reference reminder never uses `workout replace`',
+    )
+    expect(skill).toContain(
+      'An ordinary request to start a workout does not itself authorize deletion',
+    )
+    expect(skill).toContain(
+      'say that nothing was replaced and ask a fresh bounded replacement question',
     )
     expect(skill).toContain('vault-cli workout exercise add')
     expect(skill).toContain('[--sets <n>]')
