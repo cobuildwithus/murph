@@ -868,29 +868,52 @@ export async function readExpectedActivitySessionReplacement(
       return null;
     }
 
-    const candidateIds = [...new Set(
-      (replaced.links ?? []).flatMap((link) =>
-        link.type === "related_to" && link.targetId.startsWith("evt_")
-          ? [link.targetId]
-          : []
-      ),
-    )];
-    const candidates = await Promise.all(candidateIds.map(async (candidateId) => {
-      const shards = await loadEventLedgerShardsById(
-        input.vaultRoot,
-        candidateId,
-      );
-      return selectLatestMatchedEvent(shards)?.record ?? null;
-    }));
-    const replacements = candidates.filter(
-      (candidate): candidate is EventRecordByKind<"activity_session"> =>
-        candidate?.kind === "activity_session"
-        && !isDeletedEventSpineRecord(candidate)
-        && eventSpineRevision(candidate) === 1
-        && hasRelatedEventLink(candidate, input.replacedEventId),
+    const approvedRecords = replacedShards.flatMap((shard) =>
+      shard.matchingRecords.filter(
+        (record) => eventSpineRevision(record) === input.expectedRevision,
+      )
     );
-    return replacements.length === 1 ? replacements[0]! : null;
+    if (
+      approvedRecords.length !== 1
+      || approvedRecords[0]?.kind !== "activity_session"
+      || isDeletedEventSpineRecord(approvedRecords[0])
+    ) {
+      return null;
+    }
+
+    const approvedTargets = relatedEventTargetIds(approvedRecords[0]);
+    const addedTargets = [...relatedEventTargetIds(replaced)].filter(
+      (targetId) => !approvedTargets.has(targetId),
+    );
+    if (addedTargets.length !== 1) {
+      return null;
+    }
+
+    const replacementShards = await loadEventLedgerShardsById(
+      input.vaultRoot,
+      addedTargets[0]!,
+    );
+    const replacement = selectLatestMatchedEvent(replacementShards)?.record ?? null;
+    if (
+      replacement?.kind !== "activity_session"
+      || isDeletedEventSpineRecord(replacement)
+      || eventSpineRevision(replacement) !== 1
+      || !hasRelatedEventLink(replacement, input.replacedEventId)
+    ) {
+      return null;
+    }
+    return replacement;
   });
+}
+
+function relatedEventTargetIds(record: EventRecord): Set<string> {
+  return new Set(
+    (record.links ?? []).flatMap((link) =>
+      link.type === "related_to" && link.targetId.startsWith("evt_")
+        ? [link.targetId]
+        : []
+    ),
+  );
 }
 
 function hasRelatedEventLink(record: EventRecord, targetId: string): boolean {

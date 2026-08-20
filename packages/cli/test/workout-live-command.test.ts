@@ -6,6 +6,7 @@ import { Cli } from 'incur'
 import { afterAll } from 'vitest'
 import { workoutSessionSchema } from '@murphai/contracts'
 import {
+  addActivitySession,
   applyHostedCanonicalWriteReceipt,
   readExpectedActivitySessionReplacement,
   readJsonlRecords,
@@ -103,6 +104,43 @@ function requireShownRevision(shown: ShowResult): number {
   const revision = shown.entity.data.lifecycle?.revision
   assert.equal(typeof revision, 'number')
   return revision!
+}
+
+async function addReciprocalRelatedWorkout(
+  vaultRoot: string,
+  oldWorkout: WorkoutResult,
+) {
+  const relatedWorkout = await addActivitySession({
+    vaultRoot,
+    draft: {
+      occurredAt: '2026-08-20T06:45:00.000Z',
+      source: 'manual',
+      title: 'Related historical workout',
+      activityType: 'strength-training',
+      durationMinutes: 20,
+      links: [{ type: 'related_to', targetId: oldWorkout.eventId }],
+      workout: {
+        sourceApp: 'imported-history',
+        startedAt: '2026-08-20T06:45:00.000Z',
+        endedAt: '2026-08-20T07:05:00.000Z',
+        exercises: [],
+      },
+    },
+  })
+  await addActivitySession({
+    vaultRoot,
+    draft: {
+      id: oldWorkout.eventId,
+      occurredAt: '2026-08-20T06:30:00.000Z',
+      source: 'manual',
+      title: 'Old workout',
+      note: oldWorkout.note,
+      activityType: oldWorkout.activityType,
+      durationMinutes: 1,
+      links: [{ type: 'related_to', targetId: relatedWorkout.eventId }],
+      workout: workoutSessionSchema.parse(oldWorkout.workout),
+    },
+  })
 }
 
 test('live workout commands target exact records without a global active singleton', async () => {
@@ -269,6 +307,7 @@ test('one command atomically replaces one approved workout without touching anot
     '--started-at', '2026-08-20T06:45:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
+  await addReciprocalRelatedWorkout(vaultRoot, oldWorkout)
   const approvedSnapshot = requireData((await run<ShowResult>(cli, [
     'workout', 'show', oldWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
@@ -339,6 +378,7 @@ test('replacement replay proves the mutually linked atomic pair and writes nothi
     '--started-at', '2026-08-20T06:30:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
+  await addReciprocalRelatedWorkout(vaultRoot, oldWorkout)
   const approvedSnapshot = requireData((await run<ShowResult>(cli, [
     'workout', 'show', oldWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)

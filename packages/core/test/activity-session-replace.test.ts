@@ -8,6 +8,7 @@ import { afterEach, test, vi } from 'vitest'
 import {
   addActivitySession,
   applyHostedCanonicalWriteReceipt,
+  deleteEvent,
   initializeVault,
   readJsonlRecords,
   readExpectedActivitySessionReplacement,
@@ -57,6 +58,43 @@ async function addActiveWorkout(vaultRoot: string) {
       },
     },
   })
+}
+
+async function addReciprocalRelatedWorkout(
+  vaultRoot: string,
+  oldWorkout: Awaited<ReturnType<typeof addActiveWorkout>>,
+) {
+  const relatedWorkout = await addActivitySession({
+    vaultRoot,
+    draft: {
+      occurredAt: '2026-08-20T06:45:00.000Z',
+      source: 'manual',
+      title: 'Related historical workout',
+      activityType: 'strength-training',
+      durationMinutes: 20,
+      links: [{ type: 'related_to', targetId: oldWorkout.eventId }],
+      workout: {
+        sourceApp: 'imported-history',
+        startedAt: '2026-08-20T06:45:00.000Z',
+        endedAt: '2026-08-20T07:05:00.000Z',
+        exercises: [],
+      },
+    },
+  })
+  const revisedOldWorkout = await addActivitySession({
+    vaultRoot,
+    draft: {
+      id: oldWorkout.eventId,
+      occurredAt: oldWorkout.event.occurredAt,
+      source: oldWorkout.event.source,
+      title: oldWorkout.event.title,
+      activityType: oldWorkout.event.activityType,
+      durationMinutes: oldWorkout.event.durationMinutes,
+      links: [{ type: 'related_to', targetId: relatedWorkout.eventId }],
+      workout: oldWorkout.event.workout,
+    },
+  })
+  return { relatedWorkout, revisedOldWorkout }
 }
 
 function replacementDraft(): ReplaceActivitySessionInput['draft'] {
@@ -200,6 +238,48 @@ test('activity-session replacement emits one hosted atomic write', async () => {
     vaultRoot,
     replacedEventId: 'evt_00000000000000000000000000',
     expectedRevision: 1,
+  }), null)
+})
+
+test('replacement recovery ignores inherited reciprocal event relationships', async () => {
+  const vaultRoot = await makeVault()
+  const oldWorkout = await addActiveWorkout(vaultRoot)
+  const { revisedOldWorkout } = await addReciprocalRelatedWorkout(
+    vaultRoot,
+    oldWorkout,
+  )
+  assert.equal(requireRevision(revisedOldWorkout.event), 2)
+
+  const replacement = await replaceActivitySession({
+    vaultRoot,
+    eventId: oldWorkout.eventId,
+    expectedRevision: requireRevision(revisedOldWorkout.event),
+    draft: replacementDraft(),
+  })
+
+  assert.equal((await readExpectedActivitySessionReplacement({
+    vaultRoot,
+    replacedEventId: oldWorkout.eventId,
+    expectedRevision: requireRevision(revisedOldWorkout.event),
+  }))?.id, replacement.eventId)
+})
+
+test('an inherited reciprocal relationship alone is not replacement proof', async () => {
+  const vaultRoot = await makeVault()
+  const oldWorkout = await addActiveWorkout(vaultRoot)
+  const { revisedOldWorkout } = await addReciprocalRelatedWorkout(
+    vaultRoot,
+    oldWorkout,
+  )
+  await deleteEvent({
+    vaultRoot,
+    eventId: oldWorkout.eventId,
+  })
+
+  assert.equal(await readExpectedActivitySessionReplacement({
+    vaultRoot,
+    replacedEventId: oldWorkout.eventId,
+    expectedRevision: requireRevision(revisedOldWorkout.event),
   }), null)
 })
 
