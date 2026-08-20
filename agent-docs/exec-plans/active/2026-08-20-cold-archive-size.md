@@ -104,6 +104,9 @@ Updated: 2026-08-20
   skipped-inline files are materialized after quiescent residue cleanup, so a
   cold-restored terminal generated-delivery file is absent when cleanup scans
   and is reintroduced immediately before archive planning.
+- Preserve runtime-owned operator-home symlink pruning before materialization;
+  only the state-aware cleanup that requires a complete physical inventory
+  moves after materialization.
 - Retain the query SQLite snapshot exception unless ReviewGPT produces stronger
   evidence. Its compressed checkpoint cost is materially smaller than its raw
   size, while the original one-vCPU measurement avoids a multi-second cold
