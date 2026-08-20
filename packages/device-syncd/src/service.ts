@@ -2094,7 +2094,17 @@ function normalizeExecutionError(error: unknown): {
   if (error instanceof JunctionSparseCalendarRepairNormalizationError) {
     return {
       code: error.code,
-      details: {},
+      details: compactFailureDiagnostics({
+        normalizationFailureReason: readSafeDiagnosticToken(error.diagnostic.reason),
+        normalizationRowOrdinal: error.diagnostic.rowOrdinal,
+        normalizationSourceProvider: readSafeDiagnosticToken(error.diagnostic.sourceProvider),
+        normalizationStage: readSafeDiagnosticToken(error.diagnostic.stage),
+        normalizationTimestampKind: readSafeDiagnosticToken(error.diagnostic.timestampKind),
+        normalizationTimestampSemantics: readSafeDiagnosticToken(
+          error.diagnostic.timestampSemantics,
+        ),
+        normalizationValueKind: readSafeDiagnosticToken(error.diagnostic.valueKind),
+      }),
       message: error.message,
       retryable: true,
     };

@@ -1307,6 +1307,12 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "failureCauseCode",
   "failureCauseName",
   "failureErrorName",
+  "normalizationFailureReason",
+  "normalizationSourceProvider",
+  "normalizationStage",
+  "normalizationTimestampKind",
+  "normalizationTimestampSemantics",
+  "normalizationValueKind",
   "providerRequestAuthKind",
   "providerRequestAuthPlacement",
   "providerRequestBodyFieldNames",
@@ -1339,6 +1345,7 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
 ] as const satisfies readonly DeviceSyncFailureDiagnosticStringField[];
 
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
+  "normalizationRowOrdinal",
   "providerHttpStatus",
   "providerRequestBodyFieldCount",
   "providerRequestCandidateCount",
