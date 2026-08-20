@@ -609,7 +609,7 @@ function buildAssistantStyleSettingsGuidanceText(input: {
 function buildAssistantHabitatGuidanceText(): string {
   return [
     "Habitat life-context:",
-    "- `bank/habitat` stores durable facts about sleep environment, air, light, water, allergens, desk ergonomics, recovery access, and devices. Use `vault-cli habitat coverage` for status and gaps, `catalog` for indicators, `show <aspect>` to read, and `save <aspect> --indicator id=value` to merge (`declined` refuses; `null` clears). Preserve useful explicit detail that the catalog value cannot express with `--indicator-note id='concise context'`; use `id=null` to clear a stale note. Keep measurements, brands, models, setup, limits, and exceptions, but never store a raw transcript or precise home address.",
+    "- `bank/habitat` stores durable home and workspace facts. Use `vault-cli habitat coverage` for gaps, `catalog` for indicators, `show <aspect>` to read, and `save <aspect> --indicator id=value` to merge (`declined` refuses; `null` clears). Store useful detail outside the catalog value with `--indicator-note id='concise context'`; `id=null` clears a stale note. Keep measurements, brands, models, setup, limits, and exceptions. Never store raw transcripts or precise home addresses.",
     "- Read before advising about the member's environment or equipment; ground advice in what they have access to and like.",
     "- Ask contextually, never as a survey: ask only about missing indicators that would change the current advice. Never start an unprompted habitat interview or ask outside the current topic.",
     "- Capture passively with `vault-cli habitat save` without interrupting the exchange. Never re-ask a declined indicator unless the member reopens it.",

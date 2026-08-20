@@ -3,6 +3,7 @@ import {
   matchCloudflareHostedControlUserRoutePath,
 } from "@murphai/cloudflare-hosted-control/routes";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
+import OpenAI from "openai";
 
 import { json } from "../../json.ts";
 import {
@@ -15,8 +16,6 @@ import { buildWorkerRouteLogDetails } from "../route-utils/log-details.ts";
 import { decodeRouteParam } from "../route-utils/route-params.ts";
 
 const SDP_MAX_BYTES = 64 * 1_024;
-const OPENAI_REALTIME_CALL_URL = "https://api.openai.com/v1/realtime/calls";
-
 const environmentRealtimeCallRoute = {
   authorizeBeforeMethod: true,
   authorization: "vercel-oidc",
@@ -63,15 +62,14 @@ const environmentRealtimeCallRoute = {
 
     let response: Response;
     try {
-      response = await fetch(OPENAI_REALTIME_CALL_URL, {
+      const openai = new OpenAI({ apiKey, maxRetries: 0 });
+      response = await openai.post("/realtime/calls", {
         body: form,
         headers: {
-          authorization: `Bearer ${apiKey}`,
           "OpenAI-Safety-Identifier": await hashSafetyIdentifier(userId),
         },
-        method: "POST",
         signal: context.request.signal,
-      });
+      }).asResponse();
     } catch (error) {
       emitRealtimeFailure(context, userId, error, null);
       return realtimeProviderError();

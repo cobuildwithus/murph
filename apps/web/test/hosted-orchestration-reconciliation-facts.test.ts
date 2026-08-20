@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   readHostedMailboxLatestPendingConversationItem: vi.fn(),
   readHostedMailboxMaxSeqByLane: vi.fn(),
   readHostedMailboxPayload: vi.fn(),
+  readPendingHostedEnvironmentInterviewMailboxItem: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   readHostedMemberCoreState: vi.fn(),
   readSelectedHostedInferenceConnectionOverride: vi.fn(),
@@ -52,6 +53,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane: mocks.readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload: mocks.readHostedMailboxPayload,
+  readPendingHostedEnvironmentInterviewMailboxItem:
+    mocks.readPendingHostedEnvironmentInterviewMailboxItem,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
   tryMarkHostedMailboxConversationAiUsageDenied:
     mocks.tryMarkHostedMailboxConversationAiUsageDenied,
@@ -147,6 +150,7 @@ describe("hosted orchestration reconciliation facts", () => {
     mocks.getPrisma.mockReturnValue(createPrismaClientStub());
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue(MEMBER_ID);
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord());
+    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue(null);
     mocks.hostedMemberFindUnique.mockResolvedValue(buildMemberAccessRecord());
     mocks.hostedConsentGrantFindUnique.mockResolvedValue(null);
     mocks.hasHostedMemberEstablishedLinqHomeRoute.mockResolvedValue(false);
@@ -1642,6 +1646,7 @@ describe("hosted orchestration reconciliation facts", () => {
         reason: "user_not_active",
         retryAt: null,
       },
+      environmentInterviewPending: false,
       mailboxLag: [],
       workspace: {
         inboxMediaRetentionWakeAt: null,

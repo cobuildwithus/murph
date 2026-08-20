@@ -45,9 +45,8 @@ describe("worker Environment Realtime route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
     expect(url).toBe("https://api.openai.com/v1/realtime/calls");
-    expect(init?.headers).toMatchObject({
-      authorization: "Bearer test-openai-key",
-    });
+    const requestHeaders = new Headers(init?.headers);
+    expect(requestHeaders.get("authorization")).toBe("Bearer test-openai-key");
     const safetyId = new Headers(init?.headers).get("OpenAI-Safety-Identifier");
     expect(safetyId).toMatch(/^[a-f0-9]{64}$/u);
     expect(safetyId).not.toContain("user_123");
