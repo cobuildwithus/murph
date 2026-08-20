@@ -831,8 +831,9 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "saved_card_confirmation_identity_changed",
       );
     }
+    let recovered: Stripe.PaymentIntent;
     try {
-      return await input.stripe.paymentIntents.retrieve(
+      recovered = await input.stripe.paymentIntents.retrieve(
         input.paymentIntent.id,
         { expand: ["latest_charge"] },
       );
@@ -842,6 +843,13 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "paymentIntents.retrieve.saved-card-confirm-recovery",
       );
     }
+    if (recovered.status === "requires_confirmation") {
+      throw buildHostedUsageCreditStripeUnavailableError(
+        error,
+        "paymentIntents.confirm.saved-card",
+      );
+    }
+    return recovered;
   }
 }
 
