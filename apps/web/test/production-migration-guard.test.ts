@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +22,7 @@ import {
 } from "../scripts/run-production-contract-migrations";
 import {
   resolveVercelProductionAliasSha,
+  verifyVercelProductionDeployment,
   verifyVercelProductionDeploymentProtection,
 } from "../scripts/resolve-vercel-production-alias-sha";
 import {
@@ -1279,6 +1281,249 @@ describe("hosted web production migration guard", () => {
     );
   });
 
+  test("verifies every paginated Vercel production custom domain against one exact deployment", async () => {
+    const expectedGitSha = "a".repeat(40);
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TEAM_ID: "team-id",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    const requests: Array<{
+      authorization: string | undefined;
+      url: string;
+    }> = [];
+
+    const result = await verifyVercelProductionDeployment(
+      environment,
+      {
+        deploymentUrl: "https://murph-exact.vercel.app",
+        expectedGitSha,
+      },
+      async (url, init) => {
+        requests.push({
+          authorization:
+            init?.headers === undefined
+              ? undefined
+              : new Headers(init.headers).get("authorization") ?? undefined,
+          url,
+        });
+        if (url.includes("/v13/deployments/murph-alias.vercel.app")) {
+          return jsonFetchResponse({ id: "dpl_exact" });
+        }
+        if (url.includes("/v13/deployments/")) {
+          return jsonFetchResponse({
+            gitSource: { sha: expectedGitSha },
+            id: "dpl_exact",
+            projectId: "project-id",
+            readyState: "READY",
+            target: "production",
+          });
+        }
+        if (url.includes("/domains") && url.includes("until=123")) {
+          return jsonFetchResponse({
+            domains: [
+              {
+                customEnvironmentId: null,
+                gitBranch: null,
+                name: "callbacks.withmurph.ai",
+              },
+              {
+                customEnvironmentId: "env_preview",
+                gitBranch: null,
+                name: "custom-preview.withmurph.ai",
+              },
+            ],
+            pagination: { next: null },
+          });
+        }
+        if (url.includes("/domains")) {
+          return jsonFetchResponse({
+            domains: [
+              {
+                customEnvironmentId: null,
+                gitBranch: null,
+                name: "www.withmurph.ai",
+              },
+              {
+                customEnvironmentId: null,
+                gitBranch: null,
+                name: "app.withmurph.ai",
+              },
+              {
+                customEnvironmentId: null,
+                gitBranch: "feature",
+                name: "branch.withmurph.ai",
+              },
+            ],
+            pagination: { next: 123 },
+          });
+        }
+        if (url.includes("/v4/aliases/")) {
+          if (url.includes("app.withmurph.ai")) {
+            return jsonFetchResponse({ deploymentId: "dpl_exact" });
+          }
+          if (url.includes("callbacks.withmurph.ai")) {
+            return jsonFetchResponse({ deployment: { id: "dpl_exact" } });
+          }
+          return jsonFetchResponse({
+            deployment: { url: "murph-alias.vercel.app" },
+          });
+        }
+        throw new Error(`Unexpected Vercel URL: ${url}`);
+      },
+    );
+
+    assert.deepEqual(result, {
+      deploymentId: "dpl_exact",
+      gitSha: expectedGitSha,
+      productionDomainCount: 3,
+    });
+    assert.ok(requests.every((request) => request.authorization === "Bearer token"));
+    assert.equal(
+      requests.filter((request) => request.url.includes("/v4/aliases/")).length,
+      3,
+    );
+    assert.equal(
+      requests.filter((request) =>
+        request.url.includes("/v13/deployments/murph-alias.vercel.app"),
+      ).length,
+      1,
+    );
+    assert.ok(requests.some((request) => request.url.includes("limit=100&until=123")));
+  });
+
+  test("rejects exact Vercel production proof when any production domain is stale", async () => {
+    const expectedGitSha = "b".repeat(40);
+    await assert.rejects(
+      () => verifyVercelProductionDeployment(
+        {
+          HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+          HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+          HOSTED_WEB_VERCEL_TOKEN: "token",
+        },
+        {
+          deploymentUrl: "https://murph-exact.vercel.app",
+          expectedGitSha,
+        },
+        async (url) => {
+          if (url.includes("/v13/deployments/")) {
+            return jsonFetchResponse({
+              gitSource: { sha: expectedGitSha },
+              id: "dpl_exact",
+              projectId: "project-id",
+              readyState: "READY",
+              target: "production",
+            });
+          }
+          if (url.includes("/domains")) {
+            return jsonFetchResponse({
+              domains: [
+                { customEnvironmentId: null, gitBranch: null, name: "www.withmurph.ai" },
+                { customEnvironmentId: null, gitBranch: null, name: "callbacks.withmurph.ai" },
+              ],
+              pagination: { next: null },
+            });
+          }
+          if (url.includes("callbacks.withmurph.ai")) {
+            return jsonFetchResponse({ deploymentId: "dpl_previous" });
+          }
+          return jsonFetchResponse({ deploymentId: "dpl_exact" });
+        },
+      ),
+      /1 of 2 Vercel production custom domains do not resolve to the exact deployment/u,
+    );
+  });
+
+  test("rejects an untrusted exact Vercel deployment before domain lookup", async () => {
+    const expectedGitSha = "d".repeat(40);
+    const trustedDeployment = {
+      gitSource: { sha: expectedGitSha },
+      id: "dpl_exact",
+      projectId: "project-id",
+      readyState: "READY",
+      target: "production",
+    };
+    const cases = [
+      {
+        expectedError: /different project/u,
+        response: { ...trustedDeployment, projectId: "other-project" },
+      },
+      {
+        expectedError: /not a production deployment/u,
+        response: { ...trustedDeployment, target: "preview" },
+      },
+      {
+        expectedError: /not ready/u,
+        response: { ...trustedDeployment, readyState: "BUILDING" },
+      },
+      {
+        expectedError: /gitSource\.sha does not match DEPLOYED_SHA/u,
+        response: { ...trustedDeployment, gitSource: { sha: "e".repeat(40) } },
+      },
+    ];
+
+    for (const testCase of cases) {
+      let listedDomains = false;
+      await assert.rejects(
+        () => verifyVercelProductionDeployment(
+          {
+            HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+            HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+            HOSTED_WEB_VERCEL_TOKEN: "token",
+          },
+          {
+            deploymentUrl: "https://murph-exact.vercel.app",
+            expectedGitSha,
+          },
+          async (url) => {
+            if (url.includes("/domains")) listedDomains = true;
+            return jsonFetchResponse(testCase.response);
+          },
+        ),
+        testCase.expectedError,
+      );
+      assert.equal(listedDomains, false);
+    }
+  });
+
+  test("rejects malformed exact Vercel deployment authority before provider access", async () => {
+    let requested = false;
+    const environment = {
+      HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
+      HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+      HOSTED_WEB_VERCEL_TOKEN: "token",
+    };
+    const fetchImpl = async () => {
+      requested = true;
+      return jsonFetchResponse({});
+    };
+
+    await assert.rejects(
+      () => verifyVercelProductionDeployment(
+        environment,
+        {
+          deploymentUrl: "https://murph-exact.vercel.app/path",
+          expectedGitSha: "f".repeat(40),
+        },
+        fetchImpl,
+      ),
+      /origin-only HTTPS deployment URL/u,
+    );
+    await assert.rejects(
+      () => verifyVercelProductionDeployment(
+        environment,
+        {
+          deploymentUrl: "https://murph-exact.vercel.app",
+          expectedGitSha: "not-a-sha",
+        },
+        fetchImpl,
+      ),
+      /exact lowercase 40-character Git SHA/u,
+    );
+    assert.equal(requested, false);
+  });
+
   test("requires Vercel protection for generated production deployment URLs", async () => {
     const environment = {
       HOSTED_WEB_PRODUCTION_BASE_URL: "https://www.withmurph.ai",
@@ -1410,6 +1655,8 @@ describe("hosted web production migration guard", () => {
     const releaseMigrationScript = scripts["release:production:migrate"] ?? "";
     const deploymentProtectionScript =
       scripts["release:production:verify-deployment-protection"] ?? "";
+    const exactDeploymentVerificationScript =
+      scripts["release:production:verify-exact-deployment"] ?? "";
 
     assert.match(buildScript, /pnpm prisma:generate:build/u);
     assert.doesNotMatch(buildScript, /pnpm prisma:generate(?=\s|&&|$)/u);
@@ -1432,6 +1679,10 @@ describe("hosted web production migration guard", () => {
     assert.equal(
       watchTypecheckScript,
       "pnpm changelog:generate && pnpm health-commons:generate && pnpm prisma:generate && pnpm --dir ../.. exec tsx scripts/ensure-next-route-type-stubs.ts apps/web && node ../../scripts/run-typescript.mjs watch -p tsconfig.json --pretty false --watch --tsBuildInfoFile typecheck.watch.tsbuildinfo",
+    );
+    assert.match(
+      exactDeploymentVerificationScript,
+      /verify-vercel-production-deployment\.ts/u,
     );
     assert.match(
       buildScript,
@@ -1574,7 +1825,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       verifyFastScript.match(/run_timed_step "next build" run_next_build/gu)?.length,
-      3,
+      4,
       "skipping the TypeScript 7 source check must preserve every Next build path",
     );
     const artifactLockGuardIndex = verifyFastScript.indexOf(
@@ -1643,6 +1894,7 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /deployment_status/u);
     assert.match(workflow, /workflow_dispatch/u);
     assert.match(workflow, /deployed_sha/u);
+    assert.match(workflow, /deployment_url/u);
     assert.match(workflow, /github\.event_name == 'workflow_dispatch'/u);
     assert.match(workflow, /github\.event\.deployment_status\.state == 'success'/u);
     assert.match(
@@ -1657,8 +1909,15 @@ describe("hosted web production migration guard", () => {
     assert.doesNotMatch(workflow, /cancel-in-progress/u);
     assert.doesNotMatch(workflow, /hosted-web-contract-migrations-production/u);
     assert.match(workflow, /github\.event\.deployment\.sha \|\| inputs\.deployed_sha/u);
+    assert.match(
+      workflow,
+      /github\.event\.deployment_status\.environment_url \|\| inputs\.deployment_url/u,
+    );
     assert.match(workflow, /fetch-depth: 0/u);
     assert.match(workflow, /git merge-base --is-ancestor "\$\{DEPLOYED_SHA\}" origin\/main/u);
+    assert.match(workflow, /git rev-parse origin\/main/u);
+    assert.match(workflow, /should_require_current=true/u);
+    assert.match(workflow, /should_require_current=false/u);
     assert.match(
       workflow,
       /resolve-vercel-production-alias-sha\.ts/u,
@@ -1685,6 +1944,14 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /steps\.current-production\.outputs\.should_apply == 'true'/u);
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /release:production:contract-migrate/u);
+    assert.doesNotMatch(workflow, /release:production:verify-exact-deployment/u);
+    assert.equal(
+      workflow.match(
+        /pnpm --dir apps\/web exec tsx scripts\/verify-vercel-production-deployment\.ts/gu,
+      )?.length,
+      3,
+      "captured deployment proofs must bypass pnpm 10 lifecycle stdout",
+    );
 
     const productionProofStep = extractWorkflowStep(
       workflow,
@@ -1697,16 +1964,34 @@ describe("hosted web production migration guard", () => {
     assert.match(productionProofStep, /id: current-production/u);
     assert.match(productionProofStep, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(productionProofStep, /resolve-vercel-production-alias-sha\.ts/u);
+    assert.match(
+      productionProofStep,
+      /exec tsx scripts\/verify-vercel-production-deployment\.ts/u,
+    );
     assert.match(productionProofStep, /echo "should_apply=true" >> "\$\{GITHUB_OUTPUT\}"/u);
     assert.match(productionProofStep, /echo "should_apply=false" >> "\$\{GITHUB_OUTPUT\}"/u);
+    assert.match(
+      productionProofStep,
+      /steps\.production-branch\.outputs\.should_require_current/u,
+    );
+    assert.match(productionProofStep, /::error::The current main Vercel deployment is Ready/u);
     assert.doesNotMatch(productionProofStep, /HOSTED_WEB_DIRECT_DATABASE_URL/u);
     assert.doesNotMatch(productionProofStep, /DIRECT_DATABASE_URL/u);
     assert.match(
       contractMigrationStep,
       /steps\.current-production\.outputs\.should_apply == 'true'/u,
     );
+    assert.match(contractMigrationStep, /SHOULD_REQUIRE_CURRENT:/u);
+    assert.match(
+      contractMigrationStep,
+      /if \[ "\$\{SHOULD_REQUIRE_CURRENT\}" = "true" \]; then/u,
+    );
     assert.match(contractMigrationStep, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(contractMigrationStep, /resolve-vercel-production-alias-sha\.ts/u);
+    assert.match(
+      contractMigrationStep,
+      /exec tsx scripts\/verify-vercel-production-deployment\.ts/u,
+    );
     assert.match(contractMigrationStep, /-u DIRECT_DATABASE_URL/u);
     assert.match(
       contractMigrationStep,
@@ -1729,10 +2014,23 @@ describe("hosted web production migration guard", () => {
       /MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"/u,
     );
     assert.match(contractMigrationStep, /release:production:contract-migrate/u);
+    const initialCurrentProof = productionProofStep.indexOf('current_sha="$(');
+    const initialExactProof = productionProofStep.indexOf(
+      "verify-vercel-production-deployment.ts",
+    );
+    const drainWait = productionProofStep.indexOf(
+      'sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"',
+    );
+    const finalCurrentProof = productionProofStep.lastIndexOf('current_sha="$(');
+    const finalExactProof = productionProofStep.lastIndexOf(
+      "verify-vercel-production-deployment.ts",
+    );
     assert.ok(
-      productionProofStep.indexOf('sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"')
-        < productionProofStep.indexOf('current_sha="$('),
-      "contract migrations must wait for production drain before the final alias check",
+      initialCurrentProof < initialExactProof
+        && initialExactProof < drainWait
+        && drainWait < finalCurrentProof
+        && finalCurrentProof < finalExactProof,
+      "contract migrations must prove every production domain before and after the prior-function drain",
     );
     assert.ok(
       contractMigrationStep.indexOf("-u DIRECT_DATABASE_URL")
@@ -1746,6 +2044,11 @@ describe("hosted web production migration guard", () => {
     );
     assert.ok(
       contractMigrationStep.indexOf('if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then')
+        < contractMigrationStep.indexOf("verify-vercel-production-deployment.ts"),
+      "contract migrations must skip a superseded deployment before exact-domain proof",
+    );
+    assert.ok(
+      contractMigrationStep.indexOf("verify-vercel-production-deployment.ts")
         < contractMigrationStep.indexOf("release:production:contract-migrate"),
       "contract migrations must re-check the current production deployment SHA immediately before SQL",
     );
@@ -1754,6 +2057,132 @@ describe("hosted web production migration guard", () => {
         < workflow.indexOf("release:production:contract-migrate"),
       "contract migrations must expose the database secret only after the alias proof output is set",
     );
+
+    const productionProofRun = extractWorkflowRunScript(productionProofStep);
+    const contractMigrationRun = extractWorkflowRunScript(contractMigrationStep);
+    const shellFixture = await mkdtemp(
+      path.join(tmpdir(), "murph-contract-migration-workflow-"),
+    );
+    try {
+      const pnpmStub = path.join(shellFixture, "pnpm");
+      const callsFile = path.join(shellFixture, "calls.txt");
+      await writeFile(
+        pnpmStub,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"resolve-vercel-production-alias-sha.ts"* ]]; then
+  printf '%s\\n' "\${STUB_CURRENT_SHA}"
+elif [[ "$*" == *"release:production:verify-exact-deployment"* ]]; then
+  printf '\\n> @murphai/hosted-web@1.0.0 release:production:verify-exact-deployment /workspace/apps/web\\n'
+  printf '> pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment.ts\\n\\n'
+  printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
+  printf '%s\\n' "\${DEPLOYED_SHA}"
+elif [[ "$*" == *"exec tsx scripts/verify-vercel-production-deployment.ts"* ]]; then
+  if [[ "\${STUB_VERIFIER_AVAILABLE:-1}" != "1" ]]; then
+    if [[ -n "\${DIRECT_DATABASE_URL:-}" || -n "\${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}" || -n "\${MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS:-}" ]]; then
+      printf 'pre-floor verifier failure exposed database migration authority\\n' >&2
+      exit 96
+    fi
+    printf 'Cannot find module scripts/verify-vercel-production-deployment.ts\\n' >&2
+    exit 98
+  fi
+  printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
+  printf '%s\\n' "\${DEPLOYED_SHA}"
+elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
+  printf 'migrate\\n' >> "\${STUB_CALLS_FILE}"
+else
+  printf 'unexpected pnpm invocation: %s\\n' "$*" >&2
+  exit 97
+fi
+`,
+      );
+      await chmod(pnpmStub, 0o700);
+
+      const deployedSha = "f".repeat(40);
+      const productionOutputFile = path.join(shellFixture, "production-output.txt");
+      const runProductionProofBody = (verifierAvailable: boolean) => spawnSync(
+        "bash",
+        ["-c", productionProofRun],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            DEPLOYED_SHA: deployedSha,
+            DIRECT_DATABASE_URL: undefined,
+            GITHUB_OUTPUT: productionOutputFile,
+            HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: "0",
+            HOSTED_WEB_PRODUCTION_BASE_URL: "https://production.example.test",
+            HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+            HOSTED_WEB_VERCEL_TOKEN: "token",
+            MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: undefined,
+            MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: undefined,
+            PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
+            SHOULD_REQUIRE_CURRENT: "false",
+            STUB_CALLS_FILE: callsFile,
+            STUB_CURRENT_SHA: deployedSha,
+            STUB_VERIFIER_AVAILABLE: verifierAvailable ? "1" : "0",
+          },
+        },
+      );
+
+      const preFloorProof = runProductionProofBody(false);
+      assert.equal(preFloorProof.status, 98);
+      assert.match(preFloorProof.stderr, /Cannot find module/u);
+      assert.doesNotMatch(preFloorProof.stderr, /exposed database migration authority/u);
+      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+      await assert.rejects(() => readFile(productionOutputFile, "utf8"), /ENOENT/u);
+
+      const floorOrNewerProof = runProductionProofBody(true);
+      assert.equal(floorOrNewerProof.status, 0, floorOrNewerProof.stderr);
+      assert.equal(await readFile(callsFile, "utf8"), "verify\nverify\n");
+      assert.equal(await readFile(productionOutputFile, "utf8"), "should_apply=true\n");
+      await rm(callsFile, { force: true });
+      await rm(productionOutputFile, { force: true });
+
+      const runWorkflowBody = (options: {
+        currentSha: string;
+        requireCurrent: boolean;
+      }) => spawnSync("bash", ["-c", contractMigrationRun], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DEPLOYED_SHA: deployedSha,
+          DIRECT_DATABASE_URL: "postgresql://test.invalid/release",
+          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1",
+          MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1",
+          PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
+          SHOULD_REQUIRE_CURRENT: options.requireCurrent ? "true" : "false",
+          STUB_CALLS_FILE: callsFile,
+          STUB_CURRENT_SHA: options.currentSha,
+          STUB_VERIFIER_AVAILABLE: "1",
+        },
+      });
+
+      const currentMismatch = runWorkflowBody({
+        currentSha: "e".repeat(40),
+        requireCurrent: true,
+      });
+      assert.equal(currentMismatch.status, 1);
+      assert.match(currentMismatch.stdout, /::error::/u);
+      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+
+      const ancestorMismatch = runWorkflowBody({
+        currentSha: "d".repeat(40),
+        requireCurrent: false,
+      });
+      assert.equal(ancestorMismatch.status, 0);
+      assert.match(ancestorMismatch.stdout, /::notice::Skipping/u);
+      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+
+      const exactMatch = runWorkflowBody({
+        currentSha: deployedSha,
+        requireCurrent: true,
+      });
+      assert.equal(exactMatch.status, 0, exactMatch.stderr);
+      assert.equal(await readFile(callsFile, "utf8"), "verify\nmigrate\n");
+    } finally {
+      await rm(shellFixture, { force: true, recursive: true });
+    }
 
     const nodeVersion = workflow.match(/node-version:\s*([^\s#]+)/u)?.[1] ?? "";
     const escapedNodeVersion = nodeVersion.replaceAll(".", "\\.");
@@ -1886,6 +2315,18 @@ function extractWorkflowStep(workflow: string, stepName: string): string {
 
   const nextStep = workflow.indexOf("\n      - name: ", start + marker.length);
   return nextStep === -1 ? workflow.slice(start) : workflow.slice(start, nextStep);
+}
+
+function extractWorkflowRunScript(step: string): string {
+  const marker = "\n        run: |\n";
+  const start = step.indexOf(marker);
+  assert.notEqual(start, -1, "workflow step did not include a run block");
+
+  return step
+    .slice(start + marker.length)
+    .split("\n")
+    .map((line) => line.startsWith("          ") ? line.slice(10) : line)
+    .join("\n");
 }
 
 function jsonFetchResponse(data: unknown): {

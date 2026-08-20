@@ -10,6 +10,12 @@ import {
 } from "@murphai/runtime-state/node";
 
 import {
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+  decideJunctionSourceCallbackAdmission,
+} from "./junction-source-reconnect.ts";
+import { stringifyJson } from "./shared.ts";
+
+import {
   decodeDeviceSyncSummaryRow,
   disconnectAccount as disconnectStoredAccount,
   disconnectAccountIfCurrentInTransaction as disconnectStoredAccountIfCurrentInTransaction,
@@ -44,6 +50,7 @@ import {
   enqueueDeviceSyncJobInTransaction,
   failDeviceSyncJob,
   failDeviceSyncJobIfOwned,
+  findActiveDeviceSyncJobDedupeKeys,
   getDeviceSyncJobById,
   listDueDeviceSyncJobBatchCandidates,
   listPendingDeviceSyncJobsForAccount,
@@ -68,8 +75,9 @@ import {
 import {
   listConnectionSources as listStoredConnectionSources,
   markConnectionSourceDataReceived as markStoredConnectionSourceDataReceived,
+  prepareConnectionSourceWriteInTransaction,
   upsertConnectionSource as upsertStoredConnectionSource,
-  upsertConnectionSourceInTransaction as upsertStoredConnectionSourceInTransaction,
+  upsertPreparedConnectionSourceInTransaction as upsertPreparedStoredConnectionSourceInTransaction,
 } from "./store/sources.ts";
 import {
   clearOAuthCredentialAfterConfirmedRevoke as clearStoredOAuthCredentialAfterConfirmedRevoke,
@@ -111,6 +119,13 @@ class DeviceSyncSuccessFenceRejectedError extends Error {
   constructor() {
     super("Device sync success fence rejected.");
     this.name = "DeviceSyncSuccessFenceRejectedError";
+  }
+}
+
+class DeviceConnectionSourceAdmissionRejectedError extends Error {
+  constructor() {
+    super("Device connection source admission was rejected.");
+    this.name = "DeviceConnectionSourceAdmissionRejectedError";
   }
 }
 
@@ -262,8 +277,14 @@ export class SqliteDeviceSyncStore {
     return patchStoredAccount(this.database, accountId, patch);
   }
 
-  upsertConnectionSource(input: UpsertDeviceConnectionSourceInput): StoredDeviceConnectionSource {
-    return upsertStoredConnectionSource(this.database, input);
+  upsertConnectionSource(
+    input: UpsertDeviceConnectionSourceInput,
+    options?: {
+      fenceActiveWorkOnReconnect?: boolean;
+      preserveDisconnected?: boolean;
+    },
+  ): StoredDeviceConnectionSource {
+    return upsertStoredConnectionSource(this.database, input, options);
   }
 
   listConnectionSources(input: ListDeviceConnectionSourcesInput): StoredDeviceConnectionSource[] {
@@ -278,6 +299,7 @@ export class SqliteDeviceSyncStore {
       firstSeenAt: source.firstSeenAt,
       lastErrorCode: source.lastErrorCode,
       lastErrorMessage: source.lastErrorMessage,
+      lifecycleEpoch: source.lifecycleEpoch,
       lastDataAt: source.lastDataAt,
       lastSeenAt: source.lastSeenAt,
       resourceCount: countConnectionSourceResources(source.resourceAvailabilitySummary),
@@ -473,33 +495,112 @@ export class SqliteDeviceSyncStore {
 
   commitConnectionEstablished(input: {
     accountId: string;
+    expectedSourceLastSeenAt?: string | null;
     jobs: readonly DeviceSyncJobInput[];
     provider: string;
     source?: UpsertDeviceConnectionSourceInput | null;
-  }): DeviceSyncJobRecord[] {
-    return withImmediateTransaction(this.database, () => {
-      if (input.source) {
-        upsertStoredConnectionSourceInTransaction(this.database, input.source);
-      }
+  }): DeviceSyncJobRecord[] | null {
+    try {
+      return withImmediateTransaction(this.database, () => {
+        if (input.source) {
+          const establishedSource = input.provider === "junction"
+            ? listStoredConnectionSources(this.database, {
+                connectionId: input.accountId,
+                sourceProviderSlug: input.source.sourceProviderSlug,
+              })[0] ?? null
+            : null;
+          const preparedSource = prepareConnectionSourceWriteInTransaction(
+            this.database,
+            establishedSource
+              ? {
+                  ...input.source,
+                  sourceInstanceKey: establishedSource.sourceInstanceKey,
+                  sourceProviderSlug: establishedSource.sourceProviderSlug,
+                }
+              : input.source,
+          );
+          const source = preparedSource.input;
+          const existingSource = input.provider === "junction" && source.status === "connected"
+            ? establishedSource ?? preparedSource.existing
+            : null;
+          const sourceAdmission = input.provider === "junction" && source.status === "connected"
+            ? decideJunctionSourceCallbackAdmission({
+                connectionStartedAt: input.expectedSourceLastSeenAt,
+                currentSource: existingSource,
+              })
+            : "new_source";
+          if (sourceAdmission === "reject") {
+            throw new DeviceConnectionSourceAdmissionRejectedError();
+          }
+          const advancesJunctionSourceLifecycle = sourceAdmission === "advance_lifecycle";
+          let advancedLifecycleEpoch: number | undefined;
 
-      wakeRetainedDeviceSyncJobsForAccount(this.database, {
-        accountId: input.accountId,
-        now: input.source?.lastSeenAt ?? toIsoTimestamp(new Date()),
-      });
+          if (advancesJunctionSourceLifecycle) {
+            if (!existingSource) {
+              throw new TypeError("Existing Junction source lifecycle was not found.");
+            }
+            advancedLifecycleEpoch = existingSource.lifecycleEpoch + 1;
+            const account = getStoredAccountById(this.database, input.accountId);
+            if (!account) {
+              throw new TypeError(`Unknown account ${input.accountId}`);
+            }
+            const metadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+              metadata: account.metadata,
+              providerSlug: source.sourceProviderSlug,
+            });
+            this.database.prepare(`
+              update device_connection
+              set metadata_json = ?, updated_at = ?
+              where id = ?
+            `).run(
+              stringifyJson(metadata),
+              source.lastSeenAt,
+              input.accountId,
+            );
+            this.database.prepare(`
+              update device_observation_state
+              set local_connection_revision = local_connection_revision + 1,
+                  updated_at = ?
+              where account_id = ?
+            `).run(source.lastSeenAt, input.accountId);
+          }
 
-      return input.jobs.map((job) =>
-        enqueueDeviceSyncJobInTransaction(this.database, {
-          provider: input.provider,
+          upsertPreparedStoredConnectionSourceInTransaction(
+            this.database,
+            preparedSource,
+            {
+              ...source,
+              ...(advancedLifecycleEpoch !== undefined
+                ? { lifecycleEpoch: advancedLifecycleEpoch }
+                : {}),
+            },
+          );
+        }
+
+        wakeRetainedDeviceSyncJobsForAccount(this.database, {
           accountId: input.accountId,
-          kind: job.kind,
-          payload: job.payload ?? {},
-          priority: job.priority ?? 0,
-          availableAt: job.availableAt,
-          maxAttempts: job.maxAttempts,
-          dedupeKey: job.dedupeKey,
-        })
-      );
-    });
+          now: input.source?.lastSeenAt ?? toIsoTimestamp(new Date()),
+        });
+
+        return input.jobs.map((job) =>
+          enqueueDeviceSyncJobInTransaction(this.database, {
+            provider: input.provider,
+            accountId: input.accountId,
+            kind: job.kind,
+            payload: job.payload ?? {},
+            priority: job.priority ?? 0,
+            availableAt: job.availableAt,
+            maxAttempts: job.maxAttempts,
+            dedupeKey: job.dedupeKey,
+          })
+        );
+      });
+    } catch (error) {
+      if (error instanceof DeviceConnectionSourceAdmissionRejectedError) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   enqueueJobsAndCompleteWebhookTrace(input: {
@@ -545,6 +646,17 @@ export class SqliteDeviceSyncStore {
       accountId,
       database: this.database,
       limit,
+    });
+  }
+
+  findActiveJobDedupeKeys(input: {
+    accountId: string;
+    dedupeKeys: readonly string[];
+    provider: string;
+  }): ReadonlySet<string> {
+    return findActiveDeviceSyncJobDedupeKeys({
+      ...input,
+      database: this.database,
     });
   }
 

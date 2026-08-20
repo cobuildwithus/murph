@@ -9,6 +9,7 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 
 import { persistProviderTokenRefreshErrorStatus } from "@/src/lib/device-sync/agent-session-token-refresh";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -54,6 +55,17 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function requireJunctionProviderSourceInstanceKey(input: {
+  connectionId: string;
+  sourceProviderSlug: string;
+}): string {
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey(input);
+  if (!sourceInstanceKey) {
+    throw new TypeError("Expected a canonical Junction source instance key.");
+  }
+  return sourceInstanceKey;
 }
 
 async function createDeviceSyncDeletionFixture(): Promise<DeviceSyncDeletionFixture> {
@@ -146,6 +158,18 @@ async function waitForBlockedBackend(input: {
   throw new Error("Expected the transaction to wait on a PostgreSQL lock.");
 }
 
+const PAUSEABLE_DIRTY_MARKER_MUTATION_METHODS = new Set<PropertyKey>([
+  "updateMany",
+  "updateManyAndReturn",
+]);
+
+function isPrismaDelegateMutationMethod(
+  property: PropertyKey,
+): property is string {
+  return typeof property === "string"
+    && /^(?:create|delete|update|upsert)/u.test(property);
+}
+
 function pauseBeforeDirtyMarkerUpdate(input: {
   allowUpdate: Deferred<void>;
   beforeUpdate: Deferred<void>;
@@ -153,15 +177,26 @@ function pauseBeforeDirtyMarkerUpdate(input: {
 }): Prisma.TransactionClient {
   const deviceSyncDirtyConnection = new Proxy(input.tx.deviceSyncDirtyConnection, {
     get(target, property) {
-      if (property === "updateMany") {
-        return async (args: Prisma.DeviceSyncDirtyConnectionUpdateManyArgs) => {
+      if (PAUSEABLE_DIRTY_MARKER_MUTATION_METHODS.has(property)) {
+        const mutation = Reflect.get(target, property, target);
+        if (typeof mutation !== "function") {
+          throw new TypeError(
+            `Prisma dirty-marker mutation method "${String(property)}" is unavailable.`,
+          );
+        }
+        return async (...args: unknown[]) => {
           input.beforeUpdate.resolve();
           await input.allowUpdate.promise;
-          return target.updateMany(args);
+          return Reflect.apply(mutation, target, args);
         };
       }
+      if (isPrismaDelegateMutationMethod(property)) {
+        throw new TypeError(
+          `Dirty-marker concurrency pause hook does not support Prisma mutation method "${property}".`,
+        );
+      }
 
-      const value = Reflect.get(target, property, target);
+      const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
@@ -171,7 +206,7 @@ function pauseBeforeDirtyMarkerUpdate(input: {
       if (property === "deviceSyncDirtyConnection") {
         return deviceSyncDirtyConnection;
       }
-      const value = Reflect.get(target, property, target);
+      const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
@@ -216,6 +251,75 @@ function buildCompanionHrvResource() {
     windowStart: null,
   };
 }
+
+describe("device-sync dirty-marker concurrency pause hook", () => {
+  it.each([
+    "updateMany",
+    "updateManyAndReturn",
+  ] as const)("pauses %s before delegating", async (method) => {
+    const allowUpdate = createDeferred();
+    const beforeUpdate = createDeferred();
+    const delegatedMethods: string[] = [];
+    const tx = {
+      deviceSyncDirtyConnection: {
+        updateMany: async () => {
+          delegatedMethods.push("updateMany");
+          return { count: 1 };
+        },
+        updateManyAndReturn: async () => {
+          delegatedMethods.push("updateManyAndReturn");
+          return [];
+        },
+      },
+    } as unknown as Prisma.TransactionClient;
+    const pausedTx = pauseBeforeDirtyMarkerUpdate({
+      allowUpdate,
+      beforeUpdate,
+      tx,
+    });
+    const delegate = Reflect.get(
+      pausedTx,
+      "deviceSyncDirtyConnection",
+    ) as object;
+    const mutation = Reflect.get(delegate, method);
+    if (typeof mutation !== "function") {
+      throw new TypeError(`Expected ${method} to be callable.`);
+    }
+
+    const operation = Reflect.apply(
+      mutation,
+      delegate,
+      [{}],
+    ) as Promise<unknown>;
+    await beforeUpdate.promise;
+    try {
+      expect(delegatedMethods).toEqual([]);
+    } finally {
+      allowUpdate.resolve();
+    }
+
+    await operation;
+    expect(delegatedMethods).toEqual([method]);
+  });
+
+  it("fails fast when the dirty-marker CAS drifts to another Prisma mutation method", () => {
+    const pausedTx = pauseBeforeDirtyMarkerUpdate({
+      allowUpdate: createDeferred(),
+      beforeUpdate: createDeferred(),
+      tx: {
+        deviceSyncDirtyConnection: {},
+      } as unknown as Prisma.TransactionClient,
+    });
+    const delegate = Reflect.get(
+      pausedTx,
+      "deviceSyncDirtyConnection",
+    ) as object;
+
+    expect(() => Reflect.get(delegate, "update")).toThrowError(
+      "Dirty-marker concurrency pause hook does not support Prisma mutation method \"update\".",
+    );
+  });
+});
 
 describe.skipIf(!runPostgresConcurrencyProof)(
   "device-sync dirty-state PostgreSQL account-deletion ordering",
@@ -1052,7 +1156,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             firstSeenAt: connectedAt,
             id: sourceId,
             lastSeenAt: connectedAt,
-            sourceInstanceKey: "primary",
+            sourceInstanceKey: requireJunctionProviderSourceInstanceKey({
+              connectionId: providerConnectionId,
+              sourceProviderSlug: "provider-source",
+            }),
             sourceProviderSlug: "provider-source",
             status: "connected",
           },
@@ -1297,7 +1404,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             firstSeenAt: connectedAt,
             id: sourceId,
             lastSeenAt: connectedAt,
-            sourceInstanceKey: "primary",
+            sourceInstanceKey: requireJunctionProviderSourceInstanceKey({
+              connectionId: retainedConnectionId,
+              sourceProviderSlug: "provider-source",
+            }),
             sourceProviderSlug: "provider-source",
             status: "connected",
           },

@@ -193,6 +193,54 @@ test("Training handoff completion follows the requested workout instead of any p
   );
 });
 
+test("Training selects and refreshes the exact newer open workout", async () => {
+  const openWorkout = (
+    entityId: string,
+    startedAt: string,
+    reps: number,
+  ) => createWorkoutEntity(
+    entityId,
+    {
+      activityType: "strength-training",
+      source: "manual",
+      workout: {
+        exercises: [{ name: "Squat", sets: [{ order: 1, reps }] }],
+        sourceApp: "murph-live",
+        startedAt,
+      },
+    },
+    startedAt,
+  );
+  const older = openWorkout("workout_older", "2026-08-09T16:00:00.000Z", 5);
+  const newer = openWorkout("workout_newer", "2026-08-09T17:00:00.000Z", 8);
+  const client = await createTrainingClient([older, newer], "two-open-workouts");
+
+  assert.equal(selectBrowserVaultTraining(client).activeSession?.id, "workout_newer");
+  const baseline = createTrainingHandoffBaseline(client);
+  assert.equal(baseline.kind, "continue");
+  assert.equal(baseline.kind === "continue" && baseline.activeSessionId, "workout_newer");
+  assert.equal(
+    isTrainingHandoffComplete(
+      baseline,
+      await createTrainingClient(
+        [openWorkout("workout_older", "2026-08-09T16:00:00.000Z", 6), newer],
+        "older-workout-changed",
+      ),
+    ),
+    false,
+  );
+  assert.equal(
+    isTrainingHandoffComplete(
+      baseline,
+      await createTrainingClient(
+        [older, openWorkout("workout_newer", "2026-08-09T17:00:00.000Z", 9)],
+        "newer-workout-changed",
+      ),
+    ),
+    true,
+  );
+});
+
 test("Training derives the live workout, recent history and exercise progress from canonical sessions", async () => {
   const replica = await createBrowserVaultReplica({
     generatedAt: "2026-08-09T18:00:00.000Z",

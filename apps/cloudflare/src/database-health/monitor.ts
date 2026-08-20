@@ -235,6 +235,8 @@ type DatabaseHealthCollectedSample =
 
 interface DatabaseMetricCollection {
   attempts: number;
+  connectionErrorCounterBaseline: Record<string, number>;
+  connectionErrorDeltas: DatabaseConnectionErrorDeltas | null;
   connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence;
   observation: DatabaseMetricObservation;
 }
@@ -341,19 +343,13 @@ export class DatabaseHealthMonitor {
     try {
       const {
         attempts,
+        connectionErrorCounterBaseline,
+        connectionErrorDeltas,
         connectionErrorEvidence,
         observation,
       } = await this.collectMetricObservation(
         previousConnectionErrorCounterBaseline,
       );
-      const observedConnectionErrorCounters =
-        observation.snapshot.connectionErrorCounters;
-      const connectionErrorCounterBaseline = observedConnectionErrorCounters
-        ? advanceConnectionErrorCounterBaseline(
-          observedConnectionErrorCounters,
-          previousConnectionErrorCounterBaseline,
-        )
-        : (previousConnectionErrorCounterBaseline ?? {});
       if (observation.missingMetrics.length > 0) {
         const monitoringMissingMetrics = [...observation.missingMetrics];
         const durableConnectionErrorEvidence =
@@ -361,13 +357,6 @@ export class DatabaseHealthMonitor {
             connectionErrorEvidence,
             missingMetrics: monitoringMissingMetrics,
           });
-        const connectionErrorDeltas =
-          observedConnectionErrorCounters === null
-            ? null
-            : calculateConnectionErrorDeltas(
-              observedConnectionErrorCounters,
-              previousConnectionErrorCounterBaseline,
-            );
         const conditions = evaluateDatabaseMetricSnapshot(
           observation.snapshot,
           connectionErrorDeltas,
@@ -407,10 +396,6 @@ export class DatabaseHealthMonitor {
         };
       }
       const snapshot = requireCompleteDatabaseMetricSnapshot(observation);
-      const connectionErrorDeltas = calculateConnectionErrorDeltas(
-        snapshot.connectionErrorCounters,
-        previousConnectionErrorCounterBaseline,
-      );
       const conditions = evaluateDatabaseMetricSnapshot(
         snapshot,
         connectionErrorDeltas,
@@ -490,6 +475,7 @@ export class DatabaseHealthMonitor {
         attempts,
         observation: retryObservation,
         parsedObservations: [retryObservation],
+        previousConnectionErrorCounterBaseline,
       });
     }
     if (!hasUsableDatabaseHealthMetric(observation)) {
@@ -502,47 +488,52 @@ export class DatabaseHealthMonitor {
           attempts,
           observation: retryObservation,
           parsedObservations,
+          previousConnectionErrorCounterBaseline,
         });
       } catch {
         return buildDatabaseMetricCollection({
           attempts,
           observation,
           parsedObservations,
+          previousConnectionErrorCounterBaseline,
         });
       }
     }
-    if (!shouldConfirmMissingConnectionErrors(observation)) {
+    if (
+      !shouldConfirmPartialObservation(
+        observation,
+        previousConnectionErrorCounterBaseline,
+      )
+    ) {
       return buildDatabaseMetricCollection({
         attempts,
         observation,
         parsedObservations,
+        previousConnectionErrorCounterBaseline,
       });
     }
 
+    const confirmationConnectionErrorCounterBaseline =
+      advanceObservationConnectionErrorCounterBaseline(
+        observation,
+        previousConnectionErrorCounterBaseline,
+      );
     await this.waitImplementation(DATABASE_HEALTH_COLLECTION_RETRY_DELAY_MS);
     attempts += 1;
     try {
       const confirmation = await this.collectMetricObservationOnce();
       parsedObservations.push(confirmation);
-      const confirmationCounters =
-        confirmation.snapshot.connectionErrorCounters;
       if (
-        evaluateDatabaseMetricSnapshot(
-          confirmation.snapshot,
-          null,
-        ).length > 0
+        hasUnsafeDatabaseHealthEvidence(
+          confirmation,
+          confirmationConnectionErrorCounterBaseline,
+        )
       ) {
         return buildDatabaseMetricCollection({
           attempts,
           observation: confirmation,
           parsedObservations,
-        });
-      }
-      if (confirmationCounters === null) {
-        return buildDatabaseMetricCollection({
-          attempts,
-          observation,
-          parsedObservations,
+          previousConnectionErrorCounterBaseline,
         });
       }
       if (confirmation.missingMetrics.length === 0) {
@@ -550,24 +541,34 @@ export class DatabaseHealthMonitor {
           attempts,
           observation: confirmation,
           parsedObservations,
+          previousConnectionErrorCounterBaseline,
+        });
+      }
+      const composedConnectionErrorObservation =
+        composeRecoveredConnectionErrorObservation({
+          confirmation,
+          observation,
+        });
+      if (composedConnectionErrorObservation !== null) {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: composedConnectionErrorObservation,
+          parsedObservations,
+          previousConnectionErrorCounterBaseline,
         });
       }
       return buildDatabaseMetricCollection({
         attempts,
-        observation: {
-          missingMetrics: [],
-          snapshot: {
-            ...observation.snapshot,
-            connectionErrorCounters: confirmationCounters,
-          },
-        },
+        observation,
         parsedObservations,
+        previousConnectionErrorCounterBaseline,
       });
     } catch {
       return buildDatabaseMetricCollection({
         attempts,
         observation,
         parsedObservations,
+        previousConnectionErrorCounterBaseline,
       });
     }
   }
@@ -1493,6 +1494,8 @@ function buildDatabaseMetricCollection(input: {
   attempts: number;
   observation: DatabaseMetricObservation;
   parsedObservations: readonly DatabaseMetricObservation[];
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null;
 }): DatabaseMetricCollection {
   const missingPortAttempts: Record<
     (typeof DATABASE_CONNECTION_ERROR_PORTS)[number],
@@ -1507,13 +1510,58 @@ function buildDatabaseMetricCollection(input: {
       missingPortAttempts[port] += 1;
     }
   }
+  const connectionErrorState = collectConnectionErrorSequence({
+    observations: input.parsedObservations,
+    previousConnectionErrorCounterBaseline:
+      input.previousConnectionErrorCounterBaseline,
+  });
   return {
     attempts: input.attempts,
+    connectionErrorCounterBaseline: connectionErrorState.baseline,
+    connectionErrorDeltas: connectionErrorState.deltas,
     connectionErrorEvidence: {
       missingPortAttempts,
       parsedAttempts: input.parsedObservations.length,
     },
     observation: input.observation,
+  };
+}
+
+function collectConnectionErrorSequence(input: {
+  observations: readonly DatabaseMetricObservation[];
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null;
+}): {
+  baseline: Record<string, number>;
+  deltas: DatabaseConnectionErrorDeltas | null;
+} {
+  let baseline = { ...(input.previousConnectionErrorCounterBaseline ?? {}) };
+  const deltas: Record<
+    (typeof DATABASE_CONNECTION_ERROR_PORTS)[number],
+    number | null
+  > = { "5432": null, "6432": null };
+  let observedCounters = false;
+  for (const observation of input.observations) {
+    const counters = observation.snapshot.connectionErrorCounters;
+    if (counters === null) {
+      continue;
+    }
+    observedCounters = true;
+    const observationDeltas = calculateConnectionErrorDeltas(
+      counters,
+      baseline,
+    );
+    for (const port of DATABASE_CONNECTION_ERROR_PORTS) {
+      const delta = observationDeltas[port];
+      if (delta !== null) {
+        deltas[port] = (deltas[port] ?? 0) + delta;
+      }
+    }
+    baseline = advanceConnectionErrorCounterBaseline(counters, baseline);
+  }
+  return {
+    baseline,
+    deltas: observedCounters ? deltas : null,
   };
 }
 
@@ -1544,16 +1592,78 @@ function hasUsableDatabaseHealthMetric(
     < DATABASE_HEALTH_REQUIRED_METRIC_NAMES.length;
 }
 
-function shouldConfirmMissingConnectionErrors(
+function shouldConfirmPartialObservation(
   observation: DatabaseMetricObservation,
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null,
 ): boolean {
-  return observation.missingMetrics.length === 1
-    && observation.missingMetrics[0]
-      === DATABASE_CONNECTION_ERROR_METRIC_NAME
-    && evaluateDatabaseMetricSnapshot(
-      observation.snapshot,
+  return observation.missingMetrics.length > 0
+    && hasUsableDatabaseHealthMetric(observation)
+    && !hasUnsafeDatabaseHealthEvidence(
+      observation,
+      previousConnectionErrorCounterBaseline,
+    );
+}
+
+function hasUnsafeDatabaseHealthEvidence(
+  observation: DatabaseMetricObservation,
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null,
+): boolean {
+  const connectionErrorCounters =
+    observation.snapshot.connectionErrorCounters;
+  const connectionErrorDeltas = connectionErrorCounters === null
+    ? null
+    : calculateConnectionErrorDeltas(
+      connectionErrorCounters,
+      previousConnectionErrorCounterBaseline,
+    );
+  return evaluateDatabaseMetricSnapshot(
+    observation.snapshot,
+    connectionErrorDeltas,
+  ).length > 0;
+}
+
+function advanceObservationConnectionErrorCounterBaseline(
+  observation: DatabaseMetricObservation,
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null,
+): Readonly<Record<string, number>> | null {
+  const counters = observation.snapshot.connectionErrorCounters;
+  return counters === null
+    ? previousConnectionErrorCounterBaseline
+    : advanceConnectionErrorCounterBaseline(
+      counters,
+      previousConnectionErrorCounterBaseline,
+    );
+}
+
+function composeRecoveredConnectionErrorObservation(input: {
+  confirmation: DatabaseMetricObservation;
+  observation: DatabaseMetricObservation;
+}): DatabaseMetricObservation | null {
+  const confirmationCounters =
+    input.confirmation.snapshot.connectionErrorCounters;
+  if (
+    input.observation.missingMetrics.length !== 1
+    || input.observation.missingMetrics[0]
+      !== DATABASE_CONNECTION_ERROR_METRIC_NAME
+    || input.confirmation.missingMetrics.length === 0
+    || confirmationCounters === null
+    || evaluateDatabaseMetricSnapshot(
+      input.confirmation.snapshot,
       null,
-    ).length === 0;
+    ).length > 0
+  ) {
+    return null;
+  }
+  return {
+    missingMetrics: [],
+    snapshot: {
+      ...input.observation.snapshot,
+      connectionErrorCounters: confirmationCounters,
+    },
+  };
 }
 
 async function readBoundedResponseText(

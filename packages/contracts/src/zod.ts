@@ -150,7 +150,7 @@ const SHA256_HEX_PATTERN = "^[a-f0-9]{64}$";
 const SHA256_DIGEST_PATTERN = "^sha256:[a-f0-9]{64}$";
 const DEVICE_DATA_ORIGIN_SLUG_PATTERN = "^[a-z0-9]+(?:[-_][a-z0-9]+)*$";
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
-const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
+const UNIT_PATTERN = "^[A-Za-z0-9._/%^-]+$";
 const GENERIC_CONTRACT_ID_REGEX = new RegExp(GENERIC_CONTRACT_ID_PATTERN);
 const EXPERIMENT_SIGNAL_DIRECTIONS = ["increase", "decrease", "stabilize"] as const;
 export const EXPERIMENT_OUTCOME_STATISTICS = [
@@ -670,6 +670,8 @@ export const workoutExerciseSchema = z
     mode: workoutExerciseModeSchema.optional(),
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
+    memberRepsPerSet: integerSchema(1, 999).optional(),
+    setPlanIsFinite: z.boolean().optional(),
     sets: z.array(workoutSetSchema).min(1).max(150),
   })
   .strict();
@@ -1226,10 +1228,27 @@ const noteEventFieldsShape = {
   sections: z.array(clinicalNoteSectionSchema).min(1).max(50).optional(),
 } satisfies z.ZodRawShape;
 
+const derivedObservationEvidenceQualifiersSchema = z
+  .object({
+    derived: z.literal(true),
+    evidenceConfidence: z.enum(["low", "medium"]),
+    evidenceMethod: boundedString(1, 120),
+    eveningSampleCount: integerSchema(2, 5_000).optional(),
+    maxAdjacentGapSeconds: integerSchema(1, 24 * 60 * 60),
+    morningSampleCount: integerSchema(2, 5_000).optional(),
+    qualifyingPairCount: integerSchema(0, 4_999),
+    sampleCount: integerSchema(2, 5_000),
+    sampleIntervalSeconds: numberSchema(0, 24 * 60 * 60).optional(),
+    thresholdSampleCount: integerSchema(0, 5_000).optional(),
+  })
+  .strict();
+
 const observationEventFieldsShape = {
   metric: patternedString(SLUG_PATTERN),
   queryVisibility: z.enum(["default"]).optional(),
-  qualifiers: measurementQualifiersSchema.optional(),
+  qualifiers: z
+    .union([derivedObservationEvidenceQualifiersSchema, measurementQualifiersSchema])
+    .optional(),
   value: numberSchema(),
   visibility: z.enum(["display"]).optional(),
   canonicalFact: z.literal(true).optional(),

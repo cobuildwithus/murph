@@ -26,6 +26,11 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { readVaultRawTolerant } from '@murphai/query'
+import {
+  logLiveWorkoutSet,
+  showWorkoutRecord,
+  startLiveWorkout,
+} from '@murphai/vault-usecases/workouts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -547,7 +552,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'fails closed without an active workout and keeps a bare acknowledgement from advancing the next set',
+    'persists fixed repetitions across a fresh thread, closes set eight, and logs the next workout',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -568,10 +573,13 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           materializeRealWorkoutVaultCli({ binDirectory }),
         ])
 
-        const commonInput: Omit<
-          CodexAppServerTurnInput,
-          'dynamicTools' | 'prompt'
-        > = {
+        const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+        const older = await startLiveWorkout({
+          name: 'Earlier unfinished workout',
+          startedAt,
+          vault: workingDirectory,
+        })
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -580,10 +588,11 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
-              'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
-              'vault-cli workout exercise add <name> --order <n> [--sets <n>]',
-              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
+              'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
+              'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -595,13 +604,14 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               setupCommand: 'murph',
             },
             conversationScope: 'direct',
-            currentLocalDate: '2026-08-13',
+            currentLocalDate: '2026-08-20',
             currentTimeZone: 'UTC',
             hostedRuntime: true,
             modelBehaviorProfile: 'gpt5-agentic',
             onboardingGuidance: false,
             turnTrigger: null,
           }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -616,97 +626,128 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           sandbox: 'workspace-write',
           workingDirectory,
         }
-        const missingWorkout = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Seated cable curl set 3 complete: 9 reps.',
-        })
-        const vaultAfterMissingWorkout = await readVaultRawTolerant(workingDirectory)
-        const missingWorkoutEvents = vaultAfterMissingWorkout.events.filter((event) =>
-          workoutSessionSchema.safeParse(event.attributes.workout).success
-        )
-
-        expect(missingWorkoutEvents).toEqual([])
-        expect(missingWorkout.finalMessage).toMatch(
-          /(?:no active|could(?: not|n't) (?:find|access) an active|do(?: not|n't) have an active)(?: tracked)? workout/iu,
-        )
-        expect(missingWorkout.finalMessage).toMatch(/start/iu)
-        expect(missingWorkout.finalMessage).toContain('?')
-        expect(missingWorkout.finalMessage).not.toMatch(
-          /(?:set\s*3|it)\s+(?:(?:is|was|has been)\s+)?(?:saved|logged|recorded)|\b(?:i(?:'ve| have)|successfully)\s+(?:saved|logged|recorded)\b/iu,
-        )
-
-        const recovered = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'yes',
-          resumeSessionId: missingWorkout.sessionId,
-        })
-        const vaultAfterRecovery = await readVaultRawTolerant(workingDirectory)
-        const recoveredWorkouts = vaultAfterRecovery.events.flatMap((event) => {
-          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success ? [parsed.data] : []
-        })
-
-        expect(recovered.finalMessage).toMatch(/set\s*3/iu)
-        expect(recovered.finalMessage).toMatch(/9 reps/iu)
-        expect(recovered.finalMessage).toMatch(/logged|saved|recorded/iu)
-        expect(recoveredWorkouts).toHaveLength(1)
-        expect(
-          recoveredWorkouts[0]?.exercises[0]?.sets.map((set) => set.reps ?? null),
-        ).toEqual([null, null, 9])
-
-        await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Finish this tracked workout.',
-          resumeSessionId: recovered.sessionId,
-        })
 
         const started = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            'Start a live workout for seated cable curl with four sets.',
-            'Use 30 lb as the planned load for every set.',
-            'Every set is exactly 9 reps; use that fixed repetition count throughout this active workout.',
+            'Start a live workout named Durable repetition proof.',
+            'Add Seated cable curl with exactly eight finite sets.',
+            'Every set of that exercise is exactly 9 reps; persist that exercise-wide member count.',
+            'Do not log a set yet and do not turn any target or suggestion into an actual result.',
           ].join(' '),
         })
-        const firstCompletion = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Seated cable curl set 1 complete.',
-          resumeSessionId: started.sessionId,
-        })
-        const secondCompletion = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Second set complete.',
-          resumeSessionId: firstCompletion.sessionId,
-        })
-        await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'ok',
-          resumeSessionId: secondCompletion.sessionId,
-        })
-        const vault = await readVaultRawTolerant(workingDirectory)
-        const workouts = vault.events.flatMap((event) => {
+        const afterStart = await readVaultRawTolerant(workingDirectory)
+        const matching = afterStart.events.flatMap((event) => {
           const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success ? [parsed.data] : []
+          return parsed.success
+            && parsed.data.exercises.some(
+              (exercise) => exercise.name === 'Seated cable curl',
+            )
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
         })
-        const workout = workouts.at(-1)
 
-        expect(started.finalMessage).toMatch(/start/iu)
-        expect(started.finalMessage).toMatch(/4/iu)
-        expect(firstCompletion.finalMessage).toMatch(/9 reps/iu)
-        expect(secondCompletion.finalMessage).toMatch(/9 reps/iu)
-        expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
-        expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
-        expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
-        expect(secondCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
+        expect(started.finalMessage).not.toMatch(/how many|which workout/iu)
+        expect(matching).toHaveLength(1)
+        const finiteWorkout = matching[0]!
+        expect(started.finalMessage.trim()).toBe('')
+        expect(started.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: finiteWorkout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'active' },
+        })
+        expect(finiteWorkout.workout.exercises[0]).toMatchObject({
+          memberRepsPerSet: 9,
+          name: 'Seated cable curl',
+          setPlanIsFinite: true,
+        })
+        expect(finiteWorkout.workout.exercises[0]?.sets).toHaveLength(8)
         expect(
-          workout?.exercises[0]?.sets.map((set) => set.reps ?? null),
-        ).toEqual([9, 9, null, null])
-        expect(
-          workout?.exercises[0]?.sets.map((set) => set.weight ?? null),
-        ).toEqual([null, null, null, null])
-        expect(
-          workout?.exercises[0]?.sets.map((set) => set.weightUnit ?? null),
-        ).toEqual([null, null, null, null])
+          finiteWorkout.workout.exercises[0]?.sets.map((set) => set.reps),
+        ).toEqual(Array.from({ length: 8 }, () => undefined))
+
+        for (let setOrder = 1; setOrder <= 7; setOrder += 1) {
+          await logLiveWorkoutSet({
+            exerciseOrder: 1,
+            requireExistingSet: true,
+            setOrder,
+            vault: workingDirectory,
+            workoutId: finiteWorkout.id,
+          })
+        }
+
+        // Deliberately do not resume the provider session. The member's terse
+        // message carries no id; production reply-card context supplies the exact
+        // durable marker, while the exercise prescription remains canonical.
+        const finalSet = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            `Durable reply-card context identifies exact workout ${finiteWorkout.id}.`,
+            'The current member message is exactly: "Set 8 done."',
+          ].join(' '),
+        })
+        const completed = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
+        )
+
+        expect(finalSet.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+        expect(finalSet.finalMessage.trim()).toBe('')
+        expect(finalSet.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: finiteWorkout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'completed' },
+        })
+        expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual(
+          Array.from({ length: 8 }, () => 9),
+        )
+        expect(completed.endedAt).toEqual(expect.any(String))
+
+        // This is another fresh provider turn. The older unfinished record must
+        // neither block the new start nor be assigned an inferred end boundary.
+        const nextTurn = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Start a new live workout named Immediate next workout.',
+            'Add exactly one finite Push-up set.',
+            'Every Push-up set is exactly 12 reps; persist that count and log set 1 complete now.',
+          ].join(' '),
+        })
+        const afterNext = await readVaultRawTolerant(workingDirectory)
+        const nextWorkouts = afterNext.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          const exercise = parsed.success
+            ? parsed.data.exercises.find((entry) => entry.name === 'Push-up')
+            : undefined
+          return parsed.success && exercise?.memberRepsPerSet === 12
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const olderStored = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, older.eventId)).entity.data.workout,
+        )
+
+        expect(nextTurn.finalMessage).not.toMatch(/finish time|duration|which workout/iu)
+        expect(nextWorkouts).toHaveLength(1)
+        expect(nextTurn.finalMessage.trim()).toBe('')
+        expect(nextTurn.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: nextWorkouts[0]?.id,
+            kind: 'workout',
+          },
+          workout: { state: 'completed' },
+        })
+        expect(nextWorkouts[0]?.workout.exercises[0]?.sets).toEqual([
+          { order: 1, reps: 12 },
+        ])
+        expect(nextWorkouts[0]?.workout.endedAt).toEqual(expect.any(String))
+        expect(olderStored.endedAt).toBeUndefined()
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,
@@ -3668,6 +3709,106 @@ describeRealCodex('real Codex weekly health insight evidence fallback e2e', () =
         }
       } finally {
         await removeRealCodexTemporaryPaths(config.temporaryPaths)
+      }
+    },
+    720_000,
+  )
+})
+
+describeRealCodex('real Codex product notes eligibility e2e', () => {
+  it(
+    'filters repair-only product notes without dropping member-facing changes',
+    async () => {
+      const config = await resolveRealCodexE2eConfig()
+      const productNotes = MURPH_MANAGED_AUTOMATIONS.find(
+        (automation) =>
+          automation.automationId
+          === MURPH_WEEKLY_PRODUCT_UPDATES_AUTOMATION_ID,
+      )
+      if (!productNotes) {
+        throw new Error('Expected the managed product-notes automation.')
+      }
+      const workingDirectory = await mkdtemp(
+        path.join(tmpdir(), 'murph-product-notes-eligibility-e2e-'),
+      )
+
+      try {
+        const appendCapturePath = path.join(
+          workingDirectory,
+          'product-notes-append.txt',
+        )
+        const binDirectory = path.join(workingDirectory, 'bin')
+        const curlCapturePath = path.join(
+          workingDirectory,
+          'product-notes-curl.txt',
+        )
+        await materializeProductNotesFixtures({
+          appendCapturePath,
+          binDirectory,
+          curlCapturePath,
+        })
+
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never',
+          baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          codexCommand:
+            normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+            ?? undefined,
+          codexHome: config.codexHome,
+          developerInstructions: buildProductNotesDeveloperInstructions(),
+          dynamicTools: [],
+          env: {
+            ...config.env,
+            PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          },
+          excludeResumeTurns: true,
+          model: config.model,
+          modelProvider: config.modelProvider,
+          prompt: [
+            productNotes.instructions,
+            'Scheduled occurrence context:',
+            '- Current local date: 2026-08-19.',
+            '- The member regularly reviews scheduled reminders and has an active workout they use from Messages.',
+            '- A past connected-health sync delayed one reminder.',
+            '- The controlled canonical ledger and changelog feed are available through the normal vault-cli and curl commands.',
+            '- Complete the normal selection, ledger append, and terminal scheduled decision.',
+          ].join('\n\n'),
+          reasoningEffort: 'high',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        const curlCalls = (await readFile(curlCapturePath, 'utf8'))
+          .trim()
+          .split('\n')
+        expect(curlCalls).toHaveLength(1)
+        expect(curlCalls[0]).toContain(
+          '/api/changelog?days=14&featureLimit=70&improvementLimit=10',
+        )
+
+        const appendArguments = await readFile(appendCapturePath, 'utf8')
+        expect(appendArguments).toContain('clearer-automation-recipients')
+        expect(appendArguments).toContain('resume-workouts-in-messages')
+        expect(appendArguments).not.toContain(
+          'scheduled-support-resumes-after-syncs',
+        )
+
+        const decision = parseAssistantNotificationDecision(
+          result.finalMessage,
+        )
+        expect(decision.kind).toBe('send_message')
+        if (decision.kind === 'send_message') {
+          expect(decision.text).toMatch(/automation/iu)
+          expect(decision.text).toMatch(/resume|workout/iu)
+          expect(decision.text).not.toMatch(
+            /health-data maintenance|reliability|scheduled support resumes/iu,
+          )
+        }
+      } finally {
+        await removeRealCodexTemporaryPaths([
+          workingDirectory,
+          ...config.temporaryPaths,
+        ])
       }
     },
     720_000,
@@ -9125,6 +9266,131 @@ async function materializeWeeklyHealthInsightVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+async function materializeProductNotesFixtures(input: {
+  appendCapturePath: string
+  binDirectory: string
+  curlCapturePath: string
+}): Promise<void> {
+  await mkdir(input.binDirectory, { recursive: true })
+  const feed = JSON.stringify({
+    items: [
+      {
+        details:
+          'Reliability work prevents scheduled jobs from remaining stalled after connected-health maintenance.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'scheduled-support-resumes-after-syncs',
+        kind: 'feature',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['automations', 'connected-health'],
+        sourcePullRequests: [2001],
+        summary:
+          'Scheduled support resumes after connected-health maintenance.',
+        title: 'Scheduled support resumes after syncs',
+        url:
+          'https://www.withmurph.ai/changelog?item=scheduled-support-resumes-after-syncs',
+      },
+      {
+        details:
+          'Review the destination before saving or changing a scheduled message.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'clearer-automation-recipients',
+        kind: 'improvement',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['automations', 'settings'],
+        sourcePullRequests: [2002],
+        summary:
+          'Automation settings now show who receives each scheduled message before you save.',
+        title: 'Clearer automation recipients',
+        tryIt: {
+          label: 'Review automations',
+          prompt: 'Show my scheduled automations.',
+        },
+        url:
+          'https://www.withmurph.ai/changelog?item=clearer-automation-recipients',
+      },
+      {
+        details:
+          'Start or resume the current logged workout without leaving the Messages conversation.',
+        editionId: '2026-08-19',
+        editionTitle: 'Recent Murph work',
+        id: 'resume-workouts-in-messages',
+        kind: 'feature',
+        priority: 5,
+        publishedOn: '2026-08-19',
+        relevanceTags: ['workouts', 'messages'],
+        sourcePullRequests: [2003],
+        summary:
+          'Murph can now resume a paused workout from Messages.',
+        title: 'Resume workouts in Messages',
+        tryIt: {
+          label: 'Resume a workout',
+          prompt: 'Resume my workout.',
+        },
+        url:
+          'https://www.withmurph.ai/changelog?item=resume-workouts-in-messages',
+      },
+    ],
+    links: {
+      digestCardTemplate:
+        'https://www.withmurph.ai/changelog/card/v1/{ids}.png',
+      fullChangelog: 'https://www.withmurph.ai/changelog',
+    },
+    schema: 'murph.changelog-feed.v1',
+    window: {
+      from: '2026-08-06',
+      to: '2026-08-20',
+    },
+  })
+  const curlPath = path.join(input.binDirectory, 'curl')
+  await writeFile(
+    curlPath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"/api/changelog?days=14&featureLimit=70&improvementLimit=10"*)',
+      `    printf '%s\\n' "$*" >> '${input.curlCapturePath}'`,
+      `    printf '%s\\n' '${feed}'`,
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected product-notes URL\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(curlPath, 0o700)
+
+  const vaultCliPath = path.join(input.binDirectory, 'vault-cli')
+  await writeFile(
+    vaultCliPath,
+    [
+      '#!/bin/sh',
+      'case "$*" in',
+      '  *"knowledge show murph-product-notes"*)',
+      '    printf \'%s\\n\' \'# Murph product notes\' \'\' \'## 2026-08-05 — Murph product notes\' \'Kind: feature discovery\' \'Item ids: earlier-feature\'',
+      '    ;;',
+      '  *"knowledge append-section murph-product-notes"*)',
+      `    printf '%s\\n' "$*" > '${input.appendCapturePath}'`,
+      '    printf \'%s\\n\' \'{"ok":true,"status":"appended"}\'',
+      '    ;;',
+      '  *)',
+      '    printf \'%s\\n\' \'unexpected product-notes vault command\' >&2',
+      '    exit 69',
+      '    ;;',
+      'esac',
+      '',
+    ].join('\n'),
+    { encoding: 'utf8', mode: 0o700 },
+  )
+  await chmod(vaultCliPath, 0o700)
+}
+
 async function buildWearableArrivalPrompt(input: {
   occurredAt: string
   promptTimeContext: Awaited<ReturnType<typeof resolveAssistantPromptTimeContext>>
@@ -9966,6 +10232,29 @@ function buildWeeklyHealthInsightDeveloperInstructions(): string {
     hostedRuntime: true,
     modelBehaviorProfile: 'gpt5-agentic',
     onboardingGuidance: false,
+    turnTrigger: 'automation-cron',
+  })
+}
+
+function buildProductNotesDeveloperInstructions(): string {
+  return buildAssistantSystemPrompt({
+    assistantCliContract: null,
+    assistantContextSnapshotPrompt: null,
+    assistantHostedDeviceConnectAvailable: false,
+    assistantHostedDeviceConnectProviders: [],
+    assistantKnowledgeToolsAvailable: false,
+    channel: 'linq',
+    cliAccess: {
+      rawCommand: 'vault-cli',
+      setupCommand: 'murph',
+    },
+    conversationScope: 'direct',
+    currentLocalDate: '2026-08-19',
+    currentTimeZone: 'America/New_York',
+    hostedRuntime: true,
+    modelBehaviorProfile: 'gpt5-agentic',
+    onboardingGuidance: false,
+    scheduledOccurrenceAt: '2026-08-19T14:00:00.000Z',
     turnTrigger: 'automation-cron',
   })
 }

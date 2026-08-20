@@ -162,6 +162,11 @@ describe("hosted runtime event coverage", () => {
         wake: deviceSyncWake,
         executionContext,
         runtime,
+        runtimeLogContext: {
+          attemptId: "attempt_device_sync_event",
+          leaseGeneration: "11",
+          workspaceVersion: "12",
+        },
         runtimeEnv: {},
         vaultRoot: "/tmp/assistant-runtime-events-coverage",
       }),
@@ -178,6 +183,11 @@ describe("hosted runtime event coverage", () => {
       deviceSyncPort: null,
       platformEnv: {},
       retainFollowUpWakeUntilCheckpoint: true,
+      runtimeLogContext: {
+        attemptId: "attempt_device_sync_event",
+        leaseGeneration: "11",
+        workspaceVersion: "12",
+      },
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
       timeoutMs: null,

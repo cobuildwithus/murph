@@ -1119,6 +1119,21 @@ export async function runAssistantAutomationPass(
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
   const replies = scanResult.replies
+  const modelCapableNextWakeAt = earliestAssistantAutomationWakeAt(
+    replies.nextWakeAt,
+    scanResult.routing.nextWakeAt,
+    cronNextRunAt,
+  )
+  const nextWakeAt = earliestAssistantAutomationWakeAt(
+    modelCapableNextWakeAt,
+    outboxNextAttemptAt,
+  )
+  const outboxOnlyNextWakeAt =
+    nextWakeAt !== null
+    && nextWakeAt === earliestAssistantAutomationWakeAt(outboxNextAttemptAt)
+    && nextWakeAt !== modelCapableNextWakeAt
+      ? nextWakeAt
+      : null
   const progressed =
     stateProgressed ||
     outboxResult.attempted > 0 ||
@@ -1130,12 +1145,8 @@ export async function runAssistantAutomationPass(
     cronProcessed: cronResult.processed,
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,
-    nextWakeAt: earliestAssistantAutomationWakeAt(
-      replies.nextWakeAt,
-      scanResult.routing.nextWakeAt,
-      cronNextRunAt,
-      outboxNextAttemptAt,
-    ),
+    nextWakeAt,
+    ...(outboxOnlyNextWakeAt ? { outboxOnlyNextWakeAt } : {}),
     outboxAttempted: outboxResult.attempted,
     passTiming,
     progressed,

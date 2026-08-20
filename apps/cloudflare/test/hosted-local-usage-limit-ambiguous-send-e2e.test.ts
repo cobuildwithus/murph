@@ -51,7 +51,7 @@ const groupSecondTurnText = "Add a second group reply context.";
 const groupSecondTurnReply = "The second group context is ready.";
 const groupBacklogReply = "I caught up with the whole group in one reply.";
 const usageLimitNoticeUrl =
-  "https://www.withmurph.ai/settings?addUsage=true#subscription";
+  "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -171,7 +171,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     requireLinqStub().armNextPostAcceptLostAcknowledgment({
       expectedPath: replyPath,
       matchRequest: usageNoticeLinkMatcher,
-      responseCount: 1,
+      responseCount: 2,
     });
     requireScenario().queueAssistantResponses([firstAssistantReply], {
       matchInputContains: firstInboundText,
@@ -214,8 +214,67 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
+    const usageNoticeTextMessageId = requireAcceptedLinqMessageId(
+      chatId,
+      usageNoticeTextMatcher,
+    );
+    requireLinqStub().armNextRequestDelay({
+      delayMs: 10_000,
+      expectedMethod: "POST",
+      expectedPath: replyPath,
+      matchRequest: usageNoticeTextMatcher,
+    });
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: observedBaseline + 2,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeLinkMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    const secondReplyBaseline = requireLinqStub().countObservedSends(
+      replyPath,
+      secondReplyMatcher,
+    );
+    requireScenario().queueAssistantResponses([secondAssistantReply], {
+      matchInputContains: secondInboundText,
+    });
+    const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_usage_limit_ambiguous_second_${runId}`,
+        messageId: `msg_usage_limit_ambiguous_second_${runId}`,
+        text: secondInboundText,
+      },
+    ));
+    expect(secondResponse.status).toBe(202);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: observedTextBaseline + 2,
+      expectedPath: replyPath,
+      matchRequest: usageNoticeTextMatcher,
+      scenario: requireScenario(),
+      userId,
+    });
+    const receiptResponse = await postSignedLinqWebhook(
+      buildHostedLinqDeliveryReceiptEvent({
+        chatId,
+        eventId: `evt_usage_limit_primary_delivered_${runId}`,
+        messageId: usageNoticeTextMessageId,
+        phoneNumber: buildLinqHomePhoneNumber(userId),
+      }),
+    );
+    expect(receiptResponse.status).toBe(202);
+    await expect(receiptResponse.json()).resolves.toMatchObject({
+      ok: true,
+      reason: "recorded-linq-provider-event:message.delivered",
+    });
+    await requireLinqStub().waitForMatchingSendCount({
+      expectedCount: observedBaseline + 3,
       expectedPath: replyPath,
       matchRequest: usageNoticeLinkMatcher,
       scenario: requireScenario(),
@@ -228,23 +287,31 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    const firstCompletedStatus = await requireScenario().waitForHostedIdle(userId);
+    const firstCompletedStatus = await vi.waitFor(async () => {
+      const status = await requireScenario().harness.readUserStatus(userId);
+      expect(status.inFlight).toBe(false);
+      expect(readConversationMailboxLag(status)).not.toBe("0");
+      return status;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
 
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 1,
+      observedTextBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 2,
+      observedBaseline + 3,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 1);
     expect(firstCompletedStatus.lastErrorCode ?? null).toBeNull();
-    expect(readConversationMailboxLag(firstCompletedStatus)).toBe("0");
+    expect(readConversationMailboxLag(firstCompletedStatus)).not.toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(firstCompletedStatus),
       conversationSeqBeforeFirstInbound,
@@ -277,33 +344,11 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       exhaustedPeriod?.limitUsdMicros ?? 1n,
     );
 
-    const secondReplyBaseline = requireLinqStub().countObservedSends(
-      replyPath,
-      secondReplyMatcher,
-    );
-    requireScenario().queueAssistantResponses([secondAssistantReply], {
-      matchInputContains: secondInboundText,
-    });
-    const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_usage_limit_ambiguous_second_${runId}`,
-        messageId: `msg_usage_limit_ambiguous_second_${runId}`,
-        text: secondInboundText,
-      },
-    ));
-    expect(secondResponse.status).toBe(202);
-    await expect(secondResponse.json()).resolves.toMatchObject({
-      ignored: false,
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-    const blockedStatus = await requireScenario().waitForLatestPendingWake(userId);
+    const blockedStatus = firstCompletedStatus;
     expect(readConversationMailboxLag(blockedStatus)).not.toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(blockedStatus),
-      readConversationMailboxMaxSeq(firstCompletedStatus),
+      conversationSeqBeforeFirstInbound,
     )).toBeGreaterThan(0);
 
     const finalStatus = await vi.waitFor(async () => {
@@ -326,20 +371,20 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(readConversationMailboxLag(finalStatus)).not.toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(finalStatus),
-      readConversationMailboxMaxSeq(firstCompletedStatus),
+      conversationSeqBeforeFirstInbound,
     )).toBeGreaterThan(0);
     expect(blockedMailboxItem.consumedAt).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath, secondReplyMatcher)).toBe(
       secondReplyBaseline,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 1,
+      observedTextBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 2,
+      observedBaseline + 3,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -395,13 +440,13 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 2);
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
-      observedTextBaseline + 1,
+      observedTextBaseline + 2,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeTextMatcher)).toBe(
       acceptedTextBaseline + 1,
     );
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeLinkMatcher)).toBe(
-      observedBaseline + 2,
+      observedBaseline + 3,
     );
     expect(requireLinqStub().countAcceptedSends(replyPath, usageNoticeLinkMatcher)).toBe(
       acceptedBaseline + 1,
@@ -675,6 +720,29 @@ function buildCurrentUtcCalendarMonthPeriod(): {
   };
 }
 
+function buildHostedLinqDeliveryReceiptEvent(input: {
+  chatId: string;
+  eventId: string;
+  messageId: string;
+  phoneNumber: string;
+}): Record<string, unknown> {
+  const createdAt = new Date().toISOString();
+  return {
+    api_version: "v3",
+    created_at: createdAt,
+    data: {
+      chat_id: input.chatId,
+      message_id: input.messageId,
+      phone_number: input.phoneNumber,
+      service: "SMS",
+    },
+    event_id: input.eventId,
+    event_type: "message.delivered",
+    trace_id: `trace_${input.eventId}`,
+    webhook_version: "2026-02-03",
+  };
+}
+
 function countAssistantResponseRequests(): number {
   return requireScenario().assistantProviderRequests.filter((request) =>
     request.url === "/v1/responses"
@@ -682,17 +750,25 @@ function countAssistantResponseRequests(): number {
 }
 
 function requireAcceptedLinqMessageIdByText(chatId: string, text: string): string {
+  return requireAcceptedLinqMessageId(
+    chatId,
+    (request) => requireLinqStub().readObservedMessageText(request) === text,
+  );
+}
+
+function requireAcceptedLinqMessageId(
+  chatId: string,
+  matchRequest: (request: ObservedLinqRequest) => boolean,
+): string {
   const acceptedGroupSends = requireLinqStub().acceptedSendRequests.filter(
     (request) =>
       request.method === "POST"
       && request.url === `/chats/${encodeURIComponent(chatId)}/messages`,
   );
-  const acceptedIndex = acceptedGroupSends.findIndex((request) =>
-    requireLinqStub().readObservedMessageText(request) === text
-  );
+  const acceptedIndex = acceptedGroupSends.findIndex(matchRequest);
   const messageId = requireLinqStub().listObservedMessageIds(chatId)[acceptedIndex];
   if (acceptedIndex < 0 || !messageId) {
-    throw new Error(`Missing accepted Linq message id for ${text}.`);
+    throw new Error("Missing accepted Linq message id for the expected request.");
   }
   return messageId;
 }

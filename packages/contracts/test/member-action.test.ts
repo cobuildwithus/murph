@@ -43,6 +43,42 @@ describe("member action contract", () => {
     expect(parseMemberActionRequestV1(request)).toEqual(request);
   });
 
+  it("accepts pull-up and push-up results as typed reps", () => {
+    const request = {
+      ...validRequest(),
+      action: {
+        ...validRequest().action,
+        expectedWorkout: {
+          actionBinding: "a".repeat(64),
+          exercises: [
+            { name: "Pull-ups", sets: [{ logged: false }] },
+            { name: "Push-ups", sets: [{ logged: false }] },
+          ],
+        },
+        mutations: [
+          {
+            exerciseName: "Pull-ups",
+            exercisePosition: 1,
+            expectedResult: null,
+            kind: "set.put" as const,
+            result: { kind: "reps" as const, reps: 6 },
+            setPosition: 1,
+          },
+          {
+            exerciseName: "Push-ups",
+            exercisePosition: 2,
+            expectedResult: null,
+            kind: "set.put" as const,
+            result: { kind: "reps" as const, reps: 15 },
+            setPosition: 1,
+          },
+        ],
+      },
+    };
+
+    expect(parseMemberActionRequestV1(request)).toEqual(request);
+  });
+
   it("rejects unknown fields and invalid action identities", () => {
     expect(memberActionRequestV1Schema.safeParse({
       ...validRequest(),

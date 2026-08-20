@@ -65,6 +65,7 @@ import {
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
 import {
+  type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
 } from "./runtime-logs.ts";
 
@@ -289,6 +290,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
   retainProcessedItemUntilRecorded?: boolean;
@@ -397,6 +399,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       operatorHomeRoot: input.operatorHomeRoot ?? undefined,
       pendingItem: prepared,
       runtime: input.runtime,
+      runtimeLogContext: input.runtimeLogContext ?? null,
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
@@ -884,6 +887,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   operatorHomeRoot?: string | null;
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
+  runtimeLogContext: HostedRuntimeLogContext | null;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -938,6 +942,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
     preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
+    runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance

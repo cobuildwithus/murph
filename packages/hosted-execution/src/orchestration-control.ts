@@ -17,6 +17,9 @@ export const HOSTED_USER_RUNTIME_SIGNAL_NAME = "runtimeSignal" as const;
 export const HOSTED_USER_RUNTIME_STATUS_QUERY_NAME =
   "runtimeWorkflowStatus" as const;
 
+export const HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON =
+  "assistant_delivery" as const;
+
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
   "runtime_recheck_requested",

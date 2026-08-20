@@ -19,7 +19,10 @@ import {
   useBrowserVaultSelector,
 } from "@/src/lib/browser-vault/context";
 import { formatIsoDate, formatNumber } from "@/src/lib/browser-vault/display";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
+import {
+  type MurphContactOption,
+  withMurphContactOptionBody,
+} from "@/src/lib/murph-contact-routing";
 import {
   createTrainingHandoffBaseline,
   isTrainingHandoffComplete,
@@ -263,8 +266,14 @@ export function TrainingPageView({
     training
       && (training.activeSession || training.recentSessions.length > 0),
   );
+  const continueContactOption = continueContactOptions[0] ?? null;
   const primaryContactOption = activeSession
-    ? continueContactOptions[0] ?? null
+    ? continueContactOption
+      ? withMurphContactOptionBody(
+          continueContactOption,
+          `Continue workout ${activeSession.id}.`,
+        )
+      : null
     : hasTraining
       ? startContactOptions[0] ?? null
       : null;
