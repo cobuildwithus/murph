@@ -4487,7 +4487,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     if (replaysJunctionNoIdProfileTimestamp) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
@@ -4514,7 +4514,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
