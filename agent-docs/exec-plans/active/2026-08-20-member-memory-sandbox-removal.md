@@ -47,8 +47,9 @@ memory consolidation.
 
 - Focused permission-config, assistant-turn, provider-seam, hosted-config, and
   real App Server memory-boundary tests: passed. The App Server scenario ran
-  with `danger-full-access`, did not expose or execute the attempted shell call,
-  and completed canonical memory read/write through `murph.member_memory`.
+  with `danger-full-access`, advertised exactly `murph.member_memory` on every
+  provider request, and completed canonical memory read/write through that
+  host-owned function.
 - Affected `hosted-execution`, `assistant-runtime`, and `assistant-engine`
   package typechecks: passed.
 - Exact-head round-one preliminary review found that the real App Server test
@@ -58,7 +59,8 @@ memory consolidation.
   catalog re-enabled collaboration despite generic feature flags. The focused
   correction pins the managed maintenance seed to hosted OpenAI `gpt-5.5`,
   disables the remaining process-owned registries, and requires every provider
-  request to expose exactly the one `member_memory` function. Verification is
-  pending.
+  request to expose exactly the one `member_memory` function. The real App
+  Server proof, the 118-test focused assistant-engine set, and package typecheck
+  pass with that correction.
 - Exact-head CI and final review gate: pending.
 - Production deploy and bounded runtime-log verification: pending.
