@@ -8993,6 +8993,58 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a deterministic checkpoint rejection terminal when its response body is lost", async () => {
+    const firstFailure = new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw firstFailure;
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new TypeError("Synthetic response body lost."));
+        },
+      }), { status: 401 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: null,
+        leaseGeneration: "9",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        reason: "canonical_runtime_commit",
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: 512,
+          hostedCanonicalWriteReceiptLogSha256: "4".repeat(64),
+        },
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toMatchObject({
+      hostedRuntimeFetchCauseKind: "timeout",
+    });
+    expect(rejected).not.toBeInstanceOf(HostedRuntimeCanonicalCheckpointError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("does not retry a canonical checkpoint after its active lease changes", async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error("Synthetic ambiguous checkpoint failure.");
