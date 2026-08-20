@@ -1,5 +1,6 @@
 import {
   buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
@@ -13,8 +14,9 @@ import {
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
 } from "@murphai/device-syncd/junction-resources";
 import {
-  removeJunctionExtendedTimeseriesHistoryBackfillCoverage,
-} from "@murphai/device-syncd/junction-historical-backfill-progress";
+  clearJunctionScheduleTimeExtendedHistoryCoverageForProvider,
+  decideJunctionSourceCallbackAdmission,
+} from "@murphai/device-syncd/junction-source-reconnect";
 import type {
   DeviceConnectionHandler,
   DeviceSyncIngressWebhook,
@@ -84,16 +86,17 @@ import { readHostedHealthDataConsentState } from "../legal/consent";
 import {
   buildHostedDeviceSyncWake,
 } from "./wake";
-import { COMPANION_APPLE_HEALTH_SOURCE_PROVIDER } from "./companion";
 import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
   isHostedConnectionSourceAdmitted,
   isHostedSourceDisconnectFenced,
+  resolveHostedJunctionConnectionSource,
 } from "./connection-source-lifecycle";
 import {
   hasHostedDeviceSyncDirtyResourcePayload,
+  mapHostedConnectionRecord,
   PrismaDeviceSyncControlPlaneStore,
   type HostedConnectionSourceAdmissionCandidate,
   type HostedPrismaTransactionClient,
@@ -134,7 +137,7 @@ export async function disconnectHostedDeviceSyncConnectionSource(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<{ sourceProviderSlug: string; status: "disconnected" }> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw deviceSyncError({
       code: "CONNECTION_SOURCE_INVALID",
@@ -356,7 +359,7 @@ export async function captureHostedDeviceSyncConnectionSourceReconnect(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<HostedDeviceSyncConnectionSourceReconnectProof> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw connectionSourceNotFoundError();
   }
@@ -394,7 +397,7 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
   userId: string;
 }): Promise<void> {
   const { connection: expectedConnection, source: expectedSource } = input.proof;
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.proof.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.proof.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw connectionSourceNotFoundError();
   }
@@ -419,26 +422,24 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     ) {
       connectionChangedDuringDisconnectError();
     }
-    if (
-      source?.status === "connected"
-      && !isHostedSourceDisconnectFenced(source)
-    ) {
-      return;
-    }
-
-    const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-      connectionId: expectedConnection.id,
-      sourceProviderSlug,
-    });
+    const sourceInstanceKey = source?.sourceInstanceKey
+      ?? buildJunctionProviderSourceInstanceKey({
+        connectionId: expectedConnection.id,
+        sourceProviderSlug,
+      });
     if (!sourceInstanceKey) {
       throw connectionSourceNotFoundError();
     }
-    const sourceStartedAt = nextHostedSourceLifecycleAt(source?.lastSeenAt ?? null);
+    const sourceStartedAt = nextHostedSourceLifecycleAt(
+      source?.lastSeenAt ?? null,
+      connection.updatedAt,
+    );
     await input.store.upsertConnectionSource({
       connectionId: expectedConnection.id,
       sourceInstanceKey,
-      sourceProviderSlug,
+      sourceProviderSlug: source?.sourceProviderSlug ?? sourceProviderSlug,
       status: "disconnected",
+      ...(source ? { lifecycleEpoch: source.lifecycleEpoch } : {}),
       firstSeenAt: sourceStartedAt,
       lastDataAt: null,
       lastErrorCode: null,
@@ -447,12 +448,13 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       resourceAvailabilitySummary: null,
       tx,
     });
-    await resetHostedJunctionWeightHistoryCoverageForSource({
-      connection,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
+    if (source) {
+      await input.store.advanceConnectionSourceStartBoundary({
+        connectionId: expectedConnection.id,
+        updatedAt: sourceStartedAt,
+        tx,
+      });
+    }
   });
 }
 
@@ -466,128 +468,10 @@ function hostedConnectionSourceMatchesReconnectProof(
   return expected.id === current.id
     && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt === current.lastSeenAt
     && expected.sourceInstanceKey === current.sourceInstanceKey
     && expected.status === current.status;
-}
-
-/**
- * Reconciles a signed Junction source-registration event against live provider
- * state. The source row is captured before the provider read and revalidated
- * before either admission or target-only cleanup.
- */
-export async function reconcileHostedDeviceSyncConnectionSourceRegistration(input: {
-  account: PublicDeviceSyncAccount;
-  registry: DeviceSyncRegistry;
-  sourceProviderSlug: string;
-  store: PrismaDeviceSyncControlPlaneStore;
-}): Promise<"admitted" | "not_ready" | "removed"> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
-  const userId = await input.store.getConnectionOwnerId(input.account.id);
-  if (!sourceProviderSlug || !userId) {
-    return "not_ready";
-  }
-
-  const target = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
-    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
-    const source = await findHostedConnectionSource({
-      connectionId: input.account.id,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
-    const storedAccount = await input.store.getStoredConnectionAccountForUser(
-      userId,
-      input.account.id,
-      tx,
-    );
-    const handler = input.registry.get("junction")?.connectionHandler;
-    if (
-      !connection
-      || !publicAccountMatchesDisconnectTarget(input.account, connection)
-      || !source
-      || !storedAccount
-      || !handler?.isSourceAccessActive
-    ) {
-      throw sourceRegistrationReconciliationUnavailableError();
-    }
-    return { connection, source, storedAccount, isSourceAccessActive: handler.isSourceAccessActive };
-  });
-
-  const sourceAccessActive = await target.isSourceAccessActive(
-    target.storedAccount,
-    sourceProviderSlug,
-  );
-
-  const outcome = await input.store.withConnectionMutationLock(input.account.id, async (tx) => {
-    const connection = await input.store.getConnectionForUser(userId, input.account.id, tx);
-    const source = await findHostedConnectionSource({
-      connectionId: input.account.id,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
-    const storedAccount = await input.store.getStoredConnectionAccountForUser(
-      userId,
-      input.account.id,
-      tx,
-    );
-    if (
-      !connection
-      || !publicAccountMatchesDisconnectTarget(target.connection, connection)
-      || !storedAccountMatchesDisconnectTarget(target.storedAccount, storedAccount)
-      || !source
-      || source.id !== target.source.id
-    ) {
-      connectionChangedDuringDisconnectError();
-    }
-
-    if (
-      sourceAccessActive
-      && isEstablishedDeviceSyncConnection(connection)
-      && hostedConnectionSourceMatchesReconnectProof(target.source, source)
-    ) {
-      if (source.status === "connected" && !isHostedSourceDisconnectFenced(source)) {
-        return "admitted" as const;
-      }
-      if (source.status === "disconnected" && source.lastErrorCode === null) {
-        await input.store.upsertConnectionSource({
-          connectionId: input.account.id,
-          sourceInstanceKey: source.sourceInstanceKey,
-          sourceProviderSlug,
-          status: "connected",
-          lastErrorCode: null,
-          lastErrorMessage: null,
-          lastSeenAt: nextHostedSourceLifecycleAt(source.lastSeenAt),
-          tx,
-        });
-        return "admitted" as const;
-      }
-    }
-
-    if (
-      !isEstablishedDeviceSyncConnection(connection)
-      || isHostedSourceDisconnectFenced(source)
-    ) {
-      return "cleanup" as const;
-    }
-    return "stale" as const;
-  });
-
-  if (outcome === "admitted") {
-    return "admitted";
-  }
-  if (outcome === "cleanup") {
-    await cleanupRejectedHostedDeviceSyncConnectionSource({
-      account: input.account,
-      connectionStartedAt: "1970-01-01T00:00:00.000Z",
-      registry: input.registry,
-      sourceProviderSlug,
-      store: input.store,
-    });
-    return "removed";
-  }
-  return "not_ready";
 }
 
 /**
@@ -602,7 +486,7 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   userId: string;
 }): Promise<StartConnectionSourceLifecycleProof> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     throw sourceStartCleanupUnavailableError();
   }
@@ -644,7 +528,10 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       };
     }
 
-    const claimAt = nextHostedSourceLifecycleAt(source.lastSeenAt);
+    const claimAt = nextHostedSourceLifecycleAt(
+      source.lastSeenAt,
+      connection.updatedAt,
+    );
     await writeHostedConnectionSourceLifecycle({
       errorCode: HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
       errorMessage: null,
@@ -652,6 +539,11 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       source,
       status: source.status,
       store: input.store,
+      tx,
+    });
+    await input.store.advanceConnectionSourceStartBoundary({
+      connectionId: input.connectionId,
+      updatedAt: claimAt,
       tx,
     });
     return { claimAt, connection, revokeSourceAccess, source, storedAccount };
@@ -728,25 +620,12 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             sourceProviderSlug,
             status: "disconnected",
             firstSeenAt: sourceStartedAt,
+            lifecycleEpoch: source.lifecycleEpoch,
             lastDataAt: null,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: sourceStartedAt,
             resourceAvailabilitySummary: null,
-            tx,
-          });
-          const connection = await input.store.getConnectionForUser(
-            input.userId,
-            input.connectionId,
-            tx,
-          );
-          if (!connection) {
-            connectionChangedDuringDisconnectError();
-          }
-          await resetHostedJunctionWeightHistoryCoverageForSource({
-            connection,
-            sourceProviderSlug,
-            store: input.store,
             tx,
           });
           return { complete: true as const, source: preparedSource };
@@ -809,12 +688,6 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       lastSeenAt: sourceStartedAt,
       tx,
     });
-    await resetHostedJunctionWeightHistoryCoverageForSource({
-      connection,
-      sourceProviderSlug,
-      store: input.store,
-      tx,
-    });
     return {
       connectionId: input.connectionId,
       lastSeenAt: preparedSource.lastSeenAt,
@@ -822,28 +695,6 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
       sourceProviderSlug,
     };
   });
-}
-
-async function resetHostedJunctionWeightHistoryCoverageForSource(input: {
-  connection: PublicDeviceSyncAccount;
-  sourceProviderSlug: string;
-  store: PrismaDeviceSyncControlPlaneStore;
-  tx: HostedPrismaTransactionClient;
-}): Promise<void> {
-  const metadata = removeJunctionExtendedTimeseriesHistoryBackfillCoverage({
-    metadata: input.connection.metadata,
-    providerSlug: input.sourceProviderSlug,
-    resource: "weight",
-    version: 1,
-  });
-  if (!metadata) {
-    return;
-  }
-
-  await input.store.syncDurableConnectionState({
-    ...input.connection,
-    metadata,
-  }, input.tx);
 }
 
 /**
@@ -858,7 +709,7 @@ export async function cleanupRejectedHostedDeviceSyncConnectionSource(input: {
   sourceProviderSlug: string;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<void> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   const userId = await input.store.getConnectionOwnerId(input.account.id);
   if (!sourceProviderSlug || !userId) {
     return;
@@ -1535,11 +1386,6 @@ type HostedDeviceSyncConnectionEstablishedAccount = {
   status: PublicDeviceSyncAccount["status"];
 };
 
-type HostedDeviceSyncConnectionEstablishedAuthority = {
-  connection: HostedDeviceSyncConnectionEstablishedAccount;
-  source: HostedConnectionSourceAdmissionCandidate | null;
-};
-
 function buildHostedDeviceSyncConnectionEstablishedWake(input: {
   account: HostedDeviceSyncConnectionEstablishedAccount;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
@@ -1572,8 +1418,9 @@ function buildHostedDeviceSyncConnectionEstablishedWake(input: {
 
 async function commitHostedDeviceSyncConnectionEstablishedTx(input: {
   account: HostedDeviceSyncConnectionEstablishedAccount;
-  authority?: HostedDeviceSyncConnectionEstablishedAuthority;
   connectionStartedAt?: string | null;
+  currentConnectionRecord?: HostedConnectionRecord;
+  currentSource?: HostedConnectionSourceAdmissionCandidate;
   sourceProviderSlug?: string | null;
   connection: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   now: string;
@@ -1583,15 +1430,28 @@ async function commitHostedDeviceSyncConnectionEstablishedTx(input: {
   tx: HostedPrismaTransactionClient;
   wake: HostedExecutionDeviceSyncWake;
 }): Promise<AppendHostedMailboxItemResult> {
-  const current = input.authority?.connection ?? await input.store.getConnectionForUser(
-    input.ownerId,
-    input.account.id,
-    input.tx,
-  );
+  // Prepared-webhook admission passes the connection row and semantic source
+  // already revalidated under this same lock. Native completion still reads.
+  const currentConnectionAccount = input.currentConnectionRecord
+    ? null
+    : await input.store.getConnectionForUser(
+        input.ownerId,
+        input.account.id,
+        input.tx,
+      );
+  const currentConnection = input.currentConnectionRecord
+    ? {
+        connectedAt: input.currentConnectionRecord.connectedAt.toISOString(),
+        metadata: mapHostedConnectionRecord(input.currentConnectionRecord).metadata,
+        status: normalizeHostedDeviceSyncLifecycleStatus(
+          input.currentConnectionRecord.status,
+        ),
+      }
+    : currentConnectionAccount;
   if (
-    !current
-    || current.status !== input.account.status
-    || current.connectedAt !== input.account.connectedAt
+    !currentConnection
+    || currentConnection.status !== input.account.status
+    || currentConnection.connectedAt !== input.account.connectedAt
   ) {
     throw deviceSyncError({
       code: "CONNECTION_ESTABLISHMENT_STALE",
@@ -1606,35 +1466,66 @@ async function commitHostedDeviceSyncConnectionEstablishedTx(input: {
     sourceProviderSlug: input.sourceProviderSlug ?? null,
   });
   if (linkedSource) {
-    const currentSource = input.authority
-      ? input.authority.source
-      : await input.store.resolveConnectionSourceAdmissionCandidate({
-          connectionId: input.account.id,
-          sourceInstanceKey: linkedSource.sourceInstanceKey,
-          sourceProviderSlug: linkedSource.sourceProviderSlug,
-          tx: input.tx,
-        });
-    if (
-      currentSource
-      && (
-        isHostedSourceDisconnectFenced(currentSource)
-        || (
-          currentSource.status === "disconnected"
-          && input.connectionStartedAt
-          && isHostedSourceConnectionStartOlder(
-            input.connectionStartedAt,
-            currentSource.lastSeenAt,
-          )
-        )
-      )
-    ) {
+    const currentSourceCandidate = input.currentSource
+      ?? await input.store.resolveConnectionSourceAdmissionCandidate({
+        connectionId: input.account.id,
+        sourceInstanceKey: linkedSource.sourceInstanceKey,
+        sourceProviderSlug: linkedSource.sourceProviderSlug,
+        tx: input.tx,
+      });
+    const currentSource = currentSourceCandidate
+      ? {
+          ...currentSourceCandidate,
+          lastSeenAt: currentSourceCandidate.lastSeenAt.toISOString(),
+        }
+      : null;
+    const sourceAdmission = decideJunctionSourceCallbackAdmission({
+      connectionStartedAt: input.connectionStartedAt,
+      currentSource,
+    });
+    if (sourceAdmission === "reject") {
       throw connectionEstablishmentStaleError();
+    }
+    let advancedLifecycleEpoch: number | undefined;
+    if (sourceAdmission === "advance_lifecycle") {
+      if (!currentSource) {
+        throw connectionEstablishmentStaleError();
+      }
+      advancedLifecycleEpoch = nextHostedSourceLifecycleEpoch(
+        currentSource.lifecycleEpoch,
+      );
+      const reopenedMetadata = clearJunctionScheduleTimeExtendedHistoryCoverageForProvider({
+        metadata: currentConnection.metadata,
+        providerSlug: linkedSource.sourceProviderSlug,
+      });
+      if (input.currentConnectionRecord) {
+        await input.store.syncDurableConnectionMetadata(
+          input.account.id,
+          reopenedMetadata,
+          input.tx,
+        );
+      } else {
+        if (!currentConnectionAccount) {
+          connectionEstablishmentStaleError();
+        }
+        await input.store.syncDurableConnectionState({
+          ...currentConnectionAccount,
+          metadata: reopenedMetadata,
+        }, input.tx);
+      }
     }
     await input.store.upsertConnectionSource({
       connectionId: input.account.id,
-      sourceInstanceKey: linkedSource.sourceInstanceKey,
-      sourceProviderSlug: linkedSource.sourceProviderSlug,
+      sourceInstanceKey: currentSource?.sourceInstanceKey
+        ?? linkedSource.sourceInstanceKey,
+      sourceProviderSlug: currentSource?.sourceProviderSlug
+        ?? linkedSource.sourceProviderSlug,
       status: "connected",
+      ...(advancedLifecycleEpoch !== undefined
+        ? { lifecycleEpoch: advancedLifecycleEpoch }
+        : currentSource
+          ? { lifecycleEpoch: currentSource.lifecycleEpoch }
+          : {}),
       firstSeenAt: input.now,
       lastSeenAt: input.now,
       tx: input.tx,
@@ -1726,16 +1617,10 @@ async function findHostedConnectionSource(input: {
   store: PrismaDeviceSyncControlPlaneStore;
   tx: HostedPrismaTransactionClient;
 }): Promise<HostedDeviceConnectionSource | null> {
-  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
-    connectionId: input.connectionId,
-    sourceProviderSlug: input.sourceProviderSlug,
-  });
-  if (!sourceInstanceKey) {
-    return null;
-  }
-
-  return (await input.store.listConnectionSources(input.connectionId, input.tx))
-    .find((source) => source.sourceInstanceKey === sourceInstanceKey) ?? null;
+  return resolveHostedJunctionConnectionSource(
+    await input.store.listConnectionSources(input.connectionId, input.tx),
+    input.sourceProviderSlug,
+  );
 }
 
 async function readCurrentSourceDisconnectTarget(input: {
@@ -1810,6 +1695,7 @@ async function writeHostedConnectionSourceLifecycle(input: {
     sourceInstanceKey: input.source.sourceInstanceKey,
     sourceProviderSlug: input.source.sourceProviderSlug,
     status: input.status,
+    lifecycleEpoch: input.source.lifecycleEpoch,
     lastErrorCode: input.errorCode,
     lastErrorMessage: input.errorMessage,
     lastSeenAt: input.now,
@@ -1852,15 +1738,6 @@ function sourceAdmissionCleanupUnavailableError(): never {
   });
 }
 
-function sourceRegistrationReconciliationUnavailableError(): never {
-  throw deviceSyncError({
-    code: "CONNECTION_SOURCE_REGISTRATION_RECONCILIATION_UNAVAILABLE",
-    message: "Current device source registration could not be reconciled. Retry shortly.",
-    retryable: true,
-    httpStatus: 503,
-  });
-}
-
 function sourceStartCleanupUnavailableError(): never {
   throw deviceSyncError({
     cause: {
@@ -1874,25 +1751,26 @@ function sourceStartCleanupUnavailableError(): never {
   });
 }
 
-function nextHostedSourceLifecycleAt(previous: string | null): string {
-  const previousMs = previous === null ? Number.NaN : Date.parse(previous);
+function nextHostedSourceLifecycleAt(...previous: Array<string | null>): string {
   return toIsoTimestamp(new Date(Math.max(
     Date.now(),
-    Number.isFinite(previousMs) ? previousMs + 1 : 0,
+    ...previous.map((value) => {
+      const previousMs = value === null ? Number.NaN : Date.parse(value);
+      return Number.isFinite(previousMs) ? previousMs + 1 : 0;
+    }),
   )));
 }
 
-function isHostedSourceConnectionStartOlder(
-  connectionStartedAt: string,
-  sourceEpoch: Date | string,
-): boolean {
-  const connectionStartedAtMs = Date.parse(connectionStartedAt);
-  const sourceEpochMs = sourceEpoch instanceof Date
-    ? sourceEpoch.getTime()
-    : Date.parse(sourceEpoch);
-  return !Number.isFinite(connectionStartedAtMs)
-    || !Number.isFinite(sourceEpochMs)
-    || connectionStartedAtMs < sourceEpochMs;
+function nextHostedSourceLifecycleEpoch(previous: number): number {
+  if (!Number.isSafeInteger(previous) || previous < 1 || previous >= Number.MAX_SAFE_INTEGER) {
+    throw deviceSyncError({
+      code: "CONNECTION_SOURCE_LIFECYCLE_EPOCH_INVALID",
+      message: "Device source lifecycle state was invalid. Reconnect the parent connection.",
+      retryable: false,
+      httpStatus: 409,
+    });
+  }
+  return previous + 1;
 }
 
 function connectionEstablishmentStaleError(): never {
@@ -1915,7 +1793,7 @@ function resolveHostedJunctionLinkedSource(input: {
     return null;
   }
 
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (!sourceProviderSlug) {
     return null;
   }
@@ -2008,7 +1886,7 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     acceptedAt: input.now,
     acceptanceMode: input.webhook.acceptanceMode,
     connectionId: input.account.id,
-    dataSourceProviderSlug: normalizeJunctionProviderSlug(
+    dataSourceProviderSlug: canonicalizeJunctionProviderSlug(
       input.webhook.dataSourceProviderSlug,
     ),
     expectedConnectedAt: input.account.connectedAt,
@@ -2057,7 +1935,7 @@ async function prepareHostedWebhookSourceObservation(input: {
   traceId: string | null;
   webhook: DeviceSyncIngressWebhook;
 }): Promise<HostedWebhookSourceObservationPreparation> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.webhook.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.webhook.sourceProviderSlug);
   if (input.provider !== "junction" || !sourceProviderSlug) {
     return { kind: "not_required", preparationAuthorityProven: false };
   }
@@ -2120,7 +1998,10 @@ async function prepareHostedWebhookSourceObservation(input: {
             httpStatus: 503,
           });
         }
-        if (isHostedConnectionSourceAdmitted([source], sourceProviderSlug)) {
+        if (
+          source.status === "connected"
+          && !isHostedSourceDisconnectFenced(source)
+        ) {
           return { kind: "not_required", preparationAuthorityProven: true };
         }
         if (
@@ -2297,7 +2178,7 @@ async function persistHostedDeviceSyncCompanionResource(input: {
   userId: string;
   wakeReason: string;
 }): Promise<void> {
-  const sourceProviderSlug = normalizeJunctionProviderSlug(
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(
     input.resource.resource === COMPANION_HRV_RMSSD_RESOURCE
       ? JUNCTION_COMPANION_HRV_SOURCE_PROVIDER
       : input.resource.sourceProviderSlug,
@@ -2482,7 +2363,10 @@ async function requireHostedCompanionAdmissionTx(input: {
     sourceProviderSlug: input.sourceProviderSlug,
     tx: input.tx,
   });
-  if (!isHostedConnectionSourceAdmitted(source ? [source] : [], input.sourceProviderSlug)) {
+  if (
+    source
+    && (source.status !== "connected" || isHostedSourceDisconnectFenced(source))
+  ) {
     throw deviceSyncError({
       code: "COMPANION_HEALTH_SOURCE_REQUIRED",
       message: "Reconnect this health source before syncing health data.",
@@ -2810,6 +2694,14 @@ async function persistHostedDeviceSyncWebhookAccepted(
     retrySourceAfterCommit: boolean;
     wakeMailboxItemIds: string[];
   };
+  // Registration recovery already commits the callback-equivalent connected
+  // signal/mailbox; its wake also drains the durable dirty record.
+  const sourceEstablishmentOwnsWebhookHandoff = input.sourceObservation !== null
+    && input.provider === "junction"
+    && (
+      input.eventType === "provider.connection.created"
+      || input.eventType === "provider.connection.updated"
+    );
   try {
     result = await runWithHostedDeviceSyncPreparedWriteReplan(async (attempt) => {
       const hasPayloadResources = input.dirtyResources.some(
@@ -2957,16 +2849,21 @@ async function persistHostedDeviceSyncWebhookAccepted(
 
             const wakeMailboxItemIds: string[] = [];
             if (input.sourceObservation) {
-              if (!preparedMailbox || !sourceConnectionAccount || !sourceConnectionWake) {
+              if (
+                !preparedMailbox
+                || !sourceConnectionAccount
+                || !sourceConnectionWake
+                || !finalAdmission.currentConnectionRecord
+                || !finalAdmission.currentSource
+              ) {
                 throw createHostedDeviceSyncDirtyPreparationMismatchError();
               }
               const sourceMailboxAppend = await commitHostedDeviceSyncConnectionEstablishedTx({
                 account: sourceConnectionAccount,
-                authority: {
-                  connection: finalAdmission.connection,
-                  source: finalAdmission.source,
-                },
                 connection: input.sourceObservation.connectionWork,
+                connectionStartedAt: input.sourceObservation.source.lastSeenAt.toISOString(),
+                currentConnectionRecord: finalAdmission.currentConnectionRecord,
+                currentSource: finalAdmission.currentSource,
                 now: input.acceptedAt,
                 ownerId: input.userId,
                 preparedMailbox,
@@ -3074,7 +2971,10 @@ async function persistHostedDeviceSyncWebhookAccepted(
             }
             await completeHostedWebhookTraceTx(input, tx);
 
-            if (dirtyUpdate.shouldRequestWake) {
+            if (
+              dirtyUpdate.shouldRequestWake
+              && !sourceEstablishmentOwnsWebhookHandoff
+            ) {
               if (!preparedMailbox) {
                 throw createHostedDeviceSyncDirtyPreparationMismatchError();
               }
@@ -3120,8 +3020,11 @@ async function persistHostedDeviceSyncWebhookAccepted(
               wakeMailboxItemIds.push(mailboxAppend.item.id);
             }
             if (
-              input.acceptanceMode !== "level_dirty_hint"
-              || dirtyUpdate.shouldRequestWake
+              !sourceEstablishmentOwnsWebhookHandoff
+              && (
+                input.acceptanceMode !== "level_dirty_hint"
+                || dirtyUpdate.shouldRequestWake
+              )
             ) {
               await input.store.createSignal({
                 userId: input.userId,
@@ -3173,16 +3076,16 @@ async function persistHostedDeviceSyncWebhookAccepted(
 type HostedDeviceSyncWebhookAdmissionStatus =
   | { kind: "completed" }
   | {
-      connection: HostedDeviceSyncConnectionEstablishedAccount;
+      currentConnectionRecord: HostedConnectionRecord | null;
+      currentSource: HostedConnectionSourceAdmissionCandidate | null;
       kind: "ready";
       setupPending: boolean;
-      source: HostedConnectionSourceAdmissionCandidate | null;
     }
   | {
-      connection: HostedDeviceSyncConnectionEstablishedAccount;
+      currentConnectionRecord: HostedConnectionRecord | null;
+      currentSource: HostedConnectionSourceAdmissionCandidate | null;
       kind: "migration_pending";
       setupPending: boolean;
-      source: HostedConnectionSourceAdmissionCandidate | null;
       successorFirstSeenAt: Date;
     };
 
@@ -3255,8 +3158,9 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     await completeHostedWebhookTraceTx(input, tx);
     return { kind: "completed" };
   }
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  let currentSource: HostedConnectionSourceAdmissionCandidate | null = null;
   let source: HostedConnectionSourceAdmissionCandidate | null = null;
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (sourceProviderSlug) {
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId: input.connectionId,
@@ -3311,6 +3215,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
           httpStatus: 503,
         });
       }
+      currentSource = source;
     } else {
       if (!source) {
         throw deviceSyncError({
@@ -3321,7 +3226,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         });
       }
 
-      if (!isHostedConnectionSourceAdmitted([source], sourceProviderSlug)) {
+      if (source.status !== "connected" || isHostedSourceDisconnectFenced(source)) {
         if (
           sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
           && isGoogleHealthFitbitMigrationLegacyTerminal(source)
@@ -3346,18 +3251,11 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       }
     }
   }
-  const connection = {
-    connectedAt: current.connectedAt.toISOString(),
-    id: input.connectionId,
-    provider: current.provider,
-    scopes: input.scopes,
-    status: normalizeHostedDeviceSyncLifecycleStatus(current.status),
-  } satisfies HostedDeviceSyncConnectionEstablishedAccount;
   const ready = {
-    connection,
+    currentConnectionRecord: sourceCredentialCurrent,
+    currentSource,
     kind: "ready" as const,
     setupPending,
-    source,
   };
 
   const dataSourceProviderSlug = normalizeJunctionProviderSlug(
@@ -3525,13 +3423,24 @@ function hostedConnectionSourceAdmissionMatchesProof(
   expected: HostedConnectionSourceAdmissionCandidate,
   current: HostedConnectionSourceAdmissionCandidate,
 ): boolean {
-  return expected.id === current.id
+  const expectedCanonicalProvider = canonicalizeJunctionProviderSlug(
+    expected.sourceProviderSlug,
+  );
+  const currentCanonicalProvider = canonicalizeJunctionProviderSlug(
+    current.sourceProviderSlug,
+  );
+  const identityMatches = expectedCanonicalProvider && currentCanonicalProvider
+    ? expectedCanonicalProvider === currentCanonicalProvider
+    : expected.id === current.id
+      && expected.sourceInstanceKey === current.sourceInstanceKey
+      && expected.sourceProviderSlug === current.sourceProviderSlug;
+
+  return identityMatches
     && expected.firstSeenAt.getTime() === current.firstSeenAt.getTime()
     && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
+    && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt.getTime() === current.lastSeenAt.getTime()
-    && expected.sourceInstanceKey === current.sourceInstanceKey
-    && expected.sourceProviderSlug === current.sourceProviderSlug
     && expected.status === current.status;
 }
 

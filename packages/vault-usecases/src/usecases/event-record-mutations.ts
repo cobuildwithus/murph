@@ -426,12 +426,18 @@ export async function editEventRecord(input: EditEventRecordInput) {
       dayKeyPolicy: input.dayKeyPolicy,
     }),
   )
+  // The public edit action is member-authored. Preserve provider attribution,
+  // but never let an inherited or caller-supplied device source reclaim the
+  // provider-owned reconciliation lane.
+  const memberOwnedPayload = payload.source === 'device' || patchedPayload.source === 'device'
+    ? { ...patchedPayload, source: 'manual' }
+    : patchedPayload
   const core = await loadEventMutationCoreRuntime()
 
   try {
     const result = await core.upsertEvent({
       vaultRoot: input.vault,
-      payload: patchedPayload,
+      payload: memberOwnedPayload,
       allowSpecializedKindRewrite: true,
     })
 

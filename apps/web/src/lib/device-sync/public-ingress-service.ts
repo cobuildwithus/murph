@@ -3,6 +3,7 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
+  canonicalizeJunctionProviderSlug,
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
@@ -110,7 +111,7 @@ export class HostedDeviceSyncPublicIngressService {
         // confirms access under the consent/app/connection/source fences.
         onConnectionSourceObserved: ({ account, sourceProviderSlug }) =>
           account.provider === "junction"
-            && normalizeJunctionProviderSlug(sourceProviderSlug) !== null
+            && canonicalizeJunctionProviderSlug(sourceProviderSlug) !== null
             ? { sourceAdmissionDeferred: true }
             : undefined,
         onConnectionEstablished: async ({
@@ -902,7 +903,7 @@ function buildPreparedSourceLifecycleKey(
   provider: string,
   sourceProviderSlug: string | null,
 ): string | null {
-  const normalizedSourceProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   return provider === "junction" && normalizedSourceProviderSlug
     ? `${userId}\u0000${normalizedSourceProviderSlug}`
     : null;

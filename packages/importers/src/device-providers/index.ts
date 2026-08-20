@@ -1,6 +1,7 @@
 export {
   importDeviceProviderSnapshot,
   prepareDeviceProviderSnapshotImport,
+  resolveDeviceProviderSnapshotDefaultTimeZone,
   type DeviceProviderImporterExecutionOptions,
   type DeviceProviderSnapshotImportInput,
 } from "./import-device-provider-snapshot.ts";
@@ -46,6 +47,12 @@ export {
   type JunctionSummaryResource,
 } from "./junction.ts";
 export {
+  JUNCTION_TEMPORAL_FEATURE_ENVELOPE_MAX_BYTES,
+  JUNCTION_TEMPORAL_FEATURE_MAX_OBSERVATIONS_PER_DAY,
+  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_DAY,
+  JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
+} from "./junction-timeseries-features.ts";
+export {
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
@@ -67,6 +74,7 @@ export {
   type WhoopSnapshotInput,
 } from "./whoop.ts";
 export type {
+  CompleteDeviceProviderSourceDay,
   DeviceProviderAdapter,
   DeviceProviderSnapshotImportPayload,
   NormalizedDeviceBatch,

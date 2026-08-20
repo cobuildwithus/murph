@@ -68,6 +68,7 @@ function source(input: {
     lastDataAt: legacy ? "2026-08-16T23:59:59.000Z" : NOW,
     lastErrorCode: input.error ?? null,
     lastErrorMessage: null,
+    lifecycleEpoch: 1,
     lastSeenAt: input.lastSeenAt ?? "2026-08-17T17:59:00.000Z",
     resourceAvailabilitySummary: legacy
       ? {

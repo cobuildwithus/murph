@@ -3,6 +3,7 @@ import path from "node:path";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 import {
   buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import {
   areJunctionProviderSlugsDataEquivalent,
@@ -80,19 +81,34 @@ function createHostedRuntimeDeviceSyncImporter(
       try {
         return await importer.importDeviceProviderSnapshot(input);
       } catch (error) {
-        if (!(error instanceof HostedRuntimeArtifactWriteError)) {
-          throw error;
-        }
-        throw deviceSyncError({
-          cause: error,
-          code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
-          httpStatus: error.retryable ? 503 : 500,
-          message: "Hosted device-sync artifact persistence failed. Retry shortly.",
-          retryable: error.retryable,
-        });
+        throw translateHostedRuntimeDeviceSyncImporterError(error);
       }
     },
+    ...(importer.resolveDeviceProviderSnapshotDefaultTimeZone
+      ? {
+          async resolveDeviceProviderSnapshotDefaultTimeZone(input) {
+            try {
+              return await importer.resolveDeviceProviderSnapshotDefaultTimeZone?.(input);
+            } catch (error) {
+              throw translateHostedRuntimeDeviceSyncImporterError(error);
+            }
+          },
+        }
+      : {}),
   };
+}
+
+function translateHostedRuntimeDeviceSyncImporterError(error: unknown): unknown {
+  if (!(error instanceof HostedRuntimeArtifactWriteError)) {
+    return error;
+  }
+  return deviceSyncError({
+    cause: error,
+    code: "HOSTED_DEVICE_SYNC_ARTIFACT_WRITE_FAILED",
+    httpStatus: error.retryable ? 503 : 500,
+    message: "Hosted device-sync artifact persistence failed. Retry shortly.",
+    retryable: error.retryable,
+  });
 }
 
 async function listHostedJobConnectionSources(input: {
@@ -224,6 +240,44 @@ function dedupeHostedJobConnectionSources(
       left.sourceProviderSlug,
       right.sourceProviderSlug,
     ),
+    hostedSourceStateUnavailable,
+  );
+}
+
+type CanonicalizableHostedJunctionSource = Omit<
+  ProviderJobConnectionSource,
+  "lastDataAt" | "lastSeenAt"
+> & {
+  lastDataAt?: string | null;
+  lastSeenAt?: string;
+};
+
+export function canonicalizeHostedJunctionSources<
+  T extends CanonicalizableHostedJunctionSource,
+>(
+  sources: readonly T[],
+  connectionId?: string,
+): T[] {
+  const canonicalSources: T[] = [];
+  for (const source of sources) {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+      source.sourceProviderSlug,
+    );
+    if (!sourceProviderSlug) {
+      continue;
+    }
+    const sourceInstanceKey = connectionId
+      ? buildJunctionProviderSourceInstanceKey({ connectionId, sourceProviderSlug })
+      : source.sourceInstanceKey;
+    canonicalSources.push({
+      ...source,
+      sourceProviderSlug,
+      ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
+    });
+  }
+  return dedupeDeviceSyncSourcesByIdentity(
+    canonicalSources,
+    (left, right) => left.sourceProviderSlug === right.sourceProviderSlug,
     hostedSourceStateUnavailable,
   );
 }

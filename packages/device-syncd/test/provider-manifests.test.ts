@@ -136,12 +136,14 @@ describe("deviceSyncProviderManifests", () => {
     }
     expect(junctionConfig.timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
-    expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-5)).toEqual([
-      "steps",
-      "distance",
-      "calories_active",
-      "heartrate",
-      "weight",
+    expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-7)).toEqual([
+      "forced_vital_capacity",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "fall",
     ]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
@@ -162,20 +164,11 @@ describe("deviceSyncProviderManifests", () => {
 
     expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
       "body_mass_index",
-      "carbohydrates",
       "fat",
-      "forced_expiratory_volume_1",
-      "forced_vital_capacity",
-      "heart_rate_alert",
-      "inhaler_usage",
-      "insulin_injection",
       "lean_body_mass",
-      "peak_expiratory_flow_rate",
-      "sleep_apnea_alert",
       "waist_circumference",
       "calories_basal",
       "daylight_exposure",
-      "fall",
       "floors_climbed",
       "handwashing",
       "stand_duration",

@@ -97,6 +97,8 @@ export interface DeviceSyncAccountSourceSummary {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /** Monotonic exact-source connection lifecycle. */
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   lastDataAt: string | null;
@@ -112,6 +114,7 @@ export interface DeviceConnectionSourceRecord {
   resourceAvailabilitySummary: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload that carried this source's data; null until one has. */
@@ -129,6 +132,8 @@ export interface UpsertDeviceConnectionSourceInput {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode?: string | null;
   lastErrorMessage?: string | null;
+  /** Omit to preserve the stored lifecycle; reconnect owners advance it explicitly. */
+  lifecycleEpoch?: number;
   firstSeenAt?: string | null;
   /** Hosted hydration only: replace an exact source after Web advances its epoch. */
   replaceFirstSeenAt?: boolean;

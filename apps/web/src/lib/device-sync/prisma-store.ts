@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 
+import { canonicalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
 import type {
@@ -27,6 +28,7 @@ import {
 } from "../hosted-onboarding/shared";
 import { readHostedHealthDataConsentState } from "../legal/consent";
 import type { AuthenticatedHostedUser, HostedBrowserAssertionNonceStore } from "./auth";
+import { resolveHostedJunctionConnectionSource } from "./connection-source-lifecycle";
 import type { HostedLocalHeartbeatPatch } from "./local-heartbeat";
 import type {
   HostedDeviceSyncSecretTestCodec,
@@ -106,6 +108,7 @@ export {
   type PreparedHostedDeviceSyncDirtyConnectionUpsert,
 } from "./prisma-store/dirty-connections";
 export {
+  expandCanonicalHostedSourceProviderSlugFilter,
   hostedConnectionSourceRecordArgs,
   mapHostedConnectionSourceRecord,
   type HostedConnectionSourceRecord,
@@ -426,6 +429,22 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.connections.syncDurableConnectionState(account, tx);
   }
 
+  async syncDurableConnectionMetadata(
+    connectionId: string,
+    metadata: Record<string, unknown>,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
+    return this.connections.syncDurableConnectionMetadata(connectionId, metadata, tx);
+  }
+
+  async advanceConnectionSourceStartBoundary(input: {
+    connectionId: string;
+    updatedAt: string;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<void> {
+    await this.connections.advanceConnectionSourceStartBoundary(input);
+  }
+
   async prepareRuntimeApplyTokenWrites(
     entries: readonly HostedRuntimeApplyTokenWritePreparation[],
   ): Promise<Map<string, HostedRuntimeApplyPreparedTokenWrite>> {
@@ -645,9 +664,48 @@ export class PrismaDeviceSyncControlPlaneStore
     if (typeof input === "string") {
       return sources;
     }
-    return sources.filter((source) =>
-      (!input.sourceProviderSlug || source.sourceProviderSlug === input.sourceProviderSlug)
-      && (!input.status || source.status === input.status)
+
+    // Source-filtered ingress reads use semantic authority only for Junction;
+    // direct-provider parents retain their separate physical source instances.
+    const requestedSourceProviderSlug = input.sourceProviderSlug ?? null;
+    const canonicalSourceProviderSlug = requestedSourceProviderSlug
+      ? canonicalizeJunctionProviderSlug(requestedSourceProviderSlug)
+      : null;
+    const semanticCandidates = canonicalSourceProviderSlug
+      ? sources.filter((source) =>
+          canonicalizeJunctionProviderSlug(source.sourceProviderSlug)
+            === canonicalSourceProviderSlug
+        )
+      : [];
+    const exactCandidates = requestedSourceProviderSlug
+      ? sources.filter((source) =>
+          source.sourceProviderSlug === requestedSourceProviderSlug
+        )
+      : sources;
+    const needsSemanticProjection = canonicalSourceProviderSlug !== null
+      && semanticCandidates.length > 0
+      && (
+        semanticCandidates.length > 1
+        || exactCandidates.length !== semanticCandidates.length
+      );
+    if (needsSemanticProjection) {
+      const connection = await (tx ?? this.prisma).deviceConnection.findUnique({
+        select: { provider: true },
+        where: { id: connectionId },
+      });
+      if (connection?.provider === "junction") {
+        const source = resolveHostedJunctionConnectionSource(
+          semanticCandidates,
+          canonicalSourceProviderSlug,
+        );
+        return source && (!input.status || source.status === input.status)
+          ? [source]
+          : [];
+      }
+    }
+
+    return exactCandidates.filter((source) =>
+      !input.status || source.status === input.status
     );
   }
 

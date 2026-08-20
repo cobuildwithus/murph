@@ -228,9 +228,14 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       occurredAt: stringJobField({ includeInHostedHint: true }),
       resource: stringJobField({ includeInHostedHint: true }),
       resourceCategory: stringJobField({ includeInHostedHint: true }),
+      sourceLifecycleEpoch: numberJobField({ includeInHostedHint: true }),
       sourceInstanceId: stringJobField({ includeInHostedHint: true }),
       sourceProviderSlug: stringJobField({ includeInHostedHint: true }),
       sourceType: stringJobField({ includeInHostedHint: true }),
+      // Legacy field: retained so previously queued rows still validate; the
+      // day key is now derived from windowStart plus the authority timezone.
+      temporalAuthorityDayKey: stringJobField(),
+      temporalAuthorityTimeZone: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),

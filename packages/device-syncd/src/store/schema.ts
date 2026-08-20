@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v9: device_connection_source.last_data_at (per-source data-arrival signal).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 9;
+// v10: device_connection_source.lifecycle_epoch (exact-source reconnect fence).
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 10;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -218,6 +218,19 @@ function ensureConnectionSourceLastDataColumn(database: DatabaseSync): void {
   }
 }
 
+function ensureConnectionSourceLifecycleEpochColumn(database: DatabaseSync): void {
+  if (!tableExists(database, "device_connection_source")) {
+    return;
+  }
+
+  const names = columnNames(readConnectionSourceColumns(database));
+  if (!names.has("lifecycle_epoch")) {
+    database.exec(
+      "alter table device_connection_source add column lifecycle_epoch integer not null default 1",
+    );
+  }
+}
+
 function ensureWebhookTraceClaimTokenColumn(database: DatabaseSync): void {
   if (!tableExists(database, "webhook_trace")) {
     return;
@@ -312,6 +325,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         resource_availability_summary_json text not null default '{}',
         last_error_code text,
         last_error_message text,
+        lifecycle_epoch integer not null default 1,
         first_seen_at text not null,
         last_seen_at text not null,
         last_data_at text,
@@ -402,5 +416,6 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureHostedConnectionIdentityColumn(database);
   ensureWebhookTraceClaimTokenColumn(database);
   ensureConnectionSourceLastDataColumn(database);
+  ensureConnectionSourceLifecycleEpochColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

@@ -294,6 +294,9 @@
       "@murphai/device-syncd/junction-historical-backfill-progress": [
         "../../packages/device-syncd/src/junction-historical-backfill-progress.ts"
       ],
+      "@murphai/device-syncd/junction-source-reconnect": [
+        "../../packages/device-syncd/src/junction-source-reconnect.ts"
+      ],
       "@murphai/device-syncd/junction-resources": [
         "../../packages/device-syncd/src/junction-resources.ts"
       ],
