@@ -353,7 +353,7 @@ function buildHostedSignupWelcomeEmailMurphStartLine(input: {
   }
 
   return input.allowDirectEmailRoute
-    ? `Email Murph at ${MURPH_CONTACT_EMAIL}. Murph will send a private reply so you can start the conversation securely.`
+    ? `Email Murph at ${MURPH_CONTACT_EMAIL}. Murph will send a private reply within a few minutes so you can start the conversation securely. If it does not arrive, resend your email.`
     : null;
 }
 

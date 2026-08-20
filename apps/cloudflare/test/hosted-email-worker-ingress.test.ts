@@ -232,6 +232,74 @@ describe("hosted email worker ingress", () => {
     expect(listHostedEmailRecoveryKeys(bucket)).toEqual([]);
   });
 
+  it("uses one waitUntil and stops a chunked public stream at the split header boundary", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      }),
+    );
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode([
+        "From: Member <member@example.test>",
+        "To: mail@mail.withmurph.ai",
+        "Subject: private subject",
+        "",
+      ].join("\r\n")),
+      encoder.encode("\r\n"),
+      encoder.encode("private body that must never be pulled"),
+    ];
+    let pullCount = 0;
+    const cancel = vi.fn();
+    const raw = new ReadableStream<Uint8Array>({
+      cancel,
+      pull(controller) {
+        const chunk = chunks[pullCount];
+        pullCount += 1;
+        if (chunk) {
+          controller.enqueue(chunk);
+        } else {
+          controller.close();
+        }
+      },
+    }, { highWaterMark: 0 });
+    let bootstrapPromise: Promise<unknown> | null = null;
+    const waitUntil = vi.fn((promise: Promise<unknown>) => {
+      bootstrapPromise = promise;
+    });
+    const setReject = vi.fn();
+
+    await handleHostedEmailIngressProduction({
+      from: "member@example.test",
+      raw,
+      setReject,
+      to: "mail@mail.withmurph.ai",
+    }, createWorkerEnv(bucket), { waitUntil });
+
+    expect(waitUntil).toHaveBeenCalledOnce();
+    if (!bootstrapPromise) {
+      throw new Error("Expected the public bootstrap waitUntil promise.");
+    }
+    await bootstrapPromise;
+
+    expect(pullCount).toBe(2);
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledOnce();
+    const [callbackInput] = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0] ?? [];
+    expect(JSON.parse(String(callbackInput?.body))).toEqual({
+      candidateAddress: "member@example.test",
+    });
+    expect(String(callbackInput?.body)).not.toContain("private");
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+    expect(listHostedEmailRecoveryKeys(bucket)).toEqual([]);
+  });
+
   it("accepts and drops ambiguous public sender headers without lookup or persistence", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     const setReject = vi.fn();

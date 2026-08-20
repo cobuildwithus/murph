@@ -42,8 +42,13 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
 }));
 
 import {
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_COOLDOWN_MS,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_FAILED_RETRY_BACKOFF_MS,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_GLOBAL_HOURLY_LIMIT,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MEMBER_DAILY_LIMIT,
   sendHostedEmailPublicBootstrapChallenge,
 } from "@/src/lib/hosted-onboarding/hosted-email-public-bootstrap";
+import { HostedResendPlainTextEmailError } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
 import type {
   sendHostedResendPlainTextEmail,
 } from "@/src/lib/hosted-onboarding/resend-plain-text-email";
@@ -230,6 +235,127 @@ describe("hosted public email bootstrap", () => {
 
     expect(sendEmail).not.toHaveBeenCalled();
     expect(database.attempts).toHaveLength(100);
+    expect(database.client.$transaction).toHaveBeenCalledOnce();
+    expect(database.tx.$executeRaw).toHaveBeenCalledOnce();
+    expect(database.tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(database.tx.hostedMemberEmailAuthorization.findUnique)
+      .toHaveBeenCalledOnce();
+    expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledOnce();
+    expect(database.tx.hostedEmailPublicBootstrapAttempt.findFirst)
+      .toHaveBeenCalledWith({
+        where: {
+          memberId: "member_123",
+          OR: [
+            {
+              claimedAt: {
+                gte: new Date(
+                  NOW.getTime() - HOSTED_EMAIL_PUBLIC_BOOTSTRAP_COOLDOWN_MS,
+                ),
+              },
+              status: { in: ["claimed", "sending", "sent", "ambiguous"] },
+            },
+            {
+              claimedAt: {
+                gte: new Date(
+                  NOW.getTime()
+                    - HOSTED_EMAIL_PUBLIC_BOOTSTRAP_FAILED_RETRY_BACKOFF_MS,
+                ),
+              },
+              status: "failed",
+            },
+          ],
+        },
+        orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
+        select: { id: true, status: true },
+      });
+    expect(database.tx.hostedEmailPublicBootstrapAttempt.findMany.mock.calls)
+      .toEqual([
+        [{
+          where: {
+            claimedAt: { gte: new Date(NOW.getTime() - 24 * 60 * 60_000) },
+            memberId: "member_123",
+          },
+          orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
+          select: { id: true },
+          take: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MEMBER_DAILY_LIMIT,
+        }],
+        [{
+          where: {
+            claimedAt: { gte: new Date(NOW.getTime() - 60 * 60_000) },
+          },
+          orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
+          select: { id: true },
+          take: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_GLOBAL_HOURLY_LIMIT,
+        }],
+      ]);
+    expect(database.tx.hostedEmailPublicBootstrapAttempt.create)
+      .not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberReplyAliasRegistrationTx)
+      .not.toHaveBeenCalled();
+
+    const orderedCalls = [
+      database.tx.$executeRaw,
+      database.tx.$queryRaw,
+      database.tx.hostedMemberEmailAuthorization.findUnique,
+      mocks.readActiveHostedMemberAccess,
+      database.tx.hostedEmailPublicBootstrapAttempt.findFirst,
+      database.tx.hostedEmailPublicBootstrapAttempt.findMany,
+    ];
+    expect(orderedCalls.map((mock) => mock.mock.invocationCallOrder[0]))
+      .toEqual([...orderedCalls]
+        .map((mock) => mock.mock.invocationCallOrder[0])
+        .sort((left, right) => left - right));
+  });
+
+  it("backs off a confirmed no-send failure, then permits a bounded retry", async () => {
+    const database = createPrismaMock();
+    const sendEmail = vi.fn()
+      .mockRejectedValueOnce(new HostedResendPlainTextEmailError(
+        "Hosted Resend email send failed.",
+        {
+          code: "RESEND_SEND_FAILED",
+          providerStatus: 503,
+        },
+      ))
+      .mockResolvedValueOnce({ providerMessageId: "email_retry" });
+
+    await expect(sendHostedEmailPublicBootstrapChallenge({
+      candidateAddress: VERIFIED_ADDRESS,
+      env: TEST_ENV,
+      now: NOW,
+      prisma: database.client as never,
+      sendEmail,
+    })).resolves.toMatchObject({ status: "failed" });
+
+    await expect(sendHostedEmailPublicBootstrapChallenge({
+      candidateAddress: VERIFIED_ADDRESS,
+      env: TEST_ENV,
+      now: new Date(
+        NOW.getTime() + HOSTED_EMAIL_PUBLIC_BOOTSTRAP_FAILED_RETRY_BACKOFF_MS - 1,
+      ),
+      prisma: database.client as never,
+      sendEmail,
+    })).resolves.toEqual({
+      reason: "provider_backoff",
+      status: "suppressed",
+    });
+
+    await expect(sendHostedEmailPublicBootstrapChallenge({
+      candidateAddress: VERIFIED_ADDRESS,
+      env: TEST_ENV,
+      now: new Date(
+        NOW.getTime() + HOSTED_EMAIL_PUBLIC_BOOTSTRAP_FAILED_RETRY_BACKOFF_MS + 1,
+      ),
+      prisma: database.client as never,
+      sendEmail,
+    })).resolves.toMatchObject({
+      providerMessageId: "email_retry",
+      status: "sent",
+    });
+
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    expect(database.attempts.map((attempt) => attempt.status))
+      .toEqual(["failed", "sent"]);
   });
 
   it("terminalizes an uncertain provider call without issuing another send", async () => {
@@ -303,11 +429,26 @@ function createPrismaMock(initialAttempts: TestAttempt[] = []) {
         attempts.push({ ...data });
         return data;
       }),
-      findFirst: vi.fn(async ({ where }: { where: { claimedAt: { gte: Date }; memberId: string } }) =>
-        attempts.find((attempt) =>
+      findFirst: vi.fn(async ({ where }: {
+        where: {
+          memberId: string;
+          OR: Array<{
+            claimedAt: { gte: Date };
+            status: string | { in: string[] };
+          }>;
+        };
+      }) => attempts
+        .filter((attempt) =>
           attempt.memberId === where.memberId
-          && attempt.claimedAt >= where.claimedAt.gte
-        ) ?? null),
+          && where.OR.some((condition) =>
+            attempt.claimedAt >= condition.claimedAt.gte
+            && matchesStatus(attempt.status, condition.status)
+          )
+        )
+        .sort((left, right) =>
+          right.claimedAt.getTime() - left.claimedAt.getTime()
+          || right.id.localeCompare(left.id)
+        )[0] ?? null),
       findMany: vi.fn(async ({ take, where }: {
         take: number;
         where: { claimedAt: { gte: Date }; memberId?: string };
@@ -349,6 +490,7 @@ function createPrismaMock(initialAttempts: TestAttempt[] = []) {
   return {
     attempts,
     client,
+    tx,
     get authorizationLookupKey() {
       return state.authorizationLookupKey;
     },

@@ -1,6 +1,6 @@
 # Reliability
 
-Last verified: 2026-08-16
+Last verified: 2026-08-20
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -2247,12 +2247,17 @@ and invokes Web asynchronously with only a normalized candidate address. Web
 serializes admission with a global advisory lock and the member row lock,
 rechecks active access and current verified-email authority before provider
 entry, and terminalizes provider ambiguity without an automatic resend. A
-15-minute cooldown, three-attempt member daily limit, 100-attempt global hourly
-limit, provider idempotency key, and two-day attempt retention bound abuse and
-replay. Verified-email rotation changes the personal alias generation in the
-same transaction, so an old reply capability cannot be re-registered. Deploy
-the database migration and Web contract before Cloudflare; roll back
-Cloudflare first.
+confirmed provider no-send result admits a fresh public email only after a
+one-minute backoff; sent, ambiguous, claimed, and sending outcomes retain the
+15-minute cooldown. Every admitted try still counts toward the three-attempt
+member daily and 100-attempt global hourly limits. A provider idempotency key
+and two-day attempt retention further bound abuse and replay. Authenticated Web
+actions that already hold the current signed alias send their prepared intent
+there directly, so Start Experiment and device-recovery mail can remain a
+one-step assistant turn. Verified-email rotation changes the personal alias
+generation in the same transaction, so an old reply capability cannot be
+re-registered. Deploy the database migration and Web contract before
+Cloudflare; roll back Cloudflare first.
 
 ## Deterministic member action delivery
 

@@ -23,6 +23,9 @@ Updated: 2026-08-20
   the current personal Murph alias in `Reply-To`.
 - Duplicate provider delivery, cooldown, member daily limits, and a global
   ceiling cannot create duplicate or unbounded sends.
+- Authenticated website actions that already know the member's private alias
+  preserve the prepared request as the first assistant turn instead of routing
+  that intent through the public bootstrap.
 - Existing signed personal aliases continue to process ordinary member replies.
 - Focused tests, typechecks, required ReviewGPT gates, exact-head CI, and parent
   review pass.
@@ -98,6 +101,13 @@ Pull request: #2083
 - Prefer a private continuation sent to the current verified address with the
   personal alias in Reply-To. The original message is intentionally not quoted,
   retained, or processed.
+- Authenticated Start Experiment and device-recovery actions keep their
+  prepared intent on the current signed alias, so Murph can answer the first
+  email directly. A public-address fallback contains only the fixed bootstrap
+  request and explains the follow-up step.
+- A confirmed Resend no-send result may retry after a one-minute backoff while
+  still counting toward the three-attempt daily and 100-attempt hourly caps.
+  Sent, sending, claimed, and ambiguous outcomes retain the 15-minute cooldown.
 - Cloudflare's inbound Worker contract does not expose a trusted sender-auth
   verdict before application work. Its reply eligibility check happens at
   provider send time and therefore cannot authorize earlier model or tool work.
@@ -114,6 +124,12 @@ Result: Ready.
 - Active existing member: the advertised address opens in the same mail-app and
   webmail entry points, and the fixed continuation arrives at the current
   verified inbox with the current private reply alias.
+- Authenticated guided action: Start Experiment and device-recovery email
+  actions target the signed private alias with their prepared request, allowing
+  Murph to answer that initial outreach without a fixed bootstrap response.
+- Public fallback: the visible recovery copy explains the private-reply step,
+  expected few-minute wait, and resend recovery without putting device or
+  experiment intent into the unauthenticated public message.
 - Existing alias user: signed-alias replies retain the current direct path.
 - Unknown, inactive, suspended, deleted, mismatched, or limited sender: the
   public route accepts and drops without an account-existence signal.
@@ -126,6 +142,14 @@ Result: Ready.
 
 - Cloudflare focused hosted-email ingress and route proof: 5 files, 81 tests
   passed.
+- Review remediation proof: 7 Web files, 156 tests passed; 2 Cloudflare files,
+  31 tests passed; the broader Cloudflare node suite passed 2,601 tests with 2
+  skips.
+- Redacted production-component Playwright captures were inspected at desktop
+  and phone viewports for the Start Experiment private-alias chooser and the
+  public device-recovery fallback. The local Cloudflare Images uploader could
+  not publish them because its optional credential was unavailable; the local
+  images remain in the ignored ReviewGPT evidence packet.
 - Web bootstrap, callback, alias rotation, Privy onboarding, settings,
   retention, deletion, migration, delivery, and contact-surface proof: 16
   files, 505 tests passed.
@@ -135,6 +159,9 @@ Result: Ready.
 - Prisma schema validation passed.
 - Changed Web TypeScript/TSX ESLint passed with zero warnings.
 - `git diff --check` passed.
-- Preliminary ReviewGPT Product UX and coverage lenses.
+- Preliminary ReviewGPT Product UX and coverage lenses returned substantive
+  findings plus an unusable-evidence verdict. Accepted findings were resolved
+  by preserving guided-action intent, adding status-aware retry, adding the
+  requested bounded-stream/cardinality coverage, and supplying rendered proof.
 - Final cross-cutting ReviewGPT security/reliability review.
 - Required exact-head CI and current-base merge-tree proof.

@@ -37,6 +37,7 @@ const HOUR_MS = 60 * MINUTE_MS;
 const DAY_MS = 24 * HOUR_MS;
 
 export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_COOLDOWN_MS = 15 * MINUTE_MS;
+export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_FAILED_RETRY_BACKOFF_MS = MINUTE_MS;
 export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MEMBER_DAILY_LIMIT = 3;
 export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_GLOBAL_HOURLY_LIMIT = 100;
 export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_RETENTION_MS = 2 * DAY_MS;
@@ -63,7 +64,8 @@ export type HostedEmailPublicBootstrapResult =
         | "inactive"
         | "invalid_candidate"
         | "member_not_found"
-        | "not_configured";
+        | "not_configured"
+        | "provider_backoff";
       status: "suppressed";
     }
   | {
@@ -306,16 +308,33 @@ async function claimHostedEmailPublicBootstrapAttempt(input: {
 
     const recentAttempt = await tx.hostedEmailPublicBootstrapAttempt.findFirst({
       where: {
-        claimedAt: {
-          gte: new Date(
-            input.now.getTime() - HOSTED_EMAIL_PUBLIC_BOOTSTRAP_COOLDOWN_MS,
-          ),
-        },
         memberId: input.memberId,
+        OR: [
+          {
+            claimedAt: {
+              gte: new Date(
+                input.now.getTime() - HOSTED_EMAIL_PUBLIC_BOOTSTRAP_COOLDOWN_MS,
+              ),
+            },
+            status: { in: ["claimed", "sending", "sent", "ambiguous"] },
+          },
+          {
+            claimedAt: {
+              gte: new Date(
+                input.now.getTime()
+                  - HOSTED_EMAIL_PUBLIC_BOOTSTRAP_FAILED_RETRY_BACKOFF_MS,
+              ),
+            },
+            status: "failed",
+          },
+        ],
       },
       orderBy: [{ claimedAt: "desc" }, { id: "desc" }],
-      select: { id: true },
+      select: { id: true, status: true },
     });
+    if (recentAttempt?.status === "failed") {
+      return { reason: "provider_backoff", status: "suppressed" } as const;
+    }
     if (recentAttempt) {
       return { reason: "cooldown", status: "suppressed" } as const;
     }
