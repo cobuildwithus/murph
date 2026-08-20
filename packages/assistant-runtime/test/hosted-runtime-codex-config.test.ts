@@ -1879,6 +1879,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# Silent member maintenance may read the vault and write only canonical memory infrastructure.",
       `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
       '":minimal" = "read"',
+      '"/app" = "read"',
       "glob_scan_max_depth = 64",
       "",
       `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,

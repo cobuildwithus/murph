@@ -110,5 +110,7 @@ Updated: 2026-08-20
 - Native AMD64 result: the first exact-profile image run proved `/app` access
   advanced the command to sandbox startup, then exposed a second exit-101
   boundary before the Node CLI returned. Raw memory-command output remains
-  suppressed; the smoke now emits only fixed boolean error classifications so
-  the next exact run can identify that sandbox boundary without vault content.
+  suppressed; fixed boolean classifications proved a Rust panic involving
+  bubblewrap, but no ordinary permission, missing-file, module, or seccomp
+  error. The next exact run narrows the remaining bubblewrap lifecycle classes
+  without emitting vault content.
