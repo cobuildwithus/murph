@@ -9,6 +9,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   activateMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
   appendHostedMealPhotoMailboxEnvelopeTx: vi.fn(),
+  assertCurrentManualMealPhotoUploadAuthorityTx: vi.fn(),
   assertCurrentMealPhotoCaptureEnrollmentTx: vi.fn(),
   assertHostedHistoricalLaunchConsentGranted: vi.fn(),
   assertMealPhotoCaptureRequestHasNoBody: vi.fn(),
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   parseMealPhotoCaptureEnrollmentRequest: vi.fn(),
   parseMealPhotoCaptureRevocationRequest: vi.fn(),
   readAndValidateMealPhotoUpload: vi.fn(),
+  readAndValidateManualMealPhotoUpload: vi.fn(),
   readCurrentHostedMemberDirectRoute: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
@@ -44,12 +46,15 @@ vi.mock("@/src/lib/device-sync/meal-photo-capture", () => ({
     mocks.activateMealPhotoCaptureEnrollmentForScopedToken,
   assertCurrentMealPhotoCaptureEnrollmentTx:
     mocks.assertCurrentMealPhotoCaptureEnrollmentTx,
+  assertCurrentManualMealPhotoUploadAuthorityTx:
+    mocks.assertCurrentManualMealPhotoUploadAuthorityTx,
   assertMealPhotoCaptureRequestHasNoBody: mocks.assertMealPhotoCaptureRequestHasNoBody,
   isMealPhotoCaptureScopedAuthorization: mocks.isMealPhotoCaptureScopedAuthorization,
   issueMealPhotoCaptureEnrollment: mocks.issueMealPhotoCaptureEnrollment,
   parseMealPhotoCaptureEnrollmentRequest: mocks.parseMealPhotoCaptureEnrollmentRequest,
   parseMealPhotoCaptureRevocationRequest: mocks.parseMealPhotoCaptureRevocationRequest,
   readAndValidateMealPhotoUpload: mocks.readAndValidateMealPhotoUpload,
+  readAndValidateManualMealPhotoUpload: mocks.readAndValidateManualMealPhotoUpload,
   requireActiveMealPhotoCaptureEnrollment: mocks.requireActiveMealPhotoCaptureEnrollment,
   requireMealPhotoCaptureScopedToken: mocks.requireMealPhotoCaptureScopedToken,
   revokeMealPhotoCaptureEnrollmentForMember:
@@ -97,15 +102,19 @@ type EnrollmentRoute =
   typeof import("../app/api/device-sync/companion/meal-photo-capture/enrollment/route");
 type PhotosRoute =
   typeof import("../app/api/device-sync/companion/meal-photo-capture/photos/route");
+type ManualPhotosRoute =
+  typeof import("../app/api/device-sync/companion/meal-photos/route");
 
 let enrollmentRoute: EnrollmentRoute;
 let photosRoute: PhotosRoute;
+let manualPhotosRoute: ManualPhotosRoute;
 
 const MEMBER_ID = "member_1";
 const ENROLLMENT_ID = "hmp_enrollment";
 const CAPTURE_ID = "a".repeat(64);
 const CAPTURED_AT = "2026-07-12T16:30:45.000Z";
 const EVENT_ID = `meal-photo:${ENROLLMENT_ID}:${CAPTURE_ID}`;
+const MANUAL_EVENT_ID = `meal-photo:manual:${CAPTURE_ID}`;
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 const ENROLLMENT_REQUEST = {
   appInstallationId: "f47ac10b-58cc-4372-a567-0e02b2c3d479",
@@ -121,6 +130,9 @@ describe("meal photo companion routes", () => {
     photosRoute = await import(
       "../app/api/device-sync/companion/meal-photo-capture/photos/route"
     );
+    manualPhotosRoute = await import(
+      "../app/api/device-sync/companion/meal-photos/route"
+    );
   });
 
   beforeEach(() => {
@@ -130,6 +142,7 @@ describe("meal photo companion routes", () => {
       async (operation: (tx: { label: string }) => unknown) => operation({ label: "tx" }),
     );
     mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
+      identity: { userId: "privy_member_1" },
       member: { id: MEMBER_ID },
     });
     mocks.requirePrivyMemberAuthFromBearerToken.mockResolvedValue({
@@ -161,7 +174,16 @@ describe("meal photo companion routes", () => {
       memberId: MEMBER_ID,
     });
     mocks.assertCurrentMealPhotoCaptureEnrollmentTx.mockResolvedValue(undefined);
+    mocks.assertCurrentManualMealPhotoUploadAuthorityTx.mockResolvedValue(undefined);
     mocks.readAndValidateMealPhotoUpload.mockResolvedValue({
+      bytes: JPEG,
+      captureId: CAPTURE_ID,
+      capturedAt: CAPTURED_AT,
+      height: 2,
+      sha256: "b".repeat(64),
+      width: 3,
+    });
+    mocks.readAndValidateManualMealPhotoUpload.mockResolvedValue({
       bytes: JPEG,
       captureId: CAPTURE_ID,
       capturedAt: CAPTURED_AT,
@@ -483,6 +505,89 @@ describe("meal photo companion routes", () => {
       expectedUserId: MEMBER_ID,
       mailboxItemId: "mailbox_1",
     });
+  });
+
+  it("accepts manual photos with Privy identity authority independent of enrollment", async () => {
+    const request = new Request("https://app.example.test/meal-photos", {
+      body: requestBody(JPEG),
+      method: "POST",
+    });
+    const response = await manualPhotosRoute.POST(request);
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ accepted: true, duplicate: false });
+    expect(mocks.requireActivePrivyMemberAuthFromBearerToken).toHaveBeenCalledWith(
+      request,
+      expect.anything(),
+    );
+    expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      prisma: expect.anything(),
+    });
+    expect(mocks.readAndValidateManualMealPhotoUpload).toHaveBeenCalledWith({
+      memberId: MEMBER_ID,
+      request,
+    });
+    expect(mocks.buildHostedExecutionMealPhotoCapturedWake).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureId: CAPTURE_ID,
+        eventId: MANUAL_EVENT_ID,
+        memberId: MEMBER_ID,
+      }),
+    );
+    expect(mocks.assertCurrentManualMealPhotoUploadAuthorityTx).toHaveBeenCalledWith({
+      identityUserId: "privy_member_1",
+      memberId: MEMBER_ID,
+      prisma: { label: "tx" },
+    });
+    expect(
+      mocks.assertCurrentManualMealPhotoUploadAuthorityTx.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.appendHostedMealPhotoMailboxEnvelopeTx.mock.invocationCallOrder[0]
+        ?? Number.MAX_SAFE_INTEGER,
+    );
+    expect(mocks.requireActiveMealPhotoCaptureEnrollment).not.toHaveBeenCalled();
+    expect(mocks.assertCurrentMealPhotoCaptureEnrollmentTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects manual photos before validation when historical consent is missing", async () => {
+    mocks.assertHostedHistoricalLaunchConsentGranted.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_CONSENT_REQUIRED",
+        httpStatus: 403,
+        message: "Accept the Murph legal consent before continuing.",
+      }),
+    );
+    const response = await manualPhotosRoute.POST(new Request(
+      "https://app.example.test/meal-photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(mocks.readAndValidateManualMealPhotoUpload).not.toHaveBeenCalled();
+    expect(mocks.stageMealPhoto).not.toHaveBeenCalled();
+  });
+
+  it("cleans up manual staging when the final identity authority changes", async () => {
+    mocks.assertCurrentManualMealPhotoUploadAuthorityTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "PRIVY_USER_MISMATCH",
+        httpStatus: 409,
+        message: "This login no longer matches the current Murph member.",
+      }),
+    );
+    const response = await manualPhotosRoute.POST(new Request(
+      "https://app.example.test/meal-photos",
+      { body: requestBody(JPEG), method: "POST" },
+    ));
+
+    expect(response.status).toBe(409);
+    expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.deleteMealPhoto).toHaveBeenCalledWith({
+      mealPhotoKey: "meal-photo-key",
+      userId: MEMBER_ID,
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("requires a current private route again before accepting an upload", async () => {
