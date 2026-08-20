@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 120,
+  "item": {
+    "id": "group-contribution-success-receipt",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A cleaner finish after group contributions",
+    "summary": "After adding usage to a group, the confirmation is now compact and keeps the next step into Messages clear on computers and phones.",
+    "details": "Messages still opens without a direct group link, so the receipt reminds you to choose the group before continuing.",
+    "relevanceTags": ["groups", "billing", "design"],
+    "sourcePullRequests": [2034]
+  }
+}
