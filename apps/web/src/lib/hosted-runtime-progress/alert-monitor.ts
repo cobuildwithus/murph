@@ -296,6 +296,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         pending_head.ai_usage_denied_at AS head_usage_denied_at,
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
+        pending_head.kind AS head_kind,
         pending_head.pending_count
       FROM lane_boundary
       JOIN LATERAL (
@@ -303,6 +304,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           mailbox_item.ai_usage_denied_at,
           mailbox_item.created_at,
           mailbox_item.id,
+          mailbox_item.kind,
           COUNT(*) OVER () AS pending_count
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = lane_boundary.user_id
@@ -329,8 +331,12 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         COALESCE(
           evidence.has_pre_denial_evidence,
           FALSE
-        ) AS has_pre_denial_evidence
+        ) AS has_pre_denial_evidence,
+        workspace.next_wake_at AS workspace_next_wake_at,
+        workspace.next_wake_reason AS workspace_next_wake_reason
       FROM lagging_lane
+      LEFT JOIN hosted_workspace AS workspace
+        ON workspace.user_id = lagging_lane.user_id
       LEFT JOIN hosted_ingress_latency_trace AS trace
         ON trace.user_id = lagging_lane.user_id
         AND trace.mailbox_item_id = lagging_lane.head_item_id
@@ -367,6 +373,15 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         progress_evidence.lane,
         progress_evidence.pending_count,
         CASE
+          WHEN progress_evidence.lane = 'system'
+            AND progress_evidence.head_kind = 'device-sync.wake'
+            AND progress_evidence.workspace_next_wake_reason
+              = 'device-sync.reconcile'
+            AND progress_evidence.workspace_next_wake_at IS NOT NULL
+            THEN GREATEST(
+              progress_evidence.head_created_at,
+              progress_evidence.workspace_next_wake_at
+            )
           WHEN progress_evidence.lane = 'conversation'
             AND progress_evidence.head_usage_denied_at IS NOT NULL
             AND progress_evidence.head_usage_denied_at

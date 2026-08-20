@@ -467,6 +467,103 @@ describe.skipIf(!runPostgresProof)(
         await prisma.$disconnect();
       }
     }, 60_000);
+
+    it("ages typed device retries from their canonical scheduled wake", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback scheduled device retry progress proof.");
+      const prefix = `progress-device-retry-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00.000Z");
+      const staleAt = new Date(now.getTime() - 60 * 60_000);
+      const futureWakeAt = new Date(now.getTime() + 6 * 60 * 60_000);
+      const overdueWakeAt = new Date(now.getTime() - 20 * 60_000);
+      let proofCompleted = false;
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          const futureDeviceRetry = `${prefix}-future-device`;
+          const overdueDeviceRetry = `${prefix}-overdue-device`;
+          const unrelatedFutureWake = `${prefix}-unrelated-future`;
+          const unrelatedSystemHead = `${prefix}-unrelated-system-head`;
+          await tx.hostedMember.createMany({
+            data: [
+              futureDeviceRetry,
+              overdueDeviceRetry,
+              unrelatedFutureWake,
+              unrelatedSystemHead,
+            ].map((id) => member(id, HostedBillingStatus.active)),
+          });
+
+          for (const userId of [
+            futureDeviceRetry,
+            overdueDeviceRetry,
+            unrelatedFutureWake,
+          ]) {
+            await seedProgressLane({
+              createdAt: staleAt,
+              lane: "system",
+              tx,
+              userId,
+            });
+          }
+          await seedProgressLane({
+            createdAt: staleAt,
+            kind: "runtime.maintenance-requested",
+            lane: "system",
+            tx,
+            userId: unrelatedSystemHead,
+          });
+          await tx.hostedWorkspace.createMany({
+            data: [
+              {
+                nextWakeAt: futureWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                userId: futureDeviceRetry,
+              },
+              {
+                nextWakeAt: overdueWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                userId: overdueDeviceRetry,
+              },
+              {
+                nextWakeAt: futureWakeAt,
+                nextWakeReason: "assistant",
+                userId: unrelatedFutureWake,
+              },
+              {
+                nextWakeAt: futureWakeAt,
+                nextWakeReason: "device-sync.reconcile",
+                userId: unrelatedSystemHead,
+              },
+            ],
+          });
+
+          await expect(readHostedRuntimeProgressHealth({
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 3,
+            stalledRuntimeCount: 3,
+            stalledSystemLaneCount: 3,
+          });
+
+          proofCompleted = true;
+          throw rollback;
+        }, {
+          maxWait: 10_000,
+          timeout: 30_000,
+        }).catch((error: unknown) => {
+          if (error !== rollback) {
+            throw error;
+          }
+        });
+        expect(proofCompleted).toBe(true);
+      } finally {
+        await prisma.$disconnect();
+      }
+    }, 60_000);
   },
 );
 
@@ -490,6 +587,7 @@ async function seedProgressLane(input: {
   aiUsageDeniedAt?: Date;
   consumedAt?: Date;
   createdAt: Date;
+  kind?: string;
   lane: "conversation" | "system";
   tx: Prisma.TransactionClient;
   userId: string;
@@ -500,6 +598,7 @@ async function seedProgressLane(input: {
       aiUsageDeniedAt: input.aiUsageDeniedAt,
       consumedAt: input.consumedAt,
       createdAt: input.createdAt,
+      kind: input.kind,
       laneSeq: 1n,
     }],
     tx: input.tx,
@@ -513,6 +612,7 @@ async function seedProgressLaneItems(input: {
     aiUsageDeniedAt?: Date;
     consumedAt?: Date;
     createdAt: Date;
+    kind?: string;
     laneSeq: bigint;
   }[];
   tx: Prisma.TransactionClient;
@@ -541,9 +641,9 @@ async function seedProgressLaneItems(input: {
       createdAt: row.createdAt,
       dedupeKey: `${input.userId}-${input.lane}-dedupe-${row.laneSeq}`,
       id: `${input.userId}-${input.lane}-item-${row.laneSeq}`,
-      kind: input.lane === "conversation"
+      kind: row.kind ?? (input.lane === "conversation"
         ? "conversation.message"
-        : "device-sync.wake",
+        : "device-sync.wake"),
       lane: input.lane,
       laneSeq: row.laneSeq,
       occurredAt: row.createdAt,

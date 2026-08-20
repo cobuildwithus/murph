@@ -1484,9 +1484,13 @@ Last verified: 2026-08-20
   item retention/expiry semantics and clean-handling lane high-water to catch
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
-  lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. An active
-  runtime is anomalous when the resulting oldest live item beyond that
-  high-water remains pending for at least 15 minutes. Eligibility uses the canonical
+  lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
+  head retained behind a canonical `device-sync.reconcile` wake ages from the
+  later of its creation and the workspace's scheduled wake. Other system work
+  still ages from creation, and a device retry becomes anomalous when it remains
+  pending for 15 minutes after it is due. An active runtime is otherwise
+  anomalous when the resulting oldest live item beyond that high-water remains
+  pending for at least 15 minutes. Eligibility uses the canonical
   runtime AI-access decision, including current thread-container participants,
   so inactive or consent-withdrawn people are excluded without suppressing an
   authorized group runtime. A valid conversation usage denial with no later
