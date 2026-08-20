@@ -79,6 +79,7 @@ import type {
 import {
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
@@ -505,6 +506,7 @@ export interface CodexAppServerTurnInput {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  memberMemoryMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
@@ -4638,6 +4640,13 @@ async function runCodexAppServerTurnOnProcess(
           ),
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
+          memberMemoryAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_MEMBER_MEMORY_TOOL.namespace &&
+              tool.name === MURPH_MEMBER_MEMORY_TOOL.name,
+          ),
+          memberMemoryMaintenanceAuthorized:
+            input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
             ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
             : dynamicToolAbortController.signal,

@@ -2571,9 +2571,23 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     providerTurn: {
       ...createProviderResult({
         rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli memory upsert --vault "$VAULT" --section context --text "prefers morning summaries"',
-          ),
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: {
+                  action: 'upsert',
+                  section: 'Context',
+                  text: 'Prefers morning summaries.',
+                },
+                id: 'member-memory-write',
+                namespace: 'murph',
+                success: true,
+                tool: 'member_memory',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
         ],
         response: JSON.stringify({
           kind: 'send_message',
@@ -2680,9 +2694,19 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     providerTurn: {
       ...createProviderResult({
         rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli memory show --vault "$VAULT" --format json',
-          ),
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: { action: 'show' },
+                id: 'member-memory-read',
+                namespace: 'murph',
+                success: true,
+                tool: 'member_memory',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
         ],
         response: JSON.stringify({
           kind: 'send_message',

@@ -1794,9 +1794,24 @@ function assistantMaintenanceRawEventsIncludeMutation(
 ): boolean {
   return rawEvents.some((rawEvent) => {
     const event = normalizeCodexEvent(rawEvent)
+    const dynamicMutationActions = profile === 'group-room-model'
+      ? ['delete', 'upsert'] as const
+      : profile === 'member-memory'
+        ? ['update', 'upsert'] as const
+        : null
+    const dynamicMutationTool = profile === 'group-room-model'
+      ? 'group_room_model'
+      : profile === 'member-memory'
+        ? 'member_memory'
+        : null
     if (
-      profile === 'group-room-model' &&
-      assistantGroupRoomModelDynamicMutationCompleted(event)
+      dynamicMutationActions &&
+      dynamicMutationTool &&
+      assistantMaintenanceDynamicMutationCompleted({
+        actions: dynamicMutationActions,
+        event,
+        toolName: dynamicMutationTool,
+      })
     ) {
       return true
     }
@@ -1818,22 +1833,23 @@ function isAssistantMaintenanceMutationCommand(
   if (normalized === null) {
     return false
   }
-  if (profile === 'group-room-model') {
+  if (profile !== 'habitat-voice') {
     return false
   }
-  return profile === 'habitat-voice'
-    ? /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
-    : /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+  return /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
 }
 
-function assistantGroupRoomModelDynamicMutationCompleted(
-  event: ReturnType<typeof normalizeCodexEvent>,
-): boolean {
+function assistantMaintenanceDynamicMutationCompleted(input: {
+  actions: readonly string[]
+  event: ReturnType<typeof normalizeCodexEvent>
+  toolName: string
+}): boolean {
+  const { actions, event, toolName } = input
   if (
     event.kind !== 'tool_call' ||
     event.itemState !== 'completed' ||
     event.toolServer !== 'murph' ||
-    event.toolName !== 'group_room_model'
+    event.toolName !== toolName
   ) {
     return false
   }
@@ -1844,7 +1860,8 @@ function assistantGroupRoomModelDynamicMutationCompleted(
   const args = readAssistantNotificationRecord(item?.arguments)
   return (
     item?.success === true &&
-    (args?.action === 'upsert' || args?.action === 'delete')
+    typeof args?.action === 'string' &&
+    actions.includes(args.action)
   )
 }
 
