@@ -1,6 +1,6 @@
 # Honor Scheduled Device Retries In Runtime Progress Alerts
 
-Status: active
+Status: completed
 Updated: 2026-08-20
 
 ## Goal
@@ -62,5 +62,10 @@ identifiers.
   six-case PostgreSQL file passes, including 20,001 qualifying imported device
   heads with live suffixes under an explicit 180-second statement timeout and
   proof that PostgreSQL uses the existing mailbox lane-sequence index.
-- Final ReviewGPT, exact-head CI, deploy, and post-deploy production monitor
-  proof: pending.
+- Preliminary specialist: completed; all three findings were accepted and
+  resolved by the maximum-cardinality suffix proof, exact clock/frontier
+  PostgreSQL cases, and corrected plan status.
+- Final ReviewGPT substantive round 2: passed on the exact remediation head
+  with no qualifying findings. Required exact-head CI checks are green.
+- Deploy and post-deploy production monitor proof: pending after merge.
+Completed: 2026-08-20
