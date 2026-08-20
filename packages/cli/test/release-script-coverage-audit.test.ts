@@ -5449,13 +5449,13 @@ printf 'ZIP: %s (%s bytes)\n' \
     const cliCoverageBranch = workspaceVerify.match(
       /run_workspace_package_coverage\(\) \{[\s\S]*?^\}/m,
     )?.[0]
-    const packageCoverageDirs = workspaceVerify.match(
-      /local package_coverage_dirs=\([\s\S]*?^  \)/m,
+    const packageCoveragePlan = workspaceVerify.match(
+      /local package_coverage_plan=\([\s\S]*?^  \)/m,
     )?.[0]
 
     expect(runTimedStep).toBeTruthy()
     expect(cliCoverageBranch).toBeTruthy()
-    expect(packageCoverageDirs).toBeTruthy()
+    expect(packageCoveragePlan).toBeTruthy()
     expect(cliCoverageBranch).toContain(
       'env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_CLI_RELEASE_TARBALL_TEST=1 MURPH_VITEST_MAX_WORKERS="$package_coverage_cli_vitest_max_workers" pnpm exec vitest run --config "packages/cli/vitest.workspace.ts" --coverage',
     )
@@ -5468,11 +5468,11 @@ printf 'ZIP: %s (%s bytes)\n' \
     expect(workspaceVerify).toContain('failure_labels_dir="$failure_dir/failures"')
     expect(workspaceVerify).toContain('status_dir="$failure_dir/status"')
     expect(workspaceVerify).toContain('reap_finished_package_coverage()')
-    expect(packageCoverageDirs!.indexOf('"packages/cli"')).toBeLessThan(
-      packageCoverageDirs!.indexOf('"packages/contracts"'),
+    expect(packageCoveragePlan!.indexOf('"packages/cli|')).toBeLessThan(
+      packageCoveragePlan!.indexOf('"packages/contracts|'),
     )
-    expect(packageCoverageDirs!.indexOf('"packages/contracts"')).toBeLessThan(
-      packageCoverageDirs!.indexOf('"packages/device-syncd"'),
+    expect(packageCoveragePlan!.indexOf('"packages/contracts|')).toBeLessThan(
+      packageCoveragePlan!.indexOf('"packages/device-syncd|'),
     )
     expect(cliCoverageBranch).toContain('return $?')
     const harnessDir = mkdtempSync(
