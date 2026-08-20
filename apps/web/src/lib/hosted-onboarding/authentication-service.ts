@@ -237,9 +237,9 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
       });
       const transactionalAuthMethod = invitePreparation?.authMethod ?? input.authMethod;
       const preparedReplyAlias = transactionalAuthMethod === "email"
-        && input.identity.email?.verifiedAt
+        && liveIdentity.email?.verifiedAt
         ? await prepareHostedMemberVerifiedEmailReplyAlias({
-            address: input.identity.email.address,
+            address: liveIdentity.email.address,
             memberId: preparedMemberId,
             prisma: input.prisma,
           })

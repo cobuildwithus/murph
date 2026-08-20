@@ -60,6 +60,7 @@ export type HostedEmailPublicBootstrapResult =
         | "authority_changed"
         | "cooldown"
         | "daily_limit"
+        | "global_lock_busy"
         | "global_limit"
         | "inactive"
         | "invalid_candidate"
@@ -273,11 +274,14 @@ async function claimHostedEmailPublicBootstrapAttempt(input: {
 > {
   const attemptId = generateHostedEmailPublicBootstrapAttemptId();
   return input.prisma.$transaction(async (tx) => {
-    // One global advisory lock makes the hourly ceiling exact across members.
-    // The member row then serializes cooldown, daily admission, identity
-    // rotation, and current access without provider or crypto I/O in the
-    // transaction.
-    await acquireHostedEmailPublicBootstrapGlobalClaimLockTx(tx);
+    // One nonblocking global advisory lock makes the hourly ceiling exact
+    // across members without letting unauthenticated bursts occupy the shared
+    // Web pool while another claim is waiting on member-owned work. The member
+    // row then serializes cooldown, daily admission, identity rotation, and
+    // current access without provider or crypto I/O in the transaction.
+    if (!await tryAcquireHostedEmailPublicBootstrapGlobalClaimLockTx(tx)) {
+      return { reason: "global_lock_busy", status: "suppressed" } as const;
+    }
     await lockHostedMemberRow(tx, input.memberId);
 
     const authorization = await tx.hostedMemberEmailAuthorization.findUnique({
@@ -500,15 +504,16 @@ async function abandonHostedEmailPublicBootstrapAttempt(input: {
   });
 }
 
-async function acquireHostedEmailPublicBootstrapGlobalClaimLockTx(
+export async function tryAcquireHostedEmailPublicBootstrapGlobalClaimLockTx(
   tx: Prisma.TransactionClient,
-): Promise<void> {
-  await tx.$executeRaw`
-    SELECT pg_advisory_xact_lock(
+): Promise<boolean> {
+  const [result] = await tx.$queryRaw<Array<{ acquired: boolean }>>`
+    SELECT pg_try_advisory_xact_lock(
       hashtext('hosted-email-public-bootstrap'),
       hashtext(${HOSTED_EMAIL_PUBLIC_BOOTSTRAP_GLOBAL_LOCK_SCOPE})
-    )
+    ) AS acquired
   `;
+  return result?.acquired === true;
 }
 
 function buildHostedEmailPublicBootstrapIdempotencyKey(attemptId: string): string {

@@ -116,6 +116,14 @@ Pull request: #2083
   index, then atomically rotates or clears the stored capability.
 - The additive migration leaves legacy alias generations nullable and treats
   null as generation zero, keeping the predeploy path expand-only.
+- Interactive email authentication prepares alias rotation from Privy's fresh
+  live identity rather than the bearer snapshot. A stale A/live B rebind
+  therefore revokes A's old reply capability in the same transaction that
+  stores B, while A/A or B/B agreement keeps the generation stable.
+- The global hourly-cap advisory lock is nonblocking. A collision is silently
+  suppressed before the member lock or attempt read, preventing public bursts
+  from filling the shared Web pool while the admitted winner waits on a member
+  row.
 
 ## Product UX walkthrough
 
@@ -164,4 +172,9 @@ Result: Ready.
   by preserving guided-action intent, adding status-aware retry, adding the
   requested bounded-stream/cardinality coverage, and supplying rendered proof.
 - Final cross-cutting ReviewGPT security/reliability review.
+- ReviewGPT round 2 found stale-bearer alias preparation and blocking global
+  lock contention. Both findings were reproduced and fixed. Focused unit proof
+  passed 92 tests with one gated PostgreSQL test skipped; isolated real
+  PostgreSQL proofs passed alias rotation/stability and an eight-collision pool
+  contention replay with no advisory waiters.
 - Required exact-head CI and current-base merge-tree proof.

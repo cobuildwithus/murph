@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-19
+Last verified: 2026-08-20
 
 ## Purpose
 
@@ -90,6 +90,14 @@ generic email remains confined to hosted ingress and injected hosted delivery.
 This ownership split is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/operations/verification-and-runtime.md`,
 and `agent-docs/references/testing-ci-map.md`.
+
+The canonical public Murph email address is a content-discarding bootstrap for
+existing verified members, while authenticated guided actions and signed reply
+aliases remain the one-step private assistant-input paths. Web admits public
+bootstrap hints through a nonblocking global gate plus a member lock, and live
+verified-email rebinding atomically rotates the private reply capability. This
+boundary is jointly specified by `agent-docs/SECURITY.md` and
+`agent-docs/RELIABILITY.md`.
 
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact

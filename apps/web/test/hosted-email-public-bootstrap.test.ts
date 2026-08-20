@@ -236,8 +236,12 @@ describe("hosted public email bootstrap", () => {
     expect(sendEmail).not.toHaveBeenCalled();
     expect(database.attempts).toHaveLength(100);
     expect(database.client.$transaction).toHaveBeenCalledOnce();
-    expect(database.tx.$executeRaw).toHaveBeenCalledOnce();
-    expect(database.tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(database.tx.$executeRaw).not.toHaveBeenCalled();
+    expect(database.tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(readTaggedSql(database.tx.$queryRaw.mock.calls[0]?.[0]))
+      .toContain("pg_try_advisory_xact_lock");
+    expect(readTaggedSql(database.tx.$queryRaw.mock.calls[1]?.[0]).toLowerCase())
+      .toContain("for update");
     expect(database.tx.hostedMemberEmailAuthorization.findUnique)
       .toHaveBeenCalledOnce();
     expect(mocks.readActiveHostedMemberAccess).toHaveBeenCalledOnce();
@@ -293,18 +297,50 @@ describe("hosted public email bootstrap", () => {
     expect(mocks.resolveHostedMemberReplyAliasRegistrationTx)
       .not.toHaveBeenCalled();
 
+    const [globalLockOrder, memberLockOrder] =
+      database.tx.$queryRaw.mock.invocationCallOrder;
+    expect(globalLockOrder).toBeLessThan(memberLockOrder ?? 0);
     const orderedCalls = [
-      database.tx.$executeRaw,
-      database.tx.$queryRaw,
       database.tx.hostedMemberEmailAuthorization.findUnique,
       mocks.readActiveHostedMemberAccess,
       database.tx.hostedEmailPublicBootstrapAttempt.findFirst,
       database.tx.hostedEmailPublicBootstrapAttempt.findMany,
     ];
+    expect(memberLockOrder).toBeLessThan(
+      orderedCalls[0]?.mock.invocationCallOrder[0] ?? 0,
+    );
     expect(orderedCalls.map((mock) => mock.mock.invocationCallOrder[0]))
       .toEqual([...orderedCalls]
         .map((mock) => mock.mock.invocationCallOrder[0])
         .sort((left, right) => left - right));
+  });
+
+  it("drops a colliding public claim without waiting on the global lock", async () => {
+    const database = createPrismaMock([], { globalLockAcquired: false });
+    const sendEmail = vi.fn();
+
+    await expect(sendHostedEmailPublicBootstrapChallenge({
+      candidateAddress: VERIFIED_ADDRESS,
+      env: TEST_ENV,
+      now: NOW,
+      prisma: database.client as never,
+      sendEmail,
+    })).resolves.toEqual({
+      reason: "global_lock_busy",
+      status: "suppressed",
+    });
+
+    expect(database.tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(readTaggedSql(database.tx.$queryRaw.mock.calls[0]?.[0]))
+      .toContain("pg_try_advisory_xact_lock");
+    expect(database.tx.hostedMemberEmailAuthorization.findUnique)
+      .not.toHaveBeenCalled();
+    expect(mocks.readActiveHostedMemberAccess).not.toHaveBeenCalled();
+    expect(database.tx.hostedEmailPublicBootstrapAttempt.findFirst)
+      .not.toHaveBeenCalled();
+    expect(database.tx.hostedEmailPublicBootstrapAttempt.create)
+      .not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
   });
 
   it("backs off a confirmed no-send failure, then permits a bounded retry", async () => {
@@ -416,14 +452,21 @@ interface TestAttempt {
   status: string;
 }
 
-function createPrismaMock(initialAttempts: TestAttempt[] = []) {
+function createPrismaMock(
+  initialAttempts: TestAttempt[] = [],
+  options: { globalLockAcquired?: boolean } = {},
+) {
   const attempts = initialAttempts.map((attempt) => ({ ...attempt }));
   const state = {
     authorizationLookupKey: "candidate-lookup-key",
+    globalLockAcquired: options.globalLockAcquired ?? true,
   };
   const tx = {
     $executeRaw: vi.fn(async () => 0),
-    $queryRaw: vi.fn(async () => [{ id: "member_123" }]),
+    $queryRaw: vi.fn(async (query: TemplateStringsArray) =>
+      readTaggedSql(query).includes("pg_try_advisory_xact_lock")
+        ? [{ acquired: state.globalLockAcquired }]
+        : [{ id: "member_123" }]),
     hostedEmailPublicBootstrapAttempt: {
       create: vi.fn(async ({ data }: { data: TestAttempt }) => {
         attempts.push({ ...data });
@@ -498,6 +541,10 @@ function createPrismaMock(initialAttempts: TestAttempt[] = []) {
       state.authorizationLookupKey = value;
     },
   };
+}
+
+function readTaggedSql(value: unknown): string {
+  return Array.isArray(value) ? value.join(" ") : String(value ?? "");
 }
 
 function matchesStatus(
