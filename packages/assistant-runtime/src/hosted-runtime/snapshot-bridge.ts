@@ -1267,6 +1267,8 @@ function createAssistantGeneratedDeliveryResiduePruneLogDetails(
       result.generatedDeliveryFilesPruned,
     assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
       result.generatedDeliveryCleanupSkippedUntrustedOutbox,
+    prunedAssistantRuntimeResidueFileCount:
+      result.generatedDeliveryFilesPruned,
   };
 }
 
@@ -1312,6 +1314,22 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
     ),
     ...createAssistantGeneratedDeliveryResiduePruneLogDetails(
       input.assistantGeneratedDeliveryPruneResult,
+    ),
+    ...(
+      hasAssistantRuntimeResiduePrunedFiles(
+        input.assistantRuntimeResiduePruneResult,
+      ) ||
+      (input.assistantGeneratedDeliveryPruneResult
+        ?.generatedDeliveryFilesPruned ?? 0) > 0
+        ? {
+            prunedAssistantRuntimeResidueFileCount:
+              countAssistantRuntimeResiduePrunedFiles(
+                input.assistantRuntimeResiduePruneResult,
+              ) +
+              (input.assistantGeneratedDeliveryPruneResult
+                ?.generatedDeliveryFilesPruned ?? 0),
+          }
+        : {}
     ),
     ...createHostedWorkspaceSnapshotPlanLogDetails(input.legacyMaterialization),
     ...input.timingDetails,

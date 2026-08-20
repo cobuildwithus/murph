@@ -1810,6 +1810,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
       && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
         === terminalContents.byteLength
+      && entry.redactedJson?.prunedAssistantRuntimeResidueFileCount === 1
     )).toBe(true);
   });
 
