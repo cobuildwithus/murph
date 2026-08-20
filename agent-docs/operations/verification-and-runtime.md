@@ -62,6 +62,12 @@ supplement that proof, but it cannot establish runtime cleanup behavior.
 
 Native companion auth/control/device-sync PRs additionally require the protected
 `Native iOS hosted E2E` status described in `agent-docs/references/testing-ci-map.md`.
+A canceled native workflow must not be rerun directly because the rerun retains
+its original queue identity. From an authenticated operator checkout, use
+`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
+open same-repository human-authored PR and exact current head before rerunning a
+successful exact-head Repo Hygiene owner, whose completion creates a fresh
+native waiter without widening the protected environment or secret boundary.
 That status is production-shaped evidence: exact hosted PR Web deployment plus
 real Privy/Junction/HealthKit native flow. UI completion is not enough; trusted
 orchestration must also prove the exact candidate is anonymously reachable,
