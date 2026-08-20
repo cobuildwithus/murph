@@ -1,6 +1,6 @@
 # Blood oxygen normalization diagnostics
 
-Status: active
+Status: completed
 Created: 2026-08-19
 Updated: 2026-08-20
 
@@ -78,7 +78,13 @@ Updated: 2026-08-20
   source context. Sparse-row tests assert their exact diagnostic, and privacy
   tests prove unrecognized provider text is omitted while a known provider is
   preserved.
-- Preliminary specialist review findings were remediated. Final ReviewGPT round
-  1 passed on the preceding candidate; round 2 will review the corrected full
-  patch.
+- Preliminary specialist review findings were remediated. Final ReviewGPT
+  rounds 1 and 2 passed; round 2 reviewed the corrected full patch.
+- Required GitHub checks passed on the corrected code head, and
+  `git merge-tree --write-tree HEAD origin/main` proved a clean current-base
+  merge.
+- A bounded production runtime-log aggregate still showed 35 generic
+  normalization failures in the preceding 24 hours, confirming that the live
+  event cannot identify the failed parser branch before this change deploys.
 - `git diff --check` — passed.
+Completed: 2026-08-20
