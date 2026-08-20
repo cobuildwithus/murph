@@ -7,12 +7,23 @@ on:
     paths:
       - .github/workflows/apply-private-to-group-context-handoff.yml
       - scripts/apply-private-to-group-context-handoff.mjs
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - .github/workflows/apply-private-to-group-context-handoff.yml
+      - scripts/apply-private-to-group-context-handoff.mjs
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'feat/private-to-group-context-handoff'
     runs-on: ubuntu-latest
     steps:
       - name: Check out feature branch
