@@ -116,5 +116,10 @@ set write are intentionally outside this patch.
   destructive revision after approval and scoped the prompt too broadly. The
   remediation now carries the proposal-time revision through the CLI and core
   boundary, rejects changed state without mutation, and gives saved-format and
-  exact-reference reminder flows explicit precedence. Specialist re-review,
-  final ReviewGPT, exact-head CI, and plan closure remain pending.
+  exact-reference reminder flows explicit precedence.
+- Final ReviewGPT round 1 found that a set-valued repeatable-option normalizer
+  could deduplicate an ordered A/B/A exercise plan and reject comma-bearing
+  exercise names. The correction passes the CLI typecheck, package-shape check,
+  and seven focused CLI tests, including exact ordered duplicates and a comma-
+  bearing name on the sole replacement event.
+- Final ReviewGPT round 2, exact-head CI, and plan closure remain pending.

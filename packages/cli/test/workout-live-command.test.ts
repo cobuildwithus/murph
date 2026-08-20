@@ -309,6 +309,56 @@ test('one command atomically replaces an explicitly approved active workout', as
   assert.equal(active.entity.id, replacement.eventId)
 })
 
+test('replacement preserves ordered duplicate exercises and comma-bearing names', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-replace-ordered-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+  const oldWorkout = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Old workout',
+    '--started-at', '2026-08-20T06:30:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const approvedSnapshot = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--workout-id', oldWorkout.eventId,
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  const replacement = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Ordered blocks',
+    '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
+    '--confirm-delete',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  assert.deepEqual(
+    replacement.workout?.exercises.map((exercise) => ({
+      name: exercise.name,
+      order: exercise.order,
+      setCount: exercise.sets.length,
+    })),
+    [
+      { name: 'Run', order: 1, setCount: 1 },
+      { name: 'Row, neutral grip', order: 2, setCount: 2 },
+      { name: 'Run', order: 3, setCount: 1 },
+    ],
+  )
+  const active = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(active.entity.id, replacement.eventId)
+})
+
 test('replacement fails closed when a competing live workout exists', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-replace-conflict-',

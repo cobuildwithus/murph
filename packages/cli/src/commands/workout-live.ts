@@ -6,9 +6,6 @@ import {
   workoutAddResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
-  normalizeRepeatableFlagOption,
-} from '@murphai/vault-usecases'
-import {
   addLiveWorkoutExercise,
   clearLiveWorkoutSet,
   finishLiveWorkout,
@@ -278,10 +275,6 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     }),
     output: workoutAddResultSchema,
     async run({ args, options }) {
-      const exerciseEntries = normalizeRepeatableFlagOption(
-        options.exercise,
-        'exercise',
-      )
       return replaceLiveWorkout({
         vault: options.vault,
         workoutId: options.workoutId,
@@ -291,7 +284,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         activityType: options.type,
         note: options.note,
         startedAt: options.startedAt,
-        exercises: exerciseEntries?.map(parseReplacementExercise) ?? [],
+        exercises: options.exercise?.map(parseReplacementExercise) ?? [],
       })
     },
   })
