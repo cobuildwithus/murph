@@ -280,18 +280,20 @@ const DESIGN_FAMILY_EXHAUSTED_USAGE_STATUS: HostedPlanUsageAvailableStatus = {
 
 function GroupUsageFundingStudy() {
   const endpoint = "/api/design/group-sponsorship-management";
-  const [previewMode, setPreviewMode] = useState<"monthly" | "one_time" | null>(
-    null,
-  );
+  const [previewMode, setPreviewMode] = useState<
+    "fulfilled" | "monthly" | "one_time" | null
+  >(null);
 
   useEffect(() => {
     function syncActivationPreview() {
       setPreviewMode(
-        window.location.hash === "#group-usage-funding"
-          ? "monthly"
-          : window.location.hash === "#group-one-time-contribution"
-            ? "one_time"
-            : null,
+        window.location.hash === "#group-funding-receipt"
+          ? "fulfilled"
+          : window.location.hash === "#group-usage-funding"
+            ? "monthly"
+            : window.location.hash === "#group-one-time-contribution"
+              ? "one_time"
+              : null,
       );
     }
 
@@ -424,6 +426,35 @@ function GroupUsageFundingStudy() {
 
       <div className="grid gap-6 xl:grid-cols-2">
         <DesignSponsorshipState
+          label="Fulfilled group contribution receipt"
+          state="fulfilled-receipt"
+        >
+          <div id="group-funding-receipt">
+            <Button
+              variant="outline"
+              onClick={() => setPreviewMode("fulfilled")}
+            >
+              Preview success receipt
+            </Button>
+            {previewMode === "fulfilled" ? (
+              <HostedUsageTopUpDialog
+                activePurchase={{
+                  offerCode: "usage_10_usd",
+                  purchaseId: "hucp_design_group_fulfilled",
+                  retryAllowed: false,
+                  status: "fulfilled",
+                }}
+                inert
+                initialOpen
+                offers={[]}
+                payerMemberId={DESIGN_PAYER_MEMBER_ID}
+                scope="group"
+              />
+            ) : null}
+          </div>
+        </DesignSponsorshipState>
+
+        <DesignSponsorshipState
           label="Ordinary sponsored participant + one-time action"
           state="ordinary-sponsored-one-time"
         >
@@ -481,7 +512,6 @@ function GroupUsageFundingStudy() {
         >
           <GroupSponsorshipManagementCard
             endpoint={endpoint}
-            inert
             management={{
               authorizationId: "hgsa_design_recovery",
               chargedThisPeriodMinor: 500,

@@ -51,7 +51,7 @@ export const BODY_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["boneMassPercentage", "bone_mass_percentage"],
+    aliases: ["boneMassPercentage", "bone_mass_percentage", "bone-mass-percent"],
     biomarkerKey: null,
     canonicalUnit: "percent",
     category: "body",
@@ -62,7 +62,7 @@ export const BODY_METRICS = [
     valuePrecision: 1,
   },
   {
-    aliases: ["muscleMassPercentage", "muscle_mass_percentage"],
+    aliases: ["muscleMassPercentage", "muscle_mass_percentage", "muscle-mass-percent"],
     biomarkerKey: null,
     canonicalUnit: "percent",
     category: "body",
