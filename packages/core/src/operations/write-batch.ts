@@ -153,6 +153,7 @@ export interface HostedCanonicalWritePersistenceInput {
 
 export interface HostedCanonicalWritePort {
   persistCanonicalWrite(input: HostedCanonicalWritePersistenceInput): Promise<void>;
+  persistRuntimeState?(): Promise<void>;
 }
 
 const hostedCanonicalWritePortStorage = new AsyncLocalStorage<HostedCanonicalWritePort | null>();
@@ -536,6 +537,18 @@ function resolveAmbientHostedCanonicalWritePort(): HostedCanonicalWritePort | nu
 
 export function readHostedCanonicalWritePort(): HostedCanonicalWritePort | null {
   return resolveAmbientHostedCanonicalWritePort();
+}
+
+export async function persistHostedRuntimeStateAtCanonicalBoundary(): Promise<void> {
+  const port = resolveAmbientHostedCanonicalWritePort();
+  if (!port?.persistRuntimeState) {
+    throw new VaultError(
+      "HOSTED_CANONICAL_WRITE_BOUNDARY_REQUIRED",
+      "Hosted runtime state persistence requires a canonical write boundary.",
+    );
+  }
+
+  await port.persistRuntimeState();
 }
 
 export async function withHostedCanonicalWritePort<TResult>(

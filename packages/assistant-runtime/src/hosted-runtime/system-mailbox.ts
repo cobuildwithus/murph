@@ -42,6 +42,7 @@ import type {
 import {
   findNextHostedSystemMailboxQueueItem,
   mergeHostedSystemMailboxRollbackItems,
+  projectHostedSystemMailboxModelFreeNotificationFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
@@ -308,8 +309,21 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
+      const notificationProjectedState =
+        input.allowedRouteActions?.includes(
+          "dispatch-assistant-notification",
+        ) === true
+        && (
+          input.allowedRouteActions?.includes("apply-runtime-control-request") === true
+          || input.allowedRouteActions?.includes("run-device-sync-wake") === true
+        )
+        && input.allowedWakeKinds?.includes(
+          "assistant.notification.requested",
+        ) === true
+          ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
+          : state;
       const selectionState = {
-        pending: state.pending.filter((item) =>
+        pending: notificationProjectedState.pending.filter((item) =>
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"

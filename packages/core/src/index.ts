@@ -244,6 +244,7 @@ export {
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
   listWriteOperationMetadataPathsWithStageDirectories,
+  persistHostedRuntimeStateAtCanonicalBoundary,
   pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,

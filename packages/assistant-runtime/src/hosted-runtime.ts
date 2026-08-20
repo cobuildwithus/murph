@@ -412,6 +412,7 @@ const HOSTED_INITIAL_BOOTSTRAP_MAILBOX_IMPORT_LANES = ["system", "conversation"]
 const HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES = ["conversation", "system"] as const;
 const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
+  "dispatch-assistant-notification",
   "run-device-sync-wake",
 ] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
