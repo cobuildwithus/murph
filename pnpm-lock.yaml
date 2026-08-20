@@ -78,8 +78,8 @@ importers:
         specifier: ^0.1.17
         version: 0.1.17
       '@cobuild/review-gpt':
-        specifier: ^0.5.135
-        version: 0.5.135(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
+        specifier: ^0.5.136
+        version: 0.5.136(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.62.0
         version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -1484,8 +1484,8 @@ packages:
     resolution: {integrity: sha512-cq+LzXoKNOn+KXLBm9+N9QMTEwbIXzki5AZXP/cHnAex3+3LnyhJ7zMxB5InZVgQgqI9hEs0dsXoJX/tNxlW3Q==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.135':
-    resolution: {integrity: sha512-Z05MPmfGg/wH2ocnH5GlNzAmue1Ab/cpKAvhk4XZYP8Zgxo3tNdvEs168wa7LAmCQVGuIbb/imoHADZRHUwWYQ==}
+  '@cobuild/review-gpt@0.5.136':
+    resolution: {integrity: sha512-+6+8idtX4w8Ki86a9Ezk5zQ3o6tpta2bi01xh/RHMyn2ncP5jsxIouBEs2thPHNVMLBWGeGvfaxphNAPJgjd4w==}
     hasBin: true
 
   '@coinbase/cdp-sdk@1.48.3':
@@ -10831,7 +10831,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.17': {}
 
-  '@cobuild/review-gpt@0.5.135(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.136(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.17
       incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
