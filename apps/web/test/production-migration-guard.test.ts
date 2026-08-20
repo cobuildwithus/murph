@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1307,6 +1308,9 @@ describe("hosted web production migration guard", () => {
               : new Headers(init.headers).get("authorization") ?? undefined,
           url,
         });
+        if (url.includes("/v13/deployments/murph-alias.vercel.app")) {
+          return jsonFetchResponse({ id: "dpl_exact" });
+        }
         if (url.includes("/v13/deployments/")) {
           return jsonFetchResponse({
             gitSource: { sha: expectedGitSha },
@@ -1356,7 +1360,15 @@ describe("hosted web production migration guard", () => {
           });
         }
         if (url.includes("/v4/aliases/")) {
-          return jsonFetchResponse({ deploymentId: "dpl_exact" });
+          if (url.includes("app.withmurph.ai")) {
+            return jsonFetchResponse({ deploymentId: "dpl_exact" });
+          }
+          if (url.includes("callbacks.withmurph.ai")) {
+            return jsonFetchResponse({ deployment: { id: "dpl_exact" } });
+          }
+          return jsonFetchResponse({
+            deployment: { url: "murph-alias.vercel.app" },
+          });
         }
         throw new Error(`Unexpected Vercel URL: ${url}`);
       },
@@ -1371,6 +1383,12 @@ describe("hosted web production migration guard", () => {
     assert.equal(
       requests.filter((request) => request.url.includes("/v4/aliases/")).length,
       3,
+    );
+    assert.equal(
+      requests.filter((request) =>
+        request.url.includes("/v13/deployments/murph-alias.vercel.app"),
+      ).length,
+      1,
     );
     assert.ok(requests.some((request) => request.url.includes("limit=100&until=123")));
   });
@@ -1953,6 +1971,11 @@ describe("hosted web production migration guard", () => {
       contractMigrationStep,
       /steps\.current-production\.outputs\.should_apply == 'true'/u,
     );
+    assert.match(contractMigrationStep, /SHOULD_REQUIRE_CURRENT:/u);
+    assert.match(
+      contractMigrationStep,
+      /if \[ "\$\{SHOULD_REQUIRE_CURRENT\}" = "true" \]; then/u,
+    );
     assert.match(contractMigrationStep, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(contractMigrationStep, /resolve-vercel-production-alias-sha\.ts/u);
     assert.match(contractMigrationStep, /release:production:verify-exact-deployment/u);
@@ -2021,6 +2044,77 @@ describe("hosted web production migration guard", () => {
         < workflow.indexOf("release:production:contract-migrate"),
       "contract migrations must expose the database secret only after the alias proof output is set",
     );
+
+    const contractMigrationRun = extractWorkflowRunScript(contractMigrationStep);
+    const shellFixture = await mkdtemp(
+      path.join(tmpdir(), "murph-contract-migration-workflow-"),
+    );
+    try {
+      const pnpmStub = path.join(shellFixture, "pnpm");
+      const callsFile = path.join(shellFixture, "calls.txt");
+      await writeFile(
+        pnpmStub,
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *"resolve-vercel-production-alias-sha.ts"* ]]; then
+  printf '%s\\n' "\${STUB_CURRENT_SHA}"
+elif [[ "$*" == *"release:production:verify-exact-deployment"* ]]; then
+  printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
+  printf '%s\\n' "\${DEPLOYED_SHA}"
+elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
+  printf 'migrate\\n' >> "\${STUB_CALLS_FILE}"
+else
+  printf 'unexpected pnpm invocation: %s\\n' "$*" >&2
+  exit 97
+fi
+`,
+      );
+      await chmod(pnpmStub, 0o700);
+
+      const deployedSha = "f".repeat(40);
+      const runWorkflowBody = (options: {
+        currentSha: string;
+        requireCurrent: boolean;
+      }) => spawnSync("bash", ["-c", contractMigrationRun], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DEPLOYED_SHA: deployedSha,
+          DIRECT_DATABASE_URL: "postgresql://test.invalid/release",
+          MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1",
+          MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1",
+          PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
+          SHOULD_REQUIRE_CURRENT: options.requireCurrent ? "true" : "false",
+          STUB_CALLS_FILE: callsFile,
+          STUB_CURRENT_SHA: options.currentSha,
+        },
+      });
+
+      const currentMismatch = runWorkflowBody({
+        currentSha: "e".repeat(40),
+        requireCurrent: true,
+      });
+      assert.equal(currentMismatch.status, 1);
+      assert.match(currentMismatch.stdout, /::error::/u);
+      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+
+      const ancestorMismatch = runWorkflowBody({
+        currentSha: "d".repeat(40),
+        requireCurrent: false,
+      });
+      assert.equal(ancestorMismatch.status, 0);
+      assert.match(ancestorMismatch.stdout, /::notice::Skipping/u);
+      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+
+      const exactMatch = runWorkflowBody({
+        currentSha: deployedSha,
+        requireCurrent: true,
+      });
+      assert.equal(exactMatch.status, 0, exactMatch.stderr);
+      assert.equal(await readFile(callsFile, "utf8"), "verify\nmigrate\n");
+    } finally {
+      await rm(shellFixture, { force: true, recursive: true });
+    }
 
     const nodeVersion = workflow.match(/node-version:\s*([^\s#]+)/u)?.[1] ?? "";
     const escapedNodeVersion = nodeVersion.replaceAll(".", "\\.");
@@ -2153,6 +2247,18 @@ function extractWorkflowStep(workflow: string, stepName: string): string {
 
   const nextStep = workflow.indexOf("\n      - name: ", start + marker.length);
   return nextStep === -1 ? workflow.slice(start) : workflow.slice(start, nextStep);
+}
+
+function extractWorkflowRunScript(step: string): string {
+  const marker = "\n        run: |\n";
+  const start = step.indexOf(marker);
+  assert.notEqual(start, -1, "workflow step did not include a run block");
+
+  return step
+    .slice(start + marker.length)
+    .split("\n")
+    .map((line) => line.startsWith("          ") ? line.slice(10) : line)
+    .join("\n");
 }
 
 function jsonFetchResponse(data: unknown): {

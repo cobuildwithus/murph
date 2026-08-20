@@ -82,6 +82,7 @@ jobs:
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
           HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: ${{ vars.HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS || '300' }}
+          SHOULD_REQUIRE_CURRENT: ${{ steps.production-branch.outputs.should_require_current }}
         run: |
           set -euo pipefail
 
@@ -115,7 +116,7 @@ jobs:
           )"
 
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            if [ "${{ steps.production-branch.outputs.should_require_current }}" = "true" ]; then
+            if [ "${SHOULD_REQUIRE_CURRENT}" = "true" ]; then
               echo "::error::The current main Vercel deployment is Ready, but the production base domain still serves another commit."
               exit 1
             fi
@@ -141,7 +142,7 @@ jobs:
             pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
           )"
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
-            if [ "${{ steps.production-branch.outputs.should_require_current }}" = "true" ]; then
+            if [ "${SHOULD_REQUIRE_CURRENT}" = "true" ]; then
               echo "::error::The current main Vercel deployment changed during the prior-function drain."
               exit 1
             fi
@@ -170,6 +171,7 @@ jobs:
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          SHOULD_REQUIRE_CURRENT: ${{ steps.production-branch.outputs.should_require_current }}
           DIRECT_DATABASE_URL: ${{ secrets.HOSTED_WEB_DIRECT_DATABASE_URL }}
           MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: "1"
           MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: "1"
@@ -190,6 +192,10 @@ jobs:
           )"
 
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
+            if [ "${SHOULD_REQUIRE_CURRENT}" = "true" ]; then
+              echo "::error::The current main Vercel deployment changed immediately before contract migrations."
+              exit 1
+            fi
             echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
             exit 0
           fi

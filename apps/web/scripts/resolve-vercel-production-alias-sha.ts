@@ -22,6 +22,11 @@ interface FetchResponse {
   text(): Promise<string>;
 }
 
+interface VercelAliasDeploymentRef {
+  kind: "id" | "url";
+  value: string;
+}
+
 type FetchLike = (
   input: string,
   init?: {
@@ -43,24 +48,29 @@ const PROTECTED_PRODUCTION_DEPLOYMENT_TYPES = new Set([
 // deploy gate.
 function extractVercelAliasDeploymentRef(
   aliasResponse: unknown,
-): string | undefined {
+): VercelAliasDeploymentRef | undefined {
   if (!isRecord(aliasResponse)) {
     return undefined;
   }
 
   const deploymentId = readString(aliasResponse.deploymentId);
   if (deploymentId !== undefined) {
-    return deploymentId;
+    return { kind: "id", value: deploymentId };
   }
 
   if (!isRecord(aliasResponse.deployment)) {
     return undefined;
   }
 
-  return (
-    readString(aliasResponse.deployment.id) ??
-    readString(aliasResponse.deployment.url)
-  );
+  const nestedDeploymentId = readString(aliasResponse.deployment.id);
+  if (nestedDeploymentId !== undefined) {
+    return { kind: "id", value: nestedDeploymentId };
+  }
+
+  const deploymentUrl = readString(aliasResponse.deployment.url);
+  return deploymentUrl === undefined
+    ? undefined
+    : { kind: "url", value: deploymentUrl };
 }
 
 function extractVercelDeploymentGitSha(
@@ -89,7 +99,7 @@ export async function resolveVercelProductionAliasSha(
     throw new Error("Vercel alias response did not include a deployment id or url.");
   }
 
-  const deploymentUrl = buildVercelDeploymentUrl(deploymentRef, environment);
+  const deploymentUrl = buildVercelDeploymentUrl(deploymentRef.value, environment);
   const deploymentResponse = await fetchVercelJson(
     deploymentUrl,
     token,
@@ -123,7 +133,7 @@ export async function verifyVercelProductionDeploymentProtection(
     throw new Error("Vercel alias response did not include a deployment id or url.");
   }
   const deploymentResponse = await fetchVercelJson(
-    buildVercelDeploymentUrl(deploymentRef, environment),
+    buildVercelDeploymentUrl(deploymentRef.value, environment),
     token,
     fetchImpl,
     "deployment",
@@ -190,7 +200,7 @@ export async function verifyVercelProductionDeployment(
     throw new Error("HOSTED_WEB_PRODUCTION_BASE_URL is not a configured Vercel production custom domain.");
   }
 
-  const resolvedDeploymentRefs = await Promise.all(
+  const resolvedDeploymentIds = await Promise.all(
     productionDomains.map(async (domain) => {
       const aliasResponse = await fetchVercelJson(
         buildVercelAliasLookupUrl(domain, environment),
@@ -198,11 +208,16 @@ export async function verifyVercelProductionDeployment(
         fetchImpl,
         "production domain alias",
       );
-      return extractVercelAliasDeploymentRef(aliasResponse);
+      return resolveVercelAliasDeploymentId(
+        aliasResponse,
+        environment,
+        token,
+        fetchImpl,
+      );
     }),
   );
-  const mismatchCount = resolvedDeploymentRefs.filter(
-    (deploymentRef) => deploymentRef !== verifiedCandidate.deploymentId,
+  const mismatchCount = resolvedDeploymentIds.filter(
+    (deploymentId) => deploymentId !== verifiedCandidate.deploymentId,
   ).length;
   if (mismatchCount > 0) {
     throw new Error(
@@ -215,6 +230,29 @@ export async function verifyVercelProductionDeployment(
     gitSha: verifiedCandidate.gitSha,
     productionDomainCount: productionDomains.length,
   };
+}
+
+async function resolveVercelAliasDeploymentId(
+  aliasResponse: unknown,
+  environment: VercelAliasShaEnvironment,
+  token: string,
+  fetchImpl: FetchLike,
+): Promise<string | undefined> {
+  const deploymentRef = extractVercelAliasDeploymentRef(aliasResponse);
+  if (deploymentRef === undefined) {
+    return undefined;
+  }
+  if (deploymentRef.kind === "id") {
+    return deploymentRef.value;
+  }
+
+  const deploymentResponse = await fetchVercelJson(
+    buildVercelDeploymentUrl(deploymentRef.value, environment),
+    token,
+    fetchImpl,
+    "production domain deployment",
+  );
+  return extractVercelDeploymentId(deploymentResponse);
 }
 
 async function verifyVercelProductionDeploymentCandidate(
