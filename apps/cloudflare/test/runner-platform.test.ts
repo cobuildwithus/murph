@@ -3299,6 +3299,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
     await expect(completion).rejects.toThrow("Hosted workspace snapshot complete request failed.");
     await expect(completion).rejects.not.toBe(abortReason);
+    await expect(completion).rejects.toMatchObject({
+      phase: "session_complete_request",
+      timeoutMs: expect.any(Number),
+    });
 
     expect(completionCalls).toBe(1);
   });
@@ -3326,7 +3330,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       }
       if (request.url.endsWith(`/workspace-snapshots/${ref.snapshotId}/complete`)) {
         completionCalls += 1;
-        throw new TypeError("fetch failed");
+        if (completionCalls === 1) {
+          throw new TypeError("fetch failed");
+        }
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.error(new TypeError("fetch failed"));
+          },
+        }), {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        });
       }
       return new Response("unexpected", { status: 500 });
     });
@@ -3339,12 +3353,16 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       expectedWorkspaceVersion: "4",
       reason: "idle_shutdown",
     });
-    await expect(platform.workspaceSnapshotPort!.completeSnapshotSession({
+    const failure = await platform.workspaceSnapshotPort!.completeSnapshotSession({
       checkpointRequest: createWorkspaceSnapshotCheckpointRequest(ref),
       ref,
-    })).rejects.toThrow("Hosted workspace snapshot complete request failed.");
+    }).catch((error: unknown) => error);
 
     expect(completionCalls).toBe(2);
+    expect(failure).toMatchObject({
+      phase: "session_complete_response_decode",
+      timeoutMs: expect.any(Number),
+    });
   });
 
   it("keeps snapshot heartbeat and stored headers through replay, then clears both", async () => {

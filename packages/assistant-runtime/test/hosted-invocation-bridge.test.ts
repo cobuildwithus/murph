@@ -424,6 +424,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           phase: "session_start_request_decode",
           timeoutMs: 6_000,
         });
+      } else if (expectedStage === "checkpoint") {
+        Object.assign(failure, {
+          phase: "session_complete_request",
+          timeoutMs: 30_000,
+        });
       }
 
       if (expectedStage === "plan") {
@@ -470,6 +475,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
                   snapshotSessionStartFailurePhase: "session_start_request_decode",
                   snapshotSessionStartTimeoutMs: 6_000,
                 }
+              : expectedStage === "checkpoint"
+                ? {
+                    snapshotSessionCompleteElapsedMs: expect.any(Number),
+                    snapshotSessionCompleteFailurePhase: "session_complete_request",
+                    snapshotSessionCompleteTimeoutMs: 30_000,
+                  }
               : {}),
             snapshotStage: expectedStage,
           }),

@@ -6,6 +6,7 @@ import type {
   HostedRuntimePlatform,
   HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails,
   HostedRuntimeWorkspaceSnapshotRestoreTimingDetails,
+  HostedRuntimeWorkspaceSnapshotSessionCompleteResult,
   HostedRuntimeWorkspaceSnapshotSessionStart,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { readHostedRuntimeSafeErrorText } from "@murphai/hosted-execution";
@@ -92,7 +93,12 @@ const WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS =
   - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS
   - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS;
 
-type HostedWorkspaceSnapshotSessionStartFailurePhase =
+type HostedWorkspaceSnapshotFailurePhase =
+  | "session_complete_payload_validation"
+  | "session_complete_record_checkpoint"
+  | "session_complete_request"
+  | "session_complete_response_decode"
+  | "session_complete_write_fence_headers"
   | "session_start_payload_validation"
   | "session_start_request_decode"
   | "session_start_write_fence_headers";
@@ -232,10 +238,18 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
     async completeSnapshotSession(request) {
       const snapshotId = request.ref.snapshotId;
-      const headers = await readSessionWriteFenceHeaders(
-        snapshotId,
-        "Hosted workspace snapshot complete",
-      );
+      let headers: Headers;
+      try {
+        headers = await readSessionWriteFenceHeaders(
+          snapshotId,
+          "Hosted workspace snapshot complete",
+        );
+      } catch (error) {
+        throw annotateHostedWorkspaceSnapshotFailure({
+          error,
+          phase: "session_complete_write_fence_headers",
+        });
+      }
       headers.set("content-type", "application/json; charset=utf-8");
       // Canonical publication stays non-interruptible once `/complete` starts.
       // The session signal only prevents replay after foreground cancellation.
@@ -253,26 +267,44 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       );
       const deadlineMs = Date.now() + input.timeoutMs;
       const complete = async (timeoutMs: number): Promise<unknown> => {
-        const response = await fetchHostedResponse({
-          description: "Hosted workspace snapshot complete",
-          fetchImpl: input.fetchImpl,
-          init: {
-            body,
-            headers,
-            method: "POST",
-          },
-          redactedLogPath: "/workspace-snapshots/REDACTED/complete",
-          timeoutMs,
-          url,
-        });
-        if (!response.ok) {
-          await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+        let response: Response;
+        try {
+          response = await fetchHostedResponse({
+            description: "Hosted workspace snapshot complete",
+            fetchImpl: input.fetchImpl,
+            init: {
+              body,
+              headers,
+              method: "POST",
+            },
+            redactedLogPath: "/workspace-snapshots/REDACTED/complete",
+            timeoutMs,
+            url,
+          });
+          if (!response.ok) {
+            await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+          }
+          assertHostedOk(response, "Hosted workspace snapshot complete");
+        } catch (error) {
+          throw annotateHostedWorkspaceSnapshotFailure({
+            error,
+            phase: "session_complete_request",
+            timeoutMs,
+          });
         }
-        assertHostedOk(response, "Hosted workspace snapshot complete");
-        return await readHostedWorkspaceSnapshotCompleteResponsePayload({
-          deadlineMs,
-          response,
-        });
+        const responseDecodeTimeoutMs = Math.max(0, deadlineMs - Date.now());
+        try {
+          return await readHostedWorkspaceSnapshotCompleteResponsePayload({
+            deadlineMs,
+            response,
+          });
+        } catch (error) {
+          throw annotateHostedWorkspaceSnapshotFailure({
+            error,
+            phase: "session_complete_response_decode",
+            timeoutMs: responseDecodeTimeoutMs,
+          });
+        }
       };
       let payload: unknown;
       try {
@@ -307,12 +339,27 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         stopSessionHeartbeat(snapshotId);
         sessionRuntimeState.delete(snapshotId);
       }
-      const completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
+      let completed: HostedRuntimeWorkspaceSnapshotSessionCompleteResult;
+      try {
+        completed = parseHostedWorkspaceSnapshotCompletePayload(payload);
+      } catch (error) {
+        throw annotateHostedWorkspaceSnapshotFailure({
+          error,
+          phase: "session_complete_payload_validation",
+        });
+      }
       const { checkpoint } = completed;
       if (checkpoint.checkpointed) {
-        await input.workspaceCheckpointBridge.recordCheckpoint?.({
-          workspaceVersion: checkpoint.workspace.version,
-        });
+        try {
+          await input.workspaceCheckpointBridge.recordCheckpoint?.({
+            workspaceVersion: checkpoint.workspace.version,
+          });
+        } catch (error) {
+          throw annotateHostedWorkspaceSnapshotFailure({
+            error,
+            phase: "session_complete_record_checkpoint",
+          });
+        }
       }
       return completed;
     },
@@ -671,7 +718,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         );
       } catch (error) {
         throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(error, signal);
-        throw annotateHostedWorkspaceSnapshotSessionStartFailure({
+        throw annotateHostedWorkspaceSnapshotFailure({
           error,
           phase: "session_start_write_fence_headers",
         });
@@ -714,7 +761,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         ) {
           throw interruption;
         }
-        throw annotateHostedWorkspaceSnapshotSessionStartFailure({
+        throw annotateHostedWorkspaceSnapshotFailure({
           error: interruption ?? error,
           phase: "session_start_request_decode",
           timeoutMs: startTimeoutMs,
@@ -727,7 +774,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       try {
         started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
       } catch (error) {
-        throw annotateHostedWorkspaceSnapshotSessionStartFailure({
+        throw annotateHostedWorkspaceSnapshotFailure({
           error,
           phase: "session_start_payload_validation",
         });
@@ -743,9 +790,9 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
   return port;
 }
 
-function annotateHostedWorkspaceSnapshotSessionStartFailure(input: {
+function annotateHostedWorkspaceSnapshotFailure(input: {
   error: unknown;
-  phase: HostedWorkspaceSnapshotSessionStartFailurePhase;
+  phase: HostedWorkspaceSnapshotFailurePhase;
   timeoutMs?: number;
 }): Error {
   const error = input.error instanceof Error

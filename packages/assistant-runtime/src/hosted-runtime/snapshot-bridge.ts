@@ -281,6 +281,7 @@ interface HostedWorkspaceSnapshotTimingDetails
   extends HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
   snapshotArchiveBuildElapsedMs?: number;
   snapshotDirectR2UploadElapsedMs?: number;
+  snapshotSessionCompleteElapsedMs?: number;
   snapshotSessionStartElapsedMs?: number;
 }
 
@@ -674,12 +675,16 @@ async function createHostedWorkspaceV2Snapshot(
     checkpointAttempted = true;
     const checkpointRequest = { ...input.request };
     delete checkpointRequest.handledConversationFrontierSelected;
-    const completed = await workspaceSnapshotPort.completeSnapshotSession({
-      checkpointRequest: {
-        ...checkpointRequest,
-        snapshotRef,
-      },
-      ref: snapshotRef,
+    const completed = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotSessionCompleteElapsedMs",
+      run: async () => await workspaceSnapshotPort.completeSnapshotSession({
+        checkpointRequest: {
+          ...checkpointRequest,
+          snapshotRef,
+        },
+        ref: snapshotRef,
+      }),
+      timings: snapshotTimings,
     });
     snapshotRef = completed.snapshotRef;
     checkpoint = completed.checkpoint;
@@ -1072,11 +1077,16 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
-  const sessionStartFailure = readHostedWorkspaceSnapshotSessionStartFailure(error);
-  if (sessionStartFailure) {
-    redactedJson.snapshotSessionStartFailurePhase = sessionStartFailure.phase;
-    if (sessionStartFailure.timeoutMs !== undefined) {
-      redactedJson.snapshotSessionStartTimeoutMs = sessionStartFailure.timeoutMs;
+  const sessionFailure = readHostedWorkspaceSnapshotFailure(error);
+  if (sessionFailure?.kind === "start") {
+    redactedJson.snapshotSessionStartFailurePhase = sessionFailure.phase;
+    if (sessionFailure.timeoutMs !== undefined) {
+      redactedJson.snapshotSessionStartTimeoutMs = sessionFailure.timeoutMs;
+    }
+  } else if (sessionFailure?.kind === "complete") {
+    redactedJson.snapshotSessionCompleteFailurePhase = sessionFailure.phase;
+    if (sessionFailure.timeoutMs !== undefined) {
+      redactedJson.snapshotSessionCompleteTimeoutMs = sessionFailure.timeoutMs;
     }
   }
   let safeDiagnosticDetail: string | null = null;
@@ -1144,8 +1154,16 @@ const HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES = new Set([
   "session_start_request_decode",
   "session_start_write_fence_headers",
 ]);
+const HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES = new Set([
+  "session_complete_payload_validation",
+  "session_complete_record_checkpoint",
+  "session_complete_request",
+  "session_complete_response_decode",
+  "session_complete_write_fence_headers",
+]);
 
-function readHostedWorkspaceSnapshotSessionStartFailure(error: unknown): {
+function readHostedWorkspaceSnapshotFailure(error: unknown): {
+  kind: "complete" | "start";
   phase: string;
   timeoutMs?: number;
 } | null {
@@ -1156,14 +1174,19 @@ function readHostedWorkspaceSnapshotSessionStartFailure(error: unknown): {
   }
   const phase = properties.phase;
   const timeoutMs = properties.timeoutMs;
-  if (
-    typeof phase !== "string"
-    || !HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES.has(phase)
-  ) {
+  if (typeof phase !== "string") {
+    return null;
+  }
+  const kind = HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES.has(phase)
+    ? "start"
+    : HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES.has(phase)
+      ? "complete"
+      : null;
+  if (!kind) {
     return null;
   }
   if (timeoutMs === undefined) {
-    return { phase };
+    return { kind, phase };
   }
   if (
     typeof timeoutMs !== "number"
@@ -1173,7 +1196,7 @@ function readHostedWorkspaceSnapshotSessionStartFailure(error: unknown): {
   ) {
     return null;
   }
-  return { phase, timeoutMs };
+  return { kind, phase, timeoutMs };
 }
 
 function normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(

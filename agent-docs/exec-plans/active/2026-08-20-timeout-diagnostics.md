@@ -16,9 +16,9 @@ Updated: 2026-08-20
   per-stage and total elapsed time, attempt/budget state, provider reason, and
   provider-payload byte counts without logging credentials, resource names, or
   payloads.
-- Hosted checkpoint failure records identify session-start elapsed time and
-  distinguish write-fence, fetch-timeout, fetch-failure, and response-parse
-  failures.
+- Hosted checkpoint failure records identify session-start and completion
+  elapsed time and distinguish write-fence, request, response-decode,
+  payload-validation, and checkpoint-recording failures.
 - Focused tests prove classification, bounded values, retry recovery, and
   redaction-safe output; affected package typechecks pass.
 - Required ReviewGPT stages and exact-head CI pass before merge and deployment.
@@ -26,7 +26,8 @@ Updated: 2026-08-20
 ## Scope
 
 - In scope: hosted Web Google KMS diagnostics; Cloudflare checkpoint session
-  start diagnostics; focused tests and durable operational documentation.
+  start and completion diagnostics; focused tests and durable operational
+  documentation.
 - Out of scope: changing KMS cryptography or retry budgets; increasing the
   checkpoint timeout; adding another retry/queue; exposing provider payloads;
   changing checkpoint storage semantics.
@@ -70,6 +71,9 @@ Updated: 2026-08-20
 - Treat the observed checkpoint failures as a transient partial degradation:
   every affected subject later showed progress and no privacy exposure was
   observed.
+- Include checkpoint completion diagnostics after bounded live evidence showed
+  final publication could consume its full existing deadline even when archive
+  construction and direct upload were fast.
 
 ## Verification
 
