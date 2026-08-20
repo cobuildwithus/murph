@@ -374,21 +374,97 @@ describe("hosted group sponsorship refill dispatch", () => {
       });
   });
 
-  it("fails closed after a safely canceled charge and leaves notification to the retry owner", async () => {
+  it("moves a safely canceled charge into private recovery without retrying it", async () => {
     const purchase = buildPurchase();
-    const { prisma } = createPrisma([purchase]);
-    mocks.tryChargeHostedUsageCreditSavedCard.mockResolvedValue(null);
-    mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase.mockResolvedValue({
-      authorizationId: purchase.groupSponsorshipAuthorizationId,
-      payerMemberId: purchase.payerMemberId,
+    const { prisma, rows } = createPrisma([purchase]);
+    mocks.tryChargeHostedUsageCreditSavedCard.mockImplementationOnce(async () => {
+      Object.assign(rows[0], {
+        status: HostedUsageCreditPurchaseStatus.created,
+        stripePaymentIntentIdEncrypted: null,
+        stripePaymentIntentLookupKey: null,
+      });
+      return null;
     });
+    mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase
+      .mockImplementationOnce(async () => {
+        Object.assign(rows[0], {
+          authorizationStatus:
+            HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+          status: HostedUsageCreditPurchaseStatus.payment_failed,
+          terminalAt: NOW,
+        });
+        return {
+          authorizationId: purchase.groupSponsorshipAuthorizationId,
+          payerMemberId: purchase.payerMemberId,
+        };
+      });
 
     await expect(dispatchHostedGroupSponsorshipRefills({
       now: NOW,
       prisma: prisma as never,
     })).resolves.toEqual({ attempted: 1, dispatched: 0, recoveryRequired: 1 });
+    expect(rows[0]).toMatchObject({
+      authorizationStatus:
+        HostedGroupSponsorshipAuthorizationStatus.recovery_required,
+      status: HostedUsageCreditPurchaseStatus.payment_failed,
+      terminalAt: NOW,
+    });
     expect(mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase)
       .toHaveBeenCalledWith({ now: NOW, prisma, purchaseId: purchase.id });
+    expect(mocks.materializeHostedGroupSponsorshipRecoveryNotification)
+      .toHaveBeenCalledWith({ now: NOW, prisma, purchaseId: purchase.id });
+
+    const retryAt = new Date(NOW.getTime() + 60_000);
+    await dispatchHostedGroupSponsorshipRefills({
+      now: retryAt,
+      prisma: prisma as never,
+    });
+
+    expect(mocks.tryChargeHostedUsageCreditSavedCard).toHaveBeenCalledOnce();
+    expect(mocks.materializeHostedGroupSponsorshipRecoveryNotification)
+      .toHaveBeenLastCalledWith({ now: retryAt, prisma, purchaseId: purchase.id });
+  });
+
+  it("keeps an ambiguous bound charge silent and retries it on the next sweep", async () => {
+    const purchase = buildPurchase({
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripePaymentIntentIdEncrypted: "sealed_intent",
+      stripePaymentIntentLookupKey: "intent_lookup",
+    });
+    const { prisma, rows } = createPrisma([purchase]);
+    mocks.tryChargeHostedUsageCreditSavedCard
+      .mockRejectedValueOnce(new Error("Stripe request timed out"))
+      .mockResolvedValueOnce({
+        ...purchase,
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+        stripeChargeIdEncrypted: "sealed_charge",
+        stripeChargeLookupKey: "charge_lookup",
+      });
+
+    await expect(dispatchHostedGroupSponsorshipRefills({
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toEqual({ attempted: 1, dispatched: 0, recoveryRequired: 0 });
+    expect(rows[0]).toMatchObject({
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripePaymentIntentIdEncrypted: "sealed_intent",
+      stripePaymentIntentLookupKey: "intent_lookup",
+    });
+    expect(mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase)
+      .not.toHaveBeenCalled();
+    expect(mocks.materializeHostedGroupSponsorshipRecoveryNotification)
+      .not.toHaveBeenCalled();
+
+    await expect(dispatchHostedGroupSponsorshipRefills({
+      now: new Date(NOW.getTime() + 60_000),
+      prisma: prisma as never,
+    })).resolves.toEqual({ attempted: 1, dispatched: 1, recoveryRequired: 0 });
+
+    expect(mocks.tryChargeHostedUsageCreditSavedCard).toHaveBeenCalledTimes(2);
+    expect(mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase)
+      .not.toHaveBeenCalled();
+    expect(mocks.materializeHostedGroupSponsorshipRecoveryNotification)
+      .not.toHaveBeenCalled();
   });
 
   it("does not initialize Stripe when no admitted purchase exists", async () => {
