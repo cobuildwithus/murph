@@ -30,7 +30,8 @@ Updated: 2026-08-20
   title uses at most two leading-aligned lines with tail truncation when needed.
 - Proof: Focused contract and Swift tests, exact-head simulator renders of the
   targetless entry/saved states and wrapped transcript title, plus canonical
-  member-action application proof.
+  member-action application proof. Public release copy remains withheld until
+  the corrected companion build is available to members.
 
 ## Success criteria
 
@@ -49,8 +50,8 @@ Updated: 2026-08-20
 ## Scope
 
 - In scope: the existing iOS catalog-to-draft interpretation boundary, workout
-  entry regressions, transcript title layout, visual evidence, the Murph product
-  contract/changelog, and direct backend application proof.
+  entry regressions, transcript title layout, visual evidence, the Murph server
+  contract proof, and the public-release-copy disposition.
 - Out of scope: durable workout drafts, a second workout state owner, native
   vault reads, a new card wire version, or exercise-name inference outside an
   exact authored catalog match.
@@ -70,8 +71,9 @@ Updated: 2026-08-20
    behavior against both repository contracts.
 2. [completed] Implement the smallest iOS interpretation and title-layout changes
    with focused tests.
-3. [in_progress] Update the Murph-owned product contract, changelog, and backend
-   application proof without changing canonical mutation ownership.
+3. [completed] Prove the Murph-owned server contract and canonical application
+   path without changing mutation ownership, and withhold public release copy
+   until the repaired companion build is available.
 4. [completed] Capture exact-head simulator evidence and run focused verification.
 5. [pending] Commit, push, open both PRs, and run ReviewGPT with exact counterpart
    heads while CI runs.
