@@ -1,14 +1,80 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
+import * as coreRuntime from "@murphai/core";
+import { importDeviceProviderSnapshot } from "@murphai/importers";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import { test } from "vitest";
 
 import {
+  wearablesActivityListResultSchema,
   wearablesDayResultSchema,
   wearablesDriftResultSchema,
   wearablesLatestResultSchema,
   wearablesMetricLatestResultSchema,
   wearablesMetricTrendResultSchema,
 } from "../src/commands/wearables.ts";
+
+test("wearables activity schema preserves bounded workout features", () => {
+  const parsed = wearablesActivityListResultSchema.parse({
+    filters: {
+      date: "2026-04-03",
+      from: null,
+      limit: 10,
+      providers: ["garmin"],
+      to: null,
+    },
+    items: [{
+      activityAverageHeartRate: compactResolvedMetric({
+        metric: "activityAverageHeartRate",
+        unit: "bpm",
+        value: 106,
+      }),
+      date: "2026-04-03",
+      minimumHeartRate: compactResolvedMetric({
+        metric: "minimumHeartRate",
+        unit: "bpm",
+        value: 52,
+      }),
+      providers: ["garmin"],
+      summaryConfidence: {
+        level: "high",
+        selectedProviders: ["garmin"],
+      },
+      workoutFeatures: [{
+        activityType: "cycling",
+        averageCadence: 90,
+        averageHeartRate: 145,
+        averagePowerWatts: 220,
+        averageSpeedMps: 5,
+        cadenceUnit: "rpm",
+        provider: "garmin",
+        splits: [],
+        startedAt: "2026-04-03T18:00:00.000Z",
+      }],
+    }],
+    count: 1,
+    vault: "/tmp/example-vault",
+  });
+
+  assert.deepEqual(parsed.items[0]?.workoutFeatures?.[0]?.splits, []);
+  assert.equal(parsed.items[0]?.activityAverageHeartRate?.value, 106);
+  assert.equal(parsed.items[0]?.minimumHeartRate?.value, 52);
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.cadenceUnit, "rpm");
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averagePowerWatts, 220);
+  assert.equal(parsed.items[0]?.workoutFeatures?.[0]?.averageSpeedMps, 5);
+  assert.equal(
+    Object.hasOwn(parsed.items[0]?.workoutFeatures?.[0] ?? {}, "averagePower"),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(parsed.items[0]?.workoutFeatures?.[0] ?? {}, "averageSpeed"),
+    false,
+  );
+  assert.equal("vault" in parsed, false);
+});
 
 test("wearables day schema preserves compact fallback metadata", () => {
   const parsed = wearablesDayResultSchema.parse({
@@ -18,6 +84,11 @@ test("wearables day schema preserves compact fallback metadata", () => {
     },
     summary: {
       activity: {
+        activityAverageHeartRate: compactResolvedMetric({
+          metric: "activityAverageHeartRate",
+          unit: "bpm",
+          value: 106,
+        }),
         activityMinutes: compactResolvedMetric({ metric: "activityMinutes", unit: "minutes", value: 78 }),
         averageHeartRate: compactResolvedMetric({ metric: "averageHeartRate", unit: "bpm", value: 76 }),
         date: "2026-04-03",
@@ -25,6 +96,7 @@ test("wearables day schema preserves compact fallback metadata", () => {
         lowActivityMinutes: compactResolvedMetric({ metric: "lowActivityMinutes", unit: "minutes", value: 60 }),
         lowestHeartRate: compactResolvedMetric({ metric: "lowestHeartRate", unit: "bpm", value: 44 }),
         mediumActivityMinutes: compactResolvedMetric({ metric: "mediumActivityMinutes", unit: "minutes", value: 13 }),
+        minimumHeartRate: compactResolvedMetric({ metric: "minimumHeartRate", unit: "bpm", value: 52 }),
         summaryConfidence: {
           level: "high",
         },
@@ -62,6 +134,8 @@ test("wearables day schema preserves compact fallback metadata", () => {
   });
 
   assert.equal(parsed.summary?.activity?.activityMinutes?.value, 78);
+  assert.equal(parsed.summary?.activity?.activityAverageHeartRate?.value, 106);
+  assert.equal(parsed.summary?.activity?.minimumHeartRate?.value, 52);
   assert.equal(parsed.summary?.activity?.lowActivityMinutes?.value, 60);
   assert.equal(parsed.summary?.activity?.mediumActivityMinutes?.value, 13);
   assert.equal(parsed.summary?.activity?.highActivityMinutes?.value, 5);
@@ -78,6 +152,55 @@ test("wearables day schema preserves compact fallback metadata", () => {
   assert.equal("vault" in parsed, false);
 });
 
+test("Junction activity heart-rate facts survive persistence, query compaction, and CLI parsing", async () => {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-cli-junction-activity-heart-rate-"));
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-08-09T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    await importDeviceProviderSnapshot(
+      {
+        provider: "junction",
+        sourceKind: "poll",
+        deliveryMode: "scheduled_reconcile",
+        vaultRoot,
+        snapshot: {
+          importedAt: "2026-08-11T12:00:00.000Z",
+          summaries: {
+            activity: [{
+              id: "activity-heart-rate-cli-boundary",
+              observed_at: "2026-08-11T12:00:00.000Z",
+              average_heart_rate: 106,
+              minimum_heart_rate: 52,
+              source: { provider: "garmin", type: "watch" },
+            }],
+          },
+        },
+      },
+      { corePort: coreRuntime },
+    );
+
+    const services = createIntegratedVaultServices();
+    const compactDay = await services.query.showWearableDay({
+      vault: vaultRoot,
+      date: "2026-08-11",
+      providers: [],
+      requestId: "test-junction-activity-heart-rate-cli-boundary",
+    });
+    const parsed = wearablesDayResultSchema.parse(compactDay);
+
+    assert.equal(parsed.summary?.activity?.activityAverageHeartRate?.value, 106);
+    assert.equal(parsed.summary?.activity?.activityAverageHeartRate?.provider, "garmin");
+    assert.equal(parsed.summary?.activity?.minimumHeartRate?.value, 52);
+    assert.equal(parsed.summary?.activity?.minimumHeartRate?.provider, "garmin");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("additive wearables schemas stay compact and metric-aware", () => {
   const latestParsed = wearablesLatestResultSchema.parse({
     filters: {
@@ -88,6 +211,22 @@ test("additive wearables schemas stay compact and metric-aware", () => {
     },
     summary: {
       day: {
+        activity: {
+          activityAverageHeartRate: compactResolvedMetric({
+            metric: "activityAverageHeartRate",
+            unit: "bpm",
+            value: 106,
+          }),
+          date: "2026-04-05",
+          minimumHeartRate: compactResolvedMetric({
+            metric: "minimumHeartRate",
+            unit: "bpm",
+            value: 52,
+          }),
+          summaryConfidence: {
+            level: "high",
+          },
+        },
         date: "2026-04-05",
         notes: ["Latest wearable day was sourced from oura."],
         providers: ["oura"],
@@ -288,6 +427,8 @@ test("additive wearables schemas stay compact and metric-aware", () => {
   });
 
   assert.equal(latestParsed.summary?.day.date, "2026-04-05");
+  assert.equal(latestParsed.summary?.day.activity?.activityAverageHeartRate?.value, 106);
+  assert.equal(latestParsed.summary?.day.activity?.minimumHeartRate?.value, 52);
   assert.equal(Object.hasOwn(latestParsed.summary as Record<string, unknown>, "sleep"), false);
   assert.equal(Object.hasOwn(latestParsed.summary as Record<string, unknown>, "sourceHealth"), false);
   assert.equal("vault" in latestParsed, false);

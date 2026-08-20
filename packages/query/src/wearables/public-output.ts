@@ -37,6 +37,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
   const mediumActivityMinutes = projectWearableResolvedMetricPublicSources(day.mediumActivityMinutes);
   const highActivityMinutes = projectWearableResolvedMetricPublicSources(day.highActivityMinutes);
   const activeCalories = projectWearableResolvedMetricPublicSources(day.activeCalories);
+  const activityAverageHeartRate = projectWearableResolvedMetricPublicSources(day.activityAverageHeartRate);
   const totalCalories = projectWearableResolvedMetricPublicSources(day.totalCalories);
   const distanceKm = projectWearableResolvedMetricPublicSources(day.distanceKm);
   const floorsClimbed = projectWearableResolvedMetricPublicSources(day.floorsClimbed);
@@ -50,6 +51,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
   const averageHeartRate = projectWearableResolvedMetricPublicSources(day.averageHeartRate);
   const walkingAverageHeartRate = projectWearableResolvedMetricPublicSources(day.walkingAverageHeartRate);
   const lowestHeartRate = projectWearableResolvedMetricPublicSources(day.lowestHeartRate);
+  const minimumHeartRate = projectWearableResolvedMetricPublicSources(day.minimumHeartRate);
   const percentRecorded = projectWearableResolvedMetricPublicSources(day.percentRecorded);
   const sessionMinutes = projectWearableResolvedMetricPublicSources(day.sessionMinutes);
   const sessionCount = projectWearableResolvedMetricPublicSources(day.sessionCount);
@@ -60,6 +62,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     ["mediumActivityMinutes", mediumActivityMinutes],
     ["highActivityMinutes", highActivityMinutes],
     ["activeCalories", activeCalories],
+    ["activityAverageHeartRate", activityAverageHeartRate],
     ["totalCalories", totalCalories],
     ["distanceKm", distanceKm],
     ["floorsClimbed", floorsClimbed],
@@ -72,6 +75,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     ["maxHeartRate", maxHeartRate],
     ["averageHeartRate", averageHeartRate],
     ["walkingAverageHeartRate", walkingAverageHeartRate],
+    ["minimumHeartRate", minimumHeartRate],
     ["lowestHeartRate", lowestHeartRate],
     ["percentRecorded", percentRecorded],
     ["sessionMinutes", sessionMinutes],
@@ -85,6 +89,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
 
   return {
     ...day,
+    activityAverageHeartRate,
     activityScore,
     activeCalories,
     activityMinutes,
@@ -100,6 +105,7 @@ export function projectWearableActivityDayPublicSources(day: WearableActivityDay
     lowestHeartRate,
     maxHeartRate,
     mediumActivityMinutes,
+    minimumHeartRate,
     notes: projectSummaryNotes({
       metrics: metrics.map(([, metric]) => metric),
       originalNotes: day.notes,

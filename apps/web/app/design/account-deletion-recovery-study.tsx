@@ -183,17 +183,15 @@ function ProviderRecoveryDialogBody({ id }: { id: string }) {
         </p>
       </div>
 
-      <p
-        role="alert"
-        className="rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-sm leading-5 text-destructive"
-      >
-        Remove Murph access from Oura and Strava, then confirm below.
-      </p>
+      <HostedAccountDeletionErrorAlert
+        message="Remove Murph access from Oura and Strava, then confirm below."
+        providerAccessRemovalRequired
+      />
 
       <div className="flex flex-col gap-2">
         <Label className="block leading-5" htmlFor={`${id}-phrase`}>
           Type{" "}
-          <span className="font-mono text-xs tracking-wide">
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em] tracking-wide text-foreground">
             {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           </span>{" "}
           to confirm
@@ -248,7 +246,7 @@ function AccountDeletionMessageDialogBody({
       <div className="flex flex-col gap-2">
         <Label className="block leading-5" htmlFor={`${id}-phrase`}>
           Type{" "}
-          <span className="font-mono text-xs tracking-wide">
+          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.9em] tracking-wide text-foreground">
             {HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           </span>{" "}
           to confirm
@@ -259,7 +257,6 @@ function AccountDeletionMessageDialogBody({
           defaultValue={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           id={`${id}-phrase`}
           inputMode="text"
-          placeholder={HOSTED_ACCOUNT_DELETION_CONFIRMATION_PHRASE}
           readOnly
         />
       </div>
