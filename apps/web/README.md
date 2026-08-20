@@ -1575,6 +1575,15 @@ without letting stale events replace valid pending runs. After those gates, it c
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
 The public workflow is verification-only: it does not assign aliases, promote a
 deployment, or roll production back.
+Because the workflow checks out and executes the deployed revision, the first
+production Web deployment containing
+`scripts/verify-vercel-production-deployment.ts` is the postdeploy verification
+rollback floor. A manual retry against an older pre-floor deployment fails
+closed on the missing verifier before database authority or contract SQL is
+available. Incident recovery may still route traffic to an older deployment,
+but the protected postdeploy lane becomes operable again only after rolling
+forward to that floor or a newer revision; do not use an older workflow revision
+to bypass the complete-domain proof.
 The shared production migration URL resolver strips Prisma-style
 `sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
 handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.

@@ -21,6 +21,9 @@ Updated: 2026-08-20
   exact deployment id before downstream release work succeeds.
 - The configured production base host is present in that enumerated production
   domain set.
+- The first production deployment containing the exact verifier is documented
+  as the postdeploy rollback floor, with pre-floor failure proven before
+  database authority and a floor-or-newer success path.
 - Focused tests, typecheck, required audits, exact-head CI, and ReviewGPT pass.
 
 ## Scope

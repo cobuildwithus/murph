@@ -2058,6 +2058,7 @@ describe("hosted web production migration guard", () => {
       "contract migrations must expose the database secret only after the alias proof output is set",
     );
 
+    const productionProofRun = extractWorkflowRunScript(productionProofStep);
     const contractMigrationRun = extractWorkflowRunScript(contractMigrationStep);
     const shellFixture = await mkdtemp(
       path.join(tmpdir(), "murph-contract-migration-workflow-"),
@@ -2077,6 +2078,14 @@ elif [[ "$*" == *"release:production:verify-exact-deployment"* ]]; then
   printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
   printf '%s\\n' "\${DEPLOYED_SHA}"
 elif [[ "$*" == *"exec tsx scripts/verify-vercel-production-deployment.ts"* ]]; then
+  if [[ "\${STUB_VERIFIER_AVAILABLE:-1}" != "1" ]]; then
+    if [[ -n "\${DIRECT_DATABASE_URL:-}" || -n "\${MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS:-}" || -n "\${MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS:-}" ]]; then
+      printf 'pre-floor verifier failure exposed database migration authority\\n' >&2
+      exit 96
+    fi
+    printf 'Cannot find module scripts/verify-vercel-production-deployment.ts\\n' >&2
+    exit 98
+  fi
   printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
   printf '%s\\n' "\${DEPLOYED_SHA}"
 elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
@@ -2090,6 +2099,46 @@ fi
       await chmod(pnpmStub, 0o700);
 
       const deployedSha = "f".repeat(40);
+      const productionOutputFile = path.join(shellFixture, "production-output.txt");
+      const runProductionProofBody = (verifierAvailable: boolean) => spawnSync(
+        "bash",
+        ["-c", productionProofRun],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            DEPLOYED_SHA: deployedSha,
+            DIRECT_DATABASE_URL: undefined,
+            GITHUB_OUTPUT: productionOutputFile,
+            HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS: "0",
+            HOSTED_WEB_PRODUCTION_BASE_URL: "https://production.example.test",
+            HOSTED_WEB_VERCEL_PROJECT_ID: "project-id",
+            HOSTED_WEB_VERCEL_TOKEN: "token",
+            MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS: undefined,
+            MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS: undefined,
+            PATH: `${shellFixture}:${process.env.PATH ?? ""}`,
+            SHOULD_REQUIRE_CURRENT: "false",
+            STUB_CALLS_FILE: callsFile,
+            STUB_CURRENT_SHA: deployedSha,
+            STUB_VERIFIER_AVAILABLE: verifierAvailable ? "1" : "0",
+          },
+        },
+      );
+
+      const preFloorProof = runProductionProofBody(false);
+      assert.equal(preFloorProof.status, 98);
+      assert.match(preFloorProof.stderr, /Cannot find module/u);
+      assert.doesNotMatch(preFloorProof.stderr, /exposed database migration authority/u);
+      await assert.rejects(() => readFile(callsFile, "utf8"), /ENOENT/u);
+      await assert.rejects(() => readFile(productionOutputFile, "utf8"), /ENOENT/u);
+
+      const floorOrNewerProof = runProductionProofBody(true);
+      assert.equal(floorOrNewerProof.status, 0, floorOrNewerProof.stderr);
+      assert.equal(await readFile(callsFile, "utf8"), "verify\nverify\n");
+      assert.equal(await readFile(productionOutputFile, "utf8"), "should_apply=true\n");
+      await rm(callsFile, { force: true });
+      await rm(productionOutputFile, { force: true });
+
       const runWorkflowBody = (options: {
         currentSha: string;
         requireCurrent: boolean;
@@ -2105,6 +2154,7 @@ fi
           SHOULD_REQUIRE_CURRENT: options.requireCurrent ? "true" : "false",
           STUB_CALLS_FILE: callsFile,
           STUB_CURRENT_SHA: options.currentSha,
+          STUB_VERIFIER_AVAILABLE: "1",
         },
       });
 

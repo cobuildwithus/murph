@@ -761,6 +761,12 @@ supported provider credential.
   `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver
   removes Prisma-style `sslcert=system`, `sslkey=system`, and
   `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
+  The first production Web deployment containing the exact-deployment verifier
+  is the postdeploy verification rollback floor: the current workflow executes
+  the deployed checkout, so a synthetic pre-floor tree must fail on the missing
+  verifier before database authority or migration execution, while a
+  floor-or-newer exact match must complete the two domain proofs and the final
+  pre-SQL proof.
   After contract cleanup applies, the rollback floor is the first deployed Vercel
   commit that no longer reads or writes the dropped schema shape; rollback below
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare
