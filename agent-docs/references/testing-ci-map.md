@@ -641,6 +641,7 @@ supported provider credential.
   complete transient recovery, persistent-omission retention,
   confirmation-only port baseline advancement, transient diagnostic port
   evidence with legacy-reader-compatible durable normalization,
+  in-run reset increments and first-scrape-only sparse-series retention,
   alternating sparse-port observations, legacy single-port obligation parsing,
   and
   conservative legacy-plus-detailed window formatting,

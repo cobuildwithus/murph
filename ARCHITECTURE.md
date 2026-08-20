@@ -1684,7 +1684,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   returned immediately, and an incomplete or failed confirmation retains the
   original omission. PlanetScale's example 30-second Prometheus scrape
   configuration is not treated as a freshness guarantee or a basis for more
-  provider calls. When the original observation is missing only the whole
+  provider calls. Parsed connection-error observations are evaluated in scrape
+  order against a run-local baseline before that baseline is persisted. A new
+  or reset series seen by the first partial is therefore initialized before the
+  confirmation is evaluated, an increment between the two scrapes remains
+  alerting evidence, and a series omitted by the selected final snapshot is not
+  forgotten. When the original observation is missing only the whole
   connection-error family, a safe incomplete confirmation may join recovered
   supported-port counters to the original complete gauge evidence. Each
   observed port, including one first seen by confirmation, advances only its

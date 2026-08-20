@@ -241,7 +241,11 @@ fails before parsing; `unavailable` is reserved for checks that produced no
 parsed observation. The connection-error family tracks both supported ports,
 keyed by port and region so their series cannot collide. Any observed supported
 port makes the family available. An absent port is diagnostic sparse label
-cardinality, not a collection failure. PlanetScale's
+cardinality, not a collection failure. Parsed counter observations are evaluated
+in scrape order against a run-local baseline before persistence. A new or reset
+series from the first partial is initialized before confirmation, an increment
+between scrapes still pages, and a series omitted by the selected final snapshot
+remains available to the next check. PlanetScale's
 [documented example Prometheus scrape configuration](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
 uses 30 seconds, but that is not a provider freshness guarantee and does not
 justify another provider call. The monitor evaluates every available

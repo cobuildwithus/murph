@@ -485,7 +485,12 @@ Last verified: 2026-08-20
   6432, keyed by port and region so their counters cannot collide. Any observed
   supported port makes the family available. An absent port is diagnostic sparse
   label cardinality, not a collection failure. An observed port can still
-  produce a positive non-replayable condition. PlanetScale's documented example
+  produce a positive non-replayable condition. Parsed counter observations are
+  evaluated in scrape order against a run-local baseline before persistence. A
+  new or reset series from the first partial is initialized before confirmation,
+  an increment between scrapes remains alerting evidence, and a series omitted
+  by the selected final snapshot remains in the next baseline. PlanetScale's
+  documented example
   30-second Prometheus scrape configuration is not a freshness guarantee, so it
   does not justify a longer delay or another provider call. Every available
   confirmation signal is evaluated. When the original observation is missing
