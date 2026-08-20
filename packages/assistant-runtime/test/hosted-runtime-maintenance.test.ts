@@ -3176,6 +3176,12 @@ describe("runHostedDeviceSyncPass", () => {
       observedTokenVersions: new Map(),
       pendingDirtyAcks: [
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_1",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_dirty_batch_1",
           nextWakeAt: "2026-04-08T00:05:00.000Z",
           processedDirtyPayloadIds: ["dsp_1"],
@@ -3214,6 +3220,12 @@ describe("runHostedDeviceSyncPass", () => {
       nextWakeAt: "2026-04-08T00:03:00.000Z",
       records: [
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_1",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_dirty_batch_1",
           nextWakeAt: "2026-04-08T00:05:00.000Z",
           processedDirtyPayloadIds: ["dsp_1"],
@@ -3229,6 +3241,12 @@ describe("runHostedDeviceSyncPass", () => {
     });
     assert.deepEqual(result.stagedDirtyAcks, [
       {
+        completedImports: [{
+          dirtyPayloadId: "dsp_1",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_dirty_batch_1",
         nextWakeAt: "2026-04-08T00:05:00.000Z",
         processedDirtyPayloadIds: ["dsp_1"],

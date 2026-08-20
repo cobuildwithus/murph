@@ -1372,6 +1372,12 @@ describe("hosted system mailbox notification execution context", () => {
       mailboxLane: "device-sync",
       nextWakeAt: null,
       postCheckpointRecord: {
+        completedImports: [{
+          dirtyPayloadId: "dsp_payload_1",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_dirty_123",
         kind: "device-sync.dirty-processed",
         nextWakeAt: null,
@@ -1434,6 +1440,12 @@ describe("hosted system mailbox notification execution context", () => {
         recorded: 1,
       });
       expect(ackDirtyStateProcessed).toHaveBeenCalledWith({
+        completedImports: [{
+          dirtyPayloadId: "dsp_payload_1",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_dirty_123",
         processedDirtyPayloadIds: ["dsp_payload_1"],
         processedRevision: "12",

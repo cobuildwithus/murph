@@ -2,7 +2,10 @@ import { PrismaClient } from "@prisma/client";
 
 import { canonicalizeJunctionProviderSlug } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
-import type { HostedExecutionDeviceSyncStagedDirtyAck } from "@murphai/device-syncd/hosted-runtime";
+import type {
+  HostedExecutionDeviceSyncCompletedImport,
+  HostedExecutionDeviceSyncStagedDirtyAck,
+} from "@murphai/device-syncd/hosted-runtime";
 import type {
   ClaimDeviceSyncWebhookTraceInput,
   ClearPublicDeviceSyncOAuthCredentialInput,
@@ -522,13 +525,13 @@ export class PrismaDeviceSyncControlPlaneStore
     return this.signals.createSignal(input);
   }
 
-  async listRecentConnectionWebhookSignals(input: {
+  async listRecentConnectionStatusSignals(input: {
     userId: string;
     connectionIds: readonly string[];
     sourceProviderSlug?: string | null;
     limit?: number;
   }): Promise<HostedSignalRecord[]> {
-    return this.signals.listRecentConnectionWebhookSignals(input);
+    return this.signals.listRecentConnectionStatusSignals(input);
   }
 
   async upsertDirtyConnection(
@@ -616,6 +619,7 @@ export class PrismaDeviceSyncControlPlaneStore
   }
 
   async markDirtyConnectionProcessed(input: {
+    completedImports?: readonly HostedExecutionDeviceSyncCompletedImport[];
     connectionId: string;
     processedDirtyPayloadIds?: readonly string[];
     processedRevision: bigint;
