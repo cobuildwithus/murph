@@ -574,13 +574,13 @@ supported provider credential.
   shutdown cancellation as the fallback, and proves a
   schedule-only scoped patch to exact time atomically converts availability to
   fixed delivery without retaining its source, account, or snapshot.
-  `packages/hosted-execution/test/assistant-permissions.test.ts` and
-  `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` prove
-  one-shot memory maintenance denies the complete workspace and network.
-  Assistant-engine planning, tool-boundary, provider-seam, and real App Server
-  tests prove only the exact managed id receives `murph.member_memory`, shell
-  stays disabled, and the trusted host performs canonical memory reads and
-  audited writes; reminder availability needs no Codex permission profile.
+  `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` proves
+  hosted config emits no member-memory permission profile. Assistant-engine
+  planning, tool-boundary, provider-seam, and real App Server tests prove only
+  the exact managed id receives `murph.member_memory`, shell and every other
+  native capability stay disabled even without a sandbox profile, and the
+  trusted host performs canonical memory reads and audited writes; reminder
+  availability needs no Codex permission profile.
   `packages/core/test/automation-availability.test.ts` proves exact
   policy/source/account authorization, canonical populated and empty snapshot
   parsing/removal, host-only prompt sanitation, exact-time normalization, and

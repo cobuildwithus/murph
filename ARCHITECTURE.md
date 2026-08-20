@@ -392,7 +392,9 @@ legacy roster handle before any group summary reaches the model.
 Immutable hosted memory consolidation remains an isolated one-shot automation.
 Only its exact built-in id receives `murph.member_memory`; the host executes
 that narrow tool through canonical core memory operations while the Codex turn
-has shell/native capabilities disabled and its workspace and network denied.
+exposes no shell, filesystem, browser, app, plugin, web-search, environment, or
+public-network capability. It does not need a separate permission profile or
+filesystem mutation path.
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store

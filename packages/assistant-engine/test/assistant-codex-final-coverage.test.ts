@@ -8,7 +8,6 @@ import {
 } from '@murphai/hosted-execution/env'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -1618,7 +1617,7 @@ describe('Codex model catalog', () => {
       hostedToolContext: null,
       materializeWorkspaceArtifacts: null,
       memberMemoryMaintenanceAuthorized: true,
-      permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
+      permissions: null,
       processLifetime: 'one-shot',
       progressDelivery: null,
       providerThreadEphemeral: true,

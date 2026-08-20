@@ -247,8 +247,6 @@ describe('Codex thread instructions', () => {
         memberMemoryMaintenanceAuthorized: scenario.maintenance === 'member',
         permissions: scenario.maintenance === 'group'
           ? 'murph-group-room-model-maintenance'
-          : scenario.maintenance === 'member'
-            ? 'murph-member-memory-maintenance'
           : null,
         processLifetime: 'one-shot',
         providerThreadEphemeral: true,
@@ -281,7 +279,11 @@ describe('Codex thread instructions', () => {
         expect(appServerInput?.memberMemoryMaintenanceAuthorized).toBe(
           scenario.maintenance === 'member',
         )
-        expect(appServerInput?.sandbox).toBeUndefined()
+        expect(appServerInput?.sandbox).toBe(
+          scenario.maintenance === 'group'
+            ? undefined
+            : 'danger-full-access',
+        )
       } else {
         expect(appServerInput?.configOverrides).toEqual(outputOnlyOverrides)
         expect(appServerInput?.dynamicTools).toEqual([])
