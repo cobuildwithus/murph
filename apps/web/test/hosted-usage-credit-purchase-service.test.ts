@@ -5582,6 +5582,17 @@ describe("automatic group refill saved-card recovery", () => {
       status: "payment_pending",
       stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
     });
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenNthCalledWith(
+      2,
+      "pi_saved_card_123",
+      { expand: ["latest_charge"] },
+    );
+    expect(
+      mocks.stripePaymentIntentConfirm.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.stripePaymentIntentRetrieve.mock.invocationCallOrder[1] ?? 0,
+    );
     expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
 
     await expect(tryChargeHostedUsageCreditSavedCard({
@@ -5595,6 +5606,12 @@ describe("automatic group refill saved-card recovery", () => {
     });
 
     expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(3);
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenNthCalledWith(
+      3,
+      "pi_saved_card_123",
+      { expand: ["latest_charge"] },
+    );
     expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledTimes(2);
     expect(mocks.stripePaymentIntentConfirm.mock.calls[0]?.[2]).toEqual(
       mocks.stripePaymentIntentConfirm.mock.calls[1]?.[2],
