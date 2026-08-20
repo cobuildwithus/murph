@@ -59,6 +59,16 @@ import {
 } from "./visuals";
 
 const VISUALS: Record<string, ReactNode> = {
+  "realtime-environment-interview": (
+    <ChecklistMock
+      label="Live Environment interview"
+      items={[
+        { label: "Bedroom temperature", done: true },
+        { label: "Window at night", done: true },
+        { label: "Bedroom CO2", done: false },
+      ]}
+    />
+  ),
   "group-funding-supporters": (
     <div className="w-full max-w-[320px] rounded-2xl border border-[#c4a882]/35 bg-[#fdfaf5] px-5 pb-6">
       <GroupFundingSupporters
