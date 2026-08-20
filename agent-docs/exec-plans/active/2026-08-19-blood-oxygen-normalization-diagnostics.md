@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-19
-Updated: 2026-08-19
+Updated: 2026-08-20
 
 ## Goal
 
@@ -13,8 +13,8 @@ Updated: 2026-08-19
 
 - Every importer rejection branch emits one stable, stage-qualified reason.
 - Complete-day row failures include useful structural context: one-based row
-  ordinal, underlying provider slug, timestamp kind, and timestamp semantics
-  when known.
+  ordinal, a code-owned known provider slug, timestamp kind, and timestamp
+  semantics when known.
 - The device-sync failure diagnostic preserves those fields and the hosted
   runtime emits them on `device-sync.job_failed`.
 - Focused importer, device-sync, hosted-runtime, and type checks pass.
@@ -38,7 +38,8 @@ Updated: 2026-08-19
 
 1. Risk: added metadata accidentally carries health data or identifiers.
    Mitigation: populate only fixed enums, code-owned field paths, a bounded row
-   ordinal, and the normalized provider slug; verify the emitted log exactly.
+   ordinal, and a slug admitted by the existing known-provider set; verify the
+   emitted log exactly.
 2. Risk: diagnostic plumbing changes sync behavior.
    Mitigation: leave the error code, message, retryability, persistence, and
    control flow unchanged and exercise the real importer-to-service path.
@@ -58,14 +59,26 @@ Updated: 2026-08-19
   the member-facing error message.
 - Include structural shape evidence rather than raw values. This is both more
   privacy-safe and more directly actionable for a normalization contract bug.
+- Admit a provider slug to diagnostics only through Junction's existing
+  code-owned provider set. Unknown payload text is omitted at both the importer
+  and device-sync boundaries while the other structural diagnostics remain.
+- Collapse unreachable daily timestamp sub-classifications into one guarded
+  fallback; the reachable temporal resolver keeps its precise timestamp
+  reasons.
 
 ## Verification
 
 - `pnpm --filter @murphai/importers typecheck` — passed.
 - `pnpm --filter @murphai/device-syncd typecheck` — passed.
 - `pnpm --filter @murphai/assistant-runtime typecheck` — passed.
-- Full affected Vitest files — 229 importer, 136 device-sync service, and 85
-  hosted-runtime tests passed.
-- Focused blood-oxygen diagnostics — seven distinct rejection shapes passed;
-  assertions prove the diagnostic excludes the raw fixture value and timestamp.
+- Full affected Vitest files — 234 importer and 137 device-sync service tests
+  passed after review remediation; the unchanged hosted-runtime path previously
+  passed all 85 tests.
+- Focused blood-oxygen diagnostics cover eight rejection shapes plus unresolved
+  source context. Sparse-row tests assert their exact diagnostic, and privacy
+  tests prove unrecognized provider text is omitted while a known provider is
+  preserved.
+- Preliminary specialist review findings were remediated. Final ReviewGPT round
+  1 passed on the preceding candidate; round 2 will review the corrected full
+  patch.
 - `git diff --check` — passed.

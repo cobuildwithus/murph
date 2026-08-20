@@ -113,6 +113,7 @@ import {
   selectJunctionWorkoutStreamCandidates,
 } from "./junction-bounded-features.ts";
 import {
+  normalizeKnownJunctionSourceProviderSlug,
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
@@ -2350,7 +2351,9 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
         "sparse_interval.row_incomplete",
         {
           rowOrdinal: index + 1,
-          sourceProvider: resourceContext?.sourceProviderSlug,
+          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+            resourceContext?.sourceProviderSlug,
+          ),
           timestampKind: classifyJunctionNormalizationTimestampKind(startRaw),
           timestampSemantics: timestamp?.timestampSemantics,
         },
@@ -2360,10 +2363,7 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
 }
 
 export type JunctionCalendarRefreshNormalizationFailureReason =
-  | "daily.day_unresolved"
-  | "daily.timestamp_invalid"
-  | "daily.timestamp_missing_or_non_string"
-  | "daily.timestamp_unresolved"
+  | "daily.timestamp_or_day_unresolved"
   | "daily.value_missing"
   | "daily.value_non_numeric"
   | "daily.value_out_of_range"
@@ -4018,21 +4018,14 @@ function buildJunctionDailyTimeseriesAggregates(input: {
             : "daily.value_non_numeric";
         } else if (value === undefined) {
           reason = "daily.value_out_of_range";
-        } else if (!timestamp.observedAtRaw) {
-          reason = "daily.timestamp_missing_or_non_string";
-        } else if (
-          input.requireExplicitTimestamp
-          && !hasValidJunctionExplicitTimeseriesTimestamp(timestamp)
-        ) {
-          reason = "daily.timestamp_invalid";
-        } else if (!sampleAt) {
-          reason = "daily.timestamp_unresolved";
         } else {
-          reason = "daily.day_unresolved";
+          reason = "daily.timestamp_or_day_unresolved";
         }
         throw junctionCalendarRefreshNormalizationError(reason, {
           ...rowDiagnostic,
-          sourceProvider: resourceContext.sourceProviderSlug,
+          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+            resourceContext.sourceProviderSlug,
+          ),
           timestampKind: classifyJunctionNormalizationTimestampKind(
             timestamp.observedAtRaw ?? providerTimestamp,
           ),
@@ -4182,7 +4175,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           temporalSourceDay.timeZone,
           {
             ...rowDiagnostic,
-            sourceProvider: resourceContext.sourceProviderSlug,
+            sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+              resourceContext.sourceProviderSlug,
+            ),
             timestampKind: classifyJunctionNormalizationTimestampKind(
               timestamp.observedAtRaw ?? providerTimestamp,
             ),
@@ -4208,7 +4203,9 @@ function buildJunctionDailyTimeseriesAggregates(input: {
             "source_day.outside_authorized_day",
             {
               ...rowDiagnostic,
-              sourceProvider: resourceContext.sourceProviderSlug,
+              sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+                resourceContext.sourceProviderSlug,
+              ),
               timestampKind: classifyJunctionNormalizationTimestampKind(
                 timestamp.observedAtRaw ?? providerTimestamp,
               ),

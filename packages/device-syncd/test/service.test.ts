@@ -11709,7 +11709,17 @@ test("device sync service records unexpected job errors as dead jobs", async () 
   close();
 });
 
-test("device sync service preserves structured Junction normalization diagnostics", async () => {
+test.each([
+  { expectedSourceProvider: "garmin", sourceProvider: "garmin", sourceProviderKind: "known" },
+  {
+    expectedSourceProvider: undefined,
+    sourceProvider: "member-12345",
+    sourceProviderKind: "unrecognized",
+  },
+])("device sync service preserves safe Junction normalization diagnostics ($sourceProviderKind source)", async ({
+  expectedSourceProvider,
+  sourceProvider,
+}) => {
   const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-normalization-diagnostics");
   const { service, close } = createServiceFixture({
     secret: "secret-for-tests",
@@ -11724,7 +11734,7 @@ test("device sync service preserves structured Junction normalization diagnostic
           throw new JunctionSparseCalendarRepairNormalizationError({
             reason: "temporal.timestamp_invalid",
             rowOrdinal: 3,
-            sourceProvider: "garmin",
+            sourceProvider,
             timestampKind: "invalid",
             timestampSemantics: "unknown",
           });
@@ -11747,7 +11757,9 @@ test("device sync service preserves structured Junction normalization diagnostic
     assert.deepEqual(diagnostic.details, {
       normalizationFailureReason: "temporal.timestamp_invalid",
       normalizationRowOrdinal: 3,
-      normalizationSourceProvider: "garmin",
+      ...(expectedSourceProvider
+        ? { normalizationSourceProvider: expectedSourceProvider }
+        : {}),
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
     });
