@@ -153,9 +153,17 @@ export function EnvironmentVoiceCapture({
   triggerSize?: "sm" | "default" | "lg";
   triggerVariant?: "default" | "outline";
 }) {
-  const [open, setOpen] = useState(Boolean(preview));
+  const [open, setOpen] = useState(Boolean(preview || requestedTopicId));
   const [state, setState] = useState<RealtimeState>(preview?.state ?? "idle");
-  const [topicIndex, setTopicIndex] = useState(0);
+  const [topicIndex, setTopicIndex] = useState(() => {
+    if (!requestedTopicId) {
+      return 0;
+    }
+    const selectedIndex = script.topics.findIndex(
+      (candidate) => candidate.id === requestedTopicId,
+    );
+    return selectedIndex >= 0 ? selectedIndex : 0;
+  });
   const [notice, setNotice] = useState<string | null>(null);
   const [transcript, setTranscript] = useState(preview?.transcript ?? "");
   const [audioLevel, setAudioLevel] = useState(preview?.speaking ? 0.45 : 0);
@@ -182,7 +190,9 @@ export function EnvironmentVoiceCapture({
     },
   );
   const [sessionScript, setSessionScript] =
-    useState<EnvironmentVoiceScript | null>(preview ? script : null);
+    useState<EnvironmentVoiceScript | null>(
+      preview || requestedTopicId ? script : null,
+    );
   const completedTopicIdsRef = useRef(new Set<string>());
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -213,7 +223,11 @@ export function EnvironmentVoiceCapture({
   const savedFieldValuesRef = useRef(
     new Map<string, string | number | boolean>(),
   );
-  const savedFieldNotesRef = useRef(new Map<string, string>());
+  const savedFieldNotesRef = useRef(
+    preview || requestedTopicId
+      ? readScriptIndicatorNotes(script)
+      : new Map<string, string>(),
+  );
   const activeTopicIndexRef = useRef(0);
   const activeTopicRef = useRef<EnvironmentVoiceTopic | null>(null);
   const nextTopicRef = useRef<EnvironmentVoiceTopic | null>(null);
@@ -226,11 +240,13 @@ export function EnvironmentVoiceCapture({
     scriptForView.topics[activeTopicIndex] ?? scriptForView.topics[0];
   const nextTopic = scriptForView.topics[activeTopicIndex + 1] ?? null;
 
-  activeTopicIndexRef.current = activeTopicIndex;
-  activeTopicRef.current = topic;
-  nextTopicRef.current = nextTopic;
-  languageChoiceRef.current = languageChoice;
-  realtimeStateRef.current = state;
+  useEffect(() => {
+    activeTopicIndexRef.current = activeTopicIndex;
+    activeTopicRef.current = topic;
+    nextTopicRef.current = nextTopic;
+    languageChoiceRef.current = languageChoice;
+    realtimeStateRef.current = state;
+  }, [activeTopicIndex, languageChoice, nextTopic, state, topic]);
 
   const updateTranscript = useCallback((value: string) => {
     if (!value) {
@@ -476,9 +492,11 @@ export function EnvironmentVoiceCapture({
       return;
     }
     const savedLanguage = readSavedVoiceLanguage();
-    if (savedLanguage && findEnvironmentVoiceLanguage(savedLanguage)) {
-      setLanguageChoice(savedLanguage);
+    if (!savedLanguage || !findEnvironmentVoiceLanguage(savedLanguage)) {
+      return;
     }
+    const timeoutId = window.setTimeout(() => setLanguageChoice(savedLanguage), 0);
+    return () => window.clearTimeout(timeoutId);
   }, [preview]);
 
   useEffect(
@@ -1262,25 +1280,11 @@ export function EnvironmentVoiceCapture({
     void startRealtime();
   };
 
-  useEffect(() => {
-    if (!requestedTopicId) {
-      return;
-    }
-    const selectedIndex = script.topics.findIndex(
-      (candidate) => candidate.id === requestedTopicId,
-    );
-    setSessionScript(script);
-    savedFieldNotesRef.current = readScriptIndicatorNotes(script);
-    setTopicIndex(selectedIndex >= 0 ? selectedIndex : 0);
-    setCapturedFieldKeys(new Set());
-    setOpen(true);
-    onRequestedTopicHandled?.();
-  }, [onRequestedTopicHandled, requestedTopicId, script]);
-
   const onOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (!nextOpen) {
       reset();
+      onRequestedTopicHandled?.();
     }
   };
 

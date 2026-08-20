@@ -15,7 +15,6 @@ export function EnvironmentReportSkeleton({
   const [slow, setSlow] = useState(false);
 
   useEffect(() => {
-    setSlow(false);
     const timeoutId = window.setTimeout(() => setSlow(true), SLOW_LOAD_DELAY_MS);
     return () => window.clearTimeout(timeoutId);
   }, [retryCount]);
@@ -64,6 +63,7 @@ export function EnvironmentReportSkeleton({
           </p>
           <Button
             onClick={() => {
+              setSlow(false);
               setRetryCount((current) => current + 1);
               void onRetry();
             }}

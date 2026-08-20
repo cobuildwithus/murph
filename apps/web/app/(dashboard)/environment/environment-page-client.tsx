@@ -615,7 +615,7 @@ export function EnvironmentReport({
   const noteByCategoryId = new Map(notes.map((note) => [note.id, note]));
   const voiceScript = buildEnvironmentVoiceScript(values, indicatorNotes);
   const [requestedTopicId, setRequestedTopicId] = useState<string | null>(null);
-  const clearRequestedTopic = useCallback(() => setRequestedTopicId(null), []);
+  const clearRequestedTopic = () => setRequestedTopicId(null);
   const renderInlineVoiceCapture = useCallback(
     (indicatorId: string) => {
       const targetedScript =
@@ -734,6 +734,7 @@ export function EnvironmentReport({
         })}
       </div>
       <EnvironmentVoiceCapture
+        key={requestedTopicId ?? "report-detail-voice-capture"}
         contactOptions={contactOptions}
         disabled={voiceCaptureDisabled}
         onAccepted={onVoiceAccepted}
