@@ -237,13 +237,6 @@ async function readQueueMetrics(
   ) {
     throw new Error(`Invalid ${queueName} Queue oldest-message timestamp.`);
   }
-  if (
-    queueName === "main"
-    && metrics.backlogCount > 0
-    && oldestMessageAtMs === null
-  ) {
-    throw new Error("Main Queue backlog is missing its oldest-message timestamp.");
-  }
   return {
     backlogBytes: metrics.backlogBytes,
     backlogCount: metrics.backlogCount,

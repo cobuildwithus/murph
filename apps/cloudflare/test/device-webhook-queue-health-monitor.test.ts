@@ -105,6 +105,41 @@ describe("device webhook Queue health monitor", () => {
     );
   });
 
+  it("preserves backlog metrics when Cloudflare cannot determine message age", async () => {
+    const unknownAgeMetrics = metrics({
+      backlogBytes: 1_024,
+      backlogCount: 5,
+    });
+    const harness = createHarness({
+      mainMetrics: [unknownAgeMetrics, unknownAgeMetrics],
+    });
+
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "ok",
+      outcome: "healthy",
+    });
+
+    harness.setNow(FIVE_MINUTES_MS * 2);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "ok",
+      outcome: "healthy",
+    });
+
+    expect(harness.monitor.readLatestObservation()).toMatchObject({
+      failedQueues: [],
+      main: {
+        backlogBytes: 1_024,
+        backlogCount: 5,
+        oldestMessageAtMs: null,
+      },
+      status: "ok",
+    });
+    expect(harness.monitor.readState().consecutiveMetricsFailures).toBe(0);
+    expect(harness.sent).toEqual([]);
+  });
+
   it("requires two consecutive metric failures before paging monitoring loss", async () => {
     const harness = createHarness({
       mainMetrics: [new Error("synthetic metrics failure")],
