@@ -398,13 +398,14 @@ app_verify_parallel_default="$(resolve_local_parallel_default)"
 app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
+package_coverage_shard="$(resolve_profile_controlled_value owners-a all)"
 
 log_acceptance_resource_plan
 `);
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh test_lanes=1 app_parallel=1\n",
+      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh package_shard=all test_lanes=1 app_parallel=1\n",
     );
   });
 
@@ -887,7 +888,7 @@ rm -rf -- "$ready_dir"
     expect(result.stdout).toBe("ready\n");
   });
 
-  it("keeps every release package paired with its own coverage assertion", () => {
+  it("derives every release package coverage assertion from its selected owner", () => {
     const runAllPackageCoverage = extractWorkspaceVerifyFunction(
       "run_all_package_coverage",
     );
@@ -902,6 +903,7 @@ verify_log() { return 0; }
 
 package_coverage_concurrency_limit=1
 package_coverage_cli_active_concurrency_limit=1
+package_coverage_shard=all
 
 ${runAllPackageCoverage}
 
@@ -910,21 +912,18 @@ run_all_package_coverage 1
 
     expect(result.status, result.stderr).toBe(0);
     const pairs = result.stdout.trim().split("\n");
-    expect(pairs).toHaveLength(25);
+    expect(pairs).toHaveLength(27);
     expect(pairs).toContain(
-      "packages/hosted-execution|Hosted execution owner coverage",
+      "packages/hosted-execution|Package coverage for packages/hosted-execution",
     );
     expect(pairs).toContain(
-      "packages/importers|Importers owner coverage",
+      "packages/health-commons|Package coverage for packages/health-commons",
     );
     expect(pairs).toContain(
-      "packages/inbox-services|Inbox services package coverage",
+      "packages/hosted-local-harness|Package coverage for packages/hosted-local-harness",
     );
     expect(pairs).toContain(
-      "packages/vault-usecases|Vault usecases package coverage",
-    );
-    expect(result.stdout).not.toContain(
-      "Hosted Temporal orchestrator package coverage",
+      "packages/vault-usecases|Package coverage for packages/vault-usecases",
     );
   });
 
@@ -1087,6 +1086,7 @@ exercise_interlock() {
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf -- "$sandbox"' EXIT
+package_coverage_shard=all
 package_coverage_concurrency_limit=3
 package_coverage_cli_active_concurrency_limit=2
 
@@ -1154,17 +1154,12 @@ run_repo_vitest --no-coverage
     );
   });
 
-  it("keeps release checks free of a process-wide Node heap", () => {
+  it("keeps the release workflow free of a process-wide Node heap", () => {
     const releaseWorkflow = readFileSync(
       path.join(repoRoot, ".github", "workflows", "release.yml"),
       "utf8",
     );
-    const releaseCheckStep = releaseWorkflow.match(
-      /^      - name: Run release checks[\s\S]*?(?=^      - name: )/m,
-    )?.[0];
 
-    expect(releaseCheckStep).toBeTruthy();
-    expect(releaseCheckStep).toContain("run: pnpm release:check");
     expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
   });
 

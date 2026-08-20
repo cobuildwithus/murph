@@ -3,6 +3,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+import {
+  HOSTED_WEB_TEST_SHARD_COUNT,
+  PACKAGE_COVERAGE_EXCLUSIONS,
+  PACKAGE_COVERAGE_PLAN,
+  validateReleaseVerificationPlan,
+} from '../../../scripts/release-verification-plan.mjs'
+
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const releaseWorkflowPath = path.join(repoRoot, '.github', 'workflows', 'release.yml')
 
@@ -42,11 +49,8 @@ describe('release workflow guards', () => {
     expect(workflow).not.toContain('PACKAGE_JSON_PATH')
   })
 
-  it('runs root release checks and packs all publishable tarballs with pnpm', () => {
+  it('fans the release gate out and packs all publishable tarballs after every shard passes', () => {
     const workflow = readFileSync(releaseWorkflowPath, 'utf8')
-    const releaseChecksStart = workflow.indexOf('      - name: Run release checks')
-    const releaseChecksEnd = workflow.indexOf('      - name: Pack publishable packages')
-    const releaseChecksStep = workflow.slice(releaseChecksStart, releaseChecksEnd)
 
     expect(workflow).toContain('DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:1/murph_test')
     expect(workflow).toContain('HOSTED_DEVICE_ROUTING_INDEX_KEY: 0101010101010101010101010101010101010101010101010101010101010101')
@@ -54,21 +58,65 @@ describe('release workflow guards', () => {
     expect(workflow).toContain('HOSTED_CONTACT_PRIVACY_KEYS: v1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc')
     expect(workflow).toContain('NEXT_PUBLIC_PRIVY_APP_ID: ${{ vars.HOSTED_WEB_VERIFY_PRIVY_APP_ID }}')
     expect(workflow).toContain('PRIVY_VERIFICATION_KEY: ci-hosted-web-verification-key')
-    expect(releaseChecksStart).toBeGreaterThanOrEqual(0)
-    expect(releaseChecksEnd).toBeGreaterThan(releaseChecksStart)
-    expect(releaseChecksStep).not.toContain('NODE_OPTIONS')
-    expect(releaseChecksStep).toContain('run: pnpm release:check')
+    expect(workflow).toContain(
+      'node scripts/release-verification-plan.mjs --github-output "$GITHUB_OUTPUT"',
+    )
+    expect(workflow).toContain(
+      'matrix: ${{ fromJSON(needs.tag-check.outputs.package_matrix) }}',
+    )
+    expect(workflow).toContain(
+      'matrix: ${{ fromJSON(needs.tag-check.outputs.hosted_web_test_matrix) }}',
+    )
+    expect(workflow.match(/fail-fast: false/gu) ?? []).toHaveLength(2)
+    expect(workflow).toContain('run: pnpm release:check:preflight')
     expect(workflow).not.toContain('NODE_OPTIONS')
-    expect(workflow).toContain('MURPH_TEST_LANES_PARALLEL: "1"')
-    expect(workflow).toContain('MURPH_APP_VERIFY_PARALLEL: "1"')
-    expect(workflow).toContain('MURPH_VERIFY_STEP_PARALLEL: "1"')
+    expect(workflow).toContain('MURPH_PACKAGE_COVERAGE_SHARD: ${{ matrix.shard }}')
+    expect(workflow).toContain('run: pnpm test:packages:coverage')
+    expect(workflow).toContain('run: pnpm test:scenario-integrity')
+    expect(workflow).toContain('MURPH_HOSTED_WEB_VERIFY_LANE: build')
+    expect(workflow).toContain('MURPH_HOSTED_WEB_VERIFY_LANE: test-shard')
+    expect(workflow).toContain('MURPH_HOSTED_WEB_TEST_SHARD: ${{ matrix.shard }}')
+    expect(workflow).toContain('run: pnpm --dir apps/cloudflare verify')
+    expect(workflow).not.toContain('run: pnpm release:check\n')
+    expect(workflow).toContain('if: ${{ always() }}')
+    expect(workflow).toContain('name: Require every release verification branch')
+    expect(workflow.match(/needs\.[a-z-]+\.result/gu) ?? []).toHaveLength(7)
+    expect(workflow).toContain(`  build:
+    needs:
+      - tag-check
+      - release-preflight
+      - package-coverage
+      - fixture-coverage
+      - web-build
+      - web-tests
+      - cloudflare-verify`)
+    expect(workflow).toContain('run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"')
+    expect(workflow).toContain('run: pnpm build:workspace:clean')
     expect(workflow).toContain('node scripts/pack-publishables.mjs --expect-version "${{ needs.tag-check.outputs.version }}" --clean --out-dir dist/npm --pack-output dist/npm/pack-output.json')
     expect(workflow).toContain('name: npm-tarballs')
-    expect(workflow).not.toContain('cache: pnpm')
+    expect(workflow).toContain('cache: pnpm')
     expect(workflow).toContain('scope: "@murphai"')
     expect(workflow).not.toContain('name: Update npm')
     expect(workflow).not.toContain('run: npm install -g npm@latest')
     expect(workflow).not.toContain('npm pack --json')
+  })
+
+  it('derives a complete non-empty release matrix from package coverage owners', () => {
+    const validation = validateReleaseVerificationPlan(repoRoot)
+    const plannedDirs = PACKAGE_COVERAGE_PLAN.map(({ dir }) => dir).sort()
+
+    expect(validation.discoveredWorkspacePackageDirs).toEqual(plannedDirs)
+    expect(validation.discoveredPackageCoverageDirs).toEqual(plannedDirs)
+    expect(validation.packageCoverageShardNames).toHaveLength(6)
+    expect(validation.hostedWebTestFileCount).toBeGreaterThanOrEqual(
+      HOSTED_WEB_TEST_SHARD_COUNT,
+    )
+    expect(PACKAGE_COVERAGE_EXCLUSIONS).toEqual({})
+    expect(plannedDirs).toContain('packages/health-commons')
+    expect(plannedDirs).toContain('packages/hosted-local-harness')
+    for (const shard of validation.packageCoverageShardNames) {
+      expect(PACKAGE_COVERAGE_PLAN.some((entry) => entry.shard === shard)).toBe(true)
+    }
   })
 
   it('keeps the artifact guard ahead of every permanent publication boundary', () => {
@@ -138,7 +186,7 @@ describe('release workflow guards', () => {
     expect(workflow).not.toContain('Using NPM_TOKEN authentication for npm publish.')
     expect(workflow).not.toContain('falling back to trusted publishing')
     expect(workflow).not.toContain('unset NODE_AUTH_TOKEN')
-    expect(workflow.match(/node-version-file: \.nvmrc/g)).toHaveLength(3)
+    expect(workflow.match(/node-version-file: \.nvmrc/g)).toHaveLength(9)
     expect(workflow.match(/scope: "@murphai"/g)).toHaveLength(2)
     expect(workflow.match(/name: Update npm/g) ?? []).toHaveLength(0)
     expect(workflow).not.toContain('run: npm install -g npm@latest')

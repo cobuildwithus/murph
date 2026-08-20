@@ -1825,7 +1825,7 @@ describe("hosted web production migration guard", () => {
     );
     assert.equal(
       verifyFastScript.match(/run_timed_step "next build" run_next_build/gu)?.length,
-      3,
+      4,
       "skipping the TypeScript 7 source check must preserve every Next build path",
     );
     const artifactLockGuardIndex = verifyFastScript.indexOf(
