@@ -34,6 +34,7 @@
     "clean:source-sidecars": "tsx scripts/prune-generated-source-sidecars.ts --quiet",
     "workflow:clean-web-artifacts": "tsx scripts/clean-hosted-web-workflow-artifacts.ts",
     "deps:guard": "node scripts/verify-dependency-policy.mjs",
+    "lockfile:sync-existing": "node scripts/sync-existing-lockfile-importer.mjs",
     "deps:audit": "pnpm audit --audit-level=high",
     "deps:approve-builds": "pnpm approve-builds",
     "deps:ignored-builds": "pnpm ignored-builds",
