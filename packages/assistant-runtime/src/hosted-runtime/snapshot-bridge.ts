@@ -361,6 +361,15 @@ async function createHostedWorkspaceV2Snapshot(
     const activeSnapshotSession = snapshotSession;
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     snapshotStage = "archive";
+    await materializeLegacyWorkspaceRefsForV2Snapshot({
+      artifactStore: input.platform.artifactStore,
+      operatorHomeRoot,
+      plan: legacyMaterializationPlan,
+      scratchRoot: resolveWorkspaceScratchRoot(input.vaultRoot),
+      signal: input.signal,
+      vaultRoot: input.vaultRoot,
+    });
+    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     ({ prunedRuntimeSymlinkCount } = await pruneHostedWorkspaceSnapshotRuntimeOwnedSymlinks({
       durableRoot,
       operatorHomeRoot,
@@ -473,15 +482,6 @@ async function createHostedWorkspaceV2Snapshot(
         userId: input.userId,
       });
     }
-    assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-    await materializeLegacyWorkspaceRefsForV2Snapshot({
-      artifactStore: input.platform.artifactStore,
-      operatorHomeRoot,
-      plan: legacyMaterializationPlan,
-      scratchRoot: resolveWorkspaceScratchRoot(input.vaultRoot),
-      signal: input.signal,
-      vaultRoot: input.vaultRoot,
-    });
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const legacySnapshotExtraFiles: HostedWorkspaceSnapshotArchiveExtraPath[] = [];
     for (const file of legacyMaterializationPlan.skippedInlineFiles) {
