@@ -125,7 +125,7 @@ describe("StartExperimentButton", () => {
     const links = anchors.map((anchor) => (anchor as HTMLAnchorElement).href);
     expect(links.some((href) => href.startsWith("sms:+15550100001?body="))).toBe(true);
     expect(links.some((href) => href.startsWith(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`))).toBe(true);
-    expect(links.some((href) => href.startsWith("mailto:murph@mail.withmurph.ai"))).toBe(true);
+    expect(links.some((href) => href.startsWith("mailto:mail@mail.withmurph.ai"))).toBe(true);
     expect(decodeURIComponent(decodeURIComponent(links.join("\n"))))
       .toContain("I want to start the Finnish Dry Sauna experiment.");
     expect(links.join("\n")).not.toContain("sha256");
@@ -234,7 +234,7 @@ describe("StartExperimentButton", () => {
     expect(container.textContent).not.toContain("member@example.test");
     expect(links).toEqual([
       expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`),
-      expect.stringMatching(/^mailto:murph@mail\.withmurph\.ai/u),
+      expect.stringMatching(/^mailto:mail@mail\.withmurph\.ai/u),
     ]);
   });
 

@@ -13,7 +13,12 @@ export interface HostedEmailCapabilities {
   senderIdentity: string | null;
 }
 
+export const HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS = "mail@mail.withmurph.ai";
 export const HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID = "hosted-email-route-resolution";
+export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID =
+  "hosted-email-public-bootstrap";
+export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH =
+  "/api/internal/hosted-execution/email/bootstrap";
 export const HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH =
   "/api/internal/hosted-execution/email/register-reply-alias";
 export const HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH =
@@ -56,8 +61,21 @@ const CURRENT_HOSTED_EMAIL_GROUP_ROUTE_TOKEN_PATTERN = new RegExp(
   "u",
 );
 
+export interface HostedEmailPublicBootstrapCallbackRequest {
+  candidateAddress: string;
+}
+
+export interface HostedEmailPublicBootstrapCallbackResponse {
+  ok: true;
+}
+
 export interface HostedEmailReplyAliasRegistrationCallbackRequest {
   aliasKey: string | null;
+}
+
+export interface HostedEmailReplyAliasRegistrationCallbackResponse {
+  address: string;
+  aliasKey: string;
 }
 
 export interface HostedEmailRouteResolutionCallbackRequest {
@@ -107,11 +125,13 @@ export interface HostedEmailGroupReplyAliasRoute {
 
 export async function createHostedEmailUserReplyAliasRoute(input: {
   domain: string;
+  generation?: number;
   localPart?: string | null;
   signingSecret: string;
   userId: string;
 }): Promise<HostedEmailReplyAliasRoute> {
   const aliasKey = await deriveHostedEmailUserReplyAliasKey({
+    generation: input.generation,
     signingSecret: input.signingSecret,
     userId: input.userId,
   });
@@ -190,6 +210,7 @@ export function formatHostedEmailReplyAliasAddress(input: {
 }
 
 export async function deriveHostedEmailUserReplyAliasKey(input: {
+  generation?: number;
   signingSecret: string;
   userId: string;
 }): Promise<string> {
@@ -197,8 +218,15 @@ export async function deriveHostedEmailUserReplyAliasKey(input: {
   if (!userId) {
     throw new TypeError("Hosted email reply alias user id must be configured.");
   }
+  const generation = requireHostedEmailReplyAliasGeneration(input.generation ?? 0);
 
-  return deriveStableHostedEmailKey(input.signingSecret, `user:${userId}`);
+  // Generation zero deliberately preserves every current personal reply alias.
+  // Later generations revoke that bearer capability without changing the route
+  // token format or ordinary replies within one identity epoch.
+  const payload = generation === 0
+    ? `user:${userId}`
+    : `user:${userId}:generation:${generation}`;
+  return deriveStableHostedEmailKey(input.signingSecret, payload);
 }
 
 export async function createHostedEmailRouteToken(input: {
@@ -384,6 +412,33 @@ export function resolveHostedEmailSelfAddresses(input: {
   return addresses;
 }
 
+export function parseHostedEmailPublicBootstrapCallbackRequest(
+  value: unknown,
+): HostedEmailPublicBootstrapCallbackRequest {
+  const record = requireObject(value, "Hosted email public bootstrap callback request");
+  const candidateAddress = normalizeHostedEmailAddress(
+    normalizeHostedEmailCallbackString(record.candidateAddress),
+  );
+  if (!isHostedEmailAddress(candidateAddress)) {
+    throw new TypeError(
+      "Hosted email public bootstrap callback requires a valid candidateAddress.",
+    );
+  }
+
+  return { candidateAddress };
+}
+
+export function parseHostedEmailPublicBootstrapCallbackResponse(
+  value: unknown,
+): HostedEmailPublicBootstrapCallbackResponse {
+  const record = requireObject(value, "Hosted email public bootstrap callback response");
+  if (record.ok !== true) {
+    throw new TypeError("Hosted email public bootstrap callback response requires ok=true.");
+  }
+
+  return { ok: true };
+}
+
 export function parseHostedEmailReplyAliasRegistrationCallbackRequest(
   value: unknown,
 ): HostedEmailReplyAliasRegistrationCallbackRequest {
@@ -392,6 +447,25 @@ export function parseHostedEmailReplyAliasRegistrationCallbackRequest(
   return {
     aliasKey: normalizeHostedEmailCallbackString(record.aliasKey),
   };
+}
+
+export function parseHostedEmailReplyAliasRegistrationCallbackResponse(
+  value: unknown,
+): HostedEmailReplyAliasRegistrationCallbackResponse {
+  const record = requireObject(value, "Hosted email reply alias registration callback response");
+  const address = normalizeHostedEmailAddress(
+    normalizeHostedEmailCallbackString(record.address),
+  );
+  const aliasKey = normalizeHostedEmailReplyAliasLookupKey(
+    normalizeHostedEmailCallbackString(record.aliasKey),
+  );
+  if (!address || !aliasKey) {
+    throw new TypeError(
+      "Hosted email reply alias registration callback response requires a valid address and alias key.",
+    );
+  }
+
+  return { address, aliasKey };
 }
 
 export function parseHostedEmailRouteResolutionCallbackRequest(
@@ -497,6 +571,14 @@ function normalizeHostedEmailAddress(value: string | null | undefined): string |
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function isHostedEmailAddress(value: string | null): value is string {
+  if (!value || value.length > 254 || /[\r\n]/u.test(value)) {
+    return false;
+  }
+  const atIndex = value.lastIndexOf("@");
+  return atIndex > 0 && atIndex < value.length - 1;
+}
+
 function parseHostedEmailCapabilityFlag(value: string | null | undefined): boolean | null {
   const normalized = normalizeHostedExecutionString(value)?.toLowerCase();
   if (!normalized) {
@@ -521,6 +603,16 @@ function readHostedEmailEnvString(source: EnvSource, key: string): string | null
 
 function normalizeHostedEmailCallbackString(value: unknown): string | null {
   return normalizeHostedExecutionString(typeof value === "string" ? value : null);
+}
+
+function requireHostedEmailReplyAliasGeneration(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
+    throw new TypeError(
+      "Hosted email reply alias generation must be a non-negative 32-bit integer.",
+    );
+  }
+
+  return value;
 }
 
 function requireHostedEmailReplyAliasLookupKey(value: string): string {

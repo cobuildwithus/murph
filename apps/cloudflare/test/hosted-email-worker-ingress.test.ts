@@ -16,6 +16,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 
 import {
   createHostedEmailGroupReplyAliasRoute,
+  createHostedEmailUserReplyAliasRoute,
   HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
 } from "@murphai/hosted-execution/hosted-email";
 import {
@@ -110,6 +111,23 @@ const AUTHENTICATED_SENDER = {
   spfAligned: false,
 };
 
+async function createTestReplyAliasRegistrationResponse(): Promise<Response> {
+  const route = await createHostedEmailUserReplyAliasRoute({
+    domain: "mail.example.test",
+    localPart: "assistant",
+    signingSecret: "super-secret-signing-key",
+    userId: "user_123",
+  });
+  return new Response(JSON.stringify({
+    address: route.address,
+    aliasKey: route.aliasKey,
+    ok: true,
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
+}
+
 type HostedEmailWorkerIngressTestMessage = Parameters<typeof handleHostedEmailIngressImpl>[0] & {
   authenticatedSender?: typeof AUTHENTICATED_SENDER | null;
 };
@@ -175,18 +193,71 @@ describe("hosted email worker ingress", () => {
     mocks.resolveUserRunnerStub.mockResolvedValue({});
   });
 
+  it("drops the public message before private ingress and sends only a bounded sender hint", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      }),
+    );
+    const setReject = vi.fn();
+
+    await handleHostedEmailIngressProduction({
+      from: "member@example.test",
+      raw: buildRawEmailWithAttachment({
+        attachmentBase64: "cHJpdmF0ZSBhdHRhY2htZW50",
+        attachmentContentType: "text/plain",
+        attachmentFileName: "private.txt",
+        body: "private request that must not enter Murph",
+        from: "Member <member@example.test>",
+        subject: "private subject",
+        to: "mail@mail.withmurph.ai",
+      }),
+      setReject,
+      to: "mail@mail.withmurph.ai",
+    }, createWorkerEnv(bucket));
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).toHaveBeenCalledTimes(1);
+    const [callbackInput] = mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls[0] ?? [];
+    expect(JSON.parse(String(callbackInput?.body))).toEqual({
+      candidateAddress: "member@example.test",
+    });
+    expect(String(callbackInput?.body)).not.toContain("private");
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
+    expect(mocks.resolveUserRunnerStub).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+    expect(listHostedEmailRecoveryKeys(bucket)).toEqual([]);
+  });
+
+  it("accepts and drops ambiguous public sender headers without lookup or persistence", async () => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    const setReject = vi.fn();
+
+    await handleHostedEmailIngressProduction({
+      from: "member@example.test",
+      raw: buildRawEmail({
+        extraHeaders: ["From: Attacker <attacker@example.test>"],
+        from: "Member <member@example.test>",
+        to: "mail@mail.withmurph.ai",
+      }),
+      setReject,
+      to: "mail@mail.withmurph.ai",
+    }, createWorkerEnv(bucket));
+
+    expect(setReject).not.toHaveBeenCalled();
+    expect(mocks.fetchHostedExecutionWebControlPlaneResponse).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    expect(mocks.appendHostedEmailIngressWakeInWeb).not.toHaveBeenCalled();
+    expect(listHostedEmailMessageKeys(bucket)).toEqual([]);
+  });
+
   it("rejects alias ingress when the web-owned alias lookup misses before raw-message persistence and dispatch", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: null,
@@ -262,15 +333,7 @@ describe("hosted email worker ingress", () => {
   it("accepts signed reply-alias ingress when no trusted sender verifier is configured", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user_123",
@@ -309,15 +372,7 @@ describe("hosted email worker ingress", () => {
   it("persists and nudges alias ingress only after the web-owned signed alias lookup succeeds", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user_123",
@@ -672,15 +727,7 @@ describe("hosted email worker ingress", () => {
   it("keeps signed member email body addresses unredacted while classifying extra recipients as non-direct", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user_123",
@@ -724,15 +771,7 @@ describe("hosted email worker ingress", () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.appendHostedEmailIngressWakeInWeb.mockResolvedValue(undefined);
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user_123",
@@ -786,15 +825,7 @@ describe("hosted email worker ingress", () => {
   it("does not include original hosted email image attachment sizes in prompt projection", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user_123",
@@ -842,15 +873,7 @@ describe("hosted email worker ingress", () => {
   it("preserves available prompt metadata when parsed email body text is unavailable", async () => {
     const bucket = new MemoryEncryptedR2Bucket();
     mocks.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user_123",

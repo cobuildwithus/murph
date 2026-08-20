@@ -28,13 +28,14 @@ import {
 } from "./logging";
 import { isHostedMemberActivationPending } from "./activation-progress";
 import {
+  prepareHostedMemberVerifiedEmailReplyAlias,
   readHostedMemberMessagingSetupState,
   readHostedMemberEmailAuthorization,
+  type HostedMemberVerifiedEmailReplyAliasPreparation,
   type HostedMemberCoreState,
   syncHostedMemberVerifiedEmailAuthorization,
   updateHostedMemberPendingActivationTimeZoneIfActivationPending,
 } from "./hosted-member-store";
-import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingState,
@@ -234,6 +235,15 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
         memberId: preparedMemberId,
         prisma: input.prisma,
       });
+      const transactionalAuthMethod = invitePreparation?.authMethod ?? input.authMethod;
+      const preparedReplyAlias = transactionalAuthMethod === "email"
+        && input.identity.email?.verifiedAt
+        ? await prepareHostedMemberVerifiedEmailReplyAlias({
+            address: input.identity.email.address,
+            memberId: preparedMemberId,
+            prisma: input.prisma,
+          })
+        : null;
 
       if (input.invite) {
         if (!invitePreparation) {
@@ -264,6 +274,7 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
               identity: reconciled.identity,
               memberId: reconciled.member.id,
               preparedControlRoot: preparedRoot,
+              preparedReplyAlias,
               prisma: tx,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
@@ -313,6 +324,7 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
               identity: memberResolution.identity,
               memberId: memberResolution.member.id,
               preparedControlRoot: preparedRoot,
+              preparedReplyAlias,
               prisma: tx,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
@@ -501,15 +513,11 @@ async function syncHostedPrivyBindings(input: {
   ) {
     const email = input.identity.email;
     const syncEmailBinding = async () => {
-      const replyAlias = await createHostedMemberReplyAliasRoute({
-        memberId: input.memberId,
-      });
       await syncHostedMemberVerifiedEmailAuthorization({
         address: email.address,
         memberId: input.memberId,
         preparedControlRoot: input.preparedControlRoot,
         prisma: input.prisma,
-        replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
         verifiedAt: new Date(email.verifiedAt! * 1000),
       });
     };
@@ -586,18 +594,16 @@ async function syncHostedPrivyTransactionalBindingsTx(input: {
   identity: HostedPrivyIdentity;
   memberId: string;
   preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedReplyAlias: HostedMemberVerifiedEmailReplyAliasPreparation | null;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   if (input.authMethod === "email" && input.identity.email?.verifiedAt) {
-    const replyAlias = await createHostedMemberReplyAliasRoute({
-      memberId: input.memberId,
-    });
     await syncHostedMemberVerifiedEmailAuthorization({
       address: input.identity.email.address,
       memberId: input.memberId,
       preparedControlRoot: input.preparedControlRoot,
+      preparedReplyAlias: input.preparedReplyAlias ?? undefined,
       prisma: input.prisma,
-      replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
       verifiedAt: new Date(input.identity.email.verifiedAt * 1000),
     }).catch(mapHostedPrivyPrimaryEmailBindingError);
   }

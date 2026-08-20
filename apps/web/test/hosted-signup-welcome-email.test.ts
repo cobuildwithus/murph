@@ -333,7 +333,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Email Murph at murph@mail.withmurph.ai with whatever is on your mind about your health.",
+        "Email Murph at mail@mail.withmurph.ai. Murph will send a private reply so you can start the conversation securely.",
       );
       expect(payload).not.toHaveProperty("html");
 
@@ -368,7 +368,7 @@ describe("hosted signup welcome email", () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload.text).toContain(
-        "Email Murph at murph@mail.withmurph.ai with whatever is on your mind about your health.",
+        "Email Murph at mail@mail.withmurph.ai. Murph will send a private reply so you can start the conversation securely.",
       );
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
@@ -436,7 +436,7 @@ describe("hosted signup welcome email", () => {
         "Best next step: connect any data you want Murph to use, then start with one real health need.",
       );
       expect(payload.text).not.toContain("Shoot Murph an email at");
-      expect(payload.text).not.toContain("murph@mail.withmurph.ai");
+      expect(payload.text).not.toContain("mail@mail.withmurph.ai");
 
       return new Response(JSON.stringify({ id: "resend_email_123" }), {
         status: 200,
