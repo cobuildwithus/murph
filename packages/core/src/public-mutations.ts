@@ -71,6 +71,7 @@ import {
   addMeasurement as addMeasurementInternal,
   deleteEvent as deleteEventInternal,
   removeAutomaticMealPhoto as removeAutomaticMealPhotoInternal,
+  replaceActivitySession as replaceActivitySessionInternal,
   upsertEvent as upsertEventInternal,
 } from "./domains/events.ts";
 import { updateVaultSummary as updateVaultSummaryInternal } from "./domains/vault-summary.ts";
@@ -101,6 +102,7 @@ import type { DateInput, ValidationIssue } from "./types.ts";
 export {
   deleteEventInternal as deleteEvent,
   removeAutomaticMealPhotoInternal as removeAutomaticMealPhoto,
+  replaceActivitySessionInternal as replaceActivitySession,
   upsertEventInternal as upsertEvent,
 };
 

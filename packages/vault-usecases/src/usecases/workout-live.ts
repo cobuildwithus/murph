@@ -20,7 +20,11 @@ import {
 } from '@murphai/operator-config/workout-action-binding'
 
 import { showWorkoutFormat } from './workout-format.js'
-import { addStructuredWorkoutRecord, editWorkoutRecord } from './workout.js'
+import {
+  addStructuredWorkoutRecord,
+  editWorkoutRecord,
+  replaceStructuredWorkoutRecord,
+} from './workout.js'
 import {
   LIVE_WORKOUT_SOURCE_APP,
   type ApplyLiveWorkoutMemberActionInput,
@@ -30,6 +34,7 @@ import {
   type FinishLiveWorkoutInput,
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
+  type ReplaceLiveWorkoutInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
   buildLiveWorkoutSessionFromTemplate,
@@ -43,6 +48,7 @@ import {
   findLiveWorkoutsForMemberAction,
   normalizeLiveWorkoutActivityType,
   normalizeOptionalText,
+  normalizeLiveWorkoutId,
   normalizeWorkoutTimestamp,
   optionalString,
   parseShownWorkout,
@@ -461,6 +467,137 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   return withLiveWorkoutMutationLock(input.vault, () =>
     startLiveWorkoutWithLockHeld(input),
   )
+}
+
+export async function replaceLiveWorkout(input: ReplaceLiveWorkoutInput) {
+  if (input.confirmDelete !== true) {
+    throw new VaultCliError(
+      'invalid_operation',
+      'Replacing an active workout requires explicit deletion confirmation.',
+    )
+  }
+
+  return withLiveWorkoutMutationLock(input.vault, () =>
+    replaceLiveWorkoutWithLockHeld(input),
+  )
+}
+
+async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
+  const workoutId = normalizeLiveWorkoutId(input.workoutId)
+  if (workoutId === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'An exact active workout id is required for replacement.',
+    )
+  }
+
+  const active = await findActiveLiveWorkouts(input.vault)
+  if (active.length === 0) {
+    throw new VaultCliError('not_found', 'No active live workout was found.')
+  }
+  if (active.length > 1) {
+    throw new VaultCliError(
+      'command_failed',
+      'Multiple active live workouts were found; replacement was not performed.',
+      { activeWorkoutIds: active.map((entry) => entry.entity.id) },
+    )
+  }
+
+  const shown = active[0]!
+  if (shown.entity.id !== workoutId) {
+    throw new VaultCliError(
+      'invalid_operation',
+      'The confirmed workout is no longer the active live workout.',
+    )
+  }
+  if (input.exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Live workouts support at most ${MAX_LIVE_WORKOUT_EXERCISES} exercises.`,
+    )
+  }
+
+  const startedAt = normalizeWorkoutTimestamp(
+    input.startedAt ?? new Date().toISOString(),
+    'startedAt',
+  )
+  const title = requireNonEmptyText(input.name, 'Workout name is required.')
+  const note = normalizeOptionalText(input.note)
+  const activityType = normalizeOptionalText(input.activityType)
+  const exercises = input.exercises.map((exercise, index) => {
+    const setCount = exercise.setCount ?? 1
+    if (
+      !Number.isInteger(setCount)
+      || setCount < 1
+      || setCount > MAX_LIVE_WORKOUT_SETS_PER_EXERCISE
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Exercise set count must be between 1 and ${MAX_LIVE_WORKOUT_SETS_PER_EXERCISE}.`,
+      )
+    }
+
+    const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
+    const groupId = normalizeOptionalText(exercise.groupId)
+    const exerciseNote = normalizeOptionalText(exercise.note)
+    return {
+      name: requireNonEmptyText(exercise.name, 'Exercise name is required.'),
+      order: index + 1,
+      ...(sourceExerciseId ? { sourceExerciseId } : {}),
+      ...(groupId ? { groupId } : {}),
+      ...(exercise.mode ? { mode: exercise.mode } : {}),
+      ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
+      ...(exerciseNote ? { note: exerciseNote } : {}),
+      sets: Array.from({ length: setCount }, (_, setIndex) => ({
+        order: setIndex + 1,
+      })),
+    }
+  })
+  const workout = workoutSessionSchema.parse({
+    sourceApp: LIVE_WORKOUT_SOURCE_APP,
+    startedAt,
+    ...(note ? { sessionNote: note } : {}),
+    exercises,
+  })
+
+  return replaceStructuredWorkoutRecord({
+    vault: input.vault,
+    eventId: workoutId,
+    expectedRevision: requireWorkoutEventRevision(shown),
+    draft: {
+      occurredAt: startedAt,
+      source: 'manual',
+      title,
+      note: note ?? title,
+      activityType: activityType
+        ? normalizeLiveWorkoutActivityType(activityType)
+        : 'strength-training',
+      durationMinutes: elapsedDurationMinutes(
+        startedAt,
+        new Date().toISOString(),
+      ),
+      workout,
+    },
+  })
+}
+
+function requireWorkoutEventRevision(
+  shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>,
+): number {
+  const lifecycle = shown.entity.data.lifecycle
+  const revision =
+    typeof lifecycle === 'object'
+      && lifecycle !== null
+      && 'revision' in lifecycle
+      ? Reflect.get(lifecycle, 'revision')
+      : undefined
+  if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 1) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Workout ${shown.entity.id} is missing its canonical revision.`,
+    )
+  }
+  return revision
 }
 
 async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {

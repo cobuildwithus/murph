@@ -5971,6 +5971,59 @@
                     }
                   }
                 },
+                "replace": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "workoutId": {
+                          "type": "string",
+                          "pattern": "^evt_[0-9A-Za-z]+$",
+                          "description": "Exact canonical id of the active workout the member approved deleting."
+                        },
+                        "confirmDelete": {
+                          "description": "Required explicit acknowledgement that deletion was approved.",
+                          "type": "boolean"
+                        },
+                        "exercise": {
+                          "description": "Initial exercise grammar: name=... with optional sets/sourceExerciseId/groupId/mode/unitOverride/note. Repeat --exercise; repeat order becomes canonical order.",
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          }
+                        },
+                        "type": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        },
+                        "note": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        },
+                        "startedAt": {
+                          "description": "Optional replacement start timestamp. Defaults to now.",
+                          "type": "string",
+                          "format": "date-time",
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                        }
+                      }
+                    }
+                  }
+                },
                 "finish": {
                   "type": "object",
                   "additionalProperties": false,

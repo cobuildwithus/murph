@@ -15,6 +15,7 @@ export {
   addCaptureWithLookup,
   addMeasurement,
   findCaptureByLookup,
+  replaceActivitySession,
 } from "./events/attachment-backed.ts";
 export type {
   AddActivitySessionInput,
@@ -28,6 +29,8 @@ export type {
   AddMeasurementInput,
   AddMeasurementResult,
   FindCaptureByLookupResult,
+  ReplaceActivitySessionInput,
+  ReplaceActivitySessionResult,
 } from "./events/attachment-backed.ts";
 export {
   buildActivitySessionEventDraft,

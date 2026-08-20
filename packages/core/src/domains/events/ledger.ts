@@ -530,7 +530,7 @@ export async function loadEventLedgerShardsById(
   return matches;
 }
 
-function extractRetainedPaths(record: EventRecord): string[] {
+export function extractRetainedPaths(record: EventRecord): string[] {
   return collectEventRawReferencePaths(record);
 }
 

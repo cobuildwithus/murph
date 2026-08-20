@@ -4,6 +4,7 @@ import { rm } from 'node:fs/promises'
 import { Cli } from 'incur'
 import { afterAll } from 'vitest'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { addActivitySession } from '@murphai/core'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   addLiveWorkoutExercise,
@@ -217,6 +218,128 @@ test('live workout commands keep one canonical session and target one set', asyn
     'workout', 'active', '--vault', vaultRoot,
   ])
   assert.equal(noActive.envelope.ok, false)
+})
+
+test('one command atomically replaces an explicitly approved active workout', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-replace-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'America/Chicago',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  const oldWorkout = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Old workout',
+    '--started-at', '2026-08-20T06:30:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  const missingConfirmation = await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Upper body',
+    '--workout-id', oldWorkout.eventId,
+    '--exercise', 'name=Pull-up;sets=3;mode=bodyweight',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(missingConfirmation.envelope.ok, false)
+  const stillActive = requireData((await run<ShowResult>(cli, [
+    'workout', 'active',
+    '--workout-id', oldWorkout.eventId,
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(stillActive.entity.id, oldWorkout.eventId)
+
+  const replacement = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Upper body',
+    '--workout-id', oldWorkout.eventId,
+    '--confirm-delete',
+    '--exercise', 'name=Pull-up;sets=3;mode=bodyweight',
+    '--exercise', 'name=Push-up;sets=2;mode=bodyweight',
+    '--started-at', '2026-08-20T07:54:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  assert.notEqual(replacement.eventId, oldWorkout.eventId)
+  assert.deepEqual(replacement.workout?.exercises, [
+    {
+      name: 'Pull-up',
+      order: 1,
+      mode: 'bodyweight',
+      sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
+    },
+    {
+      name: 'Push-up',
+      order: 2,
+      mode: 'bodyweight',
+      sets: [{ order: 1 }, { order: 2 }],
+    },
+  ])
+
+  const oldIsGone = await run<ShowResult>(cli, [
+    'workout', 'active',
+    '--workout-id', oldWorkout.eventId,
+    '--vault', vaultRoot,
+  ])
+  assert.equal(oldIsGone.envelope.ok, false)
+  const active = requireData((await run<ShowResult>(cli, [
+    'workout', 'active',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(active.entity.id, replacement.eventId)
+})
+
+test('replacement fails closed when a competing live workout exists', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-replace-conflict-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+  const approved = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Approved old workout',
+    '--started-at', '2026-08-20T06:30:00.000Z',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const competing = await addActivitySession({
+    vaultRoot,
+    draft: {
+      occurredAt: '2026-08-20T07:00:00.000Z',
+      source: 'manual',
+      title: 'Competing workout',
+      activityType: 'strength-training',
+      durationMinutes: 1,
+      workout: {
+        sourceApp: 'murph-live',
+        startedAt: '2026-08-20T07:00:00.000Z',
+        exercises: [],
+      },
+    },
+  })
+
+  const conflict = await run<WorkoutResult>(cli, [
+    'workout', 'replace', 'Replacement workout',
+    '--workout-id', approved.eventId,
+    '--confirm-delete',
+    '--exercise', 'name=Pull-up;sets=2',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(conflict.envelope.ok, false)
+
+  const approvedStillActive = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--workout-id', approved.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  const competingStillActive = requireData((await run<ShowResult>(cli, [
+    'workout', 'active', '--workout-id', competing.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(approvedStillActive.entity.id, approved.eventId)
+  assert.equal(competingStillActive.entity.id, competing.eventId)
 })
 
 test('live workout usecases fail closed on invalid selectors and coordinates', async () => {

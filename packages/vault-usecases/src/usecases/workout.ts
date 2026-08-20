@@ -509,6 +509,50 @@ export async function addStructuredWorkoutRecord(input: {
   }
 }
 
+export async function replaceStructuredWorkoutRecord(input: {
+  vault: string
+  eventId: string
+  expectedRevision: number
+  draft: ActivitySessionDraft
+}) {
+  const durationMinutes = input.draft.durationMinutes
+  if (durationMinutes === undefined) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
+    )
+  }
+  const core = await loadWorkoutCoreRuntime()
+
+  try {
+    const result = await core.replaceActivitySession({
+      vaultRoot: input.vault,
+      eventId: input.eventId,
+      expectedRevision: input.expectedRevision,
+      draft: input.draft,
+    })
+
+    return {
+      vault: input.vault,
+      eventId: result.eventId,
+      lookupId: result.eventId,
+      ledgerFile: result.ledgerFile,
+      created: result.created,
+      occurredAt: result.event.occurredAt,
+      kind: 'activity_session' as const,
+      title: result.event.title,
+      activityType: result.event.activityType,
+      durationMinutes,
+      distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
+      workout: result.event.workout ?? null,
+      manifestFile: result.manifestPath,
+      note: result.event.note ?? result.event.title,
+    }
+  } catch (error) {
+    throw toEventUpsertVaultCliError(error)
+  }
+}
+
 export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   let draft: ActivitySessionDraft
 

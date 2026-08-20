@@ -120,6 +120,17 @@ describe('assistant tracked workout table skill', () => {
 
     expect(skill).toContain('vault-cli workout start')
     expect(skill).toContain('vault-cli workout active')
+    expect(skill).toContain('vault-cli workout replace')
+    expect(skill).toContain('--confirm-delete')
+    expect(skill).toContain(
+      'run exactly one `vault-cli workout replace` command',
+    )
+    expect(skill).toContain(
+      'Do not separately delete, start, or add each exercise',
+    )
+    expect(skill).toContain(
+      'the approved id is still the sole active workout',
+    )
     expect(skill).toContain('vault-cli workout exercise add')
     expect(skill).toContain('[--sets <n>]')
     expect(skill).toContain('vault-cli workout set log')
@@ -267,6 +278,9 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).toContain(
       'A contextual affirmative answer to that exact offer authorizes only the proposed start and exact set write',
+    )
+    expect(skill).toContain(
+      'The only exceptions are contextual affirmatives that directly accept the exact bounded replacement proposal or missing-workout recovery offer below',
     )
     expect(skill).toContain(
       'If an active workout now exists, do not retarget the accepted recovery',

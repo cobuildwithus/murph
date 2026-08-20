@@ -6,13 +6,25 @@ import {
   workoutAddResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
+  normalizeRepeatableFlagOption,
+} from '@murphai/vault-usecases'
+import {
   addLiveWorkoutExercise,
   clearLiveWorkoutSet,
   finishLiveWorkout,
   logLiveWorkoutSet,
+  replaceLiveWorkout,
   showActiveLiveWorkout,
   startLiveWorkout,
+  type ReplaceLiveWorkoutExerciseInput,
 } from '@murphai/vault-usecases/workouts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  compactInteger,
+  parseCompactFields,
+  rejectUnsupportedCompactFields,
+  requireCompactString,
+} from './compact-field-spec.js'
 
 const workoutIdOption = z
   .string()
@@ -21,6 +33,87 @@ const workoutIdOption = z
   .describe(
     'Optional canonical workout id. Omit it only when exactly one live workout is active.',
   )
+
+const requiredWorkoutIdOption = z
+  .string()
+  .regex(/^evt_[0-9A-Za-z]+$/u)
+  .describe('Exact canonical id of the active workout the member approved deleting.')
+
+const exerciseModeSchema = z.enum([
+  'weight_reps',
+  'bodyweight',
+  'assisted_bodyweight',
+  'weighted_bodyweight',
+  'duration',
+  'cardio',
+])
+
+const replacementExerciseFields = new Set([
+  'name',
+  'sets',
+  'sourceExerciseId',
+  'groupId',
+  'mode',
+  'unitOverride',
+  'note',
+])
+
+function invalidReplacementExercise(message: string): never {
+  throw new VaultCliError('invalid_option', message)
+}
+
+function parseReplacementExercise(
+  entry: string,
+): ReplaceLiveWorkoutExerciseInput {
+  const fields = parseCompactFields(
+    entry,
+    'exercise',
+    invalidReplacementExercise,
+  )
+  rejectUnsupportedCompactFields(
+    fields,
+    'exercise',
+    replacementExerciseFields,
+    invalidReplacementExercise,
+  )
+  const setCount = compactInteger(
+    fields,
+    'sets',
+    'exercise',
+    invalidReplacementExercise,
+  ) ?? 1
+  const mode = fields.get('mode')
+  const parsedMode = mode === undefined
+    ? undefined
+    : exerciseModeSchema.safeParse(mode)
+  if (parsedMode !== undefined && !parsedMode.success) {
+    invalidReplacementExercise('--exercise field mode is invalid.')
+  }
+  const unitOverride = fields.get('unitOverride')
+  if (unitOverride !== undefined && unitOverride !== 'lb' && unitOverride !== 'kg') {
+    invalidReplacementExercise('--exercise field unitOverride must be lb or kg.')
+  }
+  const parsedUnitOverride = unitOverride === 'lb' || unitOverride === 'kg'
+    ? unitOverride
+    : undefined
+
+  return {
+    name: requireCompactString(
+      fields,
+      'name',
+      'exercise',
+      invalidReplacementExercise,
+    ),
+    setCount,
+    ...(fields.has('sourceExerciseId')
+      ? { sourceExerciseId: fields.get('sourceExerciseId') }
+      : {}),
+    ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
+    ...(parsedMode?.success ? { mode: parsedMode.data } : {}),
+    ...(parsedUnitOverride ? { unitOverride: parsedUnitOverride } : {}),
+    ...(fields.has('note') ? { note: fields.get('note') } : {}),
+  }
+}
 
 const exerciseIdOption = z
   .string()
@@ -133,6 +226,67 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     },
   })
 
+  workout.command('replace', {
+    description:
+      'Atomically delete one exact active workout and start its approved replacement.',
+    args: z.object({
+      name: z.string().min(1).max(240).describe('Replacement workout title.'),
+    }),
+    examples: [
+      {
+        description: 'Replace one explicitly confirmed active workout.',
+        args: { name: "'Upper body'" },
+        options: {
+          workoutId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+          confirmDelete: true,
+          exercise: [
+            "'name=Pull-up;sets=3;mode=bodyweight'",
+            "'name=Push-up;sets=3;mode=bodyweight'",
+          ],
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Use only after the member explicitly approves deleting the exact active workout. The old tombstone and complete replacement commit atomically.',
+    options: withBaseOptions({
+      workoutId: requiredWorkoutIdOption,
+      confirmDelete: z
+        .boolean()
+        .optional()
+        .describe('Required explicit acknowledgement that deletion was approved.'),
+      exercise: z
+        .array(z.string().min(1).max(1000))
+        .max(100)
+        .optional()
+        .describe(
+          'Initial exercise grammar: name=... with optional sets/sourceExerciseId/groupId/mode/unitOverride/note. Repeat --exercise; repeat order becomes canonical order.',
+        ),
+      type: z.string().min(1).max(120).optional(),
+      note: z.string().min(1).max(4000).optional(),
+      startedAt: isoTimestampSchema
+        .optional()
+        .describe('Optional replacement start timestamp. Defaults to now.'),
+    }),
+    output: workoutAddResultSchema,
+    async run({ args, options }) {
+      const exerciseEntries = normalizeRepeatableFlagOption(
+        options.exercise,
+        'exercise',
+      )
+      return replaceLiveWorkout({
+        vault: options.vault,
+        workoutId: options.workoutId,
+        confirmDelete: options.confirmDelete === true,
+        name: args.name,
+        activityType: options.type,
+        note: options.note,
+        startedAt: options.startedAt,
+        exercises: exerciseEntries?.map(parseReplacementExercise) ?? [],
+      })
+    },
+  })
+
   workout.command('finish', {
     description:
       'Finish one live workout and persist its final duration without inventing missing set values.',
@@ -173,16 +327,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(80)
         .optional()
         .describe('Optional superset or circuit group id.'),
-      mode: z
-        .enum([
-          'weight_reps',
-          'bodyweight',
-          'assisted_bodyweight',
-          'weighted_bodyweight',
-          'duration',
-          'cardio',
-        ])
-        .optional(),
+      mode: exerciseModeSchema.optional(),
       unitOverride: z.enum(['lb', 'kg']).optional(),
       note: z.string().min(1).max(4000).optional(),
       sets: z

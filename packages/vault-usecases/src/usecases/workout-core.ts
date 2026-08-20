@@ -46,6 +46,20 @@ export interface WorkoutCoreRuntime {
     manifestPath: string | null
     event: ActivitySessionEventRecord
   }>
+  replaceActivitySession(input: {
+    vaultRoot: string
+    eventId: string
+    expectedRevision: number
+    draft: ActivitySessionDraftInput
+  }): Promise<{
+    eventId: string
+    ledgerFile: string
+    created: true
+    manifestPath: null
+    replacedEventId: string
+    retainedPaths: string[]
+    event: ActivitySessionEventRecord
+  }>
   addBodyMeasurement(input: {
     vaultRoot: string
     draft: BodyMeasurementDraftInput

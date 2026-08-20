@@ -34,6 +34,27 @@ export interface StartLiveWorkoutInput {
   startedAt?: string
 }
 
+export interface ReplaceLiveWorkoutExerciseInput {
+  name: string
+  sourceExerciseId?: string
+  groupId?: string
+  mode?: ExerciseMode
+  unitOverride?: LoadUnit
+  note?: string
+  setCount?: number
+}
+
+export interface ReplaceLiveWorkoutInput {
+  vault: string
+  workoutId: string
+  confirmDelete: boolean
+  name: string
+  activityType?: string
+  note?: string
+  startedAt?: string
+  exercises: ReplaceLiveWorkoutExerciseInput[]
+}
+
 export interface LiveWorkoutLookupInput {
   vault: string
   workoutId?: string
