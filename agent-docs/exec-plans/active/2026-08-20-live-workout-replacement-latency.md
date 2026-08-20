@@ -131,4 +131,43 @@ replacement-plus-completed-set write are intentionally outside this patch.
   or audit write, and still rejects a same-title request with different exercise
   state. The focused CLI suite also applies the captured hosted receipt to a
   pre-commit replica before replaying the original command.
-- Final ReviewGPT round 3, exact-head CI, and plan closure remain pending.
+- Final ReviewGPT round 3 verified the ordered-input and result-loss corrections,
+  then returned the mandatory `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` gate before
+  an ordinary audit. It reported no tactical code finding. The requirement-level
+  decision below is recorded on the PR before the next substantive round.
+- Final ReviewGPT `PASS`, exact-head CI, and plan closure remain pending.
+
+## Round 3 Architecture Retrospective
+
+Continue the exact canonical-state convergence in the live-workout owner and
+freeze its current narrow scope. Recovery after the atomic write commits but the
+command result is lost is explicit for this compound command: the hosted receipt
+restores canonical files, but it does not persist the domain return value, and a
+foreground replay can invoke the approved command after replacement changed the
+active event id.
+
+From immutable first-reviewed head `f816b084c90558c217d2416b7111a0d6d357ef69`
+to round-3 head `554ead3762ba97521b7cdec444a0a4aa1be1edf5`,
+remediation changes eight files by +300 / -41 net. The ordered-input correction
+was +58 / -10: it removed set-valued normalization from the CLI, added direct
+ordered parsing proof, and added no owner. The result-loss correction was
++254 / -43: +127 / -22 in the vault use case, +104 / -13 in the hosted-recovery
+CLI proof, and +23 / -8 in docs, prompt, and changelog coverage. Overlapping
+changed lines explain the smaller aggregate net delta.
+
+The existing canonical workout event, live-workout lock, canonical write lock,
+hosted receipt/checkpoint, and restore path remain the only owners. The only new
+feature concept is exact recognition of an already-applied replacement plus
+no-write reconstruction of its ordinary `created: false` result. A generic
+receipt-derived result would couple the vault use case to runtime artifact
+state and still require domain interpretation; generic durable command-result
+replay would add an operation identity and result lifecycle. The selected path
+instead derives from the sole canonical authority under its existing lock and
+fails closed on every nonmatch.
+
+Do not add a generic result ledger, operation-id subsystem, runtime receipt
+reader, queue, or retry loop in this PR. Remove the feature matcher when the
+canonical-write/runtime boundary provides stable operation-id result replay, or
+atomically persists canonical state, the tool result, and foreground-input
+completion so post-commit command reinvocation cannot occur. Any cross-command
+solution belongs in that separate owner-level design.
