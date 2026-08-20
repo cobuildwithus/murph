@@ -36,6 +36,13 @@ Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
 
+For changes to the shared Playwright Chromium install wrapper or any workflow
+that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
+focused `scripts/install-playwright-chromium.test.ts` Vitest file. The test owns
+the loaded APT policy, one-shot Playwright status, Ubuntu caller inventory, and
+overall step-timeout contract; exact-head Actions then prove the wrapper on the
+GitHub-hosted Ubuntu runner.
+
 For readiness, the exact PR head is the commit that contains the PR-authored
 change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with
@@ -623,9 +630,13 @@ Live Junction calls are operator smoke only and must use environment-held
 credentials with secret-safe aggregate output; routine CI stays stubbed.
 
 For every user-facing `apps/web` UI diff, verification also includes
-`pnpm test:frontend-evidence` and evidence matched to the changed visual,
-state, interaction, and responsive risk. The pull-request workflow repeats the
-evidence check against the final base-to-head diff and PR body. Inspect phone and desktop
+`pnpm test:frontend-design-proof`, a supported absolute anchored component,
+consent, or section-study link, and evidence matched to the changed visual,
+state, interaction, and responsive risk. The preliminary frontend review owns
+repository origin, reachability, currentness, and representation quality. Add
+or update the representation only when no existing route and anchor render the
+changed state. The pull-request workflow repeats the structural design-proof check
+against the final base-to-head diff and PR body. Inspect phone and desktop
 when responsive behavior can change; do not add a viewport only to meet a
 quota. Prefer an attached in-app Browser for visual proof, then use the
 repository-installed Playwright runtime when no tab is attached or the

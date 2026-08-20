@@ -51,7 +51,7 @@ const groupSecondTurnText = "Add a second group reply context.";
 const groupSecondTurnReply = "The second group context is ready.";
 const groupBacklogReply = "I caught up with the whole group in one reply.";
 const usageLimitNoticeUrl =
-  "https://www.withmurph.ai/settings?addUsage=true#subscription";
+  "https://withmurph.ai/settings?usageRecovery=true#subscription";
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;

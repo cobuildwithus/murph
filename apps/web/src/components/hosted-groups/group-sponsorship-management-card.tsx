@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog";
 
 import { Button } from "@/src/components/ui/button";
@@ -34,6 +34,13 @@ type GroupSponsorshipManagementError = {
   message: string;
 };
 
+type GroupSponsorshipRecoveryProgress =
+  | "fulfilled"
+  | "payment_pending"
+  | "recheck_required";
+
+const GROUP_SPONSORSHIP_RECOVERY_POLL_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+
 export type GroupSponsorshipManagementConfirmation =
   | {
     currentMonthlyCapMinor: MonthlyCapMinor;
@@ -64,9 +71,82 @@ export function GroupSponsorshipManagementCard({
   const [busy, setBusy] = useState(false);
   const [canceled, setCanceled] = useState(false);
   const [error, setError] = useState<GroupSponsorshipManagementError | null>(null);
+  const [recoveryProgress, setRecoveryProgress] = useState<
+    GroupSponsorshipRecoveryProgress | null
+  >(null);
   const [confirmation, setConfirmation] = useState<
     GroupSponsorshipManagementConfirmation | null
   >(null);
+  const recoveryButtonRef = useRef<HTMLButtonElement>(null);
+  const recoveryStatusRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (
+      !busy &&
+      error?.certainty === "indeterminate" &&
+      management.status === "recovery_required" &&
+      recoveryProgress === null
+    ) {
+      recoveryButtonRef.current?.focus();
+    }
+  }, [busy, error, management.status, recoveryProgress]);
+
+  useEffect(() => {
+    if (recoveryProgress) {
+      recoveryStatusRef.current?.focus();
+    }
+  }, [recoveryProgress]);
+
+  useEffect(() => {
+    if (recoveryProgress !== "payment_pending") {
+      return;
+    }
+    let canceled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const poll = (attempt: number) => {
+      timer = setTimeout(() => {
+        void (async () => {
+          try {
+            const next = await readCurrentGroupSponsorshipManagement({
+              authorizationId: initialManagement.authorizationId,
+              endpoint,
+            });
+            if (canceled) {
+              return;
+            }
+            if (next) {
+              setManagement(next);
+              setSelectedMonthlyCapMinor(
+                next.pendingMonthlyCapMinor ?? next.monthlyCapMinor,
+              );
+              if (next.status === "active") {
+                setRecoveryProgress("fulfilled");
+                return;
+              }
+            }
+          } catch {
+            // A bounded retry below owns temporary read failures.
+          }
+          if (canceled) {
+            return;
+          }
+          const nextAttempt = attempt + 1;
+          if (nextAttempt >= GROUP_SPONSORSHIP_RECOVERY_POLL_DELAYS_MS.length) {
+            setRecoveryProgress("recheck_required");
+            return;
+          }
+          poll(nextAttempt);
+        })();
+      }, GROUP_SPONSORSHIP_RECOVERY_POLL_DELAYS_MS[attempt]);
+    };
+    poll(0);
+    return () => {
+      canceled = true;
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
+  }, [endpoint, initialManagement.authorizationId, recoveryProgress]);
 
   const submit = async (body: Record<string, unknown>): Promise<boolean> => {
     if (inert || busy) {
@@ -107,8 +187,21 @@ export function GroupSponsorshipManagementCard({
           window.location.assign(checkoutUrl);
           return true;
         }
-        window.location.reload();
-        return true;
+        const checkoutStatus = value.checkout.status;
+        if (
+          checkoutStatus === "payment_pending" || checkoutStatus === "fulfilled"
+        ) {
+          const next = readManagementProjection(value.management);
+          if (next) {
+            setManagement(next);
+            setSelectedMonthlyCapMinor(
+              next.pendingMonthlyCapMinor ?? next.monthlyCapMinor,
+            );
+          }
+          setRecoveryProgress(checkoutStatus);
+          return true;
+        }
+        throw new Error("Payment review couldn’t open. Try again.");
       }
       if (value.management === null) {
         if (body.action === "cancel") {
@@ -185,6 +278,39 @@ export function GroupSponsorshipManagementCard({
     }
   };
 
+  const recheckRecoveryStatus = async () => {
+    if (inert || busy) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await readCurrentGroupSponsorshipManagement({
+        authorizationId: initialManagement.authorizationId,
+        endpoint,
+      });
+      if (!next) {
+        throw new Error("Payment status couldn’t be checked. Try again.");
+      }
+      setManagement(next);
+      setSelectedMonthlyCapMinor(
+        next.pendingMonthlyCapMinor ?? next.monthlyCapMinor,
+      );
+      setRecoveryProgress(
+        next.status === "active" ? "fulfilled" : "recheck_required",
+      );
+    } catch (cause) {
+      setError({
+        certainty: "indeterminate",
+        message: cause instanceof Error
+          ? cause.message
+          : "Payment status couldn’t be checked. Try again.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section
       className="space-y-7"
@@ -235,6 +361,39 @@ export function GroupSponsorshipManagementCard({
         <p className="text-sm leading-6 text-muted-foreground">
           Billing changes are unavailable, but you can still stop future automatic refills.
         </p>
+      ) : recoveryProgress ? (
+        <div
+          className="rounded-2xl border border-border bg-muted/40 p-4"
+          role="status"
+          ref={recoveryStatusRef}
+          tabIndex={-1}
+        >
+          <p className="font-medium">
+            {recoveryProgress === "payment_pending"
+              ? "Payment is processing"
+              : recoveryProgress === "fulfilled"
+                ? "Payment confirmed"
+                : "Check payment status"}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            {recoveryProgress === "payment_pending"
+              ? "We’ll check this payment automatically. Automatic refills will resume after it is confirmed."
+              : recoveryProgress === "fulfilled"
+                ? "Automatic refills are ready to resume."
+                : "No new payment is needed. Recheck the existing payment before trying anything else."}
+          </p>
+          {recoveryProgress === "recheck_required" ? (
+            <Button
+              type="button"
+              className="mt-3"
+              disabled={busy || inert}
+              onClick={() => void recheckRecoveryStatus()}
+              size="sm"
+            >
+              Check payment status
+            </Button>
+          ) : null}
+        </div>
       ) : management.status === "recovery_required" ? (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
           <p className="font-medium">Payment needs attention</p>
@@ -245,6 +404,7 @@ export function GroupSponsorshipManagementCard({
             type="button"
             className="mt-3"
             disabled={busy || inert}
+            ref={recoveryButtonRef}
             size="sm"
             onClick={() => void submit({ action: "recover" })}
           >
@@ -544,6 +704,25 @@ function readManagementProjection(
     periodEnd: value.periodEnd,
     status,
   };
+}
+
+async function readCurrentGroupSponsorshipManagement(input: {
+  authorizationId: string;
+  endpoint: string;
+}): Promise<GroupSponsorshipManagementProjection | null> {
+  const response = await fetch(input.endpoint, {
+    cache: "no-store",
+    credentials: "same-origin",
+    method: "GET",
+  });
+  const value: unknown = await response.json();
+  if (!response.ok || !isRecord(value)) {
+    throw new Error("Payment status couldn’t be checked. Try again.");
+  }
+  const management = readManagementProjection(value.management);
+  return management?.authorizationId === input.authorizationId
+    ? management
+    : null;
 }
 
 function readManagementErrorMessage(value: unknown): string {
