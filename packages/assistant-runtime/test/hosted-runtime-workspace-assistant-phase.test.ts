@@ -2178,6 +2178,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
 
     expect(mocks.runHostedDeviceSyncWakeLane).toHaveBeenCalledWith(
       expect.objectContaining({
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_phase",
+          leaseGeneration: "3",
+          workspaceVersion: "8",
+        },
         skipDirtyPendingFetch: false,
       }),
     );
@@ -7257,6 +7262,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       expect.objectContaining({
         allowedRouteActions: ["run-device-sync-wake"],
         allowedWakeKinds: ["device-sync.wake"],
+        runtimeLogContext: {
+          attemptId: "attempt_synthetic_phase",
+          leaseGeneration: "3",
+          workspaceVersion: "8",
+        },
         shouldYieldBackgroundMaintenance,
       }),
     );

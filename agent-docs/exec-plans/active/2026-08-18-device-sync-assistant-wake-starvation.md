@@ -1,4 +1,4 @@
-# Device Sync Production Recovery
+# Device Sync Production Recovery and Interruption Observability
 
 ## Goal
 
@@ -25,6 +25,20 @@ frontiers advance after deployment.
   importing or scheduling bounded continuation work. Cancellation releases the
   root job for retry, discarding that in-memory prefix, so slow summary calls can
   repeat indefinitely without a typed provider failure.
+- Pull request #1992 merged and shipped the bounded Junction continuation and
+  blocked-assistant recovery. A later member incident still advanced
+  `lastSyncStartedAt` without advancing completion or recording a typed failure.
+  The dirty frontier was already drained, no foreground/model/auth work ran in
+  the incident window, and the nearest production deploy completed more than two
+  hours earlier with no matching rollout or replacement event.
+- That incident's workspace wake advanced to the ordinary six-hour cadence
+  instead of the yielded 30-second retry. Service wake projection already takes
+  the earliest active reconcile or queued job, so an intact immediate Junction
+  continuation would have won. The remaining proven failure class is loss or
+  interruption after sync start but before the continuation/completion handoff
+  became durable. Existing telemetry cannot distinguish a maintenance timeout,
+  foreground yield, invocation preemption, container destruction, another outer
+  abort, or an abrupt invocation/checkpoint loss.
 
 ## Constraints
 
@@ -59,6 +73,18 @@ frontiers advance after deployment.
    required CI, and protected deployment.
 6. Confirm both affected production frontiers and typed runtime markers advance
    after deployment; continue diagnosis if either remains stalled.
+7. Add an awaited device-sync pass lifecycle pair around the hosted lane. Record
+   only attempt/lease/workspace context and bounded stage/outcome/count/presence
+   metadata, so a start without a finish identifies abrupt loss without exposing
+   member, account, job, payload, resource, or raw error values.
+8. Preserve the first cancellation source as a typed reason and distinguish
+   foreground yield, deadline timeout, invocation preemption, container
+   destruction, generic outer abort, and an otherwise unknown yield. Prove the
+   lifecycle pair, timeout stage, first-winner classification, and strict Web log
+   parser contract with focused tests and package typechecks.
+9. Deploy Web's event-code parser before fully recycling the Cloudflare runner,
+   then use the paired attempt markers and checkpoint/container logs to classify
+   any recurrence exactly.
 
 ## Verification
 
@@ -103,9 +129,10 @@ frontiers advance after deployment.
 - The diff-scoped verifier completed shell syntax, Node syntax, and the hosted
   stale-name guard before its local run was manually stopped during the next
   guard after 161 seconds; required CI remains the broad verification owner.
-- Corrective pull request #1992 is open. Exact-head PR review of the corrected
-  head, required CI, protected deployment, and production convergence proof
-  remain pending.
+- Corrective pull request #1992 merged and its bounded continuation/recovery
+  behavior was present before the later incident. The later incident therefore
+  does not reproduce the original non-resumable serial summary prefix; it exposes
+  the missing terminal-handoff observability described above.
 - Final ReviewGPT round one found two accepted cross-runtime gaps. A blocked
   assistant source was retained in the vault but omitted from the owner-visible
   checkpoint wake, so policy restoration had no guaranteed trigger. The
@@ -154,4 +181,4 @@ frontiers advance after deployment.
 ## State
 
 Status: active
-Updated: 2026-08-18
+Updated: 2026-08-20
