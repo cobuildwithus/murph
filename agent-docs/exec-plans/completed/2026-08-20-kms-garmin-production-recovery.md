@@ -1,6 +1,6 @@
 # KMS and Garmin production recovery
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -73,9 +73,42 @@ Updated: 2026-08-20
 - Commands to run: focused Web KMS tests; focused source-health/device-sync tests if changed; relevant Web/device-sync/query typechecks; diff/privacy checks; required exact-head CI and ReviewGPT gates.
 - Expected outcomes: retryable KMS latency recovers within the bounded policy, terminal failures remain immediate, and Garmin status/recovery matches the proven source state without broad resync or data mutation.
 - Direct proof completed:
-  - Web KMS boundary and official-SDK suites: 33 tests passed.
+  - Web KMS boundary and official-SDK suites: 34 tests passed.
   - Cloudflare runner environment suite: 48 tests passed.
   - Assistant-runtime device-sync provider config suite: 3 tests passed.
   - Web, Cloudflare, and assistant-runtime package typechecks passed.
   - `git diff --check` passed; production evidence remains summarized and no
     production row contents or identifiers were written to the repository.
+
+## Review record
+
+- Preliminary completion specialists reviewed first head
+  `17a0bc5d652b43ce1dda1480e90ac7d3a3bc479d` for Product UX and coverage.
+  Product purpose was `Ready` as a Patch; prompt and frontend lenses were not
+  applicable.
+- One medium coverage finding was accepted: provider-status and aggregate
+  timeout tests did not directly prove that an official SDK call hanging past
+  its local attempt deadline is canceled before the retry. The parent added
+  that exact official-boundary proof; the focused KMS suites now pass 34 tests
+  and Web typecheck remains green.
+- The optional specialist patch artifact was not applied. Review capture
+  metadata could not authorize its download after a managed-browser hydration
+  failure, so the parent authored and verified the equivalent test at the
+  requested test-only boundary.
+- Final ReviewGPT round 1 returned `PASS` with zero findings against the same
+  first-reviewed head after a full-snapshot audit. The test-only specialist
+  remediation does not create another substantive round.
+- Managed-browser capture required manual export after the exact thread rendered
+  duplicate response nodes. Both specialist and final exports were accepted
+  only after their completed response markers, durations, requested model,
+  attachment/response identities, and exact preceding committed user-turn IDs
+  were verified against the original capture metadata.
+- Exact-head GitHub app/package verification passed on the original candidate
+  and on the test-remediated head. Pull-request evidence and Vercel checks are
+  green; the protected native iOS lane is not required for this change.
+- Parent final review re-read the full task diff and affected KMS, environment,
+  runner, and provider-config call paths. No remaining proof gap, privacy leak,
+  disproportionate abstraction, or unresolved accepted finding remains. Garmin
+  production activation intentionally remains held at the documented provider
+  endpoint proof boundary.
+Completed: 2026-08-20
