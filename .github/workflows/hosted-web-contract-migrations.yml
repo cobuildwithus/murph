@@ -8,6 +8,10 @@ on:
         description: Current Vercel production commit SHA to prove before applying contract migrations.
         required: true
         type: string
+      deployment_url:
+        description: Exact ready Vercel production deployment URL to prove.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -38,10 +42,17 @@ jobs:
 
           if git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main; then
             echo "should_run=true" >> "${GITHUB_OUTPUT}"
+            if [ "${DEPLOYED_SHA}" = "$(git rev-parse origin/main)" ]; then
+              echo "should_require_current=true" >> "${GITHUB_OUTPUT}"
+            else
+              echo "should_require_current=false" >> "${GITHUB_OUTPUT}"
+              echo "::notice::The deployed SHA is from main but is no longer its tip; a newer ready main deployment owns production convergence."
+            fi
             exit 0
           fi
 
           echo "should_run=false" >> "${GITHUB_OUTPUT}"
+          echo "should_require_current=false" >> "${GITHUB_OUTPUT}"
           echo "::notice::Skipping hosted web contract migrations because deployed SHA is not reachable from origin/main."
 
       - name: Setup pnpm
@@ -66,6 +77,7 @@ jobs:
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url || inputs.deployment_url }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
@@ -98,6 +110,28 @@ jobs:
             exit 1
           fi
 
+          current_sha="$(
+            pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
+          )"
+
+          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
+            if [ "${{ steps.production-branch.outputs.should_require_current }}" = "true" ]; then
+              echo "::error::The current main Vercel deployment is Ready, but the production base domain still serves another commit."
+              exit 1
+            fi
+            echo "should_apply=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
+            exit 0
+          fi
+
+          verified_sha="$(
+            pnpm --dir apps/web release:production:verify-exact-deployment
+          )"
+          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
+            exit 1
+          fi
+
           if [ "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}" -gt 0 ]; then
             echo "::notice::Waiting ${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}s for prior production function executions to drain before contract migrations."
             sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"
@@ -106,14 +140,25 @@ jobs:
           current_sha="$(
             pnpm --dir apps/web exec tsx scripts/resolve-vercel-production-alias-sha.ts
           )"
-
-          if [ "${current_sha}" = "${DEPLOYED_SHA}" ]; then
-            echo "should_apply=true" >> "${GITHUB_OUTPUT}"
+          if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
+            if [ "${{ steps.production-branch.outputs.should_require_current }}" = "true" ]; then
+              echo "::error::The current main Vercel deployment changed during the prior-function drain."
+              exit 1
+            fi
+            echo "should_apply=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::Skipping hosted web contract migrations because Vercel production advanced during the prior-function drain."
             exit 0
           fi
 
-          echo "should_apply=false" >> "${GITHUB_OUTPUT}"
-          echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
+          verified_sha="$(
+            pnpm --dir apps/web release:production:verify-exact-deployment
+          )"
+          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "::error::Final exact Vercel production deployment verification returned an unexpected commit."
+            exit 1
+          fi
+
+          echo "should_apply=true" >> "${GITHUB_OUTPUT}"
 
       - name: Apply contract migrations
         if: ${{ steps.production-branch.outputs.should_run == 'true' && steps.current-production.outputs.should_apply == 'true' }}
@@ -121,6 +166,7 @@ jobs:
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha || inputs.deployed_sha }}
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_DEPLOYMENT_URL: ${{ github.event.deployment_status.environment_url || inputs.deployment_url }}
           HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
           HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
           HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
@@ -146,6 +192,18 @@ jobs:
           if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then
             echo "::notice::Skipping hosted web contract migrations because current Vercel production is ${current_sha}, not ${DEPLOYED_SHA}."
             exit 0
+          fi
+
+          verified_sha="$(
+            env \
+              -u DIRECT_DATABASE_URL \
+              -u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS \
+              -u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS \
+              pnpm --dir apps/web release:production:verify-exact-deployment
+          )"
+          if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
+            echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
+            exit 1
           fi
 
           pnpm --dir apps/web release:production:contract-migrate
