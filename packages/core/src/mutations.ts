@@ -3083,13 +3083,16 @@ async function buildDeviceEventIdentityContext(
     extension: ".jsonl",
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
-  const context: DeviceEventIdentityContext = {
-    index,
-    legacyReservations: buildLegacyExternalRefReservations(entries, index),
-  };
+  const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
+  // A legitimate primary spine may advance before the duplicate is repaired.
+  // Load only structural candidates first so reservations can use the bounded
+  // common-initial-history proof instead of latest-record equality.
   const aliasRepairOwnerIds = new Set<string>();
   for (const entry of entries) {
-    const ownerSplit = resolveJunctionDailyAggregateAliasOwnerSplit(entry, index);
+    const ownerSplit = resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+      entry,
+      index,
+    );
     if (!ownerSplit) {
       continue;
     }
@@ -3104,6 +3107,7 @@ async function buildDeviceEventIdentityContext(
       aliasRepairOwnerIds,
     );
   }
+  context.legacyReservations = buildLegacyExternalRefReservations(entries, index);
   return context;
 }
 
@@ -3197,6 +3201,13 @@ interface JunctionDailyAggregateAliasOwnerSplit {
   legacyRefKey: string;
   primaryOwner: IndexedEventExternalRefMatch;
   primaryRefKey: string;
+  resource: string;
+}
+
+interface JunctionDailyAggregateAliasHistoryProof
+  extends JunctionDailyAggregateAliasOwnerSplit {
+  legacyOverlay: JunctionDailyAggregateAliasOverlay;
+  primaryOverlay: JunctionDailyAggregateAliasOverlay;
 }
 
 interface JunctionDailyAggregateAliasRepairPlan {
@@ -3324,7 +3335,7 @@ function isJunctionDailyAggregateAliasCandidate(entry: PreparedDeviceEventEntry)
     && entry.record.attachments === undefined;
 }
 
-function resolveJunctionDailyAggregateAliasOwnerSplit(
+function resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
   entry: PreparedDeviceEventEntry,
   index: EventExternalRefIndex,
 ): JunctionDailyAggregateAliasOwnerSplit | null {
@@ -3353,30 +3364,31 @@ function resolveJunctionDailyAggregateAliasOwnerSplit(
     return null;
   }
 
-  // The provider may refresh the value before this vault first self-heals.
-  // Prove the duplicate from the two persisted provider baselines; the
-  // incoming record becomes only the survivor's next revision.
   const primaryProviderRecord = primaryOwner.indexedRecord;
+  const legacyProviderRecord = legacyOwner.indexedRecord;
   const primaryOrigin = primaryProviderRecord.dataOrigin;
+  const legacyOrigin = legacyProviderRecord.dataOrigin;
+  const incomingOrigin = entry.record.dataOrigin;
+  const observedAtRaw = incomingOrigin?.observedAtRaw;
+  const observedAtRawPrefix = `${entry.record.dayKey}:`;
+  const resource = observedAtRaw?.startsWith(observedAtRawPrefix)
+    && observedAtRaw.endsWith(":daily")
+    ? observedAtRaw.slice(observedAtRawPrefix.length, -":daily".length)
+    : "";
   if (
     primaryProviderRecord.dayKey !== entry.record.dayKey
-    || primaryProviderRecord.occurredAt !== entry.record.occurredAt
     || !isSameObservationFacet(primaryProviderRecord, entry.record)
+    || !isSameObservationFacet(primaryProviderRecord, legacyProviderRecord)
     || junctionDailyAggregateAliasRefShape(primaryOwner.indexedExternalRef)
       !== junctionDailyAggregateAliasRefShape(externalRef)
     || junctionDailyAggregateAliasRefShape(legacyOwner.indexedExternalRef)
       !== junctionDailyAggregateAliasRefShape(legacyExternalRef)
     || !primaryOrigin
-    || !entry.record.dataOrigin
-    || !deviceDataOriginSourceMatches(
-      primaryOrigin,
-      entry.record.dataOrigin,
-    )
-    || !isCompatibleLegacyExternalRefMatch(
-      legacyOwner,
-      primaryProviderRecord,
-      legacyExternalRef,
-    )
+    || !legacyOrigin
+    || !incomingOrigin
+    || resource.length === 0
+    || !deviceDataOriginSourceMatches(primaryOrigin, incomingOrigin)
+    || !deviceDataOriginSourceMatches(legacyOrigin, incomingOrigin)
   ) {
     return null;
   }
@@ -3406,14 +3418,7 @@ function resolveJunctionDailyAggregateAliasOwnerSplit(
     );
   }
 
-  return { legacyOwner, legacyRefKey, primaryOwner, primaryRefKey };
-}
-
-function hasJunctionDailyAggregateAliasSplit(
-  entry: PreparedDeviceEventEntry,
-  context: DeviceEventIdentityContext,
-): boolean {
-  return resolveJunctionDailyAggregateAliasOwnerSplit(entry, context.index) !== null;
+  return { legacyOwner, legacyRefKey, primaryOwner, primaryRefKey, resource };
 }
 
 function assertJunctionDailyAggregateAliasHistoryIsUncontaminated(
@@ -3525,19 +3530,13 @@ function parseJunctionDailyAggregateAliasEvidence(
   };
 }
 
-function analyzeJunctionDailyAggregateAliasHistory(input: {
-  context: DeviceEventIdentityContext;
-  eventId: string;
-  expectedDayKey: string;
-  expectedExternalRef: ExternalRef;
-  expectedOrigin: DeviceDataOrigin;
-  expectedObservedAtRaw: string;
-  expectedProviderStateKey: string;
-}): JunctionDailyAggregateAliasOverlay {
-  const { index } = input.context;
-  const history = index.aliasRepairHistoryById.get(input.eventId) ?? [];
-  const maxRevision = index.maxRevisionById.get(input.eventId) ?? 0;
-  const revisions = index.revisionsById.get(input.eventId);
+function readCompleteJunctionDailyAggregateAliasHistory(
+  index: EventExternalRefIndex,
+  eventId: string,
+): readonly EventSpineEntry<EventRecord>[] {
+  const history = index.aliasRepairHistoryById.get(eventId) ?? [];
+  const maxRevision = index.maxRevisionById.get(eventId) ?? 0;
+  const revisions = index.revisionsById.get(eventId);
   if (
     maxRevision < 1
     || maxRevision > MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS
@@ -3553,28 +3552,67 @@ function analyzeJunctionDailyAggregateAliasHistory(input: {
       "Junction daily aggregate alias repair requires a complete bounded event history.",
     );
   }
+  return history;
+}
 
-  const initial = history[0]?.record;
-  const latest = history.at(-1)?.record;
+function junctionDailyAggregateAliasPersistedOriginsMatch(
+  left: DeviceDataOrigin | undefined,
+  right: DeviceDataOrigin | undefined,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return junctionDailyAggregateAliasHistoricalOriginMatches(left, right)
+    || junctionDailyAggregateAliasHistoricalOriginMatches(right, left);
+}
+
+function junctionDailyAggregateAliasInitialRecordMatches(
+  record: EventRecord | undefined,
+  input: {
+    expectedDayKey: string;
+    expectedExternalRef: ExternalRef;
+    expectedObservedAtRaw: string;
+  },
+): record is EventRecord {
+  return record !== undefined
+    && record.source === "device"
+    && !isDeletedEventSpineRecord(record)
+    && record.dayKey === input.expectedDayKey
+    && record.dataOrigin?.observedAtRaw === input.expectedObservedAtRaw
+    && record.externalRef !== undefined
+    && eventExternalRefKey(record.externalRef)
+      === eventExternalRefKey(input.expectedExternalRef)
+    && junctionDailyAggregateAliasRefShape(record.externalRef)
+      === junctionDailyAggregateAliasRefShape(input.expectedExternalRef);
+}
+
+function analyzeJunctionDailyAggregateAliasHistoryEvolution(input: {
+  allowProviderEvolution: boolean;
+  expectedDayKey: string;
+  expectedExternalRef: ExternalRef;
+  expectedOrigin: DeviceDataOrigin;
+  expectedObservedAtRaw: string;
+  history: readonly EventSpineEntry<EventRecord>[];
+  initialProviderStateKey: string;
+  initialRecord: EventRecord;
+}): JunctionDailyAggregateAliasOverlay {
   const expectedRefKey = eventExternalRefKey(input.expectedExternalRef);
-  if (
-    !initial
-    || !latest
-    || initial.source !== "device"
-    || initial.dayKey !== input.expectedDayKey
-    || initial.dataOrigin?.observedAtRaw !== input.expectedObservedAtRaw
-    || !junctionDailyAggregateAliasHistoricalOriginMatches(
-      initial.dataOrigin,
-      input.expectedOrigin,
-    )
-    || !initial.externalRef
-    || eventExternalRefKey(initial.externalRef) !== expectedRefKey
-    || junctionDailyAggregateAliasRefShape(initial.externalRef)
-      !== junctionDailyAggregateAliasRefShape(input.expectedExternalRef)
-    || history.some(({ record }) =>
+  let providerStateKey = input.initialProviderStateKey;
+  for (const { record } of input.history) {
+    const recordProviderStateKey = junctionDailyAggregateProviderStateKey(record);
+    const providerRecord = record.source === "device";
+    if (
       isDeletedEventSpineRecord(record)
       || (record.source !== "device" && record.source !== "manual")
-      || junctionDailyAggregateProviderStateKey(record) !== input.expectedProviderStateKey
+      || record.dayKey !== input.expectedDayKey
+      || !isSameObservationFacet(input.initialRecord, record)
+      || (
+        providerRecord
+        && (
+          !record.externalRef
+          || !record.dataOrigin
+        )
+      )
       || (
         record.externalRef !== undefined
         && (
@@ -3585,19 +3623,38 @@ function analyzeJunctionDailyAggregateAliasHistory(input: {
       )
       || (
         record.dataOrigin !== undefined
-        && !junctionDailyAggregateAliasHistoricalOriginMatches(
-          record.dataOrigin,
-          input.expectedOrigin,
+        && (
+          record.dataOrigin.observedAtRaw !== input.expectedObservedAtRaw
+          || !junctionDailyAggregateAliasHistoricalOriginMatches(
+            record.dataOrigin,
+            input.expectedOrigin,
+          )
         )
       )
-    )
-  ) {
-    throw new VaultError(
-      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
-      "Junction daily aggregate alias repair found unsupported or divergent historical state.",
-    );
+      || (
+        providerRecord
+          ? !input.allowProviderEvolution
+            && recordProviderStateKey !== input.initialProviderStateKey
+          : recordProviderStateKey !== providerStateKey
+      )
+    ) {
+      throw new VaultError(
+        "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+        "Junction daily aggregate alias repair found unsupported or divergent historical state.",
+      );
+    }
+    if (providerRecord) {
+      providerStateKey = recordProviderStateKey;
+    }
   }
 
+  const latest = input.history.at(-1)?.record;
+  if (!latest) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair requires a complete bounded event history.",
+    );
+  }
   const links = [...(latest.links ?? [])];
   const tags = [...(latest.tags ?? [])];
   return {
@@ -3609,6 +3666,91 @@ function analyzeJunctionDailyAggregateAliasHistory(input: {
     ...(latest.note ? { note: latest.note } : {}),
     tags,
   };
+}
+
+function resolveJunctionDailyAggregateAliasOwnerSplit(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): JunctionDailyAggregateAliasHistoryProof | null {
+  const ownerSplit = resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+    entry,
+    index,
+  );
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (!ownerSplit || !externalRef || !legacyExternalRef || !entry.record.dataOrigin) {
+    return null;
+  }
+
+  const primaryInitial = index.aliasRepairHistoryById.get(
+    ownerSplit.primaryOwner.record.id,
+  )?.[0]?.record;
+  const legacyInitial = index.aliasRepairHistoryById.get(
+    ownerSplit.legacyOwner.record.id,
+  )?.[0]?.record;
+  const legacyDayKey = ownerSplit.legacyOwner.indexedRecord.dayKey;
+  // Divergent initial baselines are ordinary adjacent-day owners. Once the
+  // baselines match, every later revision must satisfy the bounded evolution
+  // rules before this pair can reserve or mutate either identity.
+  if (
+    !junctionDailyAggregateAliasInitialRecordMatches(primaryInitial, {
+      expectedDayKey: entry.record.dayKey,
+      expectedExternalRef: externalRef,
+      expectedObservedAtRaw: `${entry.record.dayKey}:${ownerSplit.resource}:daily`,
+    })
+    || !junctionDailyAggregateAliasInitialRecordMatches(legacyInitial, {
+      expectedDayKey: legacyDayKey,
+      expectedExternalRef: legacyExternalRef,
+      expectedObservedAtRaw: `${legacyDayKey}:${ownerSplit.resource}:daily`,
+    })
+    || !isSameObservationFacet(primaryInitial, legacyInitial)
+    || junctionDailyAggregateProviderStateKey(primaryInitial)
+      !== junctionDailyAggregateProviderStateKey(legacyInitial)
+    || !junctionDailyAggregateAliasPersistedOriginsMatch(
+      primaryInitial.dataOrigin,
+      legacyInitial.dataOrigin,
+    )
+  ) {
+    return null;
+  }
+
+  const primaryHistory = readCompleteJunctionDailyAggregateAliasHistory(
+    index,
+    ownerSplit.primaryOwner.record.id,
+  );
+  const legacyHistory = readCompleteJunctionDailyAggregateAliasHistory(
+    index,
+    ownerSplit.legacyOwner.record.id,
+  );
+
+  const primaryOverlay = analyzeJunctionDailyAggregateAliasHistoryEvolution({
+    allowProviderEvolution: true,
+    expectedDayKey: entry.record.dayKey,
+    expectedExternalRef: externalRef,
+    expectedOrigin: entry.record.dataOrigin,
+    expectedObservedAtRaw: `${entry.record.dayKey}:${ownerSplit.resource}:daily`,
+    history: primaryHistory,
+    initialProviderStateKey: junctionDailyAggregateProviderStateKey(primaryInitial),
+    initialRecord: primaryInitial,
+  });
+  const legacyOverlay = analyzeJunctionDailyAggregateAliasHistoryEvolution({
+    allowProviderEvolution: false,
+    expectedDayKey: legacyDayKey,
+    expectedExternalRef: legacyExternalRef,
+    expectedOrigin: entry.record.dataOrigin,
+    expectedObservedAtRaw: `${legacyDayKey}:${ownerSplit.resource}:daily`,
+    history: legacyHistory,
+    initialProviderStateKey: junctionDailyAggregateProviderStateKey(legacyInitial),
+    initialRecord: legacyInitial,
+  });
+  return { ...ownerSplit, legacyOverlay, primaryOverlay };
+}
+
+function hasJunctionDailyAggregateAliasSplit(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+): boolean {
+  return resolveJunctionDailyAggregateAliasOwnerSplit(entry, context.index) !== null;
 }
 
 function mergeJunctionDailyAggregateAliasOverlays(
@@ -3657,12 +3799,20 @@ function buildJunctionDailyAggregateAliasRepairPlan(input: {
   }
   assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
 
-  const { legacyOwner, legacyRefKey, primaryOwner, primaryRefKey } = ownerSplit;
+  const {
+    legacyOverlay,
+    legacyOwner,
+    legacyRefKey,
+    primaryOverlay,
+    primaryOwner,
+    primaryRefKey,
+  } = ownerSplit;
 
   const evidence = parseJunctionDailyAggregateAliasEvidence(entry, aliasRepairContext);
   if (
     primaryOwner.record.dayKey !== evidence.dayKey
     || legacyOwner.record.dayKey !== evidence.legacyDayKey
+    || ownerSplit.resource !== evidence.resource
   ) {
     throw new VaultError(
       "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
@@ -3670,46 +3820,6 @@ function buildJunctionDailyAggregateAliasRepairPlan(input: {
     );
   }
 
-  const expectedOrigin = primaryOwner.indexedRecord.dataOrigin;
-  if (!expectedOrigin) {
-    throw new VaultError(
-      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
-      "Junction daily aggregate alias repair requires persisted provider origin evidence.",
-    );
-  }
-  if (
-    !entry.record.dataOrigin
-    || !junctionDailyAggregateAliasHistoricalOriginMatches(
-      expectedOrigin,
-      entry.record.dataOrigin,
-    )
-  ) {
-    throw new VaultError(
-      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
-      "Junction daily aggregate alias repair incoming origin diverged from persisted provider history.",
-    );
-  }
-  const expectedProviderStateKey = junctionDailyAggregateProviderStateKey(
-    primaryOwner.indexedRecord,
-  );
-  const primaryOverlay = analyzeJunctionDailyAggregateAliasHistory({
-    context,
-    eventId: primaryOwner.record.id,
-    expectedDayKey: evidence.dayKey,
-    expectedExternalRef: externalRef,
-    expectedOrigin,
-    expectedObservedAtRaw: `${evidence.dayKey}:${evidence.resource}:daily`,
-    expectedProviderStateKey,
-  });
-  const legacyOverlay = analyzeJunctionDailyAggregateAliasHistory({
-    context,
-    eventId: legacyOwner.record.id,
-    expectedDayKey: evidence.legacyDayKey,
-    expectedExternalRef: legacyExternalRef,
-    expectedOrigin,
-    expectedObservedAtRaw: `${evidence.legacyDayKey}:${evidence.resource}:daily`,
-    expectedProviderStateKey,
-  });
   const overlay = mergeJunctionDailyAggregateAliasOverlays(primaryOverlay, legacyOverlay);
   const primaryRevision = (context.index.maxRevisionById.get(primaryOwner.record.id) ?? 0) + 1;
   const legacyRevision = (context.index.maxRevisionById.get(legacyOwner.record.id) ?? 0) + 1;
