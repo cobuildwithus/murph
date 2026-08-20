@@ -72,7 +72,7 @@ const RUNNER_RUNTIME_WAKE_URL = "http://container/internal/runtime-wake";
 const RUNNER_WAIT_INTERVAL_MS = 250;
 const RUNNER_STOPPED_REQUEST_SETTLE_MS = 1_000;
 const RUNNER_DESTROY_SETTLE_TIMEOUT_MS = 5_000;
-const DEFAULT_RUNNER_READY_TIMEOUT_MS = 20_000;
+const DEFAULT_RUNNER_READY_TIMEOUT_MS = 90_000;
 const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
@@ -2204,7 +2204,8 @@ export class RunnerContainer extends Container {
     } = {},
   ): Promise<"already_warm" | "started"> {
     const readinessStartedAt = Date.now();
-    const status = readContainerStatus(await this.getState());
+    const initialState = await this.getState();
+    const status = readContainerStatus(initialState);
     const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
     const readinessBudgetMs = input.timeoutMs ?? readyTimeoutMs;
     throwIfRunnerContainerOperationAborted(operationAbortSignal);
@@ -2276,6 +2277,12 @@ export class RunnerContainer extends Container {
           operationAbortSignal,
         );
         this.recordRecentReadinessProof(input.userId);
+        if (
+          this.containerStartedAtMs === null
+          && readRecentContainerStart(initialState, Date.now(), readyTimeoutMs)
+        ) {
+          this.recordContainerStartObserved("cold-start-ready");
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2290,6 +2297,22 @@ export class RunnerContainer extends Container {
         });
         return "already_warm";
       } catch (error) {
+        const pendingColdStart = this.readPendingColdStart({
+          maxAgeMs: readyTimeoutMs,
+          operationAbortSignal,
+          state: initialState,
+        });
+        if (pendingColdStart) {
+          this.logPendingColdStart({
+            ageMs: pendingColdStart.ageMs,
+            maxAgeMs: readyTimeoutMs,
+            readinessStartedAtMs: readinessStartedAt,
+            readinessTimeoutMs,
+            statusBeforeStart: status,
+            userId: input.userId,
+          });
+          throw error;
+        }
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2339,6 +2362,7 @@ export class RunnerContainer extends Container {
     const remainingTimeoutMs = Math.max(1, readinessBudgetMs - (Date.now() - readinessStartedAt));
     const readinessTimeoutMs = Math.min(remainingTimeoutMs, readyTimeoutMs);
 
+    const coldStartWaitStartedAtMs = Date.now();
     try {
       await this.startAndWaitForPorts({
         cancellationOptions: {
@@ -2360,6 +2384,23 @@ export class RunnerContainer extends Container {
       this.recordRecentReadinessProof(input.userId);
       this.recordContainerStartObserved("cold-start-ready");
     } catch (error) {
+      const pendingColdStartAgeMs = Date.now() - coldStartWaitStartedAtMs;
+      const pendingColdStart = operationAbortSignal.aborted
+        && isRunnerContainerAbortHardTimeout(operationAbortSignal.reason)
+        && this.containerStartedAtMs === null
+        && pendingColdStartAgeMs >= 0
+        && pendingColdStartAgeMs <= readyTimeoutMs;
+      if (pendingColdStart) {
+        this.logPendingColdStart({
+          ageMs: pendingColdStartAgeMs,
+          maxAgeMs: readyTimeoutMs,
+          readinessStartedAtMs: readinessStartedAt,
+          readinessTimeoutMs,
+          statusBeforeStart: status,
+          userId: input.userId,
+        });
+        throw error;
+      }
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -2407,6 +2448,48 @@ export class RunnerContainer extends Container {
     });
 
     return "started";
+  }
+
+  private readPendingColdStart(input: {
+    maxAgeMs: number;
+    operationAbortSignal: AbortSignal;
+    state: unknown;
+  }): { ageMs: number } | null {
+    if (
+      !input.operationAbortSignal.aborted
+      || !isRunnerContainerAbortHardTimeout(input.operationAbortSignal.reason)
+      || this.containerStartedAtMs !== null
+    ) {
+      return null;
+    }
+    return readRecentContainerStart(input.state, Date.now(), input.maxAgeMs);
+  }
+
+  private logPendingColdStart(input: {
+    ageMs: number;
+    maxAgeMs: number;
+    readinessStartedAtMs: number;
+    readinessTimeoutMs: number;
+    statusBeforeStart: string | null;
+    userId: string;
+  }): void {
+    emitHostedExecutionStructuredLog({
+      component: "container",
+      details: {
+        pendingColdStartAgeMs: input.ageMs,
+        pendingColdStartMaxAgeMs: input.maxAgeMs,
+        readinessLatencyMs: Date.now() - input.readinessStartedAtMs,
+        readinessPollIntervalMs: RUNNER_WAIT_INTERVAL_MS,
+        readinessTimeoutMs: input.readinessTimeoutMs,
+        runnerPort: RUNNER_PORT,
+        startMode: "cold-pending",
+        statusBeforeStart: input.statusBeforeStart,
+      },
+      level: "warn",
+      message: "Hosted execution container cold start is still pending after the caller readiness budget.",
+      phase: "container.starting",
+      userId: input.userId,
+    });
   }
 
   private async ensureSmokeContainerReady(
@@ -4161,6 +4244,34 @@ function readContainerStatus(state: unknown): string | null {
 
   const status = (state as { status?: unknown }).status;
   return typeof status === "string" ? status : null;
+}
+
+function readContainerLastChangeMs(state: unknown): number | null {
+  if (!state || typeof state !== "object" || Array.isArray(state)) {
+    return null;
+  }
+
+  const lastChange = (state as { lastChange?: unknown }).lastChange;
+  return typeof lastChange === "number" && Number.isFinite(lastChange)
+    ? lastChange
+    : null;
+}
+
+function readRecentContainerStart(
+  state: unknown,
+  nowMs: number,
+  maxAgeMs: number,
+): { ageMs: number } | null {
+  const status = readContainerStatus(state);
+  if (status !== "running" && status !== "healthy") {
+    return null;
+  }
+  const lastChangeMs = readContainerLastChangeMs(state);
+  if (lastChangeMs === null) {
+    return null;
+  }
+  const ageMs = nowMs - lastChangeMs;
+  return ageMs >= 0 && ageMs <= maxAgeMs ? { ageMs } : null;
 }
 
 function isRunnerContainerStopped(status: string | null): boolean {

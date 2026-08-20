@@ -156,7 +156,7 @@ export function readHostedExecutionWorkerEnvironment(
     runnerCommitTimeoutMs,
     runnerReadyTimeoutMs: parsePositiveInteger(
       normalizeHostedExecutionString(source.HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS),
-      20_000,
+      90_000,
       "HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS",
     ),
     runnerIdleTtlMs,
