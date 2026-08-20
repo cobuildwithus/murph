@@ -90,5 +90,20 @@ set write are intentionally outside this patch.
 - Passed a direct built-CLI journey: start the old workout, replace it once with
   two initial exercises, reject the old id as active, and resolve the replacement
   as the sole active workout.
+- Merged current `origin/main` through ordinary history and regenerated the
+  combined CLI artifacts. The only conflict was the generated CLI skill hash.
+- Passed a normalized complete first-provider-request capture against current
+  base and merged head with the pinned real Codex App Server, hermetic Responses
+  stub, `gpt-5.6-terra`, low reasoning, production code mode, identical synthetic
+  direct/group workout-replacement turns, and `gpt-tokenizer` 3.4.0
+  `o200k_harmony`. The selected provider fields were `include`, `input`,
+  `instructions`, `parallel_tool_calls`, `text`, `tool_choice`, and `tools` when
+  present; generated ids and temporary paths were normalized identically. Direct
+  changed from 27,715 tokens / 124,707 UTF-8 bytes to 27,718 / 124,718 (+3
+  tokens / +11 bytes), entirely from adding `replace` to the CLI workout-family
+  index. Group remained 22,503 tokens / 103,537 bytes. Tool/schema guidance and
+  all other first-request fields were unchanged. The deferred tracked-table skill
+  changes from 5,254 tokens / 26,607 bytes to 5,565 / 28,219 (+311 / +1,612)
+  only when selected and read; it is absent from the first request.
 - Preliminary specialist ReviewGPT, final ReviewGPT, exact-head CI, and plan
   closure remain pending until the review candidate is pushed.
