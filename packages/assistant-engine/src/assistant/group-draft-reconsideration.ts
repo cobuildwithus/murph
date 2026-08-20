@@ -4,7 +4,6 @@ import { resolveAssistantConversationScope } from './conversation-policy.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
-  ExecutedAssistantProviderTurnResult,
 } from './service-contracts.js'
 import { normalizeNullableString } from './shared.js'
 
@@ -20,15 +19,16 @@ type AssistantGroupDraftReconsiderationPlan = Pick<
   'conversationPolicy'
 >
 
-type AssistantGroupDraftCandidate = Pick<
-  ExecutedAssistantProviderTurnResult,
-  | 'finalAction'
-  | 'precedingResponseSegments'
-  | 'reactions'
-  | 'response'
-  | 'responseCard'
-  | 'responseMedia'
->
+interface AssistantGroupDraftCandidate {
+  finalAction?: { kind: string } | null
+  precedingResponseSegments?: readonly {
+    media?: readonly unknown[] | null
+  }[] | null
+  reactions?: readonly unknown[] | null
+  response: string
+  responseCard?: unknown | null
+  responseMedia?: readonly unknown[] | null
+}
 
 export function shouldUseAssistantGroupDraftReconsideration(input: {
   message: AssistantGroupDraftReconsiderationInput
