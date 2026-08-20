@@ -37,20 +37,22 @@ import {
   type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
   type ReplaceLiveWorkoutInput,
+  type SetLiveWorkoutExerciseRepsInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
   buildLiveWorkoutSessionFromTemplate,
   elapsedDurationMinutes,
+  hasCompletedFiniteLiveWorkoutPlan,
   hasLoggedWorkoutSet,
+  isOpenLiveWorkout,
 } from './workout-live-model.js'
 import {
   assertTargetableLiveWorkout,
   compactSetPatch,
-  findActiveLiveWorkouts,
-  findLiveWorkoutsForMemberAction,
+  findLiveWorkoutActionTargets,
   normalizeLiveWorkoutActivityType,
-  normalizeOptionalText,
   normalizeLiveWorkoutId,
+  normalizeOptionalText,
   normalizeWorkoutTimestamp,
   optionalString,
   parseShownWorkout,
@@ -60,8 +62,8 @@ import {
   resolveExerciseIndex,
   resolveLiveWorkout,
   updateLiveWorkoutExercises,
-  updateLiveWorkoutExercisesAfterValidatedSetRemoval,
   withLiveWorkoutMutationLock,
+  type WorkoutShowResult,
 } from './workout-live-state.js'
 
 export * from './workout-live-model.js'
@@ -74,7 +76,7 @@ export async function readLiveWorkoutCardEditor(input: {
   const shown = await resolveLiveWorkout({
     vault: input.vault,
     workoutId: input.workoutId,
-  }, { requireActive: true })
+  }, { requireOpen: true })
   const workout = parseShownWorkout(shown)
   assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   return buildLiveWorkoutCardEditor({
@@ -96,38 +98,48 @@ export async function applyLiveWorkoutMemberAction(
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  return withLiveWorkoutMutationLock(input.vault, () =>
-    applyLiveWorkoutMemberActionWithLockHeld(input),
+
+  const targets = await findLiveWorkoutActionTargets(
+    input.vault,
+    input.actionId,
+    input.action.expectedWorkout.actionBinding,
+  )
+  if (targets.exactReplays.length > 0) {
+    return targets.exactReplays.length === 1
+      ? { status: 'unchanged' }
+      : { reason: 'workout_changed', status: 'rejected' }
+  }
+  if (targets.bindingMatches.length !== 1) {
+    return { reason: 'workout_changed', status: 'rejected' }
+  }
+
+  const workoutId = targets.bindingMatches[0]!.entity.id
+  return withLiveWorkoutMutationLock(input.vault, workoutId, () =>
+    applyLiveWorkoutMemberActionWithLockHeld(input, workoutId),
   )
 }
 
 async function applyLiveWorkoutMemberActionWithLockHeld(
   input: ApplyLiveWorkoutMemberActionInput,
+  workoutId: string,
 ): Promise<ApplyLiveWorkoutMemberActionResult> {
-  const candidates = await findLiveWorkoutsForMemberAction(
-    input.vault,
-    input.actionId,
-  )
-  if (candidates.exactReplays.length > 0) {
-    if (candidates.exactReplays.length !== 1) {
+  let shown: WorkoutShowResult
+  let workout: WorkoutSession
+  let acceptedAt: string
+  try {
+    shown = await resolveLiveWorkout({
+      vault: input.vault,
+      workoutId,
+    })
+    workout = parseShownWorkout(shown)
+    if (workout.lastMemberActionId === input.actionId) {
+      return { status: 'unchanged' }
+    }
+    if (!isOpenLiveWorkout(workout)) {
       return { reason: 'workout_changed', status: 'rejected' }
     }
-    return { status: 'unchanged' }
-  }
-
-  const active = candidates.active
-  if (active.length === 0) {
-    return { reason: 'no_active_workout', status: 'rejected' }
-  }
-  if (active.length > 1) {
-    return { reason: 'multiple_active_workouts', status: 'rejected' }
-  }
-
-  const shown = active[0]!
-  let workout: WorkoutSession
-  try {
-    workout = parseShownWorkout(shown)
     assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+    acceptedAt = normalizeWorkoutTimestamp(input.acceptedAt, 'acceptedAt')
   } catch {
     return { reason: 'workout_changed', status: 'rejected' }
   }
@@ -140,17 +152,16 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
-  const acceptedAtMs = Date.parse(input.acceptedAt)
   if (
-    !Number.isFinite(acceptedAtMs)
-    || typeof workout.startedAt !== 'string'
-    || Date.parse(workout.startedAt) > acceptedAtMs
+    typeof workout.startedAt !== 'string'
+    || Date.parse(workout.startedAt) > Date.parse(acceptedAt)
   ) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
 
-  const exercises = structuredClone(workout.exercises)
+  const beforeExercises = structuredClone(workout.exercises)
     .sort((left, right) => left.order - right.order)
+  const exercises = structuredClone(beforeExercises)
   if (
     input.action.mutations.some((mutation) => mutation.kind === 'set.remove')
     && input.action.expectedWorkout.setRemovalBinding
@@ -182,7 +193,6 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
       ? left.setPosition - right.setPosition
       : left.exercisePosition - right.exercisePosition,
   )
-
   for (const mutation of removeMutations) {
     const exercise = exercises[mutation.exercisePosition - 1]
     if (
@@ -214,12 +224,17 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
       ...(mutation.unitOverride
         ? { unitOverride: mutation.unitOverride }
         : {}),
+      setPlanIsFinite: true,
       sets: Array.from({ length: mutation.setCount }, (_, index) => ({
         order: index + 1,
       })),
     })
   }
 
+  const completedPendingSet = memberActionCompletesPendingSet(
+    exercises,
+    input.action,
+  )
   if (!applyMemberActionSetPuts(exercises, existingSetMutations)) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
@@ -232,10 +247,7 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
 
     exercise.sets.sort((left, right) => left.order - right.order)
     const existing = exercise.sets[mutation.setPosition - 1]
-    if (
-      !existing
-      || exercise.sets.length <= 1
-    ) {
+    if (!existing || exercise.sets.length <= 1) {
       return { reason: 'workout_changed', status: 'rejected' }
     }
     exercise.sets.splice(mutation.setPosition - 1, 1)
@@ -255,14 +267,69 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
   if (!parsed.success) {
     return { reason: 'workout_changed', status: 'rejected' }
   }
+  const endedAt = resolveObservedWorkoutEndBoundary({
+    afterExercises: parsed.data.exercises,
+    appendedExtraSet: newSetMutations.some((mutation) => mutation.result !== null),
+    beforeExercises,
+    completedPendingSet,
+    observedAt: acceptedAt,
+    workout,
+  })
   const changed = JSON.stringify(parsed.data.exercises)
-    !== JSON.stringify(workout.exercises)
+      !== JSON.stringify(workout.exercises)
+    || endedAt !== undefined
 
-  const persistExercises = removeMutations.length > 0
-    ? updateLiveWorkoutExercisesAfterValidatedSetRemoval
-    : updateLiveWorkoutExercises
-  await persistExercises(shown, workout, parsed.data.exercises, input.actionId)
+  await updateLiveWorkoutExercises(shown, workout, parsed.data.exercises, {
+    ...(endedAt === undefined ? {} : { endedAt }),
+    lastMemberActionId: input.actionId,
+    observedAt: acceptedAt,
+  })
   return { status: changed ? 'applied' : 'unchanged' }
+}
+
+function memberActionCompletesPendingSet(
+  exercises: WorkoutExercise[],
+  action: WorkoutLiveApplyMemberActionV1,
+): boolean {
+  return action.mutations.some((mutation) => {
+    if (mutation.kind === 'set.append') {
+      return mutation.result !== null
+    }
+    if (mutation.kind !== 'set.put') {
+      return false
+    }
+    const exercise = exercises[mutation.exercisePosition - 1]
+    const set = exercise?.sets
+      .slice()
+      .sort((left, right) => left.order - right.order)[mutation.setPosition - 1]
+    return set !== undefined && !hasLoggedWorkoutSet(set)
+  })
+}
+
+function resolveObservedWorkoutEndBoundary(input: {
+  afterExercises: WorkoutExercise[]
+  appendedExtraSet: boolean
+  beforeExercises: WorkoutExercise[]
+  completedPendingSet: boolean
+  observedAt: string
+  workout: WorkoutSession
+}): string | undefined {
+  if (input.workout.endedAt !== undefined) {
+    return input.appendedExtraSet ? input.observedAt : undefined
+  }
+  if (!input.completedPendingSet) {
+    return undefined
+  }
+
+  const beforeComplete = hasCompletedFiniteLiveWorkoutPlan({
+    ...input.workout,
+    exercises: input.beforeExercises,
+  })
+  const afterComplete = hasCompletedFiniteLiveWorkoutPlan({
+    ...input.workout,
+    exercises: input.afterExercises,
+  })
+  return !beforeComplete && afterComplete ? input.observedAt : undefined
 }
 
 function applyMemberActionSetPuts(
@@ -465,33 +532,24 @@ function projectMemberActionWorkoutSetResult(
   }
 }
 
-export async function startLiveWorkout(input: StartLiveWorkoutInput) {
-  return withLiveWorkoutMutationLock(input.vault, () =>
-    startLiveWorkoutWithLockHeld(input),
-  )
-}
-
 export async function replaceLiveWorkout(input: ReplaceLiveWorkoutInput) {
   if (input.confirmDelete !== true) {
     throw new VaultCliError(
       'invalid_operation',
-      'Replacing an active workout requires explicit deletion confirmation.',
+      'Replacing a workout requires explicit deletion confirmation.',
     )
   }
 
-  return withLiveWorkoutMutationLock(input.vault, () =>
-    replaceLiveWorkoutWithLockHeld(input),
+  const workoutId = normalizeLiveWorkoutId(input.workoutId)
+  return withLiveWorkoutMutationLock(input.vault, workoutId, () =>
+    replaceLiveWorkoutWithLockHeld(input, workoutId),
   )
 }
 
-async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
-  const workoutId = normalizeLiveWorkoutId(input.workoutId)
-  if (workoutId === undefined) {
-    throw new VaultCliError(
-      'invalid_option',
-      'An exact active workout id is required for replacement.',
-    )
-  }
+async function replaceLiveWorkoutWithLockHeld(
+  input: ReplaceLiveWorkoutInput,
+  workoutId: string,
+) {
   if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
     throw new VaultCliError(
       'conflict',
@@ -499,18 +557,62 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
     )
   }
 
-  const active = await findActiveLiveWorkouts(input.vault)
-  if (active.length === 0) {
-    throw new VaultCliError('not_found', 'No active live workout was found.')
-  }
-  if (active.length > 1) {
-    throw new VaultCliError(
-      'command_failed',
-      'Multiple active live workouts were found; replacement was not performed.',
-      { activeWorkoutIds: active.map((entry) => entry.entity.id) },
+  const requested = buildLiveWorkoutReplacement(input)
+  try {
+    const shown = await resolveLiveWorkout(
+      { vault: input.vault, workoutId },
+      { requireOpen: true },
     )
-  }
+    if (requireWorkoutEventRevision(shown) !== input.expectedRevision) {
+      throw new VaultCliError(
+        'conflict',
+        'The confirmed workout changed after approval; replacement was not performed.',
+      )
+    }
 
+    return await replaceStructuredWorkoutRecord({
+      vault: input.vault,
+      eventId: workoutId,
+      expectedRevision: input.expectedRevision,
+      draft: {
+        occurredAt: requested.startedAt,
+        source: 'manual',
+        title: requested.title,
+        note: requested.note,
+        activityType: requested.activityType,
+        durationMinutes: elapsedDurationMinutes(
+          requested.startedAt,
+          new Date().toISOString(),
+        ),
+        workout: requested.workout,
+      },
+    })
+  } catch (error) {
+    const replay = await readLiveWorkoutReplacementReplay({
+      expectedRevision: input.expectedRevision,
+      requested,
+      vault: input.vault,
+      workoutId,
+    })
+    if (replay !== null) {
+      return replay
+    }
+    throw error
+  }
+}
+
+interface RequestedLiveWorkoutReplacement {
+  activityType: string
+  explicitStartedAt: boolean
+  note: string
+  startedAt: string
+  title: string
+  workout: WorkoutSession
+}
+
+function buildLiveWorkoutReplacement(
+  input: ReplaceLiveWorkoutInput,
+): RequestedLiveWorkoutReplacement {
   if (input.exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
     throw new VaultCliError(
       'invalid_option',
@@ -523,7 +625,7 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
     'startedAt',
   )
   const title = requireNonEmptyText(input.name, 'Workout name is required.')
-  const note = normalizeOptionalText(input.note)
+  const requestedNote = normalizeOptionalText(input.note)
   const activityTypeOverride = normalizeOptionalText(input.activityType)
   const activityType = activityTypeOverride
     ? normalizeLiveWorkoutActivityType(activityTypeOverride)
@@ -543,7 +645,7 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
 
     const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
     const groupId = normalizeOptionalText(exercise.groupId)
-    const exerciseNote = normalizeOptionalText(exercise.note)
+    const note = normalizeOptionalText(exercise.note)
     return {
       name: requireNonEmptyText(exercise.name, 'Exercise name is required.'),
       order: index + 1,
@@ -551,7 +653,8 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
       ...(groupId ? { groupId } : {}),
       ...(exercise.mode ? { mode: exercise.mode } : {}),
       ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
-      ...(exerciseNote ? { note: exerciseNote } : {}),
+      ...(note ? { note } : {}),
+      setPlanIsFinite: exercise.setCount !== undefined,
       sets: Array.from({ length: setCount }, (_, setIndex) => ({
         order: setIndex + 1,
       })),
@@ -560,108 +663,83 @@ async function replaceLiveWorkoutWithLockHeld(input: ReplaceLiveWorkoutInput) {
   const workout = workoutSessionSchema.parse({
     sourceApp: LIVE_WORKOUT_SOURCE_APP,
     startedAt,
-    ...(note ? { sessionNote: note } : {}),
+    ...(requestedNote ? { sessionNote: requestedNote } : {}),
     exercises,
   })
-  const shown = active[0]!
-  if (shown.entity.id !== workoutId) {
-    const canonicalReplacement = await (await loadWorkoutCoreRuntime())
-      .readExpectedActivitySessionReplacement({
-        vaultRoot: input.vault,
-        replacedEventId: workoutId,
-        replacementEventId: shown.entity.id,
-        expectedRevision: input.expectedRevision,
-      })
-    if (
-      canonicalReplacement
-      && liveWorkoutMatchesRequestedReplacement({
-        activityType,
-        candidate: canonicalReplacement,
-        explicitStartedAt: input.startedAt !== undefined,
-        note: note ?? title,
-        title,
-        workout,
-      })
-    ) {
-      return liveWorkoutReplacementReplayResult(shown, canonicalReplacement)
-    }
-    throw new VaultCliError(
-      'invalid_operation',
-      'The confirmed workout is no longer the active live workout.',
-    )
-  }
-  const currentRevision = requireWorkoutEventRevision(shown)
-  if (currentRevision !== input.expectedRevision) {
-    throw new VaultCliError(
-      'conflict',
-      'The confirmed workout changed after approval; replacement was not performed.',
-    )
-  }
 
-  return replaceStructuredWorkoutRecord({
+  return {
+    activityType,
+    explicitStartedAt: input.startedAt !== undefined,
+    note: requestedNote ?? title,
+    startedAt,
+    title,
+    workout,
+  }
+}
+
+async function readLiveWorkoutReplacementReplay(input: {
+  expectedRevision: number
+  requested: RequestedLiveWorkoutReplacement
+  vault: string
+  workoutId: string
+}) {
+  const canonical = await (await loadWorkoutCoreRuntime())
+    .readExpectedActivitySessionReplacement({
+      vaultRoot: input.vault,
+      replacedEventId: input.workoutId,
+      expectedRevision: input.expectedRevision,
+    })
+  if (
+    canonical === null
+    || !liveWorkoutMatchesRequestedReplacement({
+      candidate: canonical,
+      requested: input.requested,
+    })
+  ) {
+    return null
+  }
+  const shown = await resolveLiveWorkout({
     vault: input.vault,
-    eventId: workoutId,
-    expectedRevision: input.expectedRevision,
-    draft: {
-      occurredAt: startedAt,
-      source: 'manual',
-      title,
-      note: note ?? title,
-      activityType,
-      durationMinutes: elapsedDurationMinutes(
-        startedAt,
-        new Date().toISOString(),
-      ),
-      workout,
-    },
+    workoutId: canonical.id,
   })
+  return liveWorkoutReplacementReplayResult(shown, canonical)
 }
 
 function liveWorkoutMatchesRequestedReplacement(input: {
-  activityType: string
   candidate: ActivitySessionEventRecord
-  explicitStartedAt: boolean
-  note: string
-  title: string
-  workout: WorkoutSession
+  requested: RequestedLiveWorkoutReplacement
 }): boolean {
   const parsedWorkout = workoutSessionSchema.safeParse(input.candidate.workout)
   if (!parsedWorkout.success) {
     return false
   }
-  const activeWorkout = parsedWorkout.data
   if (
-    input.candidate.title !== input.title
+    input.candidate.title !== input.requested.title
     || input.candidate.source !== 'manual'
-    || input.candidate.activityType !== input.activityType
-    || input.candidate.note !== input.note
+    || input.candidate.activityType !== input.requested.activityType
+    || input.candidate.note !== input.requested.note
     || typeof input.candidate.distanceKm === 'number'
   ) {
     return false
   }
   if (
-    input.explicitStartedAt
+    input.requested.explicitStartedAt
     && (
-      input.candidate.occurredAt !== input.workout.startedAt
-      || activeWorkout.startedAt !== input.workout.startedAt
+      input.candidate.occurredAt !== input.requested.startedAt
+      || parsedWorkout.data.startedAt !== input.requested.startedAt
     )
   ) {
     return false
   }
 
-  const {
-    startedAt: _activeStartedAt,
-    ...activeComparable
-  } = activeWorkout
-  const {
-    startedAt: _requestedStartedAt,
-    ...requestedComparable
-  } = input.workout
+  const { startedAt: _activeStartedAt, ...activeComparable } = parsedWorkout.data
+  const { startedAt: _requestedStartedAt, ...requestedComparable } =
+    input.requested.workout
   return JSON.stringify(activeComparable) === JSON.stringify(requestedComparable)
 }
 
 function liveWorkoutReplacementReplayResult(
-  shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>,
+  shown: WorkoutShowResult,
   event: ActivitySessionEventRecord,
 ) {
   const durationMinutes = event.durationMinutes
@@ -689,10 +767,7 @@ function liveWorkoutReplacementReplayResult(
       `Workout ${shown.entity.id} is missing its ledger path.`,
     ),
     created: false,
-    occurredAt: requireString(
-      event.occurredAt,
-      `Workout ${shown.entity.id} is missing its occurrence time.`,
-    ),
+    occurredAt: event.occurredAt,
     kind: 'activity_session' as const,
     title,
     activityType: requireString(
@@ -707,9 +782,7 @@ function liveWorkoutReplacementReplayResult(
   }
 }
 
-function requireWorkoutEventRevision(
-  shown: Awaited<ReturnType<typeof showActiveLiveWorkout>>,
-): number {
+function requireWorkoutEventRevision(shown: WorkoutShowResult): number {
   const lifecycle = shown.entity.data.lifecycle
   const revision =
     typeof lifecycle === 'object'
@@ -726,7 +799,7 @@ function requireWorkoutEventRevision(
   return revision
 }
 
-async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
+export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   const routineLookup =
     input.routine === undefined
       ? undefined
@@ -734,26 +807,15 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
           input.routine,
           'Workout routine lookup is required.',
         )
-  const active = await findActiveLiveWorkouts(input.vault)
-  if (active.length > 0) {
-    throw new VaultCliError(
-      'command_failed',
-      `Workout ${active[0]?.entity.id ?? ''} is already active. Finish or delete it before starting another live workout.`,
-      { activeWorkoutIds: active.map((entry) => entry.entity.id) },
-    )
-  }
-
+  const observedAt = new Date().toISOString()
   const startedAt = normalizeWorkoutTimestamp(
-    input.startedAt ?? new Date().toISOString(),
+    input.startedAt ?? observedAt,
     'startedAt',
   )
   const name = normalizeOptionalText(input.name)
   const note = normalizeOptionalText(input.note)
   const activityTypeOverride = normalizeOptionalText(input.activityType)
-  const durationMinutes = elapsedDurationMinutes(
-    startedAt,
-    new Date().toISOString(),
-  )
+  const durationMinutes = elapsedDurationMinutes(startedAt, observedAt)
   if (routineLookup !== undefined) {
     const routine = await showWorkoutFormat(input.vault, routineLookup)
     const routineTitle = requireString(
@@ -815,22 +877,20 @@ async function startLiveWorkoutWithLockHeld(input: StartLiveWorkoutInput) {
   })
 }
 
-export async function showActiveLiveWorkout(input: LiveWorkoutLookupInput) {
-  return resolveLiveWorkout(input, { requireActive: true })
-}
-
 export async function addLiveWorkoutExercise(
   input: AddLiveWorkoutExerciseInput,
 ) {
-  return withLiveWorkoutMutationLock(input.vault, () =>
-    addLiveWorkoutExerciseWithLockHeld(input),
+  const observedAt = new Date().toISOString()
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, () =>
+    addLiveWorkoutExerciseWithLockHeld(input, observedAt),
   )
 }
 
 async function addLiveWorkoutExerciseWithLockHeld(
   input: AddLiveWorkoutExerciseInput,
+  observedAt: string,
 ) {
-  const shown = await resolveLiveWorkout(input, { requireActive: true })
+  const shown = await resolveLiveWorkout(input, { requireOpen: true })
   const workout = parseShownWorkout(shown)
   assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   const exercises = structuredClone(workout.exercises)
@@ -859,6 +919,7 @@ async function addLiveWorkoutExerciseWithLockHeld(
     ...(input.mode ? { mode: input.mode } : {}),
     ...(input.unitOverride ? { unitOverride: input.unitOverride } : {}),
     ...(note ? { note } : {}),
+    setPlanIsFinite: input.setCount !== undefined,
     sets: Array.from({ length: setCount }, (_, index) => ({ order: index + 1 })),
   }
   const parsedProposed = workoutSessionSchema.parse({
@@ -883,30 +944,111 @@ async function addLiveWorkoutExerciseWithLockHeld(
 
   exercises.push(parsedProposed)
   exercises.sort((left, right) => left.order - right.order)
-  return updateLiveWorkoutExercises(shown, workout, exercises)
+  return updateLiveWorkoutExercises(shown, workout, exercises, { observedAt })
 }
 
-export async function logLiveWorkoutSet(input: LogLiveWorkoutSetInput) {
-  return withLiveWorkoutMutationLock(input.vault, () =>
-    logLiveWorkoutSetWithLockHeld(input),
+export async function setLiveWorkoutExerciseReps(
+  input: SetLiveWorkoutExerciseRepsInput,
+) {
+  const observedAt = new Date().toISOString()
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, () =>
+    setLiveWorkoutExerciseRepsWithLockHeld(input, observedAt),
   )
 }
 
-async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
-  const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
-  const shown = await resolveLiveWorkout(input, { requireActive: true })
+async function setLiveWorkoutExerciseRepsWithLockHeld(
+  input: SetLiveWorkoutExerciseRepsInput,
+  observedAt: string,
+) {
+  const clear = input.clear === true
+  const reps = input.reps
+  const hasReps = reps !== undefined
+  if (clear === hasReps) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Pass exactly one of --reps or --clear.',
+    )
+  }
+  if (
+    reps !== undefined
+    && (!Number.isInteger(reps) || reps < 1 || reps > 999)
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Exercise repetitions per set must be an integer between 1 and 999.',
+    )
+  }
+
+  const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
   assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
-  const patch = compactSetPatch(input)
-  if (Object.keys(patch).length === 0) {
-    throw new VaultCliError('invalid_option', 'Log at least one set value or note.')
+  if (
+    (clear && exercise.memberRepsPerSet === undefined)
+    || (!clear && exercise.memberRepsPerSet === reps)
+  ) {
+    return shown
   }
 
+  if (clear) {
+    return editWorkoutRecord({
+      vault: shown.vault,
+      lookup: shown.entity.id,
+      clear: [`workout.exercises.${exerciseIndex}.memberRepsPerSet`],
+    })
+  }
+  if (reps !== undefined) {
+    exercise.memberRepsPerSet = reps
+  }
+  exercises[exerciseIndex] = exercise
+  return updateLiveWorkoutExercises(shown, workout, exercises, { observedAt })
+}
+
+export async function logLiveWorkoutSet(input: LogLiveWorkoutSetInput) {
+  const observedAt = new Date().toISOString()
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, () =>
+    logLiveWorkoutSetWithLockHeld(input, observedAt),
+  )
+}
+
+async function logLiveWorkoutSetWithLockHeld(
+  input: LogLiveWorkoutSetInput,
+  observedAt: string,
+) {
+  const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
+  const shown = await resolveLiveWorkout(input)
+  const workout = parseShownWorkout(shown)
+  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  const beforeExercises = structuredClone(workout.exercises)
+  const exercises = structuredClone(beforeExercises)
+  const exerciseIndex = resolveExerciseIndex(exercises, input)
+  const exercise = exercises[exerciseIndex]!
   const setIndex = exercise.sets.findIndex((set) => set.order === setOrder)
   const currentSet = setIndex >= 0 ? exercise.sets[setIndex] : undefined
+  const patch = compactSetPatch(input)
+  if (
+    input.reps === undefined
+    && exercise.memberRepsPerSet !== undefined
+    && (currentSet === undefined || !hasLoggedWorkoutSet(currentSet))
+  ) {
+    patch.reps = exercise.memberRepsPerSet
+  }
+  if (Object.keys(patch).length === 0) {
+    if (
+      currentSet !== undefined
+      && hasLoggedWorkoutSet(currentSet)
+      && exercise.memberRepsPerSet !== undefined
+    ) {
+      return shown
+    }
+    throw new VaultCliError(
+      'invalid_option',
+      'Log at least one set value or establish --reps for every set of this exercise first.',
+    )
+  }
+
   if (currentSet === undefined && input.requireExistingSet) {
     throw new VaultCliError(
       'not_found',
@@ -914,8 +1056,8 @@ async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
     )
   }
   if (
-    currentSet === undefined &&
-    exercise.sets.length >= MAX_LIVE_WORKOUT_SETS_PER_EXERCISE
+    currentSet === undefined
+    && exercise.sets.length >= MAX_LIVE_WORKOUT_SETS_PER_EXERCISE
   ) {
     throw new VaultCliError(
       'invalid_operation',
@@ -938,6 +1080,13 @@ async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
     return shown
   }
 
+  const appendedExtraSet = currentSet === undefined
+    && setOrder > exercise.sets.reduce(
+      (maximum, set) => Math.max(maximum, set.order),
+      0,
+    )
+  const completedPendingSet = currentSet === undefined
+    || !hasLoggedWorkoutSet(currentSet)
   if (setIndex >= 0) {
     exercise.sets[setIndex] = parsedSet
   } else {
@@ -945,20 +1094,33 @@ async function logLiveWorkoutSetWithLockHeld(input: LogLiveWorkoutSetInput) {
     exercise.sets.sort((left, right) => left.order - right.order)
   }
   exercises[exerciseIndex] = exercise
-  return updateLiveWorkoutExercises(shown, workout, exercises)
+  const endedAt = resolveObservedWorkoutEndBoundary({
+    afterExercises: exercises,
+    appendedExtraSet,
+    beforeExercises,
+    completedPendingSet,
+    observedAt,
+    workout,
+  })
+  return updateLiveWorkoutExercises(shown, workout, exercises, {
+    ...(endedAt === undefined ? {} : { endedAt }),
+    observedAt,
+  })
 }
 
 export async function clearLiveWorkoutSet(input: ClearLiveWorkoutSetInput) {
-  return withLiveWorkoutMutationLock(input.vault, () =>
-    clearLiveWorkoutSetWithLockHeld(input),
+  const observedAt = new Date().toISOString()
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, () =>
+    clearLiveWorkoutSetWithLockHeld(input, observedAt),
   )
 }
 
 async function clearLiveWorkoutSetWithLockHeld(
   input: ClearLiveWorkoutSetInput,
+  observedAt: string,
 ) {
   const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
-  const shown = await resolveLiveWorkout(input, { requireActive: true })
+  const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
   assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
   const exercises = structuredClone(workout.exercises)
@@ -982,20 +1144,17 @@ async function clearLiveWorkoutSetWithLockHeld(
   }
   exercise.sets[setIndex] = clearedSet
   exercises[exerciseIndex] = exercise
-  return updateLiveWorkoutExercises(shown, workout, exercises)
+  return updateLiveWorkoutExercises(shown, workout, exercises, { observedAt })
 }
 
 export async function finishLiveWorkout(input: FinishLiveWorkoutInput) {
-  return withLiveWorkoutMutationLock(input.vault, () =>
+  return withLiveWorkoutMutationLock(input.vault, input.workoutId, () =>
     finishLiveWorkoutWithLockHeld(input),
   )
 }
 
 async function finishLiveWorkoutWithLockHeld(input: FinishLiveWorkoutInput) {
-  const shown = await resolveLiveWorkout(input, {
-    requireActive: input.workoutId === undefined,
-    allowCompleted: input.workoutId !== undefined,
-  })
+  const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
   if (workout.endedAt) {
     return shown

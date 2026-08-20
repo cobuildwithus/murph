@@ -183,10 +183,16 @@ landing; record the chosen posture here so the decision is reviewable.
   unsafe name, symlink, special entry, or unreadable path retains everything.
   A current-user cancellation may compare-and-set an awaiting-approval
   generated delivery to terminal but never removes its bytes directly. The
-  existing quiescent cleanup remains the sole deletion owner and applies the
-  same complete-directory inventory, active-descriptor agreement, fingerprint,
-  and unchanged-file checks to that newly terminal residue. Canonical and
-  user-owned vault files remain outside this cleanup authority.
+  existing quiescent cleanup remains the sole deletion owner. Its generated-
+  delivery pass remains best effort and fails closed on its own trust or
+  inventory errors. Hosted checkpoint orchestration invokes that pass
+  independently before unrelated pending-input compaction and broader assistant-
+  residue maintenance, so failure in the later pass cannot prevent a successful
+  generated-delivery pass from removing already-terminal bytes. The generated-
+  delivery pass still applies the same complete-directory inventory,
+  active-descriptor agreement, fingerprint, and unchanged-file checks to newly
+  terminal residue. Canonical and user-owned vault files remain outside this
+  cleanup authority.
   Steady state is therefore one staged file per exact active descriptor and zero
   terminal, changed, or unclaimed staged files.
 

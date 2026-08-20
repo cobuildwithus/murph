@@ -670,6 +670,8 @@ export const workoutExerciseSchema = z
     mode: workoutExerciseModeSchema.optional(),
     unitOverride: workoutLoadUnitSchema.optional(),
     note: boundedString(1, 4000).optional(),
+    memberRepsPerSet: integerSchema(1, 999).optional(),
+    setPlanIsFinite: z.boolean().optional(),
     sets: z.array(workoutSetSchema).min(1).max(150),
   })
   .strict();

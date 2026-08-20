@@ -114,12 +114,21 @@ describe("Health Commons route-bundle boundary", () => {
       listTraceFiles(path.join(repoRoot, traceRoot))
     );
 
-    for (const traceFile of traceFiles) {
+    const routeTraces = traceFiles.flatMap((traceFile) => {
       const source = readFileSync(traceFile, "utf8");
-      if (!isHealthCommonsRouteTrace(traceFile, source)) {
-        continue;
-      }
+      return isHealthCommonsRouteTrace(traceFile, source)
+        ? [{ source, traceFile }]
+        : [];
+    });
 
+    if (process.env.MURPH_REQUIRE_HEALTH_COMMONS_ROUTE_TRACES === "1") {
+      expect(
+        routeTraces.length,
+        "the production build should emit a Health Commons route trace",
+      ).toBeGreaterThan(0);
+    }
+
+    for (const { source, traceFile } of routeTraces) {
       expect(source, path.relative(repoRoot, traceFile)).not.toContain(
         "@murphai/health-commons/generated/catalog.json",
       );

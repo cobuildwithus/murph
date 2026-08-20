@@ -232,6 +232,11 @@ import {
   type GroupRoomModelDynamicToolRequest,
 } from './dynamic-tools/group-room-model.js'
 import {
+  executeMemberMemoryDynamicTool,
+  readMemberMemoryDynamicToolRequest,
+  type MemberMemoryDynamicToolRequest,
+} from './dynamic-tools/member-memory.js'
+import {
   readClinicalRecordsConnectLinkDynamicToolRequest,
   type ClinicalRecordsConnectLinkDynamicToolRequest,
 } from './dynamic-tools/clinical-records.js'
@@ -1213,6 +1218,7 @@ export type MurphDynamicToolRequest =
   | LabsDynamicToolRequest
   | PendingVaultFilesDynamicToolRequest
   | GroupRoomModelDynamicToolRequest
+  | MemberMemoryDynamicToolRequest
   | AssistantStyleDynamicToolRequest
   | {
       kind: 'attach-response-media'
@@ -1526,6 +1532,14 @@ export function readMurphDynamicToolRequest(
   })
   if (groupRoomModelRequest) {
     return groupRoomModelRequest
+  }
+
+  const memberMemoryRequest = readMemberMemoryDynamicToolRequest({
+    arguments: request.arguments,
+    tool: request.tool,
+  })
+  if (memberMemoryRequest) {
+    return memberMemoryRequest
   }
 
   const connectedAppsRequest = readConnectedAppsDynamicToolRequest({
@@ -2027,6 +2041,8 @@ export async function executeMurphDynamicToolRequest(input: {
   assistantStyleSettingsAvailable?: boolean | null
   groupRoomModelAvailable?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  memberMemoryAvailable?: boolean | null
+  memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
@@ -2126,6 +2142,8 @@ export async function executeMurphDynamicToolRequest(input: {
       return toolTextResult(false, 'invalid pending vault-file arguments')
     case 'invalid-group-room-model-arguments':
       return toolTextResult(false, 'invalid group room-model arguments')
+    case 'invalid-member-memory-arguments':
+      return toolTextResult(false, 'invalid member-memory arguments')
     case 'invalid-connected-apps-arguments':
       return toolTextResult(false, 'invalid connected-app arguments')
     case 'invalid-assistant-style-arguments':
@@ -2353,6 +2371,14 @@ export async function executeMurphDynamicToolRequest(input: {
         request: input.request,
         userActionScope:
           input.hostedToolContext?.currentUserActionScope?.() ?? null,
+        vaultRoot: input.vaultRoot ?? null,
+      })
+    case 'member-memory':
+      return await executeMemberMemoryDynamicTool({
+        available: input.memberMemoryAvailable === true,
+        managedMaintenanceAuthorized:
+          input.memberMemoryMaintenanceAuthorized === true,
+        request: input.request,
         vaultRoot: input.vaultRoot ?? null,
       })
     case 'device': {

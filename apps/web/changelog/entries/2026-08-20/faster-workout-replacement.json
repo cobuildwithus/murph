@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Faster live workout replacement",
-    "summary": "After you approve replacing an old active workout with exercises stated in chat, Murph can now create the complete new workout in one step.",
-    "details": "The replacement binds approval to the exact workout version you saw, keeps the change atomic and retry-safe, verifies that the approved old version was deleted before recognizing a recovered result, and stops safely if workout state changed.",
+    "summary": "After you approve replacing one exact workout with exercises stated in chat, Murph can now create the complete replacement in one step.",
+    "details": "The replacement binds approval to the exact workout version you saw, keeps the change atomic and retry-safe, leaves other unfinished workouts untouched, and recognizes a recovered result only from the mutually linked deletion and replacement pair.",
     "relevanceTags": ["assistant", "workouts", "messaging", "performance", "reliability"],
     "sourcePullRequests": [2070]
   }

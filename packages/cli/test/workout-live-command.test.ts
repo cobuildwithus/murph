@@ -4,22 +4,22 @@ import path from 'node:path'
 
 import { Cli } from 'incur'
 import { afterAll } from 'vitest'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { workoutSessionSchema } from '@murphai/contracts'
 import {
-  addActivitySession,
   applyHostedCanonicalWriteReceipt,
-  deleteEvent,
+  readExpectedActivitySessionReplacement,
   readJsonlRecords,
   withHostedCanonicalWritePort,
   type HostedCanonicalWritePersistenceInput,
 } from '@murphai/core'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases'
 import {
   addLiveWorkoutExercise,
   clearLiveWorkoutSet,
   logLiveWorkoutSet,
   saveWorkoutFormat,
-  showActiveLiveWorkout,
+  setLiveWorkoutExerciseReps,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
 
@@ -75,9 +75,11 @@ interface WorkoutResult {
     endedAt?: string
     sessionNote?: string
     exercises: Array<{
+      memberRepsPerSet?: number
       name: string
       sourceExerciseId?: string
       order: number
+      setPlanIsFinite?: boolean
       sets: Array<Record<string, unknown>>
     }>
   } | null
@@ -90,6 +92,7 @@ interface ShowResult {
       durationMinutes?: number
       lifecycle?: {
         revision?: number
+        state?: string
       }
       workout: NonNullable<WorkoutResult['workout']>
     }
@@ -102,29 +105,7 @@ function requireShownRevision(shown: ShowResult): number {
   return revision!
 }
 
-async function startSingleExerciseWorkout(input: {
-  cli: Cli.Cli
-  startedAt: string
-  title: string
-  vaultRoot: string
-}) {
-  const started = requireData((await run<WorkoutResult>(input.cli, [
-    'workout', 'start', input.title,
-    '--started-at', input.startedAt,
-    '--vault', input.vaultRoot,
-  ])).envelope)
-  const added = await run<ShowResult>(input.cli, [
-    'workout', 'exercise', 'add', 'Pull-up',
-    '--workout-id', started.eventId,
-    '--order', '1',
-    '--sets', '2',
-    '--vault', input.vaultRoot,
-  ])
-  assert.equal(added.envelope.ok, true)
-  return started
-}
-
-test('live workout commands keep one canonical session and target one set', async () => {
+test('live workout commands target exact records without a global active singleton', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-',
   )
@@ -165,16 +146,22 @@ test('live workout commands keep one canonical session and target one set', asyn
   assert.equal(started.workout?.sessionNote, 'Keep the tempo controlled.')
   assert.equal(started.note, 'Push Day')
   assert.equal(started.distanceKm, null)
-  assert.deepEqual(started.workout?.exercises[0]?.sets, [
-    { order: 1, type: 'warmup' },
-    { order: 2 },
-  ])
+  assert.deepEqual(started.workout?.exercises[0], {
+    name: 'Bench press',
+    sourceExerciseId: 'EX123',
+    order: 1,
+    mode: 'weight_reps',
+    unitOverride: 'lb',
+    setPlanIsFinite: true,
+    sets: [{ order: 1, type: 'warmup' }, { order: 2 }],
+  })
   const workoutId = started.eventId
 
-  const duplicateStart = await run(cli, [
+  const overlapping = requireData((await run<WorkoutResult>(cli, [
     'workout', 'start', 'Another workout', '--vault', vaultRoot,
-  ])
-  assert.equal(duplicateStart.envelope.ok, false)
+  ])).envelope)
+  assert.notEqual(overlapping.eventId, workoutId)
+  assert.equal(overlapping.workout?.endedAt, undefined)
 
   const logArgs = [
     'workout', 'set', 'log', 'Bench press',
@@ -196,6 +183,7 @@ test('live workout commands keep one canonical session and target one set', asyn
     weightUnit: 'lb',
     rpe: 7,
   })
+  assert.equal(logged.entity.data.workout.endedAt, undefined)
 
   const retried = requireData((await run<ShowResult>(cli, logArgs)).envelope)
   assert.equal(retried.entity.data.workout.exercises[0]?.sets.length, 2)
@@ -220,6 +208,7 @@ test('live workout commands keep one canonical session and target one set', asyn
   assert.deepEqual(added.entity.data.workout.exercises[1], {
     name: 'Cable fly',
     order: 2,
+    setPlanIsFinite: true,
     sets: [{ order: 1 }, { order: 2 }],
   })
 
@@ -253,35 +242,35 @@ test('live workout commands keep one canonical session and target one set', asyn
     finishRetry.entity.data.workout.endedAt,
     '2026-08-09T18:45:00.000Z',
   )
-  assert.equal(finishRetry.entity.data.durationMinutes, 45)
 
-  const noActive = await run(cli, [
-    'workout', 'active', '--vault', vaultRoot,
-  ])
-  assert.equal(noActive.envelope.ok, false)
+  const shownOther = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', overlapping.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(shownOther.entity.data.workout.endedAt, undefined)
 })
 
-test('one command atomically replaces an explicitly approved active workout', async () => {
+test('one command atomically replaces one approved workout without touching another open workout', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-replace-',
   )
   cleanupPaths.push(parentRoot)
   const cli = createWorkoutCli()
 
-  const initialized = await run<{ created: boolean }>(cli, [
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
     'init', '--vault', vaultRoot, '--timezone', 'America/Chicago',
-  ])
-  assert.equal(requireData(initialized.envelope).created, true)
-
+  ])).envelope).created, true)
   const oldWorkout = requireData((await run<WorkoutResult>(cli, [
     'workout', 'start', 'Old workout',
     '--started-at', '2026-08-20T06:30:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
-  const approvedSnapshot = requireData((await run<ShowResult>(cli, [
-    'workout', 'active',
-    '--workout-id', oldWorkout.eventId,
+  const otherWorkout = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Unrelated workout',
+    '--started-at', '2026-08-20T06:45:00.000Z',
     '--vault', vaultRoot,
+  ])).envelope)
+  const approvedSnapshot = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', oldWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
   const approvedRevision = requireShownRevision(approvedSnapshot)
 
@@ -293,12 +282,6 @@ test('one command atomically replaces an explicitly approved active workout', as
     '--vault', vaultRoot,
   ])
   assert.equal(missingConfirmation.envelope.ok, false)
-  const stillActive = requireData((await run<ShowResult>(cli, [
-    'workout', 'active',
-    '--workout-id', oldWorkout.eventId,
-    '--vault', vaultRoot,
-  ])).envelope)
-  assert.equal(stillActive.entity.id, oldWorkout.eventId)
 
   const replacement = requireData((await run<WorkoutResult>(cli, [
     'workout', 'replace', 'Upper body',
@@ -317,52 +300,60 @@ test('one command atomically replaces an explicitly approved active workout', as
       name: 'Pull-up',
       order: 1,
       mode: 'bodyweight',
+      setPlanIsFinite: true,
       sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
     },
     {
       name: 'Push-up',
       order: 2,
       mode: 'bodyweight',
+      setPlanIsFinite: true,
       sets: [{ order: 1 }, { order: 2 }],
     },
   ])
-
-  const oldIsGone = await run<ShowResult>(cli, [
-    'workout', 'active',
-    '--workout-id', oldWorkout.eventId,
-    '--vault', vaultRoot,
-  ])
-  assert.equal(oldIsGone.envelope.ok, false)
-  const active = requireData((await run<ShowResult>(cli, [
-    'workout', 'active',
-    '--vault', vaultRoot,
+  const oldRevisions = (await readJsonlRecords({
+    vaultRoot,
+    relativePath: oldWorkout.ledgerFile,
+  })).filter((record) =>
+    (record as { id?: string }).id === oldWorkout.eventId
+  ) as Array<{ lifecycle?: { state?: string } }>
+  assert.equal(oldRevisions.at(-1)?.lifecycle?.state, 'deleted')
+  const otherStillOpen = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', otherWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
-  assert.equal(active.entity.id, replacement.eventId)
+  assert.equal(otherStillOpen.entity.data.workout.endedAt, undefined)
 })
 
-test('replacement preserves ordered duplicate exercises and comma-bearing names', async () => {
+test('replacement replay proves the mutually linked atomic pair and writes nothing', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-live-workout-replace-ordered-',
+    'murph-live-workout-replace-replay-',
   )
   cleanupPaths.push(parentRoot)
   const cli = createWorkoutCli()
 
-  const initialized = await run<{ created: boolean }>(cli, [
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
     'init', '--vault', vaultRoot, '--timezone', 'UTC',
-  ])
-  assert.equal(requireData(initialized.envelope).created, true)
+  ])).envelope).created, true)
   const oldWorkout = requireData((await run<WorkoutResult>(cli, [
     'workout', 'start', 'Old workout',
     '--started-at', '2026-08-20T06:30:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
   const approvedSnapshot = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--workout-id', oldWorkout.eventId,
-    '--vault', vaultRoot,
+    'workout', 'show', oldWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
   const replicaRoot = path.join(parentRoot, 'replica-vault')
   await cp(vaultRoot, replicaRoot, { recursive: true })
   const persisted: HostedCanonicalWritePersistenceInput[] = []
+  const replaceArgs = [
+    'workout', 'replace', 'Ordered blocks',
+    '--workout-id', oldWorkout.eventId,
+    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
+    '--confirm-delete',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
+    '--exercise', 'name=Run;sets=1;mode=cardio',
+  ]
 
   const replacement = requireData((await withHostedCanonicalWritePort(
     {
@@ -370,30 +361,8 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
         persisted.push(input)
       },
     },
-    () => run<WorkoutResult>(cli, [
-      'workout', 'replace', 'Ordered blocks',
-      '--workout-id', oldWorkout.eventId,
-      '--expected-revision', String(requireShownRevision(approvedSnapshot)),
-      '--confirm-delete',
-      '--exercise', 'name=Run;sets=1;mode=cardio',
-      '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
-      '--exercise', 'name=Run;sets=1;mode=cardio',
-      '--vault', vaultRoot,
-    ]),
+    () => run<WorkoutResult>(cli, [...replaceArgs, '--vault', vaultRoot]),
   )).envelope)
-
-  assert.deepEqual(
-    replacement.workout?.exercises.map((exercise) => ({
-      name: exercise.name,
-      order: exercise.order,
-      setCount: exercise.sets.length,
-    })),
-    [
-      { name: 'Run', order: 1, setCount: 1 },
-      { name: 'Row, neutral grip', order: 2, setCount: 2 },
-      { name: 'Run', order: 3, setCount: 1 },
-    ],
-  )
   assert.equal(persisted.length, 1)
   const hostedWrite = persisted[0]!
   await applyHostedCanonicalWriteReceipt({
@@ -405,6 +374,11 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
       )?.bytes ?? null
     },
   })
+  assert.equal((await readExpectedActivitySessionReplacement({
+    vaultRoot: replicaRoot,
+    replacedEventId: oldWorkout.eventId,
+    expectedRevision: requireShownRevision(approvedSnapshot),
+  }))?.id, replacement.eventId)
   const ledgerBeforeReplay = await readJsonlRecords({
     vaultRoot: replicaRoot,
     relativePath: replacement.ledgerFile,
@@ -413,15 +387,9 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
     vaultRoot: replicaRoot,
     relativePath: 'audit/2026/2026-08.jsonl',
   })
+
   const replay = requireData((await run<WorkoutResult>(cli, [
-    'workout', 'replace', 'Ordered blocks',
-    '--workout-id', oldWorkout.eventId,
-    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
-    '--confirm-delete',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--vault', replicaRoot,
+    ...replaceArgs, '--vault', replicaRoot,
   ])).envelope)
   assert.equal(replay.eventId, replacement.eventId)
   assert.equal(replay.created, false)
@@ -434,276 +402,41 @@ test('replacement preserves ordered duplicate exercises and comma-bearing names'
     relativePath: 'audit/2026/2026-08.jsonl',
   }), auditBeforeReplay)
 
-  const differentWorkout = await run<WorkoutResult>(cli, [
-    'workout', 'replace', 'Ordered blocks',
-    '--workout-id', oldWorkout.eventId,
-    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
-    '--confirm-delete',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--exercise', 'name=Row, neutral grip;sets=3;mode=weight_reps',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
+  const differentReplacement = await run<WorkoutResult>(cli, [
+    ...replaceArgs.slice(0, -1),
+    'name=Run;sets=2;mode=cardio',
     '--vault', replicaRoot,
   ])
-  assert.equal(differentWorkout.envelope.ok, false)
-
-  const differentStart = await run<WorkoutResult>(cli, [
-    'workout', 'replace', 'Ordered blocks',
-    '--workout-id', oldWorkout.eventId,
-    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
-    '--confirm-delete',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--started-at', '2026-08-20T00:00:00.000Z',
-    '--vault', replicaRoot,
-  ])
-  assert.equal(differentStart.envelope.ok, false)
-  assert.deepEqual(await readJsonlRecords({
-    vaultRoot: replicaRoot,
-    relativePath: replacement.ledgerFile,
-  }), ledgerBeforeReplay)
-  assert.deepEqual(await readJsonlRecords({
-    vaultRoot: replicaRoot,
-    relativePath: 'audit/2026/2026-08.jsonl',
-  }), auditBeforeReplay)
-
-  const active = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--vault', replicaRoot,
-  ])).envelope)
-  assert.equal(active.entity.id, replacement.eventId)
+  assert.equal(differentReplacement.envelope.ok, false)
 })
 
-test('replacement replay requires the exact approved tombstone revision', async () => {
-  const completedContext = await createTempVaultContext(
-    'murph-live-workout-replace-completed-old-',
-  )
-  cleanupPaths.push(completedContext.parentRoot)
-  const completedCli = createWorkoutCli()
-  assert.equal(requireData((await run<{ created: boolean }>(completedCli, [
-    'init', '--vault', completedContext.vaultRoot, '--timezone', 'UTC',
-  ])).envelope).created, true)
-  const completedOld = requireData((await run<WorkoutResult>(completedCli, [
-    'workout', 'start', 'Old workout',
-    '--started-at', '2026-08-20T06:30:00.000Z',
-    '--vault', completedContext.vaultRoot,
-  ])).envelope)
-  const completedApproval = requireData((await run<ShowResult>(completedCli, [
-    'workout', 'active', '--workout-id', completedOld.eventId,
-    '--vault', completedContext.vaultRoot,
-  ])).envelope)
-  const completed = await run<ShowResult>(completedCli, [
-    'workout', 'finish', '--workout-id', completedOld.eventId,
-    '--ended-at', '2026-08-20T06:45:00.000Z',
-    '--vault', completedContext.vaultRoot,
-  ])
-  assert.equal(completed.envelope.ok, true)
-  const completedCandidate = await startSingleExerciseWorkout({
-    cli: completedCli,
-    startedAt: '2026-08-20T07:00:00.000Z',
-    title: 'Replacement workout',
-    vaultRoot: completedContext.vaultRoot,
-  })
-  const completedLedgerBefore = await readJsonlRecords({
-    vaultRoot: completedContext.vaultRoot,
-    relativePath: completedCandidate.ledgerFile,
-  })
-  const completedAuditBefore = await readJsonlRecords({
-    vaultRoot: completedContext.vaultRoot,
-    relativePath: 'audit/2026/2026-08.jsonl',
-  })
-  const completedReplay = await run<WorkoutResult>(completedCli, [
-    'workout', 'replace', 'Replacement workout',
-    '--workout-id', completedOld.eventId,
-    '--expected-revision', String(requireShownRevision(completedApproval)),
-    '--confirm-delete',
-    '--exercise', 'name=Pull-up;sets=2',
-    '--vault', completedContext.vaultRoot,
-  ])
-  assert.equal(completedReplay.envelope.ok, false)
-  assert.deepEqual(await readJsonlRecords({
-    vaultRoot: completedContext.vaultRoot,
-    relativePath: completedCandidate.ledgerFile,
-  }), completedLedgerBefore)
-  assert.deepEqual(await readJsonlRecords({
-    vaultRoot: completedContext.vaultRoot,
-    relativePath: 'audit/2026/2026-08.jsonl',
-  }), completedAuditBefore)
-  const completedOldRevisions = completedLedgerBefore.filter(
-    (record) => (record as { id?: string }).id === completedOld.eventId,
-  ) as Array<{
-    lifecycle: { revision: number; state?: string }
-    workout?: { endedAt?: string }
-  }>
-  assert.equal(completedOldRevisions.at(-1)?.lifecycle.state, undefined)
-  assert.equal(
-    completedOldRevisions.at(-1)?.workout?.endedAt,
-    '2026-08-20T06:45:00.000Z',
-  )
-
-  const wrongRevisionContext = await createTempVaultContext(
-    'murph-live-workout-replace-wrong-tombstone-',
-  )
-  cleanupPaths.push(wrongRevisionContext.parentRoot)
-  const wrongRevisionCli = createWorkoutCli()
-  assert.equal(requireData((await run<{ created: boolean }>(wrongRevisionCli, [
-    'init', '--vault', wrongRevisionContext.vaultRoot, '--timezone', 'UTC',
-  ])).envelope).created, true)
-  const revisedOld = requireData((await run<WorkoutResult>(wrongRevisionCli, [
-    'workout', 'start', 'Old workout',
-    '--started-at', '2026-08-20T06:30:00.000Z',
-    '--vault', wrongRevisionContext.vaultRoot,
-  ])).envelope)
-  const revisedApproval = requireData((await run<ShowResult>(wrongRevisionCli, [
-    'workout', 'active', '--workout-id', revisedOld.eventId,
-    '--vault', wrongRevisionContext.vaultRoot,
-  ])).envelope)
-  await addLiveWorkoutExercise({
-    vault: wrongRevisionContext.vaultRoot,
-    workoutId: revisedOld.eventId,
-    name: 'Late edit',
-    order: 1,
-    setCount: 1,
-  })
-  await deleteEvent({
-    vaultRoot: wrongRevisionContext.vaultRoot,
-    eventId: revisedOld.eventId,
-  })
-  const wrongRevisionCandidate = await startSingleExerciseWorkout({
-    cli: wrongRevisionCli,
-    startedAt: '2026-08-20T07:00:00.000Z',
-    title: 'Replacement workout',
-    vaultRoot: wrongRevisionContext.vaultRoot,
-  })
-  const wrongRevisionLedgerBefore = await readJsonlRecords({
-    vaultRoot: wrongRevisionContext.vaultRoot,
-    relativePath: wrongRevisionCandidate.ledgerFile,
-  })
-  const wrongRevisionAuditBefore = await readJsonlRecords({
-    vaultRoot: wrongRevisionContext.vaultRoot,
-    relativePath: 'audit/2026/2026-08.jsonl',
-  })
-  const wrongTombstoneReplay = await run<WorkoutResult>(wrongRevisionCli, [
-    'workout', 'replace', 'Replacement workout',
-    '--workout-id', revisedOld.eventId,
-    '--expected-revision', String(requireShownRevision(revisedApproval)),
-    '--confirm-delete',
-    '--exercise', 'name=Pull-up;sets=2',
-    '--vault', wrongRevisionContext.vaultRoot,
-  ])
-  assert.equal(wrongTombstoneReplay.envelope.ok, false)
-  const missingOldReplay = await run<WorkoutResult>(wrongRevisionCli, [
-    'workout', 'replace', 'Replacement workout',
-    '--workout-id', 'evt_00000000000000000000000000',
-    '--expected-revision', '1',
-    '--confirm-delete',
-    '--exercise', 'name=Pull-up;sets=2',
-    '--vault', wrongRevisionContext.vaultRoot,
-  ])
-  assert.equal(missingOldReplay.envelope.ok, false)
-  assert.deepEqual(await readJsonlRecords({
-    vaultRoot: wrongRevisionContext.vaultRoot,
-    relativePath: wrongRevisionCandidate.ledgerFile,
-  }), wrongRevisionLedgerBefore)
-  assert.deepEqual(await readJsonlRecords({
-    vaultRoot: wrongRevisionContext.vaultRoot,
-    relativePath: 'audit/2026/2026-08.jsonl',
-  }), wrongRevisionAuditBefore)
-  const revisedOldRevisions = wrongRevisionLedgerBefore.filter(
-    (record) => (record as { id?: string }).id === revisedOld.eventId,
-  ) as Array<{ lifecycle: { revision: number; state?: string } }>
-  assert.deepEqual(revisedOldRevisions.at(-1)?.lifecycle, {
-    revision: requireShownRevision(revisedApproval) + 2,
-    state: 'deleted',
-  })
-})
-
-test('replacement fails closed when a competing live workout exists', async () => {
+test('replacement rejects a stale approved revision without mutation', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-live-workout-replace-conflict-',
+    'murph-live-workout-replace-stale-',
   )
   cleanupPaths.push(parentRoot)
   const cli = createWorkoutCli()
 
-  const initialized = await run<{ created: boolean }>(cli, [
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
     'init', '--vault', vaultRoot, '--timezone', 'UTC',
-  ])
-  assert.equal(requireData(initialized.envelope).created, true)
+  ])).envelope).created, true)
   const approved = requireData((await run<WorkoutResult>(cli, [
-    'workout', 'start', 'Approved old workout',
-    '--started-at', '2026-08-20T06:30:00.000Z',
-    '--vault', vaultRoot,
+    'workout', 'start', 'Approved workout', '--vault', vaultRoot,
   ])).envelope)
-  const approvedSnapshot = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--workout-id', approved.eventId, '--vault', vaultRoot,
+  const proposal = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', approved.eventId, '--vault', vaultRoot,
   ])).envelope)
-  const competing = await addActivitySession({
-    vaultRoot,
-    draft: {
-      occurredAt: '2026-08-20T07:00:00.000Z',
-      source: 'manual',
-      title: 'Replacement workout',
-      note: 'Replacement workout',
-      activityType: 'strength-training',
-      durationMinutes: 1,
-      workout: {
-        sourceApp: 'murph-live',
-        startedAt: '2026-08-20T07:00:00.000Z',
-        exercises: [{
-          name: 'Pull-up',
-          order: 1,
-          sets: [{ order: 1 }, { order: 2 }],
-        }],
-      },
-    },
-  })
-
-  const conflict = await run<WorkoutResult>(cli, [
-    'workout', 'replace', 'Replacement workout',
-    '--workout-id', approved.eventId,
-    '--expected-revision', String(requireShownRevision(approvedSnapshot)),
-    '--confirm-delete',
-    '--exercise', 'name=Pull-up;sets=2',
-    '--vault', vaultRoot,
-  ])
-  assert.equal(conflict.envelope.ok, false)
-
-  const approvedStillActive = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--workout-id', approved.eventId, '--vault', vaultRoot,
-  ])).envelope)
-  const competingStillActive = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--workout-id', competing.eventId, '--vault', vaultRoot,
-  ])).envelope)
-  assert.equal(approvedStillActive.entity.id, approved.eventId)
-  assert.equal(competingStillActive.entity.id, competing.eventId)
-})
-
-test('replacement rejects the proposal revision after the approved workout changes', async () => {
-  const { parentRoot, vaultRoot } = await createTempVaultContext(
-    'murph-live-workout-replace-stale-approval-',
-  )
-  cleanupPaths.push(parentRoot)
-  const cli = createWorkoutCli()
-
-  const initialized = await run<{ created: boolean }>(cli, [
-    'init', '--vault', vaultRoot, '--timezone', 'UTC',
-  ])
-  assert.equal(requireData(initialized.envelope).created, true)
-  const approved = requireData((await run<WorkoutResult>(cli, [
-    'workout', 'start', 'Approved old workout',
-    '--started-at', '2026-08-20T06:30:00.000Z',
-    '--vault', vaultRoot,
-  ])).envelope)
-  const proposalSnapshot = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--workout-id', approved.eventId, '--vault', vaultRoot,
-  ])).envelope)
-  const proposalRevision = requireShownRevision(proposalSnapshot)
-
+  const proposalRevision = requireShownRevision(proposal)
   await addLiveWorkoutExercise({
     vault: vaultRoot,
     workoutId: approved.eventId,
     name: 'Late correction',
     order: 1,
     setCount: 1,
+  })
+  const before = await readJsonlRecords({
+    vaultRoot,
+    relativePath: approved.ledgerFile,
   })
 
   const conflict = await run<WorkoutResult>(cli, [
@@ -715,27 +448,13 @@ test('replacement rejects the proposal revision after the approved workout chang
     '--vault', vaultRoot,
   ])
   assert.equal(conflict.envelope.ok, false)
-
-  const unchanged = requireData((await run<ShowResult>(cli, [
-    'workout', 'active', '--vault', vaultRoot,
-  ])).envelope)
-  assert.equal(unchanged.entity.id, approved.eventId)
-  assert.ok(requireShownRevision(unchanged) > proposalRevision)
-  assert.equal(unchanged.entity.data.workout.exercises[0]?.name, 'Late correction')
-  const records = await readJsonlRecords({
+  assert.deepEqual(await readJsonlRecords({
     vaultRoot,
     relativePath: approved.ledgerFile,
-  })
-  assert.deepEqual(
-    [...new Set(records.map((record) => (record as { id?: string }).id))],
-    [approved.eventId],
-  )
-  assert.equal(records.some((record) =>
-    (record as { lifecycle?: { state?: string } }).lifecycle?.state === 'deleted'
-  ), false)
+  }), before)
 })
 
-test('live workout usecases fail closed on invalid selectors and coordinates', async () => {
+test('live workout usecases fail closed on missing exact selectors and coordinates', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-boundary-',
   )
@@ -782,17 +501,20 @@ test('live workout usecases fail closed on invalid selectors and coordinates', a
     name: 'Boundary workout',
     startedAt: '2026-08-09T18:00:00.000Z',
   })
-  await assert.rejects(
-    () => showActiveLiveWorkout({ vault: vaultRoot, workoutId: '' }),
-    (error: unknown) => isVaultCliErrorCode(error, 'invalid_option'),
-  )
 
-  await addLiveWorkoutExercise({
+  const targetless = await addLiveWorkoutExercise({
     vault: vaultRoot,
     workoutId: started.eventId,
     name: 'Bench press',
     order: 1,
   })
+  const targetlessWorkout = workoutSessionSchema.parse(
+    targetless.entity.data.workout,
+  )
+  assert.equal(
+    targetlessWorkout.exercises[0]?.setPlanIsFinite,
+    false,
+  )
   await assert.rejects(
     () =>
       logLiveWorkoutSet({
@@ -815,9 +537,84 @@ test('live workout usecases fail closed on invalid selectors and coordinates', a
       }),
     (error: unknown) => isVaultCliErrorCode(error, 'invalid_option'),
   )
+  await assert.rejects(
+    () =>
+      setLiveWorkoutExerciseReps({
+        vault: vaultRoot,
+        workoutId: started.eventId,
+        exerciseOrder: 1,
+        reps: 8,
+        clear: true,
+      }),
+    (error: unknown) => isVaultCliErrorCode(error, 'invalid_option'),
+  )
 })
 
-test('concurrent live workout commands serialize without losing set updates', async () => {
+test('clearing fixed exercise repetitions stops value-less set logging', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-clear-reps-',
+  )
+  cleanupPaths.push(parentRoot)
+
+  const cli = createWorkoutCli()
+  const initialized = await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'America/New_York',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  const started = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Clear repetition rule', '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'add', 'Bench press',
+    '--workout-id', started.eventId,
+    '--order', '1',
+    '--sets', '1',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'set-reps', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1',
+    '--reps', '9',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  const cleared = requireData((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'set-reps', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1',
+    '--clear',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(
+    cleared.entity.data.workout.exercises[0]?.memberRepsPerSet,
+    undefined,
+  )
+
+  const rejected = await run<ShowResult>(cli, [
+    'workout', 'set', 'log', 'Bench press',
+    '--workout-id', started.eventId,
+    '--exercise-order', '1',
+    '--set-order', '1',
+    '--vault', vaultRoot,
+  ])
+  assert.equal(rejected.envelope.ok, false)
+  if (rejected.envelope.ok) {
+    throw new Error('Expected value-less set logging to fail after clearing repetitions.')
+  }
+  assert.equal(rejected.envelope.error.code, 'invalid_option')
+
+  const unchanged = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', started.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(unchanged.entity.data.workout.exercises[0]?.sets, [
+    { order: 1 },
+  ])
+  assert.equal(unchanged.entity.data.workout.endedAt, undefined)
+})
+
+test('concurrent exact-workout mutations serialize without losing set updates', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-concurrent-',
   )
@@ -838,11 +635,15 @@ test('concurrent live workout commands serialize without losing set updates', as
       ]),
     ),
   )
-  const successfulStarts = startResults.filter(
-    (result) => result.envelope.ok,
+  assert.equal(
+    startResults.filter((result) => result.envelope.ok).length,
+    startResults.length,
   )
-  assert.equal(successfulStarts.length, 1)
-  const workoutId = requireData(successfulStarts[0]!.envelope).eventId
+  const workoutIds = startResults.map(
+    (result) => requireData(result.envelope).eventId,
+  )
+  assert.equal(new Set(workoutIds).size, workoutIds.length)
+  const workoutId = workoutIds[0]!
 
   const added = requireData((await run<ShowResult>(setupCli, [
     'workout', 'exercise', 'add', 'Bench press',
@@ -872,23 +673,205 @@ test('concurrent live workout commands serialize without losing set updates', as
     loggedSets.length,
   )
 
-  const active = requireData((await run<ShowResult>(setupCli, [
-    'workout', 'active',
-    '--workout-id', workoutId,
-    '--vault', vaultRoot,
+  const shown = requireData((await run<ShowResult>(setupCli, [
+    'workout', 'show', workoutId, '--vault', vaultRoot,
   ])).envelope)
-  assert.deepEqual(active.entity.data.workout.exercises[0]?.sets, [
+  assert.deepEqual(shown.entity.data.workout.exercises[0]?.sets, [
     { order: 1, reps: 8, weight: 135, weightUnit: 'lb' },
     { order: 2, reps: 7, weight: 145, weightUnit: 'lb' },
     { order: 3, reps: 6, weight: 155, weightUnit: 'lb' },
     { order: 4, reps: 5, weight: 165, weightUnit: 'lb' },
   ])
+  assert.equal(typeof shown.entity.data.workout.endedAt, 'string')
+})
 
-  const finished = requireData((await run<ShowResult>(setupCli, [
-    'workout', 'finish',
-    '--workout-id', workoutId,
-    '--ended-at', '2026-08-09T19:00:00.000Z',
+test('fixed repetitions survive fresh command contexts, close a finite plan, and do not block the next workout', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-sequential-',
+  )
+  cleanupPaths.push(parentRoot)
+  const setupCli = createWorkoutCli()
+  const initialized = await run<{ created: boolean }>(setupCli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])
+  assert.equal(requireData(initialized.envelope).created, true)
+
+  const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+  const older = requireData((await run<WorkoutResult>(setupCli, [
+    'workout', 'start', 'Older unfinished workout',
+    '--started-at', startedAt,
     '--vault', vaultRoot,
   ])).envelope)
-  assert.equal(finished.entity.data.durationMinutes, 60)
+  assert.equal(older.workout?.endedAt, undefined)
+
+  const finite = requireData((await run<WorkoutResult>(setupCli, [
+    'workout', 'start', 'Eight set workout',
+    '--started-at', startedAt,
+    '--vault', vaultRoot,
+  ])).envelope)
+  const finiteId = finite.eventId
+  requireData((await run<ShowResult>(setupCli, [
+    'workout', 'exercise', 'add', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--order', '1',
+    '--sets', '8',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(setupCli, [
+    'workout', 'exercise', 'set-reps', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--reps', '9',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  let finalWriteStartedAt = 0
+  let finalWriteFinishedAt = 0
+  for (let setOrder = 1; setOrder <= 8; setOrder += 1) {
+    // A new CLI instance carries no assistant/provider thread state. Exact record
+    // identity plus the stored exercise fact are the complete mutation context.
+    if (setOrder === 8) finalWriteStartedAt = Date.now()
+    const logged = await run<ShowResult>(createWorkoutCli(), [
+      'workout', 'set', 'log', 'Seated cable curl',
+      '--workout-id', finiteId,
+      '--exercise-order', '1',
+      '--set-order', String(setOrder),
+      '--vault', vaultRoot,
+    ])
+    assert.equal(logged.envelope.ok, true)
+    if (setOrder === 8) finalWriteFinishedAt = Date.now()
+  }
+
+  const completed = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', finiteId, '--vault', vaultRoot,
+  ])).envelope)
+  const completedWorkout = completed.entity.data.workout
+  assert.equal(completedWorkout.exercises[0]?.memberRepsPerSet, 9)
+  assert.deepEqual(
+    completedWorkout.exercises[0]?.sets,
+    Array.from({ length: 8 }, (_, index) => ({ order: index + 1, reps: 9 })),
+  )
+  assert.equal(typeof completedWorkout.endedAt, 'string')
+  const completedAt = Date.parse(completedWorkout.endedAt!)
+  assert.ok(completedAt >= finalWriteStartedAt)
+  assert.ok(completedAt <= finalWriteFinishedAt)
+
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--set-order', '1',
+    '--reps', '8',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--set-order', '1',
+    '--note', 'Final rep spotted.',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const annotatedCorrection = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', finiteId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(annotatedCorrection.entity.data.workout.exercises[0]?.sets[0], {
+    note: 'Final rep spotted.',
+    order: 1,
+    reps: 8,
+  })
+  assert.equal(annotatedCorrection.entity.data.workout.endedAt, completedWorkout.endedAt)
+
+  const next = requireData((await run<WorkoutResult>(createWorkoutCli(), [
+    'workout', 'start', 'Next workout',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.notEqual(next.eventId, finiteId)
+  assert.notEqual(next.eventId, older.eventId)
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'exercise', 'add', 'Push-up',
+    '--workout-id', next.eventId,
+    '--order', '1',
+    '--sets', '1',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'exercise', 'set-reps', 'Push-up',
+    '--workout-id', next.eventId,
+    '--exercise-order', '1',
+    '--reps', '12',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Push-up',
+    '--workout-id', next.eventId,
+    '--exercise-order', '1',
+    '--set-order', '1',
+    '--vault', vaultRoot,
+  ])).envelope)
+
+  const nextCompleted = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', next.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(nextCompleted.entity.data.workout.exercises[0]?.sets, [
+    { order: 1, reps: 12 },
+  ])
+  assert.equal(typeof nextCompleted.entity.data.workout.endedAt, 'string')
+  const olderStillOpen = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', older.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(olderStillOpen.entity.data.workout.endedAt, undefined)
+
+  const extraWriteStartedAt = Date.now()
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--set-order', '9',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const extraWriteFinishedAt = Date.now()
+  const extended = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', finiteId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(extended.entity.data.workout.exercises[0]?.sets[8], {
+    order: 9,
+    reps: 9,
+  })
+  const extendedAt = Date.parse(extended.entity.data.workout.endedAt!)
+  assert.ok(extendedAt >= extraWriteStartedAt)
+  assert.ok(extendedAt <= extraWriteFinishedAt)
+  assert.ok(extendedAt >= completedAt)
+
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--set-order', '9',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const extraRetry = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', finiteId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(extraRetry.entity.data.workout.endedAt, extended.entity.data.workout.endedAt)
+  assert.equal(extraRetry.entity.data.workout.exercises[0]?.sets.length, 9)
+
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'clear', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--set-order', '8',
+    '--vault', vaultRoot,
+  ])).envelope)
+  requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Seated cable curl',
+    '--workout-id', finiteId,
+    '--exercise-order', '1',
+    '--set-order', '8',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const corrected = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'show', finiteId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(corrected.entity.data.workout.endedAt, extended.entity.data.workout.endedAt)
 })

@@ -242,6 +242,8 @@ export async function executeCodexAssistantTurnAttempt(
     groupConversation: input.groupConversation === true,
     groupRoomModelMaintenanceAuthorized:
       input.groupRoomModelMaintenanceAuthorized === true,
+    memberMemoryMaintenanceAuthorized:
+      input.memberMemoryMaintenanceAuthorized === true,
     hostedToolContext: input.hostedToolContext ?? null,
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,

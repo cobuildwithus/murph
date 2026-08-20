@@ -41,7 +41,7 @@ const EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
   'features.request_permissions_tool': false,
   'skills.include_instructions': false,
 } as const
-const EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+const EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
@@ -172,6 +172,7 @@ import {
 } from '../src/assistant/automation/target-override.ts'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import { MURPH_GENERATE_SONG_TOOL } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
@@ -1480,7 +1481,7 @@ describe('Codex model catalog', () => {
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
         ?.codexThreadConfig,
-    ).toEqual(EXPECTED_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG)
+    ).toEqual(EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG)
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
@@ -1568,7 +1569,7 @@ describe('Codex model catalog', () => {
           privateIssueCaptureEnabled: false,
           surface: 'linq',
         },
-        dynamicTools: [],
+        dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
         onboardingGuidanceInjected: false,
         planningDiagnostics: createRoutePlanningDiagnostics(),
         promptCacheMetadata: null,
@@ -1600,33 +1601,29 @@ describe('Codex model catalog', () => {
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
         ?.codexThreadConfig,
-    ).toEqual(EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG)
+    ).toEqual(EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG)
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
         ?.codexThreadConfig,
-    ).not.toHaveProperty('features.shell_tool')
+    ).toHaveProperty('features.shell_tool', false)
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
         ?.codexConfigOverrides,
-    ).toEqual(
-      expect.arrayContaining([
-        'features.apps=false',
-        'features.multi_agent=false',
-        'features.plugins=false',
-        'web_search="disabled"',
-      ]),
-    )
+    ).toBeNull()
     expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-        ?.codexConfigOverrides,
-    ).not.toContain('features.shell_tool=false')
-    expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput,
+    providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
-      dynamicTools: [],
+      dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+      environments: [],
+      hostedToolContext: null,
+      materializeWorkspaceArtifacts: null,
+      memberMemoryMaintenanceAuthorized: true,
       permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
+      progressDelivery: null,
       providerThreadEphemeral: true,
+      publicInternetFetch: null,
+      requireHostedPrivateImageDelivery: false,
       runtimeWorkspaceRoots: ['/vaults/member'],
     }))
   })

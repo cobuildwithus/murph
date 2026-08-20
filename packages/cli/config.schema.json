@@ -5948,29 +5948,6 @@
                     }
                   }
                 },
-                "active": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "workoutId": {
-                          "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
-                          "type": "string",
-                          "pattern": "^evt_[0-9A-Za-z]+$"
-                        }
-                      }
-                    }
-                  }
-                },
                 "replace": {
                   "type": "object",
                   "additionalProperties": false,
@@ -5988,13 +5965,13 @@
                         "workoutId": {
                           "type": "string",
                           "pattern": "^evt_[0-9A-Za-z]+$",
-                          "description": "Exact canonical id of the active workout the member approved deleting."
+                          "description": "Canonical workout id returned by workout start or workout show."
                         },
                         "expectedRevision": {
                           "type": "integer",
                           "minimum": 1,
                           "maximum": 9007199254740991,
-                          "description": "Exact lifecycle revision shown when deletion was approved."
+                          "description": "Exact lifecycle revision shown when replacement was approved."
                         },
                         "confirmDelete": {
                           "description": "Required explicit acknowledgement that deletion was approved.",
@@ -6045,9 +6022,9 @@
                           "maxLength": 128
                         },
                         "workoutId": {
-                          "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                           "type": "string",
-                          "pattern": "^evt_[0-9A-Za-z]+$"
+                          "pattern": "^evt_[0-9A-Za-z]+$",
+                          "description": "Canonical workout id returned by workout start or workout show."
                         },
                         "endedAt": {
                           "description": "Optional finish timestamp. Defaults to now.",
@@ -6082,9 +6059,9 @@
                                   "maxLength": 128
                                 },
                                 "workoutId": {
-                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                                   "type": "string",
-                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
                                 },
                                 "sourceExerciseId": {
                                   "description": "Optional stable source exercise id, such as an exercise catalog id.",
@@ -6096,7 +6073,7 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991,
-                                  "description": "One-based exercise order within the live workout."
+                                  "description": "One-based exercise order within the exact workout."
                                 },
                                 "groupId": {
                                   "description": "Optional superset or circuit group id.",
@@ -6128,11 +6105,55 @@
                                   "maxLength": 4000
                                 },
                                 "sets": {
-                                  "default": 1,
-                                  "description": "Number of unlogged set placeholders to create. Defaults to 1.",
+                                  "description": "Explicit finite planned set count. Omit it to create one targetless set.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 150
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "set-reps": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
+                                },
+                                "exerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "exerciseOrder": {
+                                  "description": "Optional one-based exercise order within the exact workout.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "reps": {
+                                  "description": "Exact member-stated repetitions for every set.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 999
+                                },
+                                "clear": {
+                                  "description": "Clear the stored member repetition count.",
+                                  "type": "boolean"
                                 }
                               }
                             }
@@ -6165,9 +6186,9 @@
                                   "maxLength": 128
                                 },
                                 "workoutId": {
-                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                                   "type": "string",
-                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
                                 },
                                 "exerciseId": {
                                   "description": "Optional stable source exercise id, such as an exercise catalog id.",
@@ -6176,7 +6197,7 @@
                                   "maxLength": 200
                                 },
                                 "exerciseOrder": {
-                                  "description": "Optional one-based exercise order within the live workout.",
+                                  "description": "Optional one-based exercise order within the exact workout.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991
@@ -6185,7 +6206,7 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991,
-                                  "description": "One-based set order. Read the active workout and pass it explicitly."
+                                  "description": "One-based set order from the exact workout record."
                                 },
                                 "requireExistingSet": {
                                   "description": "Fail instead of appending when the selected set no longer exists.",
@@ -6266,9 +6287,9 @@
                                   "maxLength": 128
                                 },
                                 "workoutId": {
-                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                                   "type": "string",
-                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
                                 },
                                 "exerciseId": {
                                   "description": "Optional stable source exercise id, such as an exercise catalog id.",
@@ -6277,7 +6298,7 @@
                                   "maxLength": 200
                                 },
                                 "exerciseOrder": {
-                                  "description": "Optional one-based exercise order within the live workout.",
+                                  "description": "Optional one-based exercise order within the exact workout.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991

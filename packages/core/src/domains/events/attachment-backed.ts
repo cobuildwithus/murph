@@ -88,7 +88,6 @@ export interface ReplaceActivitySessionInput {
 export interface ReadExpectedActivitySessionReplacementInput {
   vaultRoot: string;
   replacedEventId: string;
-  replacementEventId: string;
   expectedRevision: number;
 }
 
@@ -774,17 +773,24 @@ export async function replaceActivitySession(
       );
     }
 
-    const now = new Date();
-    const tombstoneRecord = buildDeletedEventTombstone(
-      latestMatchedEvent.record,
-      now,
-    );
     const replacementId = generateRecordId(ID_PREFIXES.event);
+    const now = new Date();
+    const tombstoneRecord = eventRecordSchema.parse({
+      ...buildDeletedEventTombstone(latestMatchedEvent.record, now),
+      links: [
+        ...(latestMatchedEvent.record.links ?? []),
+        { type: "related_to", targetId: replacementId },
+      ],
+    }) as EventRecordByKind<"activity_session">;
     const replacementRecord = buildTypedEventRecord(
       {
         kind: "activity_session",
         ...input.draft,
         id: replacementId,
+        links: [
+          ...(input.draft.links ?? []),
+          { type: "related_to", targetId: input.eventId },
+        ],
       },
       vault.metadata.timezone,
       buildEventSpineLifecycle(1),
@@ -849,23 +855,48 @@ export async function readExpectedActivitySessionReplacement(
   }
 
   return withCanonicalWriteLock(input.vaultRoot, async () => {
-    const [replacedShards, replacementShards] = await Promise.all([
-      loadEventLedgerShardsById(input.vaultRoot, input.replacedEventId),
-      loadEventLedgerShardsById(input.vaultRoot, input.replacementEventId),
-    ]);
+    const replacedShards = await loadEventLedgerShardsById(
+      input.vaultRoot,
+      input.replacedEventId,
+    );
     const replaced = selectLatestMatchedEvent(replacedShards)?.record ?? null;
-    const replacement = selectLatestMatchedEvent(replacementShards)?.record ?? null;
     if (
       replaced?.kind !== "activity_session"
       || !isDeletedEventSpineRecord(replaced)
       || eventSpineRevision(replaced) !== input.expectedRevision + 1
-      || replacement?.kind !== "activity_session"
-      || isDeletedEventSpineRecord(replacement)
     ) {
       return null;
     }
-    return replacement;
+
+    const candidateIds = [...new Set(
+      (replaced.links ?? []).flatMap((link) =>
+        link.type === "related_to" && link.targetId.startsWith("evt_")
+          ? [link.targetId]
+          : []
+      ),
+    )];
+    const candidates = await Promise.all(candidateIds.map(async (candidateId) => {
+      const shards = await loadEventLedgerShardsById(
+        input.vaultRoot,
+        candidateId,
+      );
+      return selectLatestMatchedEvent(shards)?.record ?? null;
+    }));
+    const replacements = candidates.filter(
+      (candidate): candidate is EventRecordByKind<"activity_session"> =>
+        candidate?.kind === "activity_session"
+        && !isDeletedEventSpineRecord(candidate)
+        && eventSpineRevision(candidate) === 1
+        && hasRelatedEventLink(candidate, input.replacedEventId),
+    );
+    return replacements.length === 1 ? replacements[0]! : null;
   });
+}
+
+function hasRelatedEventLink(record: EventRecord, targetId: string): boolean {
+  return record.links?.some(
+    (link) => link.type === "related_to" && link.targetId === targetId,
+  ) ?? false;
 }
 
 export async function addBodyMeasurement(

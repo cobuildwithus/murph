@@ -58,7 +58,7 @@ export interface ReplaceLiveWorkoutInput {
 
 export interface LiveWorkoutLookupInput {
   vault: string
-  workoutId?: string
+  workoutId: string
 }
 
 export interface AddLiveWorkoutExerciseInput extends LiveWorkoutLookupInput {
@@ -102,6 +102,13 @@ export interface ClearLiveWorkoutSetInput
   setOrder: number
 }
 
+export interface SetLiveWorkoutExerciseRepsInput
+  extends LiveWorkoutLookupInput,
+    LiveWorkoutExerciseLookup {
+  clear?: boolean
+  reps?: number
+}
+
 export interface FinishLiveWorkoutInput extends LiveWorkoutLookupInput {
   endedAt?: string
 }
@@ -115,15 +122,9 @@ export interface ApplyLiveWorkoutMemberActionInput {
 
 export type ApplyLiveWorkoutMemberActionResult =
   | { status: 'applied' | 'unchanged' }
-  | {
-      reason:
-        | 'multiple_active_workouts'
-        | 'no_active_workout'
-        | 'workout_changed'
-      status: 'rejected'
-    }
+  | { reason: 'workout_changed'; status: 'rejected' }
 
-export function isActiveLiveWorkout(workout: WorkoutSession): boolean {
+export function isOpenLiveWorkout(workout: WorkoutSession): boolean {
   return (
     workout.sourceApp === LIVE_WORKOUT_SOURCE_APP &&
     typeof workout.startedAt === 'string' &&
@@ -145,6 +146,33 @@ export function hasLoggedWorkoutSet(set: WorkoutSet): boolean {
   )
 }
 
+/**
+ * A workout is finite only when every exercise has a bounded set plan. New
+ * writes record that fact directly. For legacy saved-routine sessions, an
+ * absent marker still means planned; an explicit false marker keeps a later
+ * targetless exercise from inheriting the routine's finite-plan semantics.
+ */
+export function hasFiniteLiveWorkoutPlan(workout: WorkoutSession): boolean {
+  return workout.exercises.length > 0
+    && workout.exercises.every(
+      (exercise) =>
+        exercise.setPlanIsFinite === true
+        || (
+          exercise.setPlanIsFinite === undefined
+          && workout.routineId !== undefined
+        ),
+    )
+}
+
+export function hasCompletedFiniteLiveWorkoutPlan(
+  workout: WorkoutSession,
+): boolean {
+  return hasFiniteLiveWorkoutPlan(workout)
+    && workout.exercises.every((exercise) =>
+      exercise.sets.every(hasLoggedWorkoutSet)
+    )
+}
+
 export function buildLiveWorkoutCardEditor(input: {
   presentation: WorkoutSessionDetailV1
   workout: WorkoutSession
@@ -153,7 +181,7 @@ export function buildLiveWorkoutCardEditor(input: {
   editor: WorkoutSessionEditorProjectionV1
   workout: WorkoutSessionDetailV1
 } | null {
-  if (!isActiveLiveWorkout(input.workout) || input.presentation.state !== 'active') {
+  if (!isOpenLiveWorkout(input.workout) || input.presentation.state !== 'active') {
     return null
   }
   if (hasAmbiguousWorkoutActionExerciseCoordinates(input.workout)) {
@@ -348,6 +376,7 @@ export function buildLiveWorkoutSessionFromTemplate(input: {
         ...(exercise.mode ? { mode: exercise.mode } : {}),
         ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
         ...(exercise.note ? { note: exercise.note } : {}),
+        setPlanIsFinite: true,
         sets: exercise.plannedSets
           .slice()
           .sort((left, right) => left.order - right.order)

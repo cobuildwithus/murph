@@ -113,6 +113,7 @@ import {
 } from '../src/assistant/codex-contract-fingerprint.js'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
@@ -121,6 +122,7 @@ import {
 import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
 } from '../src/assistant/managed-automations.js'
 import {
   MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
@@ -1500,6 +1502,51 @@ describe('assistant Codex turn planning', () => {
     )
     expect(plan.systemPrompt).not.toContain('private health context')
     expect(plan.systemPrompt).not.toContain('Hosted groups:')
+    expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
+  })
+
+  it('offers only host-owned memory to the exact managed member maintenance turn', async () => {
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(
+      'Context snapshot: private health context.',
+    )
+    const plan = await resolveAssistantRouteTurnPlan({
+      executionContext: {
+        hosted: {
+          dynamicContextPrompts: ['Hosted context that must not be injected.'],
+          memberId: 'member-memory-maintenance',
+          userEnvKeys: [],
+        },
+      },
+      input: {
+        ...createMessageInput(),
+        maintenanceProfile: 'member-memory',
+        scheduledInvocationAuthority: {
+          automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+          occurrenceAt: '2026-07-25T08:00:00.000Z',
+        },
+      },
+      profile: {
+        promptProfile: 'maintenance',
+        threadScope: 'isolated-thread',
+        toolProfile: 'maintenance-turn',
+      },
+      promptTimeContext: {
+        currentLocalDate: '2026-07-25',
+        currentTimeZone: 'America/New_York',
+      },
+      route: createRoute(),
+      session: createSession(),
+      sharedPlan: createSharedPlan(),
+    })
+
+    expect(plan.dynamicTools).toEqual([MURPH_MEMBER_MEMORY_TOOL])
+    expect(plan.systemPrompt).toContain('`murph.member_memory`')
+    expect(plan.systemPrompt).toContain('Do not use the shell')
+    expect(plan.systemPrompt).not.toContain('`vault-cli memory show`')
+    expect(plan.systemPrompt).not.toContain(
+      'Hosted context that must not be injected.',
+    )
+    expect(plan.systemPrompt).not.toContain('private health context')
     expect(planningMocks.readAssistantContextSnapshotPrompt).not.toHaveBeenCalled()
   })
 

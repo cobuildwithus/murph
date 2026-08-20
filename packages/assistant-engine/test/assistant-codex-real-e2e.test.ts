@@ -26,7 +26,11 @@ import {
   showResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { readVaultRawTolerant } from '@murphai/query'
-import { addLiveWorkoutExercise } from '@murphai/vault-usecases/workouts'
+import {
+  logLiveWorkoutSet,
+  showWorkoutRecord,
+  startLiveWorkout,
+} from '@murphai/vault-usecases/workouts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -548,7 +552,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'fails closed without an active workout and keeps a bare acknowledgement from advancing the next set',
+    'persists fixed repetitions across a fresh thread, closes set eight, and logs the next workout',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -569,10 +573,13 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           materializeRealWorkoutVaultCli({ binDirectory }),
         ])
 
-        const commonInput: Omit<
-          CodexAppServerTurnInput,
-          'dynamicTools' | 'prompt'
-        > = {
+        const startedAt = new Date(Date.now() - 60 * 60 * 1000).toISOString()
+        const older = await startLiveWorkout({
+          name: 'Earlier unfinished workout',
+          startedAt,
+          vault: workingDirectory,
+        })
+        const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
           codexCommand:
@@ -581,11 +588,11 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           codexHome: config.codexHome,
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
-              'vault-cli workout active --format json',
               'vault-cli workout start [name] [--routine <format>]',
-              'vault-cli workout replace <name> --workout-id <id> --expected-revision <n> --confirm-delete [--exercise name=...;sets=...]',
-              'vault-cli workout exercise add <name> --order <n> [--sets <n>]',
-              'vault-cli workout set log <exercise> --workout-id <id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
+              'vault-cli workout show <event-id> --format json',
+              'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
+              'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
+              'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -597,13 +604,14 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               setupCommand: 'murph',
             },
             conversationScope: 'direct',
-            currentLocalDate: '2026-08-13',
+            currentLocalDate: '2026-08-20',
             currentTimeZone: 'UTC',
             hostedRuntime: true,
             modelBehaviorProfile: 'gpt5-agentic',
             onboardingGuidance: false,
             turnTrigger: null,
           }),
+          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -618,185 +626,128 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           sandbox: 'workspace-write',
           workingDirectory,
         }
-        const missingWorkout = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Seated cable curl set 3 complete: 9 reps.',
-        })
-        const vaultAfterMissingWorkout = await readVaultRawTolerant(workingDirectory)
-        const missingWorkoutEvents = vaultAfterMissingWorkout.events.filter((event) =>
-          workoutSessionSchema.safeParse(event.attributes.workout).success
-        )
-
-        expect(missingWorkoutEvents).toEqual([])
-        expect(missingWorkout.finalMessage).toMatch(
-          /(?:no active|could(?: not|n't) (?:find|access) an active|do(?: not|n't) have an active)(?: tracked)? workout/iu,
-        )
-        expect(missingWorkout.finalMessage).toMatch(/start/iu)
-        expect(missingWorkout.finalMessage).toContain('?')
-        expect(missingWorkout.finalMessage).not.toMatch(
-          /(?:set\s*3|it)\s+(?:(?:is|was|has been)\s+)?(?:saved|logged|recorded)|\b(?:i(?:'ve| have)|successfully)\s+(?:saved|logged|recorded)\b/iu,
-        )
-
-        const recovered = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'yes',
-          resumeSessionId: missingWorkout.sessionId,
-        })
-        const vaultAfterRecovery = await readVaultRawTolerant(workingDirectory)
-        const recoveredWorkouts = vaultAfterRecovery.events.flatMap((event) => {
-          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success ? [parsed.data] : []
-        })
-
-        expect(recovered.finalMessage).toMatch(/set\s*3/iu)
-        expect(recovered.finalMessage).toMatch(/9 reps/iu)
-        expect(recovered.finalMessage).toMatch(/logged|saved|recorded/iu)
-        expect(recoveredWorkouts).toHaveLength(1)
-        expect(
-          recoveredWorkouts[0]?.exercises[0]?.sets.map((set) => set.reps ?? null),
-        ).toEqual([null, null, 9])
-
-        await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Finish this tracked workout.',
-          resumeSessionId: recovered.sessionId,
-        })
 
         const started = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            'Start a live workout for seated cable curl with four sets.',
-            'Use 30 lb as the planned load for every set.',
-            'Every set is exactly 9 reps; use that fixed repetition count throughout this active workout.',
+            'Start a live workout named Durable repetition proof.',
+            'Add Seated cable curl with exactly eight finite sets.',
+            'Every set of that exercise is exactly 9 reps; persist that exercise-wide member count.',
+            'Do not log a set yet and do not turn any target or suggestion into an actual result.',
           ].join(' '),
         })
-        const firstCompletion = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Seated cable curl set 1 complete.',
-          resumeSessionId: started.sessionId,
-        })
-        const secondCompletion = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'Second set complete.',
-          resumeSessionId: firstCompletion.sessionId,
-        })
-        const acknowledgement = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'ok',
-          resumeSessionId: secondCompletion.sessionId,
-        })
-        const vault = await readVaultRawTolerant(workingDirectory)
-        const workouts = vault.events.flatMap((event) => {
+        const afterStart = await readVaultRawTolerant(workingDirectory)
+        const matching = afterStart.events.flatMap((event) => {
           const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success ? [parsed.data] : []
-        })
-        const workout = workouts.at(-1)
-
-        expect(started.finalMessage).toMatch(/start/iu)
-        expect(started.finalMessage).toMatch(/4/iu)
-        expect(firstCompletion.finalMessage).toMatch(/9 reps/iu)
-        expect(secondCompletion.finalMessage).toMatch(/9 reps/iu)
-        expect(firstCompletion.finalMessage).not.toMatch(/how many|\?/iu)
-        expect(secondCompletion.finalMessage).not.toMatch(/how many|\?/iu)
-        expect(firstCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
-        expect(secondCompletion.finalMessage).not.toMatch(/30\s*lb/iu)
-        expect(
-          workout?.exercises[0]?.sets.map((set) => set.reps ?? null),
-        ).toEqual([9, 9, null, null])
-        expect(
-          workout?.exercises[0]?.sets.map((set) => set.weight ?? null),
-        ).toEqual([null, null, null, null])
-        expect(
-          workout?.exercises[0]?.sets.map((set) => set.weightUnit ?? null),
-        ).toEqual([null, null, null, null])
-
-        const activeEvent = vault.events.find((event) => {
-          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success && parsed.data.endedAt === undefined
-        })
-        expect(activeEvent?.entityId).toBeTruthy()
-
-        const proposal = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt:
-            'Start a new ad-hoc workout named Upper body with 3 pull-up sets and 2 push-up sets.',
-          resumeSessionId: acknowledgement.sessionId,
-        })
-        const proposalCommands = readCapabilityRoutingActions(proposal.jsonEvents)
-          .flatMap((action) => action.kind === 'command' ? [action.command] : [])
-        expect(proposalCommands.some((command) =>
-          command.includes('workout replace'),
-        )).toBe(false)
-        expect(proposal.finalMessage).toMatch(/delete|replace/iu)
-        expect(proposal.finalMessage).toMatch(/upper body/iu)
-        expect(proposal.finalMessage).toMatch(/pull-up/iu)
-        expect(proposal.finalMessage).toMatch(/push-up/iu)
-        expect(proposal.finalMessage).toContain('?')
-
-        await addLiveWorkoutExercise({
-          vault: workingDirectory,
-          workoutId: activeEvent!.entityId,
-          name: 'Late correction',
-          order: 2,
-          setCount: 1,
-        })
-        const staleAcceptance = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'yes',
-          resumeSessionId: proposal.sessionId,
-        })
-        const staleCommands = readCapabilityRoutingActions(
-          staleAcceptance.jsonEvents,
-        ).flatMap((action) => action.kind === 'command' ? [action.command] : [])
-        const replacementCommands = staleCommands.filter((command) =>
-          command.includes('workout replace'),
-        )
-        expect(replacementCommands).toHaveLength(1)
-        expect(replacementCommands[0]).toMatch(/--expected-revision\s+\d+/u)
-        expect(staleAcceptance.finalMessage).toMatch(/changed/iu)
-        expect(staleAcceptance.finalMessage).toMatch(/not (?:replace|delete)|nothing/iu)
-        expect(staleAcceptance.finalMessage).toContain('?')
-
-        const afterStaleAcceptance = await readVaultRawTolerant(workingDirectory)
-        const activeAfterStale = afterStaleAcceptance.events.find((event) => {
-          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success && parsed.data.endedAt === undefined
-        })
-        expect(activeAfterStale?.entityId).toBe(activeEvent!.entityId)
-        const activeWorkoutAfterStale = workoutSessionSchema.parse(
-          activeAfterStale?.attributes.workout,
-        )
-        expect(activeWorkoutAfterStale.exercises[1]?.name).toBe('Late correction')
-
-        const replacement = await executeRealCodexAppServerTurn({
-          ...commonInput,
-          prompt: 'yes',
-          resumeSessionId: staleAcceptance.sessionId,
-        })
-        const successfulReplacementCommands = readCapabilityRoutingActions(
-          replacement.jsonEvents,
-        ).flatMap((action) => action.kind === 'command' ? [action.command] : [])
-          .filter((command) => command.includes('workout replace'))
-        expect(successfulReplacementCommands).toHaveLength(1)
-
-        const afterReplacement = await readVaultRawTolerant(workingDirectory)
-        const activeAfterReplacement = afterReplacement.events.flatMap((event) => {
-          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
-          return parsed.success && parsed.data.endedAt === undefined
-            ? [{ event, workout: parsed.data }]
+          return parsed.success
+            && parsed.data.exercises.some(
+              (exercise) => exercise.name === 'Seated cable curl',
+            )
+            ? [{ id: event.entityId, workout: parsed.data }]
             : []
         })
-        expect(activeAfterReplacement).toHaveLength(1)
-        expect(activeAfterReplacement[0]?.event.entityId).not.toBe(
-          activeEvent!.entityId,
+
+        expect(started.finalMessage).not.toMatch(/how many|which workout/iu)
+        expect(matching).toHaveLength(1)
+        const finiteWorkout = matching[0]!
+        expect(started.finalMessage.trim()).toBe('')
+        expect(started.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: finiteWorkout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'active' },
+        })
+        expect(finiteWorkout.workout.exercises[0]).toMatchObject({
+          memberRepsPerSet: 9,
+          name: 'Seated cable curl',
+          setPlanIsFinite: true,
+        })
+        expect(finiteWorkout.workout.exercises[0]?.sets).toHaveLength(8)
+        expect(
+          finiteWorkout.workout.exercises[0]?.sets.map((set) => set.reps),
+        ).toEqual(Array.from({ length: 8 }, () => undefined))
+
+        for (let setOrder = 1; setOrder <= 7; setOrder += 1) {
+          await logLiveWorkoutSet({
+            exerciseOrder: 1,
+            requireExistingSet: true,
+            setOrder,
+            vault: workingDirectory,
+            workoutId: finiteWorkout.id,
+          })
+        }
+
+        // Deliberately do not resume the provider session. The member's terse
+        // message carries no id; production reply-card context supplies the exact
+        // durable marker, while the exercise prescription remains canonical.
+        const finalSet = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            `Durable reply-card context identifies exact workout ${finiteWorkout.id}.`,
+            'The current member message is exactly: "Set 8 done."',
+          ].join(' '),
+        })
+        const completed = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
         )
-        expect(activeAfterReplacement[0]?.workout.exercises.map((exercise) => ({
-          name: exercise.name,
-          sets: exercise.sets.length,
-        }))).toEqual([
-          { name: 'Pull-up', sets: 3 },
-          { name: 'Push-up', sets: 2 },
+
+        expect(finalSet.finalMessage).not.toMatch(/how many|which workout|\?/iu)
+        expect(finalSet.finalMessage.trim()).toBe('')
+        expect(finalSet.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: finiteWorkout.id,
+            kind: 'workout',
+          },
+          workout: { state: 'completed' },
+        })
+        expect(completed.exercises[0]?.sets.map((set) => set.reps)).toEqual(
+          Array.from({ length: 8 }, () => 9),
+        )
+        expect(completed.endedAt).toEqual(expect.any(String))
+
+        // This is another fresh provider turn. The older unfinished record must
+        // neither block the new start nor be assigned an inferred end boundary.
+        const nextTurn = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Start a new live workout named Immediate next workout.',
+            'Add exactly one finite Push-up set.',
+            'Every Push-up set is exactly 12 reps; persist that count and log set 1 complete now.',
+          ].join(' '),
+        })
+        const afterNext = await readVaultRawTolerant(workingDirectory)
+        const nextWorkouts = afterNext.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          const exercise = parsed.success
+            ? parsed.data.exercises.find((entry) => entry.name === 'Push-up')
+            : undefined
+          return parsed.success && exercise?.memberRepsPerSet === 12
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const olderStored = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, older.eventId)).entity.data.workout,
+        )
+
+        expect(nextTurn.finalMessage).not.toMatch(/finish time|duration|which workout/iu)
+        expect(nextWorkouts).toHaveLength(1)
+        expect(nextTurn.finalMessage.trim()).toBe('')
+        expect(nextTurn.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: nextWorkouts[0]?.id,
+            kind: 'workout',
+          },
+          workout: { state: 'completed' },
+        })
+        expect(nextWorkouts[0]?.workout.exercises[0]?.sets).toEqual([
+          { order: 1, reps: 12 },
         ])
+        expect(nextWorkouts[0]?.workout.endedAt).toEqual(expect.any(String))
+        expect(olderStored.endedAt).toBeUndefined()
       } finally {
         await removeRealCodexTemporaryPaths([
           workingDirectory,

@@ -163,39 +163,42 @@ test('activity-session replacement emits one hosted atomic write', async () => {
   })
   const oldRevisions = records.filter(
     (record) => (record as { id?: string }).id === oldWorkout.eventId,
-  ) as Array<{ lifecycle: { revision: number; state?: string } }>
+  ) as Array<{
+    lifecycle: { revision: number; state?: string }
+    links?: Array<{ targetId: string; type: string }>
+  }>
   assert.deepEqual(oldRevisions.map((record) => record.lifecycle), [
     { revision: 1 },
     { revision: 2, state: 'deleted' },
   ])
-  assert.equal(
-    records.some((record) =>
-      (record as { id?: string }).id === replacement.eventId,
-    ),
-    true,
+  assert.deepEqual(
+    oldRevisions.at(-1)?.links,
+    [{ type: 'related_to', targetId: replacement.eventId }],
   )
+  const replacementRecord = records.find((record) =>
+    (record as { id?: string }).id === replacement.eventId
+  ) as { links?: Array<{ targetId: string; type: string }> } | undefined
+  assert.deepEqual(replacementRecord?.links, [
+    { type: 'related_to', targetId: oldWorkout.eventId },
+  ])
   assert.equal((await readExpectedActivitySessionReplacement({
     vaultRoot,
     replacedEventId: oldWorkout.eventId,
-    replacementEventId: replacement.eventId,
     expectedRevision: requireRevision(oldWorkout.event),
   }))?.id, replacement.eventId)
   assert.equal((await readExpectedActivitySessionReplacement({
     vaultRoot: replicaRoot,
     replacedEventId: oldWorkout.eventId,
-    replacementEventId: replacement.eventId,
     expectedRevision: requireRevision(oldWorkout.event),
   }))?.id, replacement.eventId)
   assert.equal(await readExpectedActivitySessionReplacement({
     vaultRoot,
     replacedEventId: oldWorkout.eventId,
-    replacementEventId: replacement.eventId,
     expectedRevision: requireRevision(oldWorkout.event) + 1,
   }), null)
   assert.equal(await readExpectedActivitySessionReplacement({
     vaultRoot,
     replacedEventId: 'evt_00000000000000000000000000',
-    replacementEventId: replacement.eventId,
     expectedRevision: 1,
   }), null)
 })

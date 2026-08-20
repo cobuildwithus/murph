@@ -147,6 +147,14 @@
     {
       "issue": "cobuildwithus/murph#1798",
       "path": ".agents/friction-log/20260813191154-test-diff-runs/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#1816",
+      "path": ".agents/friction-log/20260814000641-scoped-commit-guard/friction.md"
+    },
+    {
+      "issue": "cobuildwithus/murph#1823",
+      "path": ".agents/friction-log/20260813201916-worktree-spotlight-exclusion/friction.md"
     }
   ],
   "version": 1

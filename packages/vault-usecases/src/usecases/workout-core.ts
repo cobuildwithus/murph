@@ -63,7 +63,6 @@ export interface WorkoutCoreRuntime {
   readExpectedActivitySessionReplacement(input: {
     vaultRoot: string
     replacedEventId: string
-    replacementEventId: string
     expectedRevision: number
   }): Promise<ActivitySessionEventRecord | null>
   addBodyMeasurement(input: {

@@ -24,6 +24,7 @@ import {
   resolveMurphTestTempBaseDirectory,
 } from "../../../config/vitest-temp-lifecycle";
 import { resolveHostedWebDistDir } from "../next-artifacts";
+import { assertUnhashedOgImageRoutes } from "./check-og-route-manifest";
 
 /**
  * Post-build proof that OG images still render from the *emitted* serverless
@@ -214,6 +215,7 @@ main().catch((error) => {
 `;
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const appDirectory = path.join(appRoot, "app");
 const repoRoot = path.resolve(appRoot, "../..");
 const distDirName = resolveHostedWebDistDir(PHASE_PRODUCTION_BUILD);
 const distDir = path.join(appRoot, distDirName);
@@ -230,6 +232,15 @@ main().catch((error: unknown) => {
 });
 
 async function main(): Promise<void> {
+  const appPathRoutesManifestPath = path.join(distDir, "app-path-routes-manifest.json");
+  if (!existsSync(appPathRoutesManifestPath)) {
+    throw new Error(`Next build output is missing ${appPathRoutesManifestPath}.`);
+  }
+  const appPathRoutesManifest = JSON.parse(
+    await readFile(appPathRoutesManifestPath, "utf8"),
+  ) as Record<string, string>;
+  assertUnhashedOgImageRoutes(appDirectory, appPathRoutesManifest);
+
   const temporaryRoot = await createMarkedTemporaryRoot();
   try {
     for (const route of probeRoutes) {

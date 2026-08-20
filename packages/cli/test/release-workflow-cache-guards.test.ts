@@ -337,7 +337,7 @@ function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
 }
 
 function hasTrustedPrLiveAdmission(prLive: Record<string, unknown>): boolean {
-  return prLive.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+  return prLive.if === "${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
 }
 
 function hasEarlyExactPrHeadRevalidation(value: unknown): boolean {

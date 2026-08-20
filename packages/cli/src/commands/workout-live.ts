@@ -11,7 +11,7 @@ import {
   finishLiveWorkout,
   logLiveWorkoutSet,
   replaceLiveWorkout,
-  showActiveLiveWorkout,
+  setLiveWorkoutExerciseReps,
   startLiveWorkout,
   type ReplaceLiveWorkoutExerciseInput,
 } from '@murphai/vault-usecases/workouts'
@@ -26,21 +26,13 @@ import {
 const workoutIdOption = z
   .string()
   .regex(/^evt_[0-9A-Za-z]+$/u)
-  .optional()
-  .describe(
-    'Optional canonical workout id. Omit it only when exactly one live workout is active.',
-  )
-
-const requiredWorkoutIdOption = z
-  .string()
-  .regex(/^evt_[0-9A-Za-z]+$/u)
-  .describe('Exact canonical id of the active workout the member approved deleting.')
+  .describe('Canonical workout id returned by workout start or workout show.')
 
 const expectedWorkoutRevisionOption = z
   .number()
   .int()
   .min(1)
-  .describe('Exact lifecycle revision shown when deletion was approved.')
+  .describe('Exact lifecycle revision shown when replacement was approved.')
 
 const exerciseModeSchema = z.enum([
   'weight_reps',
@@ -84,7 +76,7 @@ function parseReplacementExercise(
     'sets',
     'exercise',
     invalidReplacementExercise,
-  ) ?? 1
+  )
   const mode = fields.get('mode')
   const parsedMode = mode === undefined
     ? undefined
@@ -107,7 +99,7 @@ function parseReplacementExercise(
       'exercise',
       invalidReplacementExercise,
     ),
-    setCount,
+    ...(setCount === undefined ? {} : { setCount }),
     ...(fields.has('sourceExerciseId')
       ? { sourceExerciseId: fields.get('sourceExerciseId') }
       : {}),
@@ -130,26 +122,24 @@ const exerciseOrderOption = z
   .int()
   .positive()
   .optional()
-  .describe('Optional one-based exercise order within the live workout.')
+  .describe('Optional one-based exercise order within the exact workout.')
 
 const requiredExerciseOrderOption = z
   .number()
   .int()
   .positive()
-  .describe('One-based exercise order within the live workout.')
+  .describe('One-based exercise order within the exact workout.')
 
 const requiredSetOrderOption = z
   .number()
   .int()
   .positive()
-  .describe(
-    'One-based set order. Read the active workout and pass it explicitly.',
-  )
+  .describe('One-based set order from the exact workout record.')
 
 export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
   workout.command('start', {
     description:
-      'Start one canonical live workout, optionally from a saved workout format.',
+      'Start a canonical live workout, optionally from a saved workout format.',
     args: z.object({
       name: z
         .string()
@@ -178,7 +168,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
       },
     ],
     hint:
-      'Only one Murph live workout may be active in a vault. Saved target values remain in the routine; the new session starts with unlogged set placeholders.',
+      'Starting a workout never closes or blocks on another workout. Preserve the returned eventId and use it for every later mutation.',
     options: withBaseOptions({
       routine: z
         .string()
@@ -214,30 +204,15 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     },
   })
 
-  workout.command('active', {
-    description: 'Show the active canonical live workout.',
-    args: z.object({}),
-    options: withBaseOptions({
-      workoutId: workoutIdOption,
-    }),
-    output: showResultSchema,
-    async run({ options }) {
-      return showActiveLiveWorkout({
-        vault: options.vault,
-        workoutId: options.workoutId,
-      })
-    },
-  })
-
   workout.command('replace', {
     description:
-      'Atomically delete one exact active workout and start its approved replacement.',
+      'Atomically delete one exact open workout and start its approved replacement.',
     args: z.object({
       name: z.string().min(1).max(240).describe('Replacement workout title.'),
     }),
     examples: [
       {
-        description: 'Replace one explicitly confirmed active workout.',
+        description: 'Replace one explicitly confirmed workout.',
         args: { name: "'Upper body'" },
         options: {
           workoutId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
@@ -252,9 +227,9 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
       },
     ],
     hint:
-      'Use only after the member explicitly approves deleting the exact active workout. The old tombstone and complete replacement commit atomically.',
+      'Use only after the member explicitly approves deleting this exact workout revision. Other unfinished workouts are unaffected.',
     options: withBaseOptions({
-      workoutId: requiredWorkoutIdOption,
+      workoutId: workoutIdOption,
       expectedRevision: expectedWorkoutRevisionOption,
       confirmDelete: z
         .boolean()
@@ -291,7 +266,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
 
   workout.command('finish', {
     description:
-      'Finish one live workout and persist its final duration without inventing missing set values.',
+      'Finish the exact live workout and persist its final duration without inventing missing set values.',
     args: z.object({}),
     options: withBaseOptions({
       workoutId: workoutIdOption,
@@ -310,12 +285,12 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
   })
 
   const exercise = Cli.create('exercise', {
-    description: 'Targeted exercise mutations for the active live workout.',
+    description: 'Exercise mutations scoped to an exact canonical workout.',
   })
 
   exercise.command('add', {
     description:
-      'Add one exercise with empty set placeholders to the active live workout.',
+      'Add one exercise with empty set placeholders to the exact live workout.',
     args: z.object({
       name: z.string().min(1).max(160).describe('Exercise name.'),
     }),
@@ -337,8 +312,10 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .int()
         .positive()
         .max(150)
-        .default(1)
-        .describe('Number of unlogged set placeholders to create. Defaults to 1.'),
+        .optional()
+        .describe(
+          'Explicit finite planned set count. Omit it to create one targetless set.',
+        ),
     }),
     output: showResultSchema,
     async run({ args, options }) {
@@ -357,13 +334,54 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     },
   })
 
+  exercise.command('set-reps', {
+    description:
+      'Store or clear the exact member-stated repetition count that applies to every set of one exercise.',
+    args: z.object({
+      exercise: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe('Optional exact exercise name.'),
+    }),
+    options: withBaseOptions({
+      workoutId: workoutIdOption,
+      exerciseId: exerciseIdOption,
+      exerciseOrder: exerciseOrderOption,
+      reps: z
+        .number()
+        .int()
+        .positive()
+        .max(999)
+        .optional()
+        .describe('Exact member-stated repetitions for every set.'),
+      clear: z
+        .boolean()
+        .optional()
+        .describe('Clear the stored member repetition count.'),
+    }),
+    output: showResultSchema,
+    async run({ args, options }) {
+      return setLiveWorkoutExerciseReps({
+        vault: options.vault,
+        workoutId: options.workoutId,
+        exerciseId: options.exerciseId,
+        exerciseName: args.exercise,
+        exerciseOrder: options.exerciseOrder,
+        reps: options.reps,
+        clear: options.clear,
+      })
+    },
+  })
+
   const set = Cli.create('set', {
-    description: 'Targeted set mutations for the active live workout.',
+    description: 'Set mutations scoped to an exact canonical workout.',
   })
 
   set.command('log', {
     description:
-      'Log or correct one set while preserving every other exercise and set.',
+      'Log or correct one exact set. Values may be omitted only when the exercise has a stored member repetition count.',
     args: z.object({
       exercise: z
         .string()
@@ -374,11 +392,12 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
     }),
     examples: [
       {
-        description: 'Log bench set 2 with an explicit stable target.',
+        description: 'Log bench set 2 on an exact workout.',
         args: {
           exercise: "'Bench press'",
         },
         options: {
+          workoutId: 'evt_01JQ8PWXP5A68SQM1W0GYM41WA',
           setOrder: 2,
           reps: 8,
           weight: 185,
@@ -437,7 +456,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
 
   set.command('clear', {
     description:
-      'Clear the logged values from one set while preserving its planned position.',
+      'Clear one exact set while preserving its planned position and the workout end boundary.',
     args: z.object({
       exercise: z
         .string()
