@@ -1,14 +1,28 @@
-import { HABITAT_CATALOG } from "@murphai/contracts";
+import {
+  ENVIRONMENT_INTERVIEW_TOPIC_GROUPS,
+  listEnvironmentInterviewFields,
+  type HabitatIndicatorValueType,
+} from "@murphai/contracts";
 
-import type { HabitatValues } from "./home-model";
+import type { HabitatIndicatorNotes, HabitatValues } from "./home-model";
 
 export type EnvironmentVoiceFlow = "walkthrough" | "fill-gaps" | "update";
+
+export type EnvironmentVoiceField = {
+  aspectId: string;
+  indicatorId: string;
+  label: string;
+  existingNote?: string;
+  question?: string;
+  valueType: HabitatIndicatorValueType;
+};
 
 export type EnvironmentVoiceTopic = {
   id: string;
   title: string;
   eyebrow: string;
   prompt: string;
+  fields?: readonly EnvironmentVoiceField[];
   focus?: readonly string[];
 };
 
@@ -17,176 +31,349 @@ export type EnvironmentVoiceScript = {
   dialogTitle: string;
   idleTitle: string;
   idleDescription: string;
+  initialCoveredDetails?: number;
+  totalDetails?: number;
   topics: readonly [EnvironmentVoiceTopic, ...EnvironmentVoiceTopic[]];
 };
 
-const WALKTHROUGH_TOPICS = [
-  {
-    id: "sleep",
-    title: "Your bedroom",
-    eyebrow: "Sleep",
-    prompt:
-      "Describe the temperature, darkness and noise at night. Mention windows, your mattress, overheating, and whether your phone or a TV is near the bed.",
-  },
-  {
-    id: "air",
-    title: "The air and water",
-    eyebrow: "Air & water",
-    prompt:
-      "Start with your city or approximate region — never your address. Then describe ventilation, damp or mold, cooking, indoor smoke, and drinking water.",
-  },
-  {
-    id: "light",
-    title: "Light through the day",
-    eyebrow: "Light",
-    prompt:
-      "Describe morning daylight, where you spend the day, and whether your evening light is warm and dim or bright and cool.",
-  },
-  {
-    id: "recovery",
-    title: "Recovery and devices",
-    eyebrow: "Optional extras",
-    prompt:
-      "Mention any sauna, cold exposure, red light, scale, blood-pressure cuff or other devices you already use. None of these are required for a good grade.",
-  },
-  {
-    id: "workspace",
-    title: "Where you work",
-    eyebrow: "Workspace",
-    prompt:
-      "Describe how long you sit, your screen height, your desk and chair, how often you take breaks, and any wrist, neck or back discomfort.",
-  },
-] as const satisfies readonly [
-  EnvironmentVoiceTopic,
-  ...EnvironmentVoiceTopic[],
-];
+const MAX_TOPIC_FIELDS = 4;
 
-export const DEFAULT_ENVIRONMENT_VOICE_SCRIPT: EnvironmentVoiceScript = {
-  flow: "walkthrough",
-  dialogTitle: "Walk Murph through your home",
-  idleTitle: "Ready when you are",
-  idleDescription:
-    "Preview the five topics, then record one continuous memo.",
-  topics: WALKTHROUGH_TOPICS,
+const VOICE_FIELD_LABELS: Readonly<Record<string, string>> = {
+  "allergens-home.pets_at_home": "Whether you have pets and what kind",
+  "health-devices.bp_cuff": "Whether you have a blood-pressure cuff",
+  "health-devices.scale": "Whether your scale is smart or basic",
+  "home-air.air_purifier": "Whether you use an air purifier and what kind",
+  "home-air.air_quality_meter": "What indoor air quality you measure",
+  "home-air.damp_or_mold": "Whether you have damp or mold at home",
+  "home-air.stove": "What kind of stove you cook on",
+  "home-air.ventilation": "How fresh air enters your home",
+  "home-location.area_type":
+    "Whether you live in a city, suburb, or rural area",
+  "home-location.location": "Your city or region, not your address",
+  "lighting.daytime_light": "How much daylight you get during the day",
+  "lighting.evening_light": "How bright and warm your evening light is",
+  "lighting.morning_light_access": "How you get daylight after waking",
+  "recovery-access.cold_exposure": "What cold exposure you use, if any",
+  "recovery-access.red_light": "Whether you can use red light therapy",
+  "recovery-access.sauna_access": "Where you can use a sauna, if anywhere",
+  "sleep-environment.bedding_overheating":
+    "How often your bedding makes you overheat",
+  "sleep-environment.co2_meter": "Whether you have a bedroom CO2 meter",
+  "sleep-environment.co2_typical_ppm": "Your typical bedroom CO2 reading",
+  "sleep-environment.co_sleepers": "Who shares your bed",
+  "sleep-environment.darkness": "How dark your bedroom stays at night",
+  "sleep-environment.humidity_known":
+    "How you measure or manage bedroom humidity",
+  "sleep-environment.mattress_satisfaction":
+    "How comfortable your mattress feels",
+  "sleep-environment.night_noise": "How noisy your bedroom is at night",
+  "sleep-environment.night_temp_c": "Your bedroom temperature at night",
+  "sleep-environment.noise_countermeasures":
+    "How you block noise while sleeping",
+  "sleep-environment.phone_by_bed": "Where your phone stays at night",
+  "sleep-environment.temp_control": "How you control bedroom temperature",
+  "sleep-environment.window_at_night":
+    "Whether your window is open or closed at night",
+  "workspace.breaks": "How often you take breaks from sitting",
+  "workspace.chair": "What kind of chair you use",
+  "workspace.desk_hours": "How many hours you spend at a desk each day",
+  "workspace.external_keyboard":
+    "Whether you use an external keyboard with a laptop",
+  "workspace.screen_at_eye_level": "Whether your screen is at eye level",
+  "workspace.screen_setup": "Whether you use a laptop or external monitor",
+  "workspace.standing_desk": "Whether your desk adjusts for standing",
+  "workspace.work_mode": "Whether you work at home, an office, or both",
+  "workspace.wrist_complaints": "Whether desk work causes wrist discomfort",
 };
 
-const UPDATE_SCRIPT: EnvironmentVoiceScript = {
+const VOICE_TOPIC_COPY: Readonly<
+  Record<
+    string,
+    {
+      eyebrow: string;
+      title: string;
+    }
+  >
+> = {
+  air: {
+    eyebrow: "Home & air",
+    title: "Your home and indoor air",
+  },
+  light: {
+    eyebrow: "Light",
+    title: "Light through your day",
+  },
+  recovery: {
+    eyebrow: "Tools & devices",
+    title: "Recovery tools and health devices",
+  },
+  sleep: {
+    eyebrow: "Sleep",
+    title: "Your bedroom at night",
+  },
+  workspace: {
+    eyebrow: "Workspace",
+    title: "Your work setup",
+  },
+};
+
+function buildUpdateScript(notes: HabitatIndicatorNotes): EnvironmentVoiceScript {
+  return {
   flow: "update",
   dialogTitle: "Update your environment",
-  idleTitle: "Record what changed",
+  idleTitle: "Tell Murph what changed",
   idleDescription:
-    "You do not need to repeat the full walkthrough. Mention only what is new or different.",
+    "Speak naturally. Murph will save only the clear details that changed.",
   topics: [
     {
+      fields: listEnvironmentInterviewFields("update")
+        .filter(({ indicator }) => indicator.priority !== "low")
+        .map((field) => toVoiceField(field, notes)),
       id: "update",
       title: "What changed?",
       eyebrow: "Quick update",
       prompt:
-        "Describe anything that changed at home, in your bedroom, workspace, lighting, air, water, recovery setup or devices. Murph will update only the clear details.",
+        "Describe anything that changed in your home, sleep setup, lighting, recovery tools, or workspace.",
     },
   ],
-};
+  };
+}
 
-const GAP_TOPIC_TITLES: Readonly<Record<string, string>> = {
-  sleep: "Your sleep setup",
-  air: "Air and water at home",
-  light: "Your lighting",
-  recovery: "Recovery and devices",
-  workspace: "Your workspace",
-};
-
-const COLLECTION_TOPICS = [
-  {
-    aspectIds: ["sleep-environment"],
-    id: "sleep",
-    title: "Sleep",
-  },
-  {
-    aspectIds: ["home-location", "home-air", "water", "allergens-home"],
-    id: "air",
-    title: "Air & water",
-  },
-  {
-    aspectIds: ["lighting"],
-    id: "light",
-    title: "Light",
-  },
-  {
-    aspectIds: ["recovery-access", "health-devices"],
-    id: "recovery",
-    title: "Recovery & devices",
-  },
-  {
-    aspectIds: ["workspace"],
-    id: "workspace",
-    title: "Workspace",
-  },
-] as const;
+export const DEFAULT_ENVIRONMENT_VOICE_SCRIPT = buildMissingScript({}, {});
 
 export function buildEnvironmentVoiceScript(
   values: HabitatValues,
+  notes: HabitatIndicatorNotes = {},
 ): EnvironmentVoiceScript {
-  const gaps = COLLECTION_TOPICS.map((topic) => {
-    const focus: string[] = [];
-    let resolved = 0;
-    let total = 0;
-    for (const aspectId of topic.aspectIds) {
-      const aspect = HABITAT_CATALOG.aspects.find(
-        (candidate) => candidate.id === aspectId,
-      );
-      if (!aspect) {
-        continue;
-      }
-      const aspectValues = values[aspectId] ?? {};
-      for (const indicator of aspect.indicators) {
-        if (indicator.priority === "low") {
-          continue;
-        }
-        total += 1;
-        const value = aspectValues[indicator.id];
-        if (value !== undefined && value !== null) {
-          resolved += 1;
-          continue;
-        }
-        focus.push(indicator.label);
-      }
+  const missingScript = buildMissingScript(values, notes);
+  const hasKnownOrDeclinedValue = Object.values(values).some((aspect) =>
+    Object.values(aspect).some(
+      (value) => value !== null && value !== undefined,
+    ),
+  );
+  if (!hasKnownOrDeclinedValue) {
+    return missingScript;
+  }
+  return missingScript.flow === "update"
+    ? missingScript
+    : { ...missingScript, flow: "fill-gaps" };
+}
+
+export function buildEnvironmentVoiceScriptForIndicator(
+  indicatorId: string,
+  notes: HabitatIndicatorNotes = {},
+): EnvironmentVoiceScript | null {
+  for (const group of ENVIRONMENT_INTERVIEW_TOPIC_GROUPS) {
+    const field = listEnvironmentInterviewFields(group.id).find(
+      ({ indicator }) => indicator.id === indicatorId,
+    );
+    if (!field) {
+      continue;
     }
-    return { ...topic, focus, resolved, total };
-  });
-  const resolved = gaps.reduce((sum, topic) => sum + topic.resolved, 0);
-  const total = gaps.reduce((sum, topic) => sum + topic.total, 0);
-  if (resolved === 0) {
-    return DEFAULT_ENVIRONMENT_VOICE_SCRIPT;
+    const voiceField = toVoiceField(field, notes);
+    const voiceTopicCopy = VOICE_TOPIC_COPY[group.id];
+    return {
+      dialogTitle: "Add an Environment detail",
+      flow: "update",
+      idleDescription:
+        "Answer one short prompt. Murph processes your answer as you speak.",
+      idleTitle: "Ready when you are",
+      topics: [
+        {
+          eyebrow: voiceTopicCopy?.eyebrow ?? group.eyebrow,
+          fields: [voiceField],
+          focus: [voiceField.label],
+          id: `${group.id}:0`,
+          prompt: topicPrompt(1),
+          title: voiceTopicCopy?.title ?? group.title,
+        },
+      ],
+    };
+  }
+  return null;
+}
+
+export function buildEnvironmentVoiceScriptForGroup(
+  groupId: string,
+  values: HabitatValues,
+  notes: HabitatIndicatorNotes = {},
+): EnvironmentVoiceScript | null {
+  const group = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.find(
+    (candidate) => candidate.id === groupId,
+  );
+  if (!group) {
+    return null;
   }
 
-  const incompleteTopics = gaps.filter((topic) => topic.focus.length > 0);
-  const [firstIncompleteTopic, ...remainingIncompleteTopics] = incompleteTopics;
-  if (!firstIncompleteTopic || resolved === total) {
-    return UPDATE_SCRIPT;
-  }
-
-  const buildGapTopic = (
-    gap: (typeof incompleteTopics)[number],
-  ): EnvironmentVoiceTopic => ({
-    id: gap.id,
-    title: GAP_TOPIC_TITLES[gap.id] ?? gap.title,
-    eyebrow: gap.title,
-    prompt:
-      "Cover only the details Murph is still missing. If something does not apply or you would rather skip it, say so.",
-    focus: gap.focus,
+  const allFields = listEnvironmentInterviewFields(group.id);
+  const missingFields = allFields.filter(
+    ({ aspectId, indicator }) =>
+      values[aspectId]?.[indicator.id] === undefined,
+  );
+  const selectedFields = missingFields.length > 0 ? missingFields : allFields;
+  const topics = chunk(
+    selectedFields.map((field) => toVoiceField(field, notes)),
+    MAX_TOPIC_FIELDS,
+  ).map((fields, chunkIndex): EnvironmentVoiceTopic => {
+    const copy = VOICE_TOPIC_COPY[group.id];
+    return {
+      eyebrow: copy?.eyebrow ?? group.eyebrow,
+      fields,
+      focus: fields.map((field) => field.label),
+      id: `${group.id}:section:${chunkIndex}`,
+      prompt: topicPrompt(fields.length),
+      title: copy?.title ?? group.title,
+    };
   });
-  const topics: [EnvironmentVoiceTopic, ...EnvironmentVoiceTopic[]] = [
-    buildGapTopic(firstIncompleteTopic),
-    ...remainingIncompleteTopics.map(buildGapTopic),
-  ];
+  const firstTopic = topics[0];
+  if (!firstTopic) {
+    return null;
+  }
 
   return {
-    flow: "fill-gaps",
-    dialogTitle: "Fill the gaps in your report",
-    idleTitle: "Only the missing details",
-    idleDescription: `${topics.length} short ${
-      topics.length === 1 ? "topic" : "topics"
-    }, based on what Murph does not know yet.`,
-    topics,
+    dialogTitle:
+      missingFields.length > 0
+        ? `Complete ${group.title}`
+        : `Update ${group.title}`,
+    flow: missingFields.length > 0 ? "fill-gaps" : "update",
+    idleDescription:
+      "Speak naturally. Murph saves each clear detail as you cover this section.",
+    idleTitle: `Talk through ${(
+      VOICE_TOPIC_COPY[group.id]?.title ?? group.title
+    ).toLowerCase()}`,
+    initialCoveredDetails: allFields.length - missingFields.length,
+    totalDetails: allFields.length,
+    topics: [firstTopic, ...topics.slice(1)],
   };
+}
+
+export function findEnvironmentVoiceTopicForField(
+  script: EnvironmentVoiceScript,
+  aspectId: string,
+  indicatorId: string,
+): string | null {
+  return (
+    script.topics.find(
+      (topic) =>
+        topic.fields?.some(
+          (field) =>
+            field.aspectId === aspectId && field.indicatorId === indicatorId,
+        ),
+    )?.id ?? null
+  );
+}
+
+export function findEnvironmentVoiceTopicForIndicator(
+  script: EnvironmentVoiceScript,
+  indicatorId: string,
+): string | null {
+  return (
+    script.topics.find(
+      (topic) =>
+        topic.fields?.some((field) => field.indicatorId === indicatorId),
+    )?.id ?? null
+  );
+}
+
+function buildMissingScript(
+  values: HabitatValues,
+  notes: HabitatIndicatorNotes,
+): EnvironmentVoiceScript {
+  const interviewFields = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap((group) =>
+    listEnvironmentInterviewFields(group.id).filter(
+      ({ indicator }) => indicator.priority !== "low",
+    ),
+  );
+  const totalDetails = interviewFields.length;
+  const initialCoveredDetails = interviewFields.filter(
+    ({ aspectId, indicator }) => values[aspectId]?.[indicator.id] !== undefined,
+  ).length;
+  const topics = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap((group) => {
+    const missingFields = listEnvironmentInterviewFields(group.id)
+      .filter(
+        ({ aspectId, indicator }) =>
+          indicator.priority !== "low" &&
+          values[aspectId]?.[indicator.id] === undefined,
+      )
+      .map((field) => toVoiceField(field, notes));
+    return chunk(missingFields, MAX_TOPIC_FIELDS).map(
+      (fields, chunkIndex): EnvironmentVoiceTopic => {
+        const voiceTopicCopy = VOICE_TOPIC_COPY[group.id];
+        return {
+          eyebrow: voiceTopicCopy?.eyebrow ?? group.eyebrow,
+          fields,
+          focus: fields.map((field) => field.label),
+          id: `${group.id}:${chunkIndex}`,
+          prompt: topicPrompt(fields.length),
+          title: voiceTopicCopy?.title ?? group.title,
+        };
+      },
+    );
+  });
+  const firstTopic = topics[0];
+  if (!firstTopic) {
+    return {
+      ...buildUpdateScript(notes),
+      initialCoveredDetails,
+      totalDetails,
+    };
+  }
+
+  const typedTopics: [EnvironmentVoiceTopic, ...EnvironmentVoiceTopic[]] = [
+    firstTopic,
+    ...topics.slice(1),
+  ];
+  const hasKnownOrDeclinedValue = Object.values(values).some((aspect) =>
+    Object.values(aspect).some(
+      (value) => value !== null && value !== undefined,
+    ),
+  );
+  return {
+    dialogTitle: hasKnownOrDeclinedValue
+      ? "Continue your Environment report"
+      : "Build your Environment report",
+    flow: hasKnownOrDeclinedValue ? "fill-gaps" : "walkthrough",
+    idleDescription: `${typedTopics.length} focused ${
+      typedTopics.length === 1 ? "topic" : "topics"
+    }. Murph saves each topic before moving on.`,
+    idleTitle: hasKnownOrDeclinedValue
+      ? "Pick up where you left off"
+      : "Ready when you are",
+    initialCoveredDetails,
+    totalDetails,
+    topics: typedTopics,
+  };
+}
+
+function toVoiceField({
+  aspectId,
+  indicator,
+}: ReturnType<
+  typeof listEnvironmentInterviewFields
+>[number], notes: HabitatIndicatorNotes): EnvironmentVoiceField {
+  return {
+    aspectId,
+    indicatorId: indicator.id,
+    label: VOICE_FIELD_LABELS[`${aspectId}.${indicator.id}`] ?? indicator.label,
+    ...(notes[aspectId]?.[indicator.id]
+      ? { existingNote: notes[aspectId][indicator.id] }
+      : {}),
+    ...(indicator.question ? { question: indicator.question } : {}),
+    valueType: indicator.valueType,
+  };
+}
+
+function topicPrompt(fieldCount: number): string {
+  if (fieldCount === 1) {
+    return "Describe the item below. If you do not know, say so.";
+  }
+  return "Describe each item below. If you do not know something, say so.";
+}
+
+function chunk<T>(values: readonly T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    result.push(values.slice(index, index + size));
+  }
+  return result;
 }

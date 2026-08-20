@@ -28,6 +28,10 @@ export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
     method: "DELETE",
     suffix: "environment-voice/delete",
   },
+  environmentRealtimeCall: {
+    method: "POST",
+    suffix: "environment-realtime/call",
+  },
   inferenceVerification: {
     method: "POST",
     suffix: "inference/verify",
@@ -135,6 +139,15 @@ export function buildCloudflareHostedControlEnvironmentVoiceDeletePath(
 ): string {
   return buildCloudflareHostedControlUserRoutePath(
     "environmentVoiceDelete",
+    userId,
+  );
+}
+
+export function buildCloudflareHostedControlEnvironmentRealtimeCallPath(
+  userId: string,
+): string {
+  return buildCloudflareHostedControlUserRoutePath(
+    "environmentRealtimeCall",
     userId,
   );
 }

@@ -68,6 +68,7 @@ export type HostedSystemMailboxRouteAction =
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
+  | "run-environment-interview"
   | "run-environment-voice"
   | "import-reported-daily-metric"
   | "apply-runtime-control-request";
@@ -540,6 +541,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
+    || value === "run-environment-interview"
     || value === "run-environment-voice"
     || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
