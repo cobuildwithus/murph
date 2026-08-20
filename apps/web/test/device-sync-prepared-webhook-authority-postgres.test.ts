@@ -2,11 +2,16 @@ import { createHmac, generateKeyPairSync, randomUUID } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
 import {
+  DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA,
+  type DeviceWebhookQueuePayloadV1,
+} from "@murphai/cloudflare-hosted-control/device-webhook-queue";
+import {
   createDeviceSyncRegistry,
   createStravaDeviceSyncProvider,
 } from "@murphai/device-syncd/public-ingress";
 import { createConfiguredDeviceSyncRegistryFromConfigs } from "@murphai/device-syncd/config";
 import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   DEVICE_SYNC_SOURCE_USER_DISCONNECTED_ERROR_CODE,
@@ -28,6 +33,7 @@ import {
   PrismaDeviceSyncControlPlaneStore,
 } from "@/src/lib/device-sync/prisma-store";
 import { HostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
+import { admitHostedDeviceWebhookBatch } from "@/src/lib/device-sync/webhook-batch";
 import {
   beginHostedDeviceSyncConnectionSourceReconnect,
   captureHostedDeviceSyncConnectionSourceReconnect,
@@ -422,6 +428,16 @@ async function prepareTimestampLessDailyHint(input: {
   return prepared;
 }
 
+function queuePreparedWebhook(
+  preparedWebhook: PreparedDeviceSyncWebhookV1,
+): DeviceWebhookQueuePayloadV1 {
+  return {
+    preparedWebhook,
+    schema: DEVICE_WEBHOOK_QUEUE_PAYLOAD_SCHEMA,
+    transportId: randomUUID(),
+  };
+}
+
 async function expectNoWebhookEffects(
   fixture: Fixture,
   input: {
@@ -680,6 +696,172 @@ describe.skipIf(!runPostgresProof)(
         await expect(fixture.prisma.hostedMailboxItem.count({
           where: { userId: fixture.memberId },
         })).resolves.toBe(1);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("retains an older queued webhook when a newer missing-source candidate is still pending", async () => {
+      const sourceProviderSlug = "apple_health_kit";
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const newerReceivedAt = new Date(fixture.receivedAt.getTime() + 1_000);
+      let providerStatus: "connected" | "unknown" = "unknown";
+      const providerFetch = vi.fn(async () => new Response(JSON.stringify({
+        data: [{ slug: sourceProviderSlug, status: providerStatus }],
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        await fixture.prisma.deviceConnectionSource.delete({
+          where: { id: fixture.sourceId },
+        });
+        const older = await prepareDailyData({
+          eventAt: fixture.receivedAt,
+          fixture,
+          receivedAt: fixture.receivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        const newer = await prepareDailyData({
+          eventAt: newerReceivedAt,
+          fixture,
+          receivedAt: newerReceivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        const olderEntry = queuePreparedWebhook(older);
+        const newerEntry = queuePreparedWebhook(newer);
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        const firstBatch = await admitHostedDeviceWebhookBatch({
+          entries: [olderEntry, newerEntry],
+          async handle(entry) {
+            if (entry.transportId === olderEntry.transportId) {
+              throw deviceSyncError({
+                code: "WEBHOOK_ACCOUNT_NOT_READY",
+                httpStatus: 503,
+                message: "Synthetic earlier admission timeout.",
+                retryable: true,
+              });
+            }
+            return consumeService.handlePreparedWebhook(entry.preparedWebhook);
+          },
+        });
+
+        expect(firstBatch.entries.map((entry) => entry.disposition)).toEqual([
+          "retry",
+          "retry",
+        ]);
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(consumeService.handlePreparedWebhook(older)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(fixture.prisma.deviceWebhookTrace.count({
+          where: {
+            provider: "junction",
+            traceId: { in: [older.traceId, newer.traceId] },
+          },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+
+        providerStatus = "connected";
+        await expect(consumeService.handlePreparedWebhook(newer)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+        await expect(consumeService.handlePreparedWebhook(older)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+
+        expect(providerFetch).toHaveBeenCalledTimes(2);
+        await expect(fixture.prisma.deviceWebhookTrace.count({
+          where: {
+            provider: "junction",
+            status: "processed",
+            traceId: { in: [older.traceId, newer.traceId] },
+          },
+        })).resolves.toBe(2);
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(2);
+      } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it("keeps an unsupported missing Junction source retryable without creating state", async () => {
+      const sourceProviderSlug = "future_sensor";
+      const fixture = await createFixture({ sourceLastErrorCode: null });
+      const providerFetch = vi.fn(async () => new Response(JSON.stringify({
+        data: [{ slug: sourceProviderSlug, status: "connected" }],
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      const registry = createJunctionRegistry(providerFetch);
+
+      try {
+        await fixture.prisma.deviceConnectionSource.delete({
+          where: { id: fixture.sourceId },
+        });
+        const prepared = await prepareDailyData({
+          fixture,
+          registry,
+          sourceProviderSlug,
+        });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+
+        expect(providerFetch).not.toHaveBeenCalled();
+        await expect(fixture.prisma.deviceConnectionSource.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceWebhookTrace.findUnique({
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.prisma.deviceSyncDirtyConnection.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
       } finally {
         await cleanupFixture(fixture);
       }

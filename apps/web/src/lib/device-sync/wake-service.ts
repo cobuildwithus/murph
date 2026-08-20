@@ -4,6 +4,7 @@ import {
   JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
@@ -1994,7 +1995,12 @@ async function prepareHostedWebhookSourceObservation(input: {
           tx,
         });
         if (!source) {
-          if (!sourceInstanceKey) {
+          if (
+            !sourceInstanceKey
+            || resolveJunctionDeviceConnectRouteByProviderSlug(
+              sourceProviderSlug,
+            ) === null
+          ) {
             throw webhookSourceNotReadyError(
               "Device source setup is not visible yet. Retry shortly.",
             );
@@ -2034,10 +2040,14 @@ async function prepareHostedWebhookSourceObservation(input: {
         if (
           source.status !== "disconnected"
           || source.lastErrorCode !== null
-          || source.lastSeenAt.getTime() > Date.parse(input.now)
         ) {
           await completeHostedWebhookTraceTx(input, tx);
           return { kind: "terminal" };
+        }
+        if (source.lastSeenAt.getTime() > Date.parse(input.now)) {
+          throw webhookSourceNotReadyError(
+            "A newer device source setup is still pending. Retry shortly.",
+          );
         }
         const connectionHandler = input.registry
           ?.get("junction")

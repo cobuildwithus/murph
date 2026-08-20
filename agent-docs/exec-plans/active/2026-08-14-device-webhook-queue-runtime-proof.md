@@ -162,6 +162,18 @@ Updated: 2026-08-20
   leaves one frozen-time disconnected candidate, releases the trace, creates
   no webhook effects, and lets the same prepared event connect exactly once
   after provider authority becomes live.
+- Accepted the first Apollo full-patch findings for missing-source recovery.
+  A disconnected candidate observed by a newer queued event is pending
+  authority, not terminal proof for an older retained event, so the older event
+  now remains retryable without completing its trace. The real-PostgreSQL
+  production-batch scenario proves that both same-account events remain
+  retained until provider authority becomes live, then each commits its own
+  durable payload exactly once.
+- Missing-source reconstruction now also requires an existing Junction connect
+  route. An authenticated but unsupported provider slug remains retryable and
+  cannot create a candidate, trace, dirty work, signal, or mailbox item. This
+  guard applies only when the canonical source row is absent, preserving the
+  established-source behavior and explicit disconnect fences.
 
 ## Verification
 
@@ -177,8 +189,10 @@ Updated: 2026-08-20
   live main/DLQ metrics were both zero with 14-day retention and the alert
   bindings configured. The workerd reseal regression now passes; its follow-up
   PR and protected redeploy passed. The corrected transport canary accepted
-  Queue traffic. The missing-source focused unit proof and all 11
-  real-PostgreSQL authority cases now pass, including inactive provider proof
-  followed by successful replay of the same prepared event. Exact-head final
+  Queue traffic. The missing-source and queue/wake focused unit proof now passes
+  all 198 cases, and all 13 real-PostgreSQL authority cases pass. This includes
+  inactive provider proof followed by successful replay of the same prepared
+  event, same-account older/newer Queue ordering, and unsupported missing-source
+  rejection without state. Prepared Web typechecking passes. Exact-head final
   review, Web redeploy, bounded encrypted redrive, and the repeated production
   canary remain pending.
