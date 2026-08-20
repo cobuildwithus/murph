@@ -1647,8 +1647,11 @@ describe("RunnerContainer", () => {
     }).catch(() => undefined);
     await startObserved.promise;
     Object.assign(container, {
-      containerStartObservedBy: "cold-start-ready",
-      containerStartedAtMs: Date.now(),
+      currentContainerStart: {
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: Date.now(),
+      },
     });
     readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
     await vi.waitFor(() => expect(destroy).toHaveBeenCalledOnce());
@@ -1773,6 +1776,110 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("does not attach status-settled warm readiness to a slow replacement start", async () => {
+    const fixedNowMs = Date.parse("2026-08-20T16:32:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let healthChecks = 0;
+    let status: "running" | "stopped" = "running";
+    let lastChange = fixedNowMs;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      if (healthChecks === 2) {
+        return new Response(JSON.stringify({ error: "stale warm shell" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+      if (healthChecks === 3) {
+        return new Response("Failed to connect to local container transport", {
+          headers: {
+            "content-type": "text/plain; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
+      return new Response(JSON.stringify(createRunnerHealthResult()), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: 200,
+      });
+    });
+    let containerOptions: CreateContainerDoubleInput;
+    const destroy = vi.fn(async () => {
+      status = "stopped";
+      lastChange = Date.now();
+      containerOptions.platformRunning = false;
+    });
+    let container: RunnerContainer;
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+      lastChange = Date.now();
+      containerOptions.platformRunning = true;
+      container.onStart();
+      throw new DOMException("Timed out", "TimeoutError");
+    });
+    containerOptions = {
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "90000",
+      },
+      getState: vi.fn(async () => ({ lastChange, status })),
+      initialStatus: "running",
+      platformRunning: true,
+      startAndWaitForPorts,
+    };
+    ({ container } = createContainerDouble(containerOptions));
+
+    try {
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toMatchObject({ kind: "ready" });
+
+      nowMs += 6_000;
+      const firstReplacementWait = container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      });
+      await expect(firstReplacementWait).rejects.toMatchObject({ name: "TimeoutError" });
+      expect(destroy).toHaveBeenCalledOnce();
+
+      container.onStop({ exitCode: 0, reason: "exit" });
+      nowMs += 10_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).rejects.toMatchObject({
+        name: "HostedRunnerContainerMetadataResponseError",
+        statusCode: 503,
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+
+      nowMs = fixedNowMs + 64_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(healthChecks).toBe(4);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("restarts an unobserved container after the readiness window elapses", async () => {
     const timeoutControllers: AbortController[] = [];
     const timeout = vi.spyOn(AbortSignal, "timeout")
@@ -1864,8 +1971,11 @@ describe("RunnerContainer", () => {
       initialStatus: "running",
     });
     Object.assign(container, {
-      containerStartObservedBy: "cold-start-ready",
-      containerStartedAtMs: Date.now(),
+      currentContainerStart: {
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: Date.now(),
+      },
     });
 
     try {
@@ -1973,8 +2083,11 @@ describe("RunnerContainer", () => {
       });
       await startObserved.promise;
       Object.assign(container, {
-        containerStartObservedBy: "cold-start-ready",
-        containerStartedAtMs: Date.now(),
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
       });
       readinessDeadline.abort(new DOMException("Timed out", "TimeoutError"));
       await Promise.resolve();
@@ -6908,8 +7021,11 @@ describe("RunnerContainer", () => {
         }),
       });
       Object.assign(container, {
-        containerStartObservedBy: "cold-start-ready",
-        containerStartedAtMs: Date.now(),
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
       });
       await container.invoke({
         job: {
@@ -6989,8 +7105,11 @@ describe("RunnerContainer", () => {
         }),
       });
       Object.assign(container, {
-        containerStartObservedBy: "cold-start-ready",
-        containerStartedAtMs: Date.now(),
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
       });
 
       const invokePromise = container.invoke({
@@ -8347,8 +8466,11 @@ describe("RunnerContainer", () => {
       initialStatus: "running",
     });
     Object.assign(container, {
-      containerStartObservedBy: "cold-start-ready",
-      containerStartedAtMs: Date.now(),
+      currentContainerStart: {
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: Date.now(),
+      },
     });
 
     vi.useFakeTimers();
@@ -8424,8 +8546,11 @@ describe("RunnerContainer", () => {
         startAndWaitForPorts: startAndWaitForPortsMock,
       });
       Object.assign(container, {
-        containerStartObservedBy: "cold-start-ready",
-        containerStartedAtMs: Date.now(),
+        currentContainerStart: {
+          pendingUntilMs: null,
+          readyObservedBy: "cold-start-ready",
+          startedAtMs: Date.now(),
+        },
       });
       const invokePromise = container.invoke({
         job: {

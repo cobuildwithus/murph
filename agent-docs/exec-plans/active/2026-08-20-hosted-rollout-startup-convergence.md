@@ -52,12 +52,42 @@ converges without restart thrash while the second group retains bounded recovery
 5. Run focused proof, commit and push the candidate, then resolve the required
    ReviewGPT and exact-head CI gates without merging or deploying.
 
+## Round 2 requirement-level retrospective
+
+- Original requirement: let one slow replacement start survive several short
+  readiness callers, then become healthy, while preserving immediate cleanup
+  for stale, fatal, stopped, and previously ready unhealthy containers.
+- First-reviewed shape: `1288c1ee38d51dcf587fa52356c3b9f3ef3a2ce9`
+  changed 419 lines across nine files. It inferred a pending start from the
+  platform timestamp plus separate lifecycle-observation fields.
+- Current reviewed shape: `8e120fce89d67755152764873682e6eb29fbcf29`
+  changed 623 lines across eleven files. Review remediation added a separate
+  pending deadline, upgraded lifecycle observations after health, and expanded
+  the warm/cold classifiers and regressions. The repeated gap is that those
+  facts still describe a container without proving they belong to the current
+  replacement generation.
+- Decision: continue this PR, but collapse the three overlapping start-time,
+  observation, and deadline fields into one in-memory current-start record
+  owned by the existing `RunnerContainer` lifecycle lock. A stopped status,
+  status-settled destroy, or applicable `onStop` ends that record; a new start
+  creates a fresh record; readiness marks only that record ready. A delayed
+  stop callback is ignored when Cloudflare already reports a running
+  replacement. No durable state, lifecycle manager, queue, fence, or new owner
+  is added.
+- Required proof: begin with a previously ready warm shell, settle its destroy
+  by stopped status without `onStop`, keep the single replacement start alive
+  across short callers until health at roughly 58 seconds, and retain the
+  existing UserRunner retry-to-acceptance proof plus fatal/stale/ready-shell
+  cleanup coverage.
+
 ## State
 
 Active. Initial exact-head CI passed. Preliminary and final ReviewGPT found two
 connected high gaps in lifecycle ordering and immediate startup-transport
-handling; both findings are accepted, reproduced, and remediated locally. A
-fresh exact-head review and CI remain.
+handling; both were remediated. Final round two required the retrospective
+above after finding stale readiness evidence across status-only replacement.
+That finding is accepted, reproduced, and remediated locally. A fresh
+exact-head review and CI remain.
 
 ## Evidence
 
@@ -87,7 +117,19 @@ fresh exact-head review and CI remain.
   signal remains active, then reaches health at 58 seconds with zero destroys.
 - A UserRunner owner regression proves an ordinary retry of the same accepted
   orchestration reaches runtime acceptance after the container becomes ready.
-- Focused Cloudflare verification passes after remediation: 415 tests across
+- ReviewGPT round two found that status-confirmed destroy settlement without an
+  `onStop` callback left the old shell's readiness observation attached to the
+  replacement. A production-shaped regression failed by observing a second
+  destroy before remediation.
+- The remediation combines the prior start timestamp, observation, and pending
+  deadline into one current-start record. Status-confirmed stop ends that
+  record; the replacement creates a fresh record; a delayed old `onStop` cannot
+  clear a replacement Cloudflare still reports running.
+- The replacement-boundary regression now starts from a previously ready warm
+  shell, settles destroy by status without `onStop`, ignores a delayed old stop
+  callback, survives timeout and fast HTTP 503 callers, and reaches health at
+  58 seconds with one replacement start and no second destroy.
+- Focused Cloudflare verification passes after remediation: 416 tests across
   five files plus package typecheck.
 
 ## Working Set
