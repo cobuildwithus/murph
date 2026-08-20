@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "apple-health-sync-freshness",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Apple Health freshness catches up",
+    "summary": "After Murph successfully imports new Apple Health data, the app's freshness status catches up on its next online refresh.",
+    "details": "A provider check by itself still does not count as synced. The timestamp advances only after the import succeeds, so empty and failed pulls keep the existing recovery state.",
+    "relevanceTags": ["apple-health", "device-sync", "ios"],
+    "sourcePullRequests": [2079]
+  }
+}

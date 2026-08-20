@@ -84,5 +84,13 @@ artifacts.
 - Root cause: proven through the current native client, Web read model, hosted
   runtime completion path, primary control-plane state, and redacted runtime
   completion evidence.
-- Focused protocol, runtime checkpoint/replay, store idempotency, companion
-  status, typecheck, ReviewGPT, CI, and deployment compatibility proof: pending.
+- Shared protocol parser: 100 focused tests passed.
+- Runtime checkpoint, replay, and mailbox flow: 2,419 tests passed with five
+  skipped; assistant-runtime typecheck passed.
+- Web authority, exact-payload idempotency, signal read, and companion status:
+  227 focused tests passed; prepared Web typecheck and focused lint passed with
+  two unrelated existing test warnings.
+- Cloudflare callback forwarding: one focused test passed with 191 unrelated
+  cases skipped; Cloudflare typecheck passed.
+- Changelog generation and archive/feed/page coverage: 57 focused tests passed.
+- ReviewGPT, required CI, and deployment compatibility proof: pending.
