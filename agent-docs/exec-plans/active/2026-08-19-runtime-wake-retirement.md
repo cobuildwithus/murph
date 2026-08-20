@@ -57,6 +57,13 @@ All evidence is aggregate and contains no production identifiers.
 - Imported-but-unhandled items remain durable in runtime state with their own
   retry timestamp. Re-signaling them from Web bypassed that owner and recreated
   the minute-level no-op loop.
+- After the imported-frontier correction reached the exact production domain,
+  the handoff sweep fell from roughly twenty candidates per minute to one. A
+  second bounded source remained: about twenty long-running Junction schedules
+  retained the same canonical due tuple, and every five-minute recovery bucket
+  re-signaled their duplicate mailbox items. Those signals produced another
+  delayed wave of successful zero-fetch, zero-import invocations even though
+  the runtime already owned the imported work.
 
 ## Product UX Patch
 
@@ -97,6 +104,10 @@ All evidence is aggregate and contains no production identifiers.
 8. Retire the Web recovery sweep's ownership at the persisted system imported
    frontier, preserve recovery for never-imported items, and verify production
    quiescence after the follow-up Web deployment.
+9. Keep the direct Temporal signal on the first scheduled device-sync mailbox
+   append, but do not signal a duplicate append from a later recovery bucket.
+   Let the imported-frontier handoff sweep recover a missed first signal and the
+   runtime's persisted retry timestamp own imported continuation work.
 
 ## Verification
 
@@ -106,5 +117,8 @@ All evidence is aggregate and contains no production identifiers.
   logs.
 - Follow-up focused regressions, real-PostgreSQL imported-frontier proof, Web
   typecheck, and focused lint: passed.
-- Follow-up exact-head ReviewGPT gates, CI, deploy, and production convergence:
-  pending.
+- Imported-frontier PR, exact-head ReviewGPT gates, required CI, merge, and Web
+  deployment: passed. The production handoff candidate count converged from
+  roughly twenty per minute to one with no warning/error shift.
+- Duplicate due-reconcile signal retirement, exact-head gates, deploy, and final
+  production convergence: pending.
