@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Connected profiles keep their history",
-    "summary": "Murph now brings older connected-health profiles forward when their timestamps use the earlier format, without losing member corrections.",
-    "details": "Recovery is limited to the exact prior timestamp shape. Conflicting provider values still stop instead of replacing existing health facts, and deleted profile facts stay deleted.",
+    "summary": "Murph now safely refreshes older connected-health profiles after a timestamp improvement, without losing member corrections or duplicating facts.",
+    "details": "Profiles with a stable provider identity move forward only from the exact prior timestamp shape. Other unchanged profile replays keep their existing history. Conflicting provider values still stop instead of replacing existing health facts, and deleted profile facts stay deleted during recovery.",
     "relevanceTags": ["connected-health", "device-sync", "reliability"],
     "sourcePullRequests": [2096]
   }

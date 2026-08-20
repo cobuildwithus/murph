@@ -165,6 +165,18 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    or other semantic change at the same revision still fails closed as a
    source-revision conflict.
 
+   The revision bump also re-admits profiles without a stable provider ID, but
+   it does not migrate their timestamp-derived identity at an equal provider
+   revision. If an earlier `created_at` changes that identity while
+   `updated_at` is unchanged, Core associates the exact same-source,
+   same-facet, timestamp-only replay with its stored provider baseline and
+   keeps the existing event spine as a canonical no-op. This preserves its
+   current member revision or deletion and appends no event revision. Multiple
+   possible predecessors fail as an alias conflict, and any height,
+   demographics, source, or other semantic difference fails atomically as a
+   source-revision conflict. The existing strictly newer no-ID migration
+   remains the only path that adopts a new timestamp-derived identity.
+
    Compact Junction timeseries retain that same single-owner rule. Dense
    `glucose`, `blood_oxygen`, and `stress_level` reconcile and direct-resource
    jobs both use closed provider-calendar-date imports; a precise window must

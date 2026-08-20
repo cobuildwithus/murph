@@ -5451,6 +5451,7 @@ test("Junction reconcile refreshes a revision-1 profile marker once", async () =
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
+      shouldYield: () => false,
     }),
     job,
   );
@@ -5459,6 +5460,7 @@ test("Junction reconcile refreshes a revision-1 profile marker once", async () =
     junctionProfileSummaryCheckedAt: "2026-04-03T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 2,
   });
+  assert.equal(firstResult.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
   const firstSnapshot = importedSnapshots[0] as {
     summaries?: Record<string, unknown[]>;
   };
@@ -5470,7 +5472,7 @@ test("Junction reconcile refreshes a revision-1 profile marker once", async () =
     updated_at: "2026-04-01T09:00:00Z",
   }]);
 
-  await executeJunctionJob(
+  const secondResult = await executeJunctionJob(
     provider,
     createJunctionJobContext({
       account: createAccount({
@@ -5483,6 +5485,7 @@ test("Junction reconcile refreshes a revision-1 profile marker once", async () =
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
+      shouldYield: () => false,
     }),
     job,
   );
@@ -5491,6 +5494,212 @@ test("Junction reconcile refreshes a revision-1 profile marker once", async () =
     requests.filter((url) => new URL(url).pathname.includes("/v2/summary/profile/")).length,
     1,
   );
+  assert.equal(secondResult.metadataPatch, undefined);
+});
+
+test("Junction revision-2 reconcile preserves a no-id profile spine", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-profile-revision-2-no-id");
+  const createdAt = "2026-04-01T09:00:00.000Z";
+  const updatedAt = "2026-05-20T09:00:00.000Z";
+  let providerHeight = 180;
+  const requests: string[] = [];
+  const legacyProfileSnapshot: JunctionSnapshotInput = {
+    importedAt: "2026-05-20T10:00:00.000Z",
+    summaries: {
+      profile: {
+        updated_at: updatedAt,
+        birth_date: "1980-01-01",
+        gender: "other",
+        height: 180,
+        source_device_id: "stable-profile-source",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  };
+  const provider = createJunctionProvider(async (input) => {
+    const url = readUrl(input);
+    requests.push(url);
+    if (url === "https://api.sandbox.us.junction.com/v2/user/providers/junction-user-1") {
+      return createJsonResponse({
+        providers: [{
+          slug: "oura",
+          name: "Oura Ring",
+          status: "connected",
+          resource_availability: { profile: true },
+        }],
+      });
+    }
+    if (url.startsWith("https://api.sandbox.us.junction.com/v2/summary/profile/junction-user-1")) {
+      return createJsonResponse({
+        data: [{
+          created_at: createdAt,
+          updated_at: updatedAt,
+          birth_date: "1980-01-01",
+          gender: "other",
+          height: providerHeight,
+          source_device_id: "stable-profile-source",
+          source: { provider: "oura", type: "ring" },
+        }],
+      });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  }, {
+    summaryResources: ["profile"],
+    timeseriesResources: [],
+  });
+
+  try {
+    const coreRuntime = await import("@murphai/core");
+    await coreRuntime.initializeVault({
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    const predecessor = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >({
+      provider: "junction",
+      snapshot: legacyProfileSnapshot,
+      vaultRoot,
+    }, { corePort: coreRuntime });
+    const predecessorHeight = predecessor.events.find((event) =>
+      event.kind === "observation" && event.metric === "height"
+    );
+    const predecessorDemographics = predecessor.events.find((event) =>
+      event.kind === "note" && event.title === "Junction profile"
+    );
+    assert.ok(predecessorHeight);
+    assert.ok(predecessorDemographics);
+    assert.equal(predecessor.events.every((event) =>
+      event.dataOrigin?.normalizerVersion === "junction-no-id-profile.v1"
+      && event.occurredAt === updatedAt
+      && event.externalRef?.version === updatedAt
+    ), true);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...predecessorHeight,
+        recordedAt: "2026-05-20T10:30:00.000Z",
+        source: "manual",
+        value: 179,
+      },
+    });
+    await coreRuntime.deleteEvent({ vaultRoot, eventId: predecessorDemographics.id });
+
+    const eventShardPaths = [...new Set(predecessor.eventShardPaths)];
+    const readEventRecords = async () => (
+      await Promise.all(eventShardPaths.map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ))
+    ).flat();
+    const beforeRefresh = await readEventRecords();
+    const importSnapshot: ProviderJobContext["importSnapshot"] = async (snapshot) => {
+      const imported = await importDeviceProviderSnapshot<
+        Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+      >({ provider: "junction", snapshot, vaultRoot }, { corePort: coreRuntime });
+      return {
+        canonicalEventCount: imported.events.length,
+        durableDeliveryAccepted: true,
+      };
+    };
+    const revision1Account = createAccount({
+      metadata: {
+        junctionProfileSummaryCheckedAt: "2026-05-20T11:00:00.000Z",
+        junctionProfileSummaryNormalizationRevision: 1,
+      },
+    });
+    const job = createJob("reconcile", {
+      windowStart: "2026-05-19T00:00:00.000Z",
+      windowEnd: "2026-05-20T23:59:59.999Z",
+    });
+    const firstResult = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: revision1Account,
+        importSnapshot,
+        now: "2026-05-20T12:00:00.000Z",
+        shouldYield: () => false,
+      }),
+      job,
+    );
+    assert.equal(firstResult.metadataPatch?.junctionProfileSummaryNormalizationRevision, 2);
+    assert.equal(firstResult.scheduledJobs?.[0]?.payload?.summaryPhaseComplete, true);
+
+    const afterRefresh = await readEventRecords();
+    assert.equal(afterRefresh.length, beforeRefresh.length);
+    const revisionOf = (record: Record<string, unknown>): number => {
+      const lifecycle = record.lifecycle;
+      return lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
+          && "revision" in lifecycle && typeof lifecycle.revision === "number"
+        ? lifecycle.revision
+        : 1;
+    };
+    const isDeleted = (record: Record<string, unknown>): boolean => {
+      const lifecycle = record.lifecycle;
+      return Boolean(
+        lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
+        && "state" in lifecycle && lifecycle.state === "deleted",
+      );
+    };
+    const latestById = new Map<string, Record<string, unknown>>();
+    for (const record of afterRefresh) {
+      if (typeof record.id !== "string") {
+        continue;
+      }
+      const existing = latestById.get(record.id);
+      if (!existing || revisionOf(record) > revisionOf(existing)) {
+        latestById.set(record.id, record);
+      }
+    }
+    const live = [...latestById.values()].filter((record) => !isDeleted(record));
+    const liveHeight = latestById.get(predecessorHeight.id);
+    const deletedDemographics = latestById.get(predecessorDemographics.id);
+    assert.equal(live.length, 2);
+    assert.equal(liveHeight?.source, "manual");
+    assert.equal(liveHeight?.value, 179);
+    assert.equal(isDeleted(deletedDemographics ?? {}), true);
+
+    const requestCountAfterRefresh = requests.filter((url) =>
+      new URL(url).pathname.includes("/v2/summary/profile/")
+    ).length;
+    const replayResult = await executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: createAccount({
+          metadata: {
+            ...revision1Account.metadata,
+            ...firstResult.metadataPatch,
+          },
+        }),
+        importSnapshot,
+        now: "2026-05-20T12:05:00.000Z",
+        shouldYield: () => false,
+      }),
+      job,
+    );
+    assert.equal(replayResult.metadataPatch, undefined);
+    assert.equal(requests.filter((url) =>
+      new URL(url).pathname.includes("/v2/summary/profile/")
+    ).length, requestCountAfterRefresh);
+
+    providerHeight = 181;
+    await assert.rejects(
+      executeJunctionJob(
+        provider,
+        createJunctionJobContext({
+          account: revision1Account,
+          importSnapshot,
+          now: "2026-05-20T12:10:00.000Z",
+          shouldYield: () => false,
+        }),
+        job,
+      ),
+      (error: unknown) => (error as { code?: unknown }).code === "EVENT_SOURCE_REVISION_CONFLICT",
+    );
+    assert.equal((await readEventRecords()).length, afterRefresh.length);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("Junction scheduled polling skips profile after the current normalization marker", async () => {
@@ -5534,6 +5743,7 @@ test("Junction scheduled polling skips profile after the current normalization m
         importedSnapshots.push(snapshot);
         return { imported: true };
       },
+      shouldYield: () => false,
     }),
     createJob("reconcile", {
       windowStart: "2026-04-02T00:00:00.000Z",

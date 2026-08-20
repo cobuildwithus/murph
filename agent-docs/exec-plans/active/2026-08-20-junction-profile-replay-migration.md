@@ -22,8 +22,10 @@ Updated: 2026-08-20
 
 ## Scope
 
-- In scope: the narrow explicit Junction profile predecessor transition,
-  focused diagnostics if needed, tests, and matching durable documentation.
+- In scope: the narrow stable-identity Junction profile predecessor transition,
+  exact equal-revision no-ID replay retention required by the account-wide
+  admission bump, focused diagnostics if needed, tests, and matching durable
+  documentation.
 - Out of scope: relaxing generic external-reference conflicts, accepting
   provider revisions with changed values, rewriting unrelated profile
   identities, or mutating production data directly.
@@ -41,8 +43,10 @@ Updated: 2026-08-20
 - Outcome: Existing members' unchanged connected-health profiles converge
   after the timestamp rollout without losing corrections or restoring deleted
   facts.
-- Reaches: Existing Junction profiles in the released updated-at shape; current
-  profiles and unrelated device facts retain their existing journey.
+- Reaches: Existing stable-identity Junction profiles in the released
+  updated-at shape. Re-admitted no-ID profiles retain their current event spine
+  when the provider revision and semantic facts are unchanged; unrelated
+  device facts retain their existing journey.
 - Proof: Provider-shaped integration coverage exercises ordinary replay,
   member-edited values and chronology, member deletion, malformed predecessor
   chronology, and real same-revision content changes.
@@ -107,6 +111,27 @@ Updated: 2026-08-20
   advances that existing scalar to revision 2 and strengthens the existing
   reconcile regression to prove a revision-1 account fetches once, records
   revision 2 only after import, and then skips the profile again.
+- Final review round 2 found that this account-wide admission bump also
+  re-fetched supported no-ID profiles. When an earlier `created_at` appeared
+  while `updated_at` stayed unchanged, the timestamp-derived external identity
+  changed and Core could append a duplicate, split a member correction, or
+  bypass a deletion. Because account metadata cannot distinguish this cohort,
+  narrowing admission would require new state or a vault preflight. The
+  retrospective therefore keeps the one bounded account-wide refresh, narrows
+  the promised migration to stable identities, and treats an exact no-ID
+  equal-revision timestamp replay as a canonical no-op on the existing spine.
+- The no-ID replay binding uses the existing scoped predecessor index and its
+  stored provider baseline, including a latest deletion. It requires an exact
+  source/facet scope, valid timestamp-derived identities, equal provider
+  revision, earlier incoming creation time, and identical semantic content.
+  Ambiguous owners fail as alias conflicts and semantic changes fail atomically
+  as source-revision conflicts. The existing strictly newer no-ID identity
+  migration remains unchanged.
+- Independent challenge review caught that the first new regression seeded a
+  synthetic generic predecessor rather than the dangerous current
+  `junction-no-id-profile.v1` shape. The corrected regression now starts with a
+  normal current-v1 import whose identity is derived from `updated_at`, then
+  replays an earlier `created_at` at the same provider revision.
 
 ## Verification
 
@@ -114,12 +139,23 @@ Updated: 2026-08-20
   remediation: 1 file, 5 tests (the exact old timestamp migration, the
   created-at generic-marker no-op, both malformed-predecessor negatives, and
   deletion retention), 242 skipped.
-- `pnpm --filter @murphai/importers test` passed after rollout remediation: 19
-  files, 552 tests.
+- `pnpm --filter @murphai/importers test` passed after the no-ID remediation:
+  19 files, 553 tests.
 - The focused five-test run and the full 552-test importer suite passed again
   after adding cross-month and untouched-provider-facet proof.
 - Focused device-sync admission proof passed: 1 file, 2 tests, 319 skipped.
-- `pnpm --filter @murphai/device-syncd test` passed: 49 files, 1,255 tests.
+- Focused production-shaped revision-2 no-ID reconcile proof passed: 1 file,
+  1 test, 321 skipped. It begins with revision-1 metadata and a persisted
+  current-v1 no-ID profile, runs the real bounded scheduled reconcile, retains
+  a member height correction and deleted demographics without an event-spine
+  append, advances revision 2, skips the replay, and rejects a same-revision
+  height change atomically.
+- Focused current-v1 no-ID canonical replay proof passed: 1 file, 1 test, 247
+  skipped; the combined stable/no-ID profile run passed 8 tests.
+- Focused equal-revision no-ID ambiguity proof passed: 1 file, 1 test, 184
+  skipped.
+- `pnpm --filter @murphai/device-syncd test` passed after the production-shaped
+  reconcile regression: 49 files, 1,256 tests.
 - `pnpm --filter @murphai/device-syncd typecheck` passed.
 - `pnpm --filter @murphai/core test` passed: 46 files, 810 tests.
 - `pnpm --filter @murphai/core typecheck` passed.
@@ -134,6 +170,13 @@ Updated: 2026-08-20
 - Focused changelog coverage passed: 2 files, 45 tests.
 - `pnpm --dir apps/web typecheck` passed after generating the ignored changelog
   registry and Prisma client.
+- `pnpm test:diff` reached and passed every affected package typecheck but found
+  two unrelated pre-existing workspace-boundary violations in
+  `packages/cli/test/junction-body-composition-e2e.test.ts` and
+  `packages/vault-usecases/test/junction-workout-features-query.test.ts`. The
+  run was stopped before its broad affected-test phase because this PR does not
+  change either file and the focused/full owning-package suites were already
+  green.
 - The read-only diff reviewer confirmed its member-deletion and member-time
   findings are resolved in the corrected code and regressions.
 - ReviewGPT runs started against the pre-regression head are non-authoritative

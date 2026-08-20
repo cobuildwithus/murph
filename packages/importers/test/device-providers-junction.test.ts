@@ -10383,6 +10383,129 @@ test("Junction explicit profile timestamp migration does not revive a member del
   }
 });
 
+test("Junction no-id profile equal-revision created-at replay is a canonical no-op", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-profile-no-id-equal-revision-noop");
+  const createdAt = "2026-04-01T09:00:00.000Z";
+  const updatedAt = "2026-05-20T09:00:00.000Z";
+  const profile = (input: { createdAt?: string; height: number }) => ({
+    importedAt: "2026-05-20T10:00:00.000Z",
+    summaries: {
+      profile: {
+        ...(input.createdAt ? { created_at: input.createdAt } : {}),
+        updated_at: updatedAt,
+        birth_date: "1980-01-01",
+        gender: "other",
+        height: input.height,
+        source_device_id: "stable-profile-source",
+        source: { provider: "oura", type: "ring" },
+      },
+    },
+  });
+
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-04-01T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    const currentSnapshot = profile({ createdAt, height: 180 });
+    const currentPayload = normalizeJunctionSnapshot(currentSnapshot);
+    const predecessor = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: profile({ height: 180 }) },
+      { corePort: coreRuntime },
+    );
+    assert.equal(predecessor.events.every((event) =>
+      event.dataOrigin?.normalizerVersion === "junction-no-id-profile.v1"
+      && event.occurredAt === updatedAt
+      && event.externalRef?.version === updatedAt
+    ), true);
+    assert.equal(currentPayload.events?.every((event) =>
+      event.dataOrigin?.normalizerVersion === "junction-no-id-profile.v1"
+      && event.occurredAt === createdAt
+      && event.externalRef?.version === updatedAt
+    ), true);
+    const predecessorHeight = predecessor.events.find((event) =>
+      event.kind === "observation" && event.metric === "height"
+    );
+    const predecessorGender = predecessor.events.find((event) =>
+      event.externalRef?.facet === "gender"
+    );
+    const predecessorDemographics = predecessor.events.find((event) =>
+      event.kind === "note" && event.title === "Junction profile"
+    );
+    assert.ok(predecessorHeight);
+    assert.ok(predecessorGender);
+    assert.ok(predecessorDemographics);
+    await coreRuntime.upsertEvent({
+      vaultRoot,
+      payload: {
+        ...predecessorHeight,
+        recordedAt: "2026-05-20T10:30:00.000Z",
+        source: "manual",
+        value: 179,
+      },
+    });
+    await coreRuntime.deleteEvent({ vaultRoot, eventId: predecessorDemographics.id });
+
+    const firstReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: currentSnapshot },
+      { corePort: coreRuntime },
+    );
+    const secondReplay = await importDeviceProviderSnapshot<
+      Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+    >(
+      { provider: "junction", vaultRoot, snapshot: currentSnapshot },
+      { corePort: coreRuntime },
+    );
+    const eventShardPaths = [...new Set(predecessor.eventShardPaths)];
+    const records = (
+      await Promise.all(eventShardPaths.map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ))
+    ).flat();
+    const live = latestLiveRecords(records);
+    const liveHeight = live.find((event) => event.id === predecessorHeight.id);
+    const liveGender = live.find((event) => event.id === predecessorGender.id);
+
+    assert.equal(firstReplay.applied, true);
+    assert.equal(secondReplay.applied, false);
+    assert.equal(live.length, 2);
+    assert.equal(liveHeight?.source, "manual");
+    assert.equal(storedObservationValue(liveHeight), 179);
+    assert.equal(storedExternalRefResourceId(liveHeight), predecessorHeight.externalRef?.resourceId);
+    assert.equal(liveGender?.source, "device");
+    assert.equal(storedExternalRefResourceId(liveGender), predecessorGender.externalRef?.resourceId);
+    assert.equal(live.some((event) => event.id === predecessorDemographics.id), false);
+    assert.ok(records.some((event) =>
+      event.id === predecessorDemographics.id && isDeletedEventLifecycle(event.lifecycle)
+    ));
+
+    await assert.rejects(
+      importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "junction",
+          vaultRoot,
+          snapshot: profile({ createdAt, height: 181 }),
+        },
+        { corePort: coreRuntime },
+      ),
+      (error: unknown) => (error as { code?: unknown }).code === "EVENT_SOURCE_REVISION_CONFLICT",
+    );
+    const recordsAfterConflict = (
+      await Promise.all(eventShardPaths.map((relativePath) =>
+        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+      ))
+    ).flat();
+    assert.equal(recordsAfterConflict.length, records.length);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("Junction no-id profile migration claims updated-at identities and retains member edits", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-profile-no-id-migration");
   const createdAt = "2026-05-01T09:00:00.000Z";
