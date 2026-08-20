@@ -2,10 +2,7 @@ import type Stripe from "stripe";
 
 import type { HostedUsageCreditPurchase } from "@prisma/client";
 
-import {
-  coerceStripeObjectId,
-  readStripeShouldRetryDirective,
-} from "./billing";
+import { coerceStripeObjectId } from "./billing";
 import {
   createHostedStripeCustomerLookupKeyReadCandidates,
   hostedLookupKeyMatchesValue,
@@ -493,27 +490,20 @@ export function isDefinitiveHostedUsageCreditStripeRequestRejection(
   if (!error || typeof error !== "object") {
     return false;
   }
-  const shouldRetry = readStripeShouldRetryDirective(error);
-  if (shouldRetry !== null) {
-    return !shouldRetry;
-  }
   const candidate = error as {
     rawType?: unknown;
     statusCode?: unknown;
     type?: unknown;
   };
-  if (typeof candidate.statusCode === "number") {
-    return candidate.statusCode >= 400 &&
-      candidate.statusCode < 500 &&
-      candidate.statusCode !== 409 &&
-      candidate.statusCode !== 429;
-  }
-  return candidate.type === "StripeInvalidRequestError" ||
-    candidate.type === "StripeAuthenticationError" ||
-    candidate.type === "StripePermissionError" ||
-    candidate.rawType === "invalid_request_error" ||
-    candidate.rawType === "authentication_error" ||
-    candidate.rawType === "permission_error";
+  return (
+    candidate.type === "StripeInvalidRequestError" ||
+    candidate.rawType === "invalid_request_error"
+  ) &&
+    typeof candidate.statusCode === "number" &&
+    candidate.statusCode >= 400 &&
+    candidate.statusCode < 500 &&
+    candidate.statusCode !== 409 &&
+    candidate.statusCode !== 429;
 }
 
 export function describeSafeHostedUsageCreditStripeError(

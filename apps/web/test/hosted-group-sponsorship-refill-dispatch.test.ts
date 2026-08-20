@@ -425,6 +425,48 @@ describe("hosted group sponsorship refill dispatch", () => {
       .toHaveBeenLastCalledWith({ now: retryAt, prisma, purchaseId: purchase.id });
   });
 
+  it("keeps an ambiguous bound charge silent and retries it on the next sweep", async () => {
+    const purchase = buildPurchase({
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripePaymentIntentIdEncrypted: "sealed_intent",
+      stripePaymentIntentLookupKey: "intent_lookup",
+    });
+    const { prisma, rows } = createPrisma([purchase]);
+    mocks.tryChargeHostedUsageCreditSavedCard
+      .mockRejectedValueOnce(new Error("Stripe request timed out"))
+      .mockResolvedValueOnce({
+        ...purchase,
+        status: HostedUsageCreditPurchaseStatus.payment_pending,
+        stripeChargeIdEncrypted: "sealed_charge",
+        stripeChargeLookupKey: "charge_lookup",
+      });
+
+    await expect(dispatchHostedGroupSponsorshipRefills({
+      now: NOW,
+      prisma: prisma as never,
+    })).resolves.toEqual({ attempted: 1, dispatched: 0, recoveryRequired: 0 });
+    expect(rows[0]).toMatchObject({
+      status: HostedUsageCreditPurchaseStatus.payment_pending,
+      stripePaymentIntentIdEncrypted: "sealed_intent",
+      stripePaymentIntentLookupKey: "intent_lookup",
+    });
+    expect(mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase)
+      .not.toHaveBeenCalled();
+    expect(mocks.materializeHostedGroupSponsorshipRecoveryNotification)
+      .not.toHaveBeenCalled();
+
+    await expect(dispatchHostedGroupSponsorshipRefills({
+      now: new Date(NOW.getTime() + 60_000),
+      prisma: prisma as never,
+    })).resolves.toEqual({ attempted: 1, dispatched: 1, recoveryRequired: 0 });
+
+    expect(mocks.tryChargeHostedUsageCreditSavedCard).toHaveBeenCalledTimes(2);
+    expect(mocks.markHostedGroupSponsorshipRecoveryRequiredForPurchase)
+      .not.toHaveBeenCalled();
+    expect(mocks.materializeHostedGroupSponsorshipRecoveryNotification)
+      .not.toHaveBeenCalled();
+  });
+
   it("does not initialize Stripe when no admitted purchase exists", async () => {
     const { prisma } = createPrisma([]);
 
