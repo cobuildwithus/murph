@@ -1,6 +1,6 @@
 # Prove Vercel production convergence
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -65,3 +65,21 @@ Updated: 2026-08-20
 - Current read-only provider inspection found five production project domains,
   all converged on the exact current deployment after the incident's explicit
   promotion.
+
+## Completion evidence
+
+- The focused production migration guard passes all 58 tests; hosted Web
+  typechecking passes, and focused lint has zero errors with two unchanged
+  pre-existing warnings in the shared test file.
+- Preliminary specialists identified and the implementation resolved the final
+  pre-SQL current-main classification gap and nested alias-URL canonicalization.
+- The final ReviewGPT loop additionally resolved pnpm 10 lifecycle-stdout
+  contamination and the deployed-tree verifier rollback floor; substantive
+  round 4 returned `ROUND_OUTCOME: PASS` on the reviewed candidate.
+- Exact-head pull-request evidence, host matrices, release build/typecheck,
+  package coverage, app verification, bundle budget, billing, hygiene, viewport,
+  foreground-state, and Vercel checks passed on the reviewed candidate.
+- Plan archival is the only remaining candidate change before the final
+  exact-head CI refresh and merge. The post-merge issue inventory and read-only
+  binding proof remain required before handoff; neither step mutates production.
+Completed: 2026-08-20
