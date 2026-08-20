@@ -107,22 +107,22 @@ if [[ "\${MURPH_TEST_WRITE_GENERATED:-0}" == '1' ]]; then
   cli_dir="$2"
   case "\${MURPH_TEST_GENERATOR_MUTATION:-}" in
     tracked)
-      printf 'raced\\n' > "$cli_dir/input.ts"
+      printf 'raced\\n' > "$cli_dir/src/input.ts"
       ;;
     untracked)
-      printf 'raced\\n' > "$cli_dir/untracked-during-generation.ts"
+      printf 'raced\\n' > "$cli_dir/src/untracked-during-generation.ts"
       ;;
   esac
-  input="$(cat "$cli_dir/input.ts")"
+  input="$(cat "$cli_dir/src/input.ts")"
   printf 'generated:%s\\n' "$input" > "$cli_dir/config.schema.json"
   printf 'generated:%s\\n' "$input" > "$cli_dir/src/incur.generated.ts"
   printf 'generated:%s\\n' "$input" > "$cli_dir/src/vault-cli-skill-hash.generated.ts"
 fi
 `,
   );
-  writeFileSync(path.join(repository, "packages", "cli", "input.ts"), "base\n");
-  writeFileSync(path.join(repository, "packages", "cli", "incoming.ts"), "base\n");
-  writeFileSync(path.join(repository, "packages", "cli", "task.ts"), "base\n");
+  writeFileSync(path.join(repository, "packages", "cli", "src", "input.ts"), "base\n");
+  writeFileSync(path.join(repository, "packages", "cli", "src", "incoming.ts"), "base\n");
+  writeFileSync(path.join(repository, "packages", "cli", "src", "task.ts"), "base\n");
   for (const output of generatedCliOutputs) {
     writeFileSync(path.join(repository, output), "generated:base\n");
   }
@@ -159,15 +159,15 @@ function createMergeHarness(withTaskAuthoredCliChange: boolean) {
   runGit(repository, ["commit", "-m", "task change"]);
 
   runGit(repository, ["checkout", "main"]);
-  writeFileSync(path.join(repository, "packages", "cli", "incoming.ts"), "incoming\n");
-  runGit(repository, ["add", "packages/cli/incoming.ts"]);
+  writeFileSync(path.join(repository, "packages", "cli", "src", "incoming.ts"), "incoming\n");
+  runGit(repository, ["add", "packages/cli/src/incoming.ts"]);
   runGit(repository, ["commit", "-m", "incoming CLI change"]);
 
   runGit(repository, ["checkout", "task"]);
   runGit(repository, ["merge", "--no-ff", "--no-commit", "main"]);
   if (withTaskAuthoredCliChange) {
-    writeFileSync(path.join(repository, "packages", "cli", "task.ts"), "task during merge\n");
-    runGit(repository, ["add", "packages/cli/task.ts"]);
+    writeFileSync(path.join(repository, "packages", "cli", "src", "task.ts"), "task during merge\n");
+    runGit(repository, ["add", "packages/cli/src/task.ts"]);
   }
 
   return harness;
@@ -266,6 +266,25 @@ describe("pre-commit fixture identity", () => {
 });
 
 describe("pre-commit CLI schema generation", () => {
+  it("skips generation for a CLI test-only change", () => {
+    const harness = createPreCommitHarness();
+    const testPath = path.join(
+      harness.repository,
+      "packages",
+      "cli",
+      "test",
+      "runtime.test.ts",
+    );
+    mkdirSync(path.dirname(testPath), { recursive: true });
+    writeFileSync(testPath, "test-only change\n");
+    runGit(harness.repository, ["add", "packages/cli/test/runtime.test.ts"]);
+
+    const result = runPreCommit(harness);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(harness.capture)).toBe(false);
+  });
+
   it("skips generation when a merge's staged CLI tree exactly matches MERGE_HEAD", () => {
     const harness = createMergeHarness(false);
     const result = runPreCommit(harness);
@@ -286,7 +305,7 @@ describe("pre-commit CLI schema generation", () => {
 
   it("detects a staged CLI rename out of the package", () => {
     const harness = createPreCommitHarness();
-    runGit(harness.repository, ["mv", "packages/cli/input.ts", "renamed-outside.ts"]);
+    runGit(harness.repository, ["mv", "packages/cli/src/input.ts", "renamed-outside.ts"]);
 
     expect(runLegacyNameGate(harness.repository).status).not.toBe(0);
     const result = runPreCommit(harness);
@@ -297,7 +316,7 @@ describe("pre-commit CLI schema generation", () => {
 
   it("detects a staged CLI path that Git quotes in name-only output", () => {
     const harness = createPreCommitHarness();
-    const unicodePath = "packages/cli/naïve file.ts";
+    const unicodePath = "packages/cli/src/naïve file.ts";
     writeFileSync(path.join(harness.repository, unicodePath), "quoted path\n");
     runGit(harness.repository, ["add", unicodePath]);
 
@@ -310,8 +329,8 @@ describe("pre-commit CLI schema generation", () => {
 
   it("detects CLI changes even when a large staged diff breaks the legacy pipefail gate", () => {
     const harness = createPreCommitHarness();
-    writeFileSync(path.join(harness.repository, "packages", "cli", "first.ts"), "cli\n");
-    runGit(harness.repository, ["add", "packages/cli/first.ts"]);
+    writeFileSync(path.join(harness.repository, "packages", "cli", "src", "first.ts"), "cli\n");
+    runGit(harness.repository, ["add", "packages/cli/src/first.ts"]);
     const blob = spawnSync("git", ["hash-object", "-w", "--stdin"], {
       cwd: harness.repository,
       encoding: "utf8",
@@ -339,9 +358,9 @@ describe("pre-commit CLI schema generation", () => {
 
   it("fails before generation when a tracked CLI input has unstaged changes", () => {
     const harness = createPreCommitHarness();
-    const inputPath = path.join(harness.repository, "packages", "cli", "input.ts");
+    const inputPath = path.join(harness.repository, "packages", "cli", "src", "input.ts");
     writeFileSync(inputPath, "staged\n");
-    runGit(harness.repository, ["add", "packages/cli/input.ts"]);
+    runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
     writeFileSync(inputPath, "unstaged\n");
 
     const result = runPreCommit(harness);
@@ -356,10 +375,10 @@ describe("pre-commit CLI schema generation", () => {
 
   it("fails before generation when an untracked CLI input is present", () => {
     const harness = createPreCommitHarness();
-    writeFileSync(path.join(harness.repository, "packages", "cli", "input.ts"), "staged\n");
-    runGit(harness.repository, ["add", "packages/cli/input.ts"]);
+    writeFileSync(path.join(harness.repository, "packages", "cli", "src", "input.ts"), "staged\n");
+    runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
     writeFileSync(
-      path.join(harness.repository, "packages", "cli", "untracked-input.ts"),
+      path.join(harness.repository, "packages", "cli", "src", "untracked-input.ts"),
       "untracked\n",
     );
 
@@ -374,8 +393,8 @@ describe("pre-commit CLI schema generation", () => {
     "fails before staging when a %s CLI input changes during generation",
     (mutation) => {
       const harness = createPreCommitHarness();
-      writeFileSync(path.join(harness.repository, "packages", "cli", "input.ts"), "staged\n");
-      runGit(harness.repository, ["add", "packages/cli/input.ts"]);
+      writeFileSync(path.join(harness.repository, "packages", "cli", "src", "input.ts"), "staged\n");
+      runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
 
       const result = runPreCommit(harness, {
         MURPH_TEST_GENERATOR_MUTATION: mutation,
@@ -393,8 +412,8 @@ describe("pre-commit CLI schema generation", () => {
 
   it("commits all generated artifacts from the exact staged CLI input tree", () => {
     const harness = createPreCommitHarness();
-    writeFileSync(path.join(harness.repository, "packages", "cli", "input.ts"), "updated\n");
-    runGit(harness.repository, ["add", "packages/cli/input.ts"]);
+    writeFileSync(path.join(harness.repository, "packages", "cli", "src", "input.ts"), "updated\n");
+    runGit(harness.repository, ["add", "packages/cli/src/input.ts"]);
     runGit(harness.repository, ["config", "core.hooksPath", ".githooks"]);
 
     const commit = spawnSync("git", ["commit", "-m", "update CLI input"], {
@@ -407,7 +426,7 @@ describe("pre-commit CLI schema generation", () => {
     });
 
     expect(commit.status, commit.stderr).toBe(0);
-    expect(runGit(harness.repository, ["show", "HEAD:packages/cli/input.ts"])).toBe("updated");
+    expect(runGit(harness.repository, ["show", "HEAD:packages/cli/src/input.ts"])).toBe("updated");
     for (const output of generatedCliOutputs) {
       expect(runGit(harness.repository, ["show", `HEAD:${output}`])).toBe("generated:updated");
     }
