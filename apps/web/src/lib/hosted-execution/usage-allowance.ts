@@ -27,6 +27,7 @@ import {
 import {
   HOSTED_ASSISTANT_VENICE_PROVIDER,
   HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
+  isHostedAssistantProductModel,
 } from "@murphai/hosted-execution/assistant-model";
 
 import {
@@ -440,11 +441,13 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
   "openai-api-pricing-2026-07-30-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
   "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex";
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_PRICING_VERSION =
+  "openai-api-pricing-2026-08-20-gpt-5.5-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
   "venice-api-pricing-2026-08-04-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
   "https://openai.com/api/pricing/";
-const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE =
+const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_PRICING_SOURCE =
   "https://developers.openai.com/api/docs/pricing";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_SOURCE =
   "https://docs.venice.ai/overview/pricing";
@@ -453,8 +456,7 @@ const HOSTED_AI_USAGE_RECOVERY_URL =
 const TOKENS_PER_PRICING_UNIT = 1_000_000n;
 
 // GPT Image API pricing has separate text/image token buckets and is not part
-// of HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS, which validates the assistant
-// chat model in deploy preflight.
+// of the assistant text-token pricing model set.
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICING_VERSION =
   "openai-image-api-pricing-2026-07-08-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_MALFORMED_PRICING_VERSION =
@@ -475,8 +477,7 @@ const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_OUTPUT_USD_MICROS_PER_MILLION_TOKEN
 // Workers AI audio transcription is duration-priced rather than token-priced.
 // Rate: $0.00051 per audio minute, from
 // https://developers.cloudflare.com/workers-ai/models/whisper-large-v3-turbo/
-// The model id stays out of HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS because
-// that list also validates HOSTED_ASSISTANT_MODEL in deploy preflight.
+// The model id stays out of the assistant text-token pricing model set.
 const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_MODEL = "@cf/openai/whisper-large-v3-turbo";
 const HOSTED_AI_USAGE_ALLOWANCE_AUDIO_PRICING_VERSION =
   "workers-ai-audio-pricing-2026-06-12";
@@ -554,17 +555,24 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE = {
   outputUsdMicrosPerMillionTokens: 1_200_000n,
 } as const;
 
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE = {
+  cachedInputUsdMicrosPerMillionTokens: 500_000n,
+  inputUsdMicrosPerMillionTokens: 5_000_000n,
+  outputUsdMicrosPerMillionTokens: 30_000_000n,
+} as const;
+
 const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES: Record<
   HostedAiUsageAllowancePricedModel,
   HostedAiUsageAllowanceModelPrice
 > = {
+  "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_MODEL_PRICE,
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_LUNA_MODEL_PRICE,
 };
 
 const HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES: Record<
-  HostedAiUsageAllowancePricedModel,
+  keyof typeof HOSTED_ASSISTANT_VENICE_PROVIDER_MODELS,
   HostedAiUsageAllowanceModelPrice
 > = {
   "gpt-5.6-sol": {
@@ -599,24 +607,36 @@ const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES = {
   "openai-flex": {
     multiplierDenominator: 2n,
     multiplierNumerator: 1n,
-    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION,
     requiredProviderKind: "openai",
   },
   standard: {
     multiplierDenominator: 1n,
     multiplierNumerator: 1n,
-    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_SOURCE,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_PRICING_SOURCE,
     pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION,
     requiredProviderKind: null,
   },
 } as const;
 
-const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
+const HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES = {
+  standard: {
+    multiplierDenominator: 1n,
+    multiplierNumerator: 1n,
+    pricingSource: HOSTED_AI_USAGE_ALLOWANCE_OPENAI_PRICING_SOURCE,
+    pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_GPT_55_PRICING_VERSION,
+    requiredProviderKind: "openai",
+  },
+} as const;
+
+const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES:
+  HostedAiUsageAllowanceTokenPricingBasesByModel = {
+  "gpt-5.5": HOSTED_AI_USAGE_ALLOWANCE_GPT_55_TOKEN_PRICING_BASES,
   "gpt-5.6-sol": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-terra": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
   "gpt-5.6-luna": HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TOKEN_PRICING_BASES,
-} as const satisfies HostedAiUsageAllowanceTokenPricingBasesByModel;
+};
 
 export function priceHostedAiUsageForAllowance(
   record: AssistantUsageRecord,
@@ -3329,6 +3349,7 @@ function buildHostedAiUsageAllowanceModelSnapshot(
     model: resolution.model,
     modelSource: resolution.source,
     ...(resolution.model
+        && isHostedAssistantProductModel(resolution.model)
         && isHostedAiUsageVeniceTokenPricingProviderName(record.providerName)
       ? {
         providerModel:
@@ -3344,9 +3365,15 @@ function resolveHostedAiUsageAllowanceModelPrices(input: {
   model: HostedAiUsageAllowancePricedModel;
   record: AssistantUsageRecord;
 }): HostedAiUsageAllowanceModelPrice {
-  return isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)
-    ? HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model]
-    : HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
+  if (isHostedAiUsageVeniceTokenPricingProviderName(input.record.providerName)) {
+    if (!isHostedAssistantProductModel(input.model)) {
+      throw new TypeError(
+        "Hosted AI usage allowance pricing is missing for the provider model.",
+      );
+    }
+    return HOSTED_AI_USAGE_ALLOWANCE_VENICE_MODEL_PRICES[input.model];
+  }
+  return HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[input.model];
 }
 
 function isHostedAiUsageVeniceTokenPricingProviderName(

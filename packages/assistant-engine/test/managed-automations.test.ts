@@ -142,6 +142,7 @@ import {
   applyMurphManagedAutomations,
   ensureAutomaticMealCloseoutAutomation,
   resolveMurphManagedAutomationSeed,
+  resolveMurphManagedAutomationExecutionTargetOverride,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedAutomationSeed,
 } from '../src/assistant/managed-automations.ts'
@@ -1311,7 +1312,10 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(seed.hostedRuntimeOnly).toBe(true)
     expect(seed.continuityPolicy).toBe('fresh')
-    expect(seed.assistantTargetOverride).toEqual({
+    expect(seed.assistantTargetOverride).toBeNull()
+    expect(resolveMurphManagedAutomationExecutionTargetOverride(
+      seed.automationId,
+    )).toEqual({
       model: 'gpt-5.5',
       modelProvider: 'hosted-openai',
       reasoningEffort: 'low',
@@ -1717,11 +1721,7 @@ describe('applyMurphManagedAutomations', () => {
       status: 'active',
       title: 'Overnight memory consolidation',
     })
-    expect(memoryRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-5.5',
-      modelProvider: 'hosted-openai',
-      reasoningEffort: 'low',
-    })
+    expect(memoryRecord?.assistantTargetOverride).toBeNull()
     expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(memoryRecord?.tags).toContain('runtime-maintenance')
     expect(memoryRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)

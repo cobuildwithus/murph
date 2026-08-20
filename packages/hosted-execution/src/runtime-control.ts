@@ -184,6 +184,7 @@ export type HostedRuntimeControlMailboxKind =
   (typeof HOSTED_RUNTIME_CONTROL_MAILBOX_KINDS)[number];
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
+  "gpt-5.5",
   "gpt-5.6-sol",
   "gpt-5.6-terra",
   "gpt-5.6-luna",
@@ -194,14 +195,16 @@ export type HostedAiUsageAllowancePricedModel =
 
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
   [
-    ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-  ] as readonly HostedAiUsageAllowancePricedModel[];
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+  ] as const;
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
   (typeof HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS)[number];
 
-// Image models stay separate from HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS
-// because that list validates HOSTED_ASSISTANT_MODEL in deploy preflight.
+// Image models stay separate because they use distinct text/image token
+// buckets rather than the assistant text-token pricing contract.
 export const HOSTED_AI_USAGE_ALLOWANCE_OPENAI_IMAGE_PRICED_MODELS = [
   "gpt-image-2",
 ] as const;
@@ -234,7 +237,9 @@ const HOSTED_AI_USAGE_OPENAI_TOKEN_PRICING_PROVIDER_NAMES = new Set<string>([
 ]);
 
 export const HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS = [
-  ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
+  "gpt-5.6-sol",
+  "gpt-5.6-terra",
+  "gpt-5.6-luna",
 ] as const;
 
 export const HOSTED_AI_USAGE_ALLOW_DECISION_SCHEMA =
@@ -328,15 +333,16 @@ export function normalizeHostedAiUsageAllowanceElevenLabsMusicModelId(
 
 export function isHostedAiUsageOpenAiFlexTokenPricingModelId(
   value: string | null | undefined,
-): value is HostedAiUsageAllowancePricedModel {
+): value is HostedAiUsageOpenAiFlexTokenPricingModel {
   if (typeof value !== "string") {
     return false;
   }
 
   const normalized = normalizeHostedAiUsageAllowancePricedModelId(value);
-  return normalized
-    ? HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS.includes(normalized)
-    : false;
+  return normalized !== null
+    && HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS.some(
+      (model) => model === normalized,
+    );
 }
 
 export function isHostedAiUsageAllowanceOpenAiImagePricedModelId(

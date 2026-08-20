@@ -57,10 +57,19 @@ memory consolidation.
   provider tool inventory. Direct request inspection proved that Responses Lite
   carries provider tools in `additional_tools` and the former Terra target's
   catalog re-enabled collaboration despite generic feature flags. The focused
-  correction pins the managed maintenance seed to hosted OpenAI `gpt-5.5`,
-  disables the remaining process-owned registries, and requires every provider
-  request to expose exactly the one `member_memory` function. The real App
-  Server proof, the 118-test focused assistant-engine set, and package typecheck
-  pass with that correction.
-- Exact-head CI and final review gate: pending.
+  first correction pinned the persisted managed seed to hosted OpenAI
+  `gpt-5.5`, disabled the remaining process-owned registries, and required every
+  provider request to expose exactly the one `member_memory` function.
+- Final review then proved that a permanent earlier-seed reconciliation failure
+  could leave the pre-correction target hint in place while the same due pass
+  continued into the automation lane. It also proved that GPT-5.5 was outside
+  the durable usage-pricing table. The retrospective chose one existing owner:
+  immutable-id cron admission now derives the complete target and standard
+  service tier, ignores stale persisted hints, and uses the existing allowance
+  owner with the official GPT-5.5 standard rate. No new state, repair loop,
+  reconciliation path, compatibility layer, or sandbox was added.
+- The real App Server proof, 328 focused assistant-engine tests, 300 hosted
+  phase tests, 115 usage-accounting tests, and all affected package/Web
+  typechecks pass with that correction.
+- Exact-head CI and next final review gate: pending.
 - Production deploy and bounded runtime-log verification: pending.

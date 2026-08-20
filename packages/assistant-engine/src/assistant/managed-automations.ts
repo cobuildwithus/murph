@@ -202,6 +202,18 @@ export function resolveMurphManagedMaintenancePolicy(
   return null
 }
 
+export function resolveMurphManagedAutomationExecutionTargetOverride(
+  automationId: string | null | undefined,
+): AutomationAssistantTargetOverride | null {
+  return automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    ? {
+        model: 'gpt-5.5',
+        modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+        reasoningEffort: 'low',
+      }
+    : null
+}
+
 export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
   automationId: MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   slug: 'automatic-meal-daily-closeout',
@@ -779,11 +791,7 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     hostedRuntimeOnly: true,
-    assistantTargetOverride: {
-      model: 'gpt-5.5',
-      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-      reasoningEffort: 'low',
-    },
+    assistantTargetOverride: null,
     tags: [
       'murph-managed:overnight-memory-consolidation',
       'runtime-maintenance',

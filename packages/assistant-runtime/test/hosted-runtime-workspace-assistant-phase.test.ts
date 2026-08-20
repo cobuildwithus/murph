@@ -3682,6 +3682,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       }),
     }));
     expect(result).not.toHaveProperty("nextWakeAt", "2026-04-27T00:00:30.000Z");
+    expect(mocks.runHostedAssistantAutomationLane).toHaveBeenCalledOnce();
     expect(logRequests.flatMap((request) => request.entries)).toContainEqual(
       expect.objectContaining({
         component: "runtime",

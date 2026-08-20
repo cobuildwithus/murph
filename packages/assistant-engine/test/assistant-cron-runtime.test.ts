@@ -4532,6 +4532,11 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: undefined,
+        assistantTargetOverride: {
+          model: 'gpt-5.5',
+          modelProvider: 'hosted-openai',
+          reasoningEffort: 'low',
+        },
         channel: null,
         deliveryKind: undefined,
         deliverySource: null,
@@ -4541,6 +4546,7 @@ describe('assistant cron runtime orchestration', () => {
         participantId: null,
         responsePolicy: null,
         sessionId: null,
+        serviceTier: null,
         threadId: null,
         threadIsDirect: null,
         turnPolicy: {
@@ -4686,6 +4692,11 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
+        assistantTargetOverride: {
+          model: 'gpt-5.5',
+          modelProvider: 'hosted-openai',
+          reasoningEffort: 'low',
+        },
         bindingDeliveryTarget: undefined,
         channel: null,
         deliveryKind: undefined,
@@ -4694,6 +4705,7 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: null,
         sessionId: null,
+        serviceTier: null,
         threadId: null,
         threadIsDirect: null,
         turnPolicy: {
@@ -13101,6 +13113,11 @@ function addGroupRoomModelConsolidationAutomation(vaultRoot: string): void {
 function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
   getVaultAutomationStore(vaultRoot).push({
     automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+    // A pre-correction record can retain this stale persisted hint when an
+    // earlier managed seed fails. Admission must ignore it.
+    assistantTargetOverride: {
+      reasoningEffort: 'medium',
+    },
     continuityPolicy: 'fresh',
     createdAt: '2026-04-08T08:00:00.000Z',
     instructions: 'Consolidate canonical vault memory.',

@@ -578,11 +578,14 @@ supported provider credential.
   hosted config emits no member-memory permission profile. Assistant-engine
   planning, tool-boundary, provider-seam, and real App Server tests prove only
   the exact managed id receives `murph.member_memory`, the dedicated hosted
-  OpenAI maintenance target advertises exactly that one function on every
-  provider request, shell and every other native capability stay disabled even
-  without a sandbox profile, and the trusted host performs canonical memory
-  reads and audited writes; reminder availability needs no Codex permission
-  profile.
+  OpenAI maintenance target is derived at cron admission even when the stored
+  record has a stale target hint, advertises exactly that one function on every
+  provider request, and uses standard service with durable allowance pricing.
+  The hosted phase suite proves a permanent earlier managed-seed failure still
+  reaches the automation lane without granting the stored hint authority.
+  Shell and every other native capability stay disabled even without a sandbox
+  profile, and the trusted host performs canonical memory reads and audited
+  writes; reminder availability needs no Codex permission profile.
   `packages/core/test/automation-availability.test.ts` proves exact
   policy/source/account authorization, canonical populated and empty snapshot
   parsing/removal, host-only prompt sanitation, exact-time normalization, and

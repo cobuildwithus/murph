@@ -4,7 +4,6 @@ import { isIP } from "node:net";
 import {
   HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS,
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
-  isHostedAiUsageAllowancePricedModelId,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   normalizeHostedExecutionBaseUrl,
@@ -327,8 +326,10 @@ export function listHostedDeployEnvironmentInvariantErrors(
     source.HOSTED_EXECUTION_CONTAINER_ROLLOUT,
     deployContext,
   );
-  const hostedAssistantModelIsPriced = hostedAssistantModel
-    ? isHostedAiUsageAllowancePricedModelId(hostedAssistantModel)
+  const hostedAssistantModelIsAccepted = hostedAssistantModel
+    ? HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.some(
+        (model) => model === hostedAssistantModel,
+      )
     : false;
   if (hostedAssistantProvider !== REQUIRED_HOSTED_ASSISTANT_PROVIDER) {
     errors.push(
@@ -340,7 +341,7 @@ export function listHostedDeployEnvironmentInvariantErrors(
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
-  } else if (!hostedAssistantModelIsPriced) {
+  } else if (!hostedAssistantModelIsAccepted) {
     errors.push(
       `HOSTED_ASSISTANT_MODEL must be one of ${HOSTED_AI_USAGE_ALLOWANCE_ACCEPTED_MODEL_IDS.join(", ")} for hosted AI usage allowance pricing.`,
     );
