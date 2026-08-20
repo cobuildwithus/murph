@@ -202,7 +202,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("replies promptly while every durable system wake kind owns the runner", async () => {
+  it("replies promptly while model-free work owns every durable system wake", async () => {
     await seedProbe(systemMailboxProbe);
     const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
     const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
@@ -2277,6 +2277,12 @@ function buildEverySystemWake(
   ] as const;
 
   return [
+    buildHostedExecutionDeviceSyncWake({
+      eventId: `device-sync.wake:priority:${runId}`,
+      occurredAt: requestedAt,
+      reason: "webhook_hint",
+      userId: identity.userId,
+    }),
     buildHostedExecutionMemberActivatedWake({
       eventId: `member.activated:priority:${runId}`,
       memberChannels: {
@@ -2406,12 +2412,6 @@ function buildEverySystemWake(
       generation: 1,
       occurredAt: requestedAt,
       runId: `clinical_run_priority_${runId}`,
-      userId: identity.userId,
-    }),
-    buildHostedExecutionDeviceSyncWake({
-      eventId: `device-sync.wake:priority:${runId}`,
-      occurredAt: requestedAt,
-      reason: "webhook_hint",
       userId: identity.userId,
     }),
     buildHostedExecutionDailyMetricReportedWake({

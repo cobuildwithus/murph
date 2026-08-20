@@ -38,6 +38,7 @@ import {
   projectHostedMailboxItem,
   prepareHostedMailboxEnvelopeAppend,
   readHostedMailboxConsumedSeqByLane,
+  readHostedMailboxFirstLiveSystemItemAfterSeq,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx,
   readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemCheckpointById,
@@ -2617,6 +2618,47 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         maxUpdatedAt: FIXED_NOW.toISOString(),
       },
     ]);
+  });
+
+  it("reads the first live system item after the handled frontier", async () => {
+    const hostedMailboxItem = createHostedMailboxItemDelegate({
+      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => buildHostedMailboxItemRow({
+        id: "mailbox_system_5",
+        kind: "assistant.ask.completed",
+        lane: "system",
+        laneSeq: 5n,
+      })),
+    });
+    const prisma = createHostedMailboxClient({
+      hostedMailboxItem,
+      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
+    });
+
+    await expect(readHostedMailboxFirstLiveSystemItemAfterSeq({
+      afterSeq: "4",
+      at: FIXED_NOW,
+      prisma,
+      userId: "member_mailbox_1",
+    })).resolves.toEqual({
+      kind: "assistant.ask.completed",
+      laneSeq: "5",
+    });
+    expect(hostedMailboxItem.findFirst).toHaveBeenCalledWith({
+      orderBy: {
+        laneSeq: "asc",
+      },
+      select: {
+        kind: true,
+        laneSeq: true,
+      },
+      where: expectLiveHostedMailboxWhere({
+        lane: "system",
+        laneSeq: {
+          gt: 4n,
+        },
+        userId: "member_mailbox_1",
+      }),
+    });
   });
 
   it("checks whether a member has any mailbox item for a given kind", async () => {

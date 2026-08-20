@@ -840,6 +840,8 @@ export async function prepareHostedGroupSponsorshipRecoveryTx(input: {
     const reset = await input.tx.hostedUsageCreditPurchase.updateMany({
       data: {
         checkoutExpiresAt: boundedCheckoutExpiresAt,
+        checkoutRequestPolicyVersion:
+          HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
         ...returnUrls,
         grantSlotReleasedAt: null,
         lastReconciledAt: null,
@@ -1640,66 +1642,6 @@ export async function readHostedGroupSponsorshipCommittedMinor(input: {
     },
   });
   return aggregate._sum.cashAmountMinor ?? 0;
-}
-
-export async function isHostedGroupSponsorshipNearCapNotificationCurrentTx(
-  input: {
-    authorizationId: string;
-    beneficiaryMemberId: string;
-    monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor;
-    now: Date;
-    payerMemberId: string;
-    periodStartedAt: Date;
-    purchaseId: string;
-    tx: Prisma.TransactionClient;
-  },
-): Promise<boolean> {
-  const purchase = await input.tx.hostedUsageCreditPurchase.findUnique({
-    select: {
-      beneficiaryMemberId: true,
-      groupSponsorshipAuthorizationId: true,
-      groupSponsorshipPeriodStartedAt: true,
-      payerMemberId: true,
-      status: true,
-    },
-    where: { id: input.purchaseId },
-  });
-  if (
-    !purchase ||
-    purchase.status !== HostedUsageCreditPurchaseStatus.fulfilled ||
-    purchase.payerMemberId !== input.payerMemberId ||
-    purchase.beneficiaryMemberId !== input.beneficiaryMemberId ||
-    purchase.groupSponsorshipAuthorizationId !== input.authorizationId ||
-    purchase.groupSponsorshipPeriodStartedAt?.getTime() !==
-      input.periodStartedAt.getTime()
-  ) {
-    return false;
-  }
-  const current = await input.tx.hostedGroupSponsorshipAuthorization.findUnique({
-    where: { id: input.authorizationId },
-  });
-  if (!current) {
-    return false;
-  }
-  const authorization = await normalizeHostedGroupSponsorshipAuthorizationTx({
-    authorization: current,
-    now: requireValidDate(input.now),
-    tx: input.tx,
-  });
-  if (
-    authorization.status !== HostedGroupSponsorshipAuthorizationStatus.active ||
-    authorization.payerMemberId !== input.payerMemberId ||
-    authorization.beneficiaryMemberId !== input.beneficiaryMemberId ||
-    authorization.periodStartedAt.getTime() !== input.periodStartedAt.getTime() ||
-    authorization.monthlyCapMinor !== input.monthlyCapMinor ||
-    authorization.monthlyCapMinor <= 500
-  ) {
-    return false;
-  }
-  return (await readHostedGroupSponsorshipCommittedMinorTx({
-    authorization,
-    tx: input.tx,
-  })) === authorization.monthlyCapMinor - 500;
 }
 
 export function addHostedGroupSponsorshipCalendarMonth(input: {

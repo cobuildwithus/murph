@@ -9,6 +9,7 @@ import {
   COMPANION_HRV_RMSSD_SCHEMA,
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
+import { buildJunctionProviderSourceInstanceKey } from "@murphai/device-syncd/connect-config";
 
 import { persistProviderTokenRefreshErrorStatus } from "@/src/lib/device-sync/agent-session-token-refresh";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
@@ -54,6 +55,17 @@ function createDeferred<T = void>(): Deferred<T> {
     resolve = resolvePromise;
   });
   return { promise, resolve };
+}
+
+function requireJunctionProviderSourceInstanceKey(input: {
+  connectionId: string;
+  sourceProviderSlug: string;
+}): string {
+  const sourceInstanceKey = buildJunctionProviderSourceInstanceKey(input);
+  if (!sourceInstanceKey) {
+    throw new TypeError("Expected a canonical Junction source instance key.");
+  }
+  return sourceInstanceKey;
 }
 
 async function createDeviceSyncDeletionFixture(): Promise<DeviceSyncDeletionFixture> {
@@ -158,6 +170,15 @@ function pauseBeforeDirtyMarkerUpdate(input: {
           input.beforeUpdate.resolve();
           await input.allowUpdate.promise;
           return target.updateMany(args);
+        };
+      }
+      if (property === "updateManyAndReturn") {
+        return async (
+          args: Prisma.DeviceSyncDirtyConnectionUpdateManyAndReturnArgs,
+        ) => {
+          input.beforeUpdate.resolve();
+          await input.allowUpdate.promise;
+          return target.updateManyAndReturn(args);
         };
       }
 
@@ -1052,7 +1073,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             firstSeenAt: connectedAt,
             id: sourceId,
             lastSeenAt: connectedAt,
-            sourceInstanceKey: "primary",
+            sourceInstanceKey: requireJunctionProviderSourceInstanceKey({
+              connectionId: providerConnectionId,
+              sourceProviderSlug: "provider-source",
+            }),
             sourceProviderSlug: "provider-source",
             status: "connected",
           },
@@ -1297,7 +1321,10 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             firstSeenAt: connectedAt,
             id: sourceId,
             lastSeenAt: connectedAt,
-            sourceInstanceKey: "primary",
+            sourceInstanceKey: requireJunctionProviderSourceInstanceKey({
+              connectionId: retainedConnectionId,
+              sourceProviderSlug: "provider-source",
+            }),
             sourceProviderSlug: "provider-source",
             status: "connected",
           },

@@ -3,6 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
 
 import {
+  buildJunctionProviderSourceInstanceKey,
+  canonicalizeJunctionProviderSlug,
+  resolveJunctionDeviceConnectRouteByProviderSlug,
+} from "../connect-config.ts";
+import { isDeviceSyncSourceDisconnectFenced } from "../public-account.ts";
+import {
   generatePrefixedId,
   stringifyJson,
   toIsoTimestamp,
@@ -27,6 +33,7 @@ interface StoredDeviceConnectionSourceRow {
   resource_availability_summary_json: string;
   last_error_code: string | null;
   last_error_message: string | null;
+  lifecycle_epoch: number;
   first_seen_at: string;
   last_seen_at: string;
   last_data_at: string | null;
@@ -73,6 +80,12 @@ const SOURCE_AVAILABILITY_BLOCKED_KEY_SUBSTRINGS = [
   "token",
   "userid",
 ];
+const SOURCE_STATUS_PRECEDENCE: Record<DeviceConnectionSourceStatus, number> = {
+  connected: 0,
+  unavailable: 1,
+  error: 2,
+  disconnected: 3,
+};
 
 const CONNECTION_SOURCE_ROW_SELECT = `
   select
@@ -85,6 +98,7 @@ const CONNECTION_SOURCE_ROW_SELECT = `
     resource_availability_summary_json,
     last_error_code,
     last_error_message,
+    lifecycle_epoch,
     first_seen_at,
     last_seen_at,
     last_data_at,
@@ -114,6 +128,13 @@ function expectNullableString(value: unknown, field: string): string | null {
   }
 
   return expectString(value, field);
+}
+
+function expectPositiveInteger(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`Expected ${field} to be a positive integer.`);
+  }
+  return value;
 }
 
 function isDeviceConnectionSourceStatus(
@@ -330,23 +351,15 @@ function earliestIsoTimestamp(left: string, right: string): string {
   return Date.parse(right) < Date.parse(left) ? right : left;
 }
 
+function latestIsoTimestamp(left: string, right: string): string {
+  return Date.parse(right) > Date.parse(left) ? right : left;
+}
+
 function normalizeSourceStatus(status: unknown): DeviceConnectionSourceStatus {
   return expectDeviceConnectionSourceStatus(status, "device_connection_source.status");
 }
 
-function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput): {
-  connectionId: string;
-  sourceInstanceKey: string;
-  sourceProviderSlug: string;
-  displayName: string | null | undefined;
-  status: DeviceConnectionSourceStatus;
-  resourceAvailabilitySummaryJson: string | undefined;
-  lastErrorCode: string | null;
-  lastErrorMessage: string | null;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  lastDataAt: string | null | undefined;
-} {
+function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput) {
   const lastSeenAt = toIsoTimestamp(input.lastSeenAt);
   const requestedFirstSeenAt = toIsoTimestamp(input.firstSeenAt ?? lastSeenAt);
   const firstSeenAt = earliestIsoTimestamp(requestedFirstSeenAt, lastSeenAt);
@@ -392,6 +405,9 @@ function normalizeSourceInput(input: UpsertDeviceConnectionSourceInput): {
           SOURCE_ERROR_MESSAGE_MAX_LENGTH,
         )
       : null,
+    lifecycleEpoch: hasOwnInputProperty(input, "lifecycleEpoch")
+      ? expectPositiveInteger(input.lifecycleEpoch, "lifecycleEpoch")
+      : undefined,
     firstSeenAt,
     lastSeenAt,
     // Undefined means "leave the stored arrival signal alone". Only hosted
@@ -434,6 +450,10 @@ function decodeConnectionSourceRow(row: SqliteRow): StoredDeviceConnectionSource
       row.last_error_message,
       "device_connection_source.last_error_message",
     ),
+    lifecycle_epoch: expectPositiveInteger(
+      row.lifecycle_epoch,
+      "device_connection_source.lifecycle_epoch",
+    ),
     first_seen_at: expectString(row.first_seen_at, "device_connection_source.first_seen_at"),
     last_seen_at: expectString(row.last_seen_at, "device_connection_source.last_seen_at"),
     last_data_at: expectNullableString(
@@ -460,6 +480,7 @@ function mapConnectionSourceRow(
     ),
     lastErrorCode: row.last_error_code,
     lastErrorMessage: row.last_error_message,
+    lifecycleEpoch: row.lifecycle_epoch,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
     lastDataAt: row.last_data_at,
@@ -482,25 +503,246 @@ function getConnectionSourceByInstanceKey(
   return row ? mapConnectionSourceRow(decodeConnectionSourceRow(row)) : null;
 }
 
+function readConnectionProvider(database: DatabaseSync, connectionId: string): string | null {
+  const row = database.prepare("select provider from device_connection where id = ?")
+    .get(connectionId) as { provider?: unknown } | undefined;
+
+  return row ? expectString(row.provider, "device_connection.provider") : null;
+}
+
+function listJunctionSourceIdentitySlugs(canonicalProviderSlug: string): string[] {
+  const route = resolveJunctionDeviceConnectRouteByProviderSlug(canonicalProviderSlug)?.route;
+  return route
+    ? [route.sourceProviderSlug, ...(route.sourceProviderSlugAliases ?? [])]
+    : [canonicalProviderSlug];
+}
+
+function readJunctionSourceIdentityCandidates(
+  database: DatabaseSync,
+  input: {
+    connectionId: string;
+    sourceInstanceKey: string;
+    sourceProviderSlug: string;
+  },
+): StoredDeviceConnectionSource[] {
+  const slugs = listJunctionSourceIdentitySlugs(input.sourceProviderSlug);
+  return database.prepare(`
+    ${CONNECTION_SOURCE_ROW_SELECT}
+    where connection_id = ?
+      and (
+        source_provider_slug in (${slugs.map(() => "?").join(", ")})
+        or source_instance_key = ?
+      )
+  `).all(input.connectionId, ...slugs, input.sourceInstanceKey)
+    .map((row) => mapConnectionSourceRow(decodeConnectionSourceRow(row)));
+}
+
+function mergeJunctionSourceIdentity(
+  candidates: readonly StoredDeviceConnectionSource[],
+): StoredDeviceConnectionSource | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const ordered = [...candidates].sort((left, right) =>
+    right.lifecycleEpoch - left.lifecycleEpoch
+    || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
+    || left.id.localeCompare(right.id)
+  );
+  const identityRow = [...candidates].sort((left, right) =>
+    Date.parse(left.firstSeenAt) - Date.parse(right.firstSeenAt)
+    || left.sourceInstanceKey.localeCompare(right.sourceInstanceKey)
+    || left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || left.id.localeCompare(right.id)
+  )[0]!;
+  const lifecycleEpoch = ordered[0]!.lifecycleEpoch;
+  const currentLifecycle = ordered.filter((source) => source.lifecycleEpoch === lifecycleEpoch);
+  const lifecycleState = currentLifecycle
+    .sort((left, right) =>
+      SOURCE_STATUS_PRECEDENCE[right.status] - SOURCE_STATUS_PRECEDENCE[left.status]
+      || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
+      || left.id.localeCompare(right.id)
+    )[0]!;
+  const lifecycleFence = currentLifecycle
+    .filter(isDeviceSyncSourceDisconnectFenced)
+    .sort((left, right) =>
+      left.lastErrorCode!.localeCompare(right.lastErrorCode!)
+      || Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)
+      || left.id.localeCompare(right.id)
+    )[0] ?? null;
+  let firstSeenAt = identityRow.firstSeenAt;
+  let lastSeenAt = identityRow.lastSeenAt;
+  let lastDataAt = identityRow.lastDataAt;
+  let updatedAt = identityRow.updatedAt;
+  let availabilityCount = 0;
+  const availability: DeviceConnectionSourceResourceAvailabilitySummary = {};
+
+  for (const source of ordered) {
+    firstSeenAt = earliestIsoTimestamp(firstSeenAt, source.firstSeenAt);
+    lastSeenAt = latestIsoTimestamp(lastSeenAt, source.lastSeenAt);
+    updatedAt = latestIsoTimestamp(updatedAt, source.updatedAt);
+    if (source.lastDataAt !== null) {
+      lastDataAt = lastDataAt === null
+        ? source.lastDataAt
+        : latestIsoTimestamp(lastDataAt, source.lastDataAt);
+    }
+    for (const [key, value] of Object.entries(source.resourceAvailabilitySummary)) {
+      if (!Object.hasOwn(availability, key) && availabilityCount < SOURCE_AVAILABILITY_MAX_ENTRIES) {
+        availability[key] = value;
+        availabilityCount += 1;
+      }
+    }
+  }
+
+  return {
+    ...identityRow,
+    displayName: lifecycleState.displayName,
+    firstSeenAt,
+    lastDataAt,
+    lastErrorCode: lifecycleFence?.lastErrorCode ?? lifecycleState.lastErrorCode,
+    lastErrorMessage: lifecycleFence?.lastErrorMessage ?? lifecycleState.lastErrorMessage,
+    lastSeenAt,
+    lifecycleEpoch,
+    resourceAvailabilitySummary: availability,
+    status: lifecycleState.status,
+    updatedAt,
+  };
+}
+
+export function prepareConnectionSourceWriteInTransaction(
+  database: DatabaseSync,
+  input: UpsertDeviceConnectionSourceInput,
+) {
+  const connectionId = normalizeRequiredBoundedString(
+    input.connectionId,
+    "connectionId",
+    SOURCE_INSTANCE_KEY_MAX_LENGTH,
+  );
+  const connectionProvider = readConnectionProvider(database, connectionId);
+  const canonicalProviderSlug = connectionProvider === "junction"
+    ? canonicalizeJunctionProviderSlug(input.sourceProviderSlug)
+    : null;
+  const canonicalSourceInstanceKey = canonicalProviderSlug
+    ? buildJunctionProviderSourceInstanceKey({
+        connectionId,
+        sourceProviderSlug: canonicalProviderSlug,
+      })
+    : null;
+  const requested = normalizeSourceInput(input);
+  const exactExisting = getConnectionSourceByInstanceKey(
+    database,
+    requested.connectionId,
+    requested.sourceInstanceKey,
+  );
+  const established = canonicalProviderSlug !== null
+    ? mergeJunctionSourceIdentity(
+        readJunctionSourceIdentityCandidates(database, requested),
+      )
+    : null;
+  const ownsCanonicalNewIdentity = !established
+    && !exactExisting
+    && canonicalProviderSlug !== null
+    && canonicalSourceInstanceKey !== null
+    && (
+      hasOwnInputProperty(input, "lifecycleEpoch")
+      || requested.sourceProviderSlug === canonicalProviderSlug
+    );
+  const ownedInput = established
+    ? {
+        ...input,
+        sourceInstanceKey: established.sourceInstanceKey,
+        sourceProviderSlug: established.sourceProviderSlug,
+      }
+    : ownsCanonicalNewIdentity
+      ? {
+          ...input,
+          sourceInstanceKey: canonicalSourceInstanceKey,
+          sourceProviderSlug: canonicalProviderSlug,
+        }
+      : input;
+  const normalized = normalizeSourceInput(ownedInput);
+  const existing = established ?? getConnectionSourceByInstanceKey(
+      database,
+      normalized.connectionId,
+      normalized.sourceInstanceKey,
+    );
+  return { existing, input: ownedInput, normalized };
+}
+
 export function upsertConnectionSource(
   database: DatabaseSync,
   input: UpsertDeviceConnectionSourceInput,
+  options: {
+    fenceActiveWorkOnReconnect?: boolean;
+    preserveDisconnected?: boolean;
+  } = {},
 ): StoredDeviceConnectionSource {
-  return withImmediateTransaction(database, () =>
-    upsertConnectionSourceInTransaction(database, input)
-  );
+  return withImmediateTransaction(database, () => {
+    if (
+      options.preserveDisconnected
+      && readConnectionProvider(database, input.connectionId) === "junction"
+    ) {
+      const requested = normalizeSourceInput(input);
+      const established = mergeJunctionSourceIdentity(
+        readJunctionSourceIdentityCandidates(database, requested),
+      );
+      if (
+        established
+        && (
+          established.status === "disconnected"
+          || isDeviceSyncSourceDisconnectFenced(established)
+        )
+      ) {
+        return established;
+      }
+    }
+    const prepared = prepareConnectionSourceWriteInTransaction(database, input);
+    if (
+      options.preserveDisconnected
+      && prepared.existing
+      && (
+        prepared.existing.status === "disconnected"
+        || isDeviceSyncSourceDisconnectFenced(prepared.existing)
+      )
+    ) {
+      return prepared.existing;
+    }
+    const reconnectStarted = options.fenceActiveWorkOnReconnect === true
+      && prepared.existing !== null
+      && prepared.existing.status !== "disconnected"
+      && prepared.normalized.status === "disconnected";
+    const source = upsertPreparedConnectionSourceInTransaction(database, prepared);
+    if (reconnectStarted) {
+      database.prepare(`
+        update device_observation_state
+        set local_connection_revision = local_connection_revision + 1,
+            updated_at = ?
+        where account_id = ?
+      `).run(source.lastSeenAt, source.connectionId);
+    }
+    return source;
+  });
 }
 
 export function upsertConnectionSourceInTransaction(
   database: DatabaseSync,
   input: UpsertDeviceConnectionSourceInput,
 ): StoredDeviceConnectionSource {
-  const normalized = normalizeSourceInput(input);
-  const existing = getConnectionSourceByInstanceKey(
+  return upsertPreparedConnectionSourceInTransaction(
     database,
-    normalized.connectionId,
-    normalized.sourceInstanceKey,
+    prepareConnectionSourceWriteInTransaction(database, input),
   );
+}
+
+export function upsertPreparedConnectionSourceInTransaction(
+  database: DatabaseSync,
+  prepared: ReturnType<typeof prepareConnectionSourceWriteInTransaction>,
+  input: UpsertDeviceConnectionSourceInput = prepared.input,
+): StoredDeviceConnectionSource {
+  const { existing } = prepared;
+  const normalized = input === prepared.input
+    ? prepared.normalized
+    : normalizeSourceInput(input);
   const displayName = normalized.displayName !== undefined
     ? normalized.displayName
     : existing?.displayName ?? null;
@@ -518,10 +760,9 @@ export function upsertConnectionSourceInTransaction(
       : null;
 
   if (existing) {
-    const firstSeenAt = earliestIsoTimestamp(
-      existing.firstSeenAt,
-      normalized.firstSeenAt,
-    );
+    const firstSeenAt = input.replaceFirstSeenAt
+      ? normalized.firstSeenAt
+      : earliestIsoTimestamp(existing.firstSeenAt, normalized.firstSeenAt);
 
     database.prepare(`
       update device_connection_source
@@ -531,6 +772,7 @@ export function upsertConnectionSourceInTransaction(
           resource_availability_summary_json = ?,
           last_error_code = ?,
           last_error_message = ?,
+          lifecycle_epoch = ?,
           first_seen_at = ?,
           last_seen_at = ?,
           last_data_at = ?,
@@ -543,6 +785,7 @@ export function upsertConnectionSourceInTransaction(
       resourceAvailabilitySummaryJson,
       lastErrorCode,
       lastErrorMessage,
+      normalized.lifecycleEpoch ?? existing.lifecycleEpoch,
       firstSeenAt,
       normalized.lastSeenAt,
       normalized.lastDataAt === undefined ? existing.lastDataAt : normalized.lastDataAt,
@@ -569,12 +812,13 @@ export function upsertConnectionSourceInTransaction(
       resource_availability_summary_json,
       last_error_code,
       last_error_message,
+      lifecycle_epoch,
       first_seen_at,
       last_seen_at,
       last_data_at,
       created_at,
       updated_at
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     normalized.connectionId,
@@ -585,6 +829,7 @@ export function upsertConnectionSourceInTransaction(
     resourceAvailabilitySummaryJson,
     lastErrorCode,
     lastErrorMessage,
+    normalized.lifecycleEpoch ?? 1,
     normalized.firstSeenAt,
     normalized.lastSeenAt,
     normalized.lastDataAt ?? null,
@@ -623,11 +868,24 @@ export function markConnectionSourceDataReceived(
     "connectionId",
     SOURCE_INSTANCE_KEY_MAX_LENGTH,
   );
-  const sourceProviderSlug = normalizeRequiredSourceSlug(
+  const requestedSourceProviderSlug = normalizeRequiredSourceSlug(
     input.sourceProviderSlug,
     "sourceProviderSlug",
     SOURCE_PROVIDER_SLUG_MAX_LENGTH,
   );
+  const isJunctionConnection = readConnectionProvider(database, connectionId) === "junction";
+  const canonicalProviderSlug = isJunctionConnection
+    ? canonicalizeJunctionProviderSlug(requestedSourceProviderSlug) ?? requestedSourceProviderSlug
+    : requestedSourceProviderSlug;
+  const junctionSlugs = isJunctionConnection
+    ? listJunctionSourceIdentitySlugs(canonicalProviderSlug)
+    : null;
+  const sourcePredicate = junctionSlugs
+    ? `source_provider_slug in (${junctionSlugs.map(() => "?").join(", ")})`
+    : "source_provider_slug = ?";
+  const sourceParams = junctionSlugs
+    ? junctionSlugs
+    : [canonicalProviderSlug];
   const now = toIsoTimestamp(input.now);
 
   const result = database.prepare(`
@@ -635,9 +893,9 @@ export function markConnectionSourceDataReceived(
     set last_data_at = ?,
         updated_at = ?
     where connection_id = ?
-      and source_provider_slug = ?
+      and ${sourcePredicate}
       and (last_data_at is null or last_data_at < ?)
-  `).run(now, now, connectionId, sourceProviderSlug, now);
+  `).run(now, now, connectionId, ...sourceParams, now);
 
   return Number(result.changes ?? 0);
 }
@@ -651,7 +909,7 @@ export function listConnectionSources(
     "connectionId",
     SOURCE_INSTANCE_KEY_MAX_LENGTH,
   );
-  const sourceProviderSlug = input.sourceProviderSlug === null || input.sourceProviderSlug === undefined
+  const requestedSourceProviderSlug = input.sourceProviderSlug === null || input.sourceProviderSlug === undefined
     ? null
     : normalizeRequiredBoundedString(
         input.sourceProviderSlug,
@@ -661,12 +919,29 @@ export function listConnectionSources(
   const status = input.status === null || input.status === undefined
     ? null
     : normalizeSourceStatus(input.status);
+
+  if (
+    requestedSourceProviderSlug !== null
+    && readConnectionProvider(database, connectionId) === "junction"
+  ) {
+    const sourceProviderSlug = canonicalizeJunctionProviderSlug(requestedSourceProviderSlug)
+      ?? requestedSourceProviderSlug;
+    const merged = mergeJunctionSourceIdentity(
+      readJunctionSourceIdentityCandidates(database, {
+        connectionId,
+        sourceInstanceKey: "",
+        sourceProviderSlug,
+      }),
+    );
+    return merged && (status === null || merged.status === status) ? [merged] : [];
+  }
+
   const conditions = ["connection_id = ?"];
   const params: string[] = [connectionId];
 
-  if (sourceProviderSlug !== null) {
+  if (requestedSourceProviderSlug !== null) {
     conditions.push("source_provider_slug = ?");
-    params.push(sourceProviderSlug);
+    params.push(requestedSourceProviderSlug);
   }
 
   if (status !== null) {
