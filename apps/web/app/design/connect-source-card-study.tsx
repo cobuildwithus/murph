@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
 
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
@@ -38,6 +39,19 @@ const APPLE_HEALTH_CONNECT_SOURCE: ConnectSource = {
   name: "Apple Health",
   unavailableActionLabel: "Download app",
   unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+};
+
+const FITBIT_CONNECT_SOURCE: ConnectSource = {
+  connectTarget: "fitbit",
+  description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
+  id: "fitbit",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 128,
+  },
+  name: "Fitbit",
 };
 
 const DEXCOM_UNAVAILABLE_SOURCE: ConnectSource = {
@@ -149,19 +163,27 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
-    source: {
-      connectTarget: "fitbit",
-      description: "Sleep, activity, heart rate, and daily readiness.",
-      id: "fitbit",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/fitbit.svg",
-        width: 128,
-      },
-      name: "Fitbit",
-    },
+    source: FITBIT_CONNECT_SOURCE,
   },
+  ...([
+    ["fitbit-authorization", "authorization_required", false],
+    ["fitbit-verifying", "verifying_successor", false],
+    ["fitbit-switching", "cutover_ready", false],
+    ["fitbit-retry", "cutover_ready", true],
+  ] as const).map(([id, migrationState, migrationRetryRequired]) => ({
+    authenticated: true,
+    errorMessage: null,
+    source: {
+      ...FITBIT_CONNECT_SOURCE,
+      disconnectConnectionId: "design-fitbit-migration",
+      ...(migrationState === "cutover_ready"
+        ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG }
+        : {}),
+      id,
+      ...(migrationRetryRequired ? { migrationRetryRequired: true } : {}),
+      migrationState,
+    },
+  })),
   {
     authenticated: true,
     errorMessage: null,
@@ -402,6 +424,7 @@ function SourceCardStudyGrid({
           pendingDisconnect={false}
           source={source}
           onDisconnectTargetChange={() => {}}
+          onMigrationRetry={() => {}}
           onSetupGuideOpen={() => {}}
           onStartConnection={() => Promise.resolve()}
         />
