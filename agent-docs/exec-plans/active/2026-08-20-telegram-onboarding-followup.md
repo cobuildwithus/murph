@@ -72,13 +72,19 @@ delivery proof.
 
 ## Progress
 
-- The assistant engine now emits one best-effort continuation callback after a
-  non-empty early-onboarding reply is accepted for sent or queued delivery.
-- Hosted runtime filters that callback to an exact direct Telegram member
-  route and invokes the canonical finite follow-up seed. The existing signup
-  welcome owner uses the same helper.
-- Focused engine/runtime suites, affected package typechecks, and hosted runner
-  bundle parity pass locally.
+- Accepted early-onboarding delivery now commits only the existing durable
+  first-contact marker. Post-checkpoint managed-automation maintenance reads
+  that marker on an exact direct Telegram route and invokes the canonical
+  finite follow-up seed only while onboarding remains open.
+- The existing managed-setup retry ladder owns transient seed-write recovery,
+  so the member's reply does not wait on automation maintenance and recovery
+  does not require another member message or replay the accepted input.
+- ReviewGPT identified the original foreground best-effort callback as an
+  unrecoverable write gap; the callback plumbing was removed in favor of this
+  durable owner and a production-shaped failure-then-retry test.
+- Focused engine/runtime suites, all three affected package typechecks, agent
+  docs drift, public changelog tests, and hosted runner bundle parity pass
+  locally. The runner bundle is 11,102,727 bytes of its 11,393,617-byte budget.
 - The production-shape first-contact E2E is prepared with direct-wake local
   orchestration, but the local harness could not start because the pinned
   public MinIO fallback never became ready. The test body did not run; exact-
@@ -92,8 +98,10 @@ delivery proof.
   whose follow-up is archived stays closed. Telegram groups and other channels
   retain their existing paths.
 - `Evidence`: focused engine integration proves exact direct-route selection,
-  one stable schedule, replay idempotency, and archive preservation; hosted
-  runtime tests prove post-accepted-reply invocation and fail-soft recovery;
+  durable first-contact gating, one stable schedule, replay idempotency,
+  completed-state closure, and archive preservation; hosted runtime tests
+  prove post-checkpoint invocation and a transient canonical-write failure
+  recovering on the next managed wake without new member input;
   the hosted-local first-contact scenario locks activation silence, ordinary
   reply delivery, durable seed attestation, and exact inbound replay. The
   existing scheduled-reminder scenario proves downstream Telegram delivery.

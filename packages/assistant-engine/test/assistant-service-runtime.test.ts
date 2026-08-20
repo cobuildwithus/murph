@@ -3365,25 +3365,9 @@ describe("assistant delivery orchestration seam", () => {
   it("finalizes receipts and marks first contact for accepted injected turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
-    const audience = {
-      actorId: null,
-      bindingDelivery: null,
-      channel: "telegram",
-      deliveryPolicy: "binding-target-only" as const,
-      effectiveThreadIsDirect: true,
-      explicitTarget: null,
-      identityId: "identity-1",
-      replyToMessageId: null,
-      threadId: "thread-1",
-      threadIsDirect: true,
-    };
-    const onEarlySessionOnboardingReplyAccepted = vi.fn();
-
     await finalizeAssistantTurnFromDeliveryOutcome({
-      audience,
       firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1", "doc-2"],
-      onEarlySessionOnboardingReplyAccepted,
       outcome: {
         delivery: {
           channel: "telegram",
@@ -3429,17 +3413,11 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
-    expect(onEarlySessionOnboardingReplyAccepted).toHaveBeenCalledWith({
-      audience,
-    });
-
     seamMocks.markAssistantFirstContactSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      audience,
       firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1"],
-      onEarlySessionOnboardingReplyAccepted,
       outcome: {
         error: null,
         intentId: "intent-queued",
@@ -3459,18 +3437,14 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
-    expect(onEarlySessionOnboardingReplyAccepted).toHaveBeenCalledTimes(2);
-
     seamMocks.markAssistantFirstContactSeen.mockClear();
 
     // Any accepted non-empty reply is first contact, not just the canned
     // welcome text — an organic onboarding reply must supersede a queued
     // signup welcome for the same route.
     await finalizeAssistantTurnFromDeliveryOutcome({
-      audience,
       firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-organic-reply"],
-      onEarlySessionOnboardingReplyAccepted,
       outcome: {
         delivery: {
           channel: "telegram",
@@ -3499,15 +3473,11 @@ describe("assistant delivery orchestration seam", () => {
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
-    expect(onEarlySessionOnboardingReplyAccepted).toHaveBeenCalledTimes(3);
-
     seamMocks.markAssistantFirstContactSeen.mockClear();
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      audience,
       firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-no-reply"],
-      onEarlySessionOnboardingReplyAccepted,
       outcome: {
         kind: "not-requested",
         media: [],
@@ -3521,9 +3491,7 @@ describe("assistant delivery orchestration seam", () => {
     });
 
     await finalizeAssistantTurnFromDeliveryOutcome({
-      audience,
       firstContactStateDocIds: ["doc-no-guidance"],
-      onEarlySessionOnboardingReplyAccepted,
       outcome: {
         delivery: {
           channel: "telegram",
@@ -3548,7 +3516,6 @@ describe("assistant delivery orchestration seam", () => {
     });
 
     expect(seamMocks.markAssistantFirstContactSeen).not.toHaveBeenCalled();
-    expect(onEarlySessionOnboardingReplyAccepted).toHaveBeenCalledTimes(3);
   });
 });
 

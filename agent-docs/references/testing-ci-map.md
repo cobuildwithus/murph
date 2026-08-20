@@ -312,8 +312,10 @@ a signup welcome nor a follow-up seed, the first accepted private reply creates
 one metadata-attested canonical finite seed, and replay of the same inbound wake
 creates neither another provider turn, another reply, nor another seed. Focused
 assistant-engine tests prove canonical route selection, stable scheduling,
-idempotent replay, and archived-record preservation; assistant-runtime tests
-prove post-acceptance hook ordering and metadata-only success/failure events.
+durable first-contact gating, idempotent replay, completed-onboarding closure,
+and archived-record preservation. Assistant-runtime tests prove post-checkpoint
+ordering, metadata-only seed attestation, and recovery from a transient
+canonical write on the existing bounded wake ladder without new member input.
 The existing hosted-local scheduled-reminder scenario remains the downstream
 proof for Telegram scheduler, outbox, and provider delivery.
 

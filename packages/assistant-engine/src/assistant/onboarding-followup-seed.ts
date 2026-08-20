@@ -1,15 +1,16 @@
 import type { AutomationRoute } from '@murphai/contracts'
 import type { AssistantCronJob } from '@murphai/operator-config/assistant-cli-contracts'
 
-import type { AssistantConversationAudience } from './conversation-policy.js'
-import type { AssistantExecutionContext } from './execution-context.js'
+import {
+  hasAssistantSeenFirstContact,
+  resolveAssistantFirstContactStateDocIds,
+} from './first-contact.js'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   resolveMurphOnboardingFollowupSchedule,
 } from './onboarding-followup-automation.js'
+import { readAssistantOnboardingState } from './onboarding-state.js'
 import { upsertAssistantCronAutomation } from './cron/authoring.js'
-import { resolveDeliverableAutomationRoute } from './cron/targets.js'
-import { normalizeNullableString } from './shared.js'
 
 export type MurphTelegramOnboardingFollowupSeedResult =
   | { kind: 'not-applicable' }
@@ -38,43 +39,44 @@ export async function seedMurphOnboardingFollowupAutomation(input: {
   })
 }
 
-export async function seedMurphOnboardingFollowupAfterAcceptedTelegramReply(
+export async function seedMurphOnboardingFollowupAfterTelegramFirstContact(
   input: {
-    audience: AssistantConversationAudience
-    executionContext?: AssistantExecutionContext | null
+    route: AutomationRoute
+    stableKey: string
     vault: string
   },
 ): Promise<MurphTelegramOnboardingFollowupSeedResult> {
-  const memberId = normalizeNullableString(
-    input.executionContext?.hosted?.memberId,
-  )
   if (
-    input.audience.channel !== 'telegram' ||
-    input.audience.effectiveThreadIsDirect !== true ||
-    memberId === null
+    input.route.channel !== 'telegram' ||
+    input.route.threadIsDirect !== true
   ) {
     return { kind: 'not-applicable' }
   }
 
-  const route = resolveDeliverableAutomationRoute(
-    {
-      channel: 'telegram',
-      deliverySource: null,
-      deliveryTarget: null,
-      identityId: input.audience.identityId,
-      participantId: null,
-      threadId: input.audience.threadId,
-      threadIsDirect: true,
-    },
-    'hosted',
-  )
-  if (route === null) {
+  const firstContactStateDocIds = resolveAssistantFirstContactStateDocIds({
+    channel: input.route.channel,
+    identityId: input.route.identityId,
+    threadId: input.route.threadId,
+    threadIsDirect: input.route.threadIsDirect,
+  })
+  if (
+    firstContactStateDocIds.length === 0 ||
+    !await hasAssistantSeenFirstContact({
+      docIds: firstContactStateDocIds,
+      vault: input.vault,
+    })
+  ) {
     return { kind: 'not-applicable' }
   }
 
+  const onboardingState = await readAssistantOnboardingState(input.vault)
+  if (onboardingState.status !== 'open') {
+    return { kind: 'preserved-closed' }
+  }
+
   const job = await seedMurphOnboardingFollowupAutomation({
-    route,
-    stableKey: memberId,
+    route: input.route,
+    stableKey: input.stableKey,
     vault: input.vault,
   })
   return job === null

@@ -2333,9 +2333,13 @@ authority, and ordinary fallback selection remains fail-closed when no eligible
 line exists. Successful or first-contact-superseded welcome delivery seeds the
 existing finite unfinished-onboarding automation. Because Telegram forbids
 proactive activation outreach, its first accepted direct onboarding reply owns
-the equivalent seed transition after reply acceptance; activation remains
-silent, replay uses the same idempotent record, and an archived follow-up is
-never reopened. The automation has at most one low-pressure opportunity on
+the equivalent transition: accepted delivery commits the existing durable
+first-contact marker, then post-checkpoint managed-automation maintenance
+observes that marker and writes the canonical seed. A transient seed write
+uses the existing bounded managed-setup wake ladder, so recovery needs neither
+another member message nor replay of the accepted reply; activation remains
+silent, the seed is idempotent, and an archived follow-up is never reopened.
+The automation has at most one low-pressure opportunity on
 each of the next three local days and the existing completion, decline,
 response, suspension, and expiry stops. The companion path does not send the
 separate signup welcome email. A committed activation whose runtime wake is not

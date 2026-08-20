@@ -53,6 +53,9 @@ import {
   resolveMurphOnboardingFollowupActiveUntil,
   resolveMurphOnboardingFollowupSchedule,
 } from './onboarding-followup-automation.js'
+import {
+  seedMurphOnboardingFollowupAfterTelegramFirstContact,
+} from './onboarding-followup-seed.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
 export { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION }
@@ -120,6 +123,7 @@ export interface MurphManagedAutomationDiagnosticStage {
 export interface ApplyMurphManagedAutomationsResult {
   created: number
   experimentLifecycleFailure?: unknown
+  onboardingFollowupSeeded?: true
   onboardingGoalCheckinFailure?: unknown
   skipped: number
   stableKeyFailure?: unknown
@@ -1248,11 +1252,56 @@ export async function applyMurphManagedAutomations(
     reportMurphManagedAutomationDiagnosticStage(input, {
       stage: 'onboarding_followup',
     })
-    const onboardingReconciliation = await reconcileExistingOnboardingFollowupAutomation({
-      now,
-      shouldYield: input.shouldYield ?? null,
+    const existingOnboardingFollowup = await showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       vaultRoot: input.vaultRoot,
     })
+    if (input.shouldYield?.() === true) {
+      return { ...result, yielded: true }
+    }
+    if (!existingOnboardingFollowup) {
+      const route = await resolveCreateRoute()
+      if (input.shouldYield?.() === true) {
+        return { ...result, yielded: true }
+      }
+      if (
+        route?.channel === 'telegram' &&
+        route.threadIsDirect === true &&
+        !scheduleStableKeyUnavailable
+      ) {
+        let stableKey: string | null = null
+        try {
+          stableKey = await resolveScheduleStableKey()
+        } catch (error) {
+          scheduleStableKeyUnavailable = true
+          result.stableKeyFailure = error
+          result.stableKeyRetryNeeded = true
+        }
+        if (input.shouldYield?.() === true) {
+          return { ...result, yielded: true }
+        }
+        if (stableKey !== null) {
+          const seedResult =
+            await seedMurphOnboardingFollowupAfterTelegramFirstContact({
+              route,
+              stableKey,
+              vault: input.vaultRoot,
+            })
+          if (seedResult.kind === 'ready') {
+            result.created += 1
+            result.onboardingFollowupSeeded = true
+          }
+        }
+      }
+    }
+    const onboardingReconciliation = result.onboardingFollowupSeeded === true
+      ? { diagnostic: null, updated: false, yielded: false }
+      : await reconcileExistingOnboardingFollowupAutomation({
+          existing: existingOnboardingFollowup,
+          now,
+          shouldYield: input.shouldYield ?? null,
+          vaultRoot: input.vaultRoot,
+        })
     if (onboardingReconciliation.yielded) {
       return { ...result, yielded: true }
     }
@@ -1482,6 +1531,7 @@ function stableHashToIndex(material: string, length: number): number {
 }
 
 async function reconcileExistingOnboardingFollowupAutomation(input: {
+  existing: AutomationRecord | null
   now: Date
   shouldYield: (() => boolean) | null
   vaultRoot: string
@@ -1493,13 +1543,7 @@ async function reconcileExistingOnboardingFollowupAutomation(input: {
   if (input.shouldYield?.() === true) {
     return { diagnostic: null, updated: false, yielded: true }
   }
-  const existing = await showAutomation({
-    slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-    vaultRoot: input.vaultRoot,
-  })
-  if (input.shouldYield?.() === true) {
-    return { diagnostic: null, updated: false, yielded: true }
-  }
+  const existing = input.existing
   if (!existing || existing.status === 'archived') {
     return { diagnostic: null, updated: false, yielded: false }
   }

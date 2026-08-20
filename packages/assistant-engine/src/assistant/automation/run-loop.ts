@@ -22,7 +22,6 @@ import {
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
-  AssistantEarlySessionOnboardingReplyAcceptedHook,
   AssistantTurnEnvironment,
 } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
@@ -107,8 +106,6 @@ export interface RunAssistantAutomationInput {
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
   inboxServices?: InboxServices
   maxPerScan?: number
-  onEarlySessionOnboardingReplyAccepted?:
-    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
@@ -997,8 +994,6 @@ export async function runAssistantAutomationPass(
     ...(input.operationScope ? { operationScope: input.operationScope } : {}),
     inboxServices,
     maxPerScan: input.maxInputPerScan ?? input.maxPerScan,
-    onEarlySessionOnboardingReplyAccepted:
-      input.onEarlySessionOnboardingReplyAccepted ?? null,
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted ?? null,

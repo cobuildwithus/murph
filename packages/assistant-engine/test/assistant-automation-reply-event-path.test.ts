@@ -139,7 +139,6 @@ afterEach(async () => {
 describe('assistant auto-reply event-first path', () => {
   it('preserves unresolved authenticated iMessage group reply context without exposing provider ids', async () => {
     const vault = await createTempVault()
-    const onEarlySessionOnboardingReplyAccepted = vi.fn()
     const candidate = createLinqGroupCandidate({
       inputId: 'ain_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
       messageId: 'linq-msg-human-reply',
@@ -153,7 +152,6 @@ describe('assistant auto-reply event-first path', () => {
       context: createReplyContext(candidate),
       enabledChannels: ['linq'],
       inboxServices: createInboxServices(),
-      onEarlySessionOnboardingReplyAccepted,
       requestId: null,
       sessionMaxAgeMs: null,
       vault,
@@ -168,11 +166,6 @@ describe('assistant auto-reply event-first path', () => {
       'The native reply edge alone does not establish that Murph is addressed.',
     )
     expect(prompt).not.toContain('linq-msg-unavailable-target')
-    expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        onEarlySessionOnboardingReplyAccepted,
-      }),
-    )
   })
 
   it('links a native group reply only to an earlier accepted non-Murph input', async () => {

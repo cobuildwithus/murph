@@ -26,7 +26,6 @@ import { resolveAssistantBindingDelivery } from './bindings.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import type {
   AssistantDeliveryOutcome,
-  AssistantEarlySessionOnboardingReplyAcceptedHook,
   AssistantMessageInput,
   AssistantTurnDeliveryFinalizationPlan,
   AssistantTurnSharedPlan,
@@ -1047,11 +1046,8 @@ function stringifyHostedDeliveryIdempotencyKeyParts(
 }
 
 export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
-  audience?: AssistantTurnSharedPlan['conversationPolicy']['audience'] | null
   firstContactGuidanceInjected?: boolean
   firstContactStateDocIds?: readonly string[]
-  onEarlySessionOnboardingReplyAccepted?:
-    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   outcome: AssistantDeliveryOutcome
   response: string
   turnId: string
@@ -1080,18 +1076,6 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
       seenAt: completedAt,
       vault: input.vault,
     })
-    if (input.audience && input.onEarlySessionOnboardingReplyAccepted) {
-      try {
-        await input.onEarlySessionOnboardingReplyAccepted({
-          audience: input.audience,
-        })
-      } catch (error) {
-        warnAssistantBestEffortFailure({
-          error,
-          operation: 'early-session onboarding reply continuation',
-        })
-      }
-    }
   }
   // The receipt finalization above is the commit; the terminal diagnostic is
   // observability only and must never fail an already-accepted delivery (a
@@ -1104,8 +1088,9 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   })
 }
 
-// The first-contact marker's only reader is the hosted signup-welcome skip,
-// so it must mean "a reply actually reached (or is queued for) this route".
+// The hosted signup-welcome skip and managed onboarding follow-up seeder both
+// read this marker, so it must mean "a reply actually reached (or is queued
+// for) this route".
 // A 'not-requested' outcome delivered nothing and must not suppress the
 // welcome for a route that has never heard from the assistant.
 function isAssistantFirstContactAcceptedForDelivery(

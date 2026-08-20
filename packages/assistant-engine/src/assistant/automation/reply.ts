@@ -40,7 +40,6 @@ import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
 import type {
   AssistantBeforeProviderAcceptedInputsHook,
-  AssistantEarlySessionOnboardingReplyAcceptedHook,
   AssistantFinishWithoutReplyAcceptedHook,
   AssistantHostedDeliveryIdempotencyContext,
   AssistantHostedImageCompletionEffectRestriction,
@@ -476,8 +475,6 @@ export async function processAssistantAutoReplyGroup(input: {
   enabledChannels: readonly string[]
   executionContext?: AssistantExecutionContext | null
   inboxServices: InboxServices
-  onEarlySessionOnboardingReplyAccepted?:
-    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
@@ -581,8 +578,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
   deliveryDispatchMode?: AssistantOutboxDispatchMode
   enabledChannels: readonly string[]
   executionContext?: AssistantExecutionContext | null
-  onEarlySessionOnboardingReplyAccepted?:
-    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   onEvent?: (event: AssistantRunEvent) => void
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
   onProviderRequestStarted?: AssistantAutoReplyProviderRequestStartHook | null
@@ -773,8 +768,6 @@ async function resolveAssistantAutoReplyGroupOutcome(input: {
     providerStallTimeoutMs: input.providerStallTimeoutMs,
     signal: input.signal,
     maxSessionAgeMs: input.sessionMaxAgeMs,
-    onEarlySessionOnboardingReplyAccepted:
-      input.onEarlySessionOnboardingReplyAccepted ?? null,
     onEvent: input.onEvent,
     onProviderEvent: input.onProviderEvent ?? null,
     onProviderRequestStarted: input.onProviderRequestStarted
@@ -2210,8 +2203,6 @@ async function executeAssistantAutoReply(input: {
   providerStallTimeoutMs?: number | null
   signal?: AbortSignal
   maxSessionAgeMs: number | null
-  onEarlySessionOnboardingReplyAccepted?:
-    AssistantEarlySessionOnboardingReplyAcceptedHook | null
   onEvent?: (event: AssistantRunEvent) => void
   onFinishWithoutReplyAccepted?: AssistantFinishWithoutReplyAcceptedHook | null
   onProviderEvent?: ((event: AssistantProviderProgressEvent) => void) | null
@@ -2307,8 +2298,6 @@ async function executeAssistantAutoReply(input: {
       userMessageContent: input.userMessageContent,
       includeEarlySessionOnboarding: true,
       deliverResponse: true,
-      onEarlySessionOnboardingReplyAccepted:
-        input.onEarlySessionOnboardingReplyAccepted ?? null,
       onFinishWithoutReplyAccepted:
         input.onFinishWithoutReplyAccepted ?? null,
       bindingDeliveryTarget: input.bindingDeliveryTarget,

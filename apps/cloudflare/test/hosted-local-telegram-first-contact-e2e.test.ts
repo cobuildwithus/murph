@@ -544,8 +544,9 @@ async function countOnboardingFollowupSeedLogs(memberId: string): Promise<number
     userId: memberId,
   });
   return logs.filter((entry) =>
-    entry.eventCode === "assistant.automation_detail"
-    && entry.redactedJson?.type === "onboarding.followup.seeded"
+    entry.eventCode === "assistant.onboarding_followup_reconciled"
+    && entry.redactedJson?.onboardingFollowupAction ===
+      "seeded_after_first_contact"
   ).length;
 }
 

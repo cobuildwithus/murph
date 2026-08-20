@@ -3382,6 +3382,25 @@ async function applyHostedManagedAutomationsBestEffort(input: {
 
   const onboardingFollowupDiagnostic =
     onboardingFollowupDiagnostics.at(-1) ?? null;
+  if (result.onboardingFollowupSeeded === true) {
+    await writeHostedRuntimeLogBestEffort({
+      entry: {
+        ...buildHostedRuntimeLogContextFields({
+          attemptId: input.input.request.attemptId,
+          leaseGeneration: input.input.request.leaseGeneration,
+          workspaceVersion: input.input.request.workspaceVersion,
+        }),
+        component: "runtime",
+        eventCode: "assistant.onboarding_followup_reconciled",
+        level: "info",
+        phase: "invoke",
+        redactedJson: {
+          onboardingFollowupAction: "seeded_after_first_contact",
+        },
+      },
+      platform: input.input.runtime.platform,
+    });
+  }
   if (
     onboardingFollowupDiagnostic
     && onboardingFollowupDiagnostic.action !== "unchanged"

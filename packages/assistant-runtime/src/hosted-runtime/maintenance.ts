@@ -15,9 +15,6 @@ import {
   runAssistantAutomationPass,
   stampAssistantProviderStartCriticalPath,
 } from "@murphai/assistant-engine";
-import {
-  seedMurphOnboardingFollowupAfterAcceptedTelegramReply,
-} from "@murphai/assistant-engine/onboarding-followup-seed";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 import { createIntegratedVaultServices } from "@murphai/vault-usecases/vault-services";
 
@@ -506,28 +503,6 @@ export async function runHostedAssistantAutomation(
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
-      onEarlySessionOnboardingReplyAccepted: async (event) => {
-        try {
-          const seeded =
-            await seedMurphOnboardingFollowupAfterAcceptedTelegramReply({
-              audience: event.audience,
-              executionContext,
-              vault: vaultRoot,
-            });
-          if (seeded.kind === "ready") {
-            onAutomationEvent({
-              safeDetails: "onboarding_followup_seeded",
-              type: "onboarding.followup.seeded",
-            });
-          }
-        } catch {
-          onAutomationEvent({
-            errorCode: "ASSISTANT_ONBOARDING_FOLLOWUP_SEED_FAILED",
-            safeDetails: "onboarding_followup_seed_failed",
-            type: "onboarding.followup.seed_failed",
-          });
-        }
-      },
       onEvent: onAutomationEvent,
       onProviderEvent: (event) => {
         const context = activeProviderMilestoneTraceContext;
@@ -1200,8 +1175,6 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
     "input.reply-skipped",
     "input.reply-started",
     "onboarding.followup.completed",
-    "onboarding.followup.seeded",
-    "onboarding.followup.seed_failed",
     "reply.scan.started",
     "scan.started",
   ]).has(type);
@@ -1209,8 +1182,7 @@ function shouldPersistHostedAssistantAutomationEvent(type: string): boolean {
 
 function shouldAlwaysPersistHostedAssistantAutomationEvent(type: string): boolean {
   return type === "input.reply-failed"
-    || type === "onboarding.followup.completed"
-    || type === "onboarding.followup.seed_failed";
+    || type === "onboarding.followup.completed";
 }
 
 export function runHostedNoopSystemWakeLane(): HostedMaintenanceMetrics {

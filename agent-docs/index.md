@@ -162,10 +162,12 @@ valid-envelope retry classification across all Telegram send operations are
 specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 
 Direct Telegram onboarding preserves member-initiated first contact: activation
-stays silent, while the first accepted private onboarding reply seeds the same
+stays silent, while accepted private onboarding delivery commits the durable
+first-contact marker and post-checkpoint managed maintenance seeds the same
 finite, idempotent next-local-day follow-up used by proactive signup channels.
-Replay, archive preservation, runtime event ownership, and hosted-local proof
-are specified by `ARCHITECTURE.md`, `agent-docs/RELIABILITY.md`,
+Bounded write retry without input replay, archive preservation, runtime event
+ownership, and hosted-local proof are specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`,
 `packages/assistant-runtime/README.md`, and
 `agent-docs/references/testing-ci-map.md`.
 
