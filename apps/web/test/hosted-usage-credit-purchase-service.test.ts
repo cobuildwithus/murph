@@ -3319,77 +3319,123 @@ describe("createHostedUsageCreditCheckout", () => {
     },
   );
 
-  it("cancels an authentication-required saved-card intent before opening Checkout", async () => {
-    const fake = createFakePrisma();
-    mockCanonicalSavedCard();
-    const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
-      amountReceived: 0,
-      latestCharge: null,
-      purchaseId: String(onlyPurchase(fake.purchases).id),
-      status: "requires_confirmation",
-    });
-    mocks.stripePaymentIntentCreate.mockImplementationOnce(
-      async () => readUnconfirmedIntent(),
-    );
-    mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+  it.each([
+    [
+      "authentication-required",
       new Error("authentication required"),
-    );
-    mocks.stripePaymentIntentRetrieve.mockImplementationOnce(async () => ({
-      ...readUnconfirmedIntent(),
-      status: "requires_action",
-    }));
-    mocks.stripePaymentIntentCancel.mockImplementationOnce(async () => ({
-      ...readUnconfirmedIntent(),
-      status: "canceled",
-    }));
-    mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
-      buildStripeSession(request)
-    );
-
-    const result = await createHostedGroupUsageCreditCheckout({
-      clientRequestKey: CLIENT_REQUEST_KEY,
-      joinCode: "group_join_code_1234",
-      now: NOW,
-      offerCode: "usage_10_usd",
-      payerMemberId: MEMBER_ID,
-      prisma: fake.prisma as never,
-    });
-
-    expect(result).toMatchObject({
-      status: "checkout_open",
-      url: "https://checkout.stripe.test/session",
-    });
-    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
-      "pi_saved_card_123",
-      { cancellation_reason: "abandoned" },
-      {
-        idempotencyKey: expect.stringMatching(
-          /^hosted-usage-credit-saved-card:hucp_.+:cancel$/,
-        ),
-      },
-    );
-    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledBefore(
-      mocks.stripeCheckoutCreate,
-    );
-    expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        payment_intent_data: {
-          metadata: expect.objectContaining({
-            policyVersion: "hosted-usage-credit-checkout-v5",
-          }),
-        },
+      "requires_action",
+    ],
+    [
+      "provider-declared no-retry",
+      buildStripeNoRetryError(),
+      "requires_confirmation",
+    ],
+    [
+      "definitive invalid-request",
+      buildStripeInvalidRequestError(),
+      "requires_confirmation",
+    ],
+    [
+      "definitive authentication rejection",
+      buildStripeDefinitiveError({
+        rawType: "authentication_error",
+        statusCode: 401,
+        type: "StripeAuthenticationError",
       }),
-      expect.any(Object),
-    );
-    expect(onlyPurchase(fake.purchases)).toMatchObject({
-      grantSlotReleasedAt: null,
-      status: "checkout_open",
-      stripeChargeIdEncrypted: null,
-      stripeChargeLookupKey: null,
-      stripePaymentIntentIdEncrypted: null,
-      stripePaymentIntentLookupKey: null,
-    });
-  });
+      "requires_confirmation",
+    ],
+    [
+      "definitive card rejection",
+      buildStripeDefinitiveError({
+        rawType: "card_error",
+        statusCode: 402,
+        type: "StripeCardError",
+      }),
+      "requires_confirmation",
+    ],
+    [
+      "definitive permission rejection",
+      buildStripeDefinitiveError({
+        rawType: "permission_error",
+        statusCode: 403,
+        type: "StripePermissionError",
+      }),
+      "requires_confirmation",
+    ],
+  ] as const)(
+    "cancels a %s saved-card intent before opening Checkout",
+    async (_label, confirmationError, recoveredStatus) => {
+      const fake = createFakePrisma();
+      mockCanonicalSavedCard();
+      const readUnconfirmedIntent = () => buildSavedCardPaymentIntent({
+        amountReceived: 0,
+        latestCharge: null,
+        purchaseId: String(onlyPurchase(fake.purchases).id),
+        status: "requires_confirmation",
+      });
+      mocks.stripePaymentIntentCreate.mockImplementationOnce(
+        async () => readUnconfirmedIntent(),
+      );
+      mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+        confirmationError,
+      );
+      mocks.stripePaymentIntentRetrieve.mockImplementationOnce(async () => ({
+        ...readUnconfirmedIntent(),
+        status: recoveredStatus,
+      }));
+      mocks.stripePaymentIntentCancel.mockImplementationOnce(async () => ({
+        ...readUnconfirmedIntent(),
+        status: "canceled",
+      }));
+      mocks.stripeCheckoutCreate.mockImplementationOnce(async (request) =>
+        buildStripeSession(request)
+      );
+
+      const result = await createHostedGroupUsageCreditCheckout({
+        clientRequestKey: CLIENT_REQUEST_KEY,
+        joinCode: "group_join_code_1234",
+        now: NOW,
+        offerCode: "usage_10_usd",
+        payerMemberId: MEMBER_ID,
+        prisma: fake.prisma as never,
+      });
+
+      expect(result).toMatchObject({
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/session",
+      });
+      expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledWith(
+        "pi_saved_card_123",
+        { cancellation_reason: "abandoned" },
+        {
+          idempotencyKey: expect.stringMatching(
+            /^hosted-usage-credit-saved-card:hucp_.+:cancel$/,
+          ),
+        },
+      );
+      expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledBefore(
+        mocks.stripeCheckoutCreate,
+      );
+      expect(mocks.stripeCheckoutCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payment_intent_data: {
+            metadata: expect.objectContaining({
+              policyVersion: "hosted-usage-credit-checkout-v5",
+            }),
+          },
+        }),
+        expect.any(Object),
+      );
+      expect(onlyPurchase(fake.purchases)).toMatchObject({
+        grantSlotReleasedAt: null,
+        status: "checkout_open",
+        stripeChargeIdEncrypted: null,
+        stripeChargeLookupKey: null,
+        stripePaymentIntentIdEncrypted: null,
+        stripePaymentIntentLookupKey: null,
+      });
+    },
+  );
 
   it("does not open Checkout when an ambiguous cancel reveals the saved-card payment succeeded", async () => {
     const fake = createFakePrisma();
@@ -5535,6 +5581,144 @@ describe("automatic group refill saved-card recovery", () => {
     );
   });
 
+  it.each([
+    ["connection loss", buildStripeConnectionError("req_confirm_refill")],
+    ["HTTP 408", buildStripeTimeoutError()],
+  ])(
+    "retries the same bound refill when %s leaves confirmation untouched",
+    async (_label, confirmationError) => {
+      const fake = createFakePrisma();
+      const fixture = installAutomaticGroupRefillFixture(fake, {
+        status: "payment_pending",
+      });
+      const requiresConfirmation = buildSavedCardPaymentIntent({
+        amount: 500,
+        amountReceived: 0,
+        latestCharge: null,
+        purchaseId: fixture.refill.id,
+        status: "requires_confirmation",
+      });
+      const succeeded = buildSavedCardPaymentIntent({
+        amount: 500,
+        amountReceived: 500,
+        latestCharge: "ch_refill_123",
+        purchaseId: fixture.refill.id,
+        status: "succeeded",
+      });
+      mocks.stripePaymentIntentRetrieve
+        .mockResolvedValueOnce(requiresConfirmation)
+        .mockResolvedValueOnce(requiresConfirmation)
+        .mockResolvedValueOnce(requiresConfirmation);
+      mocks.stripePaymentIntentConfirm
+        .mockRejectedValueOnce(confirmationError)
+        .mockResolvedValueOnce(succeeded);
+      const input = {
+        billingAuthority: {
+          automaticSponsorship: fixture.authority,
+          kind: "group" as const,
+        },
+        checkoutRequest: { customer: "cus_group_payer" } as never,
+        now: NOW,
+        policyVersion: "hosted-usage-credit-checkout-v5" as const,
+        prisma: fake.prisma as never,
+        purchase: fixture.refill as never,
+        stripe: mocks.requireHostedStripeApiMode().stripe as never,
+      };
+
+      await expect(
+        tryChargeHostedUsageCreditSavedCard(input),
+      ).rejects.toMatchObject({
+        code: "HOSTED_USAGE_CREDIT_STRIPE_UNAVAILABLE",
+        retryable: true,
+      });
+      expect(fixture.refill).toMatchObject({
+        status: "payment_pending",
+        stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+      });
+      expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
+      expect(mocks.stripePaymentIntentRetrieve).toHaveBeenNthCalledWith(
+        2,
+        "pi_saved_card_123",
+        { expand: ["latest_charge"] },
+      );
+      expect(
+        mocks.stripePaymentIntentConfirm.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.stripePaymentIntentRetrieve.mock.invocationCallOrder[1] ?? 0,
+      );
+      expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+
+      await expect(tryChargeHostedUsageCreditSavedCard({
+        ...input,
+        now: new Date(NOW.getTime() + 60_000),
+      })).resolves.toMatchObject({
+        id: fixture.refill.id,
+        status: "payment_pending",
+        stripeChargeLookupKey: "billing:ch_refill_123",
+        stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+      });
+
+      expect(mocks.stripePaymentIntentCreate).not.toHaveBeenCalled();
+      expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(3);
+      expect(mocks.stripePaymentIntentRetrieve).toHaveBeenNthCalledWith(
+        3,
+        "pi_saved_card_123",
+        { expand: ["latest_charge"] },
+      );
+      expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledTimes(2);
+      expect(mocks.stripePaymentIntentConfirm.mock.calls[0]?.[2]).toEqual(
+        mocks.stripePaymentIntentConfirm.mock.calls[1]?.[2],
+      );
+      expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+    },
+  );
+
+  it("releases a bound refill when Stripe rejects confirmation definitively", async () => {
+    const fake = createFakePrisma();
+    const fixture = installAutomaticGroupRefillFixture(fake, {
+      status: "payment_pending",
+    });
+    const requiresConfirmation = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: fixture.refill.id,
+      status: "requires_confirmation",
+    });
+    mocks.stripePaymentIntentRetrieve
+      .mockResolvedValueOnce(requiresConfirmation)
+      .mockResolvedValueOnce(requiresConfirmation);
+    mocks.stripePaymentIntentConfirm.mockRejectedValueOnce(
+      buildStripeNoRetryError(),
+    );
+    mocks.stripePaymentIntentCancel.mockResolvedValueOnce({
+      ...requiresConfirmation,
+      status: "canceled",
+    });
+
+    await expect(tryChargeHostedUsageCreditSavedCard({
+      billingAuthority: {
+        automaticSponsorship: fixture.authority,
+        kind: "group",
+      },
+      checkoutRequest: { customer: "cus_group_payer" } as never,
+      now: NOW,
+      policyVersion: "hosted-usage-credit-checkout-v5",
+      prisma: fake.prisma as never,
+      purchase: fixture.refill as never,
+      stripe: mocks.requireHostedStripeApiMode().stripe as never,
+    })).resolves.toBeNull();
+
+    expect(fixture.refill).toMatchObject({
+      status: "created",
+      stripePaymentIntentIdEncrypted: null,
+      stripePaymentIntentLookupKey: null,
+    });
+    expect(mocks.stripePaymentIntentRetrieve).toHaveBeenCalledTimes(2);
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledOnce();
+    expect(mocks.stripePaymentIntentCancel).toHaveBeenCalledOnce();
+  });
+
   it("cancels a bound refill instead of confirming after sponsorship is paused", async () => {
     const fake = createFakePrisma();
     const fixture = installAutomaticGroupRefillFixture(fake, {
@@ -6878,6 +7062,39 @@ function buildStripeConnectionErrorWithoutRequestId() {
     statusCode: 503,
     type: "StripeConnectionError",
   });
+}
+
+function buildStripeNoRetryError() {
+  return Object.assign(new Error("Stripe declined to retry the request"), {
+    headers: { "stripe-should-retry": "false" },
+    rawType: "api_error",
+    statusCode: 503,
+    type: "StripeAPIError",
+  });
+}
+
+function buildStripeInvalidRequestError() {
+  return Object.assign(new Error("Stripe rejected the confirmation request"), {
+    rawType: "invalid_request_error",
+    statusCode: 400,
+    type: "StripeInvalidRequestError",
+  });
+}
+
+function buildStripeTimeoutError() {
+  return Object.assign(new Error("Stripe request timed out"), {
+    rawType: "api_error",
+    statusCode: 408,
+    type: "StripeAPIError",
+  });
+}
+
+function buildStripeDefinitiveError(input: {
+  rawType: string;
+  statusCode: number;
+  type: string;
+}) {
+  return Object.assign(new Error("Stripe rejected the confirmation request"), input);
 }
 
 async function runOnlyScheduledStripeAlert(): Promise<void> {
