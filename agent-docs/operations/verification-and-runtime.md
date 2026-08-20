@@ -36,6 +36,13 @@ Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
 
+For changes to the shared Playwright Chromium install wrapper or any workflow
+that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
+focused `scripts/install-playwright-chromium.test.ts` Vitest file. The test owns
+the executable retry, exit-status, process-group cleanup, caller inventory, and
+step-timeout headroom contract; exact-head Actions then prove the wrapper on the
+GitHub-hosted Ubuntu runner.
+
 For readiness, the exact PR head is the commit that contains the PR-authored
 change; it does not need to be repeatedly merged with a moving base. Keep green
 required CI on that head and prove current-base mergeability with
