@@ -35,7 +35,7 @@ attempt occurred.
    sponsorship state, deployed code, and existing tests.
 2. [x] Add the smallest retry-preserving correction and focused regression
    coverage.
-3. [ ] Run focused tests, typecheck, diff checks, and the Product UX walkthrough.
+3. [x] Run focused tests, typecheck, diff checks, and the Product UX walkthrough.
 4. [ ] Commit and push an exact candidate, open a PR, and start the required
    preliminary specialist and final ReviewGPT passes concurrently with CI.
 5. [ ] Resolve accepted findings, complete parent review, close this plan with
@@ -64,3 +64,10 @@ attempt occurred.
 - Draft PR #2035 owns the candidate. The existing public sponsorship-payment
   recovery item now includes this refill-retry correction and both contributing
   PRs instead of adding a duplicate changelog outcome.
+- The Product UX Patch walkthrough is `Ready`: transient pre-attempt failures
+  stay silent and retry in the background, while provider-proven authentication
+  or card failures keep the existing payer recovery and group replies remain
+  independent of billing-provider latency.
+- The combined focused purchase, dispatcher, and changelog run passes all 248
+  tests. `git diff --check` passes and the candidate contains no generated or
+  binary changes.
