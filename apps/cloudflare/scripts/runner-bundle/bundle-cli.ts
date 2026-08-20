@@ -115,11 +115,15 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // in the Linux deploy lane on 2026-08-19; no package entered the graph. The
 // resolved combined graph measured 9,364,936 B in the canonical production
 // build; the static startup closure still measured 24,950 B.
+// Batched workout creation and exact canonical event reads replace the
+// projection-backed command path without adding a package or changing the
+// static startup closure. The combined graph measured 9,408,285 B in the Linux
+// deploy lane on 2026-08-20.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_397_704;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_441_053;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
