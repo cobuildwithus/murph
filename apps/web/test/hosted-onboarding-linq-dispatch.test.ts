@@ -194,6 +194,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelopeWithSourceMessageTx: vi.fn(),
     appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+    scheduleHostedSignupNotificationEmails: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     prepareHostedFamilyOwnerNotification: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
@@ -292,6 +293,11 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
@@ -6572,8 +6578,18 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      memberIds: ["member_family"],
+      prisma,
+    });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
     );
     expect(mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
@@ -6712,6 +6728,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_home",
       idempotencyKey: "linq-message:evt_family_sparse_saved_home",

@@ -4,7 +4,8 @@
 
 Send the existing internal signup email exactly once from a real hosted member
 activation, regardless of whether Starter enrollment, the Checkout success
-return, or Stripe webhook reconciliation completes that activation first.
+return, Stripe webhook reconciliation, or Family invite acceptance completes
+that activation first.
 
 ## Evidence
 
@@ -16,6 +17,8 @@ return, or Stripe webhook reconciliation completes that activation first.
   member, allowing an existing active member to be mislabeled as a new signup.
 - Stripe's existing `activatedMemberId` also owns pending runtime-wake replay;
   a distinct transient outcome is required to prove activation happened now.
+- Browser, Linq, and Telegram Family invite acceptance can activate a member
+  immediately under an active Family plan without any later Stripe event.
 - The notification sender already owns a durable per-member attempt claim and
   a stable provider idempotency key.
 
@@ -37,8 +40,9 @@ return, or Stripe webhook reconciliation completes that activation first.
 ## Plan
 
 1. Route the notification from the existing post-commit activation outcomes in
-   Starter enrollment, Checkout success, and Stripe reconciliation, registering
-   one post-response task before other fallible effects.
+   Starter enrollment, Checkout success, Stripe reconciliation, and Family
+   invite acceptance, registering one post-response task before other fallible
+   effects.
 2. Stop using `welcomeEmailMemberId` as notification eligibility; include every
    distinct activated member reported by a Family Stripe outcome.
 3. Add focused regression coverage for true activation, replay/idempotent
@@ -53,8 +57,9 @@ Effort: Patch.
 
 - Outcome: operators receive one internal email for a genuine hosted signup,
   without later payments or activation-wake replays being mislabeled.
-- Reaches: existing Starter, Checkout-success, and Stripe-reconciliation
-  activation journeys; member-facing welcome behavior remains unchanged.
+- Reaches: existing Starter, Checkout-success, Stripe-reconciliation, and
+  browser/Linq/Telegram Family-acceptance activation journeys; member-facing
+  welcome behavior remains unchanged.
 - Proof: focused owner tests distinguish newly committed activation from
   welcome-only billing and pending-wake replay, including Family activation.
 
@@ -68,6 +73,10 @@ Effort: Patch.
 - Walked webhook-only and Family activation: one task serially processes each
   distinct newly activated member, canonical Family access is accepted, and the
   existing durable per-member claim deduplicates competing owners and replays.
+- Walked browser, Linq, and Telegram Family invite acceptance under an already
+  active Family plan: only the callback result that says activation committed
+  carries the member id to the first post-commit boundary; accepted-invite
+  replays carry no notification work.
 - Walked provider failure and historical members: delivery remains best-effort
   with the existing provider idempotency key, and no backfill is introduced.
 - Difference from plan: the implementation added an explicit transient
@@ -76,13 +85,17 @@ Effort: Patch.
   the candidate had to be registered before other post-commit effects and use
   canonical access rather than direct billing status; the remediation reuses
   native `after()` and the existing access owner without new persisted state.
+  The next full audit found Family invite acceptance as a separate activation
+  owner; remediation carries the same transient activation proof through the
+  three existing acceptance paths without adding another sender or state owner.
 
 Result: Ready.
 
 ## Verification
 
 - Focused notification, member-store, Starter, Checkout-success, Family,
-  Stripe billing-event, and Stripe reconciliation tests passed (594 tests).
+  browser/Linq/Telegram Family acceptance, Stripe billing-event, and Stripe
+  reconciliation tests passed (854 tests across 10 files).
 - Hosted-web typecheck passed.
 - Focused ESLint and `git diff --check` passed.
 - Stripe billing-event and Checkout-completion owner tests prove the transient
@@ -91,6 +104,9 @@ Result: Ready.
   scheduler coverage proves one deduplicated task with provider concurrency one.
 - Checkout cleanup and Stripe runtime-recheck recovery tests prove registration
   happens before later failure and is not repeated by activation replay.
+- Browser Family acceptance plus Linq and Telegram dispatch coverage proves
+  first-activation registration, replay suppression, and registration before
+  fallible wake or confirmation work.
 
 ## State
 
