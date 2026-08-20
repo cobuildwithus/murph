@@ -3110,6 +3110,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     let runtimePassOrdinal = 0;
     const runWorkspaceForegroundPass = async (passInput: {
+      foregroundCausalFirst?: boolean;
       foregroundCausalOnly?: boolean;
       initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
       initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -3208,6 +3209,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 options.runAssistantPhase ?? runHostedWorkspaceAssistantPhase
               )({
                 ...phaseInput,
+                foregroundCausalFirst:
+                  passInput.foregroundCausalFirst === true,
                 foregroundCausalOnly:
                   passInput.foregroundCausalOnly === true,
                 currentAssistantInputId: () => currentAssistantInputId,
@@ -4564,6 +4567,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
         runtimeStateDirty ||= passResult.runtimeStateDirty;
       };
       const runForegroundPass = async (wakeInput: {
+        foregroundCausalFirst?: boolean;
         foregroundCausalOnly?: boolean;
         initialAssistantInputBatch?: HostedWorkspaceRunnerAssistantInputBatch | null;
         initialMailboxImport?: HostedWorkspaceRunnerInput["initialMailboxImport"];
@@ -4614,6 +4618,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             presentedProjectedAssistantWakeKey,
           );
           result = await runWorkspaceForegroundPass({
+            foregroundCausalFirst:
+              singleWakeInput.foregroundCausalFirst === true,
             foregroundCausalOnly:
               singleWakeInput.foregroundCausalOnly === true,
             initialAssistantInputBatch: singleWakeInput.initialAssistantInputBatch ?? null,
@@ -4997,7 +5003,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           return false;
         }
         try {
+          // Full system admission is owned by the post-checkpoint wake. Give
+          // its ready causal continuation one selection before the unchanged
+          // oldest-first maintenance fallback.
           await runForegroundPassAfterMailboxImport({
+            foregroundCausalFirst:
+              input.systemMailboxAdmission === "all",
             foregroundCausalOnly:
               input.systemMailboxAdmission === "pre_checkpoint_safe",
             initialAssistantInputBatch:
