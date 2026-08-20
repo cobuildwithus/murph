@@ -29,6 +29,7 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
+import { readMemoryDocument } from '@murphai/core'
 import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -56,6 +57,7 @@ import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -125,7 +127,7 @@ const RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
   'features.request_permissions_tool': false,
   'skills.include_instructions': false,
 } as const
-const GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+const TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
   'features.apps': false,
   'features.browser_use': false,
@@ -2100,48 +2102,16 @@ text(result.output);
     })
   })
 
-  scriptedPermissionShellIt('attests member-memory instructions while preserving the hosted vault shell and permitted write', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
     const scenario = await prepareScriptedTurnScenario({
-      additionalTomlLines: [
-        ...SCRIPTED_HOSTED_SHELL_ENVIRONMENT_TOML_LINES,
-        ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-      ],
+      additionalTomlLines:
+        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     })
     const vaultRoot = scenario.turnInput.workingDirectory
-    const operatorHome = path.join(vaultRoot, 'operator-home')
-    const memoryDirectory = path.join(vaultRoot, 'bank')
-    const memoryPath = path.join(memoryDirectory, 'memory.md')
-    await Promise.all([
-      mkdir(operatorHome, { recursive: true }),
-      mkdir(memoryDirectory, { recursive: true }),
-      writeFile(
-        path.join(vaultRoot, 'AGENTS.md'),
-        'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
-      ),
-    ])
+    const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
     await writeFile(
-      path.join(vaultRoot, 'vault-cli'),
-      `#!/bin/sh
-set -eu
-test "\${VAULT:-}" = ${quotePosixShellLiteral(vaultRoot)}
-test "\${HOME:-}" = ${quotePosixShellLiteral(operatorHome)}
-case "$*" in
-  "memory show --format json")
-    printf '%s\\n' 'MEMORY_SHOW_OK'
-    ;;
-  "memory upsert --fact scripted")
-    printf '%s\\n' 'scripted durable memory' > "\${VAULT}/bank/memory.md"
-    printf '%s\\n' 'MEMORY_UPSERT_OK'
-    ;;
-  *)
-    printf '%s\\n' 'unexpected command' >&2
-    exit 4
-    ;;
-esac
-`,
-      { encoding: 'utf8', mode: 0o755 },
+      path.join(vaultRoot, 'AGENTS.md'),
+      'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
     )
     scenario.stub.captureProviderRequestDiagnostics()
     scenario.stub.queue(
@@ -2149,11 +2119,29 @@ esac
         customToolCall: {
           input: `
 const result = await tools.exec_command({
-  cmd: "./vault-cli memory show --format json && ./vault-cli memory upsert --fact scripted",
+  cmd: "printf '%s\\n' 'SHELL_RAN' > shell-should-not-run",
 });
-text(result.output);
+text(JSON.stringify(result));
 `,
           name: 'exec',
+        },
+      },
+      {
+        functionCall: {
+          arguments: { action: 'show' },
+          name: 'member_memory',
+          namespace: 'murph',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'upsert',
+            section: 'Preferences',
+            text: 'Prefers concise scheduled summaries.',
+          },
+          name: 'member_memory',
+          namespace: 'murph',
         },
       },
       { text: 'RESTRICTED_MEMBER_MEMORY_OK' },
@@ -2162,38 +2150,32 @@ text(result.output);
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
       approvalPolicy: 'never',
-      configOverrides: [
-        'memories.generate_memories=false',
-        'web_search="disabled"',
-        'features.apps=false',
-        'features.browser_use=false',
-        'features.plugins=false',
-        'features.multi_agent=false',
-      ],
-      dynamicTools: [],
-      env: {
-        ...scenario.turnInput.env,
-        HOME: operatorHome,
-        VAULT: vaultRoot,
-      },
+      dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
       ephemeral: true,
+      memberMemoryMaintenanceAuthorized: true,
       permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
-      prompt: 'Run the scripted memory read and write, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
+      prompt: 'Show memory, save the scripted preference, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
       runtimeWorkspaceRoots: [vaultRoot],
       sandbox: undefined,
-      threadConfig: RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
+      threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG,
+      vaultRoot,
     })
 
     expect(result.finalMessage).toBe('RESTRICTED_MEMBER_MEMORY_OK')
-    expect(await readFile(memoryPath, 'utf8')).toBe('scripted durable memory\n')
-    const summaries = scenario.stub.requestSummariesSinceBaseline()
-    expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
-      includesExecCommand: true,
+    await expect(readFile(forbiddenShellPath, 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
     })
+    await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
+      records: [{
+        section: 'Preferences',
+        text: 'Prefers concise scheduled summaries.',
+      }],
+    })
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(
-      summaries.flatMap((summary) => summary.customToolCallOutputs ?? []).join('\n'),
-    ).toContain('MEMORY_SHOW_OK\nMEMORY_UPSERT_OK')
+      summaries.flatMap((summary) => summary.functionCallOutputs ?? []).join('\n'),
+    ).toContain('"exists":false')
   })
 
   scriptedPermissionShellIt('attests onboarding instructions while preserving reads and denying mutation', {
@@ -2342,7 +2324,7 @@ text(JSON.stringify(result));
       prompt: 'Show the room model, then reply exactly RESTRICTED_GROUP_ROOM_OK.',
       runtimeWorkspaceRoots: [vaultRoot],
       sandbox: undefined,
-      threadConfig: GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG,
+      threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG,
       vaultRoot,
     })
 

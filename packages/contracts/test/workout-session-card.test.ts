@@ -8,6 +8,7 @@ import {
   parseCompactTableAppCardEnvelope,
   workoutSessionCardV1Bounds,
   workoutSessionDetailV1Schema,
+  workoutSessionSchema,
   type CompactTableResponseCardV1,
 } from "../src/index.ts";
 
@@ -396,27 +397,60 @@ describe("workout session compact-table contract", () => {
     ).toBe(false);
   });
 
-  it("allows an active workout to wait for explicit finish after its final set", () => {
+  it("allows an open targetless workout whose current slots are logged", () => {
     const workout = workoutSessionDetailV1Schema.parse({
       ...TRACKED_WORKOUT_CARD.workout,
       exercises: TRACKED_WORKOUT_CARD.workout?.exercises.map(
         (exercise) => ({
           ...exercise,
           sets: exercise.sets.map((set) => ({
-            ...set,
+            actual: set.actual ?? "1 rep",
             status: "completed",
-            actual: set.actual ?? set.target ?? "1 rep",
+            target: null,
           })),
         }),
       ),
     });
     const card: CompactTableResponseCardV1 = {
       ...TRACKED_WORKOUT_CARD,
-      subtitle: "6 of 6 sets complete",
+      subtitle: "All current log slots complete",
       workout,
     };
 
     expect(compactTableResponseCardV1Schema.parse(card)).toEqual(card);
+  });
+
+  it("keeps member repetition prescriptions separate from finite plans and actuals", () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: "murph-live",
+      startedAt: "2026-08-20T12:00:00.000Z",
+      exercises: [
+        {
+          memberRepsPerSet: 9,
+          name: "Seated cable curl",
+          order: 1,
+          setPlanIsFinite: true,
+          sets: [{ order: 1 }, { order: 2, reps: 9 }],
+        },
+        {
+          name: "Push-up",
+          order: 2,
+          setPlanIsFinite: false,
+          sets: [{ order: 1 }],
+        },
+      ],
+    });
+
+    expect(workout.exercises[0]?.memberRepsPerSet).toBe(9);
+    expect(workout.exercises[0]?.sets[0]?.reps).toBeUndefined();
+    expect(workout.exercises[0]?.sets[1]?.reps).toBe(9);
+    expect(workout.exercises[1]?.setPlanIsFinite).toBe(false);
+    expect(
+      workoutSessionSchema.safeParse({
+        ...workout,
+        exercises: [{ ...workout.exercises[0], memberRepsPerSet: 0 }],
+      }).success,
+    ).toBe(false);
   });
 
   it("accepts complete higher-cardinality workouts when their actual envelope fits", () => {

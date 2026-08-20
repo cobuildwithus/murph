@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "lighter-workspace-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Lighter workspace recovery",
+    "summary": "Murph no longer carries already-delivered generated files into later hosted workspace restores, reducing avoidable cold-start work.",
+    "details": "Files still remain available through their original delivery, while pending approvals and retries keep the copy they need until delivery finishes.",
+    "relevanceTags": ["assistant", "reliability", "performance"],
+    "sourcePullRequests": [2074]
+  }
+}

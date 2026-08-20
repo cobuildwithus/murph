@@ -20,7 +20,9 @@ import type {
   AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
 import * as assistantOutbox from '../src/assistant/outbox.ts'
-import { pruneAssistantRuntimeResidue } from '../src/assistant/runtime-residue.ts'
+import {
+  pruneAssistantGeneratedDeliveryResidue,
+} from '../src/assistant/runtime-residue.ts'
 import * as assistantTurns from '../src/assistant/turns.ts'
 import {
   applyAssistantVaultFileSendApprovalResult,
@@ -176,9 +178,7 @@ describe('pending generated vault-file cancellation', () => {
       }],
     })
 
-    const cleanup = await pruneAssistantRuntimeResidue({
-      generatedDeliveryFilesQuiescent: true,
-      pendingInputIds: [],
+    const cleanup = await pruneAssistantGeneratedDeliveryResidue({
       vault: vaultRoot,
     })
     expect(cleanup.generatedDeliveryFilesPruned).toBe(1)

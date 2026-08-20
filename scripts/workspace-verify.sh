@@ -106,6 +106,7 @@ readonly node_syntax_check_scripts=(
   "scripts/check-hosted-crypto-hardcut.mjs"
   "scripts/release-artifact-secret-guard.mjs"
   "scripts/release-helpers.mjs"
+  "scripts/release-verification-plan.mjs"
   "scripts/verify-release-target.mjs"
   "scripts/pack-publishables.mjs"
   "scripts/publish-publishables.mjs"
@@ -487,6 +488,7 @@ readonly acceptance_app_verify_delay_seconds="$(resolve_profile_controlled_value
 readonly acceptance_early_cloudflare_verify="$(resolve_profile_controlled_value "${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}" "0")"
 readonly test_lane_parallel_default="$(resolve_local_parallel_default)"
 readonly test_lane_parallel="$(resolve_profile_controlled_value "${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}" "$test_lane_parallel_default")"
+readonly package_coverage_shard="$(resolve_profile_controlled_value "${MURPH_PACKAGE_COVERAGE_SHARD:-all}" "all")"
 readonly package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
 readonly package_coverage_concurrency_limit="$(resolve_profile_controlled_value "$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")" "$package_coverage_concurrency_default")"
 readonly package_coverage_cli_active_concurrency_default="$(resolve_package_coverage_cli_active_concurrency_default)"
@@ -999,46 +1001,25 @@ mark_acceptance_cli_coverage_complete() {
 
 run_all_package_coverage() {
   local contracts_artifacts_prepared="${1:-0}"
-  # Keep each executable owner and its assertion label in one entry so package
-  # removals cannot leave every later release-coverage failure mislabeled.
-  local package_coverage_plan=(
-    "packages/cli|CLI package coverage"
-    "packages/assistant-engine|Assistant engine package coverage"
-    "packages/assistant-runtime|Assistant runtime package coverage"
-    "packages/core|Core owner coverage"
-    "packages/setup-cli|Setup CLI package coverage"
-    "packages/assistant-cli|Assistant CLI package coverage"
-    "packages/assistantd|Assistantd package coverage"
-    "packages/cloudflare-hosted-control|Cloudflare hosted control package coverage"
-    # In non-prepared coverage, the launch guard below keeps contracts out of
-    # the active CLI window because contracts artifact verification rebuilds
-    # shared dist outputs that CLI built-runtime tests import.
-    "packages/contracts|Contracts package coverage"
-    "packages/clinical-records|Clinical records package coverage"
-    "packages/device-syncd|Device syncd package coverage"
-    "packages/exercise-library|Exercise library package coverage"
-    "packages/gateway-core|Gateway core package coverage"
-    "packages/health-metrics|Health metrics package coverage"
-    "packages/hosted-execution|Hosted execution owner coverage"
-    "packages/importers|Importers owner coverage"
-    "packages/inbox-services|Inbox services package coverage"
-    "packages/inboxd|Inboxd package coverage"
-    "packages/messaging-ingress|Messaging ingress package coverage"
-    "packages/openclaw-plugin|OpenClaw package coverage"
-    "packages/operator-config|Operator config package coverage"
-    "packages/parsers|Parsers package coverage"
-    "packages/query|Query owner coverage"
-    "packages/runtime-state|Runtime state package coverage"
-    "packages/vault-usecases|Vault usecases package coverage"
-  )
+  local package_coverage_plan_output
   local package_coverage_dirs=()
-  local package_coverage_labels=()
-  local package_coverage_entry
-  for package_coverage_entry in "${package_coverage_plan[@]}"; do
-    package_coverage_dirs+=("${package_coverage_entry%%|*}")
-    package_coverage_labels+=("${package_coverage_entry#*|}")
-  done
-  local package_count="${#package_coverage_plan[@]}"
+  local planned_package_dir
+
+  if ! package_coverage_plan_output="$(node scripts/release-verification-plan.mjs --package-dirs "$package_coverage_shard")"; then
+    verify_log "ERROR: unable to resolve package coverage shard '$package_coverage_shard'"
+    return 1
+  fi
+
+  while IFS= read -r planned_package_dir; do
+    [[ -n "$planned_package_dir" ]] && package_coverage_dirs+=("$planned_package_dir")
+  done <<<"$package_coverage_plan_output"
+
+  if [[ "${#package_coverage_dirs[@]}" -eq 0 ]]; then
+    verify_log "ERROR: package coverage shard '$package_coverage_shard' matched zero packages"
+    return 1
+  fi
+  verify_log "package coverage shard=${package_coverage_shard} packages=${package_coverage_dirs[*]}"
+  local package_count="${#package_coverage_dirs[@]}"
   local package_coverage_concurrency="$package_coverage_concurrency_limit"
   local package_coverage_cli_active_concurrency="$package_coverage_cli_active_concurrency_limit"
   local package_index=0
@@ -1087,11 +1068,13 @@ run_all_package_coverage() {
 
   if [[ "$package_coverage_concurrency" -le 1 ]]; then
     while [[ "$package_index" -lt "$package_count" ]]; do
+      local package_dir="${package_coverage_dirs[$package_index]}"
+      local package_label="Package coverage for ${package_dir}"
       if ! run_workspace_package_coverage \
-        "${package_coverage_dirs[$package_index]}" \
-        "${package_coverage_labels[$package_index]}" \
+        "$package_dir" \
+        "$package_label" \
         "$contracts_artifacts_prepared"; then
-        record_failed_package_coverage "${package_coverage_labels[$package_index]}"
+        record_failed_package_coverage "$package_label"
       fi
       if [[ "${package_coverage_dirs[$package_index]}" == "packages/cli" ]]; then
         mark_acceptance_cli_coverage_complete
@@ -1155,7 +1138,7 @@ run_all_package_coverage() {
       local failure_file="$failure_labels_dir/$package_index"
       local status_file="$status_dir/$package_index"
       local package_dir="${package_coverage_dirs[$package_index]}"
-      local package_label="${package_coverage_labels[$package_index]}"
+      local package_label="Package coverage for ${package_dir}"
       (
         local status=0
         write_package_coverage_status() {
@@ -1805,11 +1788,16 @@ run_verify_cli_with_workspace_artifact_lock() {
 }
 
 log_acceptance_resource_plan() {
-  verify_log "resources cpus=$(detect_logical_cpu_count) memory_mib=$(detect_physical_memory_mib) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
+  verify_log "resources cpus=$(detect_logical_cpu_count) memory_mib=$(detect_physical_memory_mib) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} package_shard=${package_coverage_shard} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
 }
 
 main() {
   local command="${1:-}"
+
+  if [[ "$package_coverage_shard" != "all" && "$command" != "test:packages:coverage" ]]; then
+    verify_log "ERROR: MURPH_PACKAGE_COVERAGE_SHARD is only valid with test:packages:coverage"
+    return 1
+  fi
 
   if [[ "$command" == "verify:acceptance" ]]; then
     log_acceptance_resource_plan

@@ -4,6 +4,7 @@ import { describe, it } from "vitest";
 
 import {
   createHostedRuntimeWakeCandidate,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   selectHostedRuntimeWakeCandidate,
 } from "../src/hosted-runtime/wake-candidates.ts";
 
@@ -27,6 +28,24 @@ describe("hosted runtime wake candidates", () => {
     const selected = selectHostedRuntimeWakeCandidate([
       createHostedRuntimeWakeCandidate("not-a-timestamp", "device-sync.reconcile"),
       createHostedRuntimeWakeCandidate("2026-04-08T00:30:00.000Z", "assistant"),
+    ]);
+
+    assert.deepEqual(selected, {
+      at: "2026-04-08T00:30:00.000Z",
+      reason: "assistant",
+    });
+  });
+
+  it("keeps model-capable assistant ownership when a delivery retry ties", () => {
+    const selected = selectHostedRuntimeWakeCandidate([
+      createHostedRuntimeWakeCandidate(
+        "2026-04-08T00:30:00.000Z",
+        HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+      ),
+      createHostedRuntimeWakeCandidate(
+        "2026-04-08T00:30:00.000Z",
+        "assistant",
+      ),
     ]);
 
     assert.deepEqual(selected, {

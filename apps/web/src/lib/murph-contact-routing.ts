@@ -89,6 +89,27 @@ export function resolveMurphContactOptions(input: {
   return options;
 }
 
+export function withMurphContactOptionBody(
+  option: MurphContactOption,
+  body: string,
+): MurphContactOption {
+  const href = new URL(option.href);
+  href.searchParams.set(option.kind === "telegram" ? "text" : "body", body);
+
+  return {
+    ...option,
+    href: href.toString(),
+    ...(option.webmail
+      ? {
+          webmail: {
+            ...option.webmail,
+            href: withMurphWebmailBody(option.webmail.href, body),
+          },
+        }
+      : {}),
+  };
+}
+
 const DEFAULT_MURPH_CONTACT_KIND_ORDER: readonly MurphContactKind[] = [
   "text",
   "telegram",
@@ -329,6 +350,21 @@ function buildMurphEmailContactOption(input: {
       userEmailAddress: input.userEmailAddress,
     }),
   };
+}
+
+function withMurphWebmailBody(href: string, body: string): string {
+  const url = new URL(href);
+  const mailto = url.searchParams.get("mailto");
+
+  if (!mailto) {
+    url.searchParams.set("body", body);
+    return url.toString();
+  }
+
+  const mailtoUrl = new URL(mailto);
+  mailtoUrl.searchParams.set("body", body);
+  url.searchParams.set("mailto", mailtoUrl.toString());
+  return url.toString();
 }
 
 type WebmailProvider =
