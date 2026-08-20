@@ -61,3 +61,6 @@ attempt occurred.
   binding and idempotency key, and succeeds on the next minute attempt without
   creating or canceling an intent.
 - Hosted Web typecheck passes after the normal generated-client preparation.
+- Draft PR #2035 owns the candidate. The existing public sponsorship-payment
+  recovery item now includes this refill-retry correction and both contributing
+  PRs instead of adding a duplicate changelog outcome.
