@@ -37,6 +37,12 @@ import {
   runBoundedCommand,
 } from "./native-ios-hosted-e2e-support.mjs";
 import {
+  inspectRetryableNativeIosPullRequest,
+  parseNativeIosHostedE2eRetryArgs,
+  retryNativeIosHostedE2e,
+  selectRetryableRepoHygieneRun,
+} from "./native-ios-hosted-e2e-retry.mjs";
+import {
   createE2eDeployment,
   inspectPublicCandidateResponse,
   inspectRetirableE2eDeployment,
@@ -63,6 +69,36 @@ const TRUSTED_DEFAULT_BRANCH_CONTROLLERS = [
   "scripts/native-ios-hosted-e2e-vercel.mjs",
   "scripts/native-ios-hosted-e2e.mjs",
 ];
+
+function retryablePullRequest(headSha = SHA) {
+  return {
+    head: {
+      ref: "feature/native-e2e",
+      repo: { full_name: "cobuildwithus/murph" },
+      sha: headSha,
+    },
+    number: 42,
+    state: "open",
+    user: { type: "User" },
+  };
+}
+
+function repoHygieneRun(id, overrides = {}) {
+  return {
+    conclusion: "success",
+    event: "pull_request",
+    head_branch: "feature/native-e2e",
+    head_repository: { full_name: "cobuildwithus/murph" },
+    head_sha: SHA,
+    id,
+    name: "Repo Hygiene",
+    path: ".github/workflows/repo-hygiene.yml",
+    pull_requests: [],
+    repository: { full_name: "cobuildwithus/murph" },
+    status: "completed",
+    ...overrides,
+  };
+}
 
 test("cross-repo contract is minimal, versioned, and names lifecycle ownership truthfully", () => {
   assert.equal(NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION, "3");
@@ -149,8 +185,12 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
   );
   assert.match(workflowConcurrency, /cancel-in-progress: false/u);
   assert.doesNotMatch(workflowConcurrency, /queue:/u);
+  const prLive = workflow.slice(
+    workflow.indexOf("  pr-live:"),
+    workflow.indexOf("  pr-required:"),
+  );
   assert.match(
-    workflow,
+    prLive,
     /group: native-ios-hosted-e2e-live\n\s+queue: max\n\s+cancel-in-progress: false/u,
     "the one destructive live slot must remain globally serialized without pending replacement",
   );
@@ -169,6 +209,21 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
   }
   assert.match(liveJob, /NATIVE_IOS_E2E_WEB_GITHUB_TOKEN: \$\{\{ github\.token \}\}/u);
   assert.match(liveJob, /--pr-number "\$\{PR_NUMBER\}"/u);
+  const directRerunGuard = [
+    "if: ${{ github.run_attempt == 1",
+    "github.event.workflow_run.conclusion == 'success'",
+    "needs.select-pr.outputs.selected == 'true'",
+    "needs.select-pr.outputs.trusted == 'true' }}",
+  ].join(" && ");
+  assert.ok(
+    prLive.includes(directRerunGuard),
+    "a direct workflow rerun must not inherit its original live-queue priority",
+  );
+  assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
+  assert.match(
+    workflow,
+    /Retry with node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\}; native reruns do not enter the live queue\./u,
+  );
   assert.equal(runWorkflowSelector(workflow, "apps/web/app/page.tsx"), "selected");
   assert.equal(TRUSTED_DEFAULT_BRANCH_CONTROLLERS.length, 5);
   for (const controller of TRUSTED_DEFAULT_BRANCH_CONTROLLERS) {
@@ -192,12 +247,19 @@ test("commit status descriptions distinguish real-run proof from every non-run p
   const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
   const baseEnv = {
     LIVE_RESULT: "skipped",
+    PR_NUMBER: "42",
+    RUN_ATTEMPT: "1",
     SELECT_RESULT: "success",
     SELECTED: "true",
     SOURCE_RESULT: "success",
     TRUSTED: "true",
   };
   const scenarios = [
+    [
+      { RUN_ATTEMPT: "2" },
+      "failure",
+      "Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42; native reruns do not enter the live queue.",
+    ],
     [
       { SELECT_RESULT: "failure" },
       "failure",
@@ -263,6 +325,112 @@ printf '%s\n' "$@" > "$GH_CAPTURE"
 
   assert.ok(workflow.includes("This controller run has not executed real native iOS hosted E2E yet."));
   assert.doesNotMatch(workflow, /PR does not require the hosted Web native E2E lane/u);
+});
+
+test("native iOS retry route is documented instead of direct workflow reruns", async () => {
+  const documents = await Promise.all([
+    readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
+    readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
+  ]);
+  for (const document of documents) {
+    assert.match(
+      document,
+      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number>/u,
+    );
+  }
+});
+
+test("native iOS retry helper accepts only one positive PR number", () => {
+  assert.deepEqual(parseNativeIosHostedE2eRetryArgs(["--pr", "42"]), { prNumber: 42 });
+  for (const argv of [[], ["42"], ["--pr", "0"], ["--pr", "01"], ["--pr", "42", "extra"]]) {
+    assert.throws(() => parseNativeIosHostedE2eRetryArgs(argv), /Usage:/u);
+  }
+});
+
+test("native iOS retry helper selects the newest exact-head successful Repo Hygiene owner", () => {
+  const run = selectRetryableRepoHygieneRun([
+    {
+      workflow_runs: [
+        repoHygieneRun(100),
+        repoHygieneRun(105, { conclusion: "failure" }),
+        repoHygieneRun(106, { head_branch: "feature/other" }),
+      ],
+    },
+    {
+      workflow_runs: [
+        repoHygieneRun(110),
+        repoHygieneRun(120, { head_sha: "b".repeat(40) }),
+        repoHygieneRun(130, { pull_requests: [{ number: 99 }] }),
+      ],
+    },
+  ], { headRef: "feature/native-e2e", headSha: SHA, prNumber: 42 });
+  assert.equal(run.id, 110);
+});
+
+test("native iOS retry helper will not replace an active Repo Hygiene owner", () => {
+  assert.throws(() => selectRetryableRepoHygieneRun({
+    workflow_runs: [
+      repoHygieneRun(110),
+      repoHygieneRun(111, { conclusion: null, status: "in_progress" }),
+    ],
+  }, { headRef: "feature/native-e2e", headSha: SHA, prNumber: 42 }), /already has an active/u);
+});
+
+test("native iOS retry helper revalidates the current head before rerunning Repo Hygiene", async () => {
+  const calls = [];
+  let prReads = 0;
+  const result = await retryNativeIosHostedE2e({
+    prNumber: 42,
+    request: async (request) => {
+      calls.push(request);
+      if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
+        prReads += 1;
+        return retryablePullRequest();
+      }
+      if (request.method === "GET" && request.endpoint.includes("/actions/workflows/repo-hygiene.yml/runs?")) {
+        assert.match(request.endpoint, /branch=feature%2Fnative-e2e/u);
+        assert.equal(request.paginate, true);
+        return [{ workflow_runs: [repoHygieneRun(321)] }];
+      }
+      if (request.method === "POST") return null;
+      throw new Error(`Unexpected request: ${JSON.stringify(request)}`);
+    },
+  });
+  assert.deepEqual(result, { headSha: SHA, prNumber: 42, repoHygieneRunId: 321 });
+  assert.equal(prReads, 2);
+  assert.deepEqual(calls.at(-1), {
+    endpoint: "repos/cobuildwithus/murph/actions/runs/321/rerun",
+    method: "POST",
+  });
+});
+
+test("native iOS retry helper fails closed when the PR head moves", async () => {
+  let prReads = 0;
+  let posted = false;
+  await assert.rejects(() => retryNativeIosHostedE2e({
+    prNumber: 42,
+    request: async (request) => {
+      if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
+        prReads += 1;
+        return retryablePullRequest(prReads === 1 ? SHA : "b".repeat(40));
+      }
+      if (request.method === "GET") return [{ workflow_runs: [repoHygieneRun(321)] }];
+      posted = true;
+      return null;
+    },
+  }), /head changed/u);
+  assert.equal(posted, false);
+});
+
+test("native iOS retry helper preserves the workflow trust boundary", () => {
+  assert.throws(() => inspectRetryableNativeIosPullRequest({
+    ...retryablePullRequest(),
+    head: {
+      ref: "feature/native-e2e",
+      repo: { full_name: "outside/fork" },
+      sha: SHA,
+    },
+  }, { expectedPrNumber: 42 }), /same-repository human-authored/u);
 });
 
 test("Vercel custom environment proof binds the dedicated id and slug", () => {
