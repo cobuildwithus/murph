@@ -257,8 +257,10 @@ value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 may run in parallel with both CI and the
 preliminary specialist pass on the same head; use separate managed browser
-lanes for concurrent ReviewGPT jobs. Green CI on the final head and resolved
-results from both ReviewGPT stages remain separate merge-readiness gates.
+lanes for concurrent ReviewGPT jobs. Their preflights serialize only a missing
+PR-base fetch in the shared Git directory; packaging and browser execution stay
+concurrent. Green CI on the final head and resolved results from both ReviewGPT
+stages remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
 frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
@@ -275,8 +277,9 @@ the current user explicitly asks for it.
 ## One Round
 
 1. The canonical command verifies that the local checkout is the pushed PR
-   head before invoking ReviewGPT. For a standalone preflight without starting
-   ReviewGPT, run:
+   head and coordinates any missing PR-base refresh before invoking ReviewGPT.
+   Concurrent passes share only that bounded fetch lock. For a
+   standalone preflight without starting ReviewGPT, run:
 
    ```bash
    scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>
