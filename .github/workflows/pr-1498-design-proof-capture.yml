@@ -33,7 +33,8 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Chromium
-        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
 
       - name: Register the composed recovery state in the sections catalog
         run: |
