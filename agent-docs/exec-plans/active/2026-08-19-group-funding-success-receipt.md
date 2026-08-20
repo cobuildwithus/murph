@@ -78,6 +78,10 @@ Updated: 2026-08-20
 - Keep the confirmation mark but remove its visible kicker. The headline already
   communicates the success outcome, while the mark retains the visual and
   accessible status signal.
+- Let each responsive surface own alignment: the fulfilled drawer header
+  centers the mark and headline at every drawer width, while the desktop dialog
+  retains its left-aligned hierarchy. Do not couple this boundary to a smaller
+  unrelated Tailwind breakpoint.
 - The initial redesign landed in PR #2034. Follow-up PR #2046 owns the final
   hierarchy polish and preserves both source PRs in the existing changelog item.
 
@@ -99,8 +103,19 @@ Updated: 2026-08-20
 - Phone contributor: the same study rendered a content-height 390×361 drawer.
   The mark centered with the phone headline, the chooser instruction wrapped
   without clipping, and the Messages action remained fully visible.
+- Intermediate-width contributor: a 700×900 Playwright viewport still selected
+  the drawer and directly proved that the mark and headline content share the
+  same horizontal center.
 - Direct proof: 101 focused component tests passed; the fulfilled state retained
   one live status announcement and the semantic `sms:` link. Web typecheck,
   focused ESLint, Playwright desktop/mobile capture, and diff hygiene passed.
+- Preliminary ReviewGPT returned two accepted findings: the mark crossed to
+  left alignment before the drawer ended, and the icon-only status semantics
+  were under-asserted. The drawer now owns centering throughout its range, the
+  success title drops obsolete close-button padding, and the focused test pins
+  the exact label, polite live region, hidden icon, and one-status invariant.
+- Remediation proof: 108 focused component and changelog tests, Web typecheck,
+  focused ESLint, diff hygiene, and Playwright captures at 1440×900, 700×900,
+  and 390×844 passed.
 - Result: Ready. The follow-up removes repeated success copy without changing
   payment, routing, dismissal, or recovery behavior.

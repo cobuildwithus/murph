@@ -4922,6 +4922,10 @@ test("reconciles a fulfilled Settings return without presenting a confirmation",
     });
 
     assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
     const status = rendered.container.querySelector('[role="status"]');
     assert.ok(status);
     assert.equal(status.getAttribute("aria-live"), "polite");
@@ -5211,7 +5215,17 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
       rendered.container.querySelectorAll('[role="status"]').length,
       1,
     );
-    assert.ok(rendered.container.querySelector('[role="status"] svg'));
+    const status = rendered.container.querySelector('[role="status"]');
+    assert.ok(status);
+    assert.equal(
+      status.getAttribute("aria-label"),
+      "This group has more Murph. Your contribution is ready.",
+    );
+    assert.equal(status.getAttribute("aria-live"), "polite");
+    assert.equal(
+      status.querySelector("svg")?.getAttribute("aria-hidden"),
+      "true",
+    );
   } finally {
     await rendered.cleanup();
   }
