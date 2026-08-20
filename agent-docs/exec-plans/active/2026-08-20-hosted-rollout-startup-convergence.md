@@ -42,9 +42,11 @@ converges without restart thrash while the second group retains bounded recovery
    caller readiness budgets.
 2. Preserve an aborted start wait when Cloudflare still reports a recent
    running/healthy state, including when the lifecycle start hook has fired but
-   readiness has not yet completed.
+   readiness has not yet completed and when startup transport returns before
+   the caller timeout.
 3. Rejoin that start on later readiness calls and retain the existing destroy
-   path after the configured readiness window or for non-timeout failures.
+   path after the configured readiness window or for fatal and previously-ready
+   unhealthy shells.
 4. Raise and document the canonical default readiness window to 90 seconds,
    covering the observed roughly one-minute rollout start with bounded headroom.
 5. Run focused proof, commit and push the candidate, then resolve the required
@@ -52,9 +54,10 @@ converges without restart thrash while the second group retains bounded recovery
 
 ## State
 
-Active. Initial exact-head CI passed. Preliminary ReviewGPT found one high
-coverage gap in the lifecycle ordering; the finding is accepted, reproduced,
-and remediated locally. A fresh exact-head review and CI remain.
+Active. Initial exact-head CI passed. Preliminary and final ReviewGPT found two
+connected high gaps in lifecycle ordering and immediate startup-transport
+handling; both findings are accepted, reproduced, and remediated locally. A
+fresh exact-head review and CI remain.
 
 ## Evidence
 
@@ -74,8 +77,18 @@ and remediated locally. A fresh exact-head review and CI remain.
 - ReviewGPT's preliminary specialist pass found that the original regression
   did not fire the lifecycle start hook between caller budgets. The accepted
   remediation retains an explicit pending-start deadline across that hook.
-- Focused Cloudflare verification passes after remediation: 261 tests plus
-  package typecheck.
+- ReviewGPT's final first pass found that an immediate startup HTTP 503 still
+  bypassed the timeout-only grace. The accepted remediation treats recent
+  starts that have never passed health readiness as pending for non-fatal
+  startup failures, while previously ready, stale, stopped, poisoned, and
+  version-mismatched shells retain cleanup.
+- The container regression now keeps the same start across a caller timeout,
+  lifecycle start observation, and an immediate non-JSON HTTP 503 whose caller
+  signal remains active, then reaches health at 58 seconds with zero destroys.
+- A UserRunner owner regression proves an ordinary retry of the same accepted
+  orchestration reaches runtime acceptance after the container becomes ready.
+- Focused Cloudflare verification passes after remediation: 415 tests across
+  five files plus package typecheck.
 
 ## Working Set
 

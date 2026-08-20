@@ -2290,6 +2290,51 @@ describe("HostedUserRunner execution coordination", () => {
     );
   });
 
+  it("accepts an ordinary retry after the same container start finishes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let readinessCalls = 0;
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      readinessCalls += 1;
+      if (readinessCalls === 1) {
+        const error = new Error(
+          "Hosted runner container returned HTTP 503 with non-JSON metadata response.",
+        );
+        error.name = "HostedRunnerContainerMetadataResponseError";
+        throw error;
+      }
+      return { kind: "ready" };
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const orchestrationAttemptId = "test-rollout-startup-convergence";
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId,
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(ensureReadyForProcessing).toHaveBeenCalledTimes(2);
+  });
+
   it("returns retry_later when runner secrets read exhausts the caller command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));

@@ -2282,12 +2282,7 @@ export class RunnerContainer extends Container {
         );
         this.recordRecentReadinessProof(input.userId);
         this.pendingColdStartDeadlineAtMs = null;
-        if (
-          this.containerStartedAtMs === null
-          && readRecentContainerStart(initialState, Date.now(), readyTimeoutMs)
-        ) {
-          this.recordContainerStartObserved("cold-start-ready");
-        }
+        this.recordContainerStartObserved("cold-start-ready");
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2303,8 +2298,8 @@ export class RunnerContainer extends Container {
         return "already_warm";
       } catch (error) {
         const pendingColdStart = this.readPendingColdStart({
+          error,
           maxAgeMs: readyTimeoutMs,
-          operationAbortSignal,
           state: initialState,
         });
         if (pendingColdStart) {
@@ -2391,17 +2386,35 @@ export class RunnerContainer extends Container {
       this.pendingColdStartDeadlineAtMs = null;
       this.recordContainerStartObserved("cold-start-ready");
     } catch (error) {
-      const pendingColdStartAgeMs = Date.now() - coldStartWaitStartedAtMs;
-      const pendingColdStart = operationAbortSignal.aborted
-        && isRunnerContainerAbortHardTimeout(operationAbortSignal.reason)
-        && this.containerStartedAtMs === null
-        && pendingColdStartAgeMs >= 0
-        && pendingColdStartAgeMs <= readyTimeoutMs;
-      if (pendingColdStart) {
-        this.pendingColdStartDeadlineAtMs = coldStartWaitStartedAtMs
+      const pendingColdStartCandidate =
+        this.containerStartObservedBy === "onStart"
+        || (
+          this.containerStartedAtMs === null
+          && (
+            isRunnerContainerAbortHardTimeout(error)
+            || (
+              operationAbortSignal.aborted
+              && isRunnerContainerAbortHardTimeout(operationAbortSignal.reason)
+            )
+          )
+        );
+      if (pendingColdStartCandidate) {
+        this.pendingColdStartDeadlineAtMs ??= coldStartWaitStartedAtMs
           + readyTimeoutMs;
+      }
+      const pendingColdStart = pendingColdStartCandidate
+        ? this.readPendingColdStart({
+          error,
+          maxAgeMs: readyTimeoutMs,
+          state: {
+            lastChange: coldStartWaitStartedAtMs,
+            status: "running",
+          },
+        })
+        : null;
+      if (pendingColdStart) {
         this.logPendingColdStart({
-          ageMs: pendingColdStartAgeMs,
+          ageMs: pendingColdStart.ageMs,
           maxAgeMs: readyTimeoutMs,
           readinessStartedAtMs: readinessStartedAt,
           readinessTimeoutMs,
@@ -2461,13 +2474,13 @@ export class RunnerContainer extends Container {
   }
 
   private readPendingColdStart(input: {
+    error: unknown;
     maxAgeMs: number;
-    operationAbortSignal: AbortSignal;
     state: unknown;
   }): { ageMs: number } | null {
     if (
-      !input.operationAbortSignal.aborted
-      || !isRunnerContainerAbortHardTimeout(input.operationAbortSignal.reason)
+      isRunnerContainerFatalReadinessError(input.error)
+      || isRunnerContainerReadinessObservation(this.containerStartObservedBy)
     ) {
       return null;
     }
@@ -2480,10 +2493,10 @@ export class RunnerContainer extends Container {
     if (!recentStart) {
       return null;
     }
-    if (
-      this.pendingColdStartDeadlineAtMs !== null
-      && nowMs <= this.pendingColdStartDeadlineAtMs
-    ) {
+    if (this.pendingColdStartDeadlineAtMs !== null) {
+      if (nowMs > this.pendingColdStartDeadlineAtMs) {
+        return null;
+      }
       return {
         ageMs: Math.max(
           0,
@@ -2491,7 +2504,7 @@ export class RunnerContainer extends Container {
         ),
       };
     }
-    return this.containerStartedAtMs === null ? recentStart : null;
+    return recentStart;
   }
 
   private logPendingColdStart(input: {
@@ -2954,6 +2967,14 @@ export class RunnerContainer extends Container {
   private recordContainerStartObserved(observedBy: RunnerContainerStartObservation): void {
     if (this.containerStartedAtMs === null) {
       this.containerStartedAtMs = Date.now();
+    }
+    if (
+      this.containerStartObservedBy === null
+      || (
+        this.containerStartObservedBy === "onStart"
+        && isRunnerContainerReadinessObservation(observedBy)
+      )
+    ) {
       this.containerStartObservedBy = observedBy;
     }
     this.recordContainerActivityObserved(observedBy);
@@ -3459,6 +3480,19 @@ async function waitForRunnerContainerOperationSettlement(
 
 function isRunnerContainerAbortHardTimeout(reason: unknown): boolean {
   return reason instanceof DOMException && reason.name === "TimeoutError";
+}
+
+function isRunnerContainerFatalReadinessError(error: unknown): boolean {
+  return error instanceof HostedRunnerContainerArchitectureMismatchError
+    || error instanceof HostedRunnerContainerBundleMismatchError
+    || error instanceof HostedRunnerContainerPoisonedError;
+}
+
+function isRunnerContainerReadinessObservation(
+  observation: RunnerContainerStartObservation | null,
+): boolean {
+  return observation === "cold-start-ready"
+    || observation === "deploy-smoke-ready";
 }
 
 async function waitForRunnerContainerOperationCompletion(
