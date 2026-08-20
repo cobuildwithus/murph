@@ -114,6 +114,8 @@ Updated: 2026-08-20
   - `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-entrypoint.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts`
     passed 640 tests across both files.
   - `pnpm typecheck` in `packages/assistant-runtime` passed.
+  - Focused changelog fragment, registry, and route tests passed 49 tests.
+  - Web typecheck passed after generating the changelog fragments.
 - Pending exact-head proof: GitHub required checks, preliminary
   `completion-specialists`, and final `pr-review` ReviewGPT rounds.
 - Expected outcome: synthetic approval delivery wins the first post-checkpoint
