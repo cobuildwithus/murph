@@ -613,7 +613,10 @@ supported provider credential.
   access and inactive, stale, removed, suspended, or consent-revoked
   exclusions. It also proves usage-denial suppression and restart chronology
   across staging, provider, delivery, and mailbox-consumption evidence, plus
-  the 20,000 eligible-row cap after exclusions. The hosted-local
+  imported device retries aging from their canonical earliest workspace wake
+  while unimported heads and suffixes, overdue retries, malformed frontiers,
+  and non-device system heads remain alertable, plus the 20,000
+  eligible-row cap after exclusions. The hosted-local
   foreground-priority leg drives this monitor through authenticated cron HTTP
   and the same isolated Resend stub, proving paced lost-ack retry,
   identifier-free aggregation, short-window active-incident coalescing,
