@@ -283,20 +283,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const confirmationIndicator =
     showGroupMessagesAction && statusContent ? (
       <div
-        className="flex items-center gap-2.5"
+        className="flex size-10 shrink-0 self-center items-center justify-center rounded-full bg-primary/10 text-primary sm:self-auto"
         role="status"
         aria-live="polite"
         aria-label={`${statusContent.title}. ${statusContent.message}`}
       >
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <CheckIcon className="size-4 stroke-[2.5]" />
-        </span>
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
-          Nice one
-        </span>
+        <CheckIcon aria-hidden="true" className="size-4 stroke-[2.5]" />
       </div>
     ) : null;
   const screenContent = (

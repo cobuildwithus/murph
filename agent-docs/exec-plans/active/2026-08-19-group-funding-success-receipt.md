@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-19
-Updated: 2026-08-19
+Updated: 2026-08-20
 
 ## Goal
 
@@ -18,6 +18,8 @@ Updated: 2026-08-19
   the existing `sms:` destination and accessible success announcement intact.
 - The heading, supporting copy, and action fit without overflow at desktop and
   narrow-phone widths and preserve keyboard focus and close behavior.
+- The compact success mark stands on its own without a redundant congratulatory
+  label competing with the receipt headline.
 - Focused component tests, Web typecheck, rendered browser proof, the applicable
   preliminary ReviewGPT lenses, exact-head CI, and parent final review pass.
 
@@ -73,12 +75,30 @@ Updated: 2026-08-19
 - Do not add illustration or celebratory motion. The success mark, type
   hierarchy, and tighter composition are sufficient and match Murph's explicit
   anti-gamification rules.
+- Keep the confirmation mark but remove its visible kicker. The headline already
+  communicates the success outcome, while the mark retains the visual and
+  accessible status signal.
 
 ## Verification
 
 - Commands to run: the focused hosted-usage dialog Vitest file, Web typecheck,
-  `git diff --check`, and in-app Browser walkthroughs at desktop and narrow
-  phone widths; exact-head required GitHub checks after push.
+  `git diff --check`, and Playwright walkthroughs at desktop and narrow phone
+  widths; exact-head required GitHub checks after push.
 - Expected outcomes: unchanged payment behavior, one accessible success status,
   a semantic `sms:` continuation link, no duplicate desktop dismissal action,
   no overflow or clipped action on phone, and all routed review/CI gates green.
+
+## Product UX walkthrough
+
+- Desktop contributor: the production receipt study rendered a 512×346 dialog
+  with one compact confirmation mark, one headline, one explanatory sentence,
+  and the full-width Messages action. The standard close control remained the
+  only separate exit.
+- Phone contributor: the same study rendered a content-height 390×361 drawer.
+  The mark centered with the phone headline, the chooser instruction wrapped
+  without clipping, and the Messages action remained fully visible.
+- Direct proof: 101 focused component tests passed; the fulfilled state retained
+  one live status announcement and the semantic `sms:` link. Web typecheck,
+  focused ESLint, Playwright desktop/mobile capture, and diff hygiene passed.
+- Result: Ready. The follow-up removes repeated success copy without changing
+  payment, routing, dismissal, or recovery behavior.

@@ -5169,7 +5169,7 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
       await Promise.resolve();
     });
 
-    assert.match(rendered.container.textContent ?? "", /Nice one/);
+    assert.doesNotMatch(rendered.container.textContent ?? "", /Nice one/);
     assert.match(
       rendered.container.textContent ?? "",
       /This group has more Murph/,
@@ -5211,6 +5211,7 @@ test("offers Open Messages on a fulfilled group top-up return", async () => {
       rendered.container.querySelectorAll('[role="status"]').length,
       1,
     );
+    assert.ok(rendered.container.querySelector('[role="status"] svg'));
   } finally {
     await rendered.cleanup();
   }
