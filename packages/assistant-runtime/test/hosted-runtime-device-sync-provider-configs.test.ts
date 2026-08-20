@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { JUNCTION_PRODUCTION_TIMESERIES_RESOURCES } from "@murphai/device-syncd/config";
+import {
+  createConfiguredDeviceSyncProvidersFromConfigs,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
+} from "@murphai/device-syncd/config";
 import { resolveHostedRuntimeDeviceSyncProviderConfigs } from "../src/hosted-runtime/device-sync-provider-configs.ts";
 
 const staticProviderConfigs = {
@@ -61,7 +64,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
     });
   });
 
-  it("preserves all 48 code-owned Junction production resources through member overlays", () => {
+  it("preserves all 48 code-owned Junction production resources for hosted members", () => {
     const resolved = resolveHostedRuntimeDeviceSyncProviderConfigs(
       {
         junction: {
@@ -69,12 +72,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
           region: "us",
         },
       },
-      {
-        junction: {
-          environment: "sandbox",
-          region: "us",
-        },
-      },
+      {},
       {
         JUNCTION_API_KEY: "sk_us_test_runtime",
         JUNCTION_CLIENT_USER_ID_SECRET: "runtime-client-user-secret",
@@ -85,6 +83,8 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
     );
 
     expect(resolved.junction).toMatchObject({
+      apiKey: "sk_us_test_runtime",
+      clientUserIdSecret: "runtime-client-user-secret",
       environment: "sandbox",
       pushSourceRecoveryEnabled: true,
       region: "us",
@@ -93,5 +93,8 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
     expect(new Set(JUNCTION_PRODUCTION_TIMESERIES_RESOURCES).size).toBe(48);
     expect(resolved.junction?.timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
+    expect(createConfiguredDeviceSyncProvidersFromConfigs(resolved)
+      .map((provider) => provider.provider))
+      .toEqual(["junction"]);
   });
 });
