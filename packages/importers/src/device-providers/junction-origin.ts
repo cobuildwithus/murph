@@ -58,6 +58,7 @@ const KNOWN_JUNCTION_PROVIDER_NAME_SLUGS = new Set([
   "freestyle-libre-ble",
   "garmin",
   "google-fit",
+  "google-health",
   "hammerhead",
   "health-connect",
   "ihealth",

@@ -1,8 +1,14 @@
 import {
   buildJunctionProviderSourceInstanceKey,
   canonicalizeJunctionProviderSlug,
+  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+  normalizeJunctionProviderSlug,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
+import {
+  isGoogleHealthFitbitMigrationLegacyTerminal,
+} from "@murphai/device-syncd/fitbit-migration";
 import {
   JUNCTION_COMPANION_HRV_SOURCE_PROVIDER,
   JUNCTION_COMPANION_HEALTH_METADATA_EVENT_TYPE,
@@ -84,6 +90,7 @@ import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
   HOSTED_SOURCE_USER_DISCONNECTED_ERROR_CODE,
+  isHostedConnectionSourceAdmitted,
   isHostedSourceDisconnectFenced,
   resolveHostedJunctionConnectionSource,
 } from "./connection-source-lifecycle";
@@ -434,9 +441,11 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
       status: "disconnected",
       ...(source ? { lifecycleEpoch: source.lifecycleEpoch } : {}),
       firstSeenAt: sourceStartedAt,
+      lastDataAt: null,
       lastErrorCode: null,
       lastErrorMessage: null,
       lastSeenAt: sourceStartedAt,
+      resourceAvailabilitySummary: null,
       tx,
     });
     if (source) {
@@ -610,10 +619,13 @@ export async function prepareHostedDeviceSyncConnectionSourceStart(input: {
             sourceInstanceKey: source.sourceInstanceKey,
             sourceProviderSlug,
             status: "disconnected",
+            firstSeenAt: sourceStartedAt,
             lifecycleEpoch: source.lifecycleEpoch,
+            lastDataAt: null,
             lastErrorCode: null,
             lastErrorMessage: null,
             lastSeenAt: sourceStartedAt,
+            resourceAvailabilitySummary: null,
             tx,
           });
           return { complete: true as const, source: preparedSource };
@@ -1844,6 +1856,16 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     sourceProviderSlug: input.webhook.sourceProviderSlug ?? null,
     webhookReceivedAt: input.now,
   });
+  const fitbitMigrationSuccessorOccurredAt = input.webhook.occurredAt ?? null;
+  const fitbitMigrationSuccessorEventId = fitbitMigrationSuccessorOccurredAt
+    ? buildHostedFitbitMigrationSuccessorEventId({
+        connectionId: input.account.id,
+        expectedConnectedAt: input.account.connectedAt,
+        jobs: input.webhook.jobs ?? [],
+        provider: input.account.provider,
+        userId: ownerId,
+      })
+    : null;
   const sourceObservation = input.sourceAdmissionDeferred === true
     ? await prepareHostedWebhookSourceObservation({
         ...input,
@@ -1872,6 +1894,8 @@ export async function handleHostedDeviceSyncWebhookAccepted(input: {
     expectedConnectedAt: input.account.connectedAt,
     dirtyResources,
     eventType: input.webhook.eventType,
+    fitbitMigrationSuccessorEventId,
+    fitbitMigrationSuccessorOccurredAt,
     occurredAt: input.webhook.occurredAt ?? input.now,
     processingAttemptedAt: input.processingAttemptedAt,
     provider: input.account.provider,
@@ -2646,6 +2670,8 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   dirtyResources: readonly HostedDeviceSyncDirtyResource[];
   eventType: string;
   expectedConnectedAt: string;
+  fitbitMigrationSuccessorEventId: string | null;
+  fitbitMigrationSuccessorOccurredAt: string | null;
   occurredAt: string;
   processingAttemptedAt: string;
   provider: string;
@@ -2668,6 +2694,10 @@ interface HostedDeviceSyncWebhookAdmissionInput {
 async function persistHostedDeviceSyncWebhookAccepted(
   input: HostedDeviceSyncWebhookAdmissionInput,
 ): Promise<void> {
+  let result: {
+    retrySourceAfterCommit: boolean;
+    wakeMailboxItemIds: string[];
+  };
   // Registration recovery already commits the callback-equivalent connected
   // signal/mailbox; its wake also drains the durable dirty record.
   const sourceEstablishmentOwnsWebhookHandoff = input.sourceObservation !== null
@@ -2676,15 +2706,24 @@ async function persistHostedDeviceSyncWebhookAccepted(
       input.eventType === "provider.connection.created"
       || input.eventType === "provider.connection.updated"
     );
-  let result: { wakeMailboxItemIds: string[] };
   try {
     result = await runWithHostedDeviceSyncPreparedWriteReplan(async (attempt) => {
       const hasPayloadResources = input.dirtyResources.some(
         hasHostedDeviceSyncDirtyResourcePayload,
       );
+      const advancesFitbitMigrationSuccessor =
+        isHostedJunctionDailyDataWebhookEvent(input.eventType)
+        && input.fitbitMigrationSuccessorOccurredAt !== null;
+      const requiresFitbitMigrationAdmission = input.provider === "junction"
+        && isHostedJunctionDataWebhookEvent(input.eventType)
+        && (
+          input.dataSourceProviderSlug === null
+          || input.dataSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+        );
       const allowConditionalPreparation = attempt === 0;
       const pendingDirtySnapshot = (
         allowConditionalPreparation
+        && !requiresFitbitMigrationAdmission
         && input.acceptanceMode === "level_dirty_hint"
         && !hasPayloadResources
         && input.sourceObservation === null
@@ -2696,6 +2735,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
           })
         : null;
       const skipInitialAdmission = allowConditionalPreparation
+        && !requiresFitbitMigrationAdmission
         && (
           input.preparationAuthorityProven
           || (!hasPayloadResources && pendingDirtySnapshot !== null)
@@ -2714,13 +2754,15 @@ async function persistHostedDeviceSyncWebhookAccepted(
                 return { status } as const;
               }
               return {
-                shouldPrepareWake: hasPayloadResources
-                  ? false
-                  : await input.store.shouldRequestWakeForDirtyConnectionUpsert({
-                      connectionId: input.connectionId,
-                      tx,
-                      userId: input.userId,
-                    }),
+                shouldPrepareWake: status.kind === "migration_pending"
+                  ? advancesFitbitMigrationSuccessor
+                  : hasPayloadResources
+                    ? false
+                    : await input.store.shouldRequestWakeForDirtyConnectionUpsert({
+                        connectionId: input.connectionId,
+                        tx,
+                        userId: input.userId,
+                      }),
                 status,
               } as const;
             },
@@ -2729,10 +2771,11 @@ async function persistHostedDeviceSyncWebhookAccepted(
             },
           );
       if (initialAdmission?.status.kind === "completed") {
-        return { wakeMailboxItemIds: [] };
+        return { retrySourceAfterCommit: false, wakeMailboxItemIds: [] };
       }
 
-      const preparedDirty = hasPayloadResources
+      const preparedDirty = initialAdmission?.status.kind !== "migration_pending"
+        && hasPayloadResources
         ? await input.store.prepareDirtyConnectionUpsert({
             connectionId: input.connectionId,
             dirtyAt: input.occurredAt,
@@ -2800,7 +2843,13 @@ async function persistHostedDeviceSyncWebhookAccepted(
               if (skipInitialAdmission) {
                 throw createHostedDeviceSyncDirtyPreparationMismatchError();
               }
-              return { wakeMailboxItemIds: [] };
+              return { retrySourceAfterCommit: false, wakeMailboxItemIds: [] };
+            }
+            if (
+              initialAdmission
+              && finalAdmission.kind !== initialAdmission.status.kind
+            ) {
+              throw createHostedDeviceSyncDirtyPreparationMismatchError();
             }
 
             const wakeMailboxItemIds: string[] = [];
@@ -2838,6 +2887,66 @@ async function persistHostedDeviceSyncWebhookAccepted(
                   },
                 });
               }
+            }
+
+            if (
+              finalAdmission.kind === "migration_pending"
+              && !advancesFitbitMigrationSuccessor
+            ) {
+              return { retrySourceAfterCommit: true, wakeMailboxItemIds };
+            }
+
+            if (finalAdmission.kind === "migration_pending") {
+              const successorEventId = input.fitbitMigrationSuccessorEventId;
+              const successorOccurredAt = input.fitbitMigrationSuccessorOccurredAt;
+              if (!preparedMailbox || !successorEventId || !successorOccurredAt) {
+                throw webhookSourceNotReadyError(
+                  "Google Health webhook occurrence identity is not available yet. Retry shortly.",
+                );
+              }
+              const mailboxAppend = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+                envelope: buildHostedDeviceSyncWake({
+                  connectionId: input.connectionId,
+                  eventId: successorEventId,
+                  expectedConnectedAt: input.expectedConnectedAt,
+                  hint: {
+                    eventType: input.eventType,
+                    occurredAt: successorOccurredAt,
+                    reason: "fitbit_migration_successor_arrival",
+                    resourceCategory: input.resourceCategory ?? null,
+                  },
+                  occurredAt: successorOccurredAt,
+                  provider: input.provider,
+                  source: "webhook-hint",
+                  userId: input.userId,
+                }),
+                prepared: preparedMailbox,
+                tx,
+              });
+              if (mailboxAppend.dedupeConflict) {
+                throw deviceSyncError({
+                  code: "HOSTED_DEVICE_SYNC_DIRTY_WAKE_DEDUPE_CONFLICT",
+                  httpStatus: 503,
+                  message: "Hosted device-sync migration wake conflicted with an existing wake identity.",
+                  retryable: true,
+                });
+              }
+              wakeMailboxItemIds.push(mailboxAppend.item.id);
+              if (
+                mailboxAppend.inserted
+                && Date.parse(input.acceptedAt)
+                  > finalAdmission.successorFirstSeenAt.getTime()
+                && Date.parse(successorOccurredAt)
+                  > finalAdmission.successorFirstSeenAt.getTime()
+              ) {
+                await input.store.markConnectionSourceDataReceived({
+                  connectionId: input.connectionId,
+                  now: successorOccurredAt,
+                  sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
+                  tx,
+                });
+              }
+              return { retrySourceAfterCommit: true, wakeMailboxItemIds };
             }
 
             // Every accepted hint merges into dirty state so coalesced timing remains
@@ -2939,7 +3048,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
               });
             }
 
-            return { wakeMailboxItemIds };
+            return { retrySourceAfterCommit: false, wakeMailboxItemIds };
           },
           {
             memberRowLockTimeoutMs: WEBHOOK_ADMISSION_MEMBER_ROW_LOCK_TIMEOUT_MS,
@@ -2964,6 +3073,11 @@ async function persistHostedDeviceSyncWebhookAccepted(
       failureMode: "best_effort",
     });
   }
+  if (result.retrySourceAfterCommit) {
+    throw webhookSourceNotReadyError(
+      "Google Health delivery is waiting for Fitbit migration cutover.",
+    );
+  }
 }
 
 type HostedDeviceSyncWebhookAdmissionStatus =
@@ -2973,6 +3087,13 @@ type HostedDeviceSyncWebhookAdmissionStatus =
       currentSource: HostedConnectionSourceAdmissionCandidate | null;
       kind: "ready";
       setupPending: boolean;
+    }
+  | {
+      currentConnectionRecord: HostedConnectionRecord | null;
+      currentSource: HostedConnectionSourceAdmissionCandidate | null;
+      kind: "migration_pending";
+      setupPending: boolean;
+      successorFirstSeenAt: Date;
     };
 
 async function inspectHostedDeviceSyncWebhookAdmissionTx(
@@ -3045,13 +3166,14 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     return { kind: "completed" };
   }
   let currentSource: HostedConnectionSourceAdmissionCandidate | null = null;
+  let source: HostedConnectionSourceAdmissionCandidate | null = null;
   const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (sourceProviderSlug) {
     const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
       connectionId: input.connectionId,
       sourceProviderSlug,
     });
-    const source = await input.store.resolveConnectionSourceAdmissionCandidate({
+    source = await input.store.resolveConnectionSourceAdmissionCandidate({
       connectionId: input.connectionId,
       ...(sourceInstanceKey ? { sourceInstanceKey } : {}),
       sourceProviderSlug,
@@ -3113,40 +3235,219 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
 
       if (source.status !== "connected" || isHostedSourceDisconnectFenced(source)) {
         if (
-          source.status === "disconnected"
-          && source.lastErrorCode === null
-          && source.lastSeenAt.getTime() <= Date.parse(input.acceptedAt)
+          sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+          && isGoogleHealthFitbitMigrationLegacyTerminal(source)
         ) {
-          throw deviceSyncError({
-            code: "WEBHOOK_SOURCE_NOT_READY",
-            message: "Device source registration is still settling. Retry shortly.",
-            retryable: true,
-            httpStatus: 503,
-          });
+          await completeHostedWebhookTraceTx(input, tx);
+          return { kind: "completed" };
+        }
+        if (
+          isHostedSourceDisconnectFenced(source)
+          || (
+            source.status === "disconnected"
+            && source.lastErrorCode === null
+            && source.lastSeenAt.getTime() <= Date.parse(input.acceptedAt)
+          )
+        ) {
+          throw webhookSourceNotReadyError(
+            "Device source registration is still settling. Retry shortly.",
+          );
         }
         await completeHostedWebhookTraceTx(input, tx);
         return { kind: "completed" };
       }
     }
   }
-  return {
+  const ready = {
     currentConnectionRecord: sourceCredentialCurrent,
     currentSource,
-    kind: "ready",
+    kind: "ready" as const,
     setupPending,
   };
+
+  const dataSourceProviderSlug = normalizeJunctionProviderSlug(
+    input.dataSourceProviderSlug,
+  );
+  const unknownJunctionDataSource = input.provider === "junction"
+    && dataSourceProviderSlug === null
+    && isHostedJunctionDataWebhookEvent(input.eventType);
+  if (unknownJunctionDataSource) {
+    const legacySources =
+      await input.store.listBoundedConnectionSourcesForConnections({
+        connectionIds: [input.connectionId],
+        sourceProviderSlugs: [JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG],
+        tx,
+      });
+    if (hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources)) {
+      throw webhookSourceNotReadyError(
+        "Junction webhook data source provenance is not available yet. Retry shortly.",
+      );
+    }
+    return ready;
+  }
+  if (!dataSourceProviderSlug) {
+    return ready;
+  }
+
+  const dataSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: input.connectionId,
+    sourceProviderSlug: dataSourceProviderSlug,
+  });
+  const dataSource = dataSourceProviderSlug === sourceProviderSlug
+    ? source
+    : await input.store.resolveConnectionSourceAdmissionCandidate({
+        connectionId: input.connectionId,
+        ...(dataSourceInstanceKey
+          ? { sourceInstanceKey: dataSourceInstanceKey }
+          : {}),
+        sourceProviderSlug: dataSourceProviderSlug,
+        tx,
+      });
+  if (!dataSource) {
+    throw webhookSourceNotReadyError(
+      "Device data source setup is not visible yet. Retry shortly.",
+    );
+  }
+  const observedSourceWillBeAdmitted = Boolean(
+    input.sourceObservation?.sourceAccessActive
+    && normalizeJunctionProviderSlug(
+      input.sourceObservation.source.sourceProviderSlug,
+    ) === dataSourceProviderSlug,
+  );
+  if (
+    !observedSourceWillBeAdmitted
+    && !isHostedConnectionSourceAdmitted([dataSource], dataSourceProviderSlug)
+  ) {
+    if (
+      dataSourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+      && isGoogleHealthFitbitMigrationLegacyTerminal(dataSource)
+    ) {
+      await completeHostedWebhookTraceTx(input, tx);
+      return { kind: "completed" };
+    }
+    if (
+      isHostedSourceDisconnectFenced(dataSource)
+      || (
+        dataSource.status === "disconnected"
+        && dataSource.lastErrorCode === null
+        && dataSource.lastSeenAt.getTime() <= Date.parse(input.acceptedAt)
+      )
+    ) {
+      throw webhookSourceNotReadyError(
+        "Device data source registration is still settling. Retry shortly.",
+      );
+    }
+    await completeHostedWebhookTraceTx(input, tx);
+    return { kind: "completed" };
+  }
+  if (dataSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG) {
+    const legacySources =
+      await input.store.listBoundedConnectionSourcesForConnections({
+        connectionIds: [input.connectionId],
+        sourceProviderSlugs: [JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG],
+        tx,
+      });
+    if (hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources)) {
+      return {
+        ...ready,
+        kind: "migration_pending",
+        successorFirstSeenAt: observedSourceWillBeAdmitted
+          ? new Date(Math.max(
+              dataSource.firstSeenAt.getTime(),
+              Date.parse(input.acceptedAt),
+            ))
+          : dataSource.firstSeenAt,
+      };
+    }
+  }
+  return ready;
+}
+
+function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
+  sources: readonly HostedDeviceConnectionSource[],
+): boolean {
+  return sources.some((source) =>
+    normalizeJunctionProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && !isGoogleHealthFitbitMigrationLegacyTerminal(source)
+  );
+}
+
+function isHostedJunctionDailyDataWebhookEvent(eventType: string): boolean {
+  return eventType.startsWith("daily.data.");
+}
+
+function buildHostedFitbitMigrationSuccessorEventId(input: {
+  connectionId: string;
+  expectedConnectedAt: string;
+  jobs: readonly DeviceSyncJobInput[];
+  provider: string;
+  userId: string;
+}): string | null {
+  if (input.jobs.length === 0) {
+    return null;
+  }
+  const providerJobDedupeKeys: string[] = [];
+  for (const job of input.jobs) {
+    const dedupeKey = normalizeNullableString(job.dedupeKey);
+    if (!dedupeKey) {
+      return null;
+    }
+    providerJobDedupeKeys.push(dedupeKey);
+  }
+  const logicalFactId = sha256Hex(JSON.stringify(
+    [...new Set(providerJobDedupeKeys)].sort(),
+  ));
+
+  return [
+    "device-sync",
+    "fitbit-migration-successor-arrival",
+    input.userId,
+    input.provider,
+    input.connectionId,
+    input.expectedConnectedAt,
+    logicalFactId,
+  ].join(":");
+}
+
+function isHostedJunctionDataWebhookEvent(eventType: string): boolean {
+  return isHostedJunctionDailyDataWebhookEvent(eventType)
+    || eventType.startsWith("historical.data.");
+}
+
+function webhookSourceNotReadyError(
+  message: string,
+): ReturnType<typeof deviceSyncError> {
+  return deviceSyncError({
+    code: "WEBHOOK_SOURCE_NOT_READY",
+    message,
+    retryable: true,
+    httpStatus: 503,
+  });
 }
 
 function hostedConnectionSourceAdmissionMatchesProof(
   expected: HostedConnectionSourceAdmissionCandidate,
   current: HostedConnectionSourceAdmissionCandidate,
 ): boolean {
-  return expected.lastErrorCode === current.lastErrorCode
+  const expectedCanonicalProvider = canonicalizeJunctionProviderSlug(
+    expected.sourceProviderSlug,
+  );
+  const currentCanonicalProvider = canonicalizeJunctionProviderSlug(
+    current.sourceProviderSlug,
+  );
+  const identityMatches = expectedCanonicalProvider && currentCanonicalProvider
+    ? expectedCanonicalProvider === currentCanonicalProvider
+    : expected.id === current.id
+      && expected.sourceInstanceKey === current.sourceInstanceKey
+      && expected.sourceProviderSlug === current.sourceProviderSlug;
+
+  return identityMatches
+    && expected.firstSeenAt.getTime() === current.firstSeenAt.getTime()
+    && expected.lastErrorCode === current.lastErrorCode
     && expected.lastErrorMessage === current.lastErrorMessage
     && expected.lifecycleEpoch === current.lifecycleEpoch
     && expected.lastSeenAt.getTime() === current.lastSeenAt.getTime()
-    && expected.sourceInstanceKey === current.sourceInstanceKey
-    && expected.sourceProviderSlug === current.sourceProviderSlug
     && expected.status === current.status;
 }
 
