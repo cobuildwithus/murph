@@ -1768,6 +1768,44 @@ export async function readHostedMailboxMaxSeqByLane(input: {
   return result;
 }
 
+export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
+  afterSeq: bigint | number | string;
+  at: Date;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<{ kind: HostedMailboxKind; laneSeq: string } | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const afterSeq = normalizeHostedMailboxSeq(
+    input.afterSeq,
+    "Hosted mailbox system frontier afterSeq",
+  );
+  const row = await prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    select: {
+      kind: true,
+      laneSeq: true,
+    },
+    where: {
+      ...buildHostedMailboxLiveItemWhere(input.at),
+      lane: "system",
+      laneSeq: {
+        gt: afterSeq,
+      },
+      userId,
+    },
+  });
+
+  return row
+    ? {
+        kind: requireHostedMailboxKind(row.kind),
+        laneSeq: row.laneSeq.toString(),
+      }
+    : null;
+}
+
 export async function readHostedMailboxConsumedSeqByLane(input: {
   lanes?: readonly (HostedMailboxLane | string)[];
   prisma?: HostedMailboxStoreClient;

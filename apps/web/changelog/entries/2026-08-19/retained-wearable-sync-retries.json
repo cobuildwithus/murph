@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 200,
+  "item": {
+    "id": "retained-wearable-sync-retries",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Connected health retries keep their place",
+    "summary": "Connected-health updates now resume the same queued retry after a temporary interruption, preserving progress instead of starting that work over.",
+    "details": "Recovery stays limited to the affected connection, while fresh conversations continue to take priority.",
+    "relevanceTags": ["connected-health", "wearables", "sync", "reliability"],
+    "sourcePullRequests": [2021]
+  }
+}

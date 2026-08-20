@@ -794,6 +794,36 @@ export class PrismaHostedConnectionStore {
     });
   }
 
+  async syncDurableConnectionMetadata(
+    connectionId: string,
+    metadata: Record<string, unknown>,
+    tx?: HostedPrismaTransactionClient,
+  ): Promise<HostedConnectionRecord> {
+    const prisma = tx ?? this.prisma;
+
+    return prisma.deviceConnection.update({
+      where: { id: connectionId },
+      data: {
+        metadataJson: toPrismaJsonObject(
+          sanitizeHostedDeviceSyncConnectionMetadata(metadata),
+        ),
+      },
+      ...hostedConnectionRecordArgs,
+    });
+  }
+
+  async advanceConnectionSourceStartBoundary(input: {
+    connectionId: string;
+    updatedAt: string;
+    tx: HostedPrismaTransactionClient;
+  }): Promise<void> {
+    await input.tx.deviceConnection.update({
+      where: { id: input.connectionId },
+      data: { updatedAt: new Date(input.updatedAt) },
+      select: { id: true },
+    });
+  }
+
   async syncDurableConnectionLocalHeartbeatState(
     account: Pick<PublicDeviceSyncAccount, "externalAccountId" | "id">,
     localState: HostedLocalHeartbeatStateUpdate,
