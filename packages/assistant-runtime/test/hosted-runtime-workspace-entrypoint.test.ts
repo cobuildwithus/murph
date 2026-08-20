@@ -11448,7 +11448,11 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointAttempt += 1;
       checkpointRequests.push(request);
       events.push(`checkpoint.attempt:${activeAttemptId}:${checkpointAttempt}`);
-      if (failRecordCheckpoint && checkpointAttempt === 2) {
+      if (
+        failRecordCheckpoint
+        && activeAttemptId === "attempt_device_sync_closed_loop_initial"
+        && request.reason === "idle_shutdown"
+      ) {
         events.push(`checkpoint.fail:${activeAttemptId}:${checkpointAttempt}`);
         throw new Error("synthetic checkpoint transport fault");
       }
@@ -11792,18 +11796,22 @@ describe("hosted workspace runtime entrypoint", () => {
         /synthetic checkpoint transport fault/u,
       );
 
-      assert.equal(checkpointAttempt, 2);
-      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointAttempt, 3);
+      assert.equal(checkpointRequests.length, 3);
       assert.deepEqual(
         checkpointRequests.map((request) => request.reason),
-        ["canonical_runtime_commit", "idle_shutdown"],
+        [
+          "canonical_runtime_commit",
+          "canonical_runtime_commit",
+          "idle_shutdown",
+        ],
       );
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["1", "2"],
+        ["1", "2", "3"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "2");
+      assert.equal(currentWorkspace.version, "3");
       const initialProviderRequestClasses = providerRequestClasses.slice();
       assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
       assert.deepEqual(cadencePublications, []);
@@ -11812,7 +11820,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "checkpoint.attempt:attempt_device_sync_closed_loop_initial:1",
       );
       const lostRecordCheckpointIndex = events.indexOf(
-        "checkpoint.fail:attempt_device_sync_closed_loop_initial:2",
+        "checkpoint.fail:attempt_device_sync_closed_loop_initial:3",
       );
       assert.notEqual(firstCheckpointAttemptIndex, -1);
       assert.notEqual(lostRecordCheckpointIndex, -1);
@@ -11821,23 +11829,23 @@ describe("hosted workspace runtime entrypoint", () => {
         events.slice(0, firstCheckpointAttemptIndex).filter((event) =>
           event.startsWith("provider.request:")
         ).length,
-        4,
+        0,
       );
       assert.equal(
         events.slice(0, firstCheckpointAttemptIndex).filter((event) =>
           event.startsWith("artifact.put:")
         ).length,
-        4,
+        0,
       );
       assert.equal(
-        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:3"),
+        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:4"),
         -1,
       );
-      const durablePostPullCheckpoint = checkpointRequests[0];
+      const durablePostPullCheckpoint = checkpointRequests[1];
       assert.ok(durablePostPullCheckpoint);
       assert.deepEqual(currentWorkspace.snapshotRef, durablePostPullCheckpoint.snapshotRef);
       assert.deepEqual(currentWorkspace.snapshotRef, committedInputSnapshotRef);
-      const failedPostPullCheckpoint = checkpointRequests[1];
+      const failedPostPullCheckpoint = checkpointRequests[2];
       assert.ok(failedPostPullCheckpoint);
       const failedPostPullSnapshotRef = failedPostPullCheckpoint.snapshotRef;
       assert.ok(isHostedWorkspaceSnapshotV2Ref(failedPostPullSnapshotRef));
@@ -11896,19 +11904,19 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(canonicalNextReconcileAt, dueAt);
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "5");
-      assert.equal(checkpointAttempt, 5);
-      assert.equal(checkpointRequests.length, 5);
+      assert.equal(currentWorkspace.version, "7");
+      assert.equal(checkpointAttempt, 7);
+      assert.equal(checkpointRequests.length, 7);
       assert.deepEqual(
-        checkpointRequests.slice(2, 5).map((request) =>
+        checkpointRequests.slice(3, 7).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["2", "3", "4"],
+        ["3", "4", "5", "6"],
       );
       const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
         event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
       );
-      assert.equal(recoveryCheckpointCommitIndexes.length, 3);
+      assert.equal(recoveryCheckpointCommitIndexes.length, 4);
       const durableRecoveryCompletionCheckpointIndex =
         recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 1];
       assert.notEqual(durableRecoveryCompletionCheckpointIndex, undefined);
@@ -11959,17 +11967,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(settled.nextWakeAt, "2026-04-27T06:05:00.000Z");
       assert.equal(settled.nextWakeReason, "device-sync.reconcile");
       assert.deepEqual(
-        checkpointRequests.slice(5, 7).map((request) =>
+        checkpointRequests.slice(7, 10).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["5", "6"],
+        ["7", "8", "9"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "10");
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
-      assert.equal(checkpointAttemptsAfterSettlement, 7);
-      assert.equal(checkpointRequests.length, 7);
+      assert.equal(checkpointAttemptsAfterSettlement, 10);
+      assert.equal(checkpointRequests.length, 10);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.fail:")).length,
         1,
@@ -11991,9 +11999,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "7");
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "10");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "8");
+      assert.equal(currentWorkspace.version, "11");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -12011,17 +12019,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "8");
+      assert.equal(currentWorkspace.version, "11");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
       assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
-      assert.equal(checkpointAttempt, 8);
+      assert.equal(checkpointAttempt, 11);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        7,
+        10,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);
@@ -13219,23 +13227,26 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(browserPublishCalls, 0);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
+        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
+      assert.equal(checkpointRequests[2]?.expectedWorkspaceVersion, "2");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
       assert.equal(
-        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        typeof checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         "string",
       );
       assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        checkpointRequests[2]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
-      assert.equal(typeof checkpointRequests[1]?.nextWakeAt, "string");
+      assert.equal(typeof checkpointRequests[2]?.nextWakeAt, "string");
       // The canonical write may make an immediate assistant snapshot refresh
       // earlier than the device continuation; either wake must be checkpointed.
       assert.match(
-        checkpointRequests[1]?.nextWakeReason ?? "",
+        checkpointRequests[2]?.nextWakeReason ?? "",
         /^(assistant|device-sync\.reconcile)$/u,
       );
       const retainedState = await readHostedSystemMailboxState(vaultRoot);
@@ -39127,20 +39138,30 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(events, [
+      const expectedEvents = [
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetch",
+        ...(input.nextWakeReason === "device-sync.reconcile"
+          ? ["workspace.checkpoint"]
+          : []),
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
-      ]);
+      ];
+      assert.deepEqual(events, expectedEvents);
       const shouldRunDeviceSync = input.nextWakeReason === "device-sync.reconcile";
       assert.equal(deviceSyncPort.fetchSnapshotCalls, shouldRunDeviceSync ? 1 : 0);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 2 : 1);
+      const terminalCheckpoint = checkpointRequests.at(-1);
+      assert.equal(terminalCheckpoint?.reason, "idle_shutdown");
+      assert.equal(terminalCheckpoint?.nextWakeAt, null);
+      assert.equal(terminalCheckpoint?.nextWakeReason, null);
+      if (shouldRunDeviceSync) {
+        assert.equal(checkpointRequests[0]?.reason, "canonical_runtime_commit");
+        assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+        assert.equal(typeof checkpointRequests[0]?.nextWakeAt, "string");
+      }
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.equal(result.redactedStatus?.hostedMailboxFetchedCount, 0);
