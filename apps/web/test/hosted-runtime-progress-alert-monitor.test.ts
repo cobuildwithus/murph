@@ -160,6 +160,13 @@ describe("hosted runtime progress alert monitor", () => {
     expect(sql).toContain(
       "progress_evidence.head_kind = 'device-sync.wake'",
     );
+    expect(sql).toContain("hostedMailboxSystemImportedSeq");
+    expect(sql).toContain(
+      "progress_evidence.workspace_system_imported_seq",
+    );
+    expect(sql).toContain(
+      "progress_evidence.first_unimported_system_created_at",
+    );
     expect(sql).not.toContain("head_consumed_at");
   });
 

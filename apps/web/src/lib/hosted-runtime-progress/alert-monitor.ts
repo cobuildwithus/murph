@@ -269,6 +269,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       SELECT
         lane_counter.user_id,
         lane_counter.lane,
+        lane_counter.next_seq - 1::bigint AS durable_high_water_seq,
         GREATEST(
           lane_counter.consumed_seq,
           oldest_live.lane_seq - 1::bigint
@@ -293,10 +294,12 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       SELECT
         lane_boundary.user_id,
         lane_boundary.lane,
+        lane_boundary.durable_high_water_seq,
         pending_head.ai_usage_denied_at AS head_usage_denied_at,
         pending_head.created_at AS head_created_at,
         pending_head.id AS head_item_id,
         pending_head.kind AS head_kind,
+        pending_head.lane_seq AS head_lane_seq,
         pending_head.pending_count
       FROM lane_boundary
       JOIN LATERAL (
@@ -305,6 +308,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           mailbox_item.created_at,
           mailbox_item.id,
           mailbox_item.kind,
+          mailbox_item.lane_seq,
           COUNT(*) OVER () AS pending_count
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = lane_boundary.user_id
@@ -323,28 +327,83 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         LIMIT 1
       ) AS pending_head ON TRUE
     ),
-    progress_evidence AS (
+    workspace_evidence AS (
       SELECT
         lagging_lane.*,
+        workspace.next_wake_at AS workspace_next_wake_at,
+        CASE
+          WHEN jsonb_typeof(
+            workspace.redacted_status_json
+              -> 'hostedMailboxSystemImportedSeq'
+          ) = 'string'
+            AND (
+              workspace.redacted_status_json
+                ->> 'hostedMailboxSystemImportedSeq'
+            ) ~ '^(0|[1-9][0-9]{0,18})$'
+            AND (
+              length(
+                workspace.redacted_status_json
+                  ->> 'hostedMailboxSystemImportedSeq'
+              ) < 19
+              OR (
+                workspace.redacted_status_json
+                  ->> 'hostedMailboxSystemImportedSeq'
+              ) <= '9223372036854775807'
+            )
+            THEN (
+              workspace.redacted_status_json
+                ->> 'hostedMailboxSystemImportedSeq'
+            )::bigint
+          ELSE NULL
+        END AS workspace_system_imported_seq
+      FROM lagging_lane
+      LEFT JOIN hosted_workspace AS workspace
+        ON workspace.user_id = lagging_lane.user_id
+    ),
+    progress_evidence AS (
+      SELECT
+        workspace_evidence.*,
         evidence.first_post_denial_at,
         COALESCE(evidence.has_future_evidence, FALSE) AS has_future_evidence,
         COALESCE(
           evidence.has_pre_denial_evidence,
           FALSE
         ) AS has_pre_denial_evidence,
-        workspace.next_wake_at AS workspace_next_wake_at
-      FROM lagging_lane
-      LEFT JOIN hosted_workspace AS workspace
-        ON workspace.user_id = lagging_lane.user_id
+        first_unimported_system.created_at
+          AS first_unimported_system_created_at
+      FROM workspace_evidence
+      LEFT JOIN LATERAL (
+        SELECT mailbox_item.created_at
+        FROM hosted_mailbox_item AS mailbox_item
+        WHERE mailbox_item.user_id = workspace_evidence.user_id
+          AND mailbox_item.lane = 'system'
+          AND mailbox_item.lane_seq
+            > workspace_evidence.workspace_system_imported_seq
+          AND mailbox_item.created_at > ${input.retainedAfter}
+          AND (
+            mailbox_item.expires_at IS NULL
+            OR mailbox_item.expires_at > ${input.now}
+          )
+        ORDER BY mailbox_item.lane_seq ASC
+        LIMIT 1
+      ) AS first_unimported_system ON (
+        workspace_evidence.lane = 'system'
+        AND workspace_evidence.head_kind = 'device-sync.wake'
+        AND workspace_evidence.workspace_system_imported_seq
+          >= workspace_evidence.head_lane_seq
+        AND workspace_evidence.workspace_system_imported_seq
+          < workspace_evidence.durable_high_water_seq
+      )
       LEFT JOIN hosted_ingress_latency_trace AS trace
-        ON trace.user_id = lagging_lane.user_id
-        AND trace.mailbox_item_id = lagging_lane.head_item_id
+        ON trace.user_id = workspace_evidence.user_id
+        AND trace.mailbox_item_id = workspace_evidence.head_item_id
       LEFT JOIN hosted_linq_delivery AS delivery
         ON delivery.id = trace.linq_delivery_id
       LEFT JOIN LATERAL (
         SELECT
           MIN(execution_evidence.at) FILTER (
-            WHERE execution_evidence.at > lagging_lane.head_usage_denied_at
+            WHERE execution_evidence.at
+              > workspace_evidence.head_usage_denied_at
               AND execution_evidence.at <= ${input.now}
           ) AS first_post_denial_at,
           COALESCE(
@@ -353,7 +412,8 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           ) AS has_future_evidence,
           COALESCE(
             BOOL_OR(
-              execution_evidence.at <= lagging_lane.head_usage_denied_at
+              execution_evidence.at
+                <= workspace_evidence.head_usage_denied_at
             ),
             FALSE
           ) AS has_pre_denial_evidence
@@ -374,11 +434,25 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         CASE
           WHEN progress_evidence.lane = 'system'
             AND progress_evidence.head_kind = 'device-sync.wake'
+            AND progress_evidence.workspace_system_imported_seq
+              >= progress_evidence.head_lane_seq
+            AND progress_evidence.workspace_system_imported_seq
+              <= progress_evidence.durable_high_water_seq
             AND progress_evidence.workspace_next_wake_at IS NOT NULL
-            THEN GREATEST(
-              progress_evidence.head_created_at,
-              progress_evidence.workspace_next_wake_at
-            )
+            THEN CASE
+              WHEN progress_evidence.first_unimported_system_created_at IS NULL
+                THEN GREATEST(
+                  progress_evidence.head_created_at,
+                  progress_evidence.workspace_next_wake_at
+                )
+              ELSE LEAST(
+                GREATEST(
+                  progress_evidence.head_created_at,
+                  progress_evidence.workspace_next_wake_at
+                ),
+                progress_evidence.first_unimported_system_created_at
+              )
+            END
           WHEN progress_evidence.lane = 'conversation'
             AND progress_evidence.head_usage_denied_at IS NOT NULL
             AND progress_evidence.head_usage_denied_at

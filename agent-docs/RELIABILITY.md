@@ -1485,12 +1485,16 @@ Last verified: 2026-08-20
   error-code-independent stalls. Conversation rows with a non-null
   `consumed_at` are terminal and are excluded before both head selection and the
   lane's `COUNT(*) OVER()`; system-lane selection remains unchanged. A system
-  `device-sync.wake` head ages from the later of its creation and the workspace's
+  `device-sync.wake` head covered by the workspace's canonical
+  `hostedMailboxSystemImportedSeq` ages from the later of its creation and the
   scheduled wake. That workspace wake is the runtime's earliest selected wake,
   so an earlier assistant wake may own the next pass before the device retry
-  itself is due. Other system work still ages from creation, and a device retry
-  becomes anomalous when it remains pending for 15 minutes after that scheduled
-  runtime opportunity. An active runtime is otherwise
+  itself is due. The first live system item above the imported frontier keeps
+  its own creation-time clock, and an absent, malformed, behind-head, or
+  beyond-high-water imported frontier cannot defer the head. Other system work
+  still ages from creation, and a covered device retry becomes anomalous when
+  it remains pending for 15 minutes after that scheduled runtime opportunity.
+  An active runtime is otherwise
   anomalous when the resulting oldest live item beyond that high-water remains
   pending for at least 15 minutes. Eligibility uses the canonical
   runtime AI-access decision, including current thread-container participants,

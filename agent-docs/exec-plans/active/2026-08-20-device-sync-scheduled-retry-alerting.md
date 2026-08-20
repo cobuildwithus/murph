@@ -20,6 +20,9 @@ remain unhandled after their scheduled execution time.
   creation and does not consult the workspace's canonical scheduled wake.
 - This makes legitimate multi-hour device retries alert after fifteen minutes,
   even though the runtime has a concrete future owner and execution time.
+- A workspace wake covers only the checkpoint-imported system prefix. Applying
+  it without the imported frontier could hide a newer durable mailbox suffix
+  that never reached the runtime.
 
 All evidence is aggregate or anonymously labeled and contains no production
 identifiers.
@@ -29,16 +32,20 @@ identifiers.
 - The hosted workspace remains the canonical owner of scheduled wake facts.
 - Do not advance mailbox cursors, acknowledge dirty state, or create another
   retry owner.
-- Suppress only an exact device-sync system head with a canonical future runtime
-  wake.
+- Suppress only an exact device-sync system head covered by the canonical
+  imported-system frontier and a future runtime wake.
+- The first live item above that frontier keeps its own creation-time clock;
+  malformed or impossible frontier values fail closed.
 - Once a scheduled retry is fifteen minutes overdue, the monitor must alert.
 
 ## Plan
 
-1. Add PostgreSQL boundary coverage for a future device retry, an earlier
-   assistant wake, an overdue device retry, and a non-device system head.
-2. For an exact system-lane device head, age progress from the later of mailbox
-   creation and the canonical workspace wake time.
+1. Add PostgreSQL boundary coverage for a future imported device retry, an
+   earlier assistant wake, an overdue device retry, unimported head and suffix
+   work, malformed frontiers, and a non-device system head.
+2. For an imported system-lane device head, age covered progress from the later
+   of mailbox creation and the canonical workspace wake time while independently
+   aging the first item above the imported frontier.
 3. Run the focused unit and PostgreSQL proofs plus Web typecheck.
 4. Push an exact candidate, run the required preliminary coverage review and
    final cross-cutting ReviewGPT gate with CI, then resolve all findings.

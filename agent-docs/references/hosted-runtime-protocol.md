@@ -1422,16 +1422,20 @@ side table or lane high-water advance past gaps. The runtime-progress monitor
 uses that same terminal distinction without redefining the contiguous floor:
 conversation candidates above the effective floor must still have
 `consumed_at IS NULL`, while system-lane candidates retain their existing
-live-row semantics. A `device-sync.wake` system head uses the later of its
-mailbox creation time and the canonical workspace `nextWakeAt` as its progress
-origin. The workspace stores the earliest model-free or assistant candidate, so
-an earlier assistant wake can legitimately win while the device item remains
-retained. The head is therefore not stalled before that next runtime
-opportunity, but becomes alertable 15 minutes after it is due. Non-device system
-heads continue to age from mailbox creation. The selected head and
-`COUNT(*) OVER()` come from that one lane-aware predicate. A stamped conversation row is terminal, not
-usage-resume evidence; only staging, provider start, or accepted delivery can establish
-post-denial execution for a remaining candidate. The monitor probes at most one
+live-row semantics. A `device-sync.wake` system head covered by the workspace's
+canonical `hostedMailboxSystemImportedSeq` uses the later of its mailbox
+creation time and `nextWakeAt` as its progress origin. The workspace stores the
+earliest model-free or assistant candidate, so an earlier assistant wake can
+legitimately win while the device item remains retained. The first live system
+item above the imported frontier independently keeps its creation-time origin;
+an absent, malformed, behind-head, or beyond-high-water frontier fails closed
+to the head's creation time. Covered work is therefore not stalled before its
+next runtime opportunity, but becomes alertable 15 minutes after it is due.
+Non-device system heads continue to age from mailbox creation. The selected
+head and `COUNT(*) OVER()` come from that one lane-aware predicate. A stamped
+conversation row is terminal, not usage-resume evidence; only staging, provider
+start, or accepted delivery can establish post-denial execution for a remaining
+candidate. The monitor probes at most one
 row beyond its raw 20,000-candidate cap before runtime-access and usage-denial
 exclusions and reports `scanTruncated` instead of scanning an exclusion-heavy
 population without bound. A container rollout SIGTERM

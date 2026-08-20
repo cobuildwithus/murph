@@ -517,16 +517,25 @@ describe.skipIf(!runPostgresProof)(
               {
                 nextWakeAt: futureWakeAt,
                 nextWakeReason: "device-sync.reconcile",
+                redactedStatusJson: {
+                  hostedMailboxSystemImportedSeq: "1",
+                },
                 userId: futureDeviceRetry,
               },
               {
                 nextWakeAt: overdueWakeAt,
                 nextWakeReason: "device-sync.reconcile",
+                redactedStatusJson: {
+                  hostedMailboxSystemImportedSeq: "1",
+                },
                 userId: overdueDeviceRetry,
               },
               {
                 nextWakeAt: futureWakeAt,
                 nextWakeReason: "assistant",
+                redactedStatusJson: {
+                  hostedMailboxSystemImportedSeq: "1",
+                },
                 userId: earlierAssistantWake,
               },
               {
@@ -588,6 +597,9 @@ describe.skipIf(!runPostgresProof)(
             data: {
               nextWakeAt: scheduledWakeAt,
               nextWakeReason: "device-sync.reconcile",
+              redactedStatusJson: {
+                hostedMailboxSystemImportedSeq: "1",
+              },
               userId,
             },
           });
@@ -599,6 +611,157 @@ describe.skipIf(!runPostgresProof)(
             anomalous: true,
             oldestStalledAgeMs: 20 * 60_000,
             pendingItemCount: 1,
+            stalledLaneCount: 1,
+            stalledRuntimeCount: 1,
+            stalledSystemLaneCount: 1,
+          });
+
+          proofCompleted = true;
+          throw rollback;
+        }, {
+          maxWait: 10_000,
+          timeout: 30_000,
+        }).catch((error: unknown) => {
+          if (error !== rollback) {
+            throw error;
+          }
+        });
+        expect(proofCompleted).toBe(true);
+      } finally {
+        await prisma.$disconnect();
+      }
+    }, 60_000);
+
+    it("does not let a workspace wake hide unimported system work", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback uncovered system work progress proof.");
+      const prefix = `progress-uncovered-system-proof-${randomUUID()}`;
+      const unimportedHead = `${prefix}-head`;
+      const unimportedSuffix = `${prefix}-suffix`;
+      const now = new Date("2026-08-10T16:00:00.000Z");
+      const staleHeadAt = new Date(now.getTime() - 60 * 60_000);
+      const staleSuffixAt = new Date(now.getTime() - 30 * 60_000);
+      const futureWakeAt = new Date(now.getTime() + 6 * 60 * 60_000);
+      let proofCompleted = false;
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedMember.createMany({
+            data: [unimportedHead, unimportedSuffix].map((id) =>
+              member(id, HostedBillingStatus.active)
+            ),
+          });
+          await tx.hostedWorkspace.create({
+            data: {
+              nextWakeAt: futureWakeAt,
+              nextWakeReason: "assistant",
+              redactedStatusJson: {
+                hostedMailboxSystemImportedSeq: "0",
+              },
+              userId: unimportedHead,
+            },
+          });
+          await seedProgressLane({
+            createdAt: staleHeadAt,
+            lane: "system",
+            tx,
+            userId: unimportedHead,
+          });
+          await seedProgressLane({
+            createdAt: staleHeadAt,
+            lane: "system",
+            tx,
+            userId: unimportedSuffix,
+          });
+          await tx.hostedWorkspace.create({
+            data: {
+              nextWakeAt: futureWakeAt,
+              nextWakeReason: "device-sync.reconcile",
+              redactedStatusJson: {
+                hostedMailboxSystemImportedSeq: "1",
+              },
+              userId: unimportedSuffix,
+            },
+          });
+          await tx.hostedMailboxLaneCounter.update({
+            data: { nextSeq: 3n },
+            where: {
+              userId_lane: {
+                lane: "system",
+                userId: unimportedSuffix,
+              },
+            },
+          });
+          await tx.hostedMailboxItem.create({
+            data: {
+              createdAt: staleSuffixAt,
+              dedupeKey: `${unimportedSuffix}-system-dedupe-2`,
+              id: `${unimportedSuffix}-system-item-2`,
+              kind: "device-sync.wake",
+              lane: "system",
+              laneSeq: 2n,
+              occurredAt: staleSuffixAt,
+              payloadSchema: "murph.runtime-progress-proof.v1",
+              userId: unimportedSuffix,
+            },
+          });
+
+          await expect(readHostedRuntimeProgressHealth({
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 3,
+            stalledLaneCount: 2,
+            stalledRuntimeCount: 2,
+            stalledSystemLaneCount: 2,
+          });
+
+          await tx.hostedWorkspace.update({
+            data: {
+              redactedStatusJson: {
+                hostedMailboxSystemImportedSeq: "1",
+              },
+            },
+            where: { userId: unimportedHead },
+          });
+          await tx.hostedWorkspace.update({
+            data: {
+              redactedStatusJson: {
+                hostedMailboxSystemImportedSeq: "2",
+              },
+            },
+            where: { userId: unimportedSuffix },
+          });
+
+          await expect(readHostedRuntimeProgressHealth({
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: false,
+            pendingItemCount: 0,
+            stalledLaneCount: 0,
+            stalledRuntimeCount: 0,
+            stalledSystemLaneCount: 0,
+          });
+
+          await tx.hostedWorkspace.update({
+            data: {
+              redactedStatusJson: {
+                hostedMailboxSystemImportedSeq: "9223372036854775808",
+              },
+            },
+            where: { userId: unimportedSuffix },
+          });
+
+          await expect(readHostedRuntimeProgressHealth({
+            now,
+            prisma: tx,
+          })).resolves.toMatchObject({
+            anomalous: true,
+            oldestStalledAgeMs: 60 * 60_000,
+            pendingItemCount: 2,
             stalledLaneCount: 1,
             stalledRuntimeCount: 1,
             stalledSystemLaneCount: 1,
