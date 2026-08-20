@@ -180,10 +180,14 @@ operation. Murph retains the exact workout id and lifecycle revision from the
 bounded deletion proposal, then issues one compound replacement after explicit
 approval; it never composes separate delete, start, and exercise-add commands.
 The record-scoped write revalidates that exact revision and atomically commits a
-mutually linked tombstone and complete replacement without inspecting or
-changing other unfinished workouts. A lost command result converges only when
-that reciprocal pair, approved revision, and requested workout content all
-match; otherwise no replacement is inferred or written. Saved-routine starts
+tombstone linked to the complete replacement without inspecting or changing
+other unfinished workouts. The replacement does not link back to the deleted
+workout, so a stale exact id cannot become an alias for the new record. A lost
+command result converges only when the link added from the approved revision to
+its tombstone identifies one revision-1 replacement and the approved revision
+and requested workout content all match; otherwise no replacement is inferred
+or written. Exact member-stated repetitions for every set of an exercise are
+stored on that exercise in the same replacement write. Saved-routine starts
 and exact-reference reminder flows keep their specialized precedence.
 
 Generic full-structure edits preserve exercise-owned repetition and finite-plan

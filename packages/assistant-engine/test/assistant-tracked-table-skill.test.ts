@@ -185,7 +185,10 @@ describe('assistant tracked workout table skill', () => {
       'Other unfinished workouts are valid',
     )
     expect(skill).toContain(
-      'canonical tombstone and replacement point',
+      'one related-event target newly added',
+    )
+    expect(skill).toContain(
+      'Pass `reps=<n>` only for one exact member-stated',
     )
     expect(skill).toContain(
       'A saved format or an exact-reference reminder never uses `workout',

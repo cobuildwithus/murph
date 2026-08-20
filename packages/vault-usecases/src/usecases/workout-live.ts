@@ -642,6 +642,19 @@ function buildLiveWorkoutReplacement(
         `Exercise set count must be between 1 and ${MAX_LIVE_WORKOUT_SETS_PER_EXERCISE}.`,
       )
     }
+    if (
+      exercise.reps !== undefined
+      && (
+        !Number.isInteger(exercise.reps)
+        || exercise.reps < 1
+        || exercise.reps > 999
+      )
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise repetitions per set must be an integer between 1 and 999.',
+      )
+    }
 
     const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
     const groupId = normalizeOptionalText(exercise.groupId)
@@ -654,6 +667,9 @@ function buildLiveWorkoutReplacement(
       ...(exercise.mode ? { mode: exercise.mode } : {}),
       ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
       ...(note ? { note } : {}),
+      ...(exercise.reps === undefined
+        ? {}
+        : { memberRepsPerSet: exercise.reps }),
       setPlanIsFinite: exercise.setCount !== undefined,
       sets: Array.from({ length: setCount }, (_, setIndex) => ({
         order: setIndex + 1,

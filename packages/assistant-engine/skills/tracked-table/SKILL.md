@@ -56,20 +56,24 @@ When the current message explicitly directs Murph to delete or replace one
 named workout, or the member immediately gives an unambiguous affirmative to a
 bounded proposal, read that exact workout once and retain its canonical id and
 `lifecycle.revision`. The proposal names the workout that will be deleted and
-repeats the replacement title, every exercise, and every stated set count.
+repeats the replacement title, every exercise, every stated set count, and any
+exact repetition count the member assigned to every set of that exercise.
 Run exactly one `vault-cli workout replace` command with that proposal-time
 `--workout-id`, proposal-time `--expected-revision`, `--confirm-delete`, and one
 repeated `--exercise` specification per requested exercise.
 Do not separately delete, start, or add each exercise, and do not perform another preflight read
 after the immediate approval. Omit an unstated set count so that exercise gets
-one targetless pending slot.
+one targetless pending slot. Pass `reps=<n>` only for one exact member-stated
+count that applies to every set; never derive it from a range, AMRAP, target,
+prior workout, or assistant suggestion.
 
 The command takes the exact workout's record-scoped lock, revalidates that the
 approval-bound revision is unchanged, and atomically writes the old tombstone
 plus the complete replacement. Other unfinished workouts are valid and remain
 untouched. A retry after a committed write may return the existing replacement
-without another write only when the canonical tombstone and replacement point
-to each other and exactly match the approved revision and requested content. A
+without another write only when the one related-event target newly added to the
+canonical tombstone relative to the approved revision identifies a replacement
+that exactly matches the approved revision and requested content. A
 missing, completed, changed, wrong-revision, or nonmatching record fails closed.
 Say that nothing was replaced and ask a fresh bounded replacement question from
 a new exact read. Treat a successful or proven replay result as the verification

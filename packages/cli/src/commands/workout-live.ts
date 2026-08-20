@@ -45,6 +45,7 @@ const exerciseModeSchema = z.enum([
 
 const replacementExerciseFields = new Set([
   'name',
+  'reps',
   'sets',
   'sourceExerciseId',
   'groupId',
@@ -77,6 +78,12 @@ function parseReplacementExercise(
     'exercise',
     invalidReplacementExercise,
   )
+  const reps = compactInteger(
+    fields,
+    'reps',
+    'exercise',
+    invalidReplacementExercise,
+  )
   const mode = fields.get('mode')
   const parsedMode = mode === undefined
     ? undefined
@@ -99,6 +106,7 @@ function parseReplacementExercise(
       'exercise',
       invalidReplacementExercise,
     ),
+    ...(reps === undefined ? {} : { reps }),
     ...(setCount === undefined ? {} : { setCount }),
     ...(fields.has('sourceExerciseId')
       ? { sourceExerciseId: fields.get('sourceExerciseId') }
@@ -219,8 +227,8 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
           expectedRevision: 1,
           confirmDelete: true,
           exercise: [
-            "'name=Pull-up;sets=3;mode=bodyweight'",
-            "'name=Push-up;sets=3;mode=bodyweight'",
+            "'name=Pull-up;sets=3;reps=10;mode=bodyweight'",
+            "'name=Push-up;sets=3;reps=12;mode=bodyweight'",
           ],
           vault: './vault',
         },
@@ -240,7 +248,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(100)
         .optional()
         .describe(
-          'Initial exercise grammar: name=... with optional sets/sourceExerciseId/groupId/mode/unitOverride/note. Repeat --exercise; repeat order becomes canonical order.',
+          'Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order.',
         ),
       type: z.string().min(1).max(120).optional(),
       note: z.string().min(1).max(4000).optional(),

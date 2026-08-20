@@ -41,6 +41,7 @@ export interface ReplaceLiveWorkoutExerciseInput {
   mode?: ExerciseMode
   unitOverride?: LoadUnit
   note?: string
+  reps?: number
   setCount?: number
 }
 

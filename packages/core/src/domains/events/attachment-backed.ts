@@ -787,10 +787,10 @@ export async function replaceActivitySession(
         kind: "activity_session",
         ...input.draft,
         id: replacementId,
-        links: [
-          ...(input.draft.links ?? []),
-          { type: "related_to", targetId: input.eventId },
-        ],
+        links: input.draft.links?.filter(
+          (link) =>
+            link.type !== "related_to" || link.targetId !== input.eventId,
+        ),
       },
       vault.metadata.timezone,
       buildEventSpineLifecycle(1),
@@ -898,7 +898,6 @@ export async function readExpectedActivitySessionReplacement(
       replacement?.kind !== "activity_session"
       || isDeletedEventSpineRecord(replacement)
       || eventSpineRevision(replacement) !== 1
-      || !hasRelatedEventLink(replacement, input.replacedEventId)
     ) {
       return null;
     }
@@ -914,12 +913,6 @@ function relatedEventTargetIds(record: EventRecord): Set<string> {
         : []
     ),
   );
-}
-
-function hasRelatedEventLink(record: EventRecord, targetId: string): boolean {
-  return record.links?.some(
-    (link) => link.type === "related_to" && link.targetId === targetId,
-  ) ?? false;
 }
 
 export async function addBodyMeasurement(

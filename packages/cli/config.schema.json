@@ -5978,7 +5978,7 @@
                           "type": "boolean"
                         },
                         "exercise": {
-                          "description": "Initial exercise grammar: name=... with optional sets/sourceExerciseId/groupId/mode/unitOverride/note. Repeat --exercise; repeat order becomes canonical order.",
+                          "description": "Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order.",
                           "maxItems": 100,
                           "type": "array",
                           "items": {

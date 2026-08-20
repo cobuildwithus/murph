@@ -307,7 +307,6 @@ test('one command atomically replaces one approved workout without touching anot
     '--started-at', '2026-08-20T06:45:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
-  await addReciprocalRelatedWorkout(vaultRoot, oldWorkout)
   const approvedSnapshot = requireData((await run<ShowResult>(cli, [
     'workout', 'show', oldWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
@@ -322,13 +321,25 @@ test('one command atomically replaces one approved workout without touching anot
   ])
   assert.equal(missingConfirmation.envelope.ok, false)
 
+  for (const invalidReps of ['0', '1000', '8-10', 'AMRAP']) {
+    const rejected = await run<WorkoutResult>(cli, [
+      'workout', 'replace', 'Upper body',
+      '--workout-id', oldWorkout.eventId,
+      '--expected-revision', String(approvedRevision),
+      '--confirm-delete',
+      '--exercise', `name=Pull-up;sets=3;reps=${invalidReps}`,
+      '--vault', vaultRoot,
+    ])
+    assert.equal(rejected.envelope.ok, false)
+  }
+
   const replacement = requireData((await run<WorkoutResult>(cli, [
     'workout', 'replace', 'Upper body',
     '--workout-id', oldWorkout.eventId,
     '--expected-revision', String(approvedRevision),
     '--confirm-delete',
-    '--exercise', 'name=Pull-up;sets=3;mode=bodyweight',
-    '--exercise', 'name=Push-up;sets=2;mode=bodyweight',
+    '--exercise', 'name=Pull-up;sets=3;reps=10;mode=bodyweight',
+    '--exercise', 'name=Push-up;sets=2;reps=12;mode=bodyweight',
     '--started-at', '2026-08-20T07:54:00.000Z',
     '--vault', vaultRoot,
   ])).envelope)
@@ -339,6 +350,7 @@ test('one command atomically replaces one approved workout without touching anot
       name: 'Pull-up',
       order: 1,
       mode: 'bodyweight',
+      memberRepsPerSet: 10,
       setPlanIsFinite: true,
       sets: [{ order: 1 }, { order: 2 }, { order: 3 }],
     },
@@ -346,6 +358,7 @@ test('one command atomically replaces one approved workout without touching anot
       name: 'Push-up',
       order: 2,
       mode: 'bodyweight',
+      memberRepsPerSet: 12,
       setPlanIsFinite: true,
       sets: [{ order: 1 }, { order: 2 }],
     },
@@ -357,13 +370,49 @@ test('one command atomically replaces one approved workout without touching anot
     (record as { id?: string }).id === oldWorkout.eventId
   ) as Array<{ lifecycle?: { state?: string } }>
   assert.equal(oldRevisions.at(-1)?.lifecycle?.state, 'deleted')
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'show', oldWorkout.eventId, '--vault', vaultRoot,
+  ])).envelope.ok, false)
+  const replacementBeforeStaleCommands = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', replacement.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'finish',
+    '--workout-id', oldWorkout.eventId,
+    '--vault', vaultRoot,
+  ])).envelope.ok, false)
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'exercise', 'add', 'Stale exercise',
+    '--workout-id', oldWorkout.eventId,
+    '--order', '3',
+    '--sets', '1',
+    '--vault', vaultRoot,
+  ])).envelope.ok, false)
+  const replacementAfterStaleCommands = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', replacement.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(
+    replacementAfterStaleCommands.entity.data.workout,
+    replacementBeforeStaleCommands.entity.data.workout,
+  )
+  const terseCompletion = requireData((await run<ShowResult>(createWorkoutCli(), [
+    'workout', 'set', 'log', 'Pull-up',
+    '--workout-id', replacement.eventId,
+    '--exercise-order', '1',
+    '--set-order', '1',
+    '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(
+    terseCompletion.entity.data.workout.exercises[0]?.sets[0]?.reps,
+    10,
+  )
   const otherStillOpen = requireData((await run<ShowResult>(cli, [
     'workout', 'show', otherWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
   assert.equal(otherStillOpen.entity.data.workout.endedAt, undefined)
 })
 
-test('replacement replay proves the mutually linked atomic pair and writes nothing', async () => {
+test('replacement replay proves the tombstone-linked atomic replacement and writes nothing', async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     'murph-live-workout-replace-replay-',
   )
@@ -390,9 +439,9 @@ test('replacement replay proves the mutually linked atomic pair and writes nothi
     '--workout-id', oldWorkout.eventId,
     '--expected-revision', String(requireShownRevision(approvedSnapshot)),
     '--confirm-delete',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
-    '--exercise', 'name=Row, neutral grip;sets=2;mode=weight_reps',
-    '--exercise', 'name=Run;sets=1;mode=cardio',
+    '--exercise', 'name=Run;sets=1;reps=5;mode=cardio',
+    '--exercise', 'name=Row, neutral grip;sets=2;reps=10;mode=weight_reps',
+    '--exercise', 'name=Run;sets=1;reps=7;mode=cardio',
   ]
 
   const replacement = requireData((await withHostedCanonicalWritePort(
@@ -404,6 +453,10 @@ test('replacement replay proves the mutually linked atomic pair and writes nothi
     () => run<WorkoutResult>(cli, [...replaceArgs, '--vault', vaultRoot]),
   )).envelope)
   assert.equal(persisted.length, 1)
+  assert.deepEqual(
+    replacement.workout?.exercises.map((exercise) => exercise.memberRepsPerSet),
+    [5, 10, 7],
+  )
   const hostedWrite = persisted[0]!
   await applyHostedCanonicalWriteReceipt({
     vaultRoot: replicaRoot,

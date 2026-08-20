@@ -216,9 +216,12 @@ test('activity-session replacement emits one hosted atomic write', async () => {
   const replacementRecord = records.find((record) =>
     (record as { id?: string }).id === replacement.eventId
   ) as { links?: Array<{ targetId: string; type: string }> } | undefined
-  assert.deepEqual(replacementRecord?.links, [
-    { type: 'related_to', targetId: oldWorkout.eventId },
-  ])
+  assert.equal(
+    (replacementRecord?.links ?? []).some((link) =>
+      link.type === 'related_to' && link.targetId === oldWorkout.eventId
+    ),
+    false,
+  )
   assert.equal((await readExpectedActivitySessionReplacement({
     vaultRoot,
     replacedEventId: oldWorkout.eventId,
