@@ -398,13 +398,14 @@ app_verify_parallel_default="$(resolve_local_parallel_default)"
 app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
+package_coverage_shard="$(resolve_profile_controlled_value owners-a all)"
 
 log_acceptance_resource_plan
 `);
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh test_lanes=1 app_parallel=1\n",
+      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh package_shard=all test_lanes=1 app_parallel=1\n",
     );
   });
 
@@ -1046,6 +1047,7 @@ exercise_interlock() {
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf -- "$sandbox"' EXIT
+package_coverage_shard=all
 package_coverage_concurrency_limit=3
 package_coverage_cli_active_concurrency_limit=2
 
