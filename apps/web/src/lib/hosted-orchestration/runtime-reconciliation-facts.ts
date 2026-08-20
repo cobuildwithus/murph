@@ -410,6 +410,13 @@ function hostedRuntimeReconciliationNeedsAiUsageGate(input: {
   now: Date;
   workspace: HostedRuntimeReconciliationFactsWorkspace;
 }): boolean {
+  if (
+    input.workspace.nextWakeReason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+    && isHostedRuntimeWakeDue(input.workspace.nextWakeAt, input.now)
+  ) {
+    return false;
+  }
+
   if (input.freshConversationMailboxLag) {
     return true;
   }
@@ -448,6 +455,9 @@ function resolveHostedRuntimeAiBlockedRetryAt(input: {
   return earliestHostedRuntimeReconciliationTimestamp([
     input.noticeRetryAt?.toISOString() ?? null,
     input.aiRetryAt,
+    input.workspace.nextWakeReason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+      ? readHostedRuntimeFutureTimestamp(input.workspace.nextWakeAt, input.now)
+      : null,
     readHostedRuntimeFutureTimestamp(input.workspace.inboxMediaRetentionWakeAt, input.now),
   ]);
 }

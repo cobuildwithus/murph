@@ -231,6 +231,28 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
+    const secondReplyBaseline = requireLinqStub().countObservedSends(
+      replyPath,
+      secondReplyMatcher,
+    );
+    requireScenario().queueAssistantResponses([secondAssistantReply], {
+      matchInputContains: secondInboundText,
+    });
+    const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
+      userId,
+      chatId,
+      {
+        eventId: `evt_usage_limit_ambiguous_second_${runId}`,
+        messageId: `msg_usage_limit_ambiguous_second_${runId}`,
+        text: secondInboundText,
+      },
+    ));
+    expect(secondResponse.status).toBe(202);
+    await expect(secondResponse.json()).resolves.toMatchObject({
+      ignored: false,
+      ok: true,
+      reason: "wake-appended-active-member",
+    });
     await requireLinqStub().waitForMatchingSendCount({
       expectedCount: observedTextBaseline + 2,
       expectedPath: replyPath,
@@ -265,7 +287,15 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       scenario: requireScenario(),
       userId,
     });
-    const firstCompletedStatus = await requireScenario().waitForHostedIdle(userId);
+    const firstCompletedStatus = await vi.waitFor(async () => {
+      const status = await requireScenario().harness.readUserStatus(userId);
+      expect(status.inFlight).toBe(false);
+      expect(readConversationMailboxLag(status)).not.toBe("0");
+      return status;
+    }, {
+      interval: 250,
+      timeout: 30_000,
+    });
 
     expect(requireLinqStub().countObservedSends(replyPath, usageNoticeTextMatcher)).toBe(
       observedTextBaseline + 2,
@@ -281,7 +311,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     );
     expect(countAssistantResponseRequests()).toBe(providerBaseline + 1);
     expect(firstCompletedStatus.lastErrorCode ?? null).toBeNull();
-    expect(readConversationMailboxLag(firstCompletedStatus)).toBe("0");
+    expect(readConversationMailboxLag(firstCompletedStatus)).not.toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(firstCompletedStatus),
       conversationSeqBeforeFirstInbound,
@@ -314,33 +344,11 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
       exhaustedPeriod?.limitUsdMicros ?? 1n,
     );
 
-    const secondReplyBaseline = requireLinqStub().countObservedSends(
-      replyPath,
-      secondReplyMatcher,
-    );
-    requireScenario().queueAssistantResponses([secondAssistantReply], {
-      matchInputContains: secondInboundText,
-    });
-    const secondResponse = await postSignedLinqWebhook(buildHostedLinqInboundEvent(
-      userId,
-      chatId,
-      {
-        eventId: `evt_usage_limit_ambiguous_second_${runId}`,
-        messageId: `msg_usage_limit_ambiguous_second_${runId}`,
-        text: secondInboundText,
-      },
-    ));
-    expect(secondResponse.status).toBe(202);
-    await expect(secondResponse.json()).resolves.toMatchObject({
-      ignored: false,
-      ok: true,
-      reason: "wake-appended-active-member",
-    });
-    const blockedStatus = await requireScenario().waitForLatestPendingWake(userId);
+    const blockedStatus = firstCompletedStatus;
     expect(readConversationMailboxLag(blockedStatus)).not.toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(blockedStatus),
-      readConversationMailboxMaxSeq(firstCompletedStatus),
+      conversationSeqBeforeFirstInbound,
     )).toBeGreaterThan(0);
 
     const finalStatus = await vi.waitFor(async () => {
@@ -363,7 +371,7 @@ describe("hosted local usage-limit ambiguous send e2e", () => {
     expect(readConversationMailboxLag(finalStatus)).not.toBe("0");
     expect(compareMailboxSeq(
       readConversationMailboxMaxSeq(finalStatus),
-      readConversationMailboxMaxSeq(firstCompletedStatus),
+      conversationSeqBeforeFirstInbound,
     )).toBeGreaterThan(0);
     expect(blockedMailboxItem.consumedAt).toBeNull();
     expect(requireLinqStub().countObservedSends(replyPath, secondReplyMatcher)).toBe(
