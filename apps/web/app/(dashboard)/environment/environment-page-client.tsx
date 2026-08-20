@@ -253,10 +253,7 @@ export default function EnvironmentPageClient({
       if (cancelled) {
         return;
       }
-      if (
-        voiceVaultRefreshRequestedRef.current &&
-        processing !== false
-      ) {
+      if (voiceVaultRefreshRequestedRef.current) {
         voiceVaultRefreshRequestedRef.current = false;
       }
       if (
