@@ -1,6 +1,6 @@
 # Group refill confirmation retry
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -36,9 +36,9 @@ attempt occurred.
 2. [x] Add the smallest retry-preserving correction and focused regression
    coverage.
 3. [x] Run focused tests, typecheck, diff checks, and the Product UX walkthrough.
-4. [ ] Commit and push an exact candidate, open a PR, and start the required
+4. [x] Commit and push an exact candidate, open a PR, and start the required
    preliminary specialist and final ReviewGPT passes concurrently with CI.
-5. [ ] Resolve accepted findings, complete parent review, close this plan with
+5. [x] Resolve accepted findings, complete parent review, close this plan with
    `scripts/finish-task`, and prove exact-head CI and mergeability.
 
 ## Verification log
@@ -56,9 +56,10 @@ attempt occurred.
 - The successful recovery Checkout attached a new Apple Pay card to the same
   Customer with future off-session usage. Current sponsorship, cap headroom,
   payer status, beneficiary access, and purchase-state preconditions are valid.
-- The focused purchase-service suite passes all 194 tests. Its regression loses
-  the first confirm response, re-reads an unchanged intent, preserves the exact
-  binding and idempotency key, and succeeds on the next minute attempt without
+- The focused purchase-service and refill-dispatch suites pass all 211 tests.
+  Connection-loss and HTTP 408 regressions lose the first confirm response,
+  re-read an unchanged intent, preserve the exact binding and idempotency key,
+  stay notification-silent, and succeed on the next minute attempt without
   creating or canceling an intent.
 - Hosted Web typecheck passes after the normal generated-client preparation.
 - Draft PR #2035 owns the candidate. The existing public sponsorship-payment
@@ -68,6 +69,20 @@ attempt occurred.
   stay silent and retry in the background, while provider-proven authentication
   or card failures keep the existing payer recovery and group replies remain
   independent of billing-provider latency.
-- The combined focused purchase, dispatcher, and changelog run passes all 248
-  tests. `git diff --check` passes and the candidate contains no generated or
-  binary changes.
+- The combined purchase, dispatcher, Stripe-reconciliation, and changelog run
+  passes all 313 tests. Targeted lint, Hosted Web typecheck, and
+  `git diff --check` pass, and the candidate contains no generated or binary
+  changes.
+- The preliminary specialist finding was accepted and resolved by proving the
+  exact post-error Stripe re-read count, identity, and ordering. Round 1's
+  permanent-rejection finding was accepted and resolved with definitive
+  cancellation and recovery coverage.
+- Round 2 exposed HTTP 408 and cross-owner classifier coupling. The recorded
+  retrospective chose shrinkage: account-deletion replay returned to its
+  unchanged policy, while confirmation evidence stayed local to the saved-card
+  owner. The valid full-snapshot round 3 used the configured GPT-5.6 Pro model,
+  exceeded the five-minute trust floor, and returned `ROUND_OUTCOME: PASS` with
+  no findings.
+- Required GitHub checks are green on exact head `5d81d8e1e80b`, and
+  `git merge-tree --write-tree HEAD origin/main` succeeds against current main.
+Completed: 2026-08-20
