@@ -558,6 +558,7 @@ export class RunnerContainer extends Container {
   private lifecycleLockPendingCount = 0;
   private containerStartedAtMs: number | null = null;
   private containerStartObservedBy: RunnerContainerStartObservation | null = null;
+  private pendingColdStartDeadlineAtMs: number | null = null;
   private currentLogContext: RunnerContainerLogContext | null = null;
   private lastActivityExpiryAtMs: number | null = null;
   private lastActivityObservedAtMs: number | null = null;
@@ -1753,6 +1754,7 @@ export class RunnerContainer extends Container {
     });
     this.containerStartedAtMs = null;
     this.containerStartObservedBy = null;
+    this.pendingColdStartDeadlineAtMs = null;
     this.shellPrewarmObservation = null;
     this.lastActivityExpiryAtMs = null;
     this.lastActivityObservedAtMs = null;
@@ -1763,6 +1765,7 @@ export class RunnerContainer extends Container {
   override onError(error: unknown): never {
     const context = this.currentLogContext;
     this.clearRecentReadinessProof();
+    this.pendingColdStartDeadlineAtMs = null;
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -2212,6 +2215,7 @@ export class RunnerContainer extends Container {
 
     if (isRunnerContainerStopped(status)) {
       this.clearRecentReadinessProof();
+      this.pendingColdStartDeadlineAtMs = null;
       this.warmShellInvalidatedByUnsettledDestroy = false;
     } else if (this.warmShellInvalidatedByUnsettledDestroy) {
       this.clearRecentReadinessProof();
@@ -2277,6 +2281,7 @@ export class RunnerContainer extends Container {
           operationAbortSignal,
         );
         this.recordRecentReadinessProof(input.userId);
+        this.pendingColdStartDeadlineAtMs = null;
         if (
           this.containerStartedAtMs === null
           && readRecentContainerStart(initialState, Date.now(), readyTimeoutMs)
@@ -2313,6 +2318,7 @@ export class RunnerContainer extends Container {
           });
           throw error;
         }
+        this.pendingColdStartDeadlineAtMs = null;
         emitHostedExecutionStructuredLog({
           component: "container",
           details: {
@@ -2382,6 +2388,7 @@ export class RunnerContainer extends Container {
         operationAbortSignal,
       );
       this.recordRecentReadinessProof(input.userId);
+      this.pendingColdStartDeadlineAtMs = null;
       this.recordContainerStartObserved("cold-start-ready");
     } catch (error) {
       const pendingColdStartAgeMs = Date.now() - coldStartWaitStartedAtMs;
@@ -2391,6 +2398,8 @@ export class RunnerContainer extends Container {
         && pendingColdStartAgeMs >= 0
         && pendingColdStartAgeMs <= readyTimeoutMs;
       if (pendingColdStart) {
+        this.pendingColdStartDeadlineAtMs = coldStartWaitStartedAtMs
+          + readyTimeoutMs;
         this.logPendingColdStart({
           ageMs: pendingColdStartAgeMs,
           maxAgeMs: readyTimeoutMs,
@@ -2401,6 +2410,7 @@ export class RunnerContainer extends Container {
         });
         throw error;
       }
+      this.pendingColdStartDeadlineAtMs = null;
       emitHostedExecutionStructuredLog({
         component: "container",
         details: {
@@ -2458,11 +2468,30 @@ export class RunnerContainer extends Container {
     if (
       !input.operationAbortSignal.aborted
       || !isRunnerContainerAbortHardTimeout(input.operationAbortSignal.reason)
-      || this.containerStartedAtMs !== null
     ) {
       return null;
     }
-    return readRecentContainerStart(input.state, Date.now(), input.maxAgeMs);
+    const nowMs = Date.now();
+    const recentStart = readRecentContainerStart(
+      input.state,
+      nowMs,
+      input.maxAgeMs,
+    );
+    if (!recentStart) {
+      return null;
+    }
+    if (
+      this.pendingColdStartDeadlineAtMs !== null
+      && nowMs <= this.pendingColdStartDeadlineAtMs
+    ) {
+      return {
+        ageMs: Math.max(
+          0,
+          nowMs - (this.pendingColdStartDeadlineAtMs - input.maxAgeMs),
+        ),
+      };
+    }
+    return this.containerStartedAtMs === null ? recentStart : null;
   }
 
   private logPendingColdStart(input: {
@@ -2502,6 +2531,7 @@ export class RunnerContainer extends Container {
       const status = readContainerStatus(await this.getState());
       if (!isRunnerContainerStopped(status)) {
         await assertRunnerHealthy(this, timeoutMs, this.environment);
+        this.pendingColdStartDeadlineAtMs = null;
         return;
       }
     }
@@ -2514,6 +2544,7 @@ export class RunnerContainer extends Container {
         waitInterval: RUNNER_WAIT_INTERVAL_MS,
       },
     });
+    this.pendingColdStartDeadlineAtMs = null;
     this.recordContainerStartObserved("deploy-smoke-ready");
   }
 

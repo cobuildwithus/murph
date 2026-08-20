@@ -40,8 +40,9 @@ converges without restart thrash while the second group retains bounded recovery
 
 1. Add a focused regression that reproduces a cold start spanning multiple
    caller readiness budgets.
-2. Preserve an aborted start wait only when Cloudflare still reports a recent
-   running/healthy state with no locally observed completed start.
+2. Preserve an aborted start wait when Cloudflare still reports a recent
+   running/healthy state, including when the lifecycle start hook has fired but
+   readiness has not yet completed.
 3. Rejoin that start on later readiness calls and retain the existing destroy
    path after the configured readiness window or for non-timeout failures.
 4. Raise and document the canonical default readiness window to 90 seconds,
@@ -51,8 +52,9 @@ converges without restart thrash while the second group retains bounded recovery
 
 ## State
 
-Active. The local candidate and focused proof are complete; exact-head CI and
-ReviewGPT remain.
+Active. Initial exact-head CI passed. Preliminary ReviewGPT found one high
+coverage gap in the lifecycle ordering; the finding is accepted, reproduced,
+and remediated locally. A fresh exact-head review and CI remain.
 
 ## Evidence
 
@@ -65,10 +67,15 @@ ReviewGPT remain.
 - The pinned Cloudflare containers SDK issues `container.start()` before its
   abortable wait and cancellation stops the wait rather than the platform start.
 - A focused regression now proves one cold start survives two expired caller
-  budgets and becomes healthy at 58 seconds without any destroy or second start.
+  budgets and an intervening lifecycle start observation, then becomes healthy
+  at 58 seconds without any destroy or second start.
 - A companion regression proves an unobserved start older than 90 seconds still
   enters bounded cleanup.
-- Focused Cloudflare verification passes: 261 tests plus package typecheck.
+- ReviewGPT's preliminary specialist pass found that the original regression
+  did not fire the lifecycle start hook between caller budgets. The accepted
+  remediation retains an explicit pending-start deadline across that hook.
+- Focused Cloudflare verification passes after remediation: 261 tests plus
+  package typecheck.
 
 ## Working Set
 

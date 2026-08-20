@@ -1722,6 +1722,7 @@ describe("RunnerContainer", () => {
       await expect(first).rejects.toMatchObject({ name: "TimeoutError" });
       expect(destroy).not.toHaveBeenCalled();
 
+      container.onStart();
       nowMs += 10_000;
       const second = container.ensureReadyForProcessing({
         timeoutMs: 8_000,
