@@ -232,6 +232,22 @@ describe("hosted preference handoff sweeper", () => {
     });
   });
 
+  it("stops handoff recovery after the runtime imports a system item", async () => {
+    await runHostedPreferenceHandoffSweeper({
+      hasActiveAccess: vi.fn(async () => true),
+      logger: buildLogger(),
+    });
+
+    const query = mocks.queryRaw.mock.calls[0]?.[0] as {
+      strings?: readonly string[];
+    } | undefined;
+    const sql = query?.strings?.join("?") ?? "";
+    expect(sql).not.toContain('"lane_counter"."consumed_seq"');
+    expect(sql.match(/LEFT JOIN "hosted_workspace" AS "workspace"/gu)).toHaveLength(3);
+    expect(sql.match(/"item"\."lane_seq" > CASE/gu)).toHaveLength(3);
+    expect(sql.match(/hostedMailboxSystemImportedSeq/gu)).toHaveLength(6);
+  });
+
   it("selects exact current Clinical Records wakes in the shared mailbox sweep", async () => {
     const now = new Date("2026-08-12T12:00:00.000Z");
     mocks.queryRaw.mockResolvedValueOnce([{
@@ -267,7 +283,8 @@ describe("hosted preference handoff sweeper", () => {
     expect(sql).toContain(
       '\'clinical-records:sync:v1:\' || "run"."id" || \':\' || "run"."generation"::text',
     );
-    expect(sql).toContain('"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)');
+    expect(sql).toContain('"item"."lane_seq" > CASE');
+    expect(sql).toContain("hostedMailboxSystemImportedSeq");
     expect(sql).toContain('"item"."expires_at" IS NULL OR "item"."expires_at" > ?');
     expect(sql).toContain('"item"."created_at" > ?');
     expect(query?.values).toContainEqual(
@@ -314,8 +331,9 @@ describe("hosted preference handoff sweeper", () => {
       "'health.daily-metric.reported'",
     );
     expect(sql).toContain(
-      '"item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)',
+      '"item"."lane_seq" > CASE',
     );
+    expect(sql).toContain("hostedMailboxSystemImportedSeq");
     expect(requestHandoff).toHaveBeenCalledWith({
       abortSignal: expect.any(AbortSignal),
       expectedUserId: "member_browser_refresh",
