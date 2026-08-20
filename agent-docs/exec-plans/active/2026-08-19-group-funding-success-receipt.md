@@ -78,6 +78,8 @@ Updated: 2026-08-20
 - Keep the confirmation mark but remove its visible kicker. The headline already
   communicates the success outcome, while the mark retains the visual and
   accessible status signal.
+- The initial redesign landed in PR #2034. Follow-up PR #2046 owns the final
+  hierarchy polish and preserves both source PRs in the existing changelog item.
 
 ## Verification
 
