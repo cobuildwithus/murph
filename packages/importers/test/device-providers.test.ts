@@ -2281,6 +2281,17 @@ test("Junction daily aggregate alias repair composes with a preceding-day aggreg
 test("Junction daily aggregate alias repair converges after the primary provider spine advanced", async () => {
   const fixture = await createJunctionDailyAliasSplit();
   try {
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.primaryOwner,
+        eventId: fixture.primaryOwner.id,
+        source: "manual",
+        note: "member note",
+        tags: ["primary-tag"],
+        links: [{ type: "related_to", targetId: fixture.primaryOwner.id }],
+      },
+    });
     const advancedSnapshot = junctionDailyAliasSnapshot(47, {
       currentLastSampleAt: "2026-06-25T11:00:00.000Z",
     });
@@ -2306,14 +2317,32 @@ test("Junction daily aggregate alias repair converges after the primary provider
     });
     assert.equal(advanced.applied, true);
     assert.equal(advanced.events[0]?.id, fixture.primaryOwner.id);
+    const beforeRepairRecords = await readJunctionDailyAliasRecords(
+      fixture,
+      advanced.eventShardPaths,
+    );
+    const primaryHistory = beforeRepairRecords.filter(
+      (record) => record.id === fixture.primaryOwner.id,
+    );
+    assert.deepEqual(
+      primaryHistory.map((record) => [record.source, record.value]),
+      [
+        ["device", 44],
+        ["manual", 44],
+        ["device", 47],
+        ["manual", 44],
+      ],
+    );
     const beforeRepair = liveJunctionStressRecords(
-      await readJunctionDailyAliasRecords(fixture, advanced.eventShardPaths),
+      beforeRepairRecords,
     ).sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
     assert.equal(beforeRepair.length, 2);
     assert.equal(beforeRepair[0]?.id, fixture.legacyOwner.id);
     assert.equal(beforeRepair[0]?.value, 44);
     assert.equal(beforeRepair[1]?.id, fixture.primaryOwner.id);
-    assert.equal(beforeRepair[1]?.value, 47);
+    assert.equal(beforeRepair[1]?.value, 44);
+    assert.equal(beforeRepair[1]?.note, "member note");
+    assert.deepEqual(beforeRepair[1]?.tags, ["primary-tag"]);
 
     const snapshot = junctionDailyAliasSnapshot(51, {
       currentLastSampleAt: "2026-06-25T12:00:00.000Z",
@@ -2330,6 +2359,13 @@ test("Junction daily aggregate alias repair converges after the primary provider
     assert.equal(repaired.applied, true);
     assert.ok(repaired.ingestId);
     assert.ok(repaired.auditPath);
+    assert.ok(repaired.persistedEvidencePartCount > 0);
+    assert.equal(
+      repaired.events.some((event) =>
+        event.kind === "measurement" && event.externalRef?.facet === "features"
+      ),
+      true,
+    );
     const afterRepair = await readJunctionDailyAliasRecords(
       fixture,
       repaired.eventShardPaths,
@@ -2343,6 +2379,11 @@ test("Junction daily aggregate alias repair converges after the primary provider
     assert.equal(repairedLive[1]?.dayKey, "2026-06-25");
     assert.equal(repairedLive[1]?.id, fixture.primaryOwner.id);
     assert.equal(repairedLive[1]?.value, 51);
+    assert.equal(repairedLive[1]?.note, "member note");
+    assert.deepEqual(repairedLive[1]?.tags, ["primary-tag"]);
+    assert.deepEqual(repairedLive[1]?.links, [
+      { type: "related_to", targetId: fixture.primaryOwner.id },
+    ]);
     const loserHistory = afterRepair.filter((record) => record.id === fixture.legacyOwner.id);
     assert.equal(
       loserHistory.filter((record) => isDeletedEventLifecycle(record.lifecycle)).length,
@@ -2365,6 +2406,107 @@ test("Junction daily aggregate alias repair converges after the primary provider
       ]),
       afterRepair,
     );
+
+    const updated = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: junctionDailyAliasSnapshot(55, {
+          currentLastSampleAt: "2026-06-25T13:00:00.000Z",
+          precedingDayValue: 31,
+        }),
+      },
+      { corePort: coreRuntime },
+    );
+    const afterUpdate = await readJunctionDailyAliasRecords(fixture, [
+      ...repaired.eventShardPaths,
+      ...updated.eventShardPaths,
+    ]);
+    const updatedLive = liveJunctionStressRecords(afterUpdate)
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    assert.equal(updatedLive[0]?.id, repairedLive[0]?.id);
+    assert.equal(updatedLive[1]?.id, fixture.primaryOwner.id);
+    assert.equal(updatedLive[1]?.source, "manual");
+    assert.equal(updatedLive[1]?.note, "member note");
+    assert.deepEqual(updatedLive[1]?.tags, ["primary-tag"]);
+    assert.equal(
+      afterUpdate.filter((record) =>
+        record.id === fixture.primaryOwner.id
+        && record.source === "device"
+        && record.value === 55
+      ).length,
+      1,
+    );
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair refuses changed provider state in a carried member overlay", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.primaryOwner,
+        eventId: fixture.primaryOwner.id,
+        source: "manual",
+        note: "member note",
+      },
+    });
+    const advancedPrepared = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      snapshot: junctionDailyAliasSnapshot(47, {
+        currentLastSampleAt: "2026-06-25T11:00:00.000Z",
+      }),
+    });
+    const advancedStressEvent = advancedPrepared.events?.find(
+      (event) => event.kind === "observation" && event.fields?.metric === "stress-level",
+    );
+    assert.ok(advancedStressEvent);
+    const advanced = await coreRuntime.importDeviceBatch({
+      vaultRoot: fixture.vaultRoot,
+      provider: advancedPrepared.provider,
+      accountId: advancedPrepared.accountId,
+      importedAt: advancedPrepared.importedAt,
+      source: advancedPrepared.source,
+      events: [{
+        ...advancedStressEvent,
+        evidenceRoles: [],
+        legacyExternalRefs: [],
+      }],
+    });
+    const carriedOverlay = advanced.events[0];
+    assert.ok(carriedOverlay?.kind === "observation");
+    assert.equal(carriedOverlay.source, "manual");
+    assert.equal(carriedOverlay.value, 44);
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...carriedOverlay,
+        eventId: fixture.primaryOwner.id,
+        value: 45,
+      },
+    });
+
+    const before = await snapshotVaultFiles(fixture.vaultRoot);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: junctionDailyAliasSnapshot(51, {
+            currentLastSampleAt: "2026-06-25T12:00:00.000Z",
+            precedingDayValue: 31,
+          }),
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+    );
+    assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true });
   }

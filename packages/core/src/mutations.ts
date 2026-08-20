@@ -3598,9 +3598,13 @@ function analyzeJunctionDailyAggregateAliasHistoryEvolution(input: {
 }): JunctionDailyAggregateAliasOverlay {
   const expectedRefKey = eventExternalRefKey(input.expectedExternalRef);
   let providerStateKey = input.initialProviderStateKey;
+  let memberCarrierStateKey: string | undefined;
   for (const { record } of input.history) {
     const recordProviderStateKey = junctionDailyAggregateProviderStateKey(record);
     const providerRecord = record.source === "device";
+    const manualMatchesProvider = recordProviderStateKey === providerStateKey;
+    const manualMatchesCarrier = memberCarrierStateKey !== undefined
+      && recordProviderStateKey === memberCarrierStateKey;
     if (
       isDeletedEventSpineRecord(record)
       || (record.source !== "device" && record.source !== "manual")
@@ -3635,7 +3639,7 @@ function analyzeJunctionDailyAggregateAliasHistoryEvolution(input: {
         providerRecord
           ? !input.allowProviderEvolution
             && recordProviderStateKey !== input.initialProviderStateKey
-          : recordProviderStateKey !== providerStateKey
+          : !manualMatchesProvider && !manualMatchesCarrier
       )
     ) {
       throw new VaultError(
@@ -3645,6 +3649,8 @@ function analyzeJunctionDailyAggregateAliasHistoryEvolution(input: {
     }
     if (providerRecord) {
       providerStateKey = recordProviderStateKey;
+    } else if (manualMatchesProvider) {
+      memberCarrierStateKey = recordProviderStateKey;
     }
   }
 
