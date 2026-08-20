@@ -74,13 +74,17 @@ Updated: 2026-08-20
 - Include checkpoint completion diagnostics after bounded live evidence showed
   final publication could consume its full existing deadline even when archive
   construction and direct upload were fast.
+- Keep exact inner-stage attribution for every waiter on one shared Google auth
+  refresh. The identity-pool client owns one bounded, transient stage record;
+  attempts retain only a reference to that record, never credentials, URLs, or
+  provider payloads. Caller cancellation does not clear shared auth work.
 
 ## Verification
 
 - Passed: `pnpm exec tsx apps/web/scripts/run-hosted-web-vitest.mts
   apps/web/test/hosted-crypto-gcp-kms.test.ts
   apps/web/test/hosted-crypto-gcp-kms-official.test.ts
-  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (43 tests).
+  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (47 tests).
 - Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts
   apps/cloudflare/test/runner-platform.test.ts` (195 tests).
 - Passed: `pnpm exec vitest run
@@ -93,6 +97,19 @@ Updated: 2026-08-20
 - Fixed: final ReviewGPT round 2 on immutable head `1f377fc9c3` accepted one
   installed-SDK auth-deadline failure-stage finding; active STS and service
   account impersonation deadline regressions now pass.
-- Passed: an independent two-agent remediation review found no release blocker.
+- Fixed: final ReviewGPT round 3 found that a second operation waiting on the
+  same cold auth refresh could still report `kms_rpc`. The per-client shared
+  refresh owner now exposes active subject-token, STS, and impersonation stages
+  to every waiter while preserving completed-error precedence and all existing
+  deadlines, retries, and cancellation behavior.
+- Passed: installed-SDK shared-waiter regressions for subject-token, STS, and
+  service-account impersonation deadlines; one case also expires the shared
+  auth deadline before the waiter deadline. The initiating caller cancels
+  without a failure log, the surviving waiter reports the exact stage and a
+  bounded nonzero elapsed time, provider retries stay disabled, and secret
+  values remain absent. A completed provider `DEADLINE_EXCEEDED` also preserves
+  terminal STS provenance instead of consulting active deadline state.
+- Passed: Web typecheck, focused ESLint, `git diff --check`, and an independent
+  subagent ownership/concurrency review of the shared refresh design.
 - Remaining: final ReviewGPT rerun, exact-head GitHub checks, merge/deploy, and
   bounded postdeploy Vercel/runtime-log queries.

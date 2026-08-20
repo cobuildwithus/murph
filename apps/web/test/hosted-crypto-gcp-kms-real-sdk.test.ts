@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 
+import { getVercelOidcToken } from "@vercel/oidc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@vercel/oidc", () => ({
@@ -48,11 +49,27 @@ afterEach(() => {
       Object.defineProperty(stub.target, stub.property, stub.descriptor);
     }
   }
+  vi.mocked(getVercelOidcToken).mockReset().mockResolvedValue(
+    "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature",
+  );
   vi.restoreAllMocks();
 });
 
 describe("installed Google Cloud KMS SDK boundary", () => {
-  it("retains shared STS failure provenance through the real auth wrapper", async () => {
+  it.each([
+    {
+      adapterFailure: "http_503",
+      expectedError: { providerReason: "http_503" },
+      expectedProviderReason: "http_503",
+    },
+    {
+      adapterFailure: "provider_deadline",
+      expectedError: { name: "TimeoutError" },
+      expectedProviderReason: "DEADLINE_EXCEEDED",
+    },
+  ])(
+    "retains shared STS $adapterFailure provenance through the real auth wrapper",
+    async ({ adapterFailure, expectedError, expectedProviderReason }) => {
     const authRequests: CapturedAuthRequest[] = [];
     const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     let authHeaderRequests = 0;
@@ -70,6 +87,9 @@ describe("installed Google Cloud KMS SDK boundary", () => {
         }
         authRequests.push(config);
         await pendingSts;
+        if (adapterFailure === "provider_deadline") {
+          throw Object.assign(new Error(SECRET_PROVIDER_DETAIL), { code: 4, config });
+        }
         const data = {
           error: "temporarily_unavailable",
           error_description: SECRET_PROVIDER_DETAIL,
@@ -110,7 +130,7 @@ describe("installed Google Cloud KMS SDK boundary", () => {
       throw new Error("Expected a pending real-SDK STS request.");
     }
     release();
-    await expect(second).rejects.toMatchObject({ providerReason: "http_503" });
+    await expect(second).rejects.toMatchObject(expectedError);
 
     expect(authRequests).toHaveLength(1);
     expect(authRequests[0]).toMatchObject({
@@ -126,11 +146,251 @@ describe("installed Google Cloud KMS SDK boundary", () => {
       expect.objectContaining({
         failureStage: "sts_exchange",
         outcome: "failed",
-        providerReason: "http_503",
+        providerReason: expectedProviderReason,
         workloadIdentityRefreshObserved: true,
       }),
     );
     const serializedLogs = JSON.stringify(failureLog.mock.calls);
+    expect(serializedLogs).not.toContain(SECRET_PROVIDER_DETAIL);
+    expect(serializedLogs).not.toContain("synthetic-signature");
+    expect(serializedLogs).not.toContain(KMS_KEY_NAME);
+    },
+  );
+
+  it.each([
+    {
+      expireAuthDeadline: false,
+      expectedAuthRequestCount: 2,
+      expectedElapsedField: "stsExchangeElapsedMs",
+      expectedFailureStage: "sts_exchange",
+      heldAuthRequestOrdinal: 1,
+    },
+    {
+      expireAuthDeadline: true,
+      expectedAuthRequestCount: 2,
+      expectedElapsedField: "serviceAccountImpersonationElapsedMs",
+      expectedFailureStage: "service_account_impersonation",
+      heldAuthRequestOrdinal: 2,
+    },
+  ])(
+    "attributes a shared pending $expectedFailureStage request to a surviving waiter",
+    async ({
+      expireAuthDeadline,
+      expectedAuthRequestCount,
+      expectedElapsedField,
+      expectedFailureStage,
+      heldAuthRequestOrdinal,
+    }) => {
+      const authRequests: CapturedAuthRequest[] = [];
+      const deadlineControllers: AbortController[] = [];
+      const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const heldAuth = createDeferred<void>();
+      let authHeaderRequests = 0;
+      vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+        const controller = new AbortController();
+        deadlineControllers.push(controller);
+        return controller.signal;
+      });
+
+      installPrototypeStub(
+        requireConstructorPrototype(requireFromGoogleAuth("gaxios"), "Gaxios"),
+        "_defaultAdapter",
+        async (config: unknown) => {
+          if (!isRecord(config)) {
+            throw new TypeError("Expected a prepared Gaxios request.");
+          }
+          authRequests.push(config);
+          if (authRequests.length === heldAuthRequestOrdinal) {
+            await heldAuth.promise;
+          }
+          if (authRequests.length === 1) {
+            return createGaxiosResponse(config, {
+              access_token: "federated-token",
+              expires_in: 3600,
+              token_type: "Bearer",
+            });
+          }
+          if (authRequests.length === 2) {
+            return createGaxiosResponse(config, {
+              accessToken: "impersonated-token",
+              expireTime: "2099-01-01T00:00:00Z",
+            });
+          }
+          throw new Error("Unexpected authentication request.");
+        },
+      );
+      installRealKmsClientStub(() => {
+        authHeaderRequests += 1;
+      });
+
+      const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+      const initiatingCaller = new AbortController();
+      const initiatingOperation = client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: KMS_KEY_NAME,
+        plaintext: new Uint8Array([1]),
+        signal: initiatingCaller.signal,
+      });
+      await vi.waitFor(() => expect(authRequests).toHaveLength(heldAuthRequestOrdinal));
+      const survivingOperation = client.encrypt({
+        additionalAuthenticatedData: "domain=control",
+        keyName: KMS_KEY_NAME,
+        plaintext: new Uint8Array([2]),
+      });
+      const survivingError = survivingOperation.catch((error: unknown) => error);
+      await vi.waitFor(() => expect(authHeaderRequests).toBe(2));
+
+      initiatingCaller.abort(new Error("synthetic caller-only cancellation"));
+      await expect(initiatingOperation).rejects.toMatchObject({ name: "AbortError" });
+      expect(failureLog).not.toHaveBeenCalled();
+      if (expireAuthDeadline) {
+        const authDeadline = deadlineControllers[2];
+        if (!authDeadline) {
+          throw new Error("Expected the shared authentication deadline.");
+        }
+        authDeadline.abort(new Error("synthetic shared authentication deadline"));
+      }
+      await delay(10);
+      const survivingAttemptDeadline = deadlineControllers.at(-1);
+      if (!survivingAttemptDeadline) {
+        throw new Error("Expected the surviving operation attempt deadline.");
+      }
+      survivingAttemptDeadline.abort(new Error("synthetic surviving waiter deadline"));
+
+      await expect(survivingError).resolves.toMatchObject({ name: "TimeoutError" });
+      expect(authRequests).toHaveLength(heldAuthRequestOrdinal);
+      expect(failureLog).toHaveBeenCalledTimes(1);
+      expect(failureLog).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS operation failed.",
+        expect.objectContaining({
+          failureStage: expectedFailureStage,
+          outcome: "failed",
+          providerReason: "DEADLINE_EXCEEDED",
+          workloadIdentityRefreshObserved: true,
+        }),
+      );
+      const details = failureLog.mock.calls[0]?.[1];
+      if (!isRecord(details)) {
+        throw new Error("Expected structured KMS failure details.");
+      }
+      expect(details[expectedElapsedField]).toEqual(expect.any(Number));
+      expect(Number(details[expectedElapsedField])).toBeGreaterThan(0);
+      expect(Number(details[expectedElapsedField])).toBeLessThanOrEqual(10_000);
+      expect(Number(details[expectedElapsedField])).toBeLessThanOrEqual(
+        Number(details.attemptElapsedMs),
+      );
+      expect(authRequests[0]).toMatchObject({
+        retry: false,
+        retryConfig: { retry: 0 },
+      });
+      heldAuth.resolve();
+      await vi.waitFor(() => expect(authRequests).toHaveLength(expectedAuthRequestCount));
+      const serializedLogs = JSON.stringify(failureLog.mock.calls);
+      expect(serializedLogs).not.toContain("federated-token");
+      expect(serializedLogs).not.toContain("impersonated-token");
+      expect(serializedLogs).not.toContain(SECRET_PROVIDER_DETAIL);
+      expect(serializedLogs).not.toContain("synthetic-signature");
+      expect(serializedLogs).not.toContain(KMS_KEY_NAME);
+    },
+  );
+
+  it("attributes a shared pending subject token request to a surviving waiter", async () => {
+    const authRequests: CapturedAuthRequest[] = [];
+    const deadlineControllers: AbortController[] = [];
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const heldSubjectToken = createDeferred<string>();
+    let authHeaderRequests = 0;
+    vi.mocked(getVercelOidcToken).mockImplementation(async () => heldSubjectToken.promise);
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const controller = new AbortController();
+      deadlineControllers.push(controller);
+      return controller.signal;
+    });
+
+    installPrototypeStub(
+      requireConstructorPrototype(requireFromGoogleAuth("gaxios"), "Gaxios"),
+      "_defaultAdapter",
+      async (config: unknown) => {
+        if (!isRecord(config)) {
+          throw new TypeError("Expected a prepared Gaxios request.");
+        }
+        authRequests.push(config);
+        if (authRequests.length === 1) {
+          return createGaxiosResponse(config, {
+            access_token: "federated-token",
+            expires_in: 3600,
+            token_type: "Bearer",
+          });
+        }
+        if (authRequests.length === 2) {
+          return createGaxiosResponse(config, {
+            accessToken: "impersonated-token",
+            expireTime: "2099-01-01T00:00:00Z",
+          });
+        }
+        throw new Error("Unexpected authentication request.");
+      },
+    );
+    installRealKmsClientStub(() => {
+      authHeaderRequests += 1;
+    });
+
+    const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+    const initiatingCaller = new AbortController();
+    const initiatingOperation = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1]),
+      signal: initiatingCaller.signal,
+    });
+    await vi.waitFor(() => expect(getVercelOidcToken).toHaveBeenCalledTimes(1));
+    const survivingOperation = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([2]),
+    });
+    const survivingError = survivingOperation.catch((error: unknown) => error);
+    await vi.waitFor(() => expect(authHeaderRequests).toBe(2));
+
+    initiatingCaller.abort(new Error("synthetic caller-only cancellation"));
+    await expect(initiatingOperation).rejects.toMatchObject({ name: "AbortError" });
+    expect(failureLog).not.toHaveBeenCalled();
+    await delay(10);
+    const survivingAttemptDeadline = deadlineControllers.at(-1);
+    if (!survivingAttemptDeadline) {
+      throw new Error("Expected the surviving operation attempt deadline.");
+    }
+    survivingAttemptDeadline.abort(new Error("synthetic surviving waiter deadline"));
+
+    await expect(survivingError).resolves.toMatchObject({ name: "TimeoutError" });
+    expect(authRequests).toHaveLength(0);
+    expect(getVercelOidcToken).toHaveBeenCalledTimes(1);
+    expect(failureLog).toHaveBeenCalledTimes(1);
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        failureStage: "subject_token",
+        outcome: "failed",
+        providerReason: "DEADLINE_EXCEEDED",
+        subjectTokenElapsedMs: expect.any(Number),
+        workloadIdentityRefreshObserved: true,
+      }),
+    );
+    const details = failureLog.mock.calls[0]?.[1];
+    if (!isRecord(details)) {
+      throw new Error("Expected structured KMS failure details.");
+    }
+    expect(Number(details.subjectTokenElapsedMs)).toBeGreaterThan(0);
+    expect(Number(details.subjectTokenElapsedMs)).toBeLessThanOrEqual(
+      Number(details.attemptElapsedMs),
+    );
+    heldSubjectToken.resolve(
+      "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature",
+    );
+    await vi.waitFor(() => expect(authRequests).toHaveLength(2));
+    const serializedLogs = JSON.stringify(failureLog.mock.calls);
+    expect(serializedLogs).not.toContain("federated-token");
+    expect(serializedLogs).not.toContain("impersonated-token");
     expect(serializedLogs).not.toContain(SECRET_PROVIDER_DETAIL);
     expect(serializedLogs).not.toContain("synthetic-signature");
     expect(serializedLogs).not.toContain(KMS_KEY_NAME);
