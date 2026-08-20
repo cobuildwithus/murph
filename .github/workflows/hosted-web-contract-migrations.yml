@@ -126,7 +126,7 @@ jobs:
           fi
 
           verified_sha="$(
-            pnpm --dir apps/web release:production:verify-exact-deployment
+            pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
           )"
           if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
             echo "::error::Exact Vercel production deployment verification returned an unexpected commit."
@@ -152,7 +152,7 @@ jobs:
           fi
 
           verified_sha="$(
-            pnpm --dir apps/web release:production:verify-exact-deployment
+            pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
           )"
           if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
             echo "::error::Final exact Vercel production deployment verification returned an unexpected commit."
@@ -205,7 +205,7 @@ jobs:
               -u DIRECT_DATABASE_URL \
               -u MURPH_REQUIRE_DIRECT_DATABASE_URL_FOR_MIGRATIONS \
               -u MURPH_RUN_HOSTED_WEB_CONTRACT_MIGRATIONS \
-              pnpm --dir apps/web release:production:verify-exact-deployment
+              pnpm --dir apps/web exec tsx scripts/verify-vercel-production-deployment.ts
           )"
           if [ "${verified_sha}" != "${DEPLOYED_SHA}" ]; then
             echo "::error::Exact Vercel production deployment verification returned an unexpected commit."

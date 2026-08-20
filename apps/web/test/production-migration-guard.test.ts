@@ -1944,7 +1944,14 @@ describe("hosted web production migration guard", () => {
     assert.match(workflow, /steps\.current-production\.outputs\.should_apply == 'true'/u);
     assert.doesNotMatch(workflow, /deployment\.ref == 'main'/u);
     assert.match(workflow, /release:production:contract-migrate/u);
-    assert.match(workflow, /release:production:verify-exact-deployment/u);
+    assert.doesNotMatch(workflow, /release:production:verify-exact-deployment/u);
+    assert.equal(
+      workflow.match(
+        /pnpm --dir apps\/web exec tsx scripts\/verify-vercel-production-deployment\.ts/gu,
+      )?.length,
+      3,
+      "captured deployment proofs must bypass pnpm 10 lifecycle stdout",
+    );
 
     const productionProofStep = extractWorkflowStep(
       workflow,
@@ -1957,7 +1964,10 @@ describe("hosted web production migration guard", () => {
     assert.match(productionProofStep, /id: current-production/u);
     assert.match(productionProofStep, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(productionProofStep, /resolve-vercel-production-alias-sha\.ts/u);
-    assert.match(productionProofStep, /release:production:verify-exact-deployment/u);
+    assert.match(
+      productionProofStep,
+      /exec tsx scripts\/verify-vercel-production-deployment\.ts/u,
+    );
     assert.match(productionProofStep, /echo "should_apply=true" >> "\$\{GITHUB_OUTPUT\}"/u);
     assert.match(productionProofStep, /echo "should_apply=false" >> "\$\{GITHUB_OUTPUT\}"/u);
     assert.match(
@@ -1978,7 +1988,10 @@ describe("hosted web production migration guard", () => {
     );
     assert.match(contractMigrationStep, /HOSTED_WEB_VERCEL_TOKEN/u);
     assert.match(contractMigrationStep, /resolve-vercel-production-alias-sha\.ts/u);
-    assert.match(contractMigrationStep, /release:production:verify-exact-deployment/u);
+    assert.match(
+      contractMigrationStep,
+      /exec tsx scripts\/verify-vercel-production-deployment\.ts/u,
+    );
     assert.match(contractMigrationStep, /-u DIRECT_DATABASE_URL/u);
     assert.match(
       contractMigrationStep,
@@ -2003,14 +2016,14 @@ describe("hosted web production migration guard", () => {
     assert.match(contractMigrationStep, /release:production:contract-migrate/u);
     const initialCurrentProof = productionProofStep.indexOf('current_sha="$(');
     const initialExactProof = productionProofStep.indexOf(
-      "release:production:verify-exact-deployment",
+      "verify-vercel-production-deployment.ts",
     );
     const drainWait = productionProofStep.indexOf(
       'sleep "${HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS}"',
     );
     const finalCurrentProof = productionProofStep.lastIndexOf('current_sha="$(');
     const finalExactProof = productionProofStep.lastIndexOf(
-      "release:production:verify-exact-deployment",
+      "verify-vercel-production-deployment.ts",
     );
     assert.ok(
       initialCurrentProof < initialExactProof
@@ -2031,11 +2044,11 @@ describe("hosted web production migration guard", () => {
     );
     assert.ok(
       contractMigrationStep.indexOf('if [ "${current_sha}" != "${DEPLOYED_SHA}" ]; then')
-        < contractMigrationStep.indexOf("release:production:verify-exact-deployment"),
+        < contractMigrationStep.indexOf("verify-vercel-production-deployment.ts"),
       "contract migrations must skip a superseded deployment before exact-domain proof",
     );
     assert.ok(
-      contractMigrationStep.indexOf("release:production:verify-exact-deployment")
+      contractMigrationStep.indexOf("verify-vercel-production-deployment.ts")
         < contractMigrationStep.indexOf("release:production:contract-migrate"),
       "contract migrations must re-check the current production deployment SHA immediately before SQL",
     );
@@ -2059,6 +2072,11 @@ set -euo pipefail
 if [[ "$*" == *"resolve-vercel-production-alias-sha.ts"* ]]; then
   printf '%s\\n' "\${STUB_CURRENT_SHA}"
 elif [[ "$*" == *"release:production:verify-exact-deployment"* ]]; then
+  printf '\\n> @murphai/hosted-web@1.0.0 release:production:verify-exact-deployment /workspace/apps/web\\n'
+  printf '> pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment.ts\\n\\n'
+  printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
+  printf '%s\\n' "\${DEPLOYED_SHA}"
+elif [[ "$*" == *"exec tsx scripts/verify-vercel-production-deployment.ts"* ]]; then
   printf 'verify\\n' >> "\${STUB_CALLS_FILE}"
   printf '%s\\n' "\${DEPLOYED_SHA}"
 elif [[ "$*" == *"release:production:contract-migrate"* ]]; then
