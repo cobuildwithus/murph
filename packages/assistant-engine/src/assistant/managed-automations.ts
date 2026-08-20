@@ -30,6 +30,9 @@ import {
   applyAssistantSelfDeliveryTargetDefaults,
 } from '@murphai/operator-config/operator-config'
 import {
+  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+} from '@murphai/operator-config/assistant/target-runtime'
+import {
   resolveDeliverableAutomationRoute,
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
@@ -777,7 +780,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     ownerScope: 'member',
     hostedRuntimeOnly: true,
     assistantTargetOverride: {
-      reasoningEffort: 'medium',
+      model: 'gpt-5.5',
+      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+      reasoningEffort: 'low',
     },
     tags: [
       'murph-managed:overnight-memory-consolidation',

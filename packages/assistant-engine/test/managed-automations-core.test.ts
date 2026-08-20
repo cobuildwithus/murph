@@ -1082,7 +1082,9 @@ describe('applyMurphManagedAutomations core integration', () => {
     })).resolves.toMatchObject({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
       assistantTargetOverride: {
-        reasoningEffort: 'medium',
+        model: 'gpt-5.5',
+        modelProvider: 'hosted-openai',
+        reasoningEffort: 'low',
       },
       continuityPolicy: 'fresh',
       route: defaultRoute,

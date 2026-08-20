@@ -577,10 +577,12 @@ supported provider credential.
   `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` proves
   hosted config emits no member-memory permission profile. Assistant-engine
   planning, tool-boundary, provider-seam, and real App Server tests prove only
-  the exact managed id receives `murph.member_memory`, shell and every other
-  native capability stay disabled even without a sandbox profile, and the
-  trusted host performs canonical memory reads and audited writes; reminder
-  availability needs no Codex permission profile.
+  the exact managed id receives `murph.member_memory`, the dedicated hosted
+  OpenAI maintenance target advertises exactly that one function on every
+  provider request, shell and every other native capability stay disabled even
+  without a sandbox profile, and the trusted host performs canonical memory
+  reads and audited writes; reminder availability needs no Codex permission
+  profile.
   `packages/core/test/automation-availability.test.ts` proves exact
   policy/source/account authorization, canonical populated and empty snapshot
   parsing/removal, host-only prompt sanitation, exact-time normalization, and

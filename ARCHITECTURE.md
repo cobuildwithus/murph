@@ -390,11 +390,13 @@ wire is unchanged, and assistant-engine still removes the global member id and
 legacy roster handle before any group summary reaches the model.
 
 Immutable hosted memory consolidation remains an isolated one-shot automation.
-Only its exact built-in id receives `murph.member_memory`; the host executes
-that narrow tool through canonical core memory operations while the Codex turn
-exposes no shell, filesystem, browser, app, plugin, web-search, environment, or
-public-network capability. It does not need a separate permission profile or
-filesystem mutation path.
+Only its exact built-in id receives `murph.member_memory`. The managed seed pins
+the maintenance turn to `gpt-5.5` on hosted OpenAI, and process-launch config
+leaves that host-owned function as the complete provider-visible tool inventory.
+The host executes canonical core memory operations while the one-shot turn has
+no shell, filesystem, browser, app, plugin, web-search, environment, or public
+network capability. It needs no separate permission profile or filesystem
+mutation path.
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store

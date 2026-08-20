@@ -51,5 +51,14 @@ memory consolidation.
   and completed canonical memory read/write through `murph.member_memory`.
 - Affected `hosted-execution`, `assistant-runtime`, and `assistant-engine`
   package typechecks: passed.
-- Exact-head CI and review gates: pending.
+- Exact-head round-one preliminary review found that the real App Server test
+  proved the forbidden shell effect but did not assert the complete advertised
+  provider tool inventory. Direct request inspection proved that Responses Lite
+  carries provider tools in `additional_tools` and the former Terra target's
+  catalog re-enabled collaboration despite generic feature flags. The focused
+  correction pins the managed maintenance seed to hosted OpenAI `gpt-5.5`,
+  disables the remaining process-owned registries, and requires every provider
+  request to expose exactly the one `member_memory` function. Verification is
+  pending.
+- Exact-head CI and final review gate: pending.
 - Production deploy and bounded runtime-log verification: pending.

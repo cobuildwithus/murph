@@ -63,6 +63,25 @@ const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'features.shell_tool=false',
 ] as const
+const EXPECTED_MEMBER_MEMORY_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
+  'memories.generate_memories=false',
+  'web_search="disabled"',
+  'features.web_search_request=false',
+  'features.standalone_web_search=false',
+  'features.apps=false',
+  'features.enable_mcp_apps=false',
+  'features.browser_use=false',
+  'features.plugins=false',
+  'features.multi_agent=false',
+  'features.multi_agent_v2=false',
+  'features.tool_suggest=false',
+  'memories.use_memories=false',
+  'features.shell_tool=false',
+  'tools.experimental_request_user_input.enabled=false',
+  'tools.update_plan.enabled=false',
+  'orchestrator.skills.enabled=false',
+  'orchestrator.mcp.enabled=false',
+] as const
 
 const providerMocks = vi.hoisted(() => ({
   executeCodexAssistantTurnAttemptFromInput: vi.fn(),
@@ -1497,7 +1516,9 @@ describe('Codex model catalog', () => {
   it('keeps memory maintenance one-shot and isolated from reminder tools', async () => {
     const route = createRoute({
       providerOptions: {
-        modelProvider: HOSTED_LOCAL_TEST_VENICE_CODEX_MODEL_PROVIDER_ID,
+        model: 'gpt-5.5',
+        modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+        reasoningEffort: 'low',
       },
     })
     const session = createAssistantSession({
@@ -1608,9 +1629,17 @@ describe('Codex model catalog', () => {
     expect(
       providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
         ?.codexConfigOverrides,
-    ).toBeNull()
+    ).toEqual(EXPECTED_MEMBER_MEMORY_MAINTENANCE_CODEX_CONFIG_OVERRIDES)
     expect(
-    providerMocks.executeCodexAssistantTurnAttemptFromInput,
+      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
+        ?.providerConfig,
+    ).toMatchObject({
+      model: 'gpt-5.5',
+      modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      reasoningEffort: 'low',
+    })
+    expect(
+      providerMocks.executeCodexAssistantTurnAttemptFromInput,
     ).toHaveBeenCalledWith(expect.objectContaining({
       dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
       environments: [],

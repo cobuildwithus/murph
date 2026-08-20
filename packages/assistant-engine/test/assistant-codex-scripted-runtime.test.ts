@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { crc32, deflateSync } from 'node:zlib'
 
+import { readMemoryDocument } from '@murphai/core'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
@@ -27,7 +28,6 @@ import type {
 import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
-import { readMemoryDocument } from '@murphai/core'
 import {
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
@@ -354,6 +354,11 @@ interface ScriptedProviderRequestSummary {
     includesResponseCardNutritionV2Shape: boolean
     includesGroupEmail: boolean
     includesToolSearch: boolean
+    toolDescriptors: Array<{
+      name: string | null
+      namespace: string | null
+      type: string | null
+    }>
   }
   serviceTier: string | null
   toolSearchOutputTools?: unknown[]
@@ -2094,27 +2099,19 @@ text(result.output);
     })
   })
 
-  it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
-    const scenario = await prepareScriptedTurnScenario()
+  it('advertises only the host-owned member-memory tool without a sandbox', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      model: 'gpt-5.5',
+    })
     const vaultRoot = scenario.turnInput.workingDirectory
-    const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
     await writeFile(
       path.join(vaultRoot, 'AGENTS.md'),
       'UNTRUSTED_WORKSPACE_INSTRUCTION_SHOULD_NOT_LOAD\n',
     )
     scenario.stub.captureProviderRequestDiagnostics()
     scenario.stub.queue(
-      {
-        customToolCall: {
-          input: `
-const result = await tools.exec_command({
-  cmd: "printf '%s\\n' 'SHELL_RAN' > shell-should-not-run",
-});
-text(JSON.stringify(result));
-`,
-          name: 'exec',
-        },
-      },
       {
         functionCall: {
           arguments: { action: 'show' },
@@ -2139,7 +2136,27 @@ text(JSON.stringify(result));
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
       approvalPolicy: 'never',
+      configOverrides: [
+        'memories.generate_memories=false',
+        'web_search="disabled"',
+        'features.web_search_request=false',
+        'features.standalone_web_search=false',
+        'features.apps=false',
+        'features.enable_mcp_apps=false',
+        'features.browser_use=false',
+        'features.plugins=false',
+        'features.multi_agent=false',
+        'features.multi_agent_v2=false',
+        'features.tool_suggest=false',
+        'memories.use_memories=false',
+        'features.shell_tool=false',
+        'tools.experimental_request_user_input.enabled=false',
+        'tools.update_plan.enabled=false',
+        'orchestrator.skills.enabled=false',
+        'orchestrator.mcp.enabled=false',
+      ],
       dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
+      environments: [],
       ephemeral: true,
       memberMemoryMaintenanceAuthorized: true,
       processLifetime: 'one-shot',
@@ -2151,9 +2168,6 @@ text(JSON.stringify(result));
     })
 
     expect(result.finalMessage).toBe('RESTRICTED_MEMBER_MEMORY_OK')
-    await expect(readFile(forbiddenShellPath, 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    })
     await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
       records: [{
         section: 'Preferences',
@@ -2161,6 +2175,17 @@ text(JSON.stringify(result));
       }],
     })
     const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(summaries.length).toBeGreaterThan(0)
+    for (const summary of summaries) {
+      expect(summary.model).toBe('gpt-5.5')
+      expect(summary.providerRequestDiagnostics?.toolDescriptors).toEqual([
+        {
+          name: 'member_memory',
+          namespace: 'murph',
+          type: 'function',
+        },
+      ])
+    }
     expect(
       summaries.flatMap((summary) => summary.functionCallOutputs ?? []).join('\n'),
     ).toContain('"exists":false')
@@ -11323,9 +11348,15 @@ function readScriptedProviderRequestSummary(
           .filter((width): width is number => width !== null)
       })
     : []
-  const tools = Array.isArray(body?.tools)
-    ? body.tools.map(readRecord)
-    : []
+  const tools = [
+    ...(Array.isArray(body?.tools) ? body.tools : []),
+    ...(Array.isArray(body?.input)
+      ? body.input
+        .map(readRecord)
+        .filter((item) => item?.type === 'additional_tools')
+        .flatMap((item) => Array.isArray(item?.tools) ? item.tools : [])
+      : []),
+  ].map(readRecord)
   return {
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
@@ -11359,6 +11390,27 @@ function readScriptedProviderRequestSummary(
             ].every((field) => requestBody.includes(field)),
             includesGroupEmail: requestBody.includes('send_email'),
             includesToolSearch: tools.some((tool) => tool?.type === 'tool_search'),
+            toolDescriptors: tools.flatMap<{
+              name: string | null
+              namespace: string | null
+              type: string | null
+            }>((tool) => {
+              const namespace = tool?.type === 'namespace'
+                ? readString(tool.name)
+                : null
+              if (namespace && Array.isArray(tool?.tools)) {
+                return tool.tools.map(readRecord).map((nestedTool) => ({
+                  name: readString(nestedTool?.name),
+                  namespace,
+                  type: readString(nestedTool?.type),
+                }))
+              }
+              return [{
+                name: readString(tool?.name),
+                namespace: null,
+                type: readString(tool?.type),
+              }]
+            }),
           },
         }
       : {}),

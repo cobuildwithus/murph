@@ -1312,7 +1312,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(seed.hostedRuntimeOnly).toBe(true)
     expect(seed.continuityPolicy).toBe('fresh')
     expect(seed.assistantTargetOverride).toEqual({
-      reasoningEffort: 'medium',
+      model: 'gpt-5.5',
+      modelProvider: 'hosted-openai',
+      reasoningEffort: 'low',
     })
     expect(seed.schedule.expression).toBe('0 3 * * 1,3,5')
     expect(seed.slug).toBe('overnight-memory-consolidation')
@@ -1716,7 +1718,9 @@ describe('applyMurphManagedAutomations', () => {
       title: 'Overnight memory consolidation',
     })
     expect(memoryRecord?.assistantTargetOverride).toEqual({
-      reasoningEffort: 'medium',
+      model: 'gpt-5.5',
+      modelProvider: 'hosted-openai',
+      reasoningEffort: 'low',
     })
     expect(memoryRecord?.tags).toContain('murph-managed:overnight-memory-consolidation')
     expect(memoryRecord?.tags).toContain('runtime-maintenance')
