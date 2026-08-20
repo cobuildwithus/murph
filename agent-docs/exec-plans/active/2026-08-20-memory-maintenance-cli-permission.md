@@ -107,3 +107,8 @@ Updated: 2026-08-20
 - Local results: hosted-execution profile tests passed 4/4; Cloudflare container
   contract tests passed 11/11; changelog tests passed 57/57; hosted-execution,
   Cloudflare, and Web typechecks passed; `git diff --check` passed.
+- Native AMD64 result: the first exact-profile image run proved `/app` access
+  advanced the command to sandbox startup, then exposed a second exit-101
+  boundary before the Node CLI returned. Raw memory-command output remains
+  suppressed; the smoke now emits only fixed boolean error classifications so
+  the next exact run can identify that sandbox boundary without vault content.

@@ -1006,7 +1006,7 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     const result = readCodexCommandExecResult(message.result);
     if (result.exitCode !== 0) {
       const outputPreview = options.includeOutputPreviewOnFailure === false
-        ? ""
+        ? ` stderrDiagnostics=${classifySuppressedCommandStderr(result.stderr)}`
         : ` stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`;
       throw new Error(
         `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}${outputPreview}`,
@@ -2506,6 +2506,18 @@ interface CodexMemberWorkspacePermissionProof {
   memberWorkspacePreloadBypassDenied: boolean;
   memberWorkspaceTempWriteAllowed: boolean;
   memberWorkspaceVaultWriteAllowed: boolean;
+}
+
+function classifySuppressedCommandStderr(stderr: string): string {
+  return [
+    `rustPanic=${stderr.includes("panicked at")}`,
+    `sandboxRestriction=${stderr.includes("error applying Linux sandbox restrictions")}`,
+    `bubblewrap=${stderr.includes("bubblewrap") || stderr.includes("bwrap:")}`,
+    `permissionDenied=${stderr.includes("Permission denied")}`,
+    `operationNotPermitted=${stderr.includes("Operation not permitted")}`,
+    `notFound=${stderr.includes("No such file or directory")}`,
+    `nodeModuleNotFound=${stderr.includes("ERR_MODULE_NOT_FOUND") || stderr.includes("Cannot find module")}`,
+  ].join(",");
 }
 
 interface CodexGroupReadPermissionProof {

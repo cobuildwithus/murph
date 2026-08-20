@@ -926,6 +926,12 @@ describe("hosted runner container image contract", () => {
     expect(hostedRunnerSmokeChild).toContain(
       "options.includeOutputPreviewOnFailure === false",
     );
+    expect(hostedRunnerSmokeChild).toContain(
+      "stderrDiagnostics=${classifySuppressedCommandStderr(result.stderr)}",
+    );
+    expect(hostedRunnerSmokeChild).toContain(
+      "function classifySuppressedCommandStderr(stderr: string)",
+    );
     expect(hostedRunnerSmokeChild).toContain('"vault-show-default"');
     expect(hostedRunnerSmokeChild).toContain('"vault-show-explicit"');
     expect(hostedRunnerSmokeChild).toContain('"measurement-add"');
