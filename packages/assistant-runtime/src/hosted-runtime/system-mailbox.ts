@@ -289,6 +289,8 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
+  preferredRouteActions?: readonly HostedSystemMailboxRouteAction[] | null;
+  preferredWakeKinds?: readonly HostedExecutionSystemWake["kind"][] | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
   retainProcessedItemUntilRecorded?: boolean;
@@ -335,7 +337,34 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
           )
         ),
       };
-      const pending = findNextHostedSystemMailboxQueueItem({
+      const hasPreferredSelection = input.preferredRouteActions != null
+        || input.preferredWakeKinds != null;
+      const preferredSelectionState = hasPreferredSelection
+        ? {
+            pending: selectionState.pending.filter((item) =>
+              (
+                input.allowedRouteActions == null
+                || input.allowedRouteActions.includes(item.routeAction)
+              )
+              && (
+                input.preferredRouteActions == null
+                || input.preferredRouteActions.includes(item.routeAction)
+              )
+              && (
+                input.preferredWakeKinds == null
+                || input.preferredWakeKinds.includes(item.wake.kind)
+              )
+            ),
+          }
+        : null;
+      const preferredPending = preferredSelectionState === null
+        ? null
+        : findNextHostedSystemMailboxQueueItem({
+            allowedRouteActions: input.preferredRouteActions ?? null,
+            now: startedAt,
+            state: preferredSelectionState,
+          });
+      const pending = preferredPending ?? findNextHostedSystemMailboxQueueItem({
         allowedRouteActions: input.allowedRouteActions ?? null,
         now: startedAt,
         state: selectionState,

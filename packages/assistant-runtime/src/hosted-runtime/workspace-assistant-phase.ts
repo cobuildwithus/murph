@@ -340,7 +340,6 @@ const HOSTED_MEMBER_PREFERENCE_PRE_PLANNING_MAX_ITEMS = 10;
 
 export interface HostedWorkspaceRuntimeAssistantPhaseInput
   extends HostedWorkspaceRunnerAssistantPhaseInput {
-  foregroundCausalFirst?: boolean;
   foregroundCausalOnly?: boolean;
   deviceSyncMessagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
   request: HostedAssistantWorkspaceRuntimeJobInput["request"];
@@ -5526,7 +5525,6 @@ async function runSystemMailboxMaintenancePhase(input: {
       })
     : (
       pendingAssistantInputWakeAt !== null
-      || phaseInput.foregroundCausalFirst === true
       || phaseInput.foregroundCausalOnly === true
     )
       ? await prepareHostedSystemMailboxItemForCheckpoint({
@@ -5743,6 +5741,12 @@ async function runSystemMailboxMaintenancePhase(input: {
         : {}),
       executionContext: input.executionContext,
       operatorHomeRoot: phaseInput.restored.operatorHomeRoot,
+      ...(!hasBackgroundSelection && !hasExclusiveSelection
+        ? {
+            preferredRouteActions: HOSTED_PRE_CHECKPOINT_CAUSAL_ROUTE_ACTIONS,
+            preferredWakeKinds: HOSTED_PRE_CHECKPOINT_CAUSAL_WAKE_KINDS,
+          }
+        : {}),
       runtime: phaseInput.runtime,
       runtimeEnv: phaseInput.runtimeEnv,
       signal: phaseInput.signal ?? null,

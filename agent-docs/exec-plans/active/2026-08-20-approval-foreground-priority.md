@@ -36,9 +36,9 @@ Updated: 2026-08-20
 
 ## Constraints
 
-- Technical constraints: reuse the existing foreground-causal selector and
+- Technical constraints: reuse the existing approval-only causal predicates and
   exact parked-effect binding; keep work bounded and preserve general
-  oldest-first maintenance behavior when no causal continuation is ready.
+  oldest-first maintenance behavior when no approved continuation is ready.
 - Product/process constraints: ReviewGPT authors the initial implementation
   patch from a privacy-safe synthetic scenario. The parent inspects every hunk,
   applies only the smallest correct patch, and owns verification, commits,
@@ -91,33 +91,41 @@ Updated: 2026-08-20
 - No new durable owner, queue, state machine, or device-specific exception is
   justified.
 - ReviewGPT verified the root cause and authored the initial four-file patch.
-  Parent inspection confirmed the patch adds one transient post-checkpoint
-  selection hint and otherwise reuses the existing causal and maintenance
-  selectors.
+- Final ReviewGPT round 1 found that the initial transient one-shot hint could
+  be consumed by an unrelated Assistant Ask completion and would not persist
+  across multiple approved continuations. The finding was accepted.
+- The remediation deletes that hint and derives an approval-only preference
+  from durable mailbox state on every ordinary maintenance selection. The
+  unchanged oldest-first selector remains the fallback when no approval is due.
 
 ## Product UX Walkthrough
 
 - Person and path: an existing member approves an already-prepared foreground
   file action while the active runtime has dirty work and an older device wake.
 - Evidence: the production-shaped entrypoint test proves the mixed prefix stays
-  behind the idle checkpoint; the assistant-phase test proves the approval
-  continuation then binds and delivers only its parked effect before the older
-  device wake, which remains pending for its next maintenance pass.
-- Differences from plan: none. Presentation, permission language, approval
-  authority, and destination do not change, so screenshots add no material
-  evidence.
+  behind the idle checkpoint. Assistant-phase tests prove two approvals drain
+  in exact effect-ID order before the older device wake, an unrelated Assistant
+  Ask completion remains pending, and device-only work retains oldest-first
+  fallback behavior.
+- Differences from plan: ReviewGPT round 1 replaced the initial transient hint
+  with durable approval-only selection. Presentation, permission language,
+  approval authority, and destination do not change, so screenshots add no
+  material evidence.
 - Result: `Ready`.
 
 ## Verification
 
 - Completed local proof:
   - `pnpm exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-workspace-entrypoint.test.ts test/hosted-runtime-workspace-assistant-phase.test.ts`
-    passed 640 tests across both files.
+    passed 642 tests across both files after the round 1 remediation.
   - `pnpm typecheck` in `packages/assistant-runtime` passed.
   - Focused changelog fragment, registry, and route tests passed 49 tests.
   - Web typecheck passed after generating the changelog fragments.
-- Pending exact-head proof: GitHub required checks, preliminary
-  `completion-specialists`, and final `pr-review` ReviewGPT rounds.
+- Preliminary ReviewGPT `completion-specialists` passed on the first reviewed
+  head with Product UX and coverage marked applicable and complete.
+- Final ReviewGPT round 1 produced one accepted original-PR finding; the local
+  remediation proof is green. Round 2 and exact corrected-head CI remain
+  pending.
 - Expected outcome: synthetic approval delivery wins the first post-checkpoint
   selection; device work remains pending; all focused and exact-head checks are
   green; both ReviewGPT stages finish with no unresolved accepted findings.

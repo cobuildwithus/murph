@@ -9240,12 +9240,11 @@ describe("hosted workspace runtime entrypoint", () => {
     });
   }
 
-  test("keeps a mixed causal and device prefix gated, then prioritizes causal work", async () => {
+  test("keeps a mixed causal and device prefix gated until after checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const mailboxItems: HostedMailboxItem[] = [];
-    const foregroundCausalFirstValues: boolean[] = [];
     let assistantPhaseCalls = 0;
     const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
 
@@ -9290,9 +9289,6 @@ describe("hosted workspace runtime entrypoint", () => {
           runtimeWakeSignal,
           async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
-            foregroundCausalFirstValues.push(
-              input.foregroundCausalFirst === true,
-            );
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               setTimeout(() => {
@@ -9344,7 +9340,6 @@ describe("hosted workspace runtime entrypoint", () => {
         ),
         events.join(","),
       );
-      assert.deepEqual(foregroundCausalFirstValues, [false, true]);
       assert.equal(result.status, "idle");
     } finally {
       await removeTempRoot(vaultRoot);
