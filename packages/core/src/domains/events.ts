@@ -15,8 +15,6 @@ export {
   addCaptureWithLookup,
   addMeasurement,
   findCaptureByLookup,
-  readExpectedActivitySessionReplacement,
-  replaceActivitySession,
 } from "./events/attachment-backed.ts";
 export type {
   AddActivitySessionInput,
@@ -30,9 +28,6 @@ export type {
   AddMeasurementInput,
   AddMeasurementResult,
   FindCaptureByLookupResult,
-  ReadExpectedActivitySessionReplacementInput,
-  ReplaceActivitySessionInput,
-  ReplaceActivitySessionResult,
 } from "./events/attachment-backed.ts";
 export {
   buildActivitySessionEventDraft,
@@ -58,6 +53,8 @@ export {
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
+  readEvent,
+  readOwnedEvent,
   upsertEvent,
 } from "./events/ledger.ts";
 export {
@@ -85,6 +82,9 @@ export type {
   EventRawRefMatch,
   FindEventByExternalRefInput,
   FindEventsByRawRefsInput,
+  ReadEventInput,
+  ReadEventResult,
+  ReadOwnedEventInput,
   UpsertEventDraftInput,
   UpsertEventInput,
   UpsertEventPayloadInput,

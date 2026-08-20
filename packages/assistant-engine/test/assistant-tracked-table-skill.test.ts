@@ -172,30 +172,40 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain(
       'Starting a new workout is independent of every older unfinished workout',
     )
-    expect(skill).toContain('vault-cli workout replace')
-    expect(skill).toContain('--expected-revision')
-    expect(skill).toContain('--confirm-delete')
     expect(skill).toContain(
-      'Run exactly one `vault-cli workout replace` command',
+      "one repeated `--exercise 'name=...;sets=...;reps=...'` value per ordered ad-hoc exercise",
+    )
+    expect(skill).not.toContain('vault-cli workout replace')
+    expect(skill).not.toContain('--confirm-delete')
+    expect(skill).toContain('The start command must')
+    expect(skill).toContain(
+      'contain the complete ordered initial exercise list',
     )
     expect(skill).toContain(
-      'Do not separately delete, start, or add each exercise',
+      'Verify the successful start result identifies the new canonical `eventId`',
     )
     expect(skill).toContain(
-      'Other unfinished workouts are valid',
+      '`vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`',
+    )
+    expect(skill).toContain('Never delete first.')
+    expect(skill).toContain(
+      'If the guarded delete conflicts or fails, keep both workouts.',
     )
     expect(skill).toContain(
-      'one related-event target newly added',
+      'Never roll back or delete the successfully created replacement.',
+    )
+    expect(skill).toContain('Other unfinished workouts are valid')
+    expect(skill).toContain('Pass `reps=<n>` only')
+    expect(skill).toContain(
+      'for one exact member-stated integer count',
     )
     expect(skill).toContain(
-      'Pass `reps=<n>` only for one exact member-stated',
+      'format or an exact-reference reminder retains its specialized start',
     )
     expect(skill).toContain(
-      'A saved format or an exact-reference reminder never uses `workout',
+      'An ordinary request to start a workout does not itself',
     )
-    expect(skill).toContain(
-      'An ordinary request to start a workout does not itself authorize deletion.',
-    )
+    expect(skill).toContain('authorize deletion.')
     expect(skill).toContain(
       'Presentation order never proves exercise identity.',
     )

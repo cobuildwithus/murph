@@ -38,8 +38,6 @@ import {
   type EventRecordByKind,
 } from "./drafts.ts";
 import {
-  buildDeletedEventTombstone,
-  extractRetainedPaths,
   loadEventLedgerShardsById,
   selectLatestMatchedEvent,
   toEventLedgerFile,
@@ -78,19 +76,6 @@ export interface AddActivitySessionInput {
   rawImport?: RawImportOptions;
 }
 
-export interface ReplaceActivitySessionInput {
-  vaultRoot: string;
-  eventId: string;
-  expectedRevision: number;
-  draft: Omit<AttachmentBackedEventDraft<"activity_session">, "id">;
-}
-
-export interface ReadExpectedActivitySessionReplacementInput {
-  vaultRoot: string;
-  replacedEventId: string;
-  expectedRevision: number;
-}
-
 export interface AddBodyMeasurementInput {
   vaultRoot: string;
   draft: AttachmentBackedEventDraft<"body_measurement">;
@@ -120,11 +105,6 @@ export interface AddMeasurementInput {
 export interface AddActivitySessionResult extends UpsertEventResult {
   event: EventRecordByKind<"activity_session">;
   manifestPath: string | null;
-}
-
-export interface ReplaceActivitySessionResult extends AddActivitySessionResult {
-  replacedEventId: string;
-  retainedPaths: string[];
 }
 
 export interface AddBodyMeasurementResult extends UpsertEventResult {
@@ -740,179 +720,6 @@ export async function addActivitySession(
         lifecycle,
       ) as EventRecordByKind<"activity_session">,
   });
-}
-
-export async function replaceActivitySession(
-  input: ReplaceActivitySessionInput,
-): Promise<ReplaceActivitySessionResult> {
-  return withCanonicalWriteLock(input.vaultRoot, async () => {
-    const vault = await loadVault({ vaultRoot: input.vaultRoot });
-    const matchedShards = await loadEventLedgerShardsById(
-      input.vaultRoot,
-      input.eventId,
-    );
-    const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-
-    if (!latestMatchedEvent || isDeletedEventSpineRecord(latestMatchedEvent.record)) {
-      throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
-    }
-    if (latestMatchedEvent.record.kind !== "activity_session") {
-      throw new VaultError(
-        "EVENT_KIND_MISMATCH",
-        `Event "${input.eventId}" is not an activity session.`,
-      );
-    }
-    if (
-      !Number.isInteger(input.expectedRevision) ||
-      input.expectedRevision < 1 ||
-      eventSpineRevision(latestMatchedEvent.record) !== input.expectedRevision
-    ) {
-      throw new VaultError(
-        "EVENT_REVISION_CONFLICT",
-        `Event "${input.eventId}" changed before it could be replaced.`,
-      );
-    }
-
-    const replacementId = generateRecordId(ID_PREFIXES.event);
-    const now = new Date();
-    const tombstoneRecord = eventRecordSchema.parse({
-      ...buildDeletedEventTombstone(latestMatchedEvent.record, now),
-      links: [
-        ...(latestMatchedEvent.record.links ?? []),
-        { type: "related_to", targetId: replacementId },
-      ],
-    }) as EventRecordByKind<"activity_session">;
-    const replacementRecord = buildTypedEventRecord(
-      {
-        kind: "activity_session",
-        ...input.draft,
-        id: replacementId,
-        links: input.draft.links?.filter(
-          (link) =>
-            link.type !== "related_to" || link.targetId !== input.eventId,
-        ),
-      },
-      vault.metadata.timezone,
-      buildEventSpineLifecycle(1),
-    ) as EventRecordByKind<"activity_session">;
-    const tombstoneLedgerFile = toEventLedgerFile(tombstoneRecord.occurredAt);
-    const replacementLedgerFile = toEventLedgerFile(replacementRecord.occurredAt);
-
-    return runCanonicalWrite<ReplaceActivitySessionResult>({
-      vaultRoot: input.vaultRoot,
-      operationType: "activity_session_replace",
-      summary: `Replace activity session ${input.eventId}`,
-      occurredAt: now,
-      mutate: async ({ batch }) => {
-        await batch.stageJsonlAppend(
-          tombstoneLedgerFile,
-          `${JSON.stringify(tombstoneRecord)}\n`,
-        );
-        await batch.stageJsonlAppend(
-          replacementLedgerFile,
-          `${JSON.stringify(replacementRecord)}\n`,
-        );
-        await emitAuditRecord({
-          vaultRoot: input.vaultRoot,
-          batch,
-          action: "event_delete",
-          commandName: "core.replaceActivitySession",
-          summary: `Replaced activity_session ${input.eventId}.`,
-          occurredAt: now,
-          files: [tombstoneLedgerFile],
-          targetIds: [input.eventId],
-        });
-        await emitAuditRecord({
-          vaultRoot: input.vaultRoot,
-          batch,
-          action: "event_upsert",
-          commandName: "core.replaceActivitySession",
-          summary: `Wrote replacement activity_session ${replacementId}.`,
-          occurredAt: replacementRecord.occurredAt,
-          files: [replacementLedgerFile],
-          targetIds: [replacementId],
-        });
-
-        return {
-          eventId: replacementId,
-          ledgerFile: replacementLedgerFile,
-          created: true,
-          event: replacementRecord,
-          manifestPath: null,
-          replacedEventId: input.eventId,
-          retainedPaths: extractRetainedPaths(latestMatchedEvent.record),
-        };
-      },
-    });
-  });
-}
-
-export async function readExpectedActivitySessionReplacement(
-  input: ReadExpectedActivitySessionReplacementInput,
-): Promise<EventRecordByKind<"activity_session"> | null> {
-  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
-    return null;
-  }
-
-  return withCanonicalWriteLock(input.vaultRoot, async () => {
-    const replacedShards = await loadEventLedgerShardsById(
-      input.vaultRoot,
-      input.replacedEventId,
-    );
-    const replaced = selectLatestMatchedEvent(replacedShards)?.record ?? null;
-    if (
-      replaced?.kind !== "activity_session"
-      || !isDeletedEventSpineRecord(replaced)
-      || eventSpineRevision(replaced) !== input.expectedRevision + 1
-    ) {
-      return null;
-    }
-
-    const approvedRecords = replacedShards.flatMap((shard) =>
-      shard.matchingRecords.filter(
-        (record) => eventSpineRevision(record) === input.expectedRevision,
-      )
-    );
-    if (
-      approvedRecords.length !== 1
-      || approvedRecords[0]?.kind !== "activity_session"
-      || isDeletedEventSpineRecord(approvedRecords[0])
-    ) {
-      return null;
-    }
-
-    const approvedTargets = relatedEventTargetIds(approvedRecords[0]);
-    const addedTargets = [...relatedEventTargetIds(replaced)].filter(
-      (targetId) => !approvedTargets.has(targetId),
-    );
-    if (addedTargets.length !== 1) {
-      return null;
-    }
-
-    const replacementShards = await loadEventLedgerShardsById(
-      input.vaultRoot,
-      addedTargets[0]!,
-    );
-    const replacement = selectLatestMatchedEvent(replacementShards)?.record ?? null;
-    if (
-      replacement?.kind !== "activity_session"
-      || isDeletedEventSpineRecord(replacement)
-      || eventSpineRevision(replacement) !== 1
-    ) {
-      return null;
-    }
-    return replacement;
-  });
-}
-
-function relatedEventTargetIds(record: EventRecord): Set<string> {
-  return new Set(
-    (record.links ?? []).flatMap((link) =>
-      link.type === "related_to" && link.targetId.startsWith("evt_")
-        ? [link.targetId]
-        : []
-    ),
-  );
 }
 
 export async function addBodyMeasurement(

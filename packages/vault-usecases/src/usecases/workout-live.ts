@@ -1,5 +1,4 @@
 import {
-  type ActivitySessionEventRecord,
   type WorkoutLiveApplyMemberActionV1,
   type WorkoutExercise,
   type WorkoutMemberActionExpectedSetResultV1,
@@ -21,11 +20,9 @@ import {
 } from '@murphai/operator-config/workout-action-binding'
 
 import { showWorkoutFormat } from './workout-format.js'
-import { loadWorkoutCoreRuntime } from './workout-core.js'
 import {
   addStructuredWorkoutRecord,
   editWorkoutRecord,
-  replaceStructuredWorkoutRecord,
 } from './workout.js'
 import {
   LIVE_WORKOUT_SOURCE_APP,
@@ -34,9 +31,8 @@ import {
   type AddLiveWorkoutExerciseInput,
   type ClearLiveWorkoutSetInput,
   type FinishLiveWorkoutInput,
-  type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
-  type ReplaceLiveWorkoutInput,
+  type StartLiveWorkoutExerciseInput,
   type SetLiveWorkoutExerciseRepsInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
@@ -51,7 +47,6 @@ import {
   compactSetPatch,
   findLiveWorkoutActionTargets,
   normalizeLiveWorkoutActivityType,
-  normalizeLiveWorkoutId,
   normalizeOptionalText,
   normalizeWorkoutTimestamp,
   optionalString,
@@ -532,105 +527,17 @@ function projectMemberActionWorkoutSetResult(
   }
 }
 
-export async function replaceLiveWorkout(input: ReplaceLiveWorkoutInput) {
-  if (input.confirmDelete !== true) {
-    throw new VaultCliError(
-      'invalid_operation',
-      'Replacing a workout requires explicit deletion confirmation.',
-    )
-  }
-
-  const workoutId = normalizeLiveWorkoutId(input.workoutId)
-  return withLiveWorkoutMutationLock(input.vault, workoutId, () =>
-    replaceLiveWorkoutWithLockHeld(input, workoutId),
-  )
-}
-
-async function replaceLiveWorkoutWithLockHeld(
-  input: ReplaceLiveWorkoutInput,
-  workoutId: string,
-) {
-  if (!Number.isInteger(input.expectedRevision) || input.expectedRevision < 1) {
-    throw new VaultCliError(
-      'conflict',
-      'The confirmed workout changed after approval; replacement was not performed.',
-    )
-  }
-
-  const requested = buildLiveWorkoutReplacement(input)
-  try {
-    const shown = await resolveLiveWorkout(
-      { vault: input.vault, workoutId },
-      { requireOpen: true },
-    )
-    if (requireWorkoutEventRevision(shown) !== input.expectedRevision) {
-      throw new VaultCliError(
-        'conflict',
-        'The confirmed workout changed after approval; replacement was not performed.',
-      )
-    }
-
-    return await replaceStructuredWorkoutRecord({
-      vault: input.vault,
-      eventId: workoutId,
-      expectedRevision: input.expectedRevision,
-      draft: {
-        occurredAt: requested.startedAt,
-        source: 'manual',
-        title: requested.title,
-        note: requested.note,
-        activityType: requested.activityType,
-        durationMinutes: elapsedDurationMinutes(
-          requested.startedAt,
-          new Date().toISOString(),
-        ),
-        workout: requested.workout,
-      },
-    })
-  } catch (error) {
-    const replay = await readLiveWorkoutReplacementReplay({
-      expectedRevision: input.expectedRevision,
-      requested,
-      vault: input.vault,
-      workoutId,
-    })
-    if (replay !== null) {
-      return replay
-    }
-    throw error
-  }
-}
-
-interface RequestedLiveWorkoutReplacement {
-  activityType: string
-  explicitStartedAt: boolean
-  note: string
-  startedAt: string
-  title: string
-  workout: WorkoutSession
-}
-
-function buildLiveWorkoutReplacement(
-  input: ReplaceLiveWorkoutInput,
-): RequestedLiveWorkoutReplacement {
-  if (input.exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
+function buildInitialLiveWorkoutExercises(
+  exercises: readonly StartLiveWorkoutExerciseInput[],
+): WorkoutExercise[] {
+  if (exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
     throw new VaultCliError(
       'invalid_option',
       `Live workouts support at most ${MAX_LIVE_WORKOUT_EXERCISES} exercises.`,
     )
   }
 
-  const startedAt = normalizeWorkoutTimestamp(
-    input.startedAt ?? new Date().toISOString(),
-    'startedAt',
-  )
-  const title = requireNonEmptyText(input.name, 'Workout name is required.')
-  const requestedNote = normalizeOptionalText(input.note)
-  const activityTypeOverride = normalizeOptionalText(input.activityType)
-  const activityType = activityTypeOverride
-    ? normalizeLiveWorkoutActivityType(activityTypeOverride)
-    : 'strength-training'
-  const exercises = input.exercises.map((exercise, index) => {
+  return exercises.map((exercise, index) => {
     const setCount = exercise.setCount ?? 1
     if (
       !Number.isInteger(setCount)
@@ -676,143 +583,6 @@ function buildLiveWorkoutReplacement(
       })),
     }
   })
-  const workout = workoutSessionSchema.parse({
-    sourceApp: LIVE_WORKOUT_SOURCE_APP,
-    startedAt,
-    ...(requestedNote ? { sessionNote: requestedNote } : {}),
-    exercises,
-  })
-
-  return {
-    activityType,
-    explicitStartedAt: input.startedAt !== undefined,
-    note: requestedNote ?? title,
-    startedAt,
-    title,
-    workout,
-  }
-}
-
-async function readLiveWorkoutReplacementReplay(input: {
-  expectedRevision: number
-  requested: RequestedLiveWorkoutReplacement
-  vault: string
-  workoutId: string
-}) {
-  const canonical = await (await loadWorkoutCoreRuntime())
-    .readExpectedActivitySessionReplacement({
-      vaultRoot: input.vault,
-      replacedEventId: input.workoutId,
-      expectedRevision: input.expectedRevision,
-    })
-  if (
-    canonical === null
-    || !liveWorkoutMatchesRequestedReplacement({
-      candidate: canonical,
-      requested: input.requested,
-    })
-  ) {
-    return null
-  }
-  const shown = await resolveLiveWorkout({
-    vault: input.vault,
-    workoutId: canonical.id,
-  })
-  return liveWorkoutReplacementReplayResult(shown, canonical)
-}
-
-function liveWorkoutMatchesRequestedReplacement(input: {
-  candidate: ActivitySessionEventRecord
-  requested: RequestedLiveWorkoutReplacement
-}): boolean {
-  const parsedWorkout = workoutSessionSchema.safeParse(input.candidate.workout)
-  if (!parsedWorkout.success) {
-    return false
-  }
-  if (
-    input.candidate.title !== input.requested.title
-    || input.candidate.source !== 'manual'
-    || input.candidate.activityType !== input.requested.activityType
-    || input.candidate.note !== input.requested.note
-    || typeof input.candidate.distanceKm === 'number'
-  ) {
-    return false
-  }
-  if (
-    input.requested.explicitStartedAt
-    && (
-      input.candidate.occurredAt !== input.requested.startedAt
-      || parsedWorkout.data.startedAt !== input.requested.startedAt
-    )
-  ) {
-    return false
-  }
-
-  const { startedAt: _activeStartedAt, ...activeComparable } = parsedWorkout.data
-  const { startedAt: _requestedStartedAt, ...requestedComparable } =
-    input.requested.workout
-  return JSON.stringify(activeComparable) === JSON.stringify(requestedComparable)
-}
-
-function liveWorkoutReplacementReplayResult(
-  shown: WorkoutShowResult,
-  event: ActivitySessionEventRecord,
-) {
-  const durationMinutes = event.durationMinutes
-  if (
-    typeof durationMinutes !== 'number'
-    || !Number.isInteger(durationMinutes)
-    || durationMinutes < 1
-  ) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Workout ${shown.entity.id} has an invalid duration.`,
-    )
-  }
-  const title = requireString(
-    event.title,
-    `Workout ${shown.entity.id} is missing its title.`,
-  )
-
-  return {
-    vault: shown.vault,
-    eventId: shown.entity.id,
-    lookupId: shown.entity.id,
-    ledgerFile: requireString(
-      shown.entity.path,
-      `Workout ${shown.entity.id} is missing its ledger path.`,
-    ),
-    created: false,
-    occurredAt: event.occurredAt,
-    kind: 'activity_session' as const,
-    title,
-    activityType: requireString(
-      event.activityType,
-      `Workout ${shown.entity.id} is missing its activity type.`,
-    ),
-    durationMinutes,
-    distanceKm: typeof event.distanceKm === 'number' ? event.distanceKm : null,
-    workout: workoutSessionSchema.parse(event.workout),
-    manifestFile: null,
-    note: optionalString(event.note) ?? title,
-  }
-}
-
-function requireWorkoutEventRevision(shown: WorkoutShowResult): number {
-  const lifecycle = shown.entity.data.lifecycle
-  const revision =
-    typeof lifecycle === 'object'
-      && lifecycle !== null
-      && 'revision' in lifecycle
-      ? Reflect.get(lifecycle, 'revision')
-      : undefined
-  if (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 1) {
-    throw new VaultCliError(
-      'contract_invalid',
-      `Workout ${shown.entity.id} is missing its canonical revision.`,
-    )
-  }
-  return revision
 }
 
 export async function startLiveWorkout(input: StartLiveWorkoutInput) {
@@ -831,7 +601,14 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   const name = normalizeOptionalText(input.name)
   const note = normalizeOptionalText(input.note)
   const activityTypeOverride = normalizeOptionalText(input.activityType)
+  const initialExercises = input.exercises ?? []
   const durationMinutes = elapsedDurationMinutes(startedAt, observedAt)
+  if (routineLookup !== undefined && initialExercises.length > 0) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--exercise cannot be combined with --routine.',
+    )
+  }
   if (routineLookup !== undefined) {
     const routine = await showWorkoutFormat(input.vault, routineLookup)
     const routineTitle = requireString(
@@ -875,7 +652,7 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
     sourceApp: LIVE_WORKOUT_SOURCE_APP,
     startedAt,
     ...(note ? { sessionNote: note } : {}),
-    exercises: [],
+    exercises: buildInitialLiveWorkoutExercises(initialExercises),
   })
   return addStructuredWorkoutRecord({
     vault: input.vault,
@@ -916,10 +693,10 @@ async function addLiveWorkoutExerciseWithLockHeld(
   if (!Number.isInteger(order) || order < 1) {
     throw new VaultCliError('invalid_option', 'Exercise order must be a positive integer.')
   }
-  if (!Number.isInteger(setCount) || setCount < 1 || setCount > 150) {
+  if (!Number.isInteger(setCount) || setCount < 1 || setCount > MAX_LIVE_WORKOUT_SETS_PER_EXERCISE) {
     throw new VaultCliError(
       'invalid_option',
-      'Exercise set count must be between 1 and 150.',
+      `Exercise set count must be between 1 and ${MAX_LIVE_WORKOUT_SETS_PER_EXERCISE}.`,
     )
   }
 

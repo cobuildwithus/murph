@@ -25,16 +25,7 @@ export type ExerciseMode = NonNullable<WorkoutExercise['mode']>
 export type LoadUnit = NonNullable<WorkoutExercise['unitOverride']>
 export type SetType = NonNullable<WorkoutSet['type']>
 
-export interface StartLiveWorkoutInput {
-  vault: string
-  name?: string
-  routine?: string
-  activityType?: string
-  note?: string
-  startedAt?: string
-}
-
-export interface ReplaceLiveWorkoutExerciseInput {
+export interface StartLiveWorkoutExerciseInput {
   name: string
   sourceExerciseId?: string
   groupId?: string
@@ -45,16 +36,14 @@ export interface ReplaceLiveWorkoutExerciseInput {
   setCount?: number
 }
 
-export interface ReplaceLiveWorkoutInput {
+export interface StartLiveWorkoutInput {
   vault: string
-  workoutId: string
-  expectedRevision: number
-  confirmDelete: boolean
-  name: string
+  name?: string
+  routine?: string
   activityType?: string
   note?: string
   startedAt?: string
-  exercises: ReplaceLiveWorkoutExerciseInput[]
+  exercises?: StartLiveWorkoutExerciseInput[]
 }
 
 export interface LiveWorkoutLookupInput {

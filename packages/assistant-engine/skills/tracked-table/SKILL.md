@@ -23,9 +23,9 @@ For ordinary live logging, use the targeted workout commands below. Do not recon
 
 ## Live workout command surface
 
-- Start: `vault-cli workout start [name]` with optional `--routine <format lookup>`. Preserve the returned canonical `eventId`.
+- Start: `vault-cli workout start [name]` with either optional `--routine <format lookup>` or one repeated `--exercise 'name=...;sets=...;reps=...'` value per ordered ad-hoc exercise. Never combine `--routine` and `--exercise`. Preserve the returned canonical `eventId`.
 - Read one workout: `vault-cli workout show <evt_id> --format json`.
-- Replace one explicitly approved ad-hoc workout: `vault-cli workout replace <name> --workout-id <evt_id> --expected-revision <n> --confirm-delete [--exercise 'name=...;sets=...']`.
+- Delete one exact workout: `vault-cli workout delete <evt_id> --expected-revision <n>`. The expected revision must come from the exact approved workout read.
 - Add an exercise: `vault-cli workout exercise add <name> --workout-id <evt_id> --order <n> [--sets <n>]`. An explicit `--sets` count is a finite plan; omitting it creates one targetless log slot.
 - Store a fixed repetition prescription: `vault-cli workout exercise set-reps [exercise] --workout-id <evt_id> --reps <n>`.
 - Log or correct a set: `vault-cli workout set log [exercise] --workout-id <evt_id> --set-order <n>`.
@@ -47,37 +47,41 @@ Saved target values remain in the workout format. A newly started session contai
 
 A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set completion. Keep the last exact coordinate the member identified. If that coordinate still needs an actual result, ask one narrow question; if it already matches, make no workout mutation. Never advance to another set from an acknowledgement.
 
-The compound replacement path applies only to one fully specified ad-hoc
-workout. A saved format or an exact-reference reminder never uses `workout
-replace`; those requests retain their specialized start and exact-record flows.
-An ordinary request to start a workout does not itself authorize deletion.
+An explicitly approved ad-hoc replacement uses a create-first workflow. A saved
+format or an exact-reference reminder retains its specialized start and
+exact-record flow. An ordinary request to start a workout does not itself
+authorize deletion.
 
 When the current message explicitly directs Murph to delete or replace one
 named workout, or the member immediately gives an unambiguous affirmative to a
-bounded proposal, read that exact workout once and retain its canonical id and
-`lifecycle.revision`. The proposal names the workout that will be deleted and
-repeats the replacement title, every exercise, every stated set count, and any
-exact repetition count the member assigned to every set of that exercise.
-Run exactly one `vault-cli workout replace` command with that proposal-time
-`--workout-id`, proposal-time `--expected-revision`, `--confirm-delete`, and one
-repeated `--exercise` specification per requested exercise.
-Do not separately delete, start, or add each exercise, and do not perform another preflight read
-after the immediate approval. Omit an unstated set count so that exercise gets
-one targetless pending slot. Pass `reps=<n>` only for one exact member-stated
-count that applies to every set; never derive it from a range, AMRAP, target,
-prior workout, or assistant suggestion.
+bounded proposal, read that exact workout and retain its canonical id and
+`lifecycle.revision`. The proposal names the workout that may be deleted and
+repeats the replacement title, every exercise in order, every stated set count,
+and any exact repetition count the member assigned to every set of that
+exercise.
 
-The command takes the exact workout's record-scoped lock, revalidates that the
-approval-bound revision is unchanged, and atomically writes the old tombstone
-plus the complete replacement. Other unfinished workouts are valid and remain
-untouched. A retry after a committed write may return the existing replacement
-without another write only when the one related-event target newly added to the
-canonical tombstone relative to the approved revision identifies a replacement
-that exactly matches the approved revision and requested content. A
-missing, completed, changed, wrong-revision, or nonmatching record fails closed.
-Say that nothing was replaced and ask a fresh bounded replacement question from
-a new exact read. Treat a successful or proven replay result as the verification
-result and return its refreshed workout card.
+After explicit approval:
+
+1. Run one `vault-cli workout start <name>` command with one repeated
+   `--exercise` specification per requested exercise. The start command must
+   contain the complete ordered initial exercise list; never create an empty
+   workout and follow it with exercise mutations.
+2. Verify the successful start result identifies the new canonical `eventId`
+   and contains the complete ordered requested workout. If creation fails, the
+   result is missing, or the created contents cannot be verified, stop. Keep the
+   old workout and do not issue its delete.
+3. Only after that verified creation, run
+   `vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`.
+   Never delete first.
+4. If the guarded delete conflicts or fails, keep both workouts.
+   Never roll back or delete the successfully created replacement. Report the
+   exact ids and failure, reconcile from fresh exact reads, and obtain new
+   approval before any later deletion.
+
+Other unfinished workouts are valid and remain untouched. Omit an unstated set
+count so that exercise gets one targetless pending slot. Pass `reps=<n>` only
+for one exact member-stated integer count that applies to every set; never
+derive it from a range, AMRAP, target, prior workout, or assistant suggestion.
 
 ## Scheduled reminder relationship context
 
@@ -91,15 +95,15 @@ When immediate causal context instead names an existing exact workout id, exact-
 
 Explicit historical intent remains explicit targeting. A correction naming yesterday, an older date, an older workout id, or an older card updates only that exact historical event; reminder context never redirects it to a different routine or closes another workout as a side effect.
 
-The legacy `workout edit` full-structure replacement remains available only for a deliberate identity-preserving structural operation that the targeted surface cannot express, such as a reorder, addition, or coordinated field edit. Read the complete record first and preserve every unrequested field. Keep an existing `sourceExerciseId` on that same exercise; without one, keep its exact canonical name. Presentation order never proves exercise identity. The CLI refuses a structured replacement that omits, ambiguously matches, or semantically replaces a saved exercise or omits a saved set. Use `--clear-workout` only when the member explicitly wants to remove all structured workout details while preserving the event, and use `vault-cli workout delete <evt_id>` only when they want to remove the entire record.
+The legacy `workout edit` full-structure replacement remains available only for a deliberate identity-preserving structural operation that the targeted surface cannot express, such as a reorder, addition, or coordinated field edit. Read the complete record first and preserve every unrequested field. Keep an existing `sourceExerciseId` on that same exercise; without one, keep its exact canonical name. Presentation order never proves exercise identity. The CLI refuses a structured replacement that omits, ambiguously matches, or semantically replaces a saved exercise or omits a saved set. Use `--clear-workout` only when the member explicitly wants to remove all structured workout details while preserving the event, and use `vault-cli workout delete <evt_id> --expected-revision <n>` only when they want to remove the entire record and the revision comes from that exact approved read.
 
 ## Starting a workout
 
-1. Resolve the requested saved format when the member names one. If there is no reusable plan, start a clearly requested empty session and preserve every distinct exercise the member named, including closely related variations; never collapse or omit one.
-2. Run `vault-cli workout start`, passing `--routine` for a saved format. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
-3. Preserve the returned canonical event id and pass it to every later mutation. Use exactly a stated set count with `workout exercise add --sets`; that count is finite. When no count is stated, omit `--sets` to create one targetless unlogged slot, not a claimed plan or completed set.
-4. If the member assigns one exact repetition count to every set of an exercise, persist it immediately with `workout exercise set-reps` on the returned workout id.
-5. Treat each successful command result as verification. Read the format separately before presenting planned targets.
+1. Resolve the requested saved format when the member names one. If there is no reusable plan, preserve the complete ordered list of every distinct exercise the member named, including closely related variations; never collapse or omit one.
+2. Run one `vault-cli workout start`, passing `--routine` for a saved format or one repeated `--exercise` specification per ad-hoc exercise. Never combine those inputs, and never create an empty workout followed by initial exercise mutations. Starting a new workout is independent of every older unfinished workout and never infers or writes an end for another record.
+3. Put each stated set count in that exercise's initial specification; the count is finite. When no count is stated, omit `sets` so creation supplies one targetless unlogged slot, not a claimed plan or completed set.
+4. Put `reps=<n>` in the initial specification only when the member assigns one exact integer repetition count to every set of that exercise. Use `workout exercise set-reps` only for a later change to that exercise-owned fact.
+5. Preserve the returned canonical event id and pass it to every later mutation. Treat the successful complete start result as verification. Read the format separately before presenting planned targets.
 
 Never use `workout format log` to start a live workout. That command records a completed workout from a format; a live session keeps targets in the format and actual performance in the event.
 

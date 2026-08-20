@@ -537,12 +537,21 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
 
   await withCliUsecaseMocks({
     coreRuntime: {
+      readEvent: async () => ({
+        eventId: eventRecord.primaryLookupId,
+        ledgerFile: eventRecord.path,
+        event: eventRecord.attributes,
+      }),
       upsertEvent: async (input: { payload: Record<string, unknown> }) => {
         capturedPayloads.push(input.payload);
         return {
           eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
           ledgerFile: "ledger/events/2026/2026-03.jsonl",
           created: false,
+          event: {
+            ...input.payload,
+            lifecycle: { revision: 8 },
+          },
         };
       },
     },

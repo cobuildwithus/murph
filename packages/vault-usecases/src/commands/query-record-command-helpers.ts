@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { extractIsoDatePrefix } from '@murphai/contracts'
+import { extractIsoDatePrefix, type EventRecord } from '@murphai/contracts'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
@@ -96,6 +96,54 @@ export function toCommandShowEntity(
     record,
     toCommandEntityLinks(record, { extraLinkKeys }),
   )
+}
+
+/**
+ * Maps one canonical event into the same command-facing shape as the query
+ * projection without reading or rebuilding that projection.
+ */
+export function toExactEventQueryRecord(
+  event: EventRecord,
+  ledgerFile: string,
+): QueryRecord {
+  const displayId = event.kind === 'document'
+    ? event.documentId
+    : event.kind === 'meal'
+      ? event.mealId
+      : event.id
+  const relatedIds = [...new Set((event.links ?? []).map((link) => link.targetId))]
+  const attributes: JsonObject = structuredClone(event) as JsonObject
+
+  if (displayId !== event.id) {
+    attributes.entityId = displayId
+    attributes.eventIds = [event.id]
+  }
+
+  return {
+    entityId: displayId,
+    primaryLookupId: displayId,
+    lookupIds: [...new Set([displayId, event.id, ...relatedIds])],
+    family: 'event',
+    recordClass: 'ledger',
+    kind: event.kind,
+    status: typeof attributes.status === 'string' ? attributes.status : null,
+    occurredAt: event.occurredAt,
+    date: event.dayKey ?? extractIsoDatePrefix(event.occurredAt),
+    path: ledgerFile,
+    title: event.title,
+    body: event.note ?? null,
+    attributes,
+    frontmatter: null,
+    links: (event.links ?? []).map((link) => ({
+      type: link.type as QueryRecord['links'][number]['type'],
+      targetId: link.targetId,
+    })),
+    relatedIds,
+    stream: null,
+    experimentSlug:
+      typeof attributes.experimentSlug === 'string' ? attributes.experimentSlug : null,
+    tags: [...(event.tags ?? [])],
+  }
 }
 
 export function toOwnedEventCommandShowEntity(

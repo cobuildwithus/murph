@@ -10,10 +10,9 @@ import {
   clearLiveWorkoutSet,
   finishLiveWorkout,
   logLiveWorkoutSet,
-  replaceLiveWorkout,
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
-  type ReplaceLiveWorkoutExerciseInput,
+  type StartLiveWorkoutExerciseInput,
 } from '@murphai/vault-usecases/workouts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
@@ -28,12 +27,6 @@ const workoutIdOption = z
   .regex(/^evt_[0-9A-Za-z]+$/u)
   .describe('Canonical workout id returned by workout start or workout show.')
 
-const expectedWorkoutRevisionOption = z
-  .number()
-  .int()
-  .min(1)
-  .describe('Exact lifecycle revision shown when replacement was approved.')
-
 const exerciseModeSchema = z.enum([
   'weight_reps',
   'bodyweight',
@@ -43,7 +36,7 @@ const exerciseModeSchema = z.enum([
   'cardio',
 ])
 
-const replacementExerciseFields = new Set([
+const initialExerciseFields = new Set([
   'name',
   'reps',
   'sets',
@@ -54,46 +47,46 @@ const replacementExerciseFields = new Set([
   'note',
 ])
 
-function invalidReplacementExercise(message: string): never {
+function invalidInitialExercise(message: string): never {
   throw new VaultCliError('invalid_option', message)
 }
 
-function parseReplacementExercise(
+function parseInitialExercise(
   entry: string,
-): ReplaceLiveWorkoutExerciseInput {
+): StartLiveWorkoutExerciseInput {
   const fields = parseCompactFields(
     entry,
     'exercise',
-    invalidReplacementExercise,
+    invalidInitialExercise,
   )
   rejectUnsupportedCompactFields(
     fields,
     'exercise',
-    replacementExerciseFields,
-    invalidReplacementExercise,
+    initialExerciseFields,
+    invalidInitialExercise,
   )
   const setCount = compactInteger(
     fields,
     'sets',
     'exercise',
-    invalidReplacementExercise,
+    invalidInitialExercise,
   )
   const reps = compactInteger(
     fields,
     'reps',
     'exercise',
-    invalidReplacementExercise,
+    invalidInitialExercise,
   )
   const mode = fields.get('mode')
   const parsedMode = mode === undefined
     ? undefined
     : exerciseModeSchema.safeParse(mode)
   if (parsedMode !== undefined && !parsedMode.success) {
-    invalidReplacementExercise('--exercise field mode is invalid.')
+    invalidInitialExercise('--exercise field mode is invalid.')
   }
   const unitOverride = fields.get('unitOverride')
   if (unitOverride !== undefined && unitOverride !== 'lb' && unitOverride !== 'kg') {
-    invalidReplacementExercise('--exercise field unitOverride must be lb or kg.')
+    invalidInitialExercise('--exercise field unitOverride must be lb or kg.')
   }
   const parsedUnitOverride = unitOverride === 'lb' || unitOverride === 'kg'
     ? unitOverride
@@ -104,7 +97,7 @@ function parseReplacementExercise(
       fields,
       'name',
       'exercise',
-      invalidReplacementExercise,
+      invalidInitialExercise,
     ),
     ...(reps === undefined ? {} : { reps }),
     ...(setCount === undefined ? {} : { setCount }),
@@ -147,7 +140,7 @@ const requiredSetOrderOption = z
 export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
   workout.command('start', {
     description:
-      'Start a canonical live workout, optionally from a saved workout format.',
+      'Start one complete canonical live workout, optionally from a saved workout format.',
     args: z.object({
       name: z
         .string()
@@ -166,11 +159,15 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         },
       },
       {
-        description: 'Start an empty strength session.',
+        description: 'Start an ad-hoc session with its ordered exercises.',
         args: {
           name: "'Hotel gym'",
         },
         options: {
+          exercise: [
+            "'name=Goblet squat;sets=3;reps=10;mode=weight_reps;unitOverride=lb'",
+            "'name=Row, neutral grip;sets=3;reps=12;mode=weight_reps'",
+          ],
           vault: './vault',
         },
       },
@@ -183,6 +180,13 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .min(1)
         .optional()
         .describe('Optional saved workout-format id, slug, or exact title.'),
+      exercise: z
+        .array(z.string().min(1).max(1000))
+        .max(100)
+        .optional()
+        .describe(
+          'Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
+        ),
       type: z
         .string()
         .min(1)
@@ -208,66 +212,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         activityType: options.type,
         note: options.note,
         startedAt: options.startedAt,
-      })
-    },
-  })
-
-  workout.command('replace', {
-    description:
-      'Atomically delete one exact open workout and start its approved replacement.',
-    args: z.object({
-      name: z.string().min(1).max(240).describe('Replacement workout title.'),
-    }),
-    examples: [
-      {
-        description: 'Replace one explicitly confirmed workout.',
-        args: { name: "'Upper body'" },
-        options: {
-          workoutId: 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
-          expectedRevision: 1,
-          confirmDelete: true,
-          exercise: [
-            "'name=Pull-up;sets=3;reps=10;mode=bodyweight'",
-            "'name=Push-up;sets=3;reps=12;mode=bodyweight'",
-          ],
-          vault: './vault',
-        },
-      },
-    ],
-    hint:
-      'Use only after the member explicitly approves deleting this exact workout revision. Other unfinished workouts are unaffected.',
-    options: withBaseOptions({
-      workoutId: workoutIdOption,
-      expectedRevision: expectedWorkoutRevisionOption,
-      confirmDelete: z
-        .boolean()
-        .optional()
-        .describe('Required explicit acknowledgement that deletion was approved.'),
-      exercise: z
-        .array(z.string().min(1).max(1000))
-        .max(100)
-        .optional()
-        .describe(
-          'Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order.',
-        ),
-      type: z.string().min(1).max(120).optional(),
-      note: z.string().min(1).max(4000).optional(),
-      startedAt: isoTimestampSchema
-        .optional()
-        .describe('Optional replacement start timestamp. Defaults to now.'),
-    }),
-    output: workoutAddResultSchema,
-    async run({ args, options }) {
-      return replaceLiveWorkout({
-        vault: options.vault,
-        workoutId: options.workoutId,
-        expectedRevision: options.expectedRevision,
-        confirmDelete: options.confirmDelete === true,
-        name: args.name,
-        activityType: options.type,
-        note: options.note,
-        startedAt: options.startedAt,
-        exercises: options.exercise?.map(parseReplacementExercise) ?? [],
+        exercises: options.exercise?.map(parseInitialExercise) ?? [],
       })
     },
   })

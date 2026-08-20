@@ -64,12 +64,14 @@ export interface UpsertEventPayloadInput {
   vaultRoot: string;
   payload: JsonObject;
   allowSpecializedKindRewrite?: boolean;
+  expectedRevision?: number;
 }
 
 export interface UpsertEventDraftInput {
   vaultRoot: string;
   draft: PublicEventDraft;
   allowSpecializedKindRewrite?: boolean;
+  expectedRevision?: number;
 }
 
 export type UpsertEventInput = UpsertEventPayloadInput | UpsertEventDraftInput;
@@ -77,6 +79,18 @@ export type UpsertEventInput = UpsertEventPayloadInput | UpsertEventDraftInput;
 export interface DeleteEventInput {
   vaultRoot: string;
   eventId: string;
+  expectedRevision?: number;
+}
+
+export interface ReadEventInput {
+  vaultRoot: string;
+  eventId: string;
+}
+
+export interface ReadOwnedEventInput {
+  vaultRoot: string;
+  kind: "document" | "meal";
+  ownerId: string;
 }
 
 export interface FindEventByExternalRefInput {
@@ -104,6 +118,13 @@ export interface UpsertEventResult {
   eventId: string;
   ledgerFile: string;
   created: boolean;
+  event: EventRecord;
+}
+
+export interface ReadEventResult {
+  eventId: string;
+  ledgerFile: string;
+  event: EventRecord;
 }
 
 export interface DeleteEventResult {
@@ -530,6 +551,139 @@ export async function loadEventLedgerShardsById(
   return matches;
 }
 
+function requireCurrentEvent(
+  eventId: string,
+  matchedShards: readonly LoadedEventLedgerShard[],
+): MatchedEventRecord {
+  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  if (!latestMatchedEvent || isDeletedEventSpineRecord(latestMatchedEvent.record)) {
+    throw new VaultError("EVENT_MISSING", `Event "${eventId}" was not found.`);
+  }
+  return latestMatchedEvent;
+}
+
+function assertExpectedEventRevision(input: {
+  eventId: string;
+  expectedRevision: number | undefined;
+  latestMatchedEvent: MatchedEventRecord | null;
+}): void {
+  if (input.expectedRevision === undefined) {
+    return;
+  }
+  if (
+    !Number.isInteger(input.expectedRevision)
+    || input.expectedRevision < 1
+    || input.latestMatchedEvent === null
+    || isDeletedEventSpineRecord(input.latestMatchedEvent.record)
+    || eventSpineRevision(input.latestMatchedEvent.record) !== input.expectedRevision
+  ) {
+    throw new VaultError(
+      "EVENT_REVISION_CONFLICT",
+      `Event "${input.eventId}" changed before the operation could be applied.`,
+    );
+  }
+}
+
+export async function readEvent(input: ReadEventInput): Promise<ReadEventResult> {
+  const latestMatchedEvent = requireCurrentEvent(
+    input.eventId,
+    await loadEventLedgerShardsById(input.vaultRoot, input.eventId),
+  );
+  return {
+    eventId: latestMatchedEvent.record.id,
+    ledgerFile: latestMatchedEvent.relativePath,
+    event: latestMatchedEvent.record,
+  };
+}
+
+export async function readOwnedEvent(
+  input: ReadOwnedEventInput,
+): Promise<ReadEventResult> {
+  const relativePaths = await walkVaultFiles(
+    input.vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+    { extension: ".jsonl" },
+  );
+  const candidateIds = new Set<string>();
+  const ownerField = input.kind === "document" ? "documentId" : "mealId";
+
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    for (const rawRecord of records) {
+      const candidate = rawRecord as JsonObject;
+      if (
+        candidate.kind === input.kind
+        && candidate[ownerField] === input.ownerId
+        && typeof candidate.id === "string"
+      ) {
+        candidateIds.add(candidate.id);
+      }
+    }
+  }
+  if (candidateIds.size === 0) {
+    throw new VaultError(
+      "EVENT_MISSING",
+      `${input.kind} event owner "${input.ownerId}" was not found.`,
+    );
+  }
+
+  const matchesById = new Map<string, MatchedEventRecord[]>();
+  for (const relativePath of relativePaths) {
+    const records = await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath });
+    for (const rawRecord of records) {
+      const rawId = (rawRecord as JsonObject).id;
+      if (typeof rawId !== "string" || !candidateIds.has(rawId)) {
+        continue;
+      }
+      const record = validateStoredEventRecord(rawRecord as JsonObject);
+      const matches = matchesById.get(record.id) ?? [];
+      matches.push({ relativePath, record });
+      matchesById.set(record.id, matches);
+    }
+  }
+
+  const liveMatches = [...matchesById.values()].flatMap((matches) => {
+    const latest = selectLatestEventSpineEntry(matches);
+    return latest
+      && !isDeletedEventSpineRecord(latest.record)
+      && ownedEventId(latest.record, input.kind) === input.ownerId
+      ? [latest]
+      : [];
+  });
+  if (liveMatches.length === 0) {
+    throw new VaultError(
+      "EVENT_MISSING",
+      `${input.kind} event owner "${input.ownerId}" was not found.`,
+    );
+  }
+  if (liveMatches.length > 1) {
+    throw new VaultError(
+      "EVENT_OWNER_AMBIGUOUS",
+      `${input.kind} event owner "${input.ownerId}" resolves to multiple events.`,
+    );
+  }
+
+  const match = liveMatches[0]!;
+  return {
+    eventId: match.record.id,
+    ledgerFile: match.relativePath,
+    event: match.record,
+  };
+}
+
+function ownedEventId(
+  record: EventRecord,
+  kind: ReadOwnedEventInput["kind"],
+): string | null {
+  if (kind === "document" && record.kind === "document") {
+    return record.documentId;
+  }
+  if (kind === "meal" && record.kind === "meal") {
+    return record.mealId;
+  }
+  return null;
+}
+
 export function extractRetainedPaths(record: EventRecord): string[] {
   return collectEventRawReferencePaths(record);
 }
@@ -576,6 +730,11 @@ async function upsertEventLocked(
       : await loadEventLedgerShardsById(input.vaultRoot, suppliedEventId);
 
   const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
+  assertExpectedEventRevision({
+    eventId: suppliedEventId ?? "new event",
+    expectedRevision: input.expectedRevision,
+    latestMatchedEvent,
+  });
   if (
     suppliedEventId !== undefined &&
     latestMatchedEvent !== null &&
@@ -635,6 +794,7 @@ async function upsertEventLocked(
         eventId: eventRecord.id,
         ledgerFile,
         created: matchedShards.length === 0,
+        event: eventRecord,
       };
     },
   });
@@ -650,15 +810,12 @@ async function deleteEventLocked(
   input: DeleteEventInput,
 ): Promise<DeleteEventResult> {
   const matchedShards = await loadEventLedgerShardsById(input.vaultRoot, input.eventId);
-
-  if (matchedShards.length === 0) {
-    throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
-  }
-
-  const latestMatchedEvent = selectLatestMatchedEvent(matchedShards);
-  if (!latestMatchedEvent || isDeletedEventSpineRecord(latestMatchedEvent.record)) {
-    throw new VaultError("EVENT_MISSING", `Event "${input.eventId}" was not found.`);
-  }
+  const latestMatchedEvent = requireCurrentEvent(input.eventId, matchedShards);
+  assertExpectedEventRevision({
+    eventId: input.eventId,
+    expectedRevision: input.expectedRevision,
+    latestMatchedEvent,
+  });
   const now = new Date();
   const tombstoneRecord = buildDeletedEventTombstone(latestMatchedEvent.record, now);
   const tombstoneLedgerFile = toEventLedgerFile(tombstoneRecord.occurredAt);

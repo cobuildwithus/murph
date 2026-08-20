@@ -1,4 +1,5 @@
 import {
+  type EventRecord,
   type EventSource,
   type ActivityStrengthExercise,
   type JsonObject,
@@ -509,50 +510,6 @@ export async function addStructuredWorkoutRecord(input: {
   }
 }
 
-export async function replaceStructuredWorkoutRecord(input: {
-  vault: string
-  eventId: string
-  expectedRevision: number
-  draft: ActivitySessionDraft
-}) {
-  const durationMinutes = input.draft.durationMinutes
-  if (durationMinutes === undefined) {
-    throw new VaultCliError(
-      'invalid_option',
-      'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
-    )
-  }
-  const core = await loadWorkoutCoreRuntime()
-
-  try {
-    const result = await core.replaceActivitySession({
-      vaultRoot: input.vault,
-      eventId: input.eventId,
-      expectedRevision: input.expectedRevision,
-      draft: input.draft,
-    })
-
-    return {
-      vault: input.vault,
-      eventId: result.eventId,
-      lookupId: result.eventId,
-      ledgerFile: result.ledgerFile,
-      created: result.created,
-      occurredAt: result.event.occurredAt,
-      kind: 'activity_session' as const,
-      title: result.event.title,
-      activityType: result.event.activityType,
-      durationMinutes,
-      distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
-      workout: result.event.workout ?? null,
-      manifestFile: result.manifestPath,
-      note: result.event.note ?? result.event.title,
-    }
-  } catch (error) {
-    throw toEventUpsertVaultCliError(error)
-  }
-}
-
 export async function addWorkoutRecord(input: AddWorkoutRecordInput) {
   let draft: ActivitySessionDraft
 
@@ -783,6 +740,10 @@ interface EditWorkoutRecordInput {
   set?: string[]
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
+  validatedEvent?: {
+    event: EventRecord
+    ledgerFile: string
+  }
 }
 
 async function persistWorkoutRecordEdit(input: EditWorkoutRecordInput) {
@@ -795,9 +756,13 @@ async function persistWorkoutRecordEdit(input: EditWorkoutRecordInput) {
     clear: input.clear,
     dayKeyPolicy: input.dayKeyPolicy,
     expectedKinds: ['activity_session'],
+    validatedEvent: input.validatedEvent,
   })
 
-  return showWorkoutRecord(input.vault, result.lookupId)
+  return {
+    vault: input.vault,
+    entity: result.entity,
+  }
 }
 
 export async function editWorkoutRecord(input: EditWorkoutRecordInput) {
@@ -806,11 +771,11 @@ export async function editWorkoutRecord(input: EditWorkoutRecordInput) {
 }
 
 /**
- * Persists a live-workout replacement after its exact-record owner validates
- * the complete next exercise snapshot. Generic workout edits must use
+ * Persists a validated complete exercise snapshot after its exact-record owner
+ * proves one targeted structural mutation. Generic workout edits must use
  * editWorkoutRecord so omissions and ambiguous exercise identity fail closed.
  */
-export function editWorkoutRecordAfterValidatedExerciseReplacement(
+export function editWorkoutRecordAfterValidatedExerciseUpdate(
   input: {
     durationMinutes?: number
     endedAt?: string
@@ -818,6 +783,10 @@ export function editWorkoutRecordAfterValidatedExerciseReplacement(
     lastMemberActionId?: string
     lookup: string
     vault: string
+    validatedEvent: {
+      event: EventRecord
+      ledgerFile: string
+    }
   },
 ) {
   const set = [
@@ -836,18 +805,21 @@ export function editWorkoutRecordAfterValidatedExerciseReplacement(
     lookup: input.lookup,
     set,
     vault: input.vault,
+    validatedEvent: input.validatedEvent,
   })
 }
 
 export async function deleteWorkoutRecord(input: {
   vault: string
   lookup: string
+  expectedRevision: number
 }) {
   return deleteEventRecord({
     vault: input.vault,
     lookup: input.lookup,
     entityLabel: 'workout',
     expectedKinds: ['activity_session'],
+    expectedRevision: input.expectedRevision,
   })
 }
 

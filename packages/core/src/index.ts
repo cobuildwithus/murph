@@ -116,7 +116,6 @@ export {
   addCapture,
   addCaptureWithLookup,
   addMeasurement,
-  replaceActivitySession,
   addMeal,
   appendImmunization,
   applyCanonicalWriteBatch,
@@ -174,14 +173,15 @@ export {
   upsertWorkoutFormat,
   validateVault,
 } from "./public-mutations.ts";
-export {
-  readExpectedActivitySessionReplacement,
-} from "./domains/events.ts";
 export type {
   ExperimentMediaRepairBlocker,
   RepairExperimentMediaInput,
   RepairExperimentMediaResult,
 } from "./experiment-media-repair.ts";
+export {
+  readEvent,
+  readOwnedEvent,
+} from "./domains/events.ts";
 export {
   listHabitatAspects,
   readHabitatAspect,
@@ -362,8 +362,9 @@ export type {
   FindEventsByRawRefsInput,
   PublicEventDraft,
   PublicWritableEventKind,
-  ReplaceActivitySessionInput,
-  ReplaceActivitySessionResult,
+  ReadEventInput,
+  ReadEventResult,
+  ReadOwnedEventInput,
   RemoveAutomaticMealPhotoInput,
   RemoveAutomaticMealPhotoResult,
   RunGeneratedImageCaptureRetentionInput,

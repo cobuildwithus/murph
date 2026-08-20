@@ -175,20 +175,22 @@ Every mutation carries the exact canonical workout id and uses that workout's
 record-scoped lock. Multiple unfinished workouts are valid; there is no global
 active or focused singleton.
 
-Replacing one fully specified ad-hoc workout is a distinct, approval-bound
-operation. Murph retains the exact workout id and lifecycle revision from the
-bounded deletion proposal, then issues one compound replacement after explicit
-approval; it never composes separate delete, start, and exercise-add commands.
-The record-scoped write revalidates that exact revision and atomically commits a
-tombstone linked to the complete replacement without inspecting or changing
-other unfinished workouts. The replacement does not link back to the deleted
-workout, so a stale exact id cannot become an alias for the new record. A lost
-command result converges only when the link added from the approved revision to
-its tombstone identifies one revision-1 replacement and the approved revision
-and requested workout content all match; otherwise no replacement is inferred
-or written. Exact member-stated repetitions for every set of an exercise are
-stored on that exercise in the same replacement write. Saved-routine starts
-and exact-reference reminder flows keep their specialized precedence.
+Replacing one fully specified ad-hoc workout is an approval-bound,
+create-first workflow. Murph retains the exact old workout id and lifecycle
+revision from the bounded deletion proposal. After approval it creates the
+complete ordered replacement with one `workout start` invocation and repeated
+compact exercise values, so the canonical event is valid before its one
+creation write; it never starts an empty event and appends the initial
+exercises. Exact member-stated repetitions for every set of an exercise are
+stored on that exercise in that creation write.
+
+Murph verifies the successful creation result before issuing the exact old
+workout delete with the proposal-time lifecycle revision. It never deletes
+first. A creation failure leaves the old workout untouched. A stale or failed
+delete leaves both workouts, never rolls back the successfully created
+replacement, and requires fresh exact reconciliation before any later deletion.
+Other unfinished workouts remain valid and untouched. Saved-routine starts and
+exact-reference reminder flows keep their specialized precedence.
 
 Generic full-structure edits preserve exercise-owned repetition and finite-plan
 facts only across proven exercise continuity. An existing stable

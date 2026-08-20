@@ -15,6 +15,7 @@ import {
   resolveRawImportManifestFile,
   toListEntity,
 } from './shared.js'
+import { readExactEventRecord } from './exact-event-record.js'
 import {
   relativePathEntries,
   relativePathStrings,
@@ -147,11 +148,16 @@ async function showTrackedWorkoutManifest(
 }
 
 export async function showWorkoutRecord(vault: string, lookup: string) {
-  const record = await loadTrackedWorkoutRecord(vault, lookup, ['activity_session'], 'workout')
+  const exact = await readExactEventRecord({
+    vault,
+    lookup,
+    entityLabel: 'workout',
+    expectedKinds: ['activity_session'],
+  })
 
   return {
     vault,
-    entity: toCommandShowEntity(record),
+    entity: toCommandShowEntity(exact.record),
   }
 }
 
