@@ -244,6 +244,22 @@ describe("open execution plan wrapper", () => {
 });
 
 describe("pre-commit CLI schema generation", () => {
+  it("documents the narrow ordinary merge-commit exception", () => {
+    const agents = readFileSync(path.join(repoRoot, "AGENTS.md"), "utf8");
+    const workflowRouting = readFileSync(
+      path.join(repoRoot, "agent-docs", "operations", "agent-workflow-routing.md"),
+      "utf8",
+    );
+
+    expect(agents).toContain("`scripts/committer` intentionally rejects an active `MERGE_HEAD`");
+    expect(agents).toContain("ordinary `git commit` without path arguments or hook bypass");
+    expect(workflowRouting).toContain("Narrow merge-commit exception");
+    expect(workflowRouting).toContain("`git diff --name-only --diff-filter=U`");
+    expect(workflowRouting).toContain("ordinary `git commit` without path arguments");
+    expect(workflowRouting).toContain("Do not pass `--no-verify`");
+    expect(workflowRouting).toContain("does not authorize starting a merge");
+  });
+
   it("skips generation when a merge's staged CLI tree exactly matches MERGE_HEAD", () => {
     const harness = createMergeHarness(false);
     const result = runPreCommit(harness);
