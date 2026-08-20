@@ -6152,6 +6152,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
       timeoutMs: 45_000,
       vaultRoot: "/tmp/vault-root",
     });
+    await drainHostedRuntimeLogWritesBestEffort();
 
     assert.deepEqual(result, {
       deviceSyncProcessed: 1,
@@ -6193,6 +6194,89 @@ describe("runHostedDeviceSyncWakeLane", () => {
           yieldReason: null,
         }),
         workspaceVersion: "8",
+      }),
+    ]);
+  });
+
+  it("does not wait for lifecycle log transport before device-sync work or return", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    let releaseFirstLogWrite: () => void = () => undefined;
+    const firstLogWriteRelease = new Promise<void>((resolve) => {
+      releaseFirstLogWrite = resolve;
+    });
+    const drainWorker = vi.fn().mockResolvedValue(0);
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker,
+      getNextJobWakeAt: () => "2026-04-08T00:30:00.000Z",
+      getNextWakeAt: () => "2026-04-08T00:30:00.000Z",
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+    const deviceSyncPort = createMaintenanceDeviceSyncPortStub();
+
+    try {
+      const result = await runHostedDeviceSyncWakeLane({
+        deviceSyncPort,
+        resolvedConfig: {
+          deviceSync: DEVICE_SYNC_CONFIG,
+        },
+        runtimeLogContext: {
+          attemptId: "attempt_device_sync_nonblocking_log",
+          leaseGeneration: "17",
+          workspaceVersion: "18",
+        },
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              logRequests.push(request);
+              if (logRequests.length === 1) {
+                await firstLogWriteRelease;
+              }
+              return { loggedCount: request.entries.length };
+            },
+          },
+        },
+        timeoutMs: 45_000,
+        vaultRoot: "/tmp/vault-root",
+        wake: {
+          eventId: "evt_device_sync_nonblocking_log",
+          kind: "device-sync.wake",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "reconcile_due",
+          userId: "member_123",
+        },
+      });
+
+      expect(result.deviceSyncSkipped).toBe(false);
+      expect(result.nextWakeAt).toBe("2026-04-08T00:30:00.000Z");
+      expect(result.nextWakeReason).toBe("device-sync.reconcile");
+      expect(deviceSyncPort.fetchSnapshot).toHaveBeenCalledTimes(1);
+      expect(drainWorker).toHaveBeenCalled();
+      expect(logRequests.flatMap((request) => request.entries).map((entry) =>
+        entry.eventCode
+      )).toEqual(["device-sync.pass_started"]);
+    } finally {
+      releaseFirstLogWrite();
+      await drainHostedRuntimeLogWritesBestEffort();
+    }
+
+    const lifecycleEntries = logRequests.flatMap((request) => request.entries);
+    expect(lifecycleEntries.map((entry) => entry.eventCode)).toEqual([
+      "device-sync.pass_started",
+      "device-sync.pass_finished",
+    ]);
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        attemptId: "attempt_device_sync_nonblocking_log",
+        leaseGeneration: "17",
+        workspaceVersion: "18",
+      }),
+      expect.objectContaining({
+        attemptId: "attempt_device_sync_nonblocking_log",
+        leaseGeneration: "17",
+        workspaceVersion: "18",
       }),
     ]);
   });
@@ -6273,6 +6357,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         parserProcessed: 0,
         postCheckpointRecord: null,
       });
+      await drainHostedRuntimeLogWritesBestEffort();
       expect(fetchSnapshot).toHaveBeenCalledTimes(1);
       const observedSignal = observedSignals[0];
       expect(observedSignal?.aborted).toBe(true);
@@ -6329,6 +6414,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         userId: "member_123",
       },
     })).rejects.toThrow("synthetic control-plane failure");
+    await drainHostedRuntimeLogWritesBestEffort();
 
     const lifecycleEntries = logRequests.flatMap((request) => request.entries);
     expect(lifecycleEntries.map((entry) => entry.eventCode)).toEqual([
@@ -6338,7 +6424,61 @@ describe("runHostedDeviceSyncWakeLane", () => {
     expect(lifecycleEntries[1]?.redactedJson).toEqual(expect.objectContaining({
       outcome: "failed",
       passStage: "control_plane_sync",
+      processedJobs: 0,
       yieldReason: null,
+    }));
+  });
+
+  it("retains processed-job progress when a later reconciliation stage fails", async () => {
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const drainWorker = vi.fn()
+      .mockResolvedValueOnce(1)
+      .mockResolvedValue(0);
+    mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+      close: vi.fn(),
+      drainWorker,
+      getNextJobWakeAt: () => null,
+      getNextWakeAt: () => null,
+      listAccounts: vi.fn(() => []),
+      listJobFailureDiagnostics: vi.fn(() => []),
+      runSchedulerOnce: vi.fn(async () => undefined),
+    });
+    mocks.reconcileHostedDeviceSyncControlPlaneState.mockRejectedValueOnce(
+      new Error("synthetic late reconciliation failure"),
+    );
+
+    await expect(runHostedDeviceSyncWakeLane({
+      deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+      resolvedConfig: {
+        deviceSync: DEVICE_SYNC_CONFIG,
+      },
+      runtimeLogPlatform: {
+        logPort: {
+          async write(request) {
+            logRequests.push(request);
+            return { loggedCount: request.entries.length };
+          },
+        },
+      },
+      timeoutMs: 45_000,
+      vaultRoot: "/tmp/vault-root",
+      wake: {
+        eventId: "evt_device_sync_late_failure",
+        kind: "device-sync.wake",
+        occurredAt: "2026-04-08T00:00:00.000Z",
+        reason: "reconcile_due",
+        userId: "member_123",
+      },
+    })).rejects.toThrow("synthetic late reconciliation failure");
+    await drainHostedRuntimeLogWritesBestEffort();
+
+    const finishedEntry = logRequests
+      .flatMap((request) => request.entries)
+      .find((entry) => entry.eventCode === "device-sync.pass_finished");
+    expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
+      outcome: "failed",
+      passStage: "control_plane_reconcile",
+      processedJobs: 1,
     }));
   });
 });

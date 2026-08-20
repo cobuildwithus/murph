@@ -120,6 +120,7 @@ export async function runHostedDeviceSyncPass(
   deviceSyncPort: HostedRuntimeDeviceSyncPort | null | undefined,
   timeoutMs: number | null,
   options: {
+    onProcessedJobs?: ((processedJobs: number) => void) | null;
     platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     onStage?: ((stage: HostedDeviceSyncPassStage) => void) | null;
@@ -314,6 +315,7 @@ export async function runHostedDeviceSyncPass(
       service,
       shouldYield,
     });
+    options.onProcessedJobs?.(processedJobs);
     const completedImports = promoteHostedCompletedDirtyPayloadAcks({
       service,
       state: syncState,
@@ -998,6 +1000,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
 }): Promise<HostedMaintenanceMetrics> {
   const startedAtMs = Date.now();
   let passStage: HostedDeviceSyncPassStage = "starting";
+  let processedJobs = 0;
   let foregroundYieldObserved = false;
   const shouldYieldDeviceSync = input.shouldYieldDeviceSync
     ? () => {
@@ -1013,7 +1016,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   });
 
   try {
-    await writeHostedDeviceSyncPassLifecycleLog({
+    writeHostedDeviceSyncPassLifecycleLog({
       input,
       lifecycle: "started",
       outcome: null,
@@ -1033,6 +1036,9 @@ export async function runHostedDeviceSyncWakeLane(input: {
         input.deviceSyncPort,
         input.timeoutMs,
         {
+          onProcessedJobs: (observedProcessedJobs) => {
+            processedJobs = observedProcessedJobs;
+          },
           onStage: (stage) => {
             passStage = stage;
           },
@@ -1047,12 +1053,12 @@ export async function runHostedDeviceSyncWakeLane(input: {
         },
       );
     } catch (error) {
-      await writeHostedDeviceSyncPassLifecycleLog({
+      writeHostedDeviceSyncPassLifecycleLog({
         input,
         lifecycle: "finished",
         outcome: "failed",
         passStage,
-        processedJobs: 0,
+        processedJobs,
         result: null,
         startedAtMs,
         yieldReason: cancellation.readReason(),
@@ -1092,7 +1098,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
         : {}),
     };
 
-    await writeHostedDeviceSyncPassLifecycleLog({
+    writeHostedDeviceSyncPassLifecycleLog({
       input,
       lifecycle: "finished",
       outcome,
@@ -1146,7 +1152,7 @@ function resolveHostedDeviceSyncPassOutcome(input: {
   return "completed";
 }
 
-async function writeHostedDeviceSyncPassLifecycleLog(input: {
+function writeHostedDeviceSyncPassLifecycleLog(input: {
   input: Parameters<typeof runHostedDeviceSyncWakeLane>[0];
   lifecycle: "finished" | "started";
   outcome: HostedDeviceSyncPassOutcome | null;
@@ -1155,7 +1161,7 @@ async function writeHostedDeviceSyncPassLifecycleLog(input: {
   result: HostedMaintenanceMetrics | null;
   startedAtMs: number;
   yieldReason: HostedDeviceSyncYieldReason | null;
-}): Promise<void> {
+}): void {
   if (!input.input.runtimeLogPlatform?.logPort) {
     return;
   }
@@ -1165,8 +1171,8 @@ async function writeHostedDeviceSyncPassLifecycleLog(input: {
     : input.input.wake.kind === "runtime.timer"
     ? input.input.wake.triggerKind
     : "other";
-  await writeHostedRuntimeLogEntriesBestEffort({
-    entries: [{
+  void writeHostedRuntimeLogBestEffort({
+    entry: {
       ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
       component: "device-sync",
       eventCode: input.lifecycle === "started"
@@ -1192,7 +1198,7 @@ async function writeHostedDeviceSyncPassLifecycleLog(input: {
         wakeReason,
         yieldReason: input.yieldReason,
       },
-    }],
+    },
     platform: input.input.runtimeLogPlatform,
   });
 }

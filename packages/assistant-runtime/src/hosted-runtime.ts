@@ -2732,6 +2732,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               operatorHomeRoot: restored.operatorHomeRoot,
               retainProcessedItemUntilRecorded: true,
               runtime: foregroundRuntime,
+              runtimeLogContext,
               runtimeEnv: invocationRuntimeEnv,
               shouldYieldBackgroundMaintenance: shouldYieldSystemMailboxWork,
               signal: runtimeAbortController.signal,

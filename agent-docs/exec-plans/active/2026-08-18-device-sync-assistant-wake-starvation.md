@@ -55,6 +55,21 @@ frontiers advance after deployment.
   of code, tests, docs, logs, and PR artifacts.
 - Preserve the exact wake/checkpoint and mailbox completion fences.
 
+## Product UX
+
+- Effort: Patch.
+- Outcome: A member's connected data keeps its existing freshness and recovery
+  behavior while operators gain exact interruption diagnostics.
+- Reaches: Existing background Apple Health/WHOOP sync passes during normal,
+  delayed, and interrupted hosted execution.
+- Proof: A deferred runtime-log transport cannot delay provider work, lane
+  return, foreground recovery, or checkpoint/retry handoff; the ordinary
+  system-mailbox entrypoint still emits correlated lifecycle records.
+- Walkthrough: A connected-data member sees no new surface or step. With a
+  degraded log endpoint, provider work and the existing retry/checkpoint path
+  continue independently. Result: Ready; the deferred-transport and ordinary
+  production-entrypoint regressions pass.
+
 ## Plan
 
 1. Pass a one-way platform-policy marker into the hosted request when assistant
@@ -73,10 +88,11 @@ frontiers advance after deployment.
    required CI, and protected deployment.
 6. Confirm both affected production frontiers and typed runtime markers advance
    after deployment; continue diagnosis if either remains stalled.
-7. Add an awaited device-sync pass lifecycle pair around the hosted lane. Record
-   only attempt/lease/workspace context and bounded stage/outcome/count/presence
-   metadata, so a start without a finish identifies abrupt loss without exposing
-   member, account, job, payload, resource, or raw error values.
+7. Enqueue an ordered device-sync pass lifecycle pair around the hosted lane
+   without awaiting diagnostic transport. Record only attempt/lease/workspace
+   context and bounded stage/outcome/count/presence metadata, so a persisted
+   start without a finish identifies abrupt loss without exposing member,
+   account, job, payload, resource, or raw error values.
 8. Preserve the first cancellation source as a typed reason and distinguish
    foreground yield, deadline timeout, invocation preemption, container
    destruction, generic outer abort, and an otherwise unknown yield. Prove the
@@ -177,6 +193,27 @@ frontiers advance after deployment.
   and exact-source revocation/status, while 65 distinct logical sources still
   fail before source reads or writes. The focused six-test proof passes.
   The full device-syncd suite passes all 1,128 tests, and its typecheck is green.
+- The preliminary specialist review found three accepted gaps in the first
+  observability candidate: direct lifecycle transport could consume the lane
+  budget, the top-level system-mailbox entrypoint omitted invocation context,
+  and late failures reported zero already-processed jobs. The correction uses
+  the existing ordered runtime-log buffer, threads the existing context at the
+  missing call site, and extends the existing pass observer with the processed
+  count; it adds no state, queue, scheduler, retry owner, or schema.
+- The corrected 92-test maintenance suite proves provider work and retry-wake
+  return complete while the first lifecycle transport remains blocked, retains
+  lifecycle ordering/correlation after release, and reports a nonzero job count
+  on a later reconciliation failure. The full 338-test workspace-entrypoint
+  suite proves the ordinary `system_mailbox` path emits both markers with the
+  request attempt, lease generation, and workspace version. The assistant-
+  runtime typecheck passes.
+- The independent first-round review reported one High finding: awaited
+  lifecycle telemetry could exhaust the maintenance budget and retain the
+  foreground fence. This duplicates the accepted specialist transport finding
+  and is corrected by the same existing-buffer reuse and deferred-transport
+  regression. It reported no additional defect. The consolidated five-file
+  assistant-runtime regression run passes all 798 tests, and the package
+  typecheck remains green.
 
 ## State
 
