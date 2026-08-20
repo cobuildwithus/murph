@@ -114,5 +114,13 @@ artifacts.
   after deletion. The full device-syncd suite passed 1,255 tests, including the
   exact-identity and scheduled-child regression, and both production-shaped
   Junction late-sleep recovery paths passed. Device-syncd typecheck passed.
-  ReviewGPT round 3, required CI, and final deployment compatibility proof:
-  pending.
+- Final ReviewGPT round three found review-induced dirty-payload retention
+  plumbing whose only producer had already been deleted by the exact-receipt
+  redesign. That unreachable cross-fetch channel was deleted instead of
+  retained as speculative complexity. The production pass now has one explicit
+  authoritative dirty-state fetch owner, while a cold retry refetches the Web
+  source of truth.
+- The focused runtime and production-pass tests passed 205 tests. The full
+  assistant-runtime suite again passed 2,422 tests with five skipped, and
+  assistant-runtime typecheck passed. ReviewGPT round four, required CI, and
+  final deployment compatibility proof: pending.
