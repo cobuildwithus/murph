@@ -97,7 +97,8 @@ aliases remain the one-step private assistant-input paths. Web admits public
 bootstrap hints through a nonblocking global gate plus a member lock, and live
 verified-email rebinding atomically rotates the private reply capability. This
 boundary is jointly specified by `agent-docs/SECURITY.md` and
-`agent-docs/RELIABILITY.md`.
+`agent-docs/RELIABILITY.md`; its completed round-three scope decision is recorded
+in `agent-docs/exec-plans/completed/2026-08-20-public-email-bootstrap-round-3-retrospective.md`.
 
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
