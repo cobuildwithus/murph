@@ -13,6 +13,7 @@ import {
   NATIVE_IOS_HOSTED_E2E_VERCEL_TARGET,
   assertSafeId,
   assertSha,
+  requiredEnv,
 } from "./native-ios-hosted-e2e-support.mjs";
 import {
   createE2eDeployment,
@@ -56,9 +57,11 @@ export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postcondi
     }
   }
   if (finalizationError) {
-    throw new Error(primaryError
+    const message = primaryError
       ? `Native iOS E2E failed at ${primaryStage}; fail-closed finalization failed at ${finalizationStage}.`
-      : `Native iOS E2E finalization failed at ${finalizationStage}.`);
+      : `Native iOS E2E finalization failed at ${finalizationStage}.`;
+    if (primaryError) throw new AggregateError([primaryError, finalizationError], message);
+    throw new Error(message, { cause: finalizationError });
   }
   if (primaryError) throw primaryError;
 }
@@ -67,6 +70,10 @@ async function runPr(args) {
   const sha = requiredArg(args, "sha");
   const ref = requiredArg(args, "ref");
   const correlationId = requiredArg(args, "correlation-id");
+  const prNumber = requiredPositiveIntegerArg(args, "pr-number");
+  const repository = requiredEnv("GITHUB_REPOSITORY");
+  const webGithubToken = requiredEnv("NATIVE_IOS_E2E_WEB_GITHUB_TOKEN");
+  delete process.env.NATIVE_IOS_E2E_WEB_GITHUB_TOKEN;
   assertSha(sha, "PR SHA");
   assertSafeId(correlationId, "correlation id", 120);
   const junctionClientUserIdNamespace = normalizeJunctionClientUserIdNamespace(
@@ -84,7 +91,13 @@ async function runPr(args) {
       candidateDeploymentId = created.id;
       return waitForE2eDeployment({ deploymentId: created.id, ref, sha });
     },
-    dispatch: (webBaseUrl) => dispatchAndWait({ correlationId, mode: "pr", webBaseUrl, webSha: sha }),
+    dispatch: (webBaseUrl) => dispatchAndWait({
+      correlationId,
+      mode: "pr",
+      prHead: { prNumber, repository, token: webGithubToken },
+      webBaseUrl,
+      webSha: sha,
+    }),
     now: Date.now,
     postconditions: (startedAtMs) => proveRunPostconditions(
       startedAtMs,
@@ -116,6 +129,14 @@ function requiredArg(args, name) {
   const value = args.get(name);
   if (!value) throw new Error(`--${name} is required.`);
   return value;
+}
+
+function requiredPositiveIntegerArg(args, name) {
+  const value = requiredArg(args, name);
+  if (!/^[1-9][0-9]*$/u.test(value)) throw new Error(`--${name} must be a positive integer.`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error(`--${name} must be a positive integer.`);
+  return parsed;
 }
 
 async function main(argv) {

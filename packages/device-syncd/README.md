@@ -29,6 +29,13 @@ What it does:
 - treats `DEVICE_SYNC_WORKER_BATCH_SIZE` as a durable job-row budget per tick; one provider batch may complete multiple rows, and each row counts against that budget
 - imports provider snapshots through `@murphai/importers`
 
+Canonical imports keep member-authored event revisions live while advancing
+the connected-source baseline beneath them. Unrelated facts in the same
+snapshot still commit atomically, omissions record provider tombstones beneath
+member revisions, and exact retries are no-ops. This policy lives at the event
+spine owner; device jobs, wakes, and hosted transports carry no parallel
+conflict state or overwrite preference.
+
 Current providers:
 - Direct runtime providers: Oura, Strava, and WHOOP.
 - Junction-backed sources come from `DEVICE_CONNECT_SOURCES`. `JUNCTION_PROVIDER_FILTER`
@@ -39,14 +46,16 @@ Current providers:
   Patterns currently derives an action factor only from the exact Oura `sauna`
   tag; other-source, symptom, context, outcome, and custom tags remain neutral.
   Free-text note values are dropped before raw snapshot and compact evidence
-  retention. Note-history coverage version 2 reopens sources completed under
-  the legacy intervention normalizer for one bounded semantic reimport, then
-  records terminal source coverage again. The admitted resource-job payload
-  freezes that generation across durable continuations and retries. Persisted
-  unversioned work remains v1 after an upgrade and cannot certify or downgrade
-  v2 coverage.
+  retention. Note-history policy generation 2 reopened sources completed under
+  the legacy intervention normalizer for one bounded semantic reimport. The
+  fixed 180-day extended-history rollout advances note to generation 3 and the
+  other twelve extended resources to generation 2. Every admitted
+  extended-history root freezes that package-owned generation across durable
+  continuations and retries; older work may still import safe facts but cannot
+  certify current coverage.
 - Junction's product-default labels include `steps`, `distance`,
-  `calories_active`, `heartrate`, and `weight`. Production configuration sets
+  `calories_active`, `heartrate`, `weight`, `carbohydrates`, and
+  `insulin_injection`. Production configuration sets
   the exhaustive 48-resource registry explicitly, and omitting the list at the
   programmatic runtime seam resolves to that same registry. An explicit empty
   list disables all timeseries; an explicit non-empty list remains exact and
@@ -57,15 +66,34 @@ Current providers:
   of treating provider-local day or session fragments as complete facts. The four dense resources retain the bounded
   dense-timeseries fetch window and never persist raw sample arrays or full provider
   snapshots. Opted-in `weight` uses sparse canonical measurements with compact
-  per-reading evidence and the existing long summary-history backfill window.
-- Twelve additional sparse Junction timeseries are code-owned opt-ins: BMI,
-  carbohydrates, body fat, FEV1, FVC, heart-rate alerts,
-  inhaler usage, insulin injections, lean body mass, peak expiratory flow,
-  sleep-apnea alerts, and waist circumference. The contract default remains off,
-  while the production provider assembly enables this exact audited resource set;
-  member overlays and environment variables cannot widen or narrow it. Enabled resources use the same
-  extended-history horizon as summaries, fetched in bounded 30-day windows;
-  dense/default timeseries retain their one-day windows. `fat` remains the
+  per-reading evidence and the fixed 180-day extended-history window.
+- Seven sparse clinical and safety resources are product-default labels: FEV1,
+  FVC, heart-rate alerts, inhaler usage, peak expiratory flow, sleep-apnea
+  alerts, and falls. They retain the generic bounded timeseries horizon and are
+  fetched in one-day units with at most 128 provider records, retaining at most
+  100 deterministic canonical facts;
+  an overflow leaves only a compact count marker. The source lifecycle epoch
+  is checked again after each provider read so a reconnect retries the same
+  resource/day instead of importing a stale response. Stable provider row IDs
+  may inform hashing but are omitted from compact evidence.
+- Carbohydrates and insulin injections use the generic bounded 14-day initial
+  history horizon. Their shared sparse collection contract permits chunks no
+  larger than 30 days, with at most 3,840 provider rows and 3,000 deterministic
+  canonical facts. Libre's
+  documented fake-UTC wall times are admitted only when the vault timezone
+  identifies one exact instant; real nonzero offsets stay absolute, while DST
+  gaps, overlaps, and mixed floating/absolute intervals fail closed. The first
+  accepted fallback-zone interpretation belongs to the existing canonical event
+  spine, so later profile-timezone changes cannot rewrite only the recently
+  replayed portion of history. Explicit row zones and changed raw wall times
+  remain authoritative corrections. The lifecycle fence rechecks the source
+  after each fetch before import.
+- BMI, body fat, lean body mass, and waist circumference remain product opt-in
+  labels. The production provider assembly
+  still enables the exhaustive exact code-owned registry; member overlays and
+  environment variables cannot widen or narrow it. These four resources retain
+  the generic bounded 14-day initial history horizon; their shared sparse
+  collection contract permits chunks no larger than 30 days. `fat` remains the
   public resource name while the client requests Junction's `body_fat` path.
 - `electrocardiogram_voltage` and `workout_stream` are separate exact opt-ins in
   that same code-owned production set. ECG voltage uses one-day grouped windows capped at
@@ -74,8 +102,8 @@ Current providers:
   uses the ordinary workout index only to admit at most 32 stable workouts per
   one-day window, then reads Junction's dedicated per-workout stream endpoint
   serially and caps each stream at 100,000 points. The exact production assembly has
-  48 production timeseries resources: 13 wide and 35 dense, including 34 ordinary
-  dense resources plus `workout_stream`. A full-job continuation owns one resource
+  48 production timeseries resources: 6 wide and 42 one-day resources, including
+  41 ordinary one-day resources plus `workout_stream`. A full-job continuation owns one resource
   and one closed UTC day. An ordinary collection permits at most three sequential
   pages with one attempt and an eight-second timeout per page, limiting provider
   wait to 24 seconds. A page-heavy hourly/session feature retries as one complete
@@ -85,24 +113,54 @@ Current providers:
   and window coordinate advance. A deployed v1 resource envelope is accepted
   only as read-only upgrade input and its validated active resource is immediately
   rewritten as a scalar successor. Pagination remains in memory, and no provider
-  row, vendor page cursor, waveform sample, or workout point enters job state. This
-  adds no control-database collection path, pooled transaction, or vault persistence.
-  Each present workout metric array must align with the timestamp array. A workout
-  whose present metric arrays do not align is skipped so one malformed stream cannot
-  block other workouts or replace a previously complete canonical measurement; the
-  skip emits a metadata-only cardinality warning for provider follow-up. A
-  retryable per-workout request failure remains owned by the existing job retry
-  transition and still stops the serial loop. Its worker-attempt runtime
-  diagnostic records only the canonical-order candidate ordinal/count and which
-  supported summary-id alias selected the request; it never records the workout
-  id, summary, stream payload, URL, or provider response identifier.
-  Worker-attempt logs also report the committed `queued`/`dead` transition and
-  remaining bounded attempt budget, while a typed origin distinguishes them
-  from canonical-apply and checkpoint-side diagnostics.
+  row, vendor page cursor, waveform sample, or workout point enters job state.
+  Each dedicated stream response is capped at 8 MiB before SDK parsing. Reduction
+  keeps only duration, distance, heart-rate shape, cadence, power, speed, and at
+  most 64 interpolated fixed-distance splits. Running/walking cadence uses
+  steps-per-minute, cycling cadence uses rpm, and swimming uses 100-meter rather
+  than 1-kilometer splits. Newer versions authoritatively withdraw omitted split
+  facets. Raw points, coordinates, complete curves, and provider arrays never
+  cross the importer boundary. The rebuildable query projection groups live
+  feature facets once by their internal hashed workout identity; the existing
+  `wearables activity list` filtered summary read exposes only provider, sport,
+  timestamps, unit-bearing compact metrics, and splits for each workout. This
+  adds no control-database collection path, pooled transaction, foreground
+  full-vault hydration, or sample persistence. Each present workout metric
+  array must align with the timestamp array. A workout whose present metric
+  arrays do not align is skipped so one malformed stream cannot block other
+  workouts or replace a previously complete canonical measurement; the skip
+  emits a metadata-only cardinality warning for provider follow-up. A retryable
+  per-workout request failure remains owned by the existing job retry transition
+  and still stops the serial loop. Its worker-attempt runtime diagnostic records
+  only the canonical-order candidate ordinal/count and which supported summary-id
+  alias selected the request; it never records the workout id, summary, stream
+  payload, URL, or provider response identifier. Worker-attempt logs also report
+  the committed `queued`/`dead` transition and remaining bounded attempt budget,
+  while a typed origin distinguishes them from canonical-apply and checkpoint-side
+  diagnostics.
 - Successful Junction resource/webhook jobs preserve the full-sync completion
   watermark. They still complete and clear their own failures, while only a
   terminal reconcile or backfill whose window ends at the current closed-day
   horizon can prove the configured collection ran.
+- Only the closed date-by-date Junction fetch path may authorize blood-oxygen
+  and stress temporal features. Precise resource windows and webhook-driven
+  imports keep ordinary compact facts but cannot publish temporal features from
+  partial windows. Each successful complete resource/day owns its fixed
+  `temporal-*` facet set through existing authoritative event sets, so a
+  successful empty or insufficient replacement retracts stale derived facts;
+  failed or yielded work grants no authority.
+- The temporal horizon is clamped to 1–14 authoritative vault-local days. The
+  newest eligible day imports inline, while older resource/day coordinates use
+  the existing durable queue in newest-first order. Queued or running work
+  deduplicates across restarts, while succeeded rows remain history rather than
+  suppressing a later scheduled pull whose source roster or provider data may
+  have widened. At the failure/yield ceiling, 28 temporal rows plus one ordinary
+  reconcile follow-up remain serialized by the existing per-account fence.
+- Temporal children never advance generic account completion. That watermark is
+  account activity state rather than complete floor coverage, so every scheduled
+  reconcile still refetches configured ordinary resources. Collection remains
+  capped at 100 pages and 25,000 records with at most three attempts per page;
+  reduction persists bounded scalar evidence and never full timeseries values.
 
 Use `packages/device-syncd/src/config/connect-routes.ts` as the source of truth
 for the current connect target catalog, and use
@@ -174,18 +232,26 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
-Junction timeseries use one exhaustive static history policy. Dense daily
-aggregates keep the bounded 14-day initial window. Advertised AFib burden, VO2
-max, heart-rate recovery, body and basal temperatures, sleep-breathing
-disturbance, caffeine, water, and mindfulness use the summary-history window,
-180 days by default. The existing source-scoped sparse-history jobs fetch one
-day at a time, serialize per account, and record terminal coverage in compact
+Junction timeseries use one exhaustive static history policy. Dense/default
+resources, ECG voltage, workout streams, and ordinary full-timeseries collection
+keep the generic bounded initial window (14 days by default, configurable through
+`timeseriesBackfillDays`). The existing 13-resource extended set—`afib_burden`,
+`basal_body_temperature`, `blood_pressure`, `body_temperature`,
+`body_temperature_delta`, `caffeine`, `heart_rate_recovery_one_minute`,
+`mindfulness_minutes`, `note`, `sleep_breathing_disturbance`, `vo2_max`, `water`,
+and `weight`—always starts with an explicit 180-day window independent of both
+the generic timeseries window and `summaryBackfillDays`. The existing
+source-scoped sparse-history jobs fetch policy-sized one-day chunks, serialize
+per account, and record terminal coverage in compact
 connection metadata; they do not add another queue or lifecycle. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
-source-by-resource matrix in an existing blood-pressure or note metadata slot;
-legacy values still read, and unsupported route identities fail before history
-egress rather than advancing an unretainable checkpoint. Every date-mode
+source-by-resource matrix in an existing blood-pressure or note metadata slot.
+Its existing envelope generation advances to `m2` for this rollout because the
+packed bits do not carry per-resource policy versions: pre-180-day `m1` bits are
+structurally readable but stale and writable, while future envelopes remain
+opaque. Unsupported route identities fail before history egress rather than
+advancing an unretainable checkpoint. Every date-mode
 timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing
 date with any row rejected by the canonical aggregate parser retries only that
@@ -197,7 +263,8 @@ nonterminal state waits, and explicit failure remains uncovered. Explicit
 status requires canonical history evidence. Delayed work derives
 the live reconcile boundary after every completed segment and continues until
 no middle gap remains. An explicit timeseries backfill override still governs
-every timeseries resource.
+only the generic bounded timeseries policy; it does not shorten the fixed
+extended-history horizon.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero

@@ -1,6 +1,7 @@
 # Reliability
 
-Last verified: 2026-08-16
+Last verified: 2026-08-20
+
 ## Local Frog autofix scheduling
 
 - One macOS user-session LaunchAgent owns the optional local schedule with
@@ -1041,13 +1042,15 @@ Last verified: 2026-08-16
   errors remain terminal; the runtime must not create a second artifact retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
-  schedule consumed by the global due-reconcile sweep. The selector suppresses
-  an unchanged due tuple only within the current five-minute recovery bucket;
-  if checkpoint recovery leaves that tuple stale, a later bucket may re-signal
-  the same durable mailbox item. The bounded identities are one canonical
-  schedule event and one durable mailbox item, not one Temporal signal or one
-  provider execution for the tuple's entire lifetime. The canonical mailbox
-  item/event already exists in the committed input workspace. Its read-only
+  schedule consumed by the global due-reconcile sweep. The first durable
+  mailbox append owns the direct Temporal signal. A later recovery bucket may
+  record the same still-due tuple for bounded sweep suppression, but a duplicate
+  append does not re-signal it: the shared mailbox-handoff sweep recovers a
+  never-imported first signal, and the imported runtime work keeps its persisted
+  retry timestamp. The bounded identities are one canonical schedule event and
+  one durable mailbox item, not a new Temporal signal or provider execution in
+  every recovery bucket. The canonical mailbox item/event already exists in the
+  committed input workspace. Its read-only
   provider request classes run before checkpoint 1, which then durably captures
   the replayable post-pull/intermediate state. If checkpoint 2 fails to persist
   record/completion, a cold restore from checkpoint 1 may execute the same HTTP
@@ -1334,7 +1337,12 @@ Last verified: 2026-08-16
   transaction; local admission commits the source and initial jobs in one SQLite
   transaction. Shared ingress never performs a second source write. A missing,
   disconnected, or newer account makes the callback fail and leaves the source
-  disconnected. Established siblings continue normally.
+  disconnected. An older callback also fails while a newer source start remains
+  pending. Once another independently valid Link state completes, however, a
+  later completion represents another provider registration lifecycle: hosted
+  admission advances the source epoch and reopens only its schedule-time history
+  coverage because Junction exposes no durable registration generation.
+  Established siblings continue normally.
   Starting or retrying the source first attempts target-only provider cleanup;
   a cleanup warning blocks the new link instead of adopting an ambiguous
   linkage or revoking sibling sources.
@@ -1359,12 +1367,13 @@ Last verified: 2026-08-16
   idempotent target-only revoke. The initiating operation follows the newest
   same-purpose claim before returning, while separate start-cleanup and user-
   disconnect phase codes preserve the intended terminal state.
-- Junction sparse note-history jobs freeze their semantic generation in the
-  existing durable resource-job payload. Yielded and retry-delayed
-  continuations preserve it, completion derives source coverage from it, and
-  an unversioned queued or leased job remains generation 1 after an upgrade.
-  Only a complete generation-2 chain may certify generation-2 note coverage;
-  late generation-1 completion cannot downgrade newer coverage. This keeps the
+- Every Junction extended-history root freezes its package-owned resource
+  policy generation in the existing durable job payload and root dedupe
+  identity. Yielded and retry-delayed continuations preserve both; an
+  unversioned queued or leased job remains generation 1 after an upgrade. Only
+  a terminal chain whose admitted generation matches the current resource
+  policy may certify coverage. A packed coverage matrix from an older
+  generation is stale and reopens the current obligations. This keeps the
   rollout fence in the existing queue, scheduler, and account-metadata owners
   without another repair loop or lifecycle manager.
 - Junction historical backfill and non-yieldable full jobs finish inventory,
@@ -1393,6 +1402,22 @@ Last verified: 2026-08-16
   new successors never write the envelope or consult its completed-resource
   names. Every partial continuation preserves `lastSyncCompletedAt`; only
   terminal current full work may advance it.
+- Junction workout streams stay inside that existing resource/day continuation
+  owner. One admitted workout index yields serial exact-workout SDK reads; each
+  response has an 8 MiB cap and reduces before import to one compact overall
+  feature plus at most 64 fixed-distance splits. The stable workout/source
+  identity and source update version form one authoritative facet set, so a
+  newer correction withdraws omitted splits. Only reduced duration, distance,
+  heart-rate shape, cadence, power, speed, and split scalars cross the importer;
+  raw points, coordinates, provider arrays, and full curves never enter job
+  state, evidence, or canonical samples. The rebuildable query projection
+  groups live measurement facets once by the existing hashed workout resource
+  identity and stores them in provider-scoped wearable activity summaries.
+  `wearables activity list` reads those summaries by date/provider without
+  hydrating the full projected vault. Its public `workoutFeatures` carries only
+  the source provider, activity type, start time, unit-bearing compact overall
+  scalars, and live splits; provider workout IDs and source-instance IDs remain
+  internal.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection
@@ -1658,7 +1683,8 @@ Last verified: 2026-08-16
   bounded retry/reconciliation. Lazy month rollover never expires ledger
   credit, never clears recovery, and applies a deferred cap decrease only at
   the next anchored boundary. Activation owns the sole public sponsorship
-  moment; refill fulfillment is silent and private notices are period-deduped.
+  moment; refill fulfillment is silent and sends no near-cap notice. Payment
+  failure recovery notices remain purchase-deduped and direct-only.
   Payment authority rechecks the current payer suspension fence immediately
   before a bound automatic refill can be confirmed. Payer-owned cancellation
   remains available even when the beneficiary is inactive or the live funding

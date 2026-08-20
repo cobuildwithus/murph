@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-17
+Last verified: 2026-08-19
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -75,6 +75,38 @@ Changing the launch mode does not reconfigure a browser process that is already
 running. Never restart a shared lane merely to apply this setting while it has
 pending reviews; let the new flags take effect on the lane's next normal
 restart.
+
+## Wait And Wake Ownership
+
+Give every ReviewGPT run one completion owner. For a normal active review run,
+use `--wait` and let that invocation own response capture until it returns on
+completion, timeout, or failure. Waiting on that completion-returning process is
+not status polling. Do not spend the active agent turn repeatedly reopening the
+thread, querying the process, or otherwise asking whether the review is done.
+
+When an accepted ReviewGPT request must outlive the active turn, prefer a
+detached `cobuild-review-gpt thread wake` handoff. Bind it to the exact thread,
+capture metadata, owning Codex session, repository checkout, and managed browser
+lane. The detached watcher owns the wait and resumes Codex only after the
+response is complete; the active agent does not remain in a progress-check
+loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
+every five minutes. Unless an explicit caller- or user-supplied per-run bound
+already applies, use `--poll-timeout 240m`; preserve any explicit bound. That
+wake timeout is independent of the normal ReviewGPT response-capture timeout,
+which defaults to 180 minutes.
+
+Manual status polling is a fallback only when neither a completion-returning
+wait nor a completion watcher can notify the owning model and the task cannot
+safely proceed without a check. In that case, leave at least five minutes
+between checks and stop polling as soon as one completion owner is available.
+Do not stack a manual polling loop on top of a live `--wait` process or detached
+wake watcher.
+
+The completion watcher does not relax exact-head, exact-thread, attachment,
+artifact, model, timeout, or response-marker validation. In particular, keep
+the preliminary coverage-patch download and application boundary in
+`agent-docs/operations/completion-workflow.md` § Preliminary ReviewGPT Packet;
+do not use a generic wake handoff as authority to apply an artifact.
 
 ## Preliminary Specialist Pass
 
@@ -257,8 +289,10 @@ value returned by `git rev-parse HEAD`; a shortened SHA is invalid.
 Fire each round as soon as the head it reviews is pushed. Do not wait for PR CI
 to go green first. Final round 1 may run in parallel with both CI and the
 preliminary specialist pass on the same head; use separate managed browser
-lanes for concurrent ReviewGPT jobs. Green CI on the final head and resolved
-results from both ReviewGPT stages remain separate merge-readiness gates.
+lanes for concurrent ReviewGPT jobs. Their preflights serialize only a missing
+PR-base fetch in the shared Git directory; packaging and browser execution stay
+concurrent. Green CI on the final head and resolved results from both ReviewGPT
+stages remain separate merge-readiness gates.
 
 Skip the final gate for docs/process-only PRs, prompt-primary PRs,
 frontend-only PRs that satisfy the eligibility exemption, trivial copy-only
@@ -275,8 +309,9 @@ the current user explicitly asks for it.
 ## One Round
 
 1. The canonical command verifies that the local checkout is the pushed PR
-   head before invoking ReviewGPT. For a standalone preflight without starting
-   ReviewGPT, run:
+   head and coordinates any missing PR-base refresh before invoking ReviewGPT.
+   Concurrent passes share only that bounded fetch lock. For a
+   standalone preflight without starting ReviewGPT, run:
 
    ```bash
    scripts/review-gpt-pr-head-preflight.sh <pr-url-or-number>
@@ -405,11 +440,16 @@ the current user explicitly asks for it.
    `codebase.zip`; Repomix is disabled by default and is not part of this flow.
    Each lane's user-data directory and CDP port preserve its authentication and
    process isolation; ignored copied app bundles are not browser-version
-   authority.
+   authority. When the installed Brave binary is unavailable, a named lane may
+   use only its exact app path in the current checkout or the shared primary
+   checkout derived from Git's common directory. The wrapper never searches
+   Spotlight or scans unrelated filesystem roots for an app bundle.
 
    `REVIEW_GPT_BROWSER_LANE_COUNT` limits the automatic pool to the first one
-   through six lanes and defaults to four. A host with provisioned Vonneumann
-   and Apollo profiles opts into all six by setting it in the local
+   through six lanes and defaults to four. A value supplied on the current
+   command is authoritative; the local config is only a fallback preference and
+   cannot widen or replace that per-run pool cap. A host with provisioned
+   Vonneumann and Apollo profiles opts into all six by setting it in the local
    `$XDG_CONFIG_HOME/murph/review-gpt.conf`, without committing machine-specific
    preferences or account details.
 

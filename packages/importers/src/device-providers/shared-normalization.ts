@@ -248,6 +248,7 @@ export function makeNormalizedDeviceBatch(
     events: options.events,
     samples: options.samples,
     evidenceParts: options.evidenceParts,
+    authoritativeEventSets: options.authoritativeEventSets,
     provenance: options.provenance,
   });
 }

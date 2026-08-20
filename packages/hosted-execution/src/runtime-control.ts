@@ -3355,6 +3355,7 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "assistant.pass_finished",
   "device-sync.dense_raw_retention",
   "device-sync.dirty_ack_persistence_failed",
+  "device-sync.fitbit_migration_cutover_failed",
   "device-sync.import_completed",
   "device-sync.job_failed",
   "device-sync.legacy_platform_env_present",
