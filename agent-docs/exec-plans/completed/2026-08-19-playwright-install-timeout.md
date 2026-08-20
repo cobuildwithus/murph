@@ -53,10 +53,16 @@ without restarting or supervising Playwright's privileged process tree.
   passes 54 tests.
 - `bash -n scripts/install-playwright-chromium.sh`, `shellcheck`,
   `git diff --check`, and the added-line privacy scan pass.
-- Pending final ReviewGPT round 2, exact-head required CI, and current-base
-  merge-tree proof.
+- Final ReviewGPT round 2 passed with no findings and confirmed the accepted
+  process-ownership finding is resolved by the APT-native correction.
+- Exact-head required CI passed, including the Ubuntu browser workflow that
+  executes the corrected install path and the full release-check aggregator.
+- The reviewed candidate composes cleanly with current `main` by merge-tree
+  proof.
 
 ## State
 
-Status: active
-Updated: 2026-08-19
+Status: completed
+Updated: 2026-08-20
+Completed: 2026-08-19
+Completed: 2026-08-20

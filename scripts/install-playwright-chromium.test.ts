@@ -160,7 +160,7 @@ describe("install-playwright-chromium.sh", () => {
       const step =
         /- name: Install Playwright Chromium\n\s+timeout-minutes: (\d+)\n\s+run: scripts\/install-playwright-chromium\.sh/u.exec(
           contents,
-      );
+        );
       expect(step?.[1], `${workflow} install step`).toBeDefined();
       expect(step?.[1]).toBe("14");
     }
