@@ -169,6 +169,13 @@ export function normalizeJunctionSourceProviderSlug(value: unknown): string | un
   return slug && slug !== "junction" ? slug : undefined;
 }
 
+export function normalizeKnownJunctionSourceProviderSlug(
+  value: unknown,
+): string | undefined {
+  const slug = normalizeJunctionSourceProviderSlug(value);
+  return slug && KNOWN_JUNCTION_PROVIDER_NAME_SLUGS.has(slug) ? slug : undefined;
+}
+
 export function readJunctionSourceProviderSlug(
   entry: PlainObject | undefined,
   connection: PlainObject | undefined,
@@ -200,8 +207,8 @@ function firstSourceProviderSlugFromPaths(source: PlainObject | undefined, paths
 
 function firstKnownProviderNameSlugFromPaths(source: PlainObject | undefined, paths: readonly string[]): string | undefined {
   for (const path of paths) {
-    const slug = normalizeJunctionSourceProviderSlug(readPath(source, path));
-    if (slug && KNOWN_JUNCTION_PROVIDER_NAME_SLUGS.has(slug)) {
+    const slug = normalizeKnownJunctionSourceProviderSlug(readPath(source, path));
+    if (slug) {
       return slug;
     }
   }

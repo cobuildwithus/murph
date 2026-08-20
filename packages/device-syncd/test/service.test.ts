@@ -10,7 +10,11 @@ import {
   serializeCompanionHrvRmssdObservation,
 } from "@murphai/contracts";
 import { initializeVault } from "@murphai/core";
-import { createImporters, prepareDeviceProviderSnapshotImport } from "@murphai/importers";
+import {
+  createImporters,
+  JunctionSparseCalendarRepairNormalizationError,
+  prepareDeviceProviderSnapshotImport,
+} from "@murphai/importers";
 import { buildJunctionDailyTimeseriesAggregateResourceId } from "@murphai/importers/device-providers/junction";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
@@ -11703,6 +11707,65 @@ test("device sync service records unexpected job errors as dead jobs", async () 
   );
 
   close();
+});
+
+test.each([
+  { expectedSourceProvider: "garmin", sourceProvider: "garmin", sourceProviderKind: "known" },
+  {
+    expectedSourceProvider: undefined,
+    sourceProvider: "member-12345",
+    sourceProviderKind: "unrecognized",
+  },
+])("device sync service preserves safe Junction normalization diagnostics ($sourceProviderKind source)", async ({
+  expectedSourceProvider,
+  sourceProvider,
+}) => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-normalization-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw new JunctionSparseCalendarRepairNormalizationError({
+            reason: "temporal.timestamp_invalid",
+            rowOrdinal: 3,
+            sourceProvider,
+            timestampKind: "invalid",
+            timestampSemantics: "unknown",
+          });
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "junction-normalization-diagnostic",
+    });
+
+    await service.runWorkerOnce();
+    const [diagnostic] = service.listJobFailureDiagnostics();
+    assert.ok(diagnostic);
+    assert.deepEqual(diagnostic.details, {
+      normalizationFailureReason: "temporal.timestamp_invalid",
+      normalizationRowOrdinal: 3,
+      ...(expectedSourceProvider
+        ? { normalizationSourceProvider: expectedSourceProvider }
+        : {}),
+      normalizationTimestampKind: "invalid",
+      normalizationTimestampSemantics: "unknown",
+    });
+  } finally {
+    close();
+  }
 });
 
 test("device sync service preserves sanitized validation issue paths for unexpected job errors", async () => {

@@ -1368,6 +1368,168 @@ test("Junction complete source days reject lossy rows before the canonical write
 });
 
 test.each([
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_missing",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-22T07:00:00.000Z" },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_non_numeric",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-22T07:00:00.000Z", value: "unusable" },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "daily.value_out_of_range",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-22T07:00:00.000Z", value: 150 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "temporal.timestamp_invalid",
+    expectedTimestampKind: "invalid",
+    expectedTimestampSemantics: "unknown",
+    row: { timestamp: "not-a-timestamp", value: 97 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "temporal.timestamp_missing_or_non_string",
+    expectedTimestampKind: "missing",
+    expectedTimestampSemantics: undefined,
+    row: { value: 97 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "temporal.timestamp_semantics_mismatch",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "floating",
+    row: {
+      timestamp: "2026-04-22T07:00:00.000Z",
+      timestampSemantics: "floating",
+      value: 97,
+    },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-04-22",
+    expectedReason: "source_day.outside_authorized_day",
+    expectedTimestampKind: "absolute",
+    expectedTimestampSemantics: "utc",
+    row: { timestamp: "2026-04-23T00:30:00.000Z", value: 97 },
+    timeZone: "UTC",
+  },
+  {
+    dayKey: "2026-03-08",
+    expectedReason: "temporal.local_time_ambiguous_or_nonexistent",
+    expectedTimestampKind: "floating",
+    expectedTimestampSemantics: "floating",
+    row: { timestamp: "2026-03-08 02:30", value: 97 },
+    timeZone: "America/Chicago",
+  },
+] as const)(
+  "Junction blood oxygen rejection exposes $expectedReason without raw health data",
+  ({
+    dayKey,
+    expectedReason,
+    expectedTimestampKind,
+    expectedTimestampSemantics,
+    row,
+    timeZone,
+  }) => {
+    assert.throws(
+      () => normalizeCompleteTemporalSourceDay({
+        importedAt: "2026-04-24T12:00:00.000Z",
+        timeseries: {
+          blood_oxygen: {
+            groups: {
+              garmin: [{
+                data: [row],
+                source: { provider: "garmin", type: "watch" },
+              }],
+            },
+          },
+        },
+      }, dayKey, "2026-04-24T12:00:00.000Z", timeZone),
+      (error: unknown) => {
+        assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+        assert.equal(error.diagnostic.reason, expectedReason);
+        assert.equal(error.diagnostic.rowOrdinal, 1);
+        assert.equal(error.diagnostic.sourceProvider, "garmin");
+        assert.equal(error.diagnostic.timestampKind, expectedTimestampKind);
+        assert.equal(error.diagnostic.timestampSemantics, expectedTimestampSemantics);
+
+        const serializedDiagnostic = JSON.stringify(error.diagnostic);
+        assert.doesNotMatch(serializedDiagnostic, /2026-|not-a-timestamp|"value"/u);
+        if ("value" in row) {
+          assert.equal(serializedDiagnostic.includes(String(row.value)), false);
+        }
+        return true;
+      },
+    );
+  },
+);
+
+test("Junction blood oxygen rejection identifies an unresolved source without payload data", () => {
+  assert.throws(
+    () => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: [{ timestamp: "2026-04-22T07:00:00.000Z", value: 97 }],
+      },
+    }, "2026-04-22"),
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.deepEqual(error.diagnostic, {
+        reason: "source_context.unresolved",
+        rowOrdinal: 1,
+        timestampKind: "absolute",
+        timestampSemantics: "utc",
+      });
+      return true;
+    },
+  );
+});
+
+test.each([
+  "member-12345",
+  "person@example.test",
+  "00000000-0000-4000-8000-000000000003",
+])("Junction normalization diagnostics omit unrecognized provider text (%s)", (provider) => {
+  assert.throws(
+    () => normalizeCompleteTemporalSourceDay({
+      importedAt: "2026-04-24T12:00:00.000Z",
+      timeseries: {
+        blood_oxygen: {
+          groups: {
+            [provider]: [{
+              data: [{ timestamp: "not-a-timestamp", value: 97 }],
+              source: { provider, type: "watch" },
+            }],
+          },
+        },
+      },
+    }, "2026-04-22"),
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "temporal.timestamp_invalid");
+      assert.equal(error.diagnostic.sourceProvider, undefined);
+      assert.equal(JSON.stringify(error.diagnostic).includes(provider), false);
+      return true;
+    },
+  );
+});
+
+test.each([
   { timeZone: "America/Chicago", zoneSlug: "utc-negative" },
   { timeZone: "Asia/Tokyo", zoneSlug: "utc-positive" },
 ])("Junction temporal reduction admits only genuinely clocked readings ($zoneSlug)", ({ timeZone }) => {
@@ -6814,10 +6976,17 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
         }],
       },
     }),
-    (error: unknown) =>
-      error instanceof JunctionSparseCalendarRepairNormalizationError
-      && error.code === "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION"
-      && error.retryable,
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.code, "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION");
+      assert.equal(error.retryable, true);
+      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.rowOrdinal, 2);
+      assert.equal(error.diagnostic.sourceProvider, "garmin");
+      assert.equal(error.diagnostic.timestampKind, "missing");
+      assert.equal(error.diagnostic.timestampSemantics, undefined);
+      return true;
+    },
   );
   await assert.rejects(
     prepareDeviceProviderSnapshotImport({
@@ -6834,7 +7003,15 @@ test("Junction strict sparse calendar repairs reject mixed valid and malformed r
         },
       },
     }),
-    JunctionSparseCalendarRepairNormalizationError,
+    (error: unknown) => {
+      assert.ok(error instanceof JunctionSparseCalendarRepairNormalizationError);
+      assert.equal(error.diagnostic.reason, "sparse_interval.row_incomplete");
+      assert.equal(error.diagnostic.rowOrdinal, 2);
+      assert.equal(error.diagnostic.sourceProvider, "garmin");
+      assert.equal(error.diagnostic.timestampKind, "absolute");
+      assert.equal(error.diagnostic.timestampSemantics, "utc");
+      return true;
+    },
   );
 
   const complete = normalizeJunctionSnapshot({

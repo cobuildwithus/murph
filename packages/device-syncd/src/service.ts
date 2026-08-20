@@ -2,6 +2,7 @@ import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 import {
   createImporters,
   JunctionSparseCalendarRepairNormalizationError,
+  normalizeKnownJunctionSourceProviderSlug,
 } from "@murphai/importers";
 import { normalizeJunctionCanonicalCoverageBoundary } from "@murphai/importers/device-providers/junction-resources";
 
@@ -2100,7 +2101,17 @@ function normalizeExecutionError(error: unknown): {
   if (error instanceof JunctionSparseCalendarRepairNormalizationError) {
     return {
       code: error.code,
-      details: {},
+      details: compactFailureDiagnostics({
+        normalizationFailureReason: readSafeDiagnosticToken(error.diagnostic.reason),
+        normalizationRowOrdinal: error.diagnostic.rowOrdinal,
+        normalizationSourceProvider: readSafeDiagnosticToken(
+          normalizeKnownJunctionSourceProviderSlug(error.diagnostic.sourceProvider),
+        ),
+        normalizationTimestampKind: readSafeDiagnosticToken(error.diagnostic.timestampKind),
+        normalizationTimestampSemantics: readSafeDiagnosticToken(
+          error.diagnostic.timestampSemantics,
+        ),
+      }),
       message: error.message,
       retryable: true,
     };

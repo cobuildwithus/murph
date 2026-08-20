@@ -53,6 +53,7 @@ export {
   JUNCTION_TEMPORAL_FEATURE_MAX_SAMPLES_PER_IMPORT,
 } from "./junction-timeseries-features.ts";
 export {
+  normalizeKnownJunctionSourceProviderSlug,
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,

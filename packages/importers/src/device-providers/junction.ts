@@ -117,6 +117,7 @@ import {
   selectJunctionWorkoutStreamCandidates,
 } from "./junction-bounded-features.ts";
 import {
+  normalizeKnownJunctionSourceProviderSlug,
   normalizeJunctionSourceProviderSlug,
   readJunctionSourceProviderSlug,
   resolveJunctionOrigin,
@@ -2643,19 +2644,66 @@ function assertJunctionSparseCalendarRepairRowsValid(input: {
       && (expectation.sourceInstanceId == null
         || resourceContext.origin.sourceInstanceId === expectation.sourceInstanceId);
     if (!valid) {
-      throw new JunctionSparseCalendarRepairNormalizationError();
+      throw junctionCalendarRefreshNormalizationError(
+        "sparse_interval.row_incomplete",
+        {
+          rowOrdinal: index + 1,
+          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+            resourceContext?.sourceProviderSlug,
+          ),
+          timestampKind: classifyJunctionNormalizationTimestampKind(startRaw),
+          timestampSemantics: timestamp?.timestampSemantics,
+        },
+      );
     }
   }
 }
 
+export type JunctionCalendarRefreshNormalizationFailureReason =
+  | "daily.timestamp_or_day_unresolved"
+  | "daily.value_missing"
+  | "daily.value_non_numeric"
+  | "daily.value_out_of_range"
+  | "source_context.unresolved"
+  | "source_day.outside_authorized_day"
+  | "sparse_interval.row_incomplete"
+  | "temporal.local_time_ambiguous_or_nonexistent"
+  | "temporal.timestamp_invalid"
+  | "temporal.timestamp_missing_or_non_string"
+  | "temporal.timestamp_semantics_mismatch";
+
+export type JunctionNormalizationTimestampKind =
+  | "absolute"
+  | "date_only"
+  | "floating"
+  | "invalid"
+  | "missing";
+
+export interface JunctionCalendarRefreshNormalizationDiagnostic {
+  reason: JunctionCalendarRefreshNormalizationFailureReason;
+  rowOrdinal?: number;
+  sourceProvider?: string;
+  timestampKind?: JunctionNormalizationTimestampKind;
+  timestampSemantics?: TimestampSemantics;
+}
+
 export class JunctionSparseCalendarRepairNormalizationError extends Error {
   readonly code = "JUNCTION_CALENDAR_REFRESH_INCOMPLETE_NORMALIZATION";
+  readonly diagnostic: Readonly<JunctionCalendarRefreshNormalizationDiagnostic>;
   readonly retryable = true;
 
-  constructor() {
+  constructor(diagnostic: JunctionCalendarRefreshNormalizationDiagnostic) {
     super("Junction calendar refresh contained a row that could not be applied completely.");
     this.name = "JunctionSparseCalendarRepairNormalizationError";
+    this.diagnostic = diagnostic;
   }
+}
+
+function junctionCalendarRefreshNormalizationError(
+  reason: JunctionCalendarRefreshNormalizationFailureReason,
+  diagnostic: Omit<JunctionCalendarRefreshNormalizationDiagnostic, "reason">,
+): JunctionSparseCalendarRepairNormalizationError {
+  return new JunctionSparseCalendarRepairNormalizationError({ ...diagnostic, reason });
 }
 
 function pushJunctionBoundedTimeseriesFeatures(
@@ -4173,6 +4221,15 @@ function buildJunctionDailyTimeseriesAggregates(input: {
   const seenFidelityRecords = new Set<string>();
 
   for (const [index, { entry, originFallback }] of entries.entries()) {
+    const timestampPaths = isJunctionSparseIntervalResource(input.resource)
+      ? JUNCTION_INTERVAL_START_TIMESTAMP_PATHS
+      : JUNCTION_INTERVAL_START_OWNED_TIMESTAMP_PATHS;
+    const providerTimestamp = firstStringFromPaths(entry, timestampPaths)
+      ?? firstValueFromPaths(entry, timestampPaths);
+    const rowDiagnostic = {
+      rowOrdinal: index + 1,
+      timestampKind: classifyJunctionNormalizationTimestampKind(providerTimestamp),
+    };
     const resourceContext = buildResourceContext({
       entry,
       originFallback,
@@ -4188,13 +4245,22 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       // A complete-source-day replacement may not silently drop a delivered
       // row; an unowned row invalidates the day's replacement authority.
       if (ownsTemporalFeatures) {
-        throw new JunctionSparseCalendarRepairNormalizationError();
+        throw junctionCalendarRefreshNormalizationError(
+          "source_context.unresolved",
+          {
+            ...rowDiagnostic,
+            timestampSemantics: typeof providerTimestamp === "string"
+              ? inferTimestampSemantics(providerTimestamp)
+              : undefined,
+          },
+        );
       }
       continue;
     }
 
     const providerValue = firstValueFromPaths(entry, input.valuePaths);
-    const value = input.normalizeValue(firstNumberFromPaths(entry, input.valuePaths), entry);
+    const numericProviderValue = firstNumberFromPaths(entry, input.valuePaths);
+    const value = input.normalizeValue(numericProviderValue, entry);
     const sparseStartRaw = isJunctionSparseIntervalResource(input.resource)
       ? firstStringFromPaths(entry, JUNCTION_INTERVAL_START_TIMESTAMP_PATHS)
       : undefined;
@@ -4242,7 +4308,26 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       // certify a complete source day; fail the import instead of certifying a
       // lossy response as authoritative.
       if (ownsTemporalFeatures) {
-        throw new JunctionSparseCalendarRepairNormalizationError();
+        let reason: JunctionCalendarRefreshNormalizationFailureReason;
+        if (numericProviderValue === undefined) {
+          reason = providerValue === undefined || providerValue === null
+            ? "daily.value_missing"
+            : "daily.value_non_numeric";
+        } else if (value === undefined) {
+          reason = "daily.value_out_of_range";
+        } else {
+          reason = "daily.timestamp_or_day_unresolved";
+        }
+        throw junctionCalendarRefreshNormalizationError(reason, {
+          ...rowDiagnostic,
+          sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+            resourceContext.sourceProviderSlug,
+          ),
+          timestampKind: classifyJunctionNormalizationTimestampKind(
+            timestamp.observedAtRaw ?? providerTimestamp,
+          ),
+          timestampSemantics: timestamp.timestampSemantics,
+        });
       }
       continue;
     }
@@ -4382,7 +4467,20 @@ function buildJunctionDailyTimeseriesAggregates(input: {
       ? input.context.temporalFeatureSourceDay
       : undefined;
     const temporalSampleAt = temporalSourceDay
-      ? resolveJunctionTemporalFeatureInstant(timestamp, temporalSourceDay.timeZone)
+      ? resolveJunctionTemporalFeatureInstant(
+          timestamp,
+          temporalSourceDay.timeZone,
+          {
+            ...rowDiagnostic,
+            sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+              resourceContext.sourceProviderSlug,
+            ),
+            timestampKind: classifyJunctionNormalizationTimestampKind(
+              timestamp.observedAtRaw ?? providerTimestamp,
+            ),
+            timestampSemantics: timestamp.timestampSemantics,
+          },
+        )
       : null;
     if (temporalSourceDay && temporalSampleAt !== null) {
       temporalFeatureInputCount += 1;
@@ -4398,7 +4496,19 @@ function buildJunctionDailyTimeseriesAggregates(input: {
           // The provider fetched the exact authorized window, so a row that
           // normalizes outside the target vault day (for example a fallback
           // timestamp) is a lossy normalization, not out-of-scope data.
-          throw new JunctionSparseCalendarRepairNormalizationError();
+          throw junctionCalendarRefreshNormalizationError(
+            "source_day.outside_authorized_day",
+            {
+              ...rowDiagnostic,
+              sourceProvider: normalizeKnownJunctionSourceProviderSlug(
+                resourceContext.sourceProviderSlug,
+              ),
+              timestampKind: classifyJunctionNormalizationTimestampKind(
+                timestamp.observedAtRaw ?? providerTimestamp,
+              ),
+              timestampSemantics: timestamp.timestampSemantics,
+            },
+          );
         }
         const temporalKey = [
           resourceContext.externalRefResourceType,
@@ -4804,6 +4914,23 @@ export function parseJunctionCompleteDayTimestamp(
   };
 }
 
+function classifyJunctionNormalizationTimestampKind(
+  value: unknown,
+): JunctionNormalizationTimestampKind {
+  if (value === undefined || value === null || value === "") {
+    return "missing";
+  }
+  if (typeof value !== "string") {
+    return "invalid";
+  }
+
+  const parsed = parseJunctionCompleteDayTimestamp(value);
+  if (!parsed) {
+    return value.trim() ? "invalid" : "missing";
+  }
+  return parsed.kind === "date-only" ? "date_only" : parsed.kind;
+}
+
 // The importer's complete-day boundary is the one acceptance owner: the
 // single strict parse above yields semantics agreement, day membership, and
 // temporal-instant eligibility together. Date-only rows return null (day
@@ -4817,29 +4944,45 @@ export function parseJunctionCompleteDayTimestamp(
 function resolveJunctionTemporalFeatureInstant(
   timestamp: ReturnType<typeof resolveRecordTimestamp>,
   timeZone: string,
+  diagnostic: Omit<
+    JunctionCalendarRefreshNormalizationDiagnostic,
+    "reason"
+  >,
 ): string | null {
   const raw = timestamp.observedAtRaw?.trim();
   if (!raw) {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError(
+      "temporal.timestamp_missing_or_non_string",
+      diagnostic,
+    );
   }
   const parsed = parseJunctionCompleteDayTimestamp(raw);
   if (!parsed) {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError("temporal.timestamp_invalid", diagnostic);
   }
   if (parsed.kind === "date-only") {
     if (timestamp.timestampSemantics !== "floating") {
-      throw new JunctionSparseCalendarRepairNormalizationError();
+      throw junctionCalendarRefreshNormalizationError(
+        "temporal.timestamp_semantics_mismatch",
+        diagnostic,
+      );
     }
     return null;
   }
   if (parsed.kind === "absolute") {
     if (timestamp.timestampSemantics === "floating") {
-      throw new JunctionSparseCalendarRepairNormalizationError();
+      throw junctionCalendarRefreshNormalizationError(
+        "temporal.timestamp_semantics_mismatch",
+        diagnostic,
+      );
     }
     return parsed.instant;
   }
   if (timestamp.timestampSemantics !== "floating") {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError(
+      "temporal.timestamp_semantics_mismatch",
+      diagnostic,
+    );
   }
   const [year, month, day] = parsed.dayKey.split("-").map(Number) as [
     number,
@@ -4872,7 +5015,10 @@ function resolveJunctionTemporalFeatureInstant(
         && resolved.second === second;
     });
   if (matches.length !== 1 || matches[0] === undefined) {
-    throw new JunctionSparseCalendarRepairNormalizationError();
+    throw junctionCalendarRefreshNormalizationError(
+      "temporal.local_time_ambiguous_or_nonexistent",
+      diagnostic,
+    );
   }
   return new Date(matches[0] + parsed.millisecond).toISOString();
 }
