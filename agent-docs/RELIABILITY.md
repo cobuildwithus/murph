@@ -1042,13 +1042,15 @@ Last verified: 2026-08-20
   errors remain terminal; the runtime must not create a second artifact retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
-  schedule consumed by the global due-reconcile sweep. The selector suppresses
-  an unchanged due tuple only within the current five-minute recovery bucket;
-  if checkpoint recovery leaves that tuple stale, a later bucket may re-signal
-  the same durable mailbox item. The bounded identities are one canonical
-  schedule event and one durable mailbox item, not one Temporal signal or one
-  provider execution for the tuple's entire lifetime. The canonical mailbox
-  item/event already exists in the committed input workspace. Its read-only
+  schedule consumed by the global due-reconcile sweep. The first durable
+  mailbox append owns the direct Temporal signal. A later recovery bucket may
+  record the same still-due tuple for bounded sweep suppression, but a duplicate
+  append does not re-signal it: the shared mailbox-handoff sweep recovers a
+  never-imported first signal, and the imported runtime work keeps its persisted
+  retry timestamp. The bounded identities are one canonical schedule event and
+  one durable mailbox item, not a new Temporal signal or provider execution in
+  every recovery bucket. The canonical mailbox item/event already exists in the
+  committed input workspace. Its read-only
   provider request classes run before checkpoint 1, which then durably captures
   the replayable post-pull/intermediate state. If checkpoint 2 fails to persist
   record/completion, a cold restore from checkpoint 1 may execute the same HTTP

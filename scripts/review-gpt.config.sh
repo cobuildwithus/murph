@@ -4,6 +4,8 @@ review_gpt_config_dir="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pw
 review_gpt_repo_root="$(CDPATH= cd -- "$review_gpt_config_dir/.." && pwd -P)"
 review_gpt_local_config="${XDG_CONFIG_HOME:-$HOME/.config}/murph/review-gpt.conf"
 readonly review_gpt_direct_browser_lane="${REVIEW_GPT_BROWSER_LANE-}"
+readonly review_gpt_direct_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT-}"
+readonly review_gpt_direct_compat_browser_lane_count="${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT-}"
 
 if [[ -r "$review_gpt_local_config" ]]; then
   # This optional user-owned file contains local workflow preferences only.
@@ -85,6 +87,28 @@ review_gpt_browser_lane_is_usable() {
   [[ ! -e "$review_gpt_lane_lock" && ! -L "$review_gpt_lane_lock" ]]
 }
 
+review_gpt_primary_checkout_root() {
+  local review_gpt_git_common_dir
+
+  if command -v git >/dev/null 2>&1; then
+    if review_gpt_git_common_dir="$(
+      git -C "$review_gpt_repo_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null
+    )"; then
+      case "$review_gpt_git_common_dir" in
+        */.git)
+          review_gpt_git_common_dir="${review_gpt_git_common_dir%/.git}"
+          if [[ -d "$review_gpt_git_common_dir" ]]; then
+            printf '%s\n' "$review_gpt_git_common_dir"
+            return 0
+          fi
+          ;;
+      esac
+    fi
+  fi
+
+  printf '%s\n' "$review_gpt_repo_root"
+}
+
 review_gpt_review_phase="${REVIEW_GPT_REVIEW_PHASE:-final}"
 review_gpt_round_number="${REVIEW_GPT_ROUND_NUMBER:-}"
 review_gpt_full_review_reason="${REVIEW_GPT_FULL_REVIEW_REASON:-}"
@@ -127,7 +151,15 @@ else
   review_gpt_requested_browser_lane="${REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_BROWSER_LANE:-${MURPH_REVIEW_GPT_PROFILE_SLUG:-auto}}}"
 fi
 review_gpt_requested_browser_lane="$(printf '%s' "$review_gpt_requested_browser_lane" | tr '[:upper:]' '[:lower:]')"
-review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
+# A value supplied on this invocation is task authority. The user-owned config
+# remains a fallback preference and cannot widen or replace a per-run pool cap.
+if [[ -n "$review_gpt_direct_browser_lane_count" ]]; then
+  review_gpt_browser_lane_count="$review_gpt_direct_browser_lane_count"
+elif [[ -n "$review_gpt_direct_compat_browser_lane_count" ]]; then
+  review_gpt_browser_lane_count="$review_gpt_direct_compat_browser_lane_count"
+else
+  review_gpt_browser_lane_count="${REVIEW_GPT_BROWSER_LANE_COUNT:-${MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4}}"
+fi
 
 if [[ "$review_gpt_reuses_existing_thread" == "1" ]]; then
   case "$review_gpt_requested_browser_lane" in
@@ -183,20 +215,21 @@ review_gpt_selected_browser_display="$(review_gpt_browser_lane_display_name "$re
 review_gpt_selected_browser_port="$(review_gpt_browser_lane_port "$review_gpt_selected_browser_lane")" || {
   return 1 2>/dev/null || exit 1
 }
-review_gpt_installed_browser_binary="/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+review_gpt_installed_browser_binary="${review_gpt_installed_browser_binary:-/Applications/Brave Browser.app/Contents/MacOS/Brave Browser}"
 if [[ "$review_gpt_selected_browser_lane" == "main" ]]; then
   review_gpt_selected_browser_app="/Applications/Brave Browser.app"
 else
   review_gpt_selected_browser_app="$review_gpt_repo_root/output-packages/review-gpt-profiles/$review_gpt_selected_browser_lane/$review_gpt_selected_browser_display.app"
 fi
 
-if [[ ! -x "$review_gpt_installed_browser_binary" && ! -d "$review_gpt_selected_browser_app" ]] &&
-  command -v mdfind >/dev/null 2>&1; then
-  review_gpt_found_browser_app="$(
-    mdfind "kMDItemDisplayName == '$review_gpt_selected_browser_display.app' || kMDItemFSName == '$review_gpt_selected_browser_display.app'" | head -n 1
-  )"
-  if [[ -n "$review_gpt_found_browser_app" ]]; then
-    review_gpt_selected_browser_app="$review_gpt_found_browser_app"
+if [[ -z "${browser_binary_path:-}" \
+  && "$review_gpt_selected_browser_lane" != "main" \
+  && ! -x "$review_gpt_installed_browser_binary" \
+  && ! -d "$review_gpt_selected_browser_app" ]]; then
+  review_gpt_primary_repo_root="$(review_gpt_primary_checkout_root)"
+  review_gpt_primary_browser_app="$review_gpt_primary_repo_root/output-packages/review-gpt-profiles/$review_gpt_selected_browser_lane/$review_gpt_selected_browser_display.app"
+  if [[ -d "$review_gpt_primary_browser_app" ]]; then
+    review_gpt_selected_browser_app="$review_gpt_primary_browser_app"
   fi
 fi
 

@@ -2484,6 +2484,12 @@ export async function appendHostedDeviceSyncScheduledReconcileWake(input: {
     healthDataConnectionId: input.connectionId,
     healthDataUserId: input.userId,
     signalFailureMode: "throw",
+    // The first append owns the direct Temporal handoff. A later recovery
+    // bucket can encounter the same durable schedule tuple while its imported
+    // runtime work is still pending; the shared mailbox-handoff sweep recovers
+    // only a never-imported first signal, while imported work keeps its own
+    // persisted retry owner.
+    startWorkflowOnDuplicate: false,
     wake,
     store,
     persist: async () => {},

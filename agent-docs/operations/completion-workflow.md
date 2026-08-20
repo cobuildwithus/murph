@@ -303,7 +303,10 @@ Every PR includes:
   input. Name the measurement method and exclusions. If no provider-input
   surface changed, write `Not applicable` for both runtimes with the reason;
   do not claim a measured zero from authored prompt text alone.
-- **Design proof.** Required for every user-facing hosted Web UI change. Link a
+- **Design proof.** Required for every user-facing hosted Web UI change. An
+  existing `page.tsx` or `layout.tsx` route is exempt only when the checker
+  proves that its sole runtime change is an unreferenced static object-literal
+  `metadata` export with no viewport or theme metadata. Link a
   repository-owned, reviewer-openable absolute URL with a fragment to the
   production component on `/design?tab=components`, consent surface on
   `/design?tab=consent`, or composed page section/flow under

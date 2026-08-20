@@ -151,6 +151,20 @@ export async function runHostedPreferenceHandoffSweeper(input: {
 function createHostedPreferenceHandoffCandidateStore(
   prisma: PrismaClient,
 ): HostedPreferenceHandoffCandidateStore {
+  const systemMailboxImportedSeq = Prisma.sql`
+    CASE
+      WHEN (
+        "workspace"."redacted_status_json"
+          ->> 'hostedMailboxSystemImportedSeq'
+      ) ~ '^(0|[1-9][0-9]*)$'
+        THEN (
+          "workspace"."redacted_status_json"
+            ->> 'hostedMailboxSystemImportedSeq'
+        )::bigint
+      ELSE 0
+    END
+  `;
+
   return {
     async listCandidates(input) {
       const retainedAt = new Date(input.now.getTime() - HOSTED_MAILBOX_RETENTION_MS);
@@ -171,11 +185,13 @@ function createHostedPreferenceHandoffCandidateStore(
             "item"."created_at" AS "createdAt",
             "item"."lane_seq" AS "laneSeq"
           FROM "hosted_mailbox_item" AS "item"
-          LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
-            ON "lane_counter"."user_id" = "item"."user_id"
-            AND "lane_counter"."lane" = "item"."lane"
+          LEFT JOIN "hosted_workspace" AS "workspace"
+            ON "workspace"."user_id" = "item"."user_id"
           WHERE "item"."kind" = 'member.preferences.updated'
-            AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
+            -- Import transfers retry ownership from this handoff sweep to the
+            -- runtime. Handled-through can remain behind while runtime-owned
+            -- work waits for its persisted retry timestamp.
+            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
@@ -187,16 +203,15 @@ function createHostedPreferenceHandoffCandidateStore(
             "item"."created_at" AS "createdAt",
             "item"."lane_seq" AS "laneSeq"
           FROM "hosted_mailbox_item" AS "item"
-          LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
-            ON "lane_counter"."user_id" = "item"."user_id"
-            AND "lane_counter"."lane" = "item"."lane"
+          LEFT JOIN "hosted_workspace" AS "workspace"
+            ON "workspace"."user_id" = "item"."user_id"
           WHERE "item"."kind" IN (
               'device-sync.wake',
               'health.daily-metric.reported',
               'runtime.browser-vault-refresh-requested',
               'runtime.maintenance-requested'
             )
-            AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
+            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" >= ${retainedAt}
           ORDER BY "item"."user_id", "item"."lane_seq" ASC
@@ -219,12 +234,11 @@ function createHostedPreferenceHandoffCandidateStore(
             AND "item"."dedupe_key" = (
               'clinical-records:sync:v1:' || "run"."id" || ':' || "run"."generation"::text
             )
-          LEFT JOIN "hosted_mailbox_lane_counter" AS "lane_counter"
-            ON "lane_counter"."user_id" = "item"."user_id"
-            AND "lane_counter"."lane" = "item"."lane"
+          LEFT JOIN "hosted_workspace" AS "workspace"
+            ON "workspace"."user_id" = "item"."user_id"
           WHERE "run"."status" = 'queued'
             AND "run"."completed_at" IS NULL
-            AND "item"."lane_seq" > COALESCE("lane_counter"."consumed_seq", 0)
+            AND "item"."lane_seq" > ${systemMailboxImportedSeq}
             AND ("item"."expires_at" IS NULL OR "item"."expires_at" > ${input.now})
             AND "item"."created_at" > ${retainedAt}
         ),
