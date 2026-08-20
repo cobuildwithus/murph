@@ -2090,6 +2090,9 @@ async function resolveHostedWebhookSourceObservation(input: {
   preparation: Extract<HostedWebhookSourceObservationPreparation, { kind: "provider_read" }>;
   store: PrismaDeviceSyncControlPlaneStore;
 }): Promise<{
+  buildSourceConnectionWork: NonNullable<
+    DeviceConnectionHandler["buildSourceConnectionWork"]
+  >;
   connectionWork: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   source: HostedConnectionSourceAdmissionCandidate;
   sourceAccessActive: boolean;
@@ -2112,13 +2115,57 @@ async function resolveHostedWebhookSourceObservation(input: {
     input.preparation.source.sourceProviderSlug,
   );
   return {
+    buildSourceConnectionWork: input.preparation.buildSourceConnectionWork,
     connectionWork: input.preparation.buildSourceConnectionWork({
+      historicalProofAuthorization: {
+        firstSeenAt: input.now,
+        sourceProviderSlug: input.preparation.source.sourceProviderSlug,
+      },
       now: input.now,
       sourceProviderSlug: input.preparation.source.sourceProviderSlug,
     }),
     source: input.preparation.source,
     sourceAccessActive,
     storedConnection: input.preparation.storedConnection,
+  };
+}
+
+export function buildHostedJunctionSourceEstablishmentWork(input: {
+  buildSourceConnectionWork: NonNullable<
+    DeviceConnectionHandler["buildSourceConnectionWork"]
+  >;
+  connectionWork: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
+  hasNonTerminalLegacyFitbitSource: boolean;
+  now: string;
+  sourceProviderSlug: string | null | undefined;
+}): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt"> {
+  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  if (
+    sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    || !input.hasNonTerminalLegacyFitbitSource
+  ) {
+    return input.connectionWork;
+  }
+  const legacyWork = input.buildSourceConnectionWork({
+    historicalProofAuthorization: {
+      firstSeenAt: input.now,
+      sourceProviderSlug,
+    },
+    now: input.now,
+    sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+  });
+  const legacyBackfillJobs = legacyWork.initialJobs?.filter(
+    (job) => job.kind === "backfill",
+  ) ?? [];
+  if (legacyBackfillJobs.length === 0) {
+    return input.connectionWork;
+  }
+  return {
+    ...input.connectionWork,
+    initialJobs: [
+      ...(input.connectionWork.initialJobs ?? []),
+      ...legacyBackfillJobs,
+    ],
   };
 }
 
@@ -2714,6 +2761,9 @@ interface HostedDeviceSyncWebhookAdmissionInput {
   scopes: string[];
   sourceProviderSlug: string | null;
   sourceObservation: {
+    buildSourceConnectionWork: NonNullable<
+      DeviceConnectionHandler["buildSourceConnectionWork"]
+    >;
     connectionWork: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
     source: HostedConnectionSourceAdmissionCandidate;
     sourceAccessActive: boolean;
@@ -2754,6 +2804,10 @@ async function persistHostedDeviceSyncWebhookAccepted(
           input.dataSourceProviderSlug === null
           || input.dataSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
         );
+      const sourceEstablishmentRequiresFitbitMigrationWork =
+        normalizeJunctionProviderSlug(
+          input.sourceObservation?.source.sourceProviderSlug,
+        ) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
       const allowConditionalPreparation = attempt === 0;
       const pendingDirtySnapshot = (
         allowConditionalPreparation
@@ -2770,6 +2824,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
         : null;
       const skipInitialAdmission = allowConditionalPreparation
         && !requiresFitbitMigrationAdmission
+        && !sourceEstablishmentRequiresFitbitMigrationWork
         && (
           input.preparationAuthorityProven
           || (!hasPayloadResources && pendingDirtySnapshot !== null)
@@ -2830,10 +2885,21 @@ async function persistHostedDeviceSyncWebhookAccepted(
             status: input.status,
           } satisfies HostedDeviceSyncConnectionEstablishedAccount
         : null;
+      const sourceConnectionWork = input.sourceObservation
+        ? buildHostedJunctionSourceEstablishmentWork({
+            buildSourceConnectionWork:
+              input.sourceObservation.buildSourceConnectionWork,
+            connectionWork: input.sourceObservation.connectionWork,
+            hasNonTerminalLegacyFitbitSource:
+              initialAdmission?.status.hasNonTerminalLegacyFitbitSource === true,
+            now: input.acceptedAt,
+            sourceProviderSlug: input.sourceObservation.source.sourceProviderSlug,
+          })
+        : null;
       const sourceConnectionWake = sourceConnectionAccount && input.sourceObservation
         ? buildHostedDeviceSyncConnectionEstablishedWake({
             account: sourceConnectionAccount,
-            connection: input.sourceObservation.connectionWork,
+            connection: sourceConnectionWork ?? input.sourceObservation.connectionWork,
             now: input.acceptedAt,
             ownerId: input.userId,
           })
@@ -2881,7 +2947,11 @@ async function persistHostedDeviceSyncWebhookAccepted(
             }
             if (
               initialAdmission
-              && finalAdmission.kind !== initialAdmission.status.kind
+              && (
+                finalAdmission.kind !== initialAdmission.status.kind
+                || finalAdmission.hasNonTerminalLegacyFitbitSource
+                  !== initialAdmission.status.hasNonTerminalLegacyFitbitSource
+              )
             ) {
               throw createHostedDeviceSyncDirtyPreparationMismatchError();
             }
@@ -2891,6 +2961,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
               if (
                 !preparedMailbox
                 || !sourceConnectionAccount
+                || !sourceConnectionWork
                 || !sourceConnectionWake
                 || !finalAdmission.currentConnectionRecord
                 || !finalAdmission.currentSource
@@ -2899,7 +2970,7 @@ async function persistHostedDeviceSyncWebhookAccepted(
               }
               const sourceMailboxAppend = await commitHostedDeviceSyncConnectionEstablishedTx({
                 account: sourceConnectionAccount,
-                connection: input.sourceObservation.connectionWork,
+                connection: sourceConnectionWork,
                 connectionStartedAt: input.sourceObservation.source.lastSeenAt.toISOString(),
                 currentConnectionRecord: finalAdmission.currentConnectionRecord,
                 currentSource: finalAdmission.currentSource,
@@ -3119,12 +3190,14 @@ type HostedDeviceSyncWebhookAdmissionStatus =
   | {
       currentConnectionRecord: HostedConnectionRecord | null;
       currentSource: HostedConnectionSourceAdmissionCandidate | null;
+      hasNonTerminalLegacyFitbitSource: boolean;
       kind: "ready";
       setupPending: boolean;
     }
   | {
       currentConnectionRecord: HostedConnectionRecord | null;
       currentSource: HostedConnectionSourceAdmissionCandidate | null;
+      hasNonTerminalLegacyFitbitSource: boolean;
       kind: "migration_pending";
       setupPending: boolean;
       successorFirstSeenAt: Date;
@@ -3292,27 +3365,37 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       }
     }
   }
-  const ready = {
-    currentConnectionRecord: sourceCredentialCurrent,
-    currentSource,
-    kind: "ready" as const,
-    setupPending,
-  };
-
   const dataSourceProviderSlug = normalizeJunctionProviderSlug(
     input.dataSourceProviderSlug,
   );
   const unknownJunctionDataSource = input.provider === "junction"
     && dataSourceProviderSlug === null
     && isHostedJunctionDataWebhookEvent(input.eventType);
-  if (unknownJunctionDataSource) {
-    const legacySources =
-      await input.store.listBoundedConnectionSourcesForConnections({
+  const observedGoogleHealthSource = normalizeJunctionProviderSlug(
+    input.sourceObservation?.source.sourceProviderSlug,
+  ) === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
+  const requiresLegacyFitbitSource = unknownJunctionDataSource
+    || dataSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
+    || observedGoogleHealthSource;
+  const legacySources = requiresLegacyFitbitSource
+    ? await input.store.listBoundedConnectionSourcesForConnections({
         connectionIds: [input.connectionId],
         sourceProviderSlugs: [JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG],
         tx,
-      });
-    if (hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources)) {
+      })
+    : [];
+  const hasNonTerminalLegacyFitbitSource =
+    hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources);
+  const ready = {
+    currentConnectionRecord: sourceCredentialCurrent,
+    currentSource,
+    hasNonTerminalLegacyFitbitSource,
+    kind: "ready" as const,
+    setupPending,
+  };
+
+  if (unknownJunctionDataSource) {
+    if (hasNonTerminalLegacyFitbitSource) {
       throw webhookSourceNotReadyError(
         "Junction webhook data source provenance is not available yet. Retry shortly.",
       );
@@ -3375,13 +3458,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
     return { kind: "completed" };
   }
   if (dataSourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG) {
-    const legacySources =
-      await input.store.listBoundedConnectionSourcesForConnections({
-        connectionIds: [input.connectionId],
-        sourceProviderSlugs: [JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG],
-        tx,
-      });
-    if (hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources)) {
+    if (hasNonTerminalLegacyFitbitSource) {
       return {
         ...ready,
         kind: "migration_pending",
@@ -3397,7 +3474,7 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
   return ready;
 }
 
-function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
+export function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
   sources: readonly HostedDeviceConnectionSource[],
 ): boolean {
   return sources.some((source) =>

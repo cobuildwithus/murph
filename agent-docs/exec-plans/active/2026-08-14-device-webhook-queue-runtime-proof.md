@@ -69,6 +69,13 @@ Updated: 2026-08-20
 3. Risk: a provider receives a false success or duplicate processing.
    Mitigation: keep `Queue.send` acknowledgement as the only success boundary
    and retain provider redelivery plus existing trace idempotency.
+4. Risk: reconstructing a missing Google Health source admits the source but
+   leaves Fitbit migration permanently pending because its initial history
+   work is not bound to the new Google Health source epoch.
+   Mitigation: use one source-establishment work shaper for callbacks and
+   webhook recovery, bind both exact-source backfills to the admitted Google
+   Health `firstSeenAt`, exclude legacy Fitbit reconcile work, and prove the
+   mailbox through hosted parsing and the Junction job executor.
 
 ## Tasks
 
@@ -174,6 +181,14 @@ Updated: 2026-08-20
   cannot create a candidate, trace, dirty work, signal, or mailbox item. This
   guard applies only when the canonical source row is absent, preserving the
   established-source behavior and explicit disconnect fences.
+- Accepted Apollo round 2's Fitbit-migration finding. Missing-source recovery
+  now gives its own backfill the same historical-proof authorization as an
+  ordinary callback and routes both entry paths through one pure Google
+  Health/Fitbit augmentation. The existing final admission's bounded legacy
+  source result controls whether the exact Fitbit backfill is appended; no
+  Fitbit reconcile, durable state, queue, or lifecycle owner was added. The
+  hosted wake parser now admits the two manifest-owned proof fields so runtime
+  can execute the durable mailbox instead of rejecting it.
 
 ## Verification
 
@@ -189,10 +204,17 @@ Updated: 2026-08-20
   live main/DLQ metrics were both zero with 14-day retention and the alert
   bindings configured. The workerd reseal regression now passes; its follow-up
   PR and protected redeploy passed. The corrected transport canary accepted
-  Queue traffic. The missing-source and queue/wake focused unit proof now passes
-  all 198 cases, and all 13 real-PostgreSQL authority cases pass. This includes
+  Queue traffic. The missing-source and queue/wake focused proof now passes all
+  200 cases, and all 14 real-PostgreSQL authority cases pass. This includes
   inactive provider proof followed by successful replay of the same prepared
   event, same-account older/newer Queue ordering, and unsupported missing-source
-  rejection without state. Prepared Web typechecking passes. Exact-head final
+  rejection without state. The added PostgreSQL case proves the admitted Google
+  Health epoch is carried by both exact-source backfills with no legacy Fitbit
+  reconcile. Hosted parsing and Junction executor tests prove those fields
+  survive runtime handoff, stale same-day work keeps a distinct dedupe identity,
+  and only the current dual-history proof can make migration ready. The existing
+  PostgreSQL cutover journey now also replays the retained Google Health event
+  after cutover and proves its trace plus durable payload commit. Prepared Web
+  and `device-syncd` typechecking pass. Exact-head final
   review, Web redeploy, bounded encrypted redrive, and the repeated production
   canary remain pending.
