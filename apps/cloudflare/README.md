@@ -230,31 +230,32 @@ without retaining labels or raw scrape data. Unsafe available signals therefore
 still open an incident immediately. A collection that fails before producing a
 usable observation, including a scrape with every required family absent,
 receives one bounded retry after one second; only an exhausted two-attempt
-collection counts as a failed check. A usable partial observation ordinarily
-remains single-pass so available unsafe evidence pages without delay. The
-monitor retains every successfully parsed observation even when it contains no
-usable required family and its retry fails before parsing; `unavailable` is
-reserved for checks that produced no parsed observation. The
-connection-error family tracks both supported ports, keyed by port and region
-so their series cannot collide. Any observed supported port makes the family
-available. An absent port is diagnostic sparse label cardinality, not a
-collection failure. When a safe observation has the whole family absent, the
-monitor makes one confirmation scrape after one second. PlanetScale's
+collection counts as a failed check. A usable partial observation with unsafe
+available evidence remains single-pass so paging is not delayed. Otherwise the
+monitor makes one bounded confirmation scrape after one second. A complete
+confirmation replaces the partial observation, while an unsafe confirmation is
+returned immediately. If the confirmation stays incomplete or fails, the
+original omission remains truthful. The monitor retains every successfully
+parsed observation even when it contains no usable required family and its retry
+fails before parsing; `unavailable` is reserved for checks that produced no
+parsed observation. The connection-error family tracks both supported ports,
+keyed by port and region so their series cannot collide. Any observed supported
+port makes the family available. An absent port is diagnostic sparse label
+cardinality, not a collection failure. PlanetScale's
 [documented example Prometheus scrape configuration](https://planetscale.com/docs/postgres/monitoring/prometheus-postgres)
 uses 30 seconds, but that is not a provider freshness guarantee and does not
 justify another provider call. The monitor evaluates every available
-confirmation signal
-and composes any recovered supported port with the original complete gauge
-evidence, so a port first seen there advances its baseline. Each observed port
-advances only its own usable baseline;
-an omitted port retains its prior baseline, and new or reset region series are
-suppressed independently. A failed confirmation retains the original
-incomplete observation, so absence never becomes zero and an old counter delta
-is never replayed. Two checks with the whole family absent still open the
-fallback monitoring incident. This keeps the existing maximum of two
-observations and four provider requests; even two sequential ten-second fetch
-timeouts per observation plus the one-second wait remain below the two-minute
-run lease.
+confirmation signal. When the original observation is missing only the whole
+connection-error family, a safe incomplete confirmation may still compose
+recovered supported-port counters with the original complete gauge evidence, so
+a port first seen there advances its baseline. Each observed port advances only
+its own usable baseline; an omitted port retains its prior baseline, and new or
+reset region series are suppressed independently. Absence never becomes zero
+and an old counter delta is never replayed. Persistent missing families still
+open the fallback monitoring incident after two consecutive checks. This keeps
+the existing maximum of two observations and four provider requests; even two
+sequential ten-second fetch timeouts per observation plus the one-second wait
+remain below the two-minute run lease.
 Structured failure warnings retain the parsed-observation count and exact
 per-port omission counts without raw scrape content. An acknowledged
 telemetry-only page is

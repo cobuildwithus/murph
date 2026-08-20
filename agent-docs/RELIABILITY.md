@@ -477,31 +477,32 @@ Last verified: 2026-08-20
   second, outside any storage transaction. Only an exhausted two-attempt
   collection increments the consecutive-failure state. A usable partial
   observation remains single-pass when any available signal is unsafe, so
-  concrete evidence is evaluated without delay. The connection-error family
-  tracks direct port 5432 and pooled application port 6432, keyed by port and
-  region so their counters cannot collide. Any observed supported port makes
-  the family available. An absent port is diagnostic sparse label cardinality,
-  not a collection failure. An observed port can still produce a positive
-  non-replayable condition. When every available signal is safe and the whole
-  family is absent, the monitor waits one second before one confirmation
-  scrape. PlanetScale's documented example 30-second Prometheus scrape
-  configuration is not a freshness guarantee, so it does not justify a longer
-  delay or another provider call. Every available confirmation signal is
-  evaluated;
-  any recovered supported port can be composed with the original complete
-  gauge evidence, while a failed confirmation retains the original partial
-  observation. A port first observed by confirmation advances its baseline.
-  Each observed port replaces and advances
-  only its own usable series baseline, an omitted port retains its prior baseline,
-  and new or reset region series are independently suppressed. This makes
-  transient counter-family absence less noisy without converting unknown to
-  zero, replaying an old delta, or weakening the two-check telemetry fallback.
-  The confirmation retains the existing two-observation/four-request ceiling.
-  Including two sequential ten-second fetch timeouts per observation, its
-  41-second worst-case wall time remains below the persisted two-minute run
-  lease and the platform's 15-minute scheduled runtime. Structured failure
-  warnings include the actual parsed-observation count and per-port omission
-  counts, without raw provider payloads or signed scrape values.
+  concrete evidence is evaluated without delay. Otherwise it receives exactly
+  one confirmation after one second. A complete confirmation replaces the
+  partial observation, an unsafe confirmation is returned immediately, and an
+  incomplete or failed confirmation retains the original omission. The
+  connection-error family tracks direct port 5432 and pooled application port
+  6432, keyed by port and region so their counters cannot collide. Any observed
+  supported port makes the family available. An absent port is diagnostic sparse
+  label cardinality, not a collection failure. An observed port can still
+  produce a positive non-replayable condition. PlanetScale's documented example
+  30-second Prometheus scrape configuration is not a freshness guarantee, so it
+  does not justify a longer delay or another provider call. Every available
+  confirmation signal is evaluated. When the original observation is missing
+  only the whole connection-error family, a safe incomplete confirmation may
+  compose recovered supported-port counters with the original complete gauge
+  evidence. A port first observed by confirmation advances its baseline. Each
+  observed port replaces and advances only its own usable series baseline, an
+  omitted port retains its prior baseline, and new or reset region series are
+  independently suppressed. This makes transient counter-family absence less
+  noisy without converting unknown to zero, replaying an old delta, or weakening
+  the two-check telemetry fallback. The confirmation retains the existing
+  two-observation/four-request ceiling. Including two sequential ten-second
+  fetch timeouts per observation, its 41-second worst-case wall time remains
+  below the persisted two-minute run lease and the platform's 15-minute
+  scheduled runtime. Structured failure warnings include the actual
+  parsed-observation count and per-port omission counts, without raw provider
+  payloads or signed scrape values.
   Discovery, scrape, parse, or incomplete required metrics must recur on two
   consecutive runs before paging the monitoring condition. A failed check never
   erases a successfully parsed observation: even an all-family-

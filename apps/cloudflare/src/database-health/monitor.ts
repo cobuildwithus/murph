@@ -511,7 +511,12 @@ export class DatabaseHealthMonitor {
         });
       }
     }
-    if (!shouldConfirmMissingConnectionErrors(observation)) {
+    if (
+      !shouldConfirmPartialObservation(
+        observation,
+        previousConnectionErrorCounterBaseline,
+      )
+    ) {
       return buildDatabaseMetricCollection({
         attempts,
         observation,
@@ -524,24 +529,15 @@ export class DatabaseHealthMonitor {
     try {
       const confirmation = await this.collectMetricObservationOnce();
       parsedObservations.push(confirmation);
-      const confirmationCounters =
-        confirmation.snapshot.connectionErrorCounters;
       if (
-        evaluateDatabaseMetricSnapshot(
-          confirmation.snapshot,
-          null,
-        ).length > 0
+        hasUnsafeDatabaseHealthEvidence(
+          confirmation,
+          previousConnectionErrorCounterBaseline,
+        )
       ) {
         return buildDatabaseMetricCollection({
           attempts,
           observation: confirmation,
-          parsedObservations,
-        });
-      }
-      if (confirmationCounters === null) {
-        return buildDatabaseMetricCollection({
-          attempts,
-          observation,
           parsedObservations,
         });
       }
@@ -552,15 +548,21 @@ export class DatabaseHealthMonitor {
           parsedObservations,
         });
       }
+      const composedConnectionErrorObservation =
+        composeRecoveredConnectionErrorObservation({
+          confirmation,
+          observation,
+        });
+      if (composedConnectionErrorObservation !== null) {
+        return buildDatabaseMetricCollection({
+          attempts,
+          observation: composedConnectionErrorObservation,
+          parsedObservations,
+        });
+      }
       return buildDatabaseMetricCollection({
         attempts,
-        observation: {
-          missingMetrics: [],
-          snapshot: {
-            ...observation.snapshot,
-            connectionErrorCounters: confirmationCounters,
-          },
-        },
+        observation,
         parsedObservations,
       });
     } catch {
@@ -1544,16 +1546,64 @@ function hasUsableDatabaseHealthMetric(
     < DATABASE_HEALTH_REQUIRED_METRIC_NAMES.length;
 }
 
-function shouldConfirmMissingConnectionErrors(
+function shouldConfirmPartialObservation(
   observation: DatabaseMetricObservation,
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null,
 ): boolean {
-  return observation.missingMetrics.length === 1
-    && observation.missingMetrics[0]
-      === DATABASE_CONNECTION_ERROR_METRIC_NAME
-    && evaluateDatabaseMetricSnapshot(
-      observation.snapshot,
+  return observation.missingMetrics.length > 0
+    && hasUsableDatabaseHealthMetric(observation)
+    && !hasUnsafeDatabaseHealthEvidence(
+      observation,
+      previousConnectionErrorCounterBaseline,
+    );
+}
+
+function hasUnsafeDatabaseHealthEvidence(
+  observation: DatabaseMetricObservation,
+  previousConnectionErrorCounterBaseline:
+    Readonly<Record<string, number>> | null,
+): boolean {
+  const connectionErrorCounters =
+    observation.snapshot.connectionErrorCounters;
+  const connectionErrorDeltas = connectionErrorCounters === null
+    ? null
+    : calculateConnectionErrorDeltas(
+      connectionErrorCounters,
+      previousConnectionErrorCounterBaseline,
+    );
+  return evaluateDatabaseMetricSnapshot(
+    observation.snapshot,
+    connectionErrorDeltas,
+  ).length > 0;
+}
+
+function composeRecoveredConnectionErrorObservation(input: {
+  confirmation: DatabaseMetricObservation;
+  observation: DatabaseMetricObservation;
+}): DatabaseMetricObservation | null {
+  const confirmationCounters =
+    input.confirmation.snapshot.connectionErrorCounters;
+  if (
+    input.observation.missingMetrics.length !== 1
+    || input.observation.missingMetrics[0]
+      !== DATABASE_CONNECTION_ERROR_METRIC_NAME
+    || input.confirmation.missingMetrics.length === 0
+    || confirmationCounters === null
+    || evaluateDatabaseMetricSnapshot(
+      input.confirmation.snapshot,
       null,
-    ).length === 0;
+    ).length > 0
+  ) {
+    return null;
+  }
+  return {
+    missingMetrics: [],
+    snapshot: {
+      ...input.observation.snapshot,
+      connectionErrorCounters: confirmationCounters,
+    },
+  };
 }
 
 async function readBoundedResponseText(

@@ -1677,15 +1677,16 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   independent region-plus-port monotonic series. Any observed supported port
   makes the family available. An absent port is diagnostic sparse label
   cardinality, not a collection failure, while an observed port can still
-  contribute unsafe evidence. A safe observation with the complete
-  connection-error family absent receives one bounded confirmation after one
-  second. Usable partial collections stay single-pass whenever available
-  evidence is unsafe. PlanetScale's example 30-second Prometheus scrape
+  contribute unsafe evidence. Any usable partial observation with only safe
+  available evidence receives one bounded confirmation after one second;
+  partial observations with unsafe evidence stay single-pass. A complete
+  confirmation replaces the partial observation, an unsafe confirmation is
+  returned immediately, and an incomplete or failed confirmation retains the
+  original omission. PlanetScale's example 30-second Prometheus scrape
   configuration is not treated as a freshness guarantee or a basis for more
-  provider calls. The
-  confirmation's available signals are evaluated, any recovered supported port
-  may join the original complete gauge evidence, and failure retains the
-  original incomplete observation. Each
+  provider calls. When the original observation is missing only the whole
+  connection-error family, a safe incomplete confirmation may join recovered
+  supported-port counters to the original complete gauge evidence. Each
   observed port, including one first seen by confirmation, advances only its
   usable baseline; an omitted port retains its prior baseline,
   and new or reset region series are independently suppressed so an old delta is
