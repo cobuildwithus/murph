@@ -13,6 +13,7 @@ import {
 import {
   pruneAssistantGeneratedDeliveryResidue,
   pruneAssistantRuntimeResidue,
+  type AssistantGeneratedDeliveryResiduePruneResult,
   type AssistantRuntimeResiduePruneResult,
 } from "@murphai/assistant-engine/assistant-runtime-residue";
 import {
@@ -321,6 +322,9 @@ async function createHostedWorkspaceV2Snapshot(
   let localWorkspaceCleanForWarmReuse = false;
   let prunedRuntimeSymlinkCount = 0;
   let terminalWriteOperationPruneResult: PruneTerminalWriteOperationRecordsResult | null = null;
+  let assistantGeneratedDeliveryPruneResult:
+    | AssistantGeneratedDeliveryResiduePruneResult
+    | null = null;
   let assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null = null;
   let assistantRuntimeGeneratedDeliveryPruneFailed = false;
   let snapshotFailureObserved = false;
@@ -429,35 +433,25 @@ async function createHostedWorkspaceV2Snapshot(
     }
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     try {
-      const generatedDeliveryPruneResult =
+      assistantGeneratedDeliveryPruneResult =
         await pruneAssistantGeneratedDeliveryResidue({
-          generatedDeliveryFilesQuiescent: true,
           signal: input.signal,
           vault: input.vaultRoot,
         });
-      assistantRuntimeResiduePruneResult = {
-        acceptedTurnInputJournalsPruned: 0,
-        autoReplyEvidenceFilesPruned: 0,
-        autoReplyEvidenceGroupsPruned: 0,
-        autoReplyIntentProvenancePruned: 0,
-        ...generatedDeliveryPruneResult,
-        hostedMailboxInputItemMappingsPruned: 0,
-        inputEventsPruned: 0,
-        receiptsPruned: 0,
-      };
       if (
-        generatedDeliveryPruneResult.generatedDeliveryFilesPruned > 0 ||
-        generatedDeliveryPruneResult
+        assistantGeneratedDeliveryPruneResult.generatedDeliveryFilesPruned >
+          0 ||
+        assistantGeneratedDeliveryPruneResult
           .generatedDeliveryCleanupSkippedUntrustedOutbox
       ) {
         const generatedDeliveryCleanupSkipped =
-          generatedDeliveryPruneResult
+          assistantGeneratedDeliveryPruneResult
             .generatedDeliveryCleanupSkippedUntrustedOutbox;
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
-            ...createAssistantRuntimeResiduePruneLogDetails(
-              assistantRuntimeResiduePruneResult,
+            ...createAssistantGeneratedDeliveryResiduePruneLogDetails(
+              assistantGeneratedDeliveryPruneResult,
             ),
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
@@ -492,8 +486,7 @@ async function createHostedWorkspaceV2Snapshot(
         vaultRoot: input.vaultRoot,
       });
       assertHostedWorkspaceSnapshotConstructionLive(input.signal);
-      const runtimeResiduePruneResult = await pruneAssistantRuntimeResidue({
-        generatedDeliveryFilesQuiescent: false,
+      assistantRuntimeResiduePruneResult = await pruneAssistantRuntimeResidue({
         now: new Date(),
         pendingInputIds,
         protectPendingProviderCleanupEvidence:
@@ -501,26 +494,16 @@ async function createHostedWorkspaceV2Snapshot(
         signal: input.signal,
         vault: input.vaultRoot,
       });
-      assistantRuntimeResiduePruneResult = {
-        ...runtimeResiduePruneResult,
-        generatedDeliveryCleanupSkippedUntrustedOutbox:
-          assistantRuntimeResiduePruneResult
-            ?.generatedDeliveryCleanupSkippedUntrustedOutbox ??
-          runtimeResiduePruneResult
-            .generatedDeliveryCleanupSkippedUntrustedOutbox,
-        generatedDeliveryBytesPruned:
-          assistantRuntimeResiduePruneResult?.generatedDeliveryBytesPruned ??
-          runtimeResiduePruneResult.generatedDeliveryBytesPruned,
-        generatedDeliveryFilesPruned:
-          assistantRuntimeResiduePruneResult?.generatedDeliveryFilesPruned ??
-          runtimeResiduePruneResult.generatedDeliveryFilesPruned,
-      };
-      if (hasAssistantRuntimeResiduePrunedFiles(runtimeResiduePruneResult)) {
+      if (
+        hasAssistantRuntimeResiduePrunedFiles(
+          assistantRuntimeResiduePruneResult,
+        )
+      ) {
         emitHostedExecutionStructuredLog({
           component: "runner",
           details: {
             ...createAssistantRuntimeResiduePruneLogDetails(
-              runtimeResiduePruneResult,
+              assistantRuntimeResiduePruneResult,
             ),
             snapshotMode: HOSTED_WORKSPACE_V2_SNAPSHOT_MODE,
           },
@@ -872,6 +855,7 @@ async function createHostedWorkspaceV2Snapshot(
   }
 
   await writeHostedCheckpointSnapshotFinishedLog({
+    assistantGeneratedDeliveryPruneResult,
     assistantRuntimeGeneratedDeliveryPruneFailed,
     assistantRuntimeResiduePruneResult,
     encryptedByteSize,
@@ -1234,7 +1218,6 @@ function countAssistantRuntimeResiduePrunedFiles(
     result.acceptedTurnInputJournalsPruned +
     result.autoReplyEvidenceFilesPruned +
     result.autoReplyIntentProvenancePruned +
-    result.generatedDeliveryFilesPruned +
     result.hostedMailboxInputItemMappingsPruned +
     result.inputEventsPruned +
     result.receiptsPruned
@@ -1244,13 +1227,7 @@ function countAssistantRuntimeResiduePrunedFiles(
 function createAssistantRuntimeResiduePruneLogDetails(
   result: AssistantRuntimeResiduePruneResult | null,
 ): HostedRuntimeRedactedJson {
-  if (
-    !result ||
-    (
-      !hasAssistantRuntimeResiduePrunedFiles(result) &&
-      !result.generatedDeliveryCleanupSkippedUntrustedOutbox
-    )
-  ) {
+  if (!result || !hasAssistantRuntimeResiduePrunedFiles(result)) {
     return {};
   }
   return {
@@ -1262,12 +1239,6 @@ function createAssistantRuntimeResiduePruneLogDetails(
       result.autoReplyEvidenceGroupsPruned,
     prunedAssistantRuntimeAutoReplyIntentProvenanceCount:
       result.autoReplyIntentProvenancePruned,
-    prunedAssistantRuntimeGeneratedDeliveryBytes:
-      result.generatedDeliveryBytesPruned,
-    prunedAssistantRuntimeGeneratedDeliveryFileCount:
-      result.generatedDeliveryFilesPruned,
-    assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
-      result.generatedDeliveryCleanupSkippedUntrustedOutbox,
     prunedAssistantRuntimeHostedMailboxInputItemMappingCount:
       result.hostedMailboxInputItemMappingsPruned,
     prunedAssistantRuntimeInputEventCount: result.inputEventsPruned,
@@ -1277,7 +1248,32 @@ function createAssistantRuntimeResiduePruneLogDetails(
   };
 }
 
+function createAssistantGeneratedDeliveryResiduePruneLogDetails(
+  result: AssistantGeneratedDeliveryResiduePruneResult | null,
+): HostedRuntimeRedactedJson {
+  if (
+    !result ||
+    (
+      result.generatedDeliveryFilesPruned === 0 &&
+      !result.generatedDeliveryCleanupSkippedUntrustedOutbox
+    )
+  ) {
+    return {};
+  }
+  return {
+    prunedAssistantRuntimeGeneratedDeliveryBytes:
+      result.generatedDeliveryBytesPruned,
+    prunedAssistantRuntimeGeneratedDeliveryFileCount:
+      result.generatedDeliveryFilesPruned,
+    assistantRuntimeGeneratedDeliveryCleanupSkippedUntrustedOutbox:
+      result.generatedDeliveryCleanupSkippedUntrustedOutbox,
+  };
+}
+
 async function writeHostedCheckpointSnapshotFinishedLog(input: {
+  assistantGeneratedDeliveryPruneResult:
+    | AssistantGeneratedDeliveryResiduePruneResult
+    | null;
   assistantRuntimeGeneratedDeliveryPruneFailed: boolean;
   assistantRuntimeResiduePruneResult: AssistantRuntimeResiduePruneResult | null;
   encryptedByteSize: number;
@@ -1313,6 +1309,9 @@ async function writeHostedCheckpointSnapshotFinishedLog(input: {
     ),
     ...createAssistantRuntimeResiduePruneLogDetails(
       input.assistantRuntimeResiduePruneResult,
+    ),
+    ...createAssistantGeneratedDeliveryResiduePruneLogDetails(
+      input.assistantGeneratedDeliveryPruneResult,
     ),
     ...createHostedWorkspaceSnapshotPlanLogDetails(input.legacyMaterialization),
     ...input.timingDetails,

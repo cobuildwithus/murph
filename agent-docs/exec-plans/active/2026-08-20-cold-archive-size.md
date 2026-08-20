@@ -110,6 +110,9 @@ Updated: 2026-08-20
 - Run the existing generated-delivery policy through a narrow residue entrypoint
   before unrelated pending-input compaction and broad residue maintenance, so a
   later best-effort failure cannot retain already-proved-terminal bytes.
+- Delete the broad residue API's obsolete generated-delivery mode rather than
+  retaining two production routes into the same safety-sensitive deletion
+  policy; generated delivery and unrelated residue keep separate result shapes.
 - Retain the query SQLite snapshot exception unless ReviewGPT produces stronger
   evidence. Its compressed checkpoint cost is materially smaller than its raw
   size, while the original one-vCPU measurement avoids a multi-second cold

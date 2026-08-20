@@ -66,8 +66,7 @@ export interface AssistantGeneratedDeliveryResiduePruneResult {
   generatedDeliveryFilesPruned: number
 }
 
-export interface AssistantRuntimeResiduePruneResult
-  extends AssistantGeneratedDeliveryResiduePruneResult {
+export interface AssistantRuntimeResiduePruneResult {
   acceptedTurnInputJournalsPruned: number
   autoReplyEvidenceFilesPruned: number
   autoReplyEvidenceGroupsPruned: number
@@ -133,7 +132,6 @@ interface AssistantGeneratedDeliveryPrunePlan {
 }
 
 export async function pruneAssistantRuntimeResidue(input: {
-  generatedDeliveryFilesQuiescent?: boolean
   now?: Date
   pendingInputIds: readonly string[]
   protectPendingProviderCleanupEvidence?: boolean
@@ -147,8 +145,6 @@ export async function pruneAssistantRuntimeResidue(input: {
       await ensureAssistantState(paths)
       input.signal?.throwIfAborted()
       return await pruneAssistantRuntimeResidueAtPaths({
-        generatedDeliveryFilesQuiescent:
-          input.generatedDeliveryFilesQuiescent ?? false,
         now: input.now ?? new Date(),
         paths,
         pendingInputIds: input.pendingInputIds,
@@ -165,7 +161,6 @@ export async function pruneAssistantRuntimeResidue(input: {
 }
 
 export async function pruneAssistantGeneratedDeliveryResidue(input: {
-  generatedDeliveryFilesQuiescent: true
   signal?: AbortSignal | null
   vault: string
 }): Promise<AssistantGeneratedDeliveryResiduePruneResult> {
@@ -259,7 +254,6 @@ export async function maintainAssistantAutoReplyRouteState(
 }
 
 async function pruneAssistantRuntimeResidueAtPaths(input: {
-  generatedDeliveryFilesQuiescent: boolean
   now: Date
   paths: AssistantStatePaths
   pendingInputIds: readonly string[]
@@ -292,18 +286,6 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     protectPendingProviderCleanupEvidence:
       input.protectPendingProviderCleanupEvidence,
   })
-  const generatedDeliveryPlan = input.generatedDeliveryFilesQuiescent
-    ? await planAssistantGeneratedDeliveryPrune({
-        outbox: inventory.outbox,
-        signal: input.signal,
-        vault: input.vault,
-      })
-    : {
-        files: [],
-        inventoryFiles: [],
-        root: null,
-        skippedUntrustedOutbox: false,
-      }
   input.signal?.throwIfAborted()
 
   for (const filePath of plan.journalPaths) {
@@ -331,13 +313,6 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     await removeAssistantStateFile(filePath, input.signal)
   }
 
-  const generatedDeliveryPruneResult =
-    await applyAssistantGeneratedDeliveryPrunePlan({
-      plan: generatedDeliveryPlan,
-      signal: input.signal,
-      vault: input.vault,
-    })
-
   for (const directory of [
     directories.acceptedTurnInputs,
     directories.evidence,
@@ -353,12 +328,6 @@ async function pruneAssistantRuntimeResidueAtPaths(input: {
     autoReplyEvidenceFilesPruned: evidenceFilesPruned,
     autoReplyEvidenceGroupsPruned: plan.evidenceGroups.length,
     autoReplyIntentProvenancePruned: plan.provenancePaths.length,
-    generatedDeliveryCleanupSkippedUntrustedOutbox:
-      generatedDeliveryPlan.skippedUntrustedOutbox,
-    generatedDeliveryBytesPruned:
-      generatedDeliveryPruneResult.bytesPruned,
-    generatedDeliveryFilesPruned:
-      generatedDeliveryPruneResult.filesPruned,
     hostedMailboxInputItemMappingsPruned:
       plan.hostedMailboxInputItemPaths.length,
     inputEventsPruned: plan.inputEventPaths.length,
