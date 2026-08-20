@@ -2170,7 +2170,7 @@ test("Junction daily aggregate alias repair converges under the primary owner an
 test("Junction daily aggregate alias repair composes with a preceding-day aggregate", async () => {
   const fixture = await createJunctionDailyAliasSplit();
   try {
-    const snapshot = junctionDailyAliasSnapshot(44, { precedingDayValue: 31 });
+    const snapshot = junctionDailyAliasSnapshot(47, { precedingDayValue: 31 });
     const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
       {
         provider: "junction",
@@ -2181,6 +2181,7 @@ test("Junction daily aggregate alias repair composes with a preceding-day aggreg
     );
     assert.equal(repaired.applied, true);
     assert.ok(repaired.ingestId);
+    assert.ok(repaired.auditPath);
     assert.ok(repaired.persistedEvidencePartCount > 0);
     assert.equal(
       repaired.events.some((event) =>
@@ -2215,10 +2216,15 @@ test("Junction daily aggregate alias repair composes with a preceding-day aggreg
     assert.notEqual(preceding?.id, fixture.legacyOwner.id);
     assert.equal(current?.dayKey, "2026-06-25");
     assert.equal(current?.id, fixture.primaryOwner.id);
+    assert.equal(current?.value, 47);
     assert.equal(returnedStress[0]?.id, preceding?.id);
     assert.equal(returnedStress[1]?.id, current?.id);
     const loserHistory = afterRepair.filter((record) => record.id === fixture.legacyOwner.id);
     assert.equal(isDeletedEventLifecycle(loserHistory.at(-1)?.lifecycle), true);
+    assert.equal(
+      loserHistory.filter((record) => isDeletedEventLifecycle(record.lifecycle)).length,
+      1,
+    );
 
     const replay = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
       {
@@ -2241,7 +2247,7 @@ test("Junction daily aggregate alias repair composes with a preceding-day aggreg
       {
         provider: "junction",
         vaultRoot: fixture.vaultRoot,
-        snapshot: junctionDailyAliasSnapshot(47, { precedingDayValue: 31 }),
+        snapshot: junctionDailyAliasSnapshot(51, { precedingDayValue: 31 }),
       },
       { corePort: coreRuntime },
     );
@@ -2254,7 +2260,7 @@ test("Junction daily aggregate alias repair composes with a preceding-day aggreg
     assert.equal(updatedLive[0]?.id, preceding?.id);
     assert.equal(updatedLive[0]?.value, 31);
     assert.equal(updatedLive[1]?.id, fixture.primaryOwner.id);
-    assert.equal(updatedLive[1]?.value, 47);
+    assert.equal(updatedLive[1]?.value, 51);
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true });
   }
