@@ -536,7 +536,7 @@ function addHistoryCoverage(
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
-    it("reconstructs a missing Junction source row only after live provider proof", async () => {
+    it("keeps a reconstructed Junction source retryable until live provider proof succeeds", async () => {
       const sourceProviderSlug = "apple_health_kit";
       const fixture = await createFixture({ sourceLastErrorCode: null });
       const sourceInstanceKey = buildJunctionProviderSourceInstanceKey({
@@ -546,8 +546,9 @@ describe.skipIf(!runPostgresProof)(
       if (!sourceInstanceKey) {
         throw new TypeError("Expected a canonical Junction source identity.");
       }
+      let providerStatus: "connected" | "unknown" = "unknown";
       const providerFetch = vi.fn(async () => new Response(JSON.stringify({
-        data: [{ slug: sourceProviderSlug, status: "connected" }],
+        data: [{ slug: sourceProviderSlug, status: providerStatus }],
       }), {
         headers: { "content-type": "application/json" },
         status: 200,
@@ -564,13 +565,83 @@ describe.skipIf(!runPostgresProof)(
           registry,
           store: fixture.store,
         });
+        const connectionBefore = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: {
+            lastWebhookAt: true,
+            setupExpiresAt: true,
+            setupPhase: true,
+            updatedAt: true,
+          },
+          where: { id: fixture.connectionId },
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        await expect(fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: {
+            lastWebhookAt: true,
+            setupExpiresAt: true,
+            setupPhase: true,
+            updatedAt: true,
+          },
+          where: { id: fixture.connectionId },
+        })).resolves.toEqual(connectionBefore);
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: {
+            firstSeenAt: true,
+            lastErrorCode: true,
+            lastErrorMessage: true,
+            lastSeenAt: true,
+            lifecycleEpoch: true,
+            status: true,
+          },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey,
+            },
+          },
+        })).resolves.toEqual({
+          firstSeenAt: fixture.receivedAt,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: fixture.receivedAt,
+          lifecycleEpoch: 1,
+          status: "disconnected",
+        });
+        await expect(fixture.prisma.deviceWebhookTrace.findUnique({
+          where: {
+            provider_traceId: {
+              provider: "junction",
+              traceId: prepared.traceId,
+            },
+          },
+        })).resolves.toBeNull();
+        await expect(fixture.prisma.deviceSyncDirtyConnection.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceSyncDirtyPayload.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.deviceSyncSignal.count({
+          where: { connectionId: fixture.connectionId },
+        })).resolves.toBe(0);
+        await expect(fixture.prisma.hostedMailboxItem.count({
+          where: { userId: fixture.memberId },
+        })).resolves.toBe(0);
+
+        providerStatus = "connected";
 
         await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
           accepted: true,
           duplicate: false,
         });
 
-        expect(providerFetch).toHaveBeenCalledOnce();
+        expect(providerFetch).toHaveBeenCalledTimes(2);
         await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
           select: {
             firstSeenAt: true,

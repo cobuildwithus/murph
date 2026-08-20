@@ -41,12 +41,14 @@ Updated: 2026-08-20
 - Reaches: The existing provider webhook recovery journey only; connected
   sources, explicit disconnects, unsupported providers, and member controls do
   not change.
-- Proof: Production-faithful unit and PostgreSQL scenarios must show live
-  provider proof advances the reconstructed candidate, inactive provider state
-  remains disconnected and retryable, retained encrypted traffic drains, and
-  the five-hour Junction-only canary stays healthy.
-- Walkthrough: Pending the corrected live canary; candidate status is Hold
-  until retained traffic drains and the monitored production path completes.
+- Candidate proof: Production-faithful unit and PostgreSQL scenarios show live
+  provider proof advances the reconstructed candidate, while inactive provider
+  state remains disconnected and the same prepared event stays retryable.
+- Deployment proof: Retained encrypted traffic must drain and the five-hour
+  Junction-only canary must stay healthy before rollout completion.
+- Walkthrough: Ready for candidate review based on the production-faithful
+  active-provider and inactive-then-replay paths. Rollout completion remains
+  pending the retained-traffic drain and monitored production canary.
 
 ## Constraints
 
@@ -152,6 +154,14 @@ Updated: 2026-08-20
   that row becomes connected or webhook effects commit. Do not accept a
   missing row as connected, mutate provider payload semantics, add a second
   lifecycle owner, or bypass a disconnect fence.
+- Accepted the missing-source preliminary specialist findings. Candidate
+  review now relies on the production-faithful active-provider and
+  inactive-then-replay paths; retained-message drainage and the five-hour live
+  canary are deployment-completion proof rather than a pre-merge walkthrough
+  prerequisite. The real-PostgreSQL scenario now proves the failed attempt
+  leaves one frozen-time disconnected candidate, releases the trace, creates
+  no webhook effects, and lets the same prepared event connect exactly once
+  after provider authority becomes live.
 
 ## Verification
 
@@ -167,6 +177,8 @@ Updated: 2026-08-20
   live main/DLQ metrics were both zero with 14-day retention and the alert
   bindings configured. The workerd reseal regression now passes; its follow-up
   PR and protected redeploy passed. The corrected transport canary accepted
-  Queue traffic, but the missing-source recovery, exact-head review/CI, Web
-  redeploy, bounded encrypted redrive, and repeated production canary remain
-  pending.
+  Queue traffic. The missing-source focused unit proof and all 11
+  real-PostgreSQL authority cases now pass, including inactive provider proof
+  followed by successful replay of the same prepared event. Exact-head final
+  review, Web redeploy, bounded encrypted redrive, and the repeated production
+  canary remain pending.
