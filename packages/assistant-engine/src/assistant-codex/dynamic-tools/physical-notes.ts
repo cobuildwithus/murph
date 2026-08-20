@@ -68,6 +68,7 @@ const physicalNoteRecoveryArgumentsSchema = z.object({
 export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
   namespace: 'murph',
   name: 'resolve_physical_note',
+  deferLoading: true,
   description: [
     'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md before using this tool.',
     'Call exactly once only when a person explicitly asks to check, clear, resolve, or cancel an earlier unresolved physical-note submission.',

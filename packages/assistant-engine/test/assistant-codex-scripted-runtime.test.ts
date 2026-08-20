@@ -63,6 +63,9 @@ import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
+import {
+  MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+} from '../src/assistant-codex/dynamic-tools/physical-notes.ts'
 import type {
   VoiceMemoToolRuntime,
 } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -351,6 +354,7 @@ interface ScriptedProviderRequestSummary {
     includesExecCommand: boolean
     includesAutomation: boolean
     includesGroup: boolean
+    includesPhysicalNoteRecovery: boolean
     includesReadShared: boolean
     includesResponseCardCompactTableShape: boolean
     includesResponseCardNutritionV2Shape: boolean
@@ -9565,6 +9569,146 @@ text(result.output);
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
   })
 
+  it('keeps physical-note recovery deferred until an explicit request discovers it', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const messageRef = `ain_${'e'.repeat(32)}`
+    const recoveryRequests: unknown[] = []
+    const createHostedToolContext = (): AssistantHostedToolContext => ({
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentUserActionScope: () => ({
+        acceptedInputIds: [messageRef],
+        conversationId: 'conversation-physical-note-recovery',
+        conversationScope: 'direct',
+        inboundMailboxItemIds: ['mailbox-physical-note-recovery'],
+        originSessionId: 'session-physical-note-recovery',
+        recipientKey: 'member:current',
+      }),
+      physicalNotes: {
+        resolve: async (request) => {
+          recoveryRequests.push(request)
+          return { retryAfter: null, status: 'clear' }
+        },
+        send: async () => {
+          throw new Error('Physical-note sending is unavailable in this test.')
+        },
+      },
+      sendVaultFile: async () => {
+        throw new Error('Vault-file sending is unavailable in this test.')
+      },
+      vaultFileSendAvailable: false,
+    })
+    const authorizeAcceptedMessageTarget = async (input: {
+      messageRef: string
+    }) => input.messageRef === messageRef
+      ? { targetInputId: messageRef }
+      : null
+
+    const ordinaryScenario = await prepareScriptedTurnScenario()
+    const modelCatalogJson = await writeOpenAiFlexModelCatalogJson({
+      codexCommand: ordinaryScenario.turnInput.codexCommand,
+      directory: ordinaryScenario.turnInput.codexHome,
+    })
+    ordinaryScenario.stub.captureProviderRequestDiagnostics()
+    ordinaryScenario.stub.queue({ text: 'ORDINARY_TURN_OK' })
+    const ordinaryResult = await executeCodexAppServerTurn({
+      ...ordinaryScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [MURPH_GROUP_TOOL, MURPH_RESOLVE_PHYSICAL_NOTE_TOOL],
+      env: {
+        ...ordinaryScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'What can you help me with today?',
+    })
+    const ordinarySummaries =
+      ordinaryScenario.stub.requestSummariesSinceBaseline()
+    expect(ordinarySummaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+      includesPhysicalNoteRecovery: false,
+    })
+    expect(ordinaryResult.finalMessage).toBe('ORDINARY_TURN_OK')
+    expect(recoveryRequests).toHaveLength(0)
+
+    await stopWarmCodexAppServer()
+    const baselineScenario = await prepareScriptedTurnScenario()
+    baselineScenario.stub.captureProviderRequestDiagnostics()
+    baselineScenario.stub.queue({ text: 'ORDINARY_TURN_OK' })
+    const baselineResult = await executeCodexAppServerTurn({
+      ...baselineScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [MURPH_GROUP_TOOL],
+      env: {
+        ...baselineScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'What can you help me with today?',
+    })
+    const baselineSummary =
+      baselineScenario.stub.requestSummariesSinceBaseline()[0]
+    expect(baselineResult.finalMessage).toBe('ORDINARY_TURN_OK')
+    const deferredDiscoveryOverheadBytes =
+      (ordinarySummaries[0]?.providerRequestDiagnostics?.bytes ?? 0)
+      - (baselineSummary?.providerRequestDiagnostics?.bytes ?? 0)
+    expect(deferredDiscoveryOverheadBytes).toBeGreaterThan(0)
+    expect(deferredDiscoveryOverheadBytes).toBeLessThan(200)
+    expect(recoveryRequests).toHaveLength(0)
+
+    await stopWarmCodexAppServer()
+    const recoveryScenario = await prepareScriptedTurnScenario()
+    recoveryScenario.stub.captureProviderRequestDiagnostics()
+    recoveryScenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const tool = ALL_TOOLS.find(
+  ({ name }) => name === "murph__resolve_physical_note",
+);
+if (!tool) {
+  text(JSON.stringify({ found: false }));
+} else {
+  const result = await tools.murph__resolve_physical_note({
+    message_ref: ${JSON.stringify(messageRef)},
+  });
+  text(JSON.stringify({ found: true, result }));
+}
+`,
+          name: 'exec',
+        },
+      },
+      { text: 'PHYSICAL_NOTE_RECOVERY_OK' },
+    )
+    const recoveryResult = await executeCodexAppServerTurn({
+      ...recoveryScenario.turnInput,
+      authorizeAcceptedMessageTarget,
+      dynamicTools: [MURPH_GROUP_TOOL, MURPH_RESOLVE_PHYSICAL_NOTE_TOOL],
+      env: {
+        ...recoveryScenario.turnInput.env,
+        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
+      },
+      hostedToolContext: createHostedToolContext(),
+      prompt: 'Clear my earlier unresolved physical note.',
+    })
+    const recoverySummaries =
+      recoveryScenario.stub.requestSummariesSinceBaseline()
+    expect(recoverySummaries[0]?.providerRequestDiagnostics).toMatchObject({
+      includesAllTools: true,
+      includesPhysicalNoteRecovery: false,
+    })
+    const recoveryOutput =
+      recoverySummaries[1]?.customToolCallOutputs?.join('\n') ?? ''
+    expect(recoveryOutput).toContain('"found":true')
+    expect(recoveryOutput).toContain('No unresolved physical-note submission')
+    expect(recoveryRequests).toEqual([{
+      originAssistantInputId: messageRef,
+    }])
+    expect(recoveryResult.finalMessage).toBe('PHYSICAL_NOTE_RECOVERY_OK')
+  })
+
   it('keeps narrow group reads eager beside deferred Terra tools', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -11351,6 +11495,8 @@ function readScriptedProviderRequestSummary(
             includesExecCommand: requestBody.includes('exec_command'),
             includesAutomation: requestBody.includes('"name":"automation"'),
             includesGroup: requestBody.includes('"name":"group"'),
+            includesPhysicalNoteRecovery:
+              requestBody.includes('"name":"resolve_physical_note"'),
             includesReadShared: requestBody.includes('read_shared'),
             includesResponseCardCompactTableShape: [
               'compact_table',

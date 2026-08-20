@@ -46,7 +46,9 @@ message that explicitly asks to check, clear, resolve, or cancel an earlier
 uncertain submission. It performs one foreground reconciliation through Web and
 returns in the same turn. It does not generate artwork, publish an image, create
 a provider effect, recall accepted mail, schedule work, or authorize a later
-send.
+send. The low-frequency action uses the existing deferred-tool discovery path:
+ordinary eligible turns carry only its compact discovery record, while an
+explicit recovery request discovers the full schema before calling it.
 
 On the immediate completion turn the send tool infers the trusted image only
 when its completion carries that exact accepted origin. When Murph showed the
@@ -265,10 +267,11 @@ producer first. Then deploy the Cloudflare Web-control allowlist and port plus
 the runner bundle, and require immediate container convergence and fingerprint
 proof. The recovery request is not replayed after transport loss: provider
 metadata reads are safe, but a lost response may hide a durable reconciliation,
-so the assistant reports recovery as unavailable instead of converting transport
-failure into a claim about the old note. An older runner does not expose the
-action; a new runner against old Web receives a route failure and leaves the
-guard unchanged.
+so the assistant reports the final recovery state as unconfirmed instead of
+converting transport failure into a claim about the old note. It still states
+that nothing new was sent and no automatic retry is running. An older runner
+does not expose the action; a new runner against old Web receives a route
+failure and leaves the guard unchanged.
 
 The proactive address-completion change ships in the runner bundle and reuses an
 existing CLI command family plus the unchanged Worker-owned Mapbox provider-egress

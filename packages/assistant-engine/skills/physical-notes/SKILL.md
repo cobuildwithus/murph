@@ -27,8 +27,13 @@ Treat its result literally:
 - `pending` means the outcome still cannot be safely resolved. If
   `retryAfter` is present, state that Murph can check again after that time only
   if the person explicitly asks. Never promise or schedule an automatic check.
-- `permission_denied` or `unavailable` means nothing changed. State the bounded
-  reason and do not retry automatically.
+- `permission_denied` means the action was not authorized and nothing changed.
+  State the bounded reason and do not retry automatically.
+- For `unavailable`, follow the result's bounded explanation. A returned
+  provider/configuration unavailability can establish that no clear occurred,
+  while a lost or invalid response leaves the final state unconfirmed. Never
+  infer a state change or no-change from the status alone. Say nothing new was
+  sent, say no automatic retry is running, and do not retry automatically.
 
 The recovery tool never sends a new note or recalls an accepted one. Never say
 “canceled” unless a future provider contract explicitly adds that outcome.

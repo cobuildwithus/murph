@@ -92,6 +92,7 @@ describe('assistant physical notes', () => {
     expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.description).toContain(
       'never sends a new note or recalls an accepted one',
     )
+    expect(MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.deferLoading).toBe(true)
   })
 
   it('parses recovery only with an exact accepted-input-shaped message ref', () => {
@@ -194,6 +195,42 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       `\"status\":\"${response.status}\"`,
     )
+    if (response.status === 'unavailable') {
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'earlier submission was not cleared',
+      )
+    }
+  })
+
+  it('keeps the durable recovery state unconfirmed when its response is lost', async () => {
+    const resolve = vi.fn(async () => {
+      throw new Error('response body lost after the request was consumed')
+    })
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        physicalNotes: { resolve, send: vi.fn() },
+        privateImageUrlPublisher: unavailablePrivateImagePublisher(),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'resolve-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+      },
+    })
+
+    const text = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(resolve).toHaveBeenCalledOnce()
+    expect(result.rpcResult).toMatchObject({ success: false })
+    expect(text).toContain('final state is unconfirmed')
+    expect(text).toContain('Nothing new was sent')
+    expect(text).toContain('no automatic retry is running')
+    expect(text).not.toContain('was not cleared')
+    expect(text).not.toContain('nothing changed')
   })
 
   it('keeps rejection recovery separate from feedback eligibility', async () => {

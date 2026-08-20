@@ -2620,7 +2620,7 @@ export async function executeMurphDynamicToolRequest(input: {
           false,
           JSON.stringify({
             note:
-              'Murph could not complete the provider check. The earlier submission was not cleared, nothing new was sent, and no automatic retry is running.',
+              'Murph could not confirm the provider-check response, so the earlier submission\'s final state is unconfirmed. Do not claim any clearing or acceptance outcome. Nothing new was sent, and no automatic retry is running.',
             retryAfter: null,
             status: 'unavailable',
           }),

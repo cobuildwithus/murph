@@ -126,18 +126,35 @@ not Web presentation.
 - Affected Web, Cloudflare, Assistant Engine, Assistant Runtime, and hosted
   execution typechecks: pass.
 - Web lint, documentation drift, and documentation gardening: pass.
-- Real pinned Codex app-server initial-provider-input measurement, using a
-  captured complete request with volatile identifiers/paths canonicalized and
-  the recovery registration removed to form the paired base: direct
-  `125030 bytes / 27657 tokens` to `125891 bytes / 27854 tokens`; group
-  `109536 bytes / 24157 tokens` to `110397 bytes / 24354 tokens`. The scoped
-  recovery tool accounts for `+861 bytes / +197 o200k_harmony tokens` in both
-  cases; turns without an accepted current recovery instruction do not receive
-  it.
+- Real pinned Codex app-server initial-provider-input measurement, using the
+  same captured complete requests with volatile identifiers/paths canonicalized
+  and `gpt-tokenizer@3.4.0` `o200k_harmony`: direct
+  `125030 bytes / 27657 tokens` to `125124 bytes / 27675 tokens`
+  (`+94 bytes / +18 tokens`, `+0.08% bytes / +0.07% tokens`); group
+  `109536 bytes / 24157 tokens` to `109630 bytes / 24175 tokens`
+  (`+94 bytes / +18 tokens`, `+0.09% bytes / +0.07% tokens`). The initial
+  delta is only the existing code-mode deferred-discovery record; the full
+  recovery schema is absent from both ordinary and explicit recovery initial
+  requests and is loaded only after explicit discovery. A pinned app-server
+  provider-boundary regression proves ordinary non-use, explicit discovery,
+  one authorized call, and a sub-200-byte discovery-record ceiling.
 - Repository-wide typecheck reports two pre-existing Junction workspace-boundary
   violations outside this change; all workspace package/app typechecks pass.
-- Candidate is published as PR #2099 for the required specialist, final
-  ReviewGPT, and exact-head CI gates.
+- Preliminary Product UX/prompt/coverage review at the immutable first-reviewed
+  head returned two accepted findings: transport-loss copy was overconfident,
+  and the low-frequency recovery schema was eagerly exposed. Recovery now keeps
+  a lost response explicitly unconfirmed and uses the existing deferred
+  code-mode discovery path with ordinary-turn and explicit-call proof.
+- Final ReviewGPT round 1 at the same immutable head independently returned the
+  accepted transport-loss finding and no other cross-cutting finding. The
+  correction preserves definite no-change copy for a returned Web
+  `unavailable` result while keeping thrown/lost responses uncertainty-safe.
+- Post-finding canonical affected verification (`pnpm test:diff`): pass. This
+  includes 4,006 Assistant Engine tests, 2,430 Assistant Runtime tests, 1,182
+  CLI tests, 10,788 hosted Web tests plus lint/dev-smoke/production build, and
+  2,612 Cloudflare Node plus 15 Workers tests.
+- Candidate is published as PR #2099; final ReviewGPT re-review and exact-head
+  CI remain open before plan closure.
 
 Status: active
 Updated: 2026-08-20
