@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -9,7 +10,9 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import {
+  isFrontendUiChange,
   isFrontendUiPath,
+  isStaticMetadataOnlyRouteChange,
   validateFrontendEvidence,
 } from "./check-frontend-evidence.mjs";
 
@@ -24,6 +27,52 @@ const COMPLETE_HTML = `
 <li>Coverage: Empty and populated states on a narrow phone; desktop structure did not change.</li>
 </ul>
 `;
+const COMPLETION_WORKFLOW = readFileSync(
+  new URL("../agent-docs/operations/completion-workflow.md", import.meta.url),
+  "utf8",
+);
+const HOSTED_WORKTREE_GUIDE = readFileSync(
+  new URL(
+    "../agent-docs/operations/hosted-local-worktree-dev.md",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+function documentedEvidenceExamples() {
+  return [...COMPLETION_WORKFLOW.matchAll(
+    /```markdown\n([\s\S]*?)\n\s*```/gu,
+  )]
+    .map((match) => match[1])
+    .filter((example) => example.trimStart().startsWith("## Evidence"));
+}
+
+function renderDocumentedEvidenceExample(markdown) {
+  const [heading, ...bodyLines] = markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  assert.equal(heading, "## Evidence");
+  return `
+<h2>Evidence</h2>
+<ul>
+${bodyLines
+  .map((line) => {
+    assert.match(line, /^- /u);
+    return `<li>${line.slice(2)}</li>`;
+  })
+  .join("\n")}
+</ul>
+`;
+}
+
+function frontendOnlyWorktreeCommand() {
+  const match = /For frontend-only work[\s\S]*?```bash\n([\s\S]*?)\n```/u.exec(
+    HOSTED_WORKTREE_GUIDE,
+  );
+  assert.ok(match);
+  return match[1];
+}
 
 test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/app/home/page.tsx"), true);
@@ -38,6 +87,202 @@ test("detects user-facing UI and excludes reference pages", () => {
   assert.equal(isFrontendUiPath("apps/web/app/screenshots/page.tsx"), false);
   assert.equal(
     isFrontendUiPath("apps/web/test/hosted-settings.test.tsx"),
+    false,
+  );
+});
+
+test("completion workflow documents the exact frontend evidence labels", () => {
+  const examples = documentedEvidenceExamples();
+  assert.equal(examples.length, 1);
+  assert.deepEqual(
+    validateFrontendEvidence({
+      changedPaths: ["apps/web/app/settings/page.tsx"],
+      prBodyHtml: renderDocumentedEvidenceExample(examples[0]),
+    }),
+    {
+      errors: [],
+      required: true,
+      uiPaths: ["apps/web/app/settings/page.tsx"],
+    },
+  );
+});
+
+test("frontend-only worktree command pins every hosted public URL locally", () => {
+  const command = frontendOnlyWorktreeCommand();
+  for (const expected of [
+    "DEVICE_SYNC_PUBLIC_BASE_URL='http://localhost:3101/api/device-sync'",
+    "HOSTED_ONBOARDING_PUBLIC_BASE_URL='http://localhost:3101'",
+    "HOSTED_ONBOARDING_ALLOWED_MUTATION_ORIGINS='http://localhost:3101,http://127.0.0.1:3101'",
+    "HOSTED_WEB_BASE_URL='http://localhost:3101'",
+  ]) {
+    assert.match(
+      command,
+      new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    );
+  }
+  assert.match(command, /pnpm dev -- --hostname 127\.0\.0\.1 --port 3101/u);
+});
+
+test("exempts only isolated static route metadata from rendered proof", () => {
+  const baseSource = `import { PitchDeck } from "./pitch-deck";
+
+export default function Page() {
+  return <PitchDeck />;
+}
+`;
+  const headSource = `import type { Metadata } from "next";
+import { PitchDeck } from "./pitch-deck";
+
+export const metadata: Metadata = {
+  alternates: { canonical: "/pitch-deck" },
+  description: "A public pitch deck.",
+  title: "Pitch deck",
+};
+
+export default function Page() {
+  return <PitchDeck />;
+}
+`;
+  const change = {
+    baseSource,
+    headSource,
+    path: "apps/web/app/pitch-deck/page.tsx",
+  };
+
+  assert.equal(isStaticMetadataOnlyRouteChange(change), true);
+  assert.equal(isFrontendUiChange(change), false);
+  assert.deepEqual(
+    validateFrontendEvidence({ changedFiles: [change], prBodyHtml: "" }),
+    { required: false },
+  );
+
+  assert.equal(
+    isStaticMetadataOnlyRouteChange({
+      baseSource: headSource,
+      headSource: headSource.replace("Pitch deck", "Pitch deck for teams"),
+      path: change.path,
+    }),
+    true,
+  );
+});
+
+test("keeps rendered, shared, dynamic, and viewport metadata changes in proof", () => {
+  const path = "apps/web/app/pitch-deck/page.tsx";
+  const baseSource = `export const metadata = { title: "Before" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`;
+  const cases = [
+    `export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>After</h1>;
+}
+`,
+    `export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{metadata.title}</h1>;
+}
+`,
+    String.raw`export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{metad\u0061ta.title}</h1>;
+}
+`,
+    `export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{eval("meta" + "data").title}</h1>;
+}
+`,
+    `export const metadata = buildMetadata("After");
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { themeColor: "black", title: "After" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { formatDetection: { telephone: false } };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `const pageTitle = "After";
+export const metadata = { title: pageTitle };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { "theme\\u0043olor": "black", title: "After" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `export const metadata = { title: "After" };
+export const viewport = { width: "device-width" };
+
+export default function Page() {
+  return <h1>Before</h1>;
+}
+`,
+    `import * as self from "./page";
+export const metadata = { title: "After" };
+
+export default function Page() {
+  return <h1>{self["meta" + "data"].title}</h1>;
+}
+`,
+  ];
+
+  for (const headSource of cases) {
+    const change = { baseSource, headSource, path };
+    assert.equal(isStaticMetadataOnlyRouteChange(change), false);
+    assert.equal(isFrontendUiChange(change), true);
+  }
+
+  assert.equal(
+    isStaticMetadataOnlyRouteChange({
+      baseSource: null,
+      headSource: `export const metadata = { title: "New" };\n`,
+      path,
+    }),
+    false,
+  );
+});
+
+test("does not strip type-import text from rendered route source", () => {
+  const path = "apps/web/app/pitch-deck/page.tsx";
+  const baseSource = `export const metadata = { title: "Before" };
+
+const example = \`import type { Before } from "example";\`;
+
+export default function Page() {
+  return <pre>{example}</pre>;
+}
+`;
+  const headSource = `export const metadata = { title: "After" };
+
+const example = \`import type { After } from "example";\`;
+
+export default function Page() {
+  return <pre>{example}</pre>;
+}
+`;
+
+  assert.equal(
+    isStaticMetadataOnlyRouteChange({ baseSource, headSource, path }),
     false,
   );
 });
@@ -77,8 +322,8 @@ test("rejects missing, pending, or absent proof", () => {
 `,
     }).errors,
     [
-      "The Evidence section must name direct proof matched to the changed frontend claim.",
-      "The Evidence section must explain which states and viewports were checked and why that proof is sufficient.",
+      "Add a `Direct:` list item under `## Evidence` naming proof matched to the changed frontend claim.",
+      "Add a `Coverage:` list item under `## Evidence` explaining which states and viewports were checked and why that proof is sufficient.",
     ],
   );
 });
@@ -95,7 +340,7 @@ test("does not borrow proof from another heading", () => {
   });
 
   assert.deepEqual(result.errors, [
-    "The Evidence section must name direct proof matched to the changed frontend claim.",
+    "Add a `Direct:` list item under `## Evidence` naming proof matched to the changed frontend claim.",
   ]);
 });
 
@@ -166,21 +411,51 @@ async function createCliFixture() {
   execFileSync("git", ["config", "user.name", "Codex Test"], {
     cwd: directory,
   });
-  await writeFile(join(directory, "README.md"), "fixture\n");
-  execFileSync("git", ["add", "README.md"], { cwd: directory });
-  execFileSync("git", ["commit", "--quiet", "-m", "base"], { cwd: directory });
+  await mkdir(join(directory, "apps/web/app/settings"), { recursive: true });
+  const pagePath = join(directory, "apps/web/app/settings/page.tsx");
+  await writeFile(
+    pagePath,
+    'export default function Page() { return <h1>Before</h1>; }\n',
+  );
+  execFileSync("git", ["add", "apps"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "root"], { cwd: directory });
+  const rootSha = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: directory,
+    encoding: "utf8",
+  }).trim();
+
+  execFileSync("git", ["switch", "--quiet", "-c", "base"], {
+    cwd: directory,
+  });
+  await writeFile(
+    pagePath,
+    'export default function Page() { return <h1>After</h1>; }\n',
+  );
+  execFileSync("git", ["add", "apps"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "base moved"], {
+    cwd: directory,
+  });
   const baseSha = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: directory,
     encoding: "utf8",
   }).trim();
 
-  await mkdir(join(directory, "apps/web/app/settings"), { recursive: true });
+  execFileSync("git", ["switch", "--quiet", "-c", "head", rootSha], {
+    cwd: directory,
+  });
   await writeFile(
-    join(directory, "apps/web/app/settings/page.tsx"),
-    "export default function Page() { return null; }\n",
+    pagePath,
+    [
+      'export const metadata = { title: "Settings" };',
+      "",
+      'export default function Page() { return <h1>After</h1>; }',
+      "",
+    ].join("\n"),
   );
   execFileSync("git", ["add", "apps"], { cwd: directory });
-  execFileSync("git", ["commit", "--quiet", "-m", "head"], { cwd: directory });
+  execFileSync("git", ["commit", "--quiet", "-m", "head changed"], {
+    cwd: directory,
+  });
   const headSha = execFileSync("git", ["rev-parse", "HEAD"], {
     cwd: directory,
     encoding: "utf8",

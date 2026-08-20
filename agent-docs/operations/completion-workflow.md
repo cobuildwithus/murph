@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-08-19
+Last verified: 2026-08-20
 
 This workflow applies to repo code/docs/test/config changes after implementation is materially complete.
 Use `agent-docs/operations/agent-workflow-routing.md` to classify the task, choose the commit path, and decide whether plan mechanics apply.
@@ -246,8 +246,14 @@ Every PR includes:
   exclusions, and any difference from the approved plan. For internal work,
   state why Product UX does not apply.
 - **Evidence.** List the direct journey proof and focused checks. For frontend
-  work, state the changed states and viewports. Link screenshots only when they
-  add proof. There is no screenshot quota and no required catalog link.
+  work, use literal `Direct:` and `Coverage:` list-item labels, and state the
+  changed states and viewports. Link screenshots only when they add proof. There
+  is no screenshot quota and no required catalog link. The frontend guard
+  mechanically exempts only an isolated static object-literal `metadata` export
+  change in an existing `page.tsx` or `layout.tsx` when the remaining runtime
+  source is unchanged and rendered code does not reference that export. Dynamic
+  metadata, viewport or theme metadata, route additions/deletions, and any
+  co-declared rendered change remain proof-required.
 - **Deployment concerns.** Add exactly one `## Deployment concerns` section.
   Select `Deployment: applicable` and complete the deployment contract when the
   change crosses a deploy boundary; otherwise select
@@ -256,6 +262,15 @@ Every PR includes:
 - **Changelog.** Add exactly one `## Changelog` section with
   `Changelog: updated` and its item IDs, or `Changelog: not applicable` with a
   concrete reason. The changelog guard validates this section.
+
+For frontend work, use this rendered-list form so the guard and reviewer see
+both required claims:
+
+```markdown
+## Evidence
+- Direct: Browser walkthrough of the changed settings state.
+- Coverage: Checked the empty and populated states on a narrow phone; desktop structure did not change.
+```
 
 Complete this launch preflight before starting PR gates:
 

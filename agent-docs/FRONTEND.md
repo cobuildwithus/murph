@@ -99,10 +99,15 @@ cd apps/web && pnpm typecheck
   Do not capture another viewport only to meet a quota. When a screenshot is
   useful, crop it to the changed component or section and inspect it at native
   resolution so ordinary body copy is legible.
-- The `Pull request evidence` check requires direct evidence and a coverage
-  explanation for user-facing UI diffs. It does not require a catalog update or
+- The `Pull request evidence` check requires literal `Direct:` and `Coverage:`
+  list items for user-facing UI diffs. It does not require a catalog update or
   screenshot count. Design and screenshot-study changes are exempt so those
-  references can be maintained independently.
+  references can be maintained independently. Existing `page.tsx` and
+  `layout.tsx` files also receive a narrow metadata-only exemption when the
+  checker can prove that the only runtime source change is an unreferenced static
+  object-literal `metadata` export. Dynamic metadata, viewport or theme
+  metadata, route additions/deletions, and any rendered-source change still
+  require frontend proof.
 
 ## Docs to update
 
