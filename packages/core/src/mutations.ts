@@ -2161,6 +2161,8 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  aliasRepairContaminatedEventIds: Set<string>;
+  aliasRepairContaminatedRefKeys: Set<string>;
   aliasRepairHistoryById: Map<string, EventSpineEntry<EventRecord>[]>;
   liveOwnerIdsByRefKey: Map<string, Set<string>>;
   junctionSparseDayHistoryById: Map<string, {
@@ -2199,6 +2201,8 @@ async function indexLatestEventsByExternalRef(
   relativePaths: readonly string[],
   signal?: AbortSignal | null,
 ): Promise<EventExternalRefIndex> {
+  const aliasRepairContaminatedEventIds = new Set<string>();
+  const aliasRepairContaminatedRefKeys = new Set<string>();
   const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
     string,
     Map<string, Map<string, Set<number>>>
@@ -2229,6 +2233,15 @@ async function indexLatestEventsByExternalRef(
         const parsed = safeParseContract(eventRecordSchema, raw);
 
         if (!parsed.success) {
+          if (isLooseRecordValue(raw)) {
+            if (typeof raw.id === "string" && raw.id.length > 0) {
+              aliasRepairContaminatedEventIds.add(raw.id);
+            }
+            const rejectedRefKey = readRejectedEventExternalRefKey(raw.externalRef);
+            if (rejectedRefKey) {
+              aliasRepairContaminatedRefKeys.add(rejectedRefKey);
+            }
+          }
           return;
         }
         const entry = { relativePath, record: parsed.data };
@@ -2351,6 +2364,8 @@ async function indexLatestEventsByExternalRef(
     indexJunctionNoIdProfilePredecessors(latestByRefKey.values());
 
   return {
+    aliasRepairContaminatedEventIds,
+    aliasRepairContaminatedRefKeys,
     aliasRepairHistoryById: new Map(),
     deviceOwnerRevisionsByRefKeyAndFingerprint,
     junctionNoIdProfilePredecessorsByScope,
@@ -3032,6 +3047,8 @@ async function buildDeviceEventIdentityContext(
   if (entries.length === 0 && authoritativeEventSets.length === 0) {
     return {
       index: {
+        aliasRepairContaminatedEventIds: new Set(),
+        aliasRepairContaminatedRefKeys: new Set(),
         aliasRepairHistoryById: new Map(),
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
         junctionNoIdProfilePredecessorsByScope: new Map(),
@@ -3049,9 +3066,13 @@ async function buildDeviceEventIdentityContext(
     extension: ".jsonl",
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
+  const context: DeviceEventIdentityContext = {
+    index,
+    legacyReservations: buildLegacyExternalRefReservations(entries, index),
+  };
   const aliasRepairOwnerIds = new Set<string>();
   for (const entry of entries) {
-    if (!isJunctionDailyAggregateAliasCandidate(entry)) {
+    if (!hasJunctionDailyAggregateAliasSplit(entry, context)) {
       continue;
     }
     const externalRef = entry.record.externalRef;
@@ -3059,6 +3080,7 @@ async function buildDeviceEventIdentityContext(
     if (!externalRef || !legacyExternalRef) {
       continue;
     }
+    assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
     const primaryOwnerIds = index.liveOwnerIdsByRefKey.get(eventExternalRefKey(externalRef));
     const legacyOwnerIds = index.liveOwnerIdsByRefKey.get(eventExternalRefKey(legacyExternalRef));
     if (
@@ -3079,10 +3101,7 @@ async function buildDeviceEventIdentityContext(
       aliasRepairOwnerIds,
     );
   }
-  return {
-    index,
-    legacyReservations: buildLegacyExternalRefReservations(entries, index),
-  };
+  return context;
 }
 
 function cloneDeviceEventIdentityContext(
@@ -3090,6 +3109,12 @@ function cloneDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   return {
     index: {
+      aliasRepairContaminatedEventIds: new Set(
+        context.index.aliasRepairContaminatedEventIds,
+      ),
+      aliasRepairContaminatedRefKeys: new Set(
+        context.index.aliasRepairContaminatedRefKeys,
+      ),
       aliasRepairHistoryById: new Map(
         [...context.index.aliasRepairHistoryById].map(([id, history]) => [id, [...history]]),
       ),
@@ -3116,6 +3141,8 @@ function buildEmptyDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
+    aliasRepairContaminatedEventIds: new Set(),
+    aliasRepairContaminatedRefKeys: new Set(),
     aliasRepairHistoryById: new Map(),
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
     junctionNoIdProfilePredecessorsByScope: new Map(),
@@ -3186,6 +3213,20 @@ function isLooseRecordValue(value: unknown): value is LooseRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function readRejectedEventExternalRefKey(value: unknown): string | undefined {
+  if (!isLooseRecordValue(value)) {
+    return undefined;
+  }
+  const parsed = safeParseContract(externalRefSchema, {
+    system: value.system,
+    resourceType: value.resourceType,
+    resourceId: value.resourceId,
+    ...(value.facet === undefined ? {} : { facet: value.facet }),
+    ...(value.version === undefined ? {} : { version: value.version }),
+  });
+  return parsed.success ? eventExternalRefKey(parsed.data) : undefined;
+}
+
 function junctionDailyAggregateAliasRefShape(externalRef: ExternalRef): string {
   return stableStringify({
     facet: externalRef.facet ?? null,
@@ -3203,6 +3244,33 @@ function junctionDailyAggregateAliasOriginKey(
   }
   const { observedAtRaw: _observedAtRaw, ...stableOrigin } = origin;
   return stableStringify(stableOrigin);
+}
+
+function junctionDailyAggregateAliasHistoricalOriginMatches(
+  historical: DeviceDataOrigin | undefined,
+  current: DeviceDataOrigin,
+): boolean {
+  if (!historical) {
+    return false;
+  }
+  if (junctionDailyAggregateAliasOriginKey(historical)
+    === junctionDailyAggregateAliasOriginKey(current)) {
+    return true;
+  }
+  if (historical.timeZoneOffsetMinutes !== undefined) {
+    return false;
+  }
+  const {
+    observedAtRaw: _historicalObservedAtRaw,
+    timeZoneOffsetMinutes: _historicalOffset,
+    ...stableHistorical
+  } = historical;
+  const {
+    observedAtRaw: _currentObservedAtRaw,
+    timeZoneOffsetMinutes: _currentOffset,
+    ...stableCurrent
+  } = current;
+  return stableStringify(stableHistorical) === stableStringify(stableCurrent);
 }
 
 function junctionDailyAggregateProviderStateKey(record: EventRecord): string {
@@ -3259,15 +3327,49 @@ function hasJunctionDailyAggregateAliasSplit(
   ) {
     return false;
   }
+  const resolved = resolveDeviceEventIdentity(entry, context);
+  const matchedRefKeys = new Set(resolved?.matchedEntries.map((match) => match.refKey));
+  const primaryRefKey = eventExternalRefKey(externalRef);
+  const legacyRefKey = eventExternalRefKey(legacyExternalRef);
+  if (!matchedRefKeys.has(primaryRefKey) || !matchedRefKeys.has(legacyRefKey)) {
+    return false;
+  }
   const primaryOwnerIds = context.index.liveOwnerIdsByRefKey.get(
-    eventExternalRefKey(externalRef),
+    primaryRefKey,
   ) ?? new Set<string>();
   const legacyOwnerIds = context.index.liveOwnerIdsByRefKey.get(
-    eventExternalRefKey(legacyExternalRef),
+    legacyRefKey,
   ) ?? new Set<string>();
   return primaryOwnerIds.size > 0
     && legacyOwnerIds.size > 0
     && new Set([...primaryOwnerIds, ...legacyOwnerIds]).size > 1;
+}
+
+function assertJunctionDailyAggregateAliasHistoryIsUncontaminated(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+): void {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (!externalRef || !legacyExternalRef) {
+    return;
+  }
+  const primaryRefKey = eventExternalRefKey(externalRef);
+  const legacyRefKey = eventExternalRefKey(legacyExternalRef);
+  const ownerIds = new Set([
+    ...(context.index.liveOwnerIdsByRefKey.get(primaryRefKey) ?? []),
+    ...(context.index.liveOwnerIdsByRefKey.get(legacyRefKey) ?? []),
+  ]);
+  if (
+    [...ownerIds].some((id) => context.index.aliasRepairContaminatedEventIds.has(id))
+    || context.index.aliasRepairContaminatedRefKeys.has(primaryRefKey)
+    || context.index.aliasRepairContaminatedRefKeys.has(legacyRefKey)
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair found a schema-rejected candidate revision.",
+    );
+  }
 }
 
 function parseJunctionDailyAggregateAliasEvidence(
@@ -3357,7 +3459,7 @@ function analyzeJunctionDailyAggregateAliasHistory(input: {
   eventId: string;
   expectedDayKey: string;
   expectedExternalRef: ExternalRef;
-  expectedOriginKey: string;
+  expectedOrigin: DeviceDataOrigin;
   expectedObservedAtRaw: string;
   expectedProviderStateKey: string;
 }): JunctionDailyAggregateAliasOverlay {
@@ -3390,7 +3492,10 @@ function analyzeJunctionDailyAggregateAliasHistory(input: {
     || initial.source !== "device"
     || initial.dayKey !== input.expectedDayKey
     || initial.dataOrigin?.observedAtRaw !== input.expectedObservedAtRaw
-    || junctionDailyAggregateAliasOriginKey(initial.dataOrigin) !== input.expectedOriginKey
+    || !junctionDailyAggregateAliasHistoricalOriginMatches(
+      initial.dataOrigin,
+      input.expectedOrigin,
+    )
     || !initial.externalRef
     || eventExternalRefKey(initial.externalRef) !== expectedRefKey
     || junctionDailyAggregateAliasRefShape(initial.externalRef)
@@ -3409,7 +3514,10 @@ function analyzeJunctionDailyAggregateAliasHistory(input: {
       )
       || (
         record.dataOrigin !== undefined
-        && junctionDailyAggregateAliasOriginKey(record.dataOrigin) !== input.expectedOriginKey
+        && !junctionDailyAggregateAliasHistoricalOriginMatches(
+          record.dataOrigin,
+          input.expectedOrigin,
+        )
       )
     )
   ) {
@@ -3472,6 +3580,7 @@ function buildJunctionDailyAggregateAliasRepairPlan(input: {
   ) {
     return null;
   }
+  assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
 
   const primaryRefKey = eventExternalRefKey(externalRef);
   const legacyRefKey = eventExternalRefKey(legacyExternalRef);
@@ -3524,8 +3633,8 @@ function buildJunctionDailyAggregateAliasRepairPlan(input: {
     );
   }
 
-  const expectedOriginKey = junctionDailyAggregateAliasOriginKey(entry.record.dataOrigin);
-  if (!expectedOriginKey) {
+  const expectedOrigin = entry.record.dataOrigin;
+  if (!expectedOrigin) {
     throw new VaultError(
       "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
       "Junction daily aggregate alias repair requires normalized provider origin evidence.",
@@ -3537,7 +3646,7 @@ function buildJunctionDailyAggregateAliasRepairPlan(input: {
     eventId: primaryOwner.record.id,
     expectedDayKey: evidence.dayKey,
     expectedExternalRef: externalRef,
-    expectedOriginKey,
+    expectedOrigin,
     expectedObservedAtRaw: `${evidence.dayKey}:${evidence.resource}:daily`,
     expectedProviderStateKey,
   });
@@ -3546,7 +3655,7 @@ function buildJunctionDailyAggregateAliasRepairPlan(input: {
     eventId: legacyOwner.record.id,
     expectedDayKey: evidence.legacyDayKey,
     expectedExternalRef: legacyExternalRef,
-    expectedOriginKey,
+    expectedOrigin,
     expectedObservedAtRaw: `${evidence.legacyDayKey}:${evidence.resource}:daily`,
     expectedProviderStateKey,
   });

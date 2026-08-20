@@ -2617,6 +2617,58 @@ test("Junction daily aggregates reserve proven legacy ids when adjacent primary 
       assert.equal(storedExternalRefResourceId(correctedLiveRecord), correctedResourceId);
       assert.notEqual(adjacentLiveRecord?.id, legacyEventId);
       assert.equal(storedExternalRefResourceId(adjacentLiveRecord), legacyResourceId);
+
+      const adjacentEventId = adjacentLiveRecord?.id;
+      assert.ok(typeof adjacentEventId === "string");
+      const refreshImport = await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+        {
+          provider: "junction",
+          vaultRoot,
+          snapshot: {
+            accountId: "junction-account-hash-1",
+            importedAt: "2026-06-25T13:00:00.000Z",
+            timeseries: {
+              stress_level: {
+                groups: {
+                  garmin: [{
+                    data: [{
+                      ...correctedSample,
+                      updatedAt: "2026-06-25T13:00:00.000Z",
+                      score: 47,
+                    }],
+                    source: { provider: "garmin", type: "watch" },
+                  }],
+                },
+              },
+            },
+          },
+        },
+        { corePort: coreRuntime },
+      );
+      const refreshedRecords = (
+        await Promise.all(
+          [...new Set([
+            ...legacyImport.eventShardPaths,
+            ...replayImport.eventShardPaths,
+            ...refreshImport.eventShardPaths,
+          ])].map((relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath })),
+        )
+      ).flat();
+      const refreshedLiveStressRecords = latestLiveRecords(refreshedRecords)
+        .filter((record) => record.kind === "observation" && record.metric === "stress-level")
+        .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+      const refreshedCorrectedRecord = refreshedLiveStressRecords.find(
+        (record) => record.dayKey === "2026-06-25",
+      );
+      const refreshedAdjacentRecord = refreshedLiveStressRecords.find(
+        (record) => record.dayKey === "2026-06-24",
+      );
+
+      assert.equal(refreshedLiveStressRecords.length, 2);
+      assert.equal(refreshedCorrectedRecord?.id, legacyEventId);
+      assert.equal(refreshedCorrectedRecord?.value, 47);
+      assert.equal(refreshedAdjacentRecord?.id, adjacentEventId);
+      assert.equal(storedExternalRefResourceId(refreshedAdjacentRecord), legacyResourceId);
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }

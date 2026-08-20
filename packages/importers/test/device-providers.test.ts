@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -78,6 +78,17 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
 >;
 type CoreDeviceImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>;
 type CoreDeviceImportEvent = CoreDeviceImportResult["events"][number];
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer>> {
+  const snapshot = new Map<string, Buffer>();
+  for (const relativePath of await readdir(vaultRoot, { recursive: true })) {
+    const absolutePath = join(vaultRoot, relativePath);
+    if ((await stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await readFile(absolutePath));
+    }
+  }
+  return snapshot;
+}
 
 interface DeviceProviderCoreContractFixture {
   expectedEventKinds?: readonly string[];
@@ -1957,6 +1968,7 @@ function junctionDailyAliasSnapshot(value = 44) {
 }
 
 async function createJunctionDailyAliasSplit(input: {
+  historicalTimeZoneOffsetMinutes?: number;
   legacyValue?: number;
   primaryValue?: number;
 } = {}) {
@@ -1985,7 +1997,9 @@ async function createJunctionDailyAliasSplit(input: {
     sourceProviderSlug: "garmin",
     sourceType: "watch",
     timestampSemantics: "offset" as const,
-    timeZoneOffsetMinutes: -240,
+    ...(input.historicalTimeZoneOffsetMinutes === undefined
+      ? {}
+      : { timeZoneOffsetMinutes: input.historicalTimeZoneOffsetMinutes }),
     normalizerVersion: "junction-normalizer.v1",
   };
   const makeEvent = (options: {
@@ -2269,8 +2283,32 @@ test("Junction daily aggregate alias repair requires exact normalized evidence",
   }
 });
 
-test("Junction daily aggregate alias repair refuses divergent provider histories", async () => {
+test("Junction daily aggregate alias repair skips divergent provider histories", async () => {
   const fixture = await createJunctionDailyAliasSplit({ legacyValue: 43 });
+  try {
+    const before = await readJunctionDailyAliasRecords(fixture);
+    await importDeviceProviderSnapshot(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: fixture.snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.deepEqual(
+      liveJunctionStressRecords(await readJunctionDailyAliasRecords(fixture)),
+      liveJunctionStressRecords(before),
+    );
+    assert.equal(liveJunctionStressRecords(before).length, 2);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair refuses a conflicting historical timezone offset", async () => {
+  const fixture = await createJunctionDailyAliasSplit({
+    historicalTimeZoneOffsetMinutes: -300,
+  });
   try {
     const before = await readJunctionDailyAliasRecords(fixture);
     await assert.rejects(
@@ -2287,6 +2325,51 @@ test("Junction daily aggregate alias repair refuses divergent provider histories
         && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
     );
     assert.deepEqual(await readJunctionDailyAliasRecords(fixture), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  "candidate-id",
+  "primary-ref",
+  "legacy-ref",
+] as const)("Junction daily aggregate alias repair refuses schema-invalid %s contamination", async (claim) => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const shardPath = fixture.legacyImport.eventShardPaths[0];
+    assert.ok(shardPath);
+    const claimedOwner = claim === "legacy-ref" ? fixture.legacyOwner : fixture.primaryOwner;
+    await appendFile(
+      join(fixture.vaultRoot, shardPath),
+      `${JSON.stringify({
+        ...claimedOwner,
+        id: claim === "candidate-id" ? fixture.primaryOwner.id : `invalid-${claim}-owner`,
+        ...(claim === "candidate-id"
+          ? { "from-the-future": true }
+          : {
+              externalRef: {
+                ...claimedOwner.externalRef,
+                "from-the-future": true,
+              },
+            }),
+      })}\n`,
+    );
+    const before = await snapshotVaultFiles(fixture.vaultRoot);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: fixture.snapshot,
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+    );
+    assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true });
   }
