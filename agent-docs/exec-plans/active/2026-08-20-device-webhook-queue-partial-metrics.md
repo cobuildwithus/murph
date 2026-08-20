@@ -38,6 +38,21 @@ Updated: 2026-08-20
   preserve the production-critical webhook path, and deploy only after the
   protected Worker checks pass.
 
+## Product UX
+
+- Effort: Patch.
+- Outcome: on-call operators stop receiving false total-metrics-loss pages
+  without seeing an unknown queue age represented as confirmed health.
+- Reaches: the existing five-minute Queue-health observation and Linq paging
+  journey only.
+- Proof: provider-shaped monitor sequences preserve partial backlog data, reset
+  only the real read-failure streak, keep an existing stall incident open, and
+  recover only after a complete healthy sample.
+- Walkthrough: an unknown-age positive backlog persists as partial without a
+  page; a real read failure still pages after two checks; a timestamp-backed
+  stall retains its incident and one-hour pacing across an unknown-age sample;
+  an empty queue closes the incident. Result: Ready.
+
 ## Risks and mitigations
 
 1. Risk: accepting an absent timestamp could hide a real stalled queue.
@@ -70,6 +85,13 @@ Updated: 2026-08-20
   optional age was unknown, the dead-letter queue was empty, and webhook traces
   plus hosted imports continued completing after the alert. The failure was in
   Murph's observation normalization rather than Queue delivery or credentials.
+- Accepted both preliminary findings and the final round-one finding. Unknown
+  age is now an existing `partial` observation with no alert condition, so it
+  cannot close a real incident; the specialist coverage artifact added the
+  focused failure-streak reset sequence and touched tests only.
+- Refreshed Product UX purpose verdict after remediation: Ready. The smallest
+  complete operator experience distinguishes successful partial telemetry from
+  both confirmed queue health and actual metric-read failure.
 
 ## Verification
 
@@ -79,6 +101,6 @@ Updated: 2026-08-20
 - Expected outcomes: missing optional age remains a successful observation with
   preserved backlog metrics and no false page; genuine metric rejection, DLQ
   backlog, and timestamp-backed stall tests remain green.
-- Current local proof: the focused monitor suite passes 9 tests, the Cloudflare
-  typecheck passes, the full Cloudflare Node suite passes 2,614 tests with two
-  skips, and `git diff --check` is clean.
+- Current local proof: the remediated focused monitor suite passes 11 tests,
+  the Cloudflare typecheck passes, the pre-remediation full Cloudflare Node
+  suite passes 2,614 tests with two skips, and `git diff --check` is clean.

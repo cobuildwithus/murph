@@ -116,15 +116,15 @@ describe("device webhook Queue health monitor", () => {
 
     await expect(harness.run()).resolves.toEqual({
       conditions: [],
-      observationStatus: "ok",
-      outcome: "healthy",
+      observationStatus: "partial",
+      outcome: "alert_deferred",
     });
 
     harness.setNow(FIVE_MINUTES_MS * 2);
     await expect(harness.run()).resolves.toEqual({
       conditions: [],
-      observationStatus: "ok",
-      outcome: "healthy",
+      observationStatus: "partial",
+      outcome: "alert_deferred",
     });
 
     expect(harness.monitor.readLatestObservation()).toMatchObject({
@@ -134,9 +134,103 @@ describe("device webhook Queue health monitor", () => {
         backlogCount: 5,
         oldestMessageAtMs: null,
       },
-      status: "ok",
+      status: "partial",
     });
     expect(harness.monitor.readState().consecutiveMetricsFailures).toBe(0);
+    expect(harness.sent).toEqual([]);
+  });
+
+  it("does not close or re-page a stalled incident while backlog age is unknown", async () => {
+    const stalledMetrics = metrics({
+      backlogCount: 1,
+      oldestMessageAtMs: FIVE_MINUTES_MS,
+    });
+    const harness = createHarness({
+      mainMetrics: [
+        stalledMetrics,
+        metrics({ backlogCount: 1 }),
+        stalledMetrics,
+        metrics(),
+      ],
+      nowMs: 20 * 60 * 1_000,
+    });
+
+    await expect(harness.run()).resolves.toMatchObject({
+      outcome: "alert_sent",
+    });
+    expect(harness.sent).toHaveLength(1);
+
+    harness.setNow(25 * 60 * 1_000);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+    expect(harness.monitor.readState()).toMatchObject({
+      incidentOpen: true,
+      incidentSequence: 1,
+    });
+
+    harness.setNow(30 * 60 * 1_000);
+    await expect(harness.run()).resolves.toMatchObject({
+      conditions: [{ kind: "main_queue_stalled" }],
+      outcome: "alert_deferred",
+    });
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.monitor.readState()).toMatchObject({
+      incidentOpen: true,
+      incidentSequence: 1,
+    });
+
+    harness.setNow(35 * 60 * 1_000);
+    await expect(harness.run()).resolves.toMatchObject({
+      outcome: "healthy",
+    });
+    expect(harness.monitor.readState().incidentOpen).toBe(false);
+  });
+
+  it("resets a real metric failure after a successful unknown-age sample", async () => {
+    const harness = createHarness({
+      mainMetrics: [
+        new Error("synthetic metrics failure"),
+        metrics({
+          backlogBytes: 1_024,
+          backlogCount: 5,
+        }),
+        new Error("synthetic metrics failure"),
+      ],
+    });
+
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+    expect(harness.monitor.readState().consecutiveMetricsFailures).toBe(1);
+
+    harness.setNow(FIVE_MINUTES_MS * 2);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+    expect(harness.monitor.readLatestObservation()).toMatchObject({
+      failedQueues: [],
+      main: {
+        backlogBytes: 1_024,
+        backlogCount: 5,
+        oldestMessageAtMs: null,
+      },
+    });
+    expect(harness.monitor.readState().consecutiveMetricsFailures).toBe(0);
+
+    harness.setNow(FIVE_MINUTES_MS * 3);
+    await expect(harness.run()).resolves.toEqual({
+      conditions: [],
+      observationStatus: "partial",
+      outcome: "alert_deferred",
+    });
+    expect(harness.monitor.readState().consecutiveMetricsFailures).toBe(1);
     expect(harness.sent).toEqual([]);
   });
 
