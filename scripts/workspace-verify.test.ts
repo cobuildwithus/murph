@@ -887,6 +887,47 @@ rm -rf -- "$ready_dir"
     expect(result.stdout).toBe("ready\n");
   });
 
+  it("keeps every release package paired with its own coverage assertion", () => {
+    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+      "run_all_package_coverage",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+run_workspace_package_coverage() {
+  printf '%s|%s\n' "$1" "$2"
+}
+mark_acceptance_cli_coverage_complete() { return 0; }
+verify_log() { return 0; }
+
+package_coverage_concurrency_limit=1
+package_coverage_cli_active_concurrency_limit=1
+
+${runAllPackageCoverage}
+
+run_all_package_coverage 1
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    const pairs = result.stdout.trim().split("\n");
+    expect(pairs).toHaveLength(25);
+    expect(pairs).toContain(
+      "packages/hosted-execution|Hosted execution owner coverage",
+    );
+    expect(pairs).toContain(
+      "packages/importers|Importers owner coverage",
+    );
+    expect(pairs).toContain(
+      "packages/inbox-services|Inbox services package coverage",
+    );
+    expect(pairs).toContain(
+      "packages/vault-usecases|Vault usecases package coverage",
+    );
+    expect(result.stdout).not.toContain(
+      "Hosted Temporal orchestrator package coverage",
+    );
+  });
+
   it("releases apps and expands package fanout after CLI success or failure", () => {
     const markCliCoverageComplete = extractWorkspaceVerifyFunction(
       "mark_acceptance_cli_coverage_complete",
