@@ -419,6 +419,12 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           ? "Hosted bundle archive is invalid."
           : `Synthetic ${expectedStage} failure.`,
       );
+      if (expectedStage === "session") {
+        Object.assign(failure, {
+          phase: "session_start_request_decode",
+          timeoutMs: 6_000,
+        });
+      }
 
       if (expectedStage === "plan") {
         platform.workspacePort = {
@@ -458,6 +464,13 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           eventCode: "checkpoint.snapshot_failed",
           redactedJson: expect.objectContaining({
             snapshotMode: "workspace_snapshot_v2",
+            ...(expectedStage === "session"
+              ? {
+                  snapshotSessionStartElapsedMs: expect.any(Number),
+                  snapshotSessionStartFailurePhase: "session_start_request_decode",
+                  snapshotSessionStartTimeoutMs: 6_000,
+                }
+              : {}),
             snapshotStage: expectedStage,
           }),
         }),

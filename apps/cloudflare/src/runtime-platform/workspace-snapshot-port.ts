@@ -92,6 +92,11 @@ const WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS =
   - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_TIMEOUT_MS
   - WORKSPACE_SNAPSHOT_HANDOFF_HEARTBEAT_INTERVAL_MS;
 
+type HostedWorkspaceSnapshotSessionStartFailurePhase =
+  | "session_start_payload_validation"
+  | "session_start_request_decode"
+  | "session_start_write_fence_headers";
+
 export function createCloudflareWorkspaceSnapshotPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -658,18 +663,28 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
 
     async startSnapshotSession({ signal, ...request }) {
       assertHostedWorkspaceSnapshotOperationLive(signal);
-      const headers = await requireHostedRuntimeWriteFenceHeaders(
-        input.workspaceCheckpointBridge,
-        "Hosted workspace snapshot session start",
-      );
+      let headers: Headers;
+      try {
+        headers = await requireHostedRuntimeWriteFenceHeaders(
+          input.workspaceCheckpointBridge,
+          "Hosted workspace snapshot session start",
+        );
+      } catch (error) {
+        throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(error, signal);
+        throw annotateHostedWorkspaceSnapshotSessionStartFailure({
+          error,
+          phase: "session_start_write_fence_headers",
+        });
+      }
       assertHostedWorkspaceSnapshotOperationLive(signal);
       const startTimeoutMs = Math.min(
         input.timeoutMs,
         WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS,
       );
+      const startTimeoutSignal = AbortSignal.timeout(startTimeoutMs);
       const startSignal = combineAbortSignalsWithCleanup(
         signal ?? null,
-        AbortSignal.timeout(startTimeoutMs),
+        startTimeoutSignal,
       );
       let payload: unknown;
       try {
@@ -688,16 +703,35 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           ),
         });
       } catch (error) {
-        throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
+        const interruption = readHostedWorkspaceSnapshotInterruptionCausedBySignal(
           error,
           startSignal.signal,
         );
-        throw error;
+        if (
+          interruption
+          && signal?.aborted
+          && Object.is(startSignal.signal.reason, signal.reason)
+        ) {
+          throw interruption;
+        }
+        throw annotateHostedWorkspaceSnapshotSessionStartFailure({
+          error: interruption ?? error,
+          phase: "session_start_request_decode",
+          timeoutMs: startTimeoutMs,
+        });
       } finally {
         startSignal.dispose();
       }
       assertHostedWorkspaceSnapshotOperationLive(signal);
-      const started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
+      let started: HostedRuntimeWorkspaceSnapshotSessionStart;
+      try {
+        started = parseHostedWorkspaceSnapshotStartPayload(payload, input.boundUserId);
+      } catch (error) {
+        throw annotateHostedWorkspaceSnapshotSessionStartFailure({
+          error,
+          phase: "session_start_payload_validation",
+        });
+      }
       sessionRuntimeState.set(started.snapshotId, {
         headers: new Headers(headers),
         signal: signal ?? null,
@@ -707,6 +741,44 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
     },
   };
   return port;
+}
+
+function annotateHostedWorkspaceSnapshotSessionStartFailure(input: {
+  error: unknown;
+  phase: HostedWorkspaceSnapshotSessionStartFailurePhase;
+  timeoutMs?: number;
+}): Error {
+  const error = input.error instanceof Error
+    ? input.error
+    : new Error("Hosted workspace snapshot session start failed.");
+  if (Object.isExtensible(error)) {
+    if (!Object.hasOwn(error, "phase")) {
+      Object.defineProperty(error, "phase", {
+        configurable: true,
+        enumerable: true,
+        value: input.phase,
+        writable: false,
+      });
+    }
+    if (input.timeoutMs !== undefined && !Object.hasOwn(error, "timeoutMs")) {
+      Object.defineProperty(error, "timeoutMs", {
+        configurable: true,
+        enumerable: true,
+        value: Math.max(0, Math.trunc(input.timeoutMs)),
+        writable: false,
+      });
+    }
+    return error;
+  }
+  return Object.assign(
+    new Error("Hosted workspace snapshot session start failed.", { cause: error }),
+    {
+      phase: input.phase,
+      ...(input.timeoutMs === undefined
+        ? {}
+        : { timeoutMs: Math.max(0, Math.trunc(input.timeoutMs)) }),
+    },
+  );
 }
 
 interface HostedWorkspaceSnapshotR2FailureDiagnostics {
@@ -1125,10 +1197,25 @@ function throwHostedWorkspaceSnapshotInterruptionWhenCausedBySignal(
   error: unknown,
   signal: AbortSignal | null | undefined,
 ): void {
-  if (!signal?.aborted || !isHostedWorkspaceSnapshotAbortFailure(error, signal.reason)) {
-    return;
+  const interruption = readHostedWorkspaceSnapshotInterruptionCausedBySignal(
+    error,
+    signal,
+  );
+  if (interruption) {
+    throw interruption;
   }
-  assertHostedWorkspaceSnapshotOperationLive(signal);
+}
+
+function readHostedWorkspaceSnapshotInterruptionCausedBySignal(
+  error: unknown,
+  signal: AbortSignal | null | undefined,
+): Error | null {
+  if (!signal?.aborted || !isHostedWorkspaceSnapshotAbortFailure(error, signal.reason)) {
+    return null;
+  }
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error("Hosted workspace snapshot direct upload was interrupted.");
 }
 
 function assertHostedWorkspaceSnapshotOperationLive(

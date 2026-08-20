@@ -86,6 +86,14 @@ const HOSTED_GCP_KMS_DECRYPT_RETRY_JITTER_MS = 200;
 
 type OwnedBytes = Uint8Array<ArrayBuffer>;
 type HostedGcpKmsOperation = "asymmetricSign" | "decrypt" | "encrypt" | "macSign";
+type HostedGcpKmsFailureStage =
+  | "auth_refresh_wait"
+  | "kms_rpc"
+  | "retry_backoff"
+  | "sdk_initialize"
+  | "service_account_impersonation"
+  | "sts_exchange"
+  | "subject_token";
 
 export interface HostedGcpKmsClient {
   asymmetricSign(input: GcpKmsAsymmetricSignInput): Promise<{
@@ -297,12 +305,27 @@ interface HostedGcpKmsOperationContext {
   deadlineSignal: AbortSignal;
   signal: AbortSignal;
   startedAtMs: number;
+  timeoutMs: number;
 }
 
 interface HostedGcpKmsAttemptContext {
   deadlineSignal: AbortSignal;
+  diagnostics: HostedGcpKmsAttemptDiagnostics;
   signal: AbortSignal;
   timeoutMs: number;
+}
+
+interface HostedGcpKmsAttemptDiagnostics {
+  lastFailureStage: HostedGcpKmsFailureStage | null;
+  stageDurationsMs: Record<HostedGcpKmsFailureStage, number>;
+  stageStartedAtMs: Record<HostedGcpKmsFailureStage, number[]>;
+  startedAtMs: number;
+  workloadIdentityRefreshObserved: boolean;
+}
+
+interface HostedGcpKmsRequestMetrics {
+  additionalAuthenticatedDataBytes?: number;
+  providerPayloadBytes: number;
 }
 
 interface HostedGcpAuthRefreshContext {
@@ -321,6 +344,9 @@ interface HostedGcpKmsEndpointConfiguration {
 }
 
 const hostedGcpAuthRefreshContext = new AsyncLocalStorage<HostedGcpAuthRefreshContext>();
+const hostedGcpKmsAttemptDiagnosticsContext =
+  new AsyncLocalStorage<HostedGcpKmsAttemptDiagnostics>();
+const hostedGcpKmsSharedFailureStages = new WeakMap<object, HostedGcpKmsFailureStage>();
 const defaultHostedGcpKmsDependencies: HostedGcpKmsClientDependencies = {
   createSdkTransport: createOfficialGcpKmsSdkTransport,
 };
@@ -401,8 +427,15 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         plaintext,
         plaintextCrc32c: crc32c(plaintext),
       };
-      const response = await this.callProvider("encrypt", input.signal, (options) =>
-        this.transport.encrypt(request, options));
+      const response = await this.callProvider(
+        "encrypt",
+        input.signal,
+        (options) => this.transport.encrypt(request, options),
+        {
+          additionalAuthenticatedDataBytes: additionalAuthenticatedData.byteLength,
+          providerPayloadBytes: plaintext.byteLength,
+        },
+      );
       responseCiphertext = claimResponseBytes(
         response.ciphertext,
         GCP_KMS_MAX_CIPHERTEXT_BYTES,
@@ -477,6 +510,10 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         "decrypt",
         input.signal,
         (options) => this.transport.decrypt(request, options),
+        {
+          additionalAuthenticatedDataBytes: additionalAuthenticatedData.byteLength,
+          providerPayloadBytes: ciphertext.byteLength,
+        },
       );
       responsePlaintext = claimResponseBytes(
         response.plaintext,
@@ -522,8 +559,12 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         digestCrc32c: crc32c(digest),
         name: keyVersionName,
       };
-      const response = await this.callProvider("asymmetricSign", input.signal, (options) =>
-        this.transport.asymmetricSign(request, options));
+      const response = await this.callProvider(
+        "asymmetricSign",
+        input.signal,
+        (options) => this.transport.asymmetricSign(request, options),
+        { providerPayloadBytes: digest.byteLength },
+      );
       responseSignature = claimResponseBytes(
         response.signature,
         GCP_KMS_MAX_SIGNATURE_BYTES,
@@ -585,8 +626,12 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         dataCrc32c: crc32c(data),
         name: keyVersionName,
       };
-      const response = await this.callProvider("macSign", input.signal, (options) =>
-        this.transport.macSign(request, options));
+      const response = await this.callProvider(
+        "macSign",
+        input.signal,
+        (options) => this.transport.macSign(request, options),
+        { providerPayloadBytes: data.byteLength },
+      );
       responseMac = claimResponseBytes(
         response.mac,
         GCP_KMS_MAC_BYTES,
@@ -635,6 +680,7 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
     operation: HostedGcpKmsOperation,
     callerSignal: AbortSignal | undefined,
     invoke: (options: HostedGcpKmsSdkCallOptions) => Promise<TResponse>,
+    requestMetrics: HostedGcpKmsRequestMetrics,
   ): Promise<TResponse> {
     const retryTransientDecrypt = operation === "decrypt";
     const maxAttempts = retryTransientDecrypt
@@ -656,18 +702,54 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         timeoutMs: attemptContext.timeoutMs,
       };
       try {
-        const response = await invoke(options);
+        const response = await hostedGcpKmsAttemptDiagnosticsContext.run(
+          attemptContext.diagnostics,
+          async () => await invoke(options),
+        );
         throwIfProviderAttemptAborted(context, attemptContext);
+        if (attempt > 1) {
+          console.info("Hosted Google Cloud KMS decrypt recovered after retry.", {
+            ...buildHostedGcpKmsAttemptLogDetails({
+              attempt,
+              attemptContext,
+              context,
+              maxAttempts,
+              operation,
+              providerReason: "RECOVERED",
+              requestMetrics,
+            }),
+            outcome: "recovered",
+          });
+        }
         return response;
       } catch (error) {
         if (context.callerSignal?.aborted) {
           throw createCallerAbortError();
         }
+        const failureStage = attemptContext.diagnostics.lastFailureStage
+          ?? readHostedGcpKmsSharedFailureStage(error)
+          ?? "kms_rpc";
         if (context.deadlineSignal.aborted) {
+          console.error("Hosted Google Cloud KMS operation failed.", {
+            ...buildHostedGcpKmsAttemptLogDetails({
+              attempt,
+              attemptContext,
+              context,
+              failureStage,
+              maxAttempts,
+              operation,
+              providerReason: "DEADLINE_EXCEEDED",
+              requestMetrics,
+            }),
+            outcome: "failed",
+          });
           throw createOperationTimeoutError();
         }
         const attemptTimedOut = attemptContext.deadlineSignal.aborted || isTimeoutError(error);
         const unavailable = isUnavailableError(error);
+        const providerReason = attemptTimedOut
+          ? "DEADLINE_EXCEEDED"
+          : readProviderReason(error, readProviderHttpStatus(error));
         if (
           retryTransientDecrypt
           && attempt < maxAttempts
@@ -675,15 +757,63 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         ) {
           const delayMs = createDecryptRetryDelayMs();
           console.warn("Hosted Google Cloud KMS decrypt retrying after a transient failure.", {
-            attempt,
+            ...buildHostedGcpKmsAttemptLogDetails({
+              attempt,
+              attemptContext,
+              context,
+              failureStage,
+              maxAttempts,
+              operation,
+              providerReason,
+              requestMetrics,
+            }),
             delayMs,
-            elapsedMs: Math.max(0, Date.now() - context.startedAtMs),
-            failureStage: "credential_or_rpc",
-            providerReason: attemptTimedOut ? "DEADLINE_EXCEEDED" : "UNAVAILABLE",
+            outcome: "retrying",
           });
-          await waitForOperationRetryDelay({ context, delayMs });
+          try {
+            await hostedGcpKmsAttemptDiagnosticsContext.run(
+              attemptContext.diagnostics,
+              async () => await runHostedGcpKmsFailureStage(
+                "retry_backoff",
+                async () => await waitForOperationRetryDelay({ context, delayMs }),
+              ),
+            );
+          } catch (delayError) {
+            if (context.callerSignal?.aborted) {
+              throw createCallerAbortError();
+            }
+            console.error("Hosted Google Cloud KMS operation failed.", {
+              ...buildHostedGcpKmsAttemptLogDetails({
+                attempt,
+                attemptContext,
+                context,
+                failureStage: "retry_backoff",
+                maxAttempts,
+                operation,
+                providerReason: isTimeoutError(delayError)
+                  ? "DEADLINE_EXCEEDED"
+                  : readProviderReason(delayError, readProviderHttpStatus(delayError)),
+                requestMetrics,
+              }),
+              outcome: "failed",
+            });
+            throw delayError;
+          }
           continue;
         }
+        console.error("Hosted Google Cloud KMS operation failed.", {
+          ...buildHostedGcpKmsAttemptLogDetails({
+            attempt,
+            attemptContext,
+            context,
+            failureStage,
+            maxAttempts,
+            operation,
+            providerReason,
+            requestMetrics,
+          }),
+          outcome: "failed",
+        });
         if (attemptTimedOut) {
           throw createOperationTimeoutError();
         }
@@ -1003,7 +1133,10 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
     request: object,
     options: HostedGcpKmsSdkCallOptions,
   ): Promise<TResponse> {
-    await waitForAbortablePromise(this.client.initialize(), options.signal);
+    await runHostedGcpKmsFailureStage(
+      "sdk_initialize",
+      async () => await waitForAbortablePromise(this.client.initialize(), options.signal),
+    );
     const invoke = this.client.innerApiCalls[method];
     if (typeof invoke !== "function") {
       throw new TypeError(`Google Cloud KMS SDK method ${method} is unavailable.`);
@@ -1025,7 +1158,10 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
       ]),
       method,
     );
-    const [response] = await waitForAbortablePromise(call, options.signal);
+    const [response] = await runHostedGcpKmsFailureStage(
+      "kms_rpc",
+      async () => await waitForAbortablePromise(call, options.signal),
+    );
     return response;
   }
 }
@@ -1033,11 +1169,17 @@ class OfficialHostedGcpKmsSdkTransport implements HostedGcpKmsSdkTransport {
 class HostedGcpIdentityPoolClient extends IdentityPoolClient {
   override getAccessToken(): ReturnType<IdentityPoolClient["getAccessToken"]> {
     if (hostedGcpAuthRefreshContext.getStore()) {
-      return super.getAccessToken();
+      return runHostedGcpKmsFailureStage(
+        "auth_refresh_wait",
+        async () => await super.getAccessToken(),
+      );
     }
     return hostedGcpAuthRefreshContext.run(
       createAuthRefreshContext(),
-      () => super.getAccessToken(),
+      () => runHostedGcpKmsFailureStage(
+        "auth_refresh_wait",
+        async () => await super.getAccessToken(),
+      ),
     );
   }
 }
@@ -1093,7 +1235,12 @@ function createOfficialGoogleAuthClient(
         ) {
           throw new TypeError("GCP Workload Identity subject-token binding is invalid.");
         }
-        return credentials.getSubjectToken(hostedGcpAuthRefreshContext.getStore()?.signal);
+        return runHostedGcpKmsFailureStage(
+          "subject_token",
+          async () => await credentials.getSubjectToken(
+            hostedGcpAuthRefreshContext.getStore()?.signal,
+          ),
+        );
       },
     },
     subject_token_type: credentials.subjectTokenType,
@@ -1110,8 +1257,11 @@ function createOfficialGoogleAuthClient(
 function configureOfficialGoogleAuthTransport(
   authClient: IdentityPoolClient | OAuth2Client,
 ): void {
-  addBoundedGoogleAuthTransportInterceptor(authClient.transporter);
   if (authClient instanceof IdentityPoolClient) {
+    addBoundedGoogleAuthTransportInterceptor(
+      authClient.transporter,
+      "service_account_impersonation",
+    );
     const stsCredential = Reflect.get(authClient, "stsCredential");
     if (!isRecord(stsCredential)) {
       throw new TypeError("Google Workload Identity STS transport is unavailable.");
@@ -1120,12 +1270,18 @@ function configureOfficialGoogleAuthTransport(
     if (!isGoogleAuthTransport(stsTransport)) {
       throw new TypeError("Google Workload Identity STS transport is unavailable.");
     }
-    addBoundedGoogleAuthTransportInterceptor(stsTransport);
+    addBoundedGoogleAuthTransportInterceptor(stsTransport, "sts_exchange");
+    return;
   }
+  addBoundedGoogleAuthTransportInterceptor(authClient.transporter, "auth_refresh_wait");
 }
 
 function addBoundedGoogleAuthTransportInterceptor(
   transport: OAuth2Client["transporter"],
+  failureStage: Extract<
+    HostedGcpKmsFailureStage,
+    "auth_refresh_wait" | "service_account_impersonation" | "sts_exchange"
+  >,
 ): void {
   transport.interceptors.request.add({
     resolved: async (request) => {
@@ -1137,7 +1293,20 @@ function addBoundedGoogleAuthTransportInterceptor(
       }
       request.signal = context.signal;
       request.timeout = remainingAuthRefreshTimeoutMs(context);
+      startHostedGcpKmsStage(failureStage);
       return request;
+    },
+  });
+  transport.interceptors.response.add({
+    rejected: (error) => {
+      finishHostedGcpKmsStage(failureStage);
+      rememberHostedGcpKmsSharedFailureStage(error, failureStage);
+      markHostedGcpKmsFailureStage(failureStage);
+      throw error;
+    },
+    resolved: async (response) => {
+      finishHostedGcpKmsStage(failureStage);
+      return response;
     },
   });
 }
@@ -1213,6 +1382,8 @@ function readHostedGcpKmsCredentialConfiguration(
         }
         return requireCompactJwt(token, "Vercel OIDC subject token");
       } catch (error) {
+        rememberHostedGcpKmsSharedFailureStage(error, "subject_token");
+        markHostedGcpKmsFailureStage("subject_token");
         if (signal?.aborted) {
           throw createCallerAbortError();
         }
@@ -1302,6 +1473,7 @@ function createOperationContext(
       ? AbortSignal.any([callerSignal, deadlineSignal])
       : deadlineSignal,
     startedAtMs,
+    timeoutMs,
   };
 }
 
@@ -1315,9 +1487,165 @@ function createProviderAttemptContext(
   const deadlineSignal = AbortSignal.timeout(timeoutMs);
   return {
     deadlineSignal,
+    diagnostics: createHostedGcpKmsAttemptDiagnostics(),
     signal: AbortSignal.any([context.signal, deadlineSignal]),
     timeoutMs,
   };
+}
+
+function createHostedGcpKmsAttemptDiagnostics(): HostedGcpKmsAttemptDiagnostics {
+  const startedAtMs = Date.now();
+  return {
+    lastFailureStage: null,
+    stageDurationsMs: {
+      auth_refresh_wait: 0,
+      kms_rpc: 0,
+      retry_backoff: 0,
+      sdk_initialize: 0,
+      service_account_impersonation: 0,
+      sts_exchange: 0,
+      subject_token: 0,
+    },
+    stageStartedAtMs: {
+      auth_refresh_wait: [],
+      kms_rpc: [],
+      retry_backoff: [],
+      sdk_initialize: [],
+      service_account_impersonation: [],
+      sts_exchange: [],
+      subject_token: [],
+    },
+    startedAtMs,
+    workloadIdentityRefreshObserved: false,
+  };
+}
+
+async function runHostedGcpKmsFailureStage<T>(
+  stage: HostedGcpKmsFailureStage,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
+  if (!diagnostics) {
+    return operation();
+  }
+  startHostedGcpKmsStage(stage);
+  try {
+    return await operation();
+  } catch (error) {
+    // The innermost failing stage wins, so an STS or impersonation failure is
+    // not replaced by the surrounding auth-refresh or SDK initialization wait.
+    diagnostics.lastFailureStage ??=
+      readHostedGcpKmsSharedFailureStage(error) ?? stage;
+    throw error;
+  } finally {
+    finishHostedGcpKmsStage(stage);
+  }
+}
+
+function markHostedGcpKmsFailureStage(
+  stage: HostedGcpKmsFailureStage,
+): void {
+  const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
+  if (diagnostics) {
+    diagnostics.lastFailureStage = stage;
+  }
+}
+
+function rememberHostedGcpKmsSharedFailureStage(
+  error: unknown,
+  stage: HostedGcpKmsFailureStage,
+): void {
+  if (error && typeof error === "object") {
+    hostedGcpKmsSharedFailureStages.set(error, stage);
+  }
+}
+
+function readHostedGcpKmsSharedFailureStage(
+  error: unknown,
+): HostedGcpKmsFailureStage | null {
+  return error && typeof error === "object"
+    ? hostedGcpKmsSharedFailureStages.get(error) ?? null
+    : null;
+}
+
+function startHostedGcpKmsStage(stage: HostedGcpKmsFailureStage): void {
+  const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
+  if (!diagnostics) {
+    return;
+  }
+  diagnostics.stageStartedAtMs[stage].push(Date.now());
+  if (stage === "subject_token") {
+    diagnostics.workloadIdentityRefreshObserved = true;
+  }
+}
+
+function finishHostedGcpKmsStage(stage: HostedGcpKmsFailureStage): void {
+  const diagnostics = hostedGcpKmsAttemptDiagnosticsContext.getStore();
+  if (!diagnostics) {
+    return;
+  }
+  const startedAtMs = diagnostics.stageStartedAtMs[stage].pop();
+  if (startedAtMs === undefined) {
+    return;
+  }
+  diagnostics.stageDurationsMs[stage] +=
+    readHostedGcpKmsBoundedElapsedMs(startedAtMs, Date.now());
+}
+
+function buildHostedGcpKmsAttemptLogDetails(input: {
+  attempt: number;
+  attemptContext: HostedGcpKmsAttemptContext;
+  context: HostedGcpKmsOperationContext;
+  failureStage?: HostedGcpKmsFailureStage;
+  maxAttempts: number;
+  operation: HostedGcpKmsOperation;
+  providerReason: string;
+  requestMetrics: HostedGcpKmsRequestMetrics;
+}): Record<string, boolean | number | string> {
+  const now = Date.now();
+  const stageDurationsMs = {
+    ...input.attemptContext.diagnostics.stageDurationsMs,
+  };
+  for (const stage of Object.keys(stageDurationsMs) as HostedGcpKmsFailureStage[]) {
+    for (const startedAtMs of input.attemptContext.diagnostics.stageStartedAtMs[stage]) {
+      stageDurationsMs[stage] += readHostedGcpKmsBoundedElapsedMs(startedAtMs, now);
+    }
+  }
+  return {
+    additionalAuthenticatedDataBytes:
+      input.requestMetrics.additionalAuthenticatedDataBytes ?? 0,
+    aggregateRemainingMs: Math.max(0, input.context.deadlineAtMs - now),
+    aggregateTimeoutMs: input.context.timeoutMs,
+    attempt: input.attempt,
+    attemptElapsedMs: readHostedGcpKmsBoundedElapsedMs(
+      input.attemptContext.diagnostics.startedAtMs,
+      now,
+    ),
+    attemptTimeoutMs: input.attemptContext.timeoutMs,
+    authRefreshWaitElapsedMs: stageDurationsMs.auth_refresh_wait,
+    ...(input.failureStage ? { failureStage: input.failureStage } : {}),
+    kmsRpcElapsedMs: stageDurationsMs.kms_rpc,
+    maxAttempts: input.maxAttempts,
+    operation: input.operation,
+    operationElapsedMs: readHostedGcpKmsBoundedElapsedMs(input.context.startedAtMs, now),
+    providerReason: input.providerReason,
+    providerPayloadBytes: input.requestMetrics.providerPayloadBytes,
+    retryBackoffElapsedMs: stageDurationsMs.retry_backoff,
+    sdkInitializeElapsedMs: stageDurationsMs.sdk_initialize,
+    serviceAccountImpersonationElapsedMs:
+      stageDurationsMs.service_account_impersonation,
+    stsExchangeElapsedMs: stageDurationsMs.sts_exchange,
+    subjectTokenElapsedMs: stageDurationsMs.subject_token,
+    workloadIdentityRefreshObserved:
+      input.attemptContext.diagnostics.workloadIdentityRefreshObserved,
+  };
+}
+
+function readHostedGcpKmsBoundedElapsedMs(startedAtMs: number, now: number): number {
+  const elapsedMs = now - startedAtMs;
+  return Number.isSafeInteger(elapsedMs) && elapsedMs > 0
+    ? Math.min(elapsedMs, HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS)
+    : 0;
 }
 
 function createAuthRefreshContext(): HostedGcpAuthRefreshContext {

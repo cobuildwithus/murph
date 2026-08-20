@@ -2524,6 +2524,34 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
+  it("labels write-fence session-start failures without inventing a phase timeout", async () => {
+    const writeFenceFailure = Object.preventExtensions(
+      new Error("Synthetic write-fence failure."),
+    );
+    const fetchMock = vi.fn();
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => {
+          throw writeFenceFailure;
+        },
+      },
+    });
+
+    const failure = await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "6",
+      reason: "idle_shutdown",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      cause: writeFenceFailure,
+      phase: "session_start_write_fence_headers",
+    });
+    expect(failure).not.toHaveProperty("timeoutMs");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("reuses the snapshot session write fence when aborting after the runtime lease changes", async () => {
     const snapshotId = "snapshot_runner_platform";
     const objectKey =
@@ -2761,13 +2789,13 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       timeoutControllers.push({ controller, delayMs });
       return controller.signal;
     });
-    const fetchMock = vi.fn(async () => new Response(
-      new ReadableStream<Uint8Array>({ start: () => undefined }),
-      {
-        headers: { "content-type": "application/json; charset=utf-8" },
-        status: 200,
-      },
-    ));
+    const fetchControl: { reject: ((reason?: unknown) => void) | null } = {
+      reject: null,
+    };
+    const fetchMock = vi.fn(async () =>
+      await new Promise<Response>((_resolve, reject) => {
+        fetchControl.reject = reject;
+      }));
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       commitTimeoutMs: 30_000,
@@ -2780,7 +2808,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         reason: "idle_shutdown",
       });
       await vi.waitFor(() =>
-        expect(timeoutControllers.some(({ delayMs }) => delayMs === 6_000)).toBe(true)
+        expect(fetchMock).toHaveBeenCalledOnce()
       );
       const startTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 6_000);
       if (!startTimeout) {
@@ -2789,12 +2817,42 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const timeoutError = new Error("The operation timed out.");
       timeoutError.name = "TimeoutError";
       startTimeout.controller.abort(timeoutError);
+      const rejectStartedFetch = fetchControl.reject;
+      if (!rejectStartedFetch) {
+        throw new Error("Workspace snapshot start fetch did not begin.");
+      }
+      rejectStartedFetch(new DOMException("The operation was aborted.", "AbortError"));
 
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
+      expect(timeoutError).toMatchObject({
+        phase: "session_start_request_decode",
+        timeoutMs: 6_000,
+      });
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
       timeoutSpy.mockRestore();
     }
+  });
+
+  it("labels malformed session responses as request decoding failures", async () => {
+    const fetchMock = vi.fn(async () => new Response("{", {
+      headers: { "content-type": "application/json; charset=utf-8" },
+      status: 200,
+    }));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const failure = await platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "6",
+      reason: "idle_shutdown",
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      phase: "session_start_request_decode",
+      timeoutMs: 6_000,
+    });
   });
 
   it("preserves the handoff timeout when a runtime wake arrives afterward", async () => {
@@ -2841,6 +2899,10 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       snapshotAbort.abort(wakeError);
 
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
+      expect(timeoutError).toMatchObject({
+        phase: "session_start_request_decode",
+        timeoutMs: 6_000,
+      });
       expect(fetchMock).toHaveBeenCalledOnce();
     } finally {
       timeoutSpy.mockRestore();
@@ -3568,12 +3630,17 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       fetchImpl: fetchMock as typeof fetch,
     });
 
-    await expect(platform.workspaceSnapshotPort!.startSnapshotSession({
+    const failure = await platform.workspaceSnapshotPort!.startSnapshotSession({
       expectedWorkspaceVersion: "6",
       reason: "idle_shutdown",
-    })).rejects.toThrow(
-      "Hosted workspace snapshot session start response AAD does not match its user binding.",
-    );
+    }).catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      message:
+        "Hosted workspace snapshot session start response AAD does not match its user binding.",
+      phase: "session_start_payload_validation",
+    });
+    expect(failure).not.toHaveProperty("timeoutMs");
 
     expect(fetchMock).toHaveBeenCalledOnce();
   });

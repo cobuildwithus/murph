@@ -1064,7 +1064,19 @@ Last verified: 2026-08-20
   second attempt, after 100–300 ms of abortable jitter. Encrypt, sign, MAC,
   permission/authentication, quota, input, and integrity failures remain
   single-attempt and fail closed; the official SDK's broad default retry budget
-  stays disabled.
+  stays disabled. Retry, recovery, and terminal-failure logs contain only the
+  operation and outcome, normalized provider reason, exact bounded auth/RPC
+  stage, attempt and aggregate budget state, per-stage elapsed milliseconds,
+  workload-refresh presence, and provider-payload/AAD byte counts. They never
+  contain credentials, resource names, AAD, ciphertext, or plaintext.
+- Hosted workspace checkpoint session-start failures preserve cancellation
+  reasons and extensible `Error` identity while adding an allowlisted phase for
+  write-fence header acquisition, the deadline-bound request/JSON decode, or
+  payload validation. Non-extensible errors are retained as the `cause` of the
+  annotated error. The durable checkpoint failure record also includes that
+  phase and the measured session-start elapsed milliseconds; a phase timeout is
+  recorded only for the deadline-bound request/decode phase. These diagnostics
+  do not increase the handoff deadline or add another checkpoint retry owner.
 - Hosted artifact uploads are content-addressed and replay-safe. Transport failures
   plus HTTP 408, 429, and 5xx responses carry typed retryability into the existing
   device-sync job owner, which requeues with its normal bounded backoff. Write-fence

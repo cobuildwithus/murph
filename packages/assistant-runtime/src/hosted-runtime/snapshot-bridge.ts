@@ -30,6 +30,7 @@ import {
   hasHostedProviderCleanupRecoveryCompleted,
 } from "./provider-cleanup.ts";
 import {
+  buildHostedExecutionSafeErrorDetails,
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
   readHostedRuntimeSafeErrorText,
@@ -280,6 +281,7 @@ interface HostedWorkspaceSnapshotTimingDetails
   extends HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails {
   snapshotArchiveBuildElapsedMs?: number;
   snapshotDirectR2UploadElapsedMs?: number;
+  snapshotSessionStartElapsedMs?: number;
 }
 
 type HostedWorkspaceSnapshotStage =
@@ -356,13 +358,17 @@ async function createHostedWorkspaceV2Snapshot(
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
     const durableRoot = resolveWorkspaceDurableRoot(input.vaultRoot);
     const operatorHomeRoot = resolveWorkspaceOperatorHomeRoot(input.vaultRoot);
-    snapshotSession = await workspaceSnapshotPort.startSnapshotSession({
-      expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
-      inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
-      nextWakeAt: input.request.nextWakeAt,
-      nextWakeReason: input.request.nextWakeReason,
-      reason: input.request.reason,
-      signal: input.signal,
+    snapshotSession = await runHostedWorkspaceSnapshotMeasuredStep({
+      key: "snapshotSessionStartElapsedMs",
+      run: async () => await workspaceSnapshotPort.startSnapshotSession({
+        expectedWorkspaceVersion: input.request.expectedWorkspaceVersion,
+        inboxMediaRetentionWakeAt: input.request.inboxMediaRetentionWakeAt,
+        nextWakeAt: input.request.nextWakeAt,
+        nextWakeReason: input.request.nextWakeReason,
+        reason: input.request.reason,
+        signal: input.signal,
+      }),
+      timings: snapshotTimings,
     });
     const activeSnapshotSession = snapshotSession;
     assertHostedWorkspaceSnapshotConstructionLive(input.signal);
@@ -1066,6 +1072,13 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
   }
 
   const diagnostics = buildHostedExecutionSafeErrorDiagnostics(error);
+  const sessionStartFailure = readHostedWorkspaceSnapshotSessionStartFailure(error);
+  if (sessionStartFailure) {
+    redactedJson.snapshotSessionStartFailurePhase = sessionStartFailure.phase;
+    if (sessionStartFailure.timeoutMs !== undefined) {
+      redactedJson.snapshotSessionStartTimeoutMs = sessionStartFailure.timeoutMs;
+    }
+  }
   let safeDiagnosticDetail: string | null = null;
   if (diagnostics) {
     if (typeof diagnostics.errorCode === "string") {
@@ -1124,6 +1137,43 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
       redactedJson.bundleArchiveValidationDetail = validationDetail;
     }
   }
+}
+
+const HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES = new Set([
+  "session_start_payload_validation",
+  "session_start_request_decode",
+  "session_start_write_fence_headers",
+]);
+
+function readHostedWorkspaceSnapshotSessionStartFailure(error: unknown): {
+  phase: string;
+  timeoutMs?: number;
+} | null {
+  const details = buildHostedExecutionSafeErrorDetails(error);
+  const properties = details?.errorProperties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) {
+    return null;
+  }
+  const phase = properties.phase;
+  const timeoutMs = properties.timeoutMs;
+  if (
+    typeof phase !== "string"
+    || !HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES.has(phase)
+  ) {
+    return null;
+  }
+  if (timeoutMs === undefined) {
+    return { phase };
+  }
+  if (
+    typeof timeoutMs !== "number"
+    || !Number.isSafeInteger(timeoutMs)
+    || timeoutMs < 0
+    || timeoutMs > 60_000
+  ) {
+    return null;
+  }
+  return { phase, timeoutMs };
 }
 
 function normalizeHostedWorkspaceSnapshotDiagnosticsHashSecret(

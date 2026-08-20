@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 
+import { getVercelOidcToken } from "@vercel/oidc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 interface CapturedAuthRequest {
@@ -95,30 +96,51 @@ vi.mock("@google-cloud/kms", () => {
 
 vi.mock("google-auth-library", () => {
   function createTransport(kind: "iam" | "sts") {
-    const interceptors: Array<{
+    const requestInterceptors: Array<{
       resolved(request: Record<PropertyKey, unknown>): Promise<Record<PropertyKey, unknown>>;
+    }> = [];
+    const responseInterceptors: Array<{
+      rejected?(error: unknown): void;
+      resolved?(response: unknown): Promise<unknown>;
     }> = [];
     return {
       interceptors: {
         request: {
-          add(interceptor: typeof interceptors[number]) {
-            interceptors.push(interceptor);
+          add(interceptor: typeof requestInterceptors[number]) {
+            requestInterceptors.push(interceptor);
+          },
+        },
+        response: {
+          add(interceptor: typeof responseInterceptors[number]) {
+            responseInterceptors.push(interceptor);
           },
         },
       },
       async request(options: Record<PropertyKey, unknown>) {
         let resolved = options;
-        for (const interceptor of interceptors) {
+        for (const interceptor of requestInterceptors) {
           resolved = await interceptor.resolved(resolved);
         }
         const captured = { kind, options: resolved } satisfies CapturedAuthRequest;
         googleSdkMocks.authRequests.push(captured);
-        if (googleSdkMocks.authRequest) {
-          return googleSdkMocks.authRequest(captured);
+        try {
+          let response: unknown = googleSdkMocks.authRequest
+            ? await googleSdkMocks.authRequest(captured)
+            : kind === "sts"
+              ? { data: { access_token: "federated-token" } }
+              : { data: { accessToken: "impersonated-token" } };
+          for (const interceptor of responseInterceptors) {
+            if (interceptor.resolved) {
+              response = await interceptor.resolved(response);
+            }
+          }
+          return response;
+        } catch (error) {
+          for (const interceptor of responseInterceptors) {
+            interceptor.rejected?.(error);
+          }
+          throw error;
         }
-        return kind === "sts"
-          ? { data: { access_token: "federated-token" } }
-          : { data: { accessToken: "impersonated-token" } };
       },
     };
   }
@@ -232,8 +254,14 @@ const WORKLOAD_IDENTITY_ENV = {
   HOSTED_CRYPTO_GCP_WORKLOAD_IDENTITY_PROVIDER_ID: "vercel-provider",
   NODE_ENV: "test",
 } satisfies NodeJS.ProcessEnv;
+const mockedGetVercelOidcToken = vi.mocked(getVercelOidcToken);
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  mockedGetVercelOidcToken.mockReset();
+  mockedGetVercelOidcToken.mockResolvedValue(
+    "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJob3N0ZWQtdGVzdCJ9.synthetic-signature",
+  );
   googleSdkMocks.authClients.length = 0;
   googleSdkMocks.authRequest = null;
   googleSdkMocks.authRequests.length = 0;
@@ -349,6 +377,7 @@ describe("official Google Cloud KMS SDK boundary", () => {
   it("retries one transient Decrypt call without repeating cold Workload Identity refresh", async () => {
     const random = vi.spyOn(Math, "random").mockReturnValue(0);
     const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const recoveryLog = vi.spyOn(console, "info").mockImplementation(() => undefined);
     let decryptCalls = 0;
     googleSdkMocks.kmsCall = async (call) => {
       if (call.method !== "decrypt") {
@@ -381,12 +410,94 @@ describe("official Google Cloud KMS SDK boundary", () => {
       )).toBe(true);
       expect(warning).toHaveBeenCalledWith(
         "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
-        expect.objectContaining({ providerReason: "UNAVAILABLE" }),
+        expect.objectContaining({
+          failureStage: "kms_rpc",
+          providerReason: "UNAVAILABLE",
+          workloadIdentityRefreshObserved: true,
+        }),
       );
+      expect(recoveryLog).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt recovered after retry.",
+        expect.objectContaining({
+          outcome: "recovered",
+          providerReason: "RECOVERED",
+        }),
+      );
+      expect(recoveryLog.mock.calls[0]?.[1]).not.toHaveProperty("failureStage");
+      expect(recoveryLog.mock.calls[0]?.[1]).not.toHaveProperty("completionStage");
     } finally {
       random.mockRestore();
+      recoveryLog.mockRestore();
       warning.mockRestore();
     }
+  });
+
+  it.each([
+    { failureStage: "sts_exchange", kind: "sts" as const },
+    { failureStage: "service_account_impersonation", kind: "iam" as const },
+  ])("identifies a terminal $kind authentication failure", async ({
+    failureStage,
+    kind,
+  }) => {
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    googleSdkMocks.authRequest = async (request) => {
+      if (request.kind === kind) {
+        throw Object.assign(new Error("secret provider detail"), {
+          code: "PERMISSION_DENIED",
+          response: { status: 403 },
+        });
+      }
+      return { data: { access_token: "federated-token" } };
+    };
+
+    const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([7, 8, 9])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).rejects.toMatchObject({ providerReason: "PERMISSION_DENIED" });
+
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        additionalAuthenticatedDataBytes: Buffer.byteLength("domain=control"),
+        attempt: 1,
+        failureStage,
+        operation: "decrypt",
+        outcome: "failed",
+        providerPayloadBytes: 3,
+        providerReason: "PERMISSION_DENIED",
+        workloadIdentityRefreshObserved: true,
+      }),
+    );
+    expect(JSON.stringify(failureLog.mock.calls)).not.toContain("secret provider detail");
+    expect(JSON.stringify(failureLog.mock.calls)).not.toContain(KMS_KEY_NAME);
+  });
+
+  it("identifies a terminal subject-token failure without logging token material", async () => {
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mockedGetVercelOidcToken.mockRejectedValueOnce(
+      Object.assign(new Error("secret oidc material"), { code: "PERMISSION_DENIED" }),
+    );
+
+    const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([7, 8, 9])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).rejects.toMatchObject({ providerReason: "PERMISSION_DENIED" });
+
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        failureStage: "subject_token",
+        outcome: "failed",
+        providerReason: "PERMISSION_DENIED",
+        subjectTokenElapsedMs: expect.any(Number),
+        workloadIdentityRefreshObserved: true,
+      }),
+    );
+    expect(JSON.stringify(failureLog.mock.calls)).not.toContain("secret oidc material");
   });
 
   it("cancels a timed-out official Decrypt call before retrying within the aggregate deadline", async () => {
@@ -487,6 +598,56 @@ describe("official Google Cloud KMS SDK boundary", () => {
     await expect(second).resolves.toMatchObject({ keyName: KMS_KEY_NAME });
     expect(googleSdkMocks.kmsCalls[0]?.canceled).toBe(true);
     expect(googleSdkMocks.authRequests.map((request) => request.kind)).toEqual(["sts", "iam"]);
+  });
+
+  it("retains the exact stage when a shared cold authentication refresh fails", async () => {
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stsControl: { reject: ((reason?: unknown) => void) | null } = {
+      reject: null,
+    };
+    const pendingSts = new Promise<unknown>((_resolve, reject) => {
+      stsControl.reject = reject;
+    });
+    googleSdkMocks.authRequest = async (request) => {
+      if (request.kind === "sts") {
+        return await pendingSts;
+      }
+      return { data: { accessToken: "impersonated-token" } };
+    };
+    const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+    const caller = new AbortController();
+    const first = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1]),
+      signal: caller.signal,
+    });
+    await vi.waitFor(() => expect(googleSdkMocks.authRequests).toHaveLength(1));
+    const second = client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([2]),
+    });
+
+    caller.abort(new Error("caller-only cancellation"));
+    await expect(first).rejects.toMatchObject({ name: "AbortError" });
+    const rejectSts = stsControl.reject;
+    if (!rejectSts) {
+      throw new Error("Expected a pending shared STS request.");
+    }
+    rejectSts(Object.assign(new Error("redacted shared STS failure"), {
+      code: "UNAVAILABLE",
+    }));
+
+    await expect(second).rejects.toMatchObject({ providerReason: "UNAVAILABLE" });
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        failureStage: "sts_exchange",
+        outcome: "failed",
+        providerReason: "UNAVAILABLE",
+      }),
+    );
   });
 });
 
