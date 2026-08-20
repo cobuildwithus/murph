@@ -35,6 +35,22 @@ Updated: 2026-08-20
 - Diagnostics may name bounded diff categories only and must not expose profile
   values, provider identifiers, or member identifiers.
 
+## Product UX
+
+- Effort: Patch.
+- Outcome: Existing members' unchanged connected-health profiles converge
+  after the timestamp rollout without losing corrections or restoring deleted
+  facts.
+- Reaches: Existing Junction profiles in the released updated-at shape; current
+  profiles and unrelated device facts retain their existing journey.
+- Proof: Provider-shaped integration coverage exercises ordinary replay,
+  member-edited values and chronology, member deletion, malformed predecessor
+  chronology, and real same-revision content changes.
+- Walkthrough: Ready. The exact legacy profile migrated once and replayed as a
+  no-op; member value and timestamp edits stayed authoritative; deleted facts
+  stayed deleted through a later provider revision; malformed and semantically
+  changed inputs stopped without changing accepted content.
+
 ## Tasks
 
 1. [completed] Reproduce the old `updated_at`-pinned event replaying under the current
@@ -81,6 +97,12 @@ Updated: 2026-08-20
 - `git diff --check` passed.
 - The task diff and plan passed the direct-identifier, local-path, credential,
   and environment-variable scan.
+- Public changelog item `2026-08-20 · stable-junction-profile-replays` records
+  the member-visible recovery without private evidence or implementation-only
+  detail.
+- Focused changelog coverage passed: 2 files, 45 tests.
+- `pnpm --dir apps/web typecheck` passed after generating the ignored changelog
+  registry and Prisma client.
 - The read-only diff reviewer confirmed its member-deletion and member-time
   findings are resolved in the corrected code and regressions.
 - ReviewGPT, exact-head CI, merge, deploy, and production convergence remain
