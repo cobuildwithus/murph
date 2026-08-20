@@ -2030,6 +2030,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     assertRuntimeNotAborted();
     const initialMailboxImportLanes =
       input.request.processingMode === "system_mailbox"
+        || input.request.processingMode === "environment_interview"
         ? (["system"] as const)
         : initialMailboxImportPlan.lanes;
     const initialPendingRuntimeWake = consumePendingHostedRuntimeWake(
@@ -2119,7 +2120,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       initialMailboxImportResult = await importHostedInitialMailboxForWorkspaceRunner({
         importItemContext: initialMailboxImportContext,
         lanes: initialMailboxImportLanes,
-        prefetchLanes: HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
+        prefetchLanes:
+          input.request.processingMode === "environment_interview"
+            ? initialMailboxImportLanes
+            : HOSTED_FOREGROUND_MAILBOX_PREFETCH_LANES,
         runnerInput: baseRunnerInput,
         requestId,
       });
@@ -5261,6 +5265,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       };
 
       result = await runForegroundPass({
+        foregroundCausalOnly:
+          input.request.processingMode === "environment_interview",
         ...(systemMailboxForegroundWakePrefetch
           ? {
               initialMailboxImportContext:

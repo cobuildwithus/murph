@@ -54,6 +54,8 @@ export interface UpsertHabitatAspectInput {
    * indicator back to unknown; omitted indicators keep their stored value.
    */
   indicators?: Record<string, HabitatIndicatorValue>;
+  /** Concise member-facing context to merge by indicator. Null clears a note. */
+  indicatorNotes?: Record<string, string | null>;
   /** ISO date stamped on every indicator set in this call. */
   recordedAt?: string;
   note?: string;
@@ -162,6 +164,31 @@ function mergeIndicators(
   };
 }
 
+function mergeIndicatorNotes(
+  existing: HabitatFrontmatter["indicatorNotes"] | undefined,
+  updates: Record<string, string | null> | undefined,
+  indicators: Readonly<Record<string, HabitatIndicatorValue>>,
+): Record<string, string> | undefined {
+  const notes: Record<string, string> = { ...existing };
+
+  for (const [indicatorId, note] of Object.entries(updates ?? {})) {
+    const normalized = normalizeOptionalText(note);
+    if (!normalized || !(indicatorId in indicators)) {
+      delete notes[indicatorId];
+      continue;
+    }
+    notes[indicatorId] = normalized;
+  }
+
+  for (const indicatorId of Object.keys(notes)) {
+    if (!(indicatorId in indicators)) {
+      delete notes[indicatorId];
+    }
+  }
+
+  return Object.keys(notes).length > 0 ? notes : undefined;
+}
+
 function hasStoredIndicatorUpdates(
   updates: Record<string, HabitatIndicatorValue> | undefined,
 ): boolean {
@@ -225,6 +252,21 @@ function assertValidStoredIndicatorUpdates(
   }
 }
 
+function assertValidIndicatorNoteUpdates(
+  aspect: string,
+  updates: Record<string, string | null> | undefined,
+): void {
+  for (const indicatorId of Object.keys(updates ?? {})) {
+    if (!getHabitatIndicatorDefinition(aspect, indicatorId)) {
+      throw new VaultError(
+        "HABITAT_FRONTMATTER_INVALID",
+        `Indicator note "${indicatorId}" is not part of habitat aspect "${aspect}".`,
+        { aspect, indicatorId },
+      );
+    }
+  }
+}
+
 export async function upsertHabitatAspect(
   input: UpsertHabitatAspectInput,
 ): Promise<UpsertHabitatAspectResult> {
@@ -247,6 +289,7 @@ async function upsertHabitatAspectLocked(
   const recordedAt = normalizeOptionalText(input.recordedAt) ?? undefined;
   const existingRecords = await loadHabitatRecords(input.vaultRoot);
   assertValidStoredIndicatorUpdates(aspectDefinition.id, input.indicators);
+  assertValidIndicatorNoteUpdates(aspectDefinition.id, input.indicatorNotes);
   assertRecordedAtForStoredIndicatorUpdates(input.indicators, recordedAt);
   const existingRecord =
     existingRecords.find((record) => record.aspect === aspectDefinition.id) ?? null;
@@ -268,6 +311,11 @@ async function upsertHabitatAspectLocked(
     existingRecord?.indicatorRecordedAt,
     recordedAt,
   );
+  const indicatorNotes = mergeIndicatorNotes(
+    existingRecord?.indicatorNotes,
+    input.indicatorNotes,
+    merged.indicators,
+  );
   const note = normalizeOptionalText(input.note) ?? existingRecord?.note ?? undefined;
   const nextAttributes = validateHabitatFrontmatter(
     compactObject({
@@ -280,6 +328,7 @@ async function upsertHabitatAspectLocked(
       domain: aspectDefinition.domain,
       aspect: aspectDefinition.id,
       indicators: merged.indicators,
+      indicatorNotes,
       indicatorRecordedAt: merged.indicatorRecordedAt,
       note,
     }),

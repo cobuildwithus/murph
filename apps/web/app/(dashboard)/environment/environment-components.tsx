@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type SVGProps } from "react";
+import { useState, type ReactNode, type SVGProps } from "react";
 import { cva } from "class-variance-authority";
 import Image from "next/image";
 import Link from "next/link";
@@ -17,7 +17,6 @@ import {
   Share2,
   Sun,
   Wind,
-  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -103,13 +102,17 @@ export function GradeBadge({
   grade: CategoryGrade;
   size?: "xs" | "sm" | "lg";
 }) {
+  const bonusSummary =
+    grade.capabilityBonus && grade.basePct !== undefined
+      ? `, based on ${grade.basePct} percent from conditions plus a ${grade.capabilityBonus} point capability bonus`
+      : "";
   const label =
     grade.letter && grade.pct !== null
       ? grade.redFlags > 0
         ? `Grade ${grade.letter}, capped by ${grade.redFlags} red ${
             grade.redFlags === 1 ? "flag" : "flags"
-          }; ${grade.pct} percent of known conditions within target`
-        : `Grade ${grade.letter}, ${grade.pct} percent`
+          }; ${grade.pct} percent${bonusSummary}`
+        : `Grade ${grade.letter}, ${grade.pct} percent${bonusSummary}`
       : "Grade not available";
 
   return (
@@ -137,7 +140,7 @@ function GradeDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+      <DialogContent className="max-w-lg gap-0 overflow-hidden p-0 sm:max-w-lg">
         <DialogHeader className="border-b border-border bg-muted/40 px-7 pb-6 pt-7">
           <div className="flex items-center gap-5 pr-8">
             <GradeBadge grade={grade} size="lg" />
@@ -165,8 +168,26 @@ function GradeDialog({
                         : `${grade.redFlags} urgent issues cap`
                     } this grade at E. ${grade.met} of ${
                       grade.graded
-                    } known conditions are within target.`
-                  : `${grade.met} of ${grade.graded} known conditions are within target. Unknown facts do not lower the grade.`}
+                    } known conditions are within target.${
+                      grade.capabilityBonus && grade.basePct !== undefined
+                        ? ` The ${grade.capabilityBonus}-point capability bonus cannot remove this cap.`
+                        : ""
+                    }`
+                  : `${grade.met} of ${
+                      grade.graded
+                    } known conditions are within target. Unknown facts do not lower the grade.${
+                      grade.capabilityBonus && grade.basePct !== undefined
+                        ? ` The base result is ${
+                            grade.basePct
+                          }%. Available capabilities add ${
+                            grade.capabilityBonus
+                          } points${
+                            grade.basePct + grade.capabilityBonus > 100
+                              ? ", with the total limited to 100%."
+                              : "."
+                          }`
+                        : ""
+                    }`}
               </DialogDescription>
             </div>
           </div>
@@ -314,17 +335,44 @@ function OverallGradeDialog({
 }
 
 export function ShareEnvironmentButton({
+  coverage,
   disabled = false,
+  grade,
+  known,
+  total,
 }: {
+  coverage: number;
   disabled?: boolean;
+  grade: CategoryGrade;
+  known: number;
+  total: number;
 }) {
   const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
 
   const share = async () => {
+    if (grade.letter === null || grade.pct === null) {
+      return;
+    }
+    setFailed(false);
     const url = window.location.origin + window.location.pathname;
-    const title = "Map your environment with Murph";
+    const title = `My Environment score is ${grade.pct}%`;
     try {
-      const response = await fetch("/environment/opengraph-image");
+      const response = await fetch("/api/environment/share-card", {
+        body: JSON.stringify({
+          coverage,
+          grade: grade.letter,
+          known,
+          score: grade.pct,
+          total,
+        }),
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("Environment share card could not be created.");
+      }
       const blob = await response.blob();
       const file = new File([blob], "my-environment-grade.png", {
         type: "image/png",
@@ -333,7 +381,7 @@ export function ShareEnvironmentButton({
         await navigator.share({
           files: [file],
           title,
-          text: `Understand how the place you sleep, breathe and work supports your health. ${url}`,
+          text: `My Environment score is ${grade.pct}%. ${url}`,
         });
         return;
       }
@@ -344,12 +392,21 @@ export function ShareEnvironmentButton({
       await navigator.clipboard.writeText(url);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // Share sheet dismissed or clipboard blocked — nothing to clean up.
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      setFailed(true);
+      setTimeout(() => setFailed(false), 2500);
     }
   };
 
-  const label = copied ? (
+  const label = failed ? (
+    <>
+      <Share2 className="size-3.5" aria-hidden="true" />
+      Try sharing again
+    </>
+  ) : copied ? (
     <>
       <Check className="size-3.5 text-primary" aria-hidden="true" />
       Link copied
@@ -367,10 +424,7 @@ export function ShareEnvironmentButton({
         <Tooltip>
           <TooltipTrigger
             render={
-              <span
-                className="inline-flex cursor-not-allowed"
-                tabIndex={0}
-              />
+              <span className="inline-flex cursor-not-allowed" tabIndex={0} />
             }
           >
             <button
@@ -432,12 +486,16 @@ export function EnvironmentHero({
   total,
   context,
   notes,
+  missingTopicByKey,
+  onFillMissing,
 }: {
   grade: CategoryGrade;
   known: number;
   total: number;
   context: EnvironmentContext;
   notes: CategoryNote[];
+  missingTopicByKey?: Partial<Record<keyof EnvironmentContext, string>>;
+  onFillMissing?: (topicId: string) => void;
 }) {
   const coverage = total === 0 ? 0 : Math.round((100 * known) / total);
   const [gradeOpen, setGradeOpen] = useState(false);
@@ -464,19 +522,14 @@ export function EnvironmentHero({
                   : "Not enough information for a fair grade"}
               </p>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setGradeOpen(true)}
-                  aria-label="How this grade is calculated"
-                  className="mt-1 cursor-pointer border-b border-dotted border-muted-foreground/60 font-serif text-3xl font-semibold tracking-[-0.02em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {grade.pct}%
-                </button>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  of known conditions within target
-                </p>
-              </>
+              <button
+                type="button"
+                onClick={() => setGradeOpen(true)}
+                aria-label="How this grade is calculated"
+                className="mt-1 cursor-pointer border-b border-dotted border-muted-foreground/60 font-serif text-3xl font-semibold tracking-[-0.02em] text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {grade.pct}%
+              </button>
             )}
             {grade.redFlags > 0 ? (
               <button
@@ -506,7 +559,7 @@ export function EnvironmentHero({
             <p className="text-sm font-medium text-foreground">
               {known === 0
                 ? "Start with five short topics"
-                : `Murph knows ${known} of ${total}`}
+                : `Murph knows ${known} of ${total} conditions`}
             </p>
             <p className="font-serif text-2xl font-semibold text-foreground">
               {coverage}%
@@ -534,18 +587,39 @@ export function EnvironmentHero({
       >
         {CONTEXT_ICONS.map((item) => {
           const Icon = item.icon;
-          return (
-            <div key={item.key} className="flex min-w-0 items-center gap-3">
+          const topicId = missingTopicByKey?.[item.key];
+          const content = (
+            <>
               <Icon
                 className="size-4 shrink-0 text-primary"
                 aria-hidden="true"
               />
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground">{item.label}</p>
-                <p className="truncate text-sm font-medium text-foreground">
+                <p
+                  className={`truncate text-sm font-medium ${
+                    topicId
+                      ? "text-primary underline decoration-primary/30 underline-offset-2"
+                      : "text-foreground"
+                  }`}
+                >
                   {context[item.key]}
                 </p>
               </div>
+            </>
+          );
+          return topicId && onFillMissing ? (
+            <button
+              className="flex min-w-0 cursor-pointer items-center gap-3 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              key={item.key}
+              onClick={() => onFillMissing(topicId)}
+              type="button"
+            >
+              {content}
+            </button>
+          ) : (
+            <div key={item.key} className="flex min-w-0 items-center gap-3">
+              {content}
             </div>
           );
         })}
@@ -558,10 +632,14 @@ export function CategoryCard({
   category,
   note,
   chatHref,
+  renderFillMissing,
+  voiceAction,
 }: {
   category: ResolvedCategory;
   note: CategoryNote;
   chatHref: string | null;
+  renderFillMissing?: (indicatorId: string) => ReactNode;
+  voiceAction?: ReactNode;
 }) {
   const headingId = `environment-category-${note.id}`;
   const coverage =
@@ -590,18 +668,15 @@ export function CategoryCard({
             {note.title}
           </span>
           <CategoryGradeButton note={note} />
-          <span className="w-12 shrink-0 sm:w-24">
+          <span className="w-12 shrink-0 sm:w-28">
             {note.total === 0 ? (
               <span className="block text-right text-xs text-muted-foreground">
                 Optional
               </span>
             ) : (
               <>
-                <span className="flex items-baseline justify-between gap-1">
+                <span className="block text-right text-xs text-muted-foreground">
                   <span className="font-serif text-base font-semibold text-foreground sm:text-lg">
-                    {coverage}%
-                  </span>
-                  <span className="hidden text-[10px] text-muted-foreground sm:inline">
                     {note.known}/{note.total}
                   </span>
                 </span>
@@ -632,6 +707,8 @@ export function CategoryCard({
             category={category}
             note={note}
             chatHref={chatHref}
+            renderFillMissing={renderFillMissing}
+            voiceAction={voiceAction}
           />
         </div>
       </details>
@@ -743,6 +820,7 @@ export type SelectedFact = {
   value: string | null;
   target: string | null;
   detail: string | null;
+  note: string | null;
 };
 
 function UnmetFlag() {
@@ -803,34 +881,12 @@ function buildChatMessage(fact: SelectedFact): string {
 
 function buildChatHref(chatHref: string, fact: SelectedFact): string {
   const [base, rawQuery = ""] = chatHref.split("?", 2);
+  if (chatHref.startsWith("sms:")) {
+    return `${base}?body=${encodeURIComponent(buildChatMessage(fact))}`;
+  }
   const query = new URLSearchParams(rawQuery);
-  query.set(
-    chatHref.startsWith("sms:") ? "body" : "text",
-    buildChatMessage(fact),
-  );
+  query.set("text", buildChatMessage(fact));
   return `${base}?${query}`;
-}
-
-const DISMISSED_CHECKS_KEY = "murph-environment-dismissed-checks";
-
-function loadDismissedChecks(): Set<string> {
-  try {
-    const raw = window.localStorage.getItem(DISMISSED_CHECKS_KEY);
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveDismissedChecks(next: Set<string>) {
-  try {
-    window.localStorage.setItem(
-      DISMISSED_CHECKS_KEY,
-      JSON.stringify([...next]),
-    );
-  } catch {
-    // Private-mode storage failures just lose the preference.
-  }
 }
 
 function GuideTipList({ title, items }: { title: string; items: string[] }) {
@@ -865,6 +921,7 @@ function FactDrawer({
   sprite,
   chatHref,
   onClose,
+  renderFillMissing,
   onStep,
   position,
 }: {
@@ -872,6 +929,7 @@ function FactDrawer({
   sprite?: ObjectSpriteDefinition;
   chatHref: string | null;
   onClose: () => void;
+  renderFillMissing?: (indicatorId: string) => ReactNode;
   onStep?: (delta: 1 | -1) => void;
   position?: { index: number; total: number };
 }) {
@@ -880,13 +938,17 @@ function FactDrawer({
     fact?.kind === "unknown" ||
     fact?.kind === "optional" ||
     fact?.kind === "skipped";
+  const fillMissing =
+    fact &&
+    (fact.kind === "unknown" ||
+      fact.kind === "optional" ||
+      fact.kind === "skipped")
+      ? renderFillMissing?.(fact.indicatorId)
+      : null;
 
   return (
     <Sheet open={fact !== null} onOpenChange={(open) => open || onClose()}>
-      <SheetContent
-        side="right"
-        className="w-full overflow-y-auto sm:max-w-md"
-      >
+      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
         {fact ? (
           <>
             {onStep && position ? (
@@ -997,6 +1059,16 @@ function FactDrawer({
                         {fact.detail}
                       </p>
                     ) : null}
+                    {fact.note ? (
+                      <div className="border-t border-border pt-3">
+                        <dt className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+                          What Murph remembers
+                        </dt>
+                        <dd className="mt-1.5 text-sm leading-relaxed text-foreground">
+                          {fact.note}
+                        </dd>
+                      </div>
+                    ) : null}
                   </dl>
                 )}
               </div>
@@ -1010,7 +1082,11 @@ function FactDrawer({
               ))}
             </div>
 
-            {chatHref ? (
+            {fillMissing ? (
+              <SheetFooter className="border-t border-border">
+                {fillMissing}
+              </SheetFooter>
+            ) : chatHref ? (
               <SheetFooter className="border-t border-border">
                 <a
                   href={buildChatHref(chatHref, fact)}
@@ -1022,8 +1098,8 @@ function FactDrawer({
                   {fact.kind === "optional"
                     ? "Ask Murph about it"
                     : quiet
-                      ? "Tell Murph about it"
-                      : "Talk to Murph about it"}
+                    ? "Tell Murph about it"
+                    : "Talk to Murph about it"}
                 </a>
               </SheetFooter>
             ) : null}
@@ -1043,30 +1119,20 @@ export type NextCheckItem = {
 export function NextChecksStrip({
   items,
   chatHref,
+  renderFillMissing,
 }: {
   items: NextCheckItem[];
-  chatHref: string;
+  chatHref: string | null;
+  renderFillMissing?: (indicatorId: string) => ReactNode;
 }) {
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      setDismissed(loadDismissedChecks());
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, []);
-
-  const remaining = items.filter(
-    (item) => !dismissed.has(item.fact.indicatorId),
-  );
-  const unmet = remaining.filter((item) => item.fact.kind === "unmet");
+  const unmet = items.filter((item) => item.fact.kind === "unmet");
   const shown = [
     ...unmet.slice(0, 2),
-    ...remaining.filter((item) => item.fact.kind !== "unmet"),
+    ...items.filter((item) => item.fact.kind !== "unmet"),
     ...unmet.slice(2),
   ].slice(0, 3);
-  const dismissedCount = items.length - remaining.length;
   const selectedIndex = shown.findIndex(
     (item) => item.fact.indicatorId === selectedId,
   );
@@ -1089,107 +1155,61 @@ export function NextChecksStrip({
     const next = shown[selectedIndex + delta];
     if (next) open(next);
   };
-  const dismiss = (indicatorId: string) => {
-    const next = new Set(dismissed).add(indicatorId);
-    setDismissed(next);
-    saveDismissedChecks(next);
-    if (selectedId === indicatorId) close();
-  };
-  const restore = () => {
-    setDismissed(new Set());
-    saveDismissedChecks(new Set());
-  };
-
   return (
-    <TooltipProvider delay={150}>
-      <section aria-label="What to check next">
-        <div className="flex items-baseline justify-between">
-          <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            What to check next
-          </p>
-          {dismissedCount > 0 ? (
-            <button
-              type="button"
-              onClick={restore}
-              className="cursor-pointer text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              Show dismissed ({dismissedCount})
-            </button>
-          ) : null}
-        </div>
-        {shown.length > 0 ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {shown.map((item) => (
-              <div key={item.fact.indicatorId} className="group/check relative">
-                <button
-                  type="button"
-                  onClick={() => open(item)}
-                  className="flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-colors duration-150 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
-                >
-                  <FactIcon kind={item.fact.kind} sprite={item.sprite} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">
-                      {item.fact.label}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {item.fact.kind === "unknown"
-                        ? `not known yet · ${item.categoryTitle}`
-                        : `${item.fact.value} · ${item.categoryTitle}`}
-                    </span>
-                  </span>
-                  {item.fact.kind === "unmet" ? (
-                    <span className="shrink-0 text-xs font-medium text-destructive">
-                      fix
-                    </span>
-                  ) : (
-                    <span className="shrink-0 text-xs font-medium text-primary">
-                      fill in
-                    </span>
-                  )}
-                  <ChevronRight
-                    className="size-4 shrink-0 text-muted-foreground/50 transition-colors duration-150 group-hover/check:text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </button>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <button
-                        type="button"
-                        onClick={() => dismiss(item.fact.indicatorId)}
-                        className="absolute right-1.5 top-1.5 flex size-5 cursor-pointer items-center justify-center rounded-full border border-border bg-card text-muted-foreground opacity-0 shadow-sm transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/check:opacity-100"
-                        aria-label={`Hide ${item.fact.label}`}
-                      />
-                    }
-                  >
-                    <X className="size-3" aria-hidden="true" />
-                  </TooltipTrigger>
-                  <TooltipContent>Hide this suggestion</TooltipContent>
-                </Tooltip>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Nothing left to suggest. You&apos;ve hidden all current suggestions
-            on this device.
-          </p>
-        )}
+    <section aria-label="What to check next">
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+        What to check next
+      </p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {shown.map((item) => (
+          <button
+            key={item.fact.indicatorId}
+            type="button"
+            onClick={() => open(item)}
+            className="group/check flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-colors duration-150 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
+          >
+            <FactIcon kind={item.fact.kind} sprite={item.sprite} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-foreground">
+                {item.fact.label}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {item.fact.kind === "unknown"
+                  ? `not known yet · ${item.categoryTitle}`
+                  : `${item.fact.value} · ${item.categoryTitle}`}
+              </span>
+            </span>
+            {item.fact.kind === "unmet" ? (
+              <span className="shrink-0 text-xs font-medium text-destructive">
+                fix
+              </span>
+            ) : (
+              <span className="shrink-0 text-xs font-medium text-primary">
+                fill in
+              </span>
+            )}
+            <ChevronRight
+              className="size-4 shrink-0 text-muted-foreground/50 transition-colors duration-150 group-hover/check:text-muted-foreground"
+              aria-hidden="true"
+            />
+          </button>
+        ))}
+      </div>
 
-        <FactDrawer
-          fact={selected?.fact ?? null}
-          sprite={selected?.sprite}
-          chatHref={chatHref}
-          onClose={close}
-          onStep={step}
-          position={
-            selected === null
-              ? undefined
-              : { index: selectedIndex, total: shown.length }
-          }
-        />
-      </section>
-    </TooltipProvider>
+      <FactDrawer
+        fact={selected?.fact ?? null}
+        sprite={selected?.sprite}
+        chatHref={chatHref}
+        onClose={close}
+        renderFillMissing={renderFillMissing}
+        onStep={step}
+        position={
+          selected === null
+            ? undefined
+            : { index: selectedIndex, total: shown.length }
+        }
+      />
+    </section>
   );
 }
 
@@ -1204,6 +1224,7 @@ function quietToSelected(
     value: null,
     target: null,
     detail: null,
+    note: null,
   };
 }
 
@@ -1215,17 +1236,30 @@ function rowToSelected(row: FactRow): SelectedFact {
     value: row.value,
     target: row.target,
     detail: row.detail,
+    note: row.note,
   };
 }
+
+const CATEGORY_SECTION_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  air: "Air, water and home exposures that shape everyday health.",
+  light: "Morning and evening light that shape sleep and daily rhythm.",
+  recovery: "Recovery tools and health devices available when you need them.",
+  sleep: "Temperature, darkness and noise that shape your sleep.",
+  workspace: "Your desk setup, movement and comfort while you work.",
+};
 
 function CategoryFactList({
   category,
   note,
   chatHref,
+  renderFillMissing,
+  voiceAction,
 }: {
   category: ResolvedCategory;
   note: CategoryNote;
   chatHref: string | null;
+  renderFillMissing?: (indicatorId: string) => ReactNode;
+  voiceAction?: ReactNode;
 }) {
   const facts: SelectedFact[] = [
     ...note.rows.map(rowToSelected),
@@ -1261,18 +1295,28 @@ function CategoryFactList({
     spriteByIndicatorId.get(indicatorId) ?? INDICATOR_SPRITES[indicatorId];
   const hasRows = facts.length > 0;
   const hasGoal = note.rows.some((row) => row.target !== null);
+  const description = CATEGORY_SECTION_DESCRIPTIONS[note.id];
 
   return (
     <section aria-label={`${note.title} facts`} className="min-w-0">
+      {voiceAction ? (
+        <div className="mb-3 flex flex-col gap-3 border-b border-border pb-4 min-[480px]:flex-row min-[480px]:items-center min-[480px]:justify-between">
+          <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">
+            {description}
+          </p>
+          <div className="shrink-0">{voiceAction}</div>
+        </div>
+      ) : null}
       {hasRows ? (
-        <div
-          className={`hidden ${FACT_ROW_GRID} mb-1 border-b border-border pb-1.5 sm:grid`}
-          aria-hidden="true"
-        >
+        <div className={`${FACT_ROW_GRID} mb-1 hidden pb-2.5 sm:grid`}>
           <span />
-          <span className="text-xs text-muted-foreground">Yours</span>
+          <span className="hidden text-xs text-muted-foreground sm:block">
+            Yours
+          </span>
           {hasGoal ? (
-            <span className="text-xs text-muted-foreground">Target</span>
+            <span className="hidden text-xs text-muted-foreground sm:block">
+              Target
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -1381,6 +1425,7 @@ function CategoryFactList({
         sprite={selected ? spriteFor(selected.indicatorId) : undefined}
         chatHref={chatHref}
         onClose={close}
+        renderFillMissing={renderFillMissing}
         onStep={step}
         position={
           selectedIndex === null

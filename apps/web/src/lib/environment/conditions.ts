@@ -34,16 +34,27 @@ export async function loadEnvironmentConditions(input: {
       message: "Confirm a city or approximate region for live conditions.",
     });
   }
-  const geocoding = await executeConnectedApps({
-    memberId: input.memberId,
-    request: {
-      input: {
-        arguments: { limit: 1, q: location },
-        toolSlug: "OPENWEATHER_API_GET_GEOCODING_DIRECT",
+  let geocoding: unknown;
+  try {
+    geocoding = await executeConnectedApps({
+      memberId: input.memberId,
+      request: {
+        input: {
+          arguments: { limit: 1, q: location },
+          toolSlug: "OPENWEATHER_API_GET_GEOCODING_DIRECT",
+        },
+        operation: "execute",
       },
-      operation: "execute",
-    },
-  });
+    });
+  } catch {
+    console.error("Environment conditions geocoding provider request failed.");
+    throw hostedOnboardingError({
+      code: "ENVIRONMENT_CONDITIONS_PROVIDER_FAILED",
+      httpStatus: 502,
+      message: "Live conditions are unavailable right now.",
+      retryable: true,
+    });
+  }
   const place = readGeocodedPlace(geocoding);
   if (!place) {
     throw hostedOnboardingError({
@@ -53,33 +64,54 @@ export async function loadEnvironmentConditions(input: {
     });
   }
 
-  const [weatherResult, airQualityResult] = await Promise.all([
-    executeConnectedApps({
-      memberId: input.memberId,
-      request: {
-        input: {
-          arguments: { lat: place.lat, lon: place.lon, units: "metric" },
-          toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+  let weatherResult: unknown;
+  let airQualityResult: unknown;
+  try {
+    [weatherResult, airQualityResult] = await Promise.all([
+      executeConnectedApps({
+        memberId: input.memberId,
+        request: {
+          input: {
+            arguments: { lat: place.lat, lon: place.lon, units: "metric" },
+            toolSlug: "OPENWEATHER_API_GET_CURRENT_WEATHER",
+          },
+          operation: "execute",
         },
-        operation: "execute",
-      },
-    }),
-    executeConnectedApps({
-      memberId: input.memberId,
-      request: {
-        input: {
-          arguments: { lat: place.lat, lon: place.lon },
-          toolSlug: "OPENWEATHER_API_GET_AIR_POLLUTION_CURRENT",
+      }),
+      executeConnectedApps({
+        memberId: input.memberId,
+        request: {
+          input: {
+            arguments: { lat: place.lat, lon: place.lon },
+            toolSlug: "OPENWEATHER_API_GET_AIR_POLLUTION_CURRENT",
+          },
+          operation: "execute",
         },
-        operation: "execute",
-      },
-    }),
-  ]);
+      }),
+    ]);
+  } catch {
+    console.error("Environment conditions weather provider request failed.");
+    throw hostedOnboardingError({
+      code: "ENVIRONMENT_CONDITIONS_PROVIDER_FAILED",
+      httpStatus: 502,
+      message: "Live conditions are unavailable right now.",
+      retryable: true,
+    });
+  }
+
+  const weather = readWeather(weatherResult);
+  const airQuality = readAirQuality(airQualityResult);
+  if (!weather || !airQuality) {
+    console.error("Environment conditions provider response was incomplete.", {
+      airQualityAvailable: airQuality !== null,
+      weatherAvailable: weather !== null,
+    });
+  }
 
   return {
-    airQuality: readAirQuality(airQualityResult),
+    airQuality,
     locationLabel: [place.name, place.country].filter(Boolean).join(", "),
-    weather: readWeather(weatherResult),
+    weather,
   };
 }
 

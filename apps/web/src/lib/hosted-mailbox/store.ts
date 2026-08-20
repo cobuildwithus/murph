@@ -2400,6 +2400,42 @@ export async function readHostedMailboxUserIdsByKind(input: {
   return new Set(records.map((record) => record.userId));
 }
 
+export async function hasPendingHostedEnvironmentInterviewMailboxItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  return (await readPendingHostedEnvironmentInterviewMailboxItem(input)) !== null;
+}
+
+export async function readPendingHostedEnvironmentInterviewMailboxItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<{ id: string } | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const laneCounter = await prisma.hostedMailboxLaneCounter.findUnique({
+    select: { consumedSeq: true },
+    where: {
+      userId_lane: {
+        lane: "system",
+        userId: input.userId,
+      },
+    },
+  });
+  const item = await prisma.hostedMailboxItem.findFirst({
+    orderBy: { laneSeq: "asc" },
+    select: { id: true },
+    where: {
+      kind: "environment-interview.completed",
+      lane: "system",
+      laneSeq: {
+        gt: laneCounter?.consumedSeq ?? 0n,
+      },
+      userId: input.userId,
+    },
+  });
+  return item;
+}
+
 export async function hasHostedMailboxItemByKind(input: {
   kind: HostedMailboxKind | string;
   prisma?: HostedMailboxStoreClient;

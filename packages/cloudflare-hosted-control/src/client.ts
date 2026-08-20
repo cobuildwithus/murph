@@ -59,6 +59,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
   buildCloudflareHostedControlBrowserVaultSessionPath,
+  buildCloudflareHostedControlEnvironmentRealtimeCallPath,
   buildCloudflareHostedControlEnvironmentVoiceDeletePath,
   buildCloudflareHostedControlEnvironmentVoiceStagePath,
   buildCloudflareHostedControlInferenceVerificationPath,
@@ -235,6 +236,10 @@ export type CloudflareHostedControlTelegramUsageLimitNoticeResponse =
   };
 
 export interface CloudflareHostedControlClient {
+  createEnvironmentRealtimeCall(input: {
+    sdp: string;
+    userId: string;
+  }): Promise<{ sdp: string }>;
   enqueueDeviceWebhook(
     envelope: DeviceWebhookQueueEnvelopeV1,
   ): Promise<{ accepted: true; transportId: string }>;
@@ -498,6 +503,32 @@ export function createCloudflareHostedControlClient(
   };
 
   return {
+    createEnvironmentRealtimeCall(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      const sdp = requireString(
+        input.sdp,
+        "Cloudflare environment realtime SDP",
+      );
+      if (!sdp.startsWith("v=0") || sdp.length > 64 * 1_024) {
+        throw new TypeError("Cloudflare environment realtime SDP is invalid.");
+      }
+      return requestHostedExecutionAuthorizedJson({
+        baseUrl,
+        boundUserId: userId,
+        fetchImpl,
+        getAuthorizationHeader,
+        label: "environment realtime call",
+        parse: parseCloudflareHostedControlEnvironmentRealtimeCall,
+        path: buildCloudflareHostedControlEnvironmentRealtimeCallPath(userId),
+        request: {
+          body: sdp,
+          headers: { "content-type": "application/sdp" },
+          method: "POST",
+        },
+        timeoutMs: options.timeoutMs,
+      });
+    },
+
     enqueueDeviceWebhook(envelope) {
       const request = parseDeviceWebhookQueueEnvelope(envelope);
       return requestHostedExecutionAuthorizedJson({
@@ -839,6 +870,25 @@ export function createCloudflareHostedControlClient(
       });
     },
   };
+}
+
+function parseCloudflareHostedControlEnvironmentRealtimeCall(
+  value: unknown,
+): { sdp: string } {
+  const record = requireRecord(
+    value,
+    "Cloudflare environment realtime call",
+  );
+  const sdp = requireString(
+    record.sdp,
+    "Cloudflare environment realtime call SDP",
+  );
+  if (!sdp.startsWith("v=0") || sdp.length > 64 * 1_024) {
+    throw new TypeError(
+      "Cloudflare environment realtime call SDP is invalid.",
+    );
+  }
+  return { sdp };
 }
 
 function parseDeviceWebhookEnqueueResponse(

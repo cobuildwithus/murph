@@ -8,36 +8,41 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 
 import { deriveCategoryNote, overallGrade } from "../category-notes";
+import { EnvironmentPrintReport } from "../environment-print-report";
+import { EnvironmentReportSkeleton } from "../environment-report-skeleton";
 import {
-  EnvironmentPrintLoading,
-  EnvironmentPrintReport,
-} from "../environment-print-report";
-import { selectEnvironmentHabitatValues } from "../habitat-values";
-import {
-  resolveEnvironmentCoverage,
-  resolveHabitatScene,
-} from "../home-model";
+  selectEnvironmentHabitatIndicatorNotes,
+  selectEnvironmentHabitatValues,
+} from "../habitat-values";
+import { resolveEnvironmentCoverage, resolveHabitatScene } from "../home-model";
 
 export function EnvironmentPrintPageClient({
   generatedOn,
 }: {
   generatedOn: string;
 }) {
-  const { client, error, status } = useBrowserVault();
+  const { client, error, refresh, status } = useBrowserVault();
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
   );
+  const indicatorNotes = useMemo(
+    () => (client ? selectEnvironmentHabitatIndicatorNotes(client) : {}),
+    [client],
+  );
   const scene = useMemo(() => resolveHabitatScene(values), [values]);
   const notes = useMemo(
-    () => scene.categories.map((category) => deriveCategoryNote(category, values)),
-    [scene, values],
+    () =>
+      scene.categories.map((category) =>
+        deriveCategoryNote(category, values, indicatorNotes)
+      ),
+    [indicatorNotes, scene, values],
   );
-  const grade = useMemo(() => overallGrade(notes), [notes]);
+  const grade = useMemo(() => overallGrade(notes, values), [notes, values]);
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
 
   if (status === "loading") {
-    return <EnvironmentPrintLoading />;
+    return <EnvironmentReportSkeleton onRetry={() => refresh()} />;
   }
 
   if (status === "error") {
@@ -46,7 +51,8 @@ export function EnvironmentPrintPageClient({
         <Alert variant="destructive">
           <AlertTitle>Could not load your Environment report</AlertTitle>
           <AlertDescription>
-            {error ?? "Murph could not unlock your private Habitat records right now."}
+            {error ??
+              "Murph could not unlock your private Habitat records right now."}
           </AlertDescription>
         </Alert>
       </PrintStatus>
@@ -57,7 +63,10 @@ export function EnvironmentPrintPageClient({
     return (
       <PrintStatus>
         <p>There is no Environment report to print yet.</p>
-        <Link href="/environment" className="text-primary underline underline-offset-4">
+        <Link
+          href="/environment"
+          className="text-primary underline underline-offset-4"
+        >
           Add your home details
         </Link>
       </PrintStatus>
@@ -80,12 +89,10 @@ export function EnvironmentPrintPageClient({
 
 function printableContextValue(value: unknown): string | null {
   if (
-    value === HABITAT_DECLINED_VALUE
-    || (
-      typeof value !== "string"
-      && typeof value !== "number"
-      && typeof value !== "boolean"
-    )
+    value === HABITAT_DECLINED_VALUE ||
+    (typeof value !== "string" &&
+      typeof value !== "number" &&
+      typeof value !== "boolean")
   ) {
     return null;
   }

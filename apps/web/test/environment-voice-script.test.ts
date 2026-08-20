@@ -9,20 +9,26 @@ import { buildEnvironmentVoiceScript } from "../app/(dashboard)/environment/envi
 import type { HabitatValues } from "../app/(dashboard)/environment/home-model";
 
 describe("environment voice script", () => {
-  it("uses one five-topic walkthrough at zero coverage and asks only for city-level location", () => {
+  it("uses focused topics at zero coverage and asks only for city-level location", () => {
     const script = buildEnvironmentVoiceScript({});
 
     expect(script.flow).toBe("walkthrough");
-    expect(script.topics).toHaveLength(5);
-    expect(script.topics.map((topic) => topic.id)).toEqual([
-      "sleep",
-      "air",
-      "light",
-      "recovery",
-      "workspace",
-    ]);
-    expect(script.topics[1].prompt).toMatch(/city or approximate region/i);
-    expect(script.topics[1].prompt).toMatch(/never your address/i);
+    expect(script.topics.length).toBeGreaterThan(5);
+    expect(script.topics.every((topic) => (topic.fields?.length ?? 0) <= 4))
+      .toBe(true);
+    expect(script.topics.map((topic) => topic.id.split(":")[0]))
+      .toEqual(expect.arrayContaining([
+        "sleep",
+        "air",
+        "light",
+        "recovery",
+        "workspace",
+      ]));
+    const location = script.topics
+      .flatMap((topic) => topic.fields ?? [])
+      .find((field) => field.indicatorId === "location");
+    expect(location?.label).toMatch(/city or region/i);
+    expect(location?.label).toMatch(/not your address/i);
   });
 
   it("asks about unknown high and medium context without mixing it into grade coverage", () => {
@@ -35,13 +41,13 @@ describe("environment voice script", () => {
 
     expect(script.flow).toBe("fill-gaps");
     const focus = script.topics.flatMap((topic) => topic.focus ?? []);
-    expect(focus).toContain("City / region");
-    expect(focus).toContain("Ventilation");
-    expect(focus).toContain("Work mode");
-    expect(focus).toContain("Screen setup");
-    expect(focus).not.toContain("Phone by bed");
-    expect(focus).not.toContain("Radon tested");
-    expect(focus).not.toContain("Drinking water");
+    expect(focus).toContain("Your city or region, not your address");
+    expect(focus).toContain("How fresh air enters your home");
+    expect(focus).toContain("Whether you work at home, an office, or both");
+    expect(focus).toContain("Whether you use a laptop or external monitor");
+    expect(focus).not.toContain("Where your phone stays at night");
+    expect(focus).not.toContain("Whether your home has been tested for radon");
+    expect(focus).not.toContain("Your drinking water source or filter");
   });
 
   it("omits declined gaps and switches to an open update only when collection gaps are resolved", () => {

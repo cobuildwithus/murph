@@ -95,6 +95,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -884,6 +885,28 @@ export interface HostedExecutionDailyMetricReportedWake
   kind: "health.daily-metric.reported";
 }
 
+export interface HostedExecutionEnvironmentInterviewTopicCompletion {
+  answers: Array<{
+    aspectId: string;
+    indicatorId: string;
+    note?: string | null;
+    value: string | number | boolean;
+  }>;
+  topicId: string;
+}
+
+export interface HostedExecutionEnvironmentInterviewCompletedPayload {
+  completedAt: string;
+  completionId: string;
+  topics: HostedExecutionEnvironmentInterviewTopicCompletion[];
+}
+
+export interface HostedExecutionEnvironmentInterviewCompletedWake
+  extends HostedExecutionBaseWake {
+  environmentInterview: HostedExecutionEnvironmentInterviewCompletedPayload;
+  kind: "environment-interview.completed";
+}
+
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
@@ -948,6 +971,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake

@@ -40,6 +40,7 @@ import {
   readHostedMailboxLatestPendingConversationItem,
   readHostedMailboxMaxSeqByLane,
   readHostedMailboxPayload,
+  readPendingHostedEnvironmentInterviewMailboxItem,
   tryMarkHostedMailboxConversationAiUsageDenied,
 } from "../hosted-mailbox/store";
 import {
@@ -189,14 +190,23 @@ export async function readHostedRuntimeReconciliationFacts(
     return facts;
   }
 
-  const [maxSeqByLane, consumedSeqByLane] = await Promise.all([
+  const [
+    maxSeqByLane,
+    consumedSeqByLane,
+    pendingEnvironmentInterview,
+  ] = await Promise.all([
     readHostedMailboxMaxSeqByLane({ prisma, userId: input.userId }),
     readHostedMailboxConsumedSeqByLane({
       lanes: ["conversation"],
       prisma,
       userId: input.userId,
     }),
+    readPendingHostedEnvironmentInterviewMailboxItem({
+      prisma,
+      userId: input.userId,
+    }),
   ]);
+  const environmentInterviewPending = pendingEnvironmentInterview !== null;
   const redactedStatus = readHostedMailboxRedactedStatusRecord(
     workspace?.redactedStatusJson,
   );
@@ -209,6 +219,7 @@ export async function readHostedRuntimeReconciliationFacts(
 
   if (!projectedWorkspace) {
     const facts = buildHostedRuntimeBlockedFacts({
+      environmentInterviewPending,
       mailboxLag,
       reason: "hosted_runtime_not_configured",
       retryAt: null,
@@ -265,6 +276,7 @@ export async function readHostedRuntimeReconciliationFacts(
     }))
   ) {
     const facts = buildHostedRuntimeBlockedFacts({
+      environmentInterviewPending,
       mailboxLag,
       reason: "automation_engagement_paused",
       retryAt: new Date(
@@ -302,6 +314,7 @@ export async function readHostedRuntimeReconciliationFacts(
 
     if (gate.status === "health_data_consent_withdrawn") {
       const facts = buildHostedRuntimeBlockedFacts({
+        environmentInterviewPending,
         mailboxLag,
         reason: "health_data_consent_withdrawn",
         retryAt: null,
@@ -342,6 +355,7 @@ export async function readHostedRuntimeReconciliationFacts(
         });
       }
       const facts = buildHostedRuntimeBlockedFacts({
+        environmentInterviewPending,
         mailboxLag,
         reason: "ai_usage_denied",
         retryAt: resolveHostedRuntimeAiBlockedRetryAt({
@@ -363,6 +377,7 @@ export async function readHostedRuntimeReconciliationFacts(
 
     const facts = parseHostedRuntimeReconciliationFacts({
       blocked: null,
+      environmentInterviewPending,
       mailboxLag,
       workspace: workspaceWithSystemMailboxFrontier,
     });
@@ -377,6 +392,7 @@ export async function readHostedRuntimeReconciliationFacts(
 
   const facts = parseHostedRuntimeReconciliationFacts({
     blocked: null,
+    environmentInterviewPending,
     mailboxLag,
     workspace: workspaceWithSystemMailboxFrontier,
   });
@@ -390,6 +406,7 @@ export async function readHostedRuntimeReconciliationFacts(
 }
 
 function buildHostedRuntimeBlockedFacts(input: {
+  environmentInterviewPending?: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   reason: HostedRuntimeReconciliationBlockedReason;
   retryAt: string | null;
@@ -400,6 +417,7 @@ function buildHostedRuntimeBlockedFacts(input: {
       reason: input.reason,
       retryAt: input.retryAt,
     },
+    environmentInterviewPending: input.environmentInterviewPending ?? false,
     mailboxLag: input.mailboxLag,
     workspace: input.workspace,
   });

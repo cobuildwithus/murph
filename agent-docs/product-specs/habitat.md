@@ -1,6 +1,6 @@
 # Habitat: Progressive Member Life-Context
 
-Last verified: 2026-07-31
+Last verified: 2026-08-20
 
 ## Current State
 
@@ -14,7 +14,7 @@ Habitat is the umbrella for this knowledge: durable, structured facts about the 
 - Habitat stores circumstances (what surrounds the member, what they have access to, what they prefer), not medical facts. Diagnosed allergies stay in `allergy`; conditions stay in `condition`; supplement/medication regimens stay in `regimen`. Habitat records link to those where relevant (e.g. home allergen exposure ↔ allergy records).
 - Wearables and data integrations are not Habitat. `health-devices` covers only standalone devices without integrations (BP cuff, scale, thermometer).
 - Diet is explicitly out of scope for now.
-- No gamification, points, or streaks. Any grading is a research audit derived from indicators, with per-grade reasoning (see Environment Audit below).
+- No gamification or streaks. Grading is a research audit derived from indicators, with per-grade reasoning and a transparent capability bonus (see Environment Audit below).
 - Environment v1 describes one primary home. Multi-home and travel profiles are deliberately out of scope.
 - The printable Environment report is an authenticated dashboard view. Its
   facts are read from the same private Browser Vault replica as `/environment`;
@@ -48,7 +48,13 @@ darkness: blackout          # blackout | partial | bright
 updated: 2026-07-07
 ```
 
-- **Body carries nuance as prose** ("window closed on smog days; streetlight bleeds through the blind").
+- **Indicator notes carry concise nuance beside each atomic value.** They keep
+  explicit measurements, brands, models, setup details, limits, and exceptions
+  that the catalog value cannot express. The note is a compact semantic summary,
+  not a transcript. A later correction replaces the affected summary so the
+  Markdown record does not accumulate contradictory history.
+- **Body remains available for broader authored prose** that does not belong to
+  one indicator.
 - **Declined is a first-class value.** When the member does not want to answer, the indicator records `declined` with a date. Murph does not re-ask; UI shows "skipped" instead of "unknown"; the member can revisit anytime.
 - **Freshness matters.** High-priority indicators carry dates; stale critical values are re-confirmed conversationally, not assumed.
 - Location is stored at city-or-approximate-region precision, member-stated, declinable. Climate, season, daylight hours, pollen season, and ambient air quality are derived from it rather than asked separately.
@@ -58,6 +64,20 @@ updated: 2026-07-07
 A typed, versioned catalog in `packages/contracts` (product spec, not per-member state) defines: domains → aspects → indicators, and per indicator: id, value type/enum, priority (`high | medium | low`), an example conversational question, and an optional evidence target (e.g. `co2 < 1000 ppm`). Low priority means: never proactively asked; filled only when context surfaces it.
 
 Questions in the catalog are conversation starters, not form fields. One natural question ("do you sleep with the window open?") routinely fills several indicators at once; the agent extracts every indicator the answer contains.
+
+Natural speech never has to repeat a catalog enum token. The visible prompt and
+field labels provide the question context. When one field remains, a concise
+answer that is valid for that field maps to it even when the member omits the
+label or uses a sentence fragment. For enum fields, the extractor normalizes
+synonyms, natural descriptions, and more specific equivalent terms to the
+matching canonical value. With several fields, it saves a concise answer only
+when the meaning identifies the field clearly. Ambiguous answers remain
+unknown. The UI marks a field complete only after the canonical value is
+accepted for persistence.
+
+The catalog remains the source of truth for allowed values. Do not maintain a
+separate synonym list for every indicator unless measured ambiguity proves that
+the general semantic rule is insufficient.
 
 If the catalog grows editorial weight (long "why it matters" copy), migrate it to the health-commons authored-content pattern; start as a plain typed constant.
 
@@ -75,7 +95,22 @@ Ordered by importance:
 1. **Opportunistic (primary).** When the member raises a topic ("sleeping badly"), Murph first reads what it already knows (mattress, temperature, CO2, screens…), uses it in the answer, and asks about a missing indicator only when the answer would improve the current help — the question is part of the advice, never a survey. When the value is not obvious, Murph explains the context dividend.
 2. **Photos as input.** During onboarding or gap-filling the member can send a photo of the bedroom, desk, home gym, or sauna; Murph extracts indicators from the image (darkness, LED sources, monitor height, equipment) and saves them like any other answer. This is an input mechanism for all aspects, not a separate feature.
 3. **UI handoff.** A web zone showing "unknown" (or a weak audit grade) offers "Fill this in with Murph": a deep link into the member's chosen channel (iMessage/Telegram) with a prefilled opener; the member writes freely and Murph parses and saves all indicators at once.
-4. **Voice walkthrough.** The authenticated Environment page can record one continuous memo while showing short topic cards. With no resolved facts, the script covers all five categories. A partial profile gets only the high- and medium-priority, non-declined facts that remain unknown; this collection completeness is separate from grade coverage, because informational context can improve advice without affecting the score. Once those collection-eligible facts are resolved, the script becomes one free-form update prompt so the member can describe what changed without repeating the walkthrough. The cards are prompts, not fields. The browser uploads the recording directly to Murph instead of opening a chat share sheet. First-seen uploads must pass the existing AI-usage gate, and each member can have only one unconsumed Environment recording at a time. The server enforces the three-minute media cap during audio preparation rather than trusting the browser's duration claim. Exact retries remain idempotent even when they arrive later. Murph stages the audio application-encrypted, transcribes it through the existing hosted transcription boundary, and runs one silent Habitat-only maintenance turn that immediately saves explicit, high-confidence catalog facts. Ordinary Habitat writes and voice extraction accept only an explicitly stated city or approximate region for `home-location.location`; precise addresses are rejected, and Web rechecks that boundary before any weather-provider request so unsafe legacy values cannot leave Murph. The transcript is not added to conversation history, ambiguous details stay unknown, and corrections happen in the normal Murph conversation. Audio is deleted only after the updated vault checkpoint succeeds; a 24-hour R2 lifecycle is the recovery backstop. An open Environment page refreshes its Browser Vault replica after upload acceptance and reports whether the audit changed, no clear new facts were found, or processing is taking longer.
+4. **Realtime voice walkthrough.** The authenticated Environment page streams
+   microphone audio through a short-lived Realtime session while showing one
+   topic at a time. With no resolved facts, the script covers all five
+   categories. A partial profile asks only for unresolved high- and
+   medium-priority facts. Once those facts are resolved, the script becomes one
+   free-form update prompt. The extractor saves explicit catalog values and an
+   optional concise note for useful detail that the value cannot express. It
+   receives the prior note during updates, preserves details that remain true,
+   and removes contradicted details. Raw audio and the live transcript are not
+   Habitat records or conversation history. Ambiguous details remain unknown.
+   Notes never retain a precise home address. The page refreshes its private
+   Browser Vault replica after accepted writes. It waits for a newer replica
+   before it marks the update complete, so saved details appear without a full
+   page reload. A member can also start the same walkthrough for one category;
+   that script includes every unresolved field in the category, including
+   optional context. Delayed processing does not close the interview surface.
 5. **New-member onboarding.** Ask a Habitat question only when it supports the selected first thread. Ask at most one; there is no universal environment checkpoint or Habitat survey.
 6. **Scheduled nudges (rare, supplementary).** Coverage gaps are advisory evidence, not a question queue. An ordinary turn started by an authorized scheduled automation may pick one high-priority gap only when the answer would unlock useful help, subject to `agent-docs/operations/imessage-deliverability.md` pacing and quiet hours.
 7. **Write-through.** Every answer saves immediately to `bank/habitat/<aspect>.md` via the habitat CLI command, with dates.
@@ -185,20 +220,25 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 
 **Levels (all derived, never stored):**
 
-1. Indicator status: each gradeable condition evaluates against its catalog rule to on-target / off-target / unknown / declined. Informational indicators and equipment/access facts inform advice but never grade.
-2. Context and access status: facts without a universal healthy target — including window habits, ventilation type, stove type, radon-test relevance, work mode/hours, and equipment such as saunas, red-light panels, air purifiers, and standing desks — are informational. They can tailor advice or unlock a capability, but their value, absence, or decline never counts as off-target.
-3. Zone grade: coverage = known gradeable conditions ÷ all gradeable conditions; below 50% the zone is `unknown`. Score = on-target ÷ known, mapped ≥90% A · ≥75% B · ≥55% C · ≥35% D · else E. `declined` is excluded from the denominator — declining is respected, never penalized.
+1. Indicator status: each gradeable condition evaluates against its catalog rule to on-target / off-target / unknown / declined. Informational facts never become off-target conditions.
+2. Context and access status: facts without a universal healthy target — including window habits, ventilation type, stove type, work mode, and equipment — stay informational. Selected capabilities can add a positive catalog-owned bonus. Missing, absent, or declined capabilities remain neutral.
+3. Zone grade: coverage = known gradeable conditions ÷ all gradeable conditions; below 50% the zone is `unknown`. Base score = on-target ÷ known, mapped ≥90% A · ≥75% B · ≥55% C · ≥35% D · else E. `declined` is excluded from the denominator — declining is respected, never penalized. The overall Environment score adds the catalog's deduplicated capability bonus, capped at 15 percentage points and 100% total. Related indicators share a capability group so one device counts once. Zone grades remain condition-only.
 4. Red-flag cap: a known urgent exposure such as visible mold, indoor smoking, or a high-radon result forces an E once enough gradeable conditions are known to issue a grade. Missing, declined, and `not_tested` radon remain neutral. The UI still discloses the raw within-target proportion and names the cap instead of disguising it as a lower percentage.
 5. Domain/home grade: the same formula runs over all gradeable conditions in the domain and is always displayed with its coverage so confident grades and thin-data grades never look alike.
 
 ## Environment UI
 
 - `/environment` reads the private Browser Vault replica. Production UI never substitutes fixtures for missing member data.
-- Zero-data members see a benefit-led empty state with voice and chat entry points. Sparse records keep the report visible and offer a voice script derived from unknown, non-declined high- and medium-priority facts, including useful informational context such as city, ventilation, and work mode. Once those collection-eligible facts are resolved, the fill-gaps action becomes a free-form voice or chat update. There are no edit forms. The page refreshes after a voice upload and names the processing outcome instead of requiring a manual reload.
-- The page shows derived A–E grades only after at least 50% of gradeable conditions are known. Missing and declined data never lower the grade. Purchases and optional access can tailor advice or provide a positive capability, but their absence is neutral.
-- Each zone offers a conversational handoff. A hidden suggestion is only a local presentation preference; it is not a health fact and does not affect grading.
+- Zero-data members see a benefit-led empty state with voice and chat entry points. Sparse records keep the report visible and offer a voice script derived from unknown, non-declined high- and medium-priority facts, including useful informational context such as city, ventilation, and work mode. Once those collection-eligible facts are resolved, the fill-gaps action becomes a free-form voice or chat update. Each category also offers one voice action that covers all its unresolved fields, including optional context. There are no edit forms. The open page waits for a newer Browser Vault replica after accepted voice writes and updates the visible report without a full reload.
+- The page shows derived A–E grades only after at least 50% of gradeable conditions are known. Missing and declined data never lower the grade. The overall score shows its condition base and positive capability bonus separately. Optional access can improve the score, but its absence is neutral.
+- Assessment coverage always names its known gradeable conditions. It remains
+  distinct from the larger set of optional and conversational details that a
+  voice walkthrough can still collect.
+- Each zone offers a conversational handoff.
 - Current outdoor weather and air quality derive transiently from the member-stated city through a server-owned provider key. The browser sends only that city to the authenticated same-origin endpoint; results are not persisted as Habitat facts and outdoor air is never presented as indoor air.
-- Public sharing and Open Graph previews remain generic. They never render private Habitat facts or imply a personal grade without a private data-aware export path.
+- Public Open Graph previews remain generic. An authenticated, member-started
+  share action can create a personal image with the derived score and coverage.
+  That image excludes location, answers, notes, and other private Habitat facts.
 - The existing `/context` ("What Murph knows") page becomes the umbrella; domains grow their own pages.
 
 ## Phasing
@@ -222,6 +262,7 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
 - 2026-07-23 — Grades measure known conditions and habits. Optional equipment and access are neutral when absent; missing and declined facts are excluded until coverage is sufficient.
 - 2026-07-23 — Live weather and outdoor air quality are transient city-level context, not stored member truth.
 - 2026-07-29 — Every non-informational catalog indicator must have an evaluator. Context without a universal target stays informational, while visible mold, indoor smoking, and a known high-radon result cap a sufficiently covered audit at E.
+- 2026-08-20 — Selected informational capabilities can add value-specific positive credit to the overall Environment score. The catalog owns each coefficient and deduplication group. The bonus is capped at 15 percentage points and the final score at 100%; absence stays neutral, and red-flag grade caps still win.
 - 2026-07-30 — The voice walkthrough uploads privately to the authenticated Murph path. Audio is staged application-encrypted, processed by a silent Habitat-only turn, deleted after the canonical checkpoint, and covered by a 24-hour R2 lifecycle backstop; no iMessage, Telegram, or browser share sheet is part of the primary flow.
 - 2026-07-30 — Voice guidance has three modes: five-category first walkthrough, catalog-derived gap filling for unknown high- and medium-priority facts that excludes declined facts, and one free-form update prompt once those collection-eligible facts are resolved. Grade coverage does not select the script.
 - 2026-07-30 — Every ordinary Habitat write and live-conditions egress may retain or send only a member-stated city or approximate region; precise addresses are rejected and unsafe legacy values fail closed before provider egress.
