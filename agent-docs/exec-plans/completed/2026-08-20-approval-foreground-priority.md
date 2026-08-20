@@ -1,6 +1,6 @@
 # Prioritize approved foreground continuations
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -168,7 +168,10 @@ Updated: 2026-08-20
   the required second retrospective is recorded. The corrected real-entrypoint
   proof now runs both exact approved deliveries before device maintenance and
   passes in the full 656-test proof. A valid round 4 retry and new exact-head CI
-  remain pending.
-- Expected outcome: synthetic approval delivery wins the first post-checkpoint
-  selection; device work remains pending; all focused and exact-head checks are
-  green; both ReviewGPT stages finish with no unresolved accepted findings.
+  subsequently passed: the fresh full-snapshot ReviewGPT audit returned
+  `ROUND_OUTCOME: PASS` with no qualifying findings, its external model verifier
+  matched the requested review model, and all 17 exact-head GitHub checks passed.
+- Outcome: synthetic approval delivery wins the first post-checkpoint selection;
+  device work remains pending; all focused and exact-head checks are green; both
+  ReviewGPT stages finished with no unresolved accepted findings.
+Completed: 2026-08-20
