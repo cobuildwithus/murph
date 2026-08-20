@@ -216,6 +216,21 @@ Last verified: 2026-08-20
 
 - Keep behavior deterministic and documented as the first modules are added.
 - Prefer explicit failure paths and actionable errors over silent fallback behavior.
+- A successful Vercel build is not production convergence. For the current
+  protected `main` tip, the postdeploy gate fails if the configured production
+  base still serves another commit or if any production custom domain resolves
+  to another deployment id. It uses the exact deployment URL from the trusted
+  Vercel status, follows the complete project-domain pagination, excludes
+  branch/custom-environment domains, and repeats the full proof after the
+  prior-function drain and immediately before contract SQL. Late completed
+  events for older main ancestors may skip when production has advanced; the
+  workflow remains non-concurrent so a stale event cannot cancel the valid run.
+  The first production Web deployment containing the exact-deployment verifier
+  is the postdeploy verification rollback floor because this workflow executes
+  from the deployed checkout. A pre-floor manual retry fails closed on the
+  missing verifier before database authority or SQL, and recovery must roll
+  forward to the floor or newer rather than re-running an older base-domain-only
+  workflow.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing

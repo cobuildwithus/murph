@@ -48,6 +48,7 @@
     "release:production:contract-migrate": "pnpm --dir ../.. exec tsx apps/web/scripts/run-production-contract-migrations.ts",
     "release:production:migrate": "pnpm --dir ../../packages/hosted-execution build && pnpm --dir ../.. exec tsx apps/web/scripts/run-production-migrations.ts",
     "release:production:verify-deployment-protection": "pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment-protection.ts",
+    "release:production:verify-exact-deployment": "pnpm --dir ../.. exec tsx apps/web/scripts/verify-vercel-production-deployment.ts",
     "verify": "bash scripts/verify-fast.sh",
     "verify:parallel": "MURPH_VERIFY_STEP_PARALLEL=1 bash scripts/verify-fast.sh"
   },

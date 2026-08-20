@@ -747,17 +747,26 @@ supported provider credential.
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
   workflow checks out the deployed SHA, verifies it is reachable from
-  `origin/main`, waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for
-  prior production function executions to drain, rechecks that the configured
-  Vercel production alias still points at that SHA before exposing the database
-  secret, supports manual dispatch with `deployed_sha` for the same current-alias
-  proof path, does not use GitHub Actions concurrency for this lane so stale
+  `origin/main`, fails when the current main tip is not serving through the
+  configured production base domain, and proves the event's exact ready
+  production deployment id behind every paginated production project domain.
+  It waits `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior
+  production function executions to drain, repeats the current-commit and full
+  domain-set proof before exposing the database secret, supports manual dispatch
+  with `deployed_sha` plus `deployment_url` for the same exact-deployment proof
+  path, does not use GitHub Actions concurrency for this lane so stale
   events cannot replace valid pending runs, and requires GitHub Actions values for
   `HOSTED_WEB_VERCEL_TOKEN`,
   `HOSTED_WEB_VERCEL_PROJECT_ID`, `HOSTED_WEB_PRODUCTION_BASE_URL`, and
   `HOSTED_WEB_DIRECT_DATABASE_URL`. The shared production migration URL resolver
   removes Prisma-style `sslcert=system`, `sslkey=system`, and
   `sslrootcert=system` markers before handing Postgres URLs to raw `pg` clients.
+  The first production Web deployment containing the exact-deployment verifier
+  is the postdeploy verification rollback floor: the current workflow executes
+  the deployed checkout, so a synthetic pre-floor tree must fail on the missing
+  verifier before database authority or migration execution, while a
+  floor-or-newer exact match must complete the two domain proofs and the final
+  pre-SQL proof.
   After contract cleanup applies, the rollback floor is the first deployed Vercel
   commit that no longer reads or writes the dropped schema shape; rollback below
   that floor requires DB restore/re-expand or a forward deploy. Cloudflare
