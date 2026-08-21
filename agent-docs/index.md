@@ -158,7 +158,7 @@ initial work, its mandatory mailbox handoff, source receipt, dirty work, and
 webhook trace under the existing health-data admission lock. The handoff is
 required even when dirty state exists. Established sources skip the recovery
 provider read. The trust and
-failure contracts require an explicit active provider status; ambiguous or
+failure contracts require the literal provider status `connected`; ambiguous or
 error states stay pending and retry. If another admission changes the source
 while that provider read runs, durable event work retries and merges its exact
 payload on replay before trace completion; rehydratable hints may settle. These

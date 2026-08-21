@@ -2646,8 +2646,9 @@ account in `pending_link` or `link_returned` cannot accept ordinary webhook side
 effects, persist dirty work, wake or schedule the runtime, execute queued
 provider jobs, or promote itself through sync success. Hosted Web may recover a
 missing browser callback only after an authenticated, source-attributed webhook
-owns its trace and a live Junction provider-list read confirms the exact
-prepared source. The webhook is a trigger, not proof by itself. The runtime
+owns its trace and a live Junction provider-list read returns only the literal
+status `connected` for the exact prepared source. The webhook is a trigger, not
+proof by itself. The runtime
 rechecks consent, shared-app binding, connection and credential epochs, source
 epoch, and disconnect fences. It then commits `source_confirmed`, source
 admission, the callback-equivalent source-scoped initial jobs, a mandatory
