@@ -6,6 +6,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
   readHostedOpsMemberUsageResetAllBatch: vi.fn(),
+  readHostedOpsMemberUsageResetAllWakeBatch: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   resetHostedOpsMemberUsage: vi.fn(),
   resetHostedOpsMemberUsageForResetAll: vi.fn(),
@@ -30,6 +31,8 @@ vi.mock("@/src/lib/hosted-ops/member-usage", async () => {
     ...actual,
     readHostedOpsMemberUsageResetAllBatch:
       mocks.readHostedOpsMemberUsageResetAllBatch,
+    readHostedOpsMemberUsageResetAllWakeBatch:
+      mocks.readHostedOpsMemberUsageResetAllWakeBatch,
     resetHostedOpsMemberUsage: mocks.resetHostedOpsMemberUsage,
     resetHostedOpsMemberUsageForResetAll:
       mocks.resetHostedOpsMemberUsageForResetAll,
@@ -82,6 +85,10 @@ describe("hosted ops usage reset route", () => {
     mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValue({
       hasMore: false,
       memberIds: [],
+    });
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValue({
+      hasMore: false,
+      receipts: [],
     });
     mocks.resetHostedOpsMemberUsage.mockResolvedValue(makeResult());
     mocks.resetHostedOpsMemberUsageForResetAll.mockImplementation(
@@ -415,6 +422,62 @@ describe("hosted ops usage reset route", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
+  test("recovers only wake-required receipts without re-entering reset transactions", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts: [
+        {
+          memberId: "hbm_reset_001",
+          timestamp: NOW.toISOString(),
+        },
+        {
+          memberId: "hbm_reset_002",
+          timestamp: NOW.toISOString(),
+        },
+      ],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime
+      .mockResolvedValueOnce({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:hbm_reset_001",
+      })
+      .mockRejectedValueOnce(new Error("Temporal unavailable"));
+
+    try {
+      const response = await route.POST(makeWakeRecoveryRequest({
+        afterMemberId: "hbm_reset_000",
+      }));
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        attempted: 2,
+        done: true,
+        lastAcknowledgedCursor: "hbm_reset_002",
+        pendingWake: 1,
+      });
+      expect(mocks.readHostedOpsMemberUsageResetAllWakeBatch)
+        .toHaveBeenCalledWith({
+          afterMemberId: "hbm_reset_000",
+          operationId: RESET_ALL_OPERATION_ID,
+        });
+      expect(mocks.readHostedOpsMemberUsageResetAllBatch).not.toHaveBeenCalled();
+      expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+      expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+      expect(consoleInfoSpy).toHaveBeenCalledWith(
+        "Hosted ops reset-everyone wake batch completed.",
+        {
+          attempted: 2,
+          done: true,
+          pendingWake: 1,
+        },
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   test("stops at a failed member and returns the last acknowledged cursor", async () => {
     mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
       hasMore: true,
@@ -607,6 +670,15 @@ function makeRuntimeRecheckRequest(): Request {
       origin: "http://localhost",
     },
     method: "POST",
+  });
+}
+
+function makeWakeRecoveryRequest(
+  overrides: Record<string, unknown> = {},
+): Request {
+  return makeResetAllRequest({
+    operation: "recover_reset_all_wakes",
+    ...overrides,
   });
 }
 

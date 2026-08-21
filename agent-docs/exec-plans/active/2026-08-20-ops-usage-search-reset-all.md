@@ -67,6 +67,9 @@ through a final reset, skipped, pending-wake, and failed summary.
   the last acknowledged cursor, or recovering from the beginning after an
   ambiguous response with the same operation UUID, reuses immutable member
   receipts rather than applying a second reset.
+- Member created after the confirmed population walk: wake recovery pages only
+  the operation's existing wake-required receipts, so the later member cannot
+  be reset or granted capacity under the old confirmation.
 
 ### Deliberate exclusions
 
@@ -103,7 +106,9 @@ through a final reset, skipped, pending-wake, and failed summary.
 3. Add one authenticated same-origin reset-all operation that reads and applies
    a fixed small ID-ordered batch through the canonical per-member reset owner,
    atomically records its stable outcome in one per-member receipt, then
-   performs runtime rechecks only after each database transaction commits.
+   performs runtime rechecks only after each database transaction commits. Once
+   population work completes, recover pending wakes from the operation's
+   receipt set without re-reading live members or re-entering reset work.
 4. Add a prominent destructive control, typed confirmation, progress and final
    outcome UI. Disable conflicting row mutations while the global action runs.
 5. Add focused regression coverage and update the owning hosted usage contract,
@@ -134,4 +139,5 @@ deploy, use synthetic or staging data to prove one exact-email lookup, one
 phone-hint lookup, one single-member reset, an included reset whose response is
 replayed after new usage, and a consumed Starter grant replay. Confirm each
 same-operation replay reuses one receipt and that pending runtime wakes recover
-without reapplying usage mutation.
+without reapplying usage mutation or admitting a member created after the
+original population walk.

@@ -57,6 +57,7 @@ import {
   HostedOpsMemberUsageResetStaleError,
   readHostedOpsMemberUsage,
   readHostedOpsMemberUsageResetAllBatch,
+  readHostedOpsMemberUsageResetAllWakeBatch,
   resetHostedOpsMemberUsage,
   resetHostedOpsMemberUsageForResetAll,
 } from "../src/lib/hosted-ops/member-usage";
@@ -290,6 +291,49 @@ describe("hosted ops member usage", () => {
       memberIds: candidates
         .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
         .map((candidate) => candidate.id),
+    });
+  });
+
+  test("reads wake recovery only from this operation's wake-required receipts", async () => {
+    const candidates = Array.from(
+      { length: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1 },
+      (_, index) => ({
+        memberId: `hbm_reset_${String(index + 11).padStart(3, "0")}`,
+        resetAt: new Date(NOW.getTime() + index),
+      }),
+    );
+    const findReceipts = vi.fn(async () => candidates);
+    const prisma = asPrismaClientForHostedOpsTest({
+      hostedOpsUsageResetReceipt: { findMany: findReceipts },
+    });
+
+    const batch = await readHostedOpsMemberUsageResetAllWakeBatch({
+      afterMemberId: "hbm_reset_010",
+      operationId: RESET_ALL_OPERATION_ID,
+      prisma,
+    });
+
+    expect(findReceipts).toHaveBeenCalledWith({
+      orderBy: { memberId: "asc" },
+      select: {
+        memberId: true,
+        resetAt: true,
+      },
+      take: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1,
+      where: {
+        memberId: { gt: "hbm_reset_010" },
+        operationId: RESET_ALL_OPERATION_ID,
+        runtimeRecheckRequired: true,
+      },
+    });
+    expect(batch).toEqual({
+      hasMore: true,
+      receipts: candidates
+        .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
+        .map((candidate) => ({
+          memberId: candidate.memberId,
+          timestamp: candidate.resetAt.toISOString(),
+        })),
     });
   });
 

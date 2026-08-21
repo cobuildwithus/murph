@@ -46,6 +46,7 @@ import {
   HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
   type HostedOpsMemberUsageResetAllBatchResponse,
   type HostedOpsMemberUsageResetAllCounts,
+  type HostedOpsMemberUsageResetAllWakeBatchResponse,
 } from "@/src/lib/hosted-ops/member-usage-contract";
 
 interface UsageResetMessage {
@@ -259,6 +260,24 @@ function MemberUsageClientSurface({
     }
     resetAllRunInFlight.current = true;
     try {
+      if (input.mode === "recover_wakes") {
+        const operationId = resetAllOperationId.current;
+        if (!operationId) {
+          setResetAllState({
+            ...resetAllState,
+            failure: {
+              ambiguous: false,
+              memberId: null,
+              message:
+                "This reset operation is no longer available. Close and start Reset everyone again.",
+            },
+            phase: "recovering_wakes",
+          });
+          return;
+        }
+        await runResetAllWakeRecovery(operationId);
+        return;
+      }
       if (input.mode !== "resume") {
         resetAllAcknowledgedCursors.current.clear();
       } else if (resetAllState.lastAcknowledgedCursor) {
@@ -407,6 +426,108 @@ function MemberUsageClientSurface({
       }
     } finally {
       resetAllRunInFlight.current = false;
+    }
+  }
+
+  async function runResetAllWakeRecovery(operationId: string): Promise<void> {
+    const wakeAcknowledgedCursors = new Set<string>();
+    let wakeCursor: string | null = null;
+    let counts = {
+      ...resetAllState.counts,
+      failed: 0,
+      pendingWake: 0,
+    };
+    setResetAllState({
+      counts,
+      failure: null,
+      lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+      phase: "recovering_wakes",
+    });
+
+    while (resetAllPageActive.current) {
+      const previousWakeCursor = wakeCursor;
+      let batch: HostedOpsMemberUsageResetAllWakeBatchResponse;
+      try {
+        batch = await requestResetAllWakeBatch(wakeCursor, operationId);
+      } catch (error) {
+        if (!resetAllPageActive.current) {
+          return;
+        }
+        setResetAllState({
+          counts,
+          failure: {
+            ambiguous: true,
+            memberId: null,
+            message: error instanceof Error
+              ? error.message
+              : "Runtime wake recovery returned an ambiguous response. Retry the wake-only pass.",
+          },
+          lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+          phase: "recovering_wakes",
+        });
+        return;
+      }
+      if (!resetAllPageActive.current) {
+        return;
+      }
+
+      const acknowledgedWakeCursor = batch.lastAcknowledgedCursor;
+      const cursorAcknowledgesBatch = batch.attempted === 0
+        ? acknowledgedWakeCursor === previousWakeCursor
+        : acknowledgedWakeCursor !== null
+          && acknowledgedWakeCursor !== previousWakeCursor
+          && !wakeAcknowledgedCursors.has(acknowledgedWakeCursor);
+      if (
+        !cursorAcknowledgesBatch
+        || (batch.attempted === 0 && !batch.done)
+      ) {
+        setResetAllState({
+          counts,
+          failure: {
+            ambiguous: true,
+            memberId: null,
+            message:
+              "The server did not acknowledge wake-recovery progress. Retry the wake-only pass.",
+          },
+          lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+          phase: "recovering_wakes",
+        });
+        return;
+      }
+
+      counts = {
+        ...counts,
+        pendingWake: counts.pendingWake + batch.pendingWake,
+      };
+      wakeCursor = acknowledgedWakeCursor;
+      if (acknowledgedWakeCursor) {
+        wakeAcknowledgedCursors.add(acknowledgedWakeCursor);
+      }
+      if (batch.done) {
+        if (counts.pendingWake > 0) {
+          setResetAllState({
+            counts,
+            failure: null,
+            lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+            phase: "recovering_wakes",
+          });
+          return;
+        }
+        setResetAllState({
+          counts,
+          failure: null,
+          lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+          phase: "complete",
+        });
+        router.refresh();
+        return;
+      }
+      setResetAllState({
+        counts,
+        failure: null,
+        lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+        phase: "recovering_wakes",
+      });
     }
   }
 
@@ -1119,9 +1240,10 @@ function UsageResetAllProgress(input: { state: UsageResetAllState }) {
         <Alert variant="destructive">
           <AlertDescription>
             Every population row was acknowledged, but one or more runtimes did
-            not accept their recheck. Retry the wake recovery before closing;
-            the same operation receipts prevent any included-usage reset or
-            Starter grant from being applied again.
+            not accept their recheck. Retry the wake recovery before closing.
+            Recovery pages only this operation&apos;s existing wake-required
+            receipts; it cannot admit a later member or enter a reset
+            transaction again.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1611,6 +1733,44 @@ async function requestResetAllBatch(
   return payload;
 }
 
+async function requestResetAllWakeBatch(
+  afterMemberId: string | null,
+  operationId: string,
+): Promise<HostedOpsMemberUsageResetAllWakeBatchResponse> {
+  const response = await fetch("/api/ops/usage-reset", {
+    body: JSON.stringify({
+      afterMemberId,
+      confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+      operation: "recover_reset_all_wakes",
+      operationId,
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(
+      "Runtime wake recovery returned an unreadable response. Retry the wake-only pass.",
+    );
+  }
+  if (!response.ok) {
+    throw new UsageResetRequestError(
+      readResponseErrorMessage(payload),
+      readResponseErrorCode(payload),
+    );
+  }
+  if (!isHostedOpsMemberUsageResetAllWakeBatchResponse(payload)) {
+    throw new Error(
+      "Runtime wake recovery returned an invalid response. Retry the wake-only pass.",
+    );
+  }
+  return payload;
+}
+
 async function requestUsageReset(
   row: HostedOpsMemberUsageRow,
 ): Promise<HostedOpsMemberUsageResetResponse> {
@@ -1727,6 +1887,22 @@ function isHostedOpsMemberUsageResetAllBatchResponse(
     && typeof Reflect.get(failure, "memberId") === "string"
     && typeof Reflect.get(failure, "message") === "string"
     && typeof Reflect.get(failure, "retryable") === "boolean";
+}
+
+function isHostedOpsMemberUsageResetAllWakeBatchResponse(
+  value: unknown,
+): value is HostedOpsMemberUsageResetAllWakeBatchResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const attempted = Reflect.get(value, "attempted");
+  const pendingWake = Reflect.get(value, "pendingWake");
+  const cursor = Reflect.get(value, "lastAcknowledgedCursor");
+  return isNonNegativeInteger(attempted)
+    && isNonNegativeInteger(pendingWake)
+    && pendingWake <= attempted
+    && (cursor === null || typeof cursor === "string")
+    && typeof Reflect.get(value, "done") === "boolean";
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

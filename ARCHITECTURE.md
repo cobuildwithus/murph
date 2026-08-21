@@ -3400,8 +3400,12 @@ same single-member reset sequentially, commits before its runtime wake, and is
 acknowledged only by an ID cursor returned to the browser. The walk ignores
 search, does not snapshot or pause the population, and converges after retries
 through the existing period, ledger-version, notice-claim, and member-lock
-checks. One browser-generated operation UUID is reused across continue and
-recovery requests. The canonical per-member reset transaction writes one
+checks. One browser-generated operation UUID is reused across continue,
+ambiguous population recovery, and wake-only recovery requests. Once the
+population walk is complete, wake recovery pages only that operation's
+existing wake-required receipts in the same fixed ID-ordered batches; it never
+reads the current hosted-member population or re-enters a reset transaction.
+The canonical per-member reset transaction writes one
 append-only receipt keyed by that UUID and member ID; the receipt freezes every
 stable outcome so replay cannot clear included usage that accrued after the
 first reset or append another Starter grant after the first was consumed.
@@ -3413,7 +3417,8 @@ first instead leaves a real period for the reset to observe and clear.
 Starter grants retain the same immutable semantic source key. This adds no
 campaign, queue, scheduler, population snapshot, or second usage projection. A
 replayed receipt may repeat only the post-commit runtime recheck when its frozen
-outcome requires one.
+outcome requires one, and later members with no receipt remain outside the
+confirmed operation.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

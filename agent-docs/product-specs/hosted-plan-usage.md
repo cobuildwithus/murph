@@ -402,13 +402,15 @@ The response reports processed, reset, unchanged, skipped, pending-wake, and
 failed outcomes plus the last acknowledged member ID. While the page remains
 open, the client may issue the next bounded request. It pauses on a known or
 ambiguous failure and can resume strictly after the last acknowledged cursor.
-When the prior response is unknown, or any committed member still needs a
-runtime wake, recovery rewalks from the beginning with the same browser-created
-operation UUID. The server returns the frozen per-member receipt on replay,
-without applying that member's reset again, while it may retry a required
-post-commit runtime wake. The dialog does not claim completion until a full
-pass reports no pending wake. The walk owns no campaign row, queue, scheduler,
-or second usage projection.
+When a population response is unknown, recovery may rewalk from the beginning
+with the same browser-created operation UUID. After the population is fully
+acknowledged, runtime-wake recovery has a narrower owner: it pages only that
+UUID's existing wake-required receipts in member-ID order and invokes only the
+bounded post-commit runtime recheck. It never reads the current member
+population or enters a reset transaction, so members created after the original
+typed confirmation cannot be admitted to that operation. The dialog does not
+claim completion until a full receipt-owned wake pass reports no pending wake.
+The walk owns no campaign row, queue, scheduler, or second usage projection.
 
 Every reset-everyone member outcome has one append-only receipt keyed by the
 operation UUID and member ID. The first serializable member transaction inserts

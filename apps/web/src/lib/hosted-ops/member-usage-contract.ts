@@ -31,3 +31,10 @@ export interface HostedOpsMemberUsageResetAllBatchResponse {
   failure: HostedOpsMemberUsageResetAllFailure | null;
   lastAcknowledgedCursor: string | null;
 }
+
+export interface HostedOpsMemberUsageResetAllWakeBatchResponse {
+  attempted: number;
+  done: boolean;
+  lastAcknowledgedCursor: string | null;
+  pendingWake: number;
+}

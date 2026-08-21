@@ -377,9 +377,14 @@ Last verified: 2026-08-20
   acknowledged ID plus one operation UUID created at destructive confirmation;
   there is no population snapshot, concurrent interactive transaction fanout,
   queue, scheduler, or persisted campaign. A known failure resumes strictly
-  after the acknowledged cursor. Recovery after an ambiguous response or a
-  committed wake failure rewalks from the beginning with the same UUID. Each
-  member first reads the append-only `(operation_id, member_id)` reset receipt;
+  after the acknowledged cursor, while an ambiguous population response may
+  rewalk from the beginning with the same UUID. After population completion,
+  committed wake recovery instead pages at most 11 existing wake-required
+  receipts for that UUID, admits 10, and invokes only sequential bounded runtime
+  rechecks. It never reads current hosted-member rows or enters the reset
+  transaction, so a member created after confirmation cannot join the old
+  operation. Each population member first reads the append-only
+  `(operation_id, member_id)` reset receipt;
   the initial serializable member transaction writes that receipt atomically
   with any reset or grant, and one bounded conflict retry covers a concurrent
   request that races the same receipt. Receipt replay returns the frozen reset,

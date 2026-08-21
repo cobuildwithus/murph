@@ -283,16 +283,9 @@ describe("MemberUsageClient", () => {
         lastAcknowledgedCursor: "hbm_reset_003",
       }))
       .mockResolvedValueOnce(jsonResponse({
-        counts: {
-          failed: 0,
-          pendingWake: 0,
-          processed: 3,
-          reset: 1,
-          skipped: 1,
-          unchanged: 1,
-        },
+        attempted: 2,
         done: true,
-        failure: null,
+        pendingWake: 0,
         lastAcknowledgedCursor: "hbm_reset_003",
       }));
     const rendered = await renderClientComponent(
@@ -384,7 +377,7 @@ describe("MemberUsageClient", () => {
       body: JSON.stringify({
         afterMemberId: null,
         confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
-        operation: "reset_all_batch",
+        operation: "recover_reset_all_wakes",
         operationId: RESET_ALL_OPERATION_ID,
       }),
       cache: "no-store",
@@ -392,6 +385,10 @@ describe("MemberUsageClient", () => {
       headers: { "content-type": "application/json" },
       method: "POST",
     });
+    expect(readMetric(rendered.container, "Processed")).toBe("3");
+    expect(readMetric(rendered.container, "Reset")).toBe("1");
+    expect(readMetric(rendered.container, "Unchanged")).toBe("1");
+    expect(readMetric(rendered.container, "Skipped")).toBe("1");
     expect(readMetric(rendered.container, "Wake pending")).toBe("0");
     expect(routerRefresh).toHaveBeenCalledTimes(1);
   });

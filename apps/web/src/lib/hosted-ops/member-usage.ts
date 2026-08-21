@@ -130,6 +130,20 @@ export interface HostedOpsMemberUsageResetAllBatch {
   memberIds: string[];
 }
 
+export interface HostedOpsMemberUsageResetAllWakeBatchInput {
+  afterMemberId?: string | null;
+  operationId: string;
+  prisma?: PrismaClient;
+}
+
+export interface HostedOpsMemberUsageResetAllWakeBatch {
+  hasMore: boolean;
+  receipts: Array<{
+    memberId: string;
+    timestamp: string;
+  }>;
+}
+
 export interface HostedOpsMemberUsageResetAllMemberInput {
   memberId: string;
   now?: Date;
@@ -745,6 +759,46 @@ export async function readHostedOpsMemberUsageResetAllBatch(
     memberIds: candidates
       .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
       .map((candidate) => candidate.id),
+  };
+}
+
+export async function readHostedOpsMemberUsageResetAllWakeBatch(
+  input: HostedOpsMemberUsageResetAllWakeBatchInput,
+): Promise<HostedOpsMemberUsageResetAllWakeBatch> {
+  const prisma = input.prisma ?? getPrisma();
+  const afterMemberId = normalizeHostedOpsMemberUsageCursor(
+    input.afterMemberId,
+  );
+  if (afterMemberId && !HOSTED_OPS_MEMBER_ID_PATTERN.test(afterMemberId)) {
+    throw new TypeError("Hosted ops reset-everyone wake cursor is invalid.");
+  }
+  if (!isHostedOpsUsageResetAllOperationId(input.operationId)) {
+    throw new TypeError("Hosted ops reset-everyone operation ID is invalid.");
+  }
+  const candidates = await prisma.hostedOpsUsageResetReceipt.findMany({
+    orderBy: { memberId: "asc" },
+    select: {
+      memberId: true,
+      resetAt: true,
+    },
+    take: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1,
+    where: {
+      ...(afterMemberId
+        ? { memberId: { gt: afterMemberId } }
+        : {}),
+      operationId: input.operationId,
+      runtimeRecheckRequired: true,
+    },
+  });
+  return {
+    hasMore:
+      candidates.length > HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE,
+    receipts: candidates
+      .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
+      .map((candidate) => ({
+        memberId: candidate.memberId,
+        timestamp: candidate.resetAt.toISOString(),
+      })),
   };
 }
 

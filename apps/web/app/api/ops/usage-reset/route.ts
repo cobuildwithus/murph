@@ -5,12 +5,14 @@ import {
   type HostedOpsMemberUsageResetAllBatchResponse,
   type HostedOpsMemberUsageResetAllCounts,
   type HostedOpsMemberUsageResetAllFailure,
+  type HostedOpsMemberUsageResetAllWakeBatchResponse,
 } from "@/src/lib/hosted-ops/member-usage-contract";
 import {
   HostedOpsMemberUsageResetNotFoundError,
   HostedOpsMemberUsageResetNoticeInFlightError,
   HostedOpsMemberUsageResetStaleError,
   readHostedOpsMemberUsageResetAllBatch,
+  readHostedOpsMemberUsageResetAllWakeBatch,
   resetHostedOpsMemberUsage,
   resetHostedOpsMemberUsageForResetAll,
 } from "@/src/lib/hosted-ops/member-usage";
@@ -57,6 +59,14 @@ export const POST = withJsonError(async (request: Request) => {
   if (body.operation === "reset_all_batch") {
     readResetAllConfirmation(body.confirmation);
     return jsonOk(await resetEveryoneBatch({
+      afterMemberId: readOptionalMemberId(body.afterMemberId),
+      operationId: readResetAllOperationId(body.operationId),
+    }));
+  }
+
+  if (body.operation === "recover_reset_all_wakes") {
+    readResetAllConfirmation(body.confirmation);
+    return jsonOk(await recoverResetEveryoneWakes({
       afterMemberId: readOptionalMemberId(body.afterMemberId),
       operationId: readResetAllOperationId(body.operationId),
     }));
@@ -163,6 +173,42 @@ async function resetEveryoneBatch(input: {
     counts,
     done,
     stoppedOnFailure: failure !== null,
+  });
+  return response;
+}
+
+async function recoverResetEveryoneWakes(input: {
+  afterMemberId: string | null;
+  operationId: string;
+}): Promise<HostedOpsMemberUsageResetAllWakeBatchResponse> {
+  const batch = await readHostedOpsMemberUsageResetAllWakeBatch({
+    afterMemberId: input.afterMemberId,
+    operationId: input.operationId,
+  });
+  let lastAcknowledgedCursor = input.afterMemberId;
+  let pendingWake = 0;
+
+  for (const receipt of batch.receipts) {
+    const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(
+      receipt.memberId,
+      receipt.timestamp,
+    );
+    if (runtimeRecheckStatus === "pending") {
+      pendingWake += 1;
+    }
+    lastAcknowledgedCursor = receipt.memberId;
+  }
+
+  const response = {
+    attempted: batch.receipts.length,
+    done: !batch.hasMore,
+    lastAcknowledgedCursor,
+    pendingWake,
+  } satisfies HostedOpsMemberUsageResetAllWakeBatchResponse;
+  console.info("Hosted ops reset-everyone wake batch completed.", {
+    attempted: response.attempted,
+    done: response.done,
+    pendingWake: response.pendingWake,
   });
   return response;
 }
