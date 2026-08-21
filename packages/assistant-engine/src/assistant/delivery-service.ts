@@ -1071,14 +1071,8 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
     response !== '' &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
-    const acceptedRoute = input.outcome.session.binding
     await markAssistantFirstContactSeen({
       docIds: input.firstContactStateDocIds ?? [],
-      onboardingFollowupAcceptedTurnId:
-        acceptedRoute.channel?.trim().toLowerCase() === 'telegram' &&
-        acceptedRoute.threadIsDirect === true
-          ? input.turnId
-          : null,
       seenAt: completedAt,
       vault: input.vault,
     })
@@ -1094,9 +1088,8 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
   })
 }
 
-// The hosted signup-welcome skip and managed onboarding follow-up seeder both
-// read this marker, so it must mean "a reply actually reached (or is queued
-// for) this route".
+// The first-contact marker's only reader is the hosted signup-welcome skip,
+// so it must mean "a reply actually reached (or is queued for) this route".
 // A 'not-requested' outcome delivered nothing and must not suppress the
 // welcome for a route that has never heard from the assistant.
 function isAssistantFirstContactAcceptedForDelivery(

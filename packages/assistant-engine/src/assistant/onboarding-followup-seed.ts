@@ -1,12 +1,5 @@
 import type { AutomationRoute } from '@murphai/contracts'
-import type {
-  AssistantCronJob,
-  AssistantOutboxIntent,
-} from '@murphai/operator-config/assistant-cli-contracts'
-
-import {
-  readAssistantTelegramOnboardingFollowupFirstContactAnchor,
-} from './first-contact.js'
+import type { AssistantCronJob } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   resolveMurphOnboardingFollowupActiveUntil,
@@ -19,10 +12,8 @@ import {
   computeAssistantCronFirstRunAfterCurrentLocalDay,
   computeAssistantCronNextRunAt,
 } from './cron/schedule.js'
-import { createAssistantRuntimeStateService } from './runtime-state-service.js'
-import { normalizeNullableString } from './shared.js'
 
-export type MurphTelegramOnboardingFollowupSeedResult =
+export type MurphOnboardingFollowupSeedResult =
   | { kind: 'not-applicable' }
   | { job: AssistantCronJob; kind: 'ready' }
   | { kind: 'preserved-closed' }
@@ -59,39 +50,21 @@ export async function seedMurphOnboardingFollowupAutomation(input: {
   })
 }
 
-export async function seedMurphOnboardingFollowupAfterTelegramFirstContact(
+export async function seedMurphOnboardingFollowupFromStartedOnboarding(
   input: {
     now?: Date
+    route: AutomationRoute
     stableKey: string
     vault: string
   },
-): Promise<MurphTelegramOnboardingFollowupSeedResult> {
-  const anchor =
-    await readAssistantTelegramOnboardingFollowupFirstContactAnchor(input.vault)
-  if (anchor === null) {
+): Promise<MurphOnboardingFollowupSeedResult> {
+  if (input.route.threadIsDirect !== true) {
     return { kind: 'not-applicable' }
   }
-
-  const state = createAssistantRuntimeStateService(input.vault)
-  const receipt = await state.turns.readReceipt(anchor.acceptedTurnId)
-  if (
-    receipt?.status !== 'completed' ||
-    receipt.completedAt === null ||
-    receipt.deliveryIntentId === null
-  ) {
-    return { kind: 'not-applicable' }
-  }
-
-  const intent = await state.outbox.readIntent(receipt.deliveryIntentId)
-  const route = resolveAcceptedTelegramOnboardingFollowupRoute({
-    acceptedTurnId: anchor.acceptedTurnId,
-    intent,
-  })
-  if (route === null) {
-    return { kind: 'not-applicable' }
-  }
-
   const onboardingState = await readAssistantOnboardingState(input.vault)
+  if (onboardingState.createdAt === null) {
+    return { kind: 'not-applicable' }
+  }
   if (onboardingState.status !== 'open') {
     return { kind: 'preserved-closed' }
   }
@@ -101,7 +74,7 @@ export async function seedMurphOnboardingFollowupAfterTelegramFirstContact(
   const timeZone = await resolveAssistantCronDefaultTimeZone(input.vault)
   const originalFirstOccurrenceAt =
     computeAssistantCronFirstRunAfterCurrentLocalDay({
-      after: new Date(receipt.completedAt),
+      after: new Date(onboardingState.createdAt),
       schedule: { ...schedule, timeZone },
     })
   const activeUntil = resolveMurphOnboardingFollowupActiveUntil({
@@ -129,42 +102,11 @@ export async function seedMurphOnboardingFollowupAfterTelegramFirstContact(
     activeUntil,
     firstOccurrenceAt,
     now,
-    route,
+    route: input.route,
     stableKey: input.stableKey,
     vault: input.vault,
   })
   return job === null
     ? { kind: 'preserved-closed' }
     : { job, kind: 'ready' }
-}
-
-function resolveAcceptedTelegramOnboardingFollowupRoute(input: {
-  acceptedTurnId: string
-  intent: AssistantOutboxIntent | null
-}): AutomationRoute | null {
-  if (
-    input.intent?.turnId !== input.acceptedTurnId ||
-    input.intent.status !== 'sent' ||
-    normalizeNullableString(input.intent.channel)?.toLowerCase() !== 'telegram' ||
-    normalizeNullableString(input.intent.delivery?.channel)?.toLowerCase() !==
-      'telegram' ||
-    input.intent.delivery?.targetKind !== 'thread' ||
-    input.intent.threadIsDirect !== true
-  ) {
-    return null
-  }
-
-  const deliveryTarget = normalizeNullableString(input.intent.delivery.target)
-  if (deliveryTarget === null) {
-    return null
-  }
-
-  return {
-    channel: 'telegram',
-    deliveryTarget,
-    identityId: normalizeNullableString(input.intent.identityId),
-    participantId: normalizeNullableString(input.intent.actorId),
-    threadId: normalizeNullableString(input.intent.threadId),
-    threadIsDirect: true,
-  }
 }

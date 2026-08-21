@@ -104,6 +104,7 @@ vi.mock("@/src/lib/hosted-onboarding/shared", async () => {
 import {
   activateHostedMemberForFamilySponsorshipTx,
   activateHostedMemberForPositiveSourceTx,
+  buildHostedMemberActivationOnboardingFollowupRoute,
   buildHostedMemberActivationWelcomeRoute,
   hasHostedMemberActivationProof,
   readHostedMemberActivationProofMemberIds,
@@ -376,6 +377,7 @@ describe("hosted onboarding member activation", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupRoute: expectedRoute,
         signupWelcome: expect.objectContaining({
           route: expectedRoute,
           text: expectedText,
@@ -855,11 +857,15 @@ describe("hosted onboarding member activation", () => {
       memberId: "member_123",
     });
 
-    expect(mocks.resolveHostedMemberActivationLinqRoute).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberActivationLinqRoute).toHaveBeenCalledWith({
+      member,
+      prisma: expect.anything(),
+    });
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledTimes(1);
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         kind: "member.activated",
+        onboardingFollowupRoute: expectedLinqParticipantWelcomeRoute(),
         signupWelcome: null,
       }),
       tx: expect.anything(),
@@ -1072,6 +1078,18 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: true,
         },
+        onboardingFollowupRoute:
+          buildHostedMemberActivationOnboardingFollowupRoute({
+            linqChatId: null,
+            linqContactLookupKey: "hbidx:email:v1:lookup",
+            linqRecipientPhone: null,
+            memberId: "member_123",
+            memberPhoneNumber: null,
+            phoneLookupKey: null,
+            telegramThreadId:
+              "telegram_user_123:business:biz-42:dm-topic:9",
+            telegramUserId: "telegram_user_123",
+          }),
         signupWelcome: null,
       }),
       tx: expect.anything(),

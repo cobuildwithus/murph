@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
@@ -7,9 +6,7 @@ import {
   buildHostedExecutionTelegramConversationMessageWake,
 } from "@murphai/hosted-execution";
 import {
-  createHostedAssistantConversationIdentifierBlind,
   createHostedMailboxAssistantInputId,
-  hashHostedAssistantConversationIdentifier,
 } from "@murphai/hosted-execution/assistant-identifiers";
 
 import {
@@ -34,7 +31,6 @@ import {
 import {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
 } from "../src/runner-injected-credential.ts";
-import { listHostedRuntimeLogsForTest } from "#hosted-web-testing";
 
 const userId = `member_local_telegram_reply_${Date.now()}`;
 const fastReplyUserId = `member_local_telegram_fast_reply_${Date.now()}`;
@@ -78,7 +74,7 @@ describe("hosted local Telegram auto-reply e2e", () => {
 
   it("sends Telegram typing and a reply after an inbound Telegram message", async () => {
     await requireScenario().seedActiveHostedMember({ memberId: userId });
-    await requireScenario().runWake(buildSignupWelcomeActivationWake(userId), userId);
+    await requireScenario().runWake(buildActivationWake(userId), userId);
 
     await requireScenario().waitForHostedCompletion(userId);
     await requireTelegramStub().waitForRequestsToSettle({
@@ -89,7 +85,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
       `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
       requireTelegramStub().createSendMessageMatcher(userId),
     )).toBe(0);
-    expect(await countOnboardingFollowupSeedLogs(userId)).toBe(0);
 
     requireScenario().queueAssistantResponses([HOSTED_TELEGRAM_DEFAULT_ASSISTANT_REPLY_TEXT], {
       matchInputContains: defaultTelegramInboundText,
@@ -165,9 +160,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
     expect(readAssistantProviderRequestText(firstInboundProviderRequest)).not.toContain(
       MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
     );
-    await waitForOnboardingFollowupSeedLog(userId);
-    expect(await countOnboardingFollowupSeedLogs(userId)).toBe(1);
-
     const providerRequestCountBeforeReplay =
       requireScenario().assistantProviderRequests.length;
     const replySendCountBeforeReplay = requireTelegramStub().countObservedRequests(
@@ -187,7 +179,6 @@ describe("hosted local Telegram auto-reply e2e", () => {
       `/bot${hostedLocalTelegramRequestToken}/sendMessage`,
       requireTelegramStub().createSendMessageMatcher(userId),
     )).toBe(replySendCountBeforeReplay);
-    expect(await countOnboardingFollowupSeedLogs(userId)).toBe(1);
     expect(requireTelegramStub().countObservedRequests(
       `/bot${hostedLocalTelegramRequestToken}/deleteMessages`,
     )).toBe(0);
@@ -460,45 +451,6 @@ function buildActivationWake(userId: string) {
   });
 }
 
-function buildSignupWelcomeActivationWake(userId: string) {
-  const identifierBlind = createHostedAssistantConversationIdentifierBlind({
-    secret: buildTelegramThreadId(userId),
-    userId,
-  });
-  const threadId = buildTelegramThreadId(userId);
-
-  return buildHostedExecutionMemberActivatedWake({
-    eventId: `member.activated:local:${userId}:evt_telegram_signup_welcome`,
-    memberId: userId,
-    memberChannels: {
-      email: false,
-      linq: false,
-      telegram: true,
-    },
-    occurredAt: new Date().toISOString(),
-    signupWelcome: {
-      route: {
-        actorId: null,
-        channel: "telegram",
-        delivery: {
-          kind: "thread",
-          target: threadId,
-        },
-        identityId: hashHostedAssistantConversationIdentifier(
-          identifierBlind,
-          "telegram:bot",
-        ),
-        threadId: hashHostedAssistantConversationIdentifier(
-          identifierBlind,
-          threadId,
-        ),
-        threadIsDirect: true,
-      },
-      text: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
-    },
-  });
-}
-
 function buildInboundTelegramWake(
   userId: string,
   overrides: {
@@ -535,34 +487,6 @@ function buildAcceptedTelegramMessageRef(userId: string, eventId: string): strin
 function readAssistantProviderRequestText(request: { body: string }): string {
   const body = JSON.parse(request.body) as Record<string, unknown>;
   return collectJsonStrings(body).join("\n\n");
-}
-
-async function countOnboardingFollowupSeedLogs(memberId: string): Promise<number> {
-  const logs = await listHostedRuntimeLogsForTest({
-    environment: requireScenario().runtimeEnv,
-    limit: 1_500,
-    userId: memberId,
-  });
-  return logs.filter((entry) =>
-    entry.eventCode === "assistant.onboarding_followup_reconciled"
-    && entry.redactedJson?.onboardingFollowupAction ===
-      "seeded_after_first_contact"
-  ).length;
-}
-
-async function waitForOnboardingFollowupSeedLog(memberId: string): Promise<void> {
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const seedLogCount = await countOnboardingFollowupSeedLogs(memberId);
-    if (seedLogCount > 1) {
-      throw new Error("Telegram onboarding follow-up was seeded more than once.");
-    }
-    if (seedLogCount === 1) {
-      return;
-    }
-    await sleep(250);
-  }
-  throw new Error("Timed out waiting for the Telegram onboarding follow-up seed.");
 }
 
 function collectJsonStrings(value: unknown): string[] {
@@ -604,7 +528,6 @@ async function startTelegramScenario(): Promise<void> {
   });
   scenario = await startHostedLocalFullStackScenario({
     additionalEnv: {
-      MURPH_DEV_TEMPORAL: "disabled",
       TELEGRAM_API_BASE_URL: requireTelegramStub().runnerBaseUrl,
       TELEGRAM_BOT_TOKEN: telegramBotToken,
     },

@@ -459,32 +459,6 @@ export async function runHostedAssistantAutomation(
       && selectedInputIds.inputIds.length === 0
         ? options?.buildBackgroundDynamicContextPrompt
         : undefined;
-    const onAutomationEvent = (event: AssistantRunEvent): void => {
-      automationEventCounts.set(
-        event.type,
-        (automationEventCounts.get(event.type) ?? 0) + 1,
-      );
-      const logEntry = emitHostedRuntimeRedactedLog({
-        component: "runtime",
-        details: buildHostedAssistantAutomationEventLogDetails(event, requestId),
-        wake,
-        message: `Hosted assistant automation event: ${event.type}.`,
-        phase: "wake.running",
-      });
-      if (
-        shouldPersistHostedAssistantAutomationEvent(event.type)
-        && (
-          shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
-          || redactedAutomationEventLogCount
-            < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
-        )
-      ) {
-        redactedLogEntries.push(logEntry);
-        if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
-          redactedAutomationEventLogCount += 1;
-        }
-      }
-    };
 
     const result = await runAssistantAutomationPass({
       ...(buildBackgroundDynamicContextPrompt
@@ -503,7 +477,31 @@ export async function runHostedAssistantAutomation(
       executionContext,
       ...(options?.operationScope ? { operationScope: options.operationScope } : {}),
       inboxServices,
-      onEvent: onAutomationEvent,
+      onEvent: (event) => {
+        automationEventCounts.set(
+          event.type,
+          (automationEventCounts.get(event.type) ?? 0) + 1,
+        );
+        const logEntry = emitHostedRuntimeRedactedLog({
+          component: "runtime",
+          details: buildHostedAssistantAutomationEventLogDetails(event, requestId),
+          wake,
+          message: `Hosted assistant automation event: ${event.type}.`,
+          phase: "wake.running",
+        });
+        if (
+          shouldPersistHostedAssistantAutomationEvent(event.type)
+          && (
+            shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)
+            || redactedAutomationEventLogCount < HOSTED_ASSISTANT_AUTOMATION_REDACTED_EVENT_LOG_LIMIT
+          )
+        ) {
+          redactedLogEntries.push(logEntry);
+          if (!shouldAlwaysPersistHostedAssistantAutomationEvent(event.type)) {
+            redactedAutomationEventLogCount += 1;
+          }
+        }
+      },
       onProviderEvent: (event) => {
         const context = activeProviderMilestoneTraceContext;
         if (!context) {

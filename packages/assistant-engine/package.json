@@ -95,10 +95,6 @@
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"
     },
-    "./onboarding-followup-seed": {
-      "types": "./dist/onboarding-followup-seed.d.ts",
-      "default": "./dist/onboarding-followup-seed.js"
-    },
     "./outbound-channel": {
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"

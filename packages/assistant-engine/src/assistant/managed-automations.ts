@@ -54,7 +54,7 @@ import {
   resolveMurphOnboardingFollowupSchedule,
 } from './onboarding-followup-automation.js'
 import {
-  seedMurphOnboardingFollowupAfterTelegramFirstContact,
+  seedMurphOnboardingFollowupFromStartedOnboarding,
 } from './onboarding-followup-seed.js'
 import { assistantRouteSupportsGroupRoomModel } from './group-room-model.js'
 
@@ -123,7 +123,6 @@ export interface MurphManagedAutomationDiagnosticStage {
 export interface ApplyMurphManagedAutomationsResult {
   created: number
   experimentLifecycleFailure?: unknown
-  onboardingFollowupSeeded?: true
   onboardingGoalCheckinFailure?: unknown
   skipped: number
   stableKeyFailure?: unknown
@@ -1259,6 +1258,7 @@ export async function applyMurphManagedAutomations(
     if (input.shouldYield?.() === true) {
       return { ...result, yielded: true }
     }
+    let onboardingFollowupCreated = false
     if (!existingOnboardingFollowup) {
       if (!scheduleStableKeyUnavailable) {
         let stableKey: string | null = null
@@ -1273,20 +1273,24 @@ export async function applyMurphManagedAutomations(
           return { ...result, yielded: true }
         }
         if (stableKey !== null) {
-          const seedResult =
-            await seedMurphOnboardingFollowupAfterTelegramFirstContact({
-              now,
-              stableKey,
-              vault: input.vaultRoot,
-            })
-          if (seedResult.kind === 'ready') {
-            result.created += 1
-            result.onboardingFollowupSeeded = true
+          const route = await resolveCreateRoute()
+          if (route !== null) {
+            const seedResult =
+              await seedMurphOnboardingFollowupFromStartedOnboarding({
+                now,
+                route,
+                stableKey,
+                vault: input.vaultRoot,
+              })
+            if (seedResult.kind === 'ready') {
+              result.created += 1
+              onboardingFollowupCreated = true
+            }
           }
         }
       }
     }
-    const onboardingReconciliation = result.onboardingFollowupSeeded === true
+    const onboardingReconciliation = onboardingFollowupCreated
       ? { diagnostic: null, updated: false, yielded: false }
       : await reconcileExistingOnboardingFollowupAutomation({
           existing: existingOnboardingFollowup,

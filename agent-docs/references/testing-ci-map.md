@@ -306,19 +306,17 @@ scheduled-reminder scenario adds the production-path proof: an ordinary group
 newsletter automation invokes `read_shared`, wakes from its alarm, and sends only to the
 exact admitted group thread.
 
-Direct Telegram onboarding continuation coverage is also production-shaped.
-The hosted-local first-contact scenario proves that activation produces neither
-a signup welcome nor a follow-up seed, the first accepted private reply creates
-one metadata-attested canonical finite seed, and replay of the same inbound wake
-creates neither another provider turn, another reply, nor another seed. Focused
-assistant-engine tests prove that the immutable accepted-turn pointer resolves
-the exact sent outbox route even when ambient managed routing differs, keeps the
-cutoff anchored to the original completed receipt across a delayed retry,
-rejects historical markers and expired windows, and preserves idempotent replay,
-completed-onboarding closure, and archived records. Assistant-runtime tests
-prove post-checkpoint ordering, metadata-only seed attestation, and recovery
-from a transient canonical write on the existing bounded wake ladder without
-new member input.
+Durable onboarding follow-up enrollment coverage is owner-split. Hosted-
+execution contract tests preserve the optional route independent of welcome
+delivery. Web activation tests cover standard Linq, Linq instant-start, and an
+established Telegram thread. Assistant-runtime tests prove route-only and
+welcome-plus-route activation, Telegram welcome suppression, retryable seed
+failure, and legacy notification non-ownership. Assistant-engine tests prove
+activation replay stability, delayed route availability, direct-only routing,
+the activation-anchored cutoff, completed-state closure, and archive
+preservation. The hosted-local Telegram first-contact scenario proves silent
+route-less activation, the ordinary first direct reply, and inbound replay
+without another provider turn or reply.
 The existing hosted-local scheduled-reminder scenario remains the downstream
 proof for Telegram scheduler, outbox, and provider delivery.
 

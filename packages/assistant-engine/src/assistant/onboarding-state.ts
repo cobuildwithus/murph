@@ -120,6 +120,25 @@ export async function completeAssistantOnboarding(input: {
   return normalizeAssistantOnboardingState(persisted)
 }
 
+export async function startAssistantOnboarding(input: {
+  startedAt?: string
+  vault: string
+}): Promise<AssistantOnboardingState> {
+  const existing = await readAssistantOnboardingState(input.vault)
+  if (existing.createdAt !== null) {
+    return existing
+  }
+
+  const startedAt = input.startedAt ?? new Date().toISOString()
+  const persisted = buildPersistedAssistantOnboardingState({
+    completedAt: null,
+    completedReason: null,
+    createdAt: startedAt,
+  })
+  await writeAssistantOnboardingState(input.vault, persisted)
+  return normalizeAssistantOnboardingState(persisted)
+}
+
 export async function reopenAssistantOnboarding(input: {
   reopenedAt?: string
   vault: string

@@ -450,7 +450,7 @@ describe("parseHostedExecutionEvent", () => {
     ).toThrow(/channel must be linq/u);
   });
 
-  it("parses member activation signup welcomes and ignores legacy fixed policy fields", () => {
+  it("parses member activation follow-up routes and signup welcomes", () => {
     expect(
       parseHostedExecutionEvent({
         initialGroupRoomModelMarkdown:
@@ -460,6 +460,17 @@ describe("parseHostedExecutionEvent", () => {
           email: true,
           linq: true,
           telegram: false,
+        },
+        onboardingFollowupRoute: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
         },
         signupWelcome: {
           deliveryDispatchMode: "queue-only",
@@ -491,6 +502,17 @@ describe("parseHostedExecutionEvent", () => {
         email: true,
         linq: true,
         telegram: false,
+      },
+      onboardingFollowupRoute: {
+        actorId: "+15550002222",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
       },
       signupWelcome: {
         route: {
@@ -4254,6 +4276,17 @@ describe("parseHostedExecutionWake", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupRoute: {
+          actorId: "+15550002222",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "chat_home_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "chat_home_123",
+          threadIsDirect: true,
+        },
         occurredAt: "2026-04-18T00:00:00.000Z",
         signupWelcome: {
           deliveryDispatchMode: "immediate",
@@ -4286,6 +4319,17 @@ describe("parseHostedExecutionWake", () => {
         email: false,
         linq: true,
         telegram: false,
+      },
+      onboardingFollowupRoute: {
+        actorId: "+15550002222",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "chat_home_123",
+        },
+        identityId: "hbidx:phone:v1:test",
+        threadId: "chat_home_123",
+        threadIsDirect: true,
       },
       occurredAt: "2026-04-18T00:00:00.000Z",
       signupWelcome: {

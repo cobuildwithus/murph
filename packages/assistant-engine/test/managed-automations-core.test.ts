@@ -33,13 +33,10 @@ import {
 } from '../src/assistant/managed-automations.ts'
 import {
   completeAssistantOnboarding,
+  readAssistantOnboardingState,
   resolveAssistantOnboardingStatePath,
+  startAssistantOnboarding,
 } from '../src/assistant/onboarding-state.ts'
-import {
-  markAssistantFirstContactSeen,
-  readAssistantTelegramOnboardingFollowupFirstContactAnchor,
-  resolveAssistantFirstContactStateDocIds,
-} from '../src/assistant/first-contact.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
 import { resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
@@ -49,8 +46,6 @@ import {
   resolveMurphOnboardingFollowupActiveUntil,
   resolveMurphOnboardingFollowupSchedule,
 } from '../src/assistant/onboarding-followup-automation.ts'
-import { markAssistantOutboxIntentSentById } from '../src/assistant/outbox.ts'
-import { createAssistantRuntimeStateService } from '../src/assistant/runtime-state-service.ts'
 import { resolveAssistantStatePaths } from '../src/assistant/store/paths.ts'
 import { createTempVaultContext } from './test-helpers.ts'
 import {
@@ -175,90 +170,18 @@ async function createVaultRoot(): Promise<string> {
   return context.vaultRoot
 }
 
-async function recordAcceptedTelegramFirstContact(input: {
-  acceptedAt: string
-  markSent?: boolean
-  route: {
-    channel: string
-    deliveryTarget: string
-    identityId: string | null
-    participantId: string | null
-    threadId: string | null
-    threadIsDirect: boolean
-  }
-  turnId: string
+async function startOnboarding(input: {
+  startedAt: string
   vaultRoot: string
-}): Promise<{ intentId: string }> {
-  const sessionId = `session-${input.turnId}`
-  const state = createAssistantRuntimeStateService(input.vaultRoot)
-  await state.turns.createReceipt({
-    deliveryRequested: true,
-    prompt: 'first Telegram message',
-    provider: 'codex-cli',
-    providerModel: 'test-model',
-    sessionId,
-    startedAt: input.acceptedAt,
-    turnId: input.turnId,
-  })
-  const intent = await state.outbox.createIntent({
-    actorId: input.route.participantId,
-    channel: input.route.channel,
-    createdAt: input.acceptedAt,
-    explicitTarget: input.route.deliveryTarget,
-    identityId: input.route.identityId,
-    message: 'ordinary Telegram reply',
-    sessionId,
-    threadId: input.route.threadId,
-    threadIsDirect: input.route.threadIsDirect,
-    turnId: input.turnId,
-  })
-  if (input.markSent !== false) {
-    await markAssistantOutboxIntentSentById({
-      delivery: createAcceptedTelegramDelivery(input),
-      intentId: intent.intentId,
-      vault: input.vaultRoot,
-    })
-  }
-  await state.turns.finalizeReceipt({
-    completedAt: input.acceptedAt,
-    deliveryDisposition: input.markSent === false ? 'queued' : 'sent',
-    deliveryIntentId: intent.intentId,
-    response: 'ordinary Telegram reply',
-    status: input.markSent === false ? 'deferred' : 'completed',
-    turnId: input.turnId,
-  })
-  await markAssistantFirstContactSeen({
-    docIds: resolveAssistantFirstContactStateDocIds(input.route),
-    onboardingFollowupAcceptedTurnId: input.turnId,
-    seenAt: input.acceptedAt,
+}): Promise<void> {
+  await startAssistantOnboarding({
+    startedAt: input.startedAt,
     vault: input.vaultRoot,
   })
-  return { intentId: intent.intentId }
-}
-
-function createAcceptedTelegramDelivery(input: {
-  acceptedAt: string
-  route: {
-    channel: string
-    deliveryTarget: string
-    threadId: string | null
-  }
-  turnId: string
-}) {
-  return {
-    channel: input.route.channel,
-    idempotencyKey: null,
-    messageLength: 23,
-    providerMessageId: `provider-${input.turnId}`,
-    providerThreadId: input.route.threadId,
-    sentAt: input.acceptedAt,
-    target: input.route.deliveryTarget,
-    targetKind: 'thread' as const,
-  }
 }
 
 describe('applyMurphManagedAutomations core integration', () => {
-  it('seeds one finite direct-Telegram follow-up only after durable first contact and preserves archive', async () => {
+  it('seeds one finite follow-up from durable onboarding start and preserves archive', async () => {
     const vaultRoot = await createVaultRoot()
     const route = {
       channel: 'telegram',
@@ -274,43 +197,47 @@ describe('applyMurphManagedAutomations core integration', () => {
       participantId: 'different-ambient-participant',
       threadId: 'different-ambient-thread',
     }
-    const beforeFirstContact = await applyMurphManagedAutomations({
+    await applyMurphManagedAutomations({
       defaultRoute: ambientRoute,
       now: new Date('2026-08-20T12:00:00.000Z'),
       vaultRoot,
     })
-    expect(beforeFirstContact.onboardingFollowupSeeded).toBeUndefined()
     await expect(showAutomation({
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       vaultRoot,
     })).resolves.toBeNull()
 
-    await recordAcceptedTelegramFirstContact({
-      acceptedAt: '2026-08-20T12:01:00.000Z',
-      route,
-      turnId: 'turn-first-contact',
+    await startOnboarding({
+      startedAt: '2026-08-20T12:01:00.000Z',
       vaultRoot,
     })
 
-    // A later accepted reply cannot replace the exact first-contact turn.
-    await recordAcceptedTelegramFirstContact({
-      acceptedAt: '2026-08-21T12:01:00.000Z',
-      route,
-      turnId: 'turn-later-reply',
+    // Replaying activation cannot move the original onboarding window.
+    await startOnboarding({
+      startedAt: '2026-08-21T12:01:00.000Z',
       vaultRoot,
     })
-    await expect(
-      readAssistantTelegramOnboardingFollowupFirstContactAnchor(vaultRoot),
-    ).resolves.toMatchObject({ acceptedTurnId: 'turn-first-contact' })
+    await expect(readAssistantOnboardingState(vaultRoot)).resolves.toMatchObject({
+      createdAt: '2026-08-20T12:01:00.000Z',
+      status: 'open',
+    })
 
-    // A later managed retry wake has no fresh inbound route. It must recover
-    // the exact first-contact route instead of the different ambient managed
-    // route, and it must keep the window anchored to the original accepted turn.
-    const first = await applyMurphManagedAutomations({
+    await applyMurphManagedAutomations({
+      defaultRoute: null,
+      now: new Date('2026-08-22T12:01:30.000Z'),
+      vaultRoot,
+    })
+    await expect(showAutomation({
+      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+      vaultRoot,
+    })).resolves.toBeNull()
+
+    // The first available direct route completes the activation-owned seed.
+    await applyMurphManagedAutomations({
+      defaultRoute: route,
       now: new Date('2026-08-22T12:02:00.000Z'),
       vaultRoot,
     })
-    expect(first.onboardingFollowupSeeded).toBe(true)
 
     const automation = await showAutomation({
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
@@ -340,11 +267,10 @@ describe('applyMurphManagedAutomations core integration', () => {
       }),
     )
 
-    const replay = await applyMurphManagedAutomations({
+    await applyMurphManagedAutomations({
       now: new Date('2026-08-22T12:03:00.000Z'),
       vaultRoot,
     })
-    expect(replay.onboardingFollowupSeeded).toBeUndefined()
     await expect(showAutomation({
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       vaultRoot,
@@ -355,18 +281,17 @@ describe('applyMurphManagedAutomations core integration', () => {
       status: 'archived',
       vaultRoot,
     })
-    const afterArchive = await applyMurphManagedAutomations({
+    await applyMurphManagedAutomations({
       now: new Date('2026-08-22T12:04:00.000Z'),
       vaultRoot,
     })
-    expect(afterArchive.onboardingFollowupSeeded).toBeUndefined()
     await expect(showAutomation({
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       vaultRoot,
     })).resolves.toMatchObject({ status: 'archived' })
   })
 
-  it('does not turn a historical first-contact marker into a new follow-up window', async () => {
+  it('does not turn an expired onboarding start into a new follow-up window', async () => {
     const vaultRoot = await createVaultRoot()
     const route = {
       channel: 'telegram',
@@ -376,147 +301,16 @@ describe('applyMurphManagedAutomations core integration', () => {
       threadId: 'telegram-historical-thread',
       threadIsDirect: true,
     }
-    await markAssistantFirstContactSeen({
-      docIds: resolveAssistantFirstContactStateDocIds(route),
-      seenAt: '2026-07-01T12:01:00.000Z',
-      vault: vaultRoot,
-    })
-    await recordAcceptedTelegramFirstContact({
-      acceptedAt: '2026-08-20T12:01:00.000Z',
-      route,
-      turnId: 'turn-after-historical-marker',
+    await startOnboarding({
+      startedAt: '2026-07-01T12:01:00.000Z',
       vaultRoot,
     })
-    await expect(
-      readAssistantTelegramOnboardingFollowupFirstContactAnchor(vaultRoot),
-    ).resolves.toBeNull()
-
-    const result = await applyMurphManagedAutomations({
+    await applyMurphManagedAutomations({
       defaultRoute: route,
       now: new Date('2026-08-20T12:02:00.000Z'),
       vaultRoot,
     })
 
-    expect(result.onboardingFollowupSeeded).toBeUndefined()
-    await expect(showAutomation({
-      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-      vaultRoot,
-    })).resolves.toBeNull()
-  })
-
-  it('keeps one immutable accepted-turn anchor when first-contact writes race', async () => {
-    const vaultRoot = await createVaultRoot()
-    const docIds = resolveAssistantFirstContactStateDocIds({
-      actorId: 'telegram-race-participant',
-      channel: 'telegram',
-      identityId: 'telegram-race-identity',
-      threadId: 'telegram-race-thread',
-      threadIsDirect: true,
-    })
-    await Promise.all([
-      markAssistantFirstContactSeen({
-        docIds,
-        onboardingFollowupAcceptedTurnId: 'turn-race-a',
-        seenAt: '2026-08-20T12:01:00.000Z',
-        vault: vaultRoot,
-      }),
-      markAssistantFirstContactSeen({
-        docIds,
-        onboardingFollowupAcceptedTurnId: 'turn-race-b',
-        seenAt: '2026-08-20T12:01:00.001Z',
-        vault: vaultRoot,
-      }),
-    ])
-    const racedAnchor =
-      await readAssistantTelegramOnboardingFollowupFirstContactAnchor(vaultRoot)
-    expect(['turn-race-a', 'turn-race-b']).toContain(racedAnchor?.acceptedTurnId)
-
-    await markAssistantFirstContactSeen({
-      docIds,
-      onboardingFollowupAcceptedTurnId: 'turn-after-race',
-      seenAt: '2026-08-20T12:02:00.000Z',
-      vault: vaultRoot,
-    })
-    await expect(
-      readAssistantTelegramOnboardingFollowupFirstContactAnchor(vaultRoot),
-    ).resolves.toEqual(racedAnchor)
-  })
-
-  it('waits for the exact first reply intent to be sent before seeding', async () => {
-    const vaultRoot = await createVaultRoot()
-    const route = {
-      channel: 'telegram',
-      deliveryTarget: 'telegram-pending-target',
-      identityId: 'telegram-pending-identity',
-      participantId: 'telegram-pending-participant',
-      threadId: 'telegram-pending-thread',
-      threadIsDirect: true,
-    }
-    const acceptedAt = '2026-08-20T12:01:00.000Z'
-    const turnId = 'turn-pending-first-contact'
-    const { intentId } = await recordAcceptedTelegramFirstContact({
-      acceptedAt,
-      markSent: false,
-      route,
-      turnId,
-      vaultRoot,
-    })
-
-    const beforeProviderSend = await applyMurphManagedAutomations({
-      defaultRoute: route,
-      now: new Date('2026-08-20T12:02:00.000Z'),
-      vaultRoot,
-    })
-    expect(beforeProviderSend.onboardingFollowupSeeded).toBeUndefined()
-    await expect(showAutomation({
-      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-      vaultRoot,
-    })).resolves.toBeNull()
-
-    await markAssistantOutboxIntentSentById({
-      delivery: createAcceptedTelegramDelivery({ acceptedAt, route, turnId }),
-      intentId,
-      vault: vaultRoot,
-    })
-    const afterProviderSend = await applyMurphManagedAutomations({
-      now: new Date('2026-08-20T12:03:00.000Z'),
-      vaultRoot,
-    })
-    expect(afterProviderSend.onboardingFollowupSeeded).toBe(true)
-    await expect(showAutomation({
-      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-      vaultRoot,
-    })).resolves.toMatchObject({ route, status: 'active' })
-  })
-
-  it('does not recreate a missing follow-up after the original first-contact window expires', async () => {
-    const vaultRoot = await createVaultRoot()
-    const route = {
-      channel: 'telegram',
-      deliveryTarget: 'telegram-expired-target',
-      identityId: 'telegram-expired-identity',
-      participantId: 'telegram-expired-participant',
-      threadId: 'telegram-expired-thread',
-      threadIsDirect: true,
-    }
-    await recordAcceptedTelegramFirstContact({
-      acceptedAt: '2026-08-01T12:01:00.000Z',
-      route,
-      turnId: 'turn-expired-first-contact',
-      vaultRoot,
-    })
-
-    const result = await applyMurphManagedAutomations({
-      defaultRoute: {
-        ...route,
-        deliveryTarget: 'different-current-target',
-        threadId: 'different-current-thread',
-      },
-      now: new Date('2026-08-20T12:02:00.000Z'),
-      vaultRoot,
-    })
-
-    expect(result.onboardingFollowupSeeded).toBeUndefined()
     await expect(showAutomation({
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       vaultRoot,
@@ -524,9 +318,13 @@ describe('applyMurphManagedAutomations core integration', () => {
   })
 
   it.each([
-    ['a Telegram group', { channel: 'telegram', threadIsDirect: false }],
-    ['a Linq direct chat', { channel: 'linq', threadIsDirect: true }],
-  ])('does not seed the onboarding follow-up for %s', async (_label, override) => {
+    ['a Telegram group', { channel: 'telegram', threadIsDirect: false }, false],
+    ['a Linq direct chat', { channel: 'linq', threadIsDirect: true }, true],
+  ])('seeds the onboarding follow-up for %s only when direct', async (
+    _label,
+    override,
+    shouldSeed,
+  ) => {
     const vaultRoot = await createVaultRoot()
     const route = {
       channel: override.channel,
@@ -536,29 +334,28 @@ describe('applyMurphManagedAutomations core integration', () => {
       threadId: 'channel-thread',
       threadIsDirect: override.threadIsDirect,
     }
-    await markAssistantFirstContactSeen({
-      docIds: resolveAssistantFirstContactStateDocIds(route),
-      seenAt: '2026-08-20T12:01:00.000Z',
+    await startAssistantOnboarding({
+      startedAt: '2026-08-20T12:01:00.000Z',
       vault: vaultRoot,
     })
-    const result = await applyMurphManagedAutomations({
+    await applyMurphManagedAutomations({
       defaultRoute: route,
       now: new Date('2026-08-20T12:02:00.000Z'),
       vaultRoot,
     })
 
-    expect(result.onboardingFollowupSeeded).toBeUndefined()
-    await expect(showAutomation({
+    const automation = await showAutomation({
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
       vaultRoot,
-    })).resolves.toBeNull()
+    })
+    expect(automation === null).toBe(!shouldSeed)
   })
 
   it.each([
     ['completed', 'user_answered'],
     ['declined', 'user_declined'],
   ] as const)(
-    'does not reopen a %s onboarding relationship after Telegram first contact',
+    'does not reopen a %s onboarding relationship after activation',
     async (_label, completionReason) => {
       const vaultRoot = await createVaultRoot()
       const route = {
@@ -569,10 +366,8 @@ describe('applyMurphManagedAutomations core integration', () => {
         threadId: 'telegram-completed-thread',
         threadIsDirect: true,
       }
-      await recordAcceptedTelegramFirstContact({
-        acceptedAt: '2026-08-20T12:01:00.000Z',
-        route,
-        turnId: `turn-${completionReason}`,
+      await startOnboarding({
+        startedAt: '2026-08-20T12:01:00.000Z',
         vaultRoot,
       })
       await completeAssistantOnboarding({
@@ -581,13 +376,12 @@ describe('applyMurphManagedAutomations core integration', () => {
         vault: vaultRoot,
       })
 
-      const result = await applyMurphManagedAutomations({
+      await applyMurphManagedAutomations({
         defaultRoute: route,
         now: new Date('2026-08-20T12:03:00.000Z'),
         vaultRoot,
       })
 
-      expect(result.onboardingFollowupSeeded).toBeUndefined()
       await expect(showAutomation({
         slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
         vaultRoot,

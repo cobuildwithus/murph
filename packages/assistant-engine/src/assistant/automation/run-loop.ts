@@ -21,9 +21,7 @@ import {
 } from '../outbox.js'
 import type { AssistantProviderTraceEvent } from '../provider-traces.js'
 import type { AssistantProviderProgressEvent } from '../provider-progress.js'
-import type {
-  AssistantTurnEnvironment,
-} from '../service-contracts.js'
+import type { AssistantTurnEnvironment } from '../service-contracts.js'
 import { buildAssistantOutboxSummary } from '../outbox/summary.js'
 import { maybeRunAssistantRuntimeMaintenance } from '../runtime-budgets.js'
 import {

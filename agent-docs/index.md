@@ -161,15 +161,13 @@ catalog-position image provenance, single-message fallback ownership, and
 valid-envelope retry classification across all Telegram send operations are
 specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 
-Direct Telegram onboarding preserves member-initiated first contact: activation
-stays silent, while accepted private onboarding delivery commits the durable
-first-contact marker with an immutable accepted-turn pointer; post-checkpoint
-managed maintenance resolves that turn's completed receipt and exact sent
-outbox route before seeding the same finite, idempotent next-local-day follow-up
-used by proactive signup channels. Historical markers and retries outside the
-original window remain ineligible.
-Bounded write retry without input replay, archive preservation, runtime event
-ownership, and hosted-local proof are specified by `ARCHITECTURE.md`,
+Durable onboarding follow-up enrollment is activation-owned across standard
+Linq, Linq instant-start, and Telegram. Activation persists one canonical start
+and independently carries any available direct route; a missing Telegram route
+is filled later by ordinary managed reconciliation without moving the original
+finite window. Welcome delivery is optional and never owns enrollment.
+Direct-route enforcement, bounded write retry, archive preservation, and
+hosted-local proof are specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`,
 `packages/assistant-runtime/README.md`, and
 `agent-docs/references/testing-ci-map.md`.
