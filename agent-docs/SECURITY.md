@@ -1416,7 +1416,7 @@ Last verified: 2026-08-20
   stale operator-shell export cannot reach preparation, runtimes, or Chromium.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
-- The protected native iOS PR E2E lane may share a Junction sandbox only through
+- The protected native iOS and Android PR E2E lanes may share a Junction sandbox only through
   an explicit non-empty `JUNCTION_CLIENT_USER_ID_NAMESPACE` whose default is
   absent everywhere else. The dedicated Vercel custom environment is the sole
   namespace value owner: the controller reads that exact non-sensitive variable by its
@@ -1445,6 +1445,20 @@ Last verified: 2026-08-20
   subject, provider mapping and condition, service-account policies,
   hosted-crypto variables, and key-level IAM before the first credentialed
   sweep.
+  Android reuses this exact namespace, isolated database, Privy principal, and
+  Vercel custom environment through the existing trusted cleanup owner. The
+  two destructive native jobs therefore share one non-canceling live lock.
+  Android dispatch accepts only a separately configured reviewed commit behind
+  an immutable lightweight private-repository tag, an exact hosted Web SHA and
+  origin, and a short-lived lease. The public controller may hold only Actions
+  write and Contents read in that private repository. Its existing protected
+  process mints repository-scoped installation tokens just in time, refreshes
+  them before expiry, and removes the App private key from the environment
+  before child commands; it never receives the fixed OTP, reads private job
+  logs or artifacts, or executes candidate code with credentials. The private workflow keeps raw instrumentation/provider
+  output in runner-temporary storage, publishes only one closed allowlisted
+  stage summary, and removes all raw output before completion. Its production
+  canary owns no database, Privy, or Junction reset authority.
 - Cloudflare hosted deploys intentionally run the manual predeploy gates, hosted Codex auth guard, production build prep, Wrangler deploy, and deployed endpoint smoke on protected-main Blacksmith runners. Treat that as the only approved Blacksmith production-secret trust expansion: keep the workflow protected-main-only before environment attachment, scope production secrets to the validation, render, deploy, and smoke steps after checkout verification, and do not move any broader production secret access to Blacksmith without a fresh security review and durable docs update.
 - Cloudflare runner Containers must explicitly render Wrangler SSH disabled for
   every class and must contain no authorized keys. Deploy automation must not

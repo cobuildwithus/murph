@@ -4,17 +4,15 @@ import path from "node:path";
 import {
   cleanupE2e,
   normalizeJunctionClientUserIdNamespace,
-  proveRunPostconditions,
+  proveAndroidRunPostconditions,
 } from "./native-ios-hosted-e2e-identity.mjs";
-import { dispatchAndWait } from "./native-ios-hosted-e2e-native.mjs";
+import { dispatchAndWait } from "./native-android-hosted-e2e-native.mjs";
 import {
-  NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
-  NATIVE_IOS_HOSTED_E2E_LANE_MARKER,
-  NATIVE_IOS_HOSTED_E2E_VERCEL_TARGET,
   assertSafeId,
   assertSha,
   requiredEnv,
 } from "./native-ios-hosted-e2e-support.mjs";
+import { runPrLifecycle } from "./native-ios-hosted-e2e.mjs";
 import {
   createE2eDeployment,
   readE2eJunctionClientUserIdNamespace,
@@ -22,68 +20,17 @@ import {
   waitForE2eDeployment,
 } from "./native-ios-hosted-e2e-vercel.mjs";
 
-export {
-  NATIVE_IOS_HOSTED_E2E_CONTRACT_VERSION,
-  NATIVE_IOS_HOSTED_E2E_LANE_MARKER,
-  NATIVE_IOS_HOSTED_E2E_VERCEL_TARGET,
-};
-
-export async function runPrLifecycle({
-  cleanup,
-  deploy,
-  dispatch,
-  laneLabel = "Native iOS E2E",
-  now,
-  postconditions,
-  retire,
-}) {
-  let primaryError = null;
-  let primaryStage = "retire_before_run";
-  let finalizationError = null;
-  let finalizationStage = "retire_after_run";
-  try {
-    await retire();
-    primaryStage = "cleanup_before_run";
-    await cleanup();
-    const startedAtMs = now();
-    primaryStage = "deploy";
-    const webBaseUrl = await deploy();
-    primaryStage = "dispatch";
-    await dispatch(webBaseUrl);
-    primaryStage = "postconditions";
-    await postconditions(startedAtMs);
-  } catch (error) {
-    primaryError = error;
-  } finally {
-    try {
-      // Retire callback-capable Web deployments before provider or database state.
-      await retire();
-      finalizationStage = "cleanup_after_run";
-      await cleanup();
-    } catch (error) {
-      finalizationError = error;
-    }
-  }
-  if (finalizationError) {
-    const message = primaryError
-      ? `${laneLabel} failed at ${primaryStage}; fail-closed finalization failed at ${finalizationStage}.`
-      : `${laneLabel} finalization failed at ${finalizationStage}.`;
-    if (primaryError) throw new AggregateError([primaryError, finalizationError], message);
-    throw new Error(message, { cause: finalizationError });
-  }
-  if (primaryError) throw primaryError;
-}
-
 async function runPr(args) {
   const sha = requiredArg(args, "sha");
   const ref = requiredArg(args, "ref");
   const correlationId = requiredArg(args, "correlation-id");
   const prNumber = requiredPositiveIntegerArg(args, "pr-number");
   const repository = requiredEnv("GITHUB_REPOSITORY");
-  const webGithubToken = requiredEnv("NATIVE_IOS_E2E_WEB_GITHUB_TOKEN");
-  delete process.env.NATIVE_IOS_E2E_WEB_GITHUB_TOKEN;
+  const webGithubToken = requiredEnv("NATIVE_ANDROID_E2E_WEB_GITHUB_TOKEN");
+  delete process.env.NATIVE_ANDROID_E2E_WEB_GITHUB_TOKEN;
   assertSha(sha, "PR SHA");
   assertSafeId(correlationId, "correlation id", 120);
+
   const junctionClientUserIdNamespace = normalizeJunctionClientUserIdNamespace(
     await readE2eJunctionClientUserIdNamespace(),
   );
@@ -93,6 +40,7 @@ async function runPr(args) {
   let candidateDeploymentId = null;
 
   await runPrLifecycle({
+    laneLabel: "Native Android E2E",
     cleanup: () => cleanupE2e(junctionClientUserIdNamespace),
     deploy: async () => {
       const created = await createE2eDeployment({ correlationId, ref, sha });
@@ -107,7 +55,7 @@ async function runPr(args) {
       webSha: sha,
     }),
     now: Date.now,
-    postconditions: (startedAtMs) => proveRunPostconditions(
+    postconditions: (startedAtMs) => proveAndroidRunPostconditions(
       startedAtMs,
       junctionClientUserIdNamespace,
     ),
@@ -127,7 +75,9 @@ async function runCanary(args) {
 function parseArgs(argv) {
   const out = new Map();
   for (let i = 0; i < argv.length; i += 2) {
-    if (!argv[i]?.startsWith("--") || argv[i + 1] === undefined) throw new Error("Expected --key value arguments.");
+    if (!argv[i]?.startsWith("--") || argv[i + 1] === undefined) {
+      throw new Error("Expected --key value arguments.");
+    }
     out.set(argv[i].slice(2), argv[i + 1]);
   }
   return out;
@@ -141,9 +91,13 @@ function requiredArg(args, name) {
 
 function requiredPositiveIntegerArg(args, name) {
   const value = requiredArg(args, name);
-  if (!/^[1-9][0-9]*$/u.test(value)) throw new Error(`--${name} must be a positive integer.`);
+  if (!/^[1-9][0-9]*$/u.test(value)) {
+    throw new Error(`--${name} must be a positive integer.`);
+  }
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed)) throw new Error(`--${name} must be a positive integer.`);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(`--${name} must be a positive integer.`);
+  }
   return parsed;
 }
 
