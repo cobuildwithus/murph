@@ -372,12 +372,82 @@ Last verified: 2026-08-20
   model and pricing source in the snapshot; unknown non-Venice standard
   provider evidence retains the existing OpenAI-compatible behavior.
 - The operator `/ops/usage` collection is bounded independently of lifetime
-  member count. It reads at most 26 hosted-member primary keys to admit a
-  25-row page, uses one scalar whole-population aggregate, filters mailbox and
-  immutable-usage groupings to those 25 IDs, and runs the canonical allowance
+  member count. The ordinary list reads at most 26 hosted-member primary keys
+  to admit a 25-row page. Search instead reads one ID-ordered cap-plus-one
+  candidate set and hydrates at most 100 matches: hosted IDs stay in the member
+  owner, verified email uses only existing blind-index read candidates, and the
+  final-four phone query uses the persisted masked hint. Search has no cursor
+  pages and surfaces the 101st row only as overflow evidence. The suffix
+  predicate has no dedicated index and may inspect the identity table, so it is
+  an operator-only lookup and must not become a hot-path or background scan.
+  Any capped or multi-member email/phone candidate set is discovery-only and
+  keeps mutations locked until exact hosted-ID lookup resolves the target.
+  Both modes use one scalar unfiltered whole-population aggregate, scope mailbox
+  and immutable-usage groupings to admitted IDs, and run the canonical allowance
   gate sequentially in one short repeatable-read transaction per displayed
   member. No transaction spans members, no off-page member reaches the gate,
   and peak added transactional connection ownership is one.
+  Starting any URL-backed search closes an open row confirmation and locks all
+  row mutation entrypoints until the new server render replaces the old result
+  set, so a stale row cannot be reset during navigation.
+- One authenticated same-origin reset-everyone request reads at most 11
+  ascending hosted-member IDs, admits 10, and invokes the existing canonical
+  per-member serializable reset sequentially. It performs at most one stale
+  re-read for that member, stops before acknowledging a remaining failure, and
+  calls the bounded runtime recheck only after the member transaction commits.
+  All runtime rechecks in that request share one five-second deadline; after it
+  expires, later latency hints become pending without another provider call,
+  while the remaining canonical member transactions continue sequentially.
+  The browser issues at most one batch request at a time, offers a pause that
+  takes effect only after the current acknowledged batch, and carries the last
+  acknowledged ID plus one operation UUID created at destructive confirmation;
+  there is no population snapshot, concurrent interactive transaction fanout,
+  queue, scheduler, or persisted campaign. A known failure resumes strictly
+  after the acknowledged cursor, while an ambiguous population response may
+  rewalk from the beginning with the same UUID. Hiding a paused dialog keeps
+  that UUID and cursor and keeps conflicting mutations locked. One validated,
+  operator-bound same-tab `sessionStorage` locator also restores the UUID, the
+  unfiltered starting population count, last acknowledged cursor, counts, and
+  recovery phase after a component remount,
+  same-tab navigation, reload, or browser-provided restoration of that tab
+  session. An operator identity mismatch discards it; it does not provide
+  cross-tab, new-tab, or closed-session recovery. The client must synchronously
+  persist that locator before the first or any next mutation request; storage
+  failure pauses without issuing the request. Explicit warned abandonment
+  removes the locator before another UUID can start. This browser record is not
+  a campaign or replay authority; the immutable member receipt below remains
+  the sole effect owner. After population completion,
+  committed wake recovery instead pages at most 11 existing wake-required
+  receipts for that UUID, admits 10, and invokes only sequential bounded runtime
+  rechecks under one five-second request deadline. It never reads current
+  hosted-member rows or enters the reset transaction, so a member created after
+  confirmation cannot join the old operation. That receipt-only phase may be
+  hidden without locking ordinary search or row recovery, stays hidden across
+  remounts and search navigation until the operator explicitly resumes it,
+  reopens under the same UUID, or clears only after a transient warned
+  abandonment; the abandonment presentation is not persisted.
+  Each population member first reads the append-only
+  `(operation_id, member_id)` reset receipt;
+  the initial serializable member transaction writes that receipt atomically
+  with any reset or grant, and one bounded conflict retry covers a concurrent
+  request that races the same receipt. Receipt replay returns the frozen reset,
+  unchanged, or skipped outcome without mutating current usage, while a frozen
+  wake requirement may repeat only the bounded post-commit runtime recheck.
+  A non-retryable `HOSTED_RUNTIME_USER_INACTIVE` result terminally settles that
+  wake because no runtime remains applicable; retryable inactive results,
+  transport failures, and orchestration timeouts remain pending.
+  The locked transaction is the only outcome authority: it reads the live gate
+  and exact period after the member lock. A valid included allowance with no
+  materialized zero-usage period commits a skipped receipt and advances; if
+  accounting materializes the period first, the reset observes that row, while
+  accounting after a committed skip remains later usage protected by replay.
+  The receipt is the only replay authority. Starter grants also retain the UUID
+  in their existing immutable semantic key solely for append-time uniqueness.
+  Thus a lost response cannot re-clear later included usage or append another
+  grant after consumption. Receipt lookup is one compound-primary-key read per
+  admitted member and initial mutation adds one insert; fixed sequential
+  cardinality and peak connection ownership remain unchanged. Receipts contain
+  no decrypted contact fact and cascade with member deletion.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing

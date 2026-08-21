@@ -5,8 +5,11 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   assertHostedOnboardingMutationOrigin: vi.fn(),
+  readHostedOpsMemberUsageResetAllBatch: vi.fn(),
+  readHostedOpsMemberUsageResetAllWakeBatch: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   resetHostedOpsMemberUsage: vi.fn(),
+  resetHostedOpsMemberUsageForResetAll: vi.fn(),
   signalHostedRuntimeRecheckRuntime: vi.fn(),
 }));
 
@@ -26,7 +29,13 @@ vi.mock("@/src/lib/hosted-ops/member-usage", async () => {
   >("@/src/lib/hosted-ops/member-usage");
   return {
     ...actual,
+    readHostedOpsMemberUsageResetAllBatch:
+      mocks.readHostedOpsMemberUsageResetAllBatch,
+    readHostedOpsMemberUsageResetAllWakeBatch:
+      mocks.readHostedOpsMemberUsageResetAllWakeBatch,
     resetHostedOpsMemberUsage: mocks.resetHostedOpsMemberUsage,
+    resetHostedOpsMemberUsageForResetAll:
+      mocks.resetHostedOpsMemberUsageForResetAll,
   };
 });
 
@@ -41,8 +50,12 @@ import {
   HostedOpsMemberUsageResetStaleError,
 } from "@/src/lib/hosted-ops/member-usage";
 import {
+  HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+} from "@/src/lib/hosted-ops/member-usage-contract";
+import {
   HOSTED_POST_COMMIT_TIMEOUT_MS,
 } from "@/src/lib/hosted-onboarding/bounded-post-commit";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 type RouteModule = typeof import("../app/api/ops/usage-reset/route");
 
@@ -51,6 +64,7 @@ const PERIOD_START = "2026-07-01T00:00:00.000Z";
 const PERIOD_UPDATED_AT = "2026-07-22T17:30:00.000Z";
 const OPERATOR_MEMBER_ID = "hbm_operator";
 const TARGET_MEMBER_ID = "hbm_target";
+const RESET_ALL_OPERATION_ID = "12345678-1234-4abc-8def-1234567890ab";
 const originalOpsMemberIds = process.env.HOSTED_OPS_MEMBER_IDS;
 let route: RouteModule;
 let consoleInfoSpy: ReturnType<typeof vi.spyOn>;
@@ -69,7 +83,24 @@ describe("hosted ops usage reset route", () => {
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: OPERATOR_MEMBER_ID },
     });
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValue({
+      hasMore: false,
+      memberIds: [],
+    });
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValue({
+      hasMore: false,
+      receipts: [],
+    });
     mocks.resetHostedOpsMemberUsage.mockResolvedValue(makeResult());
+    mocks.resetHostedOpsMemberUsageForResetAll.mockImplementation(
+      async ({ memberId }: { memberId: string }) => ({
+        memberId,
+        outcome: "unchanged",
+        resetMode: "included_usage",
+        runtimeRecheckRequired: true,
+        timestamp: NOW.toISOString(),
+      }),
+    );
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:hbm_target",
@@ -226,6 +257,627 @@ describe("hosted ops usage reset route", () => {
     expect(observedAbortSignal.aborted).toBe(true);
   });
 
+  test("requires the exact destructive confirmation before reading a reset-everyone batch", async () => {
+    const response = await route.POST(makeResetAllRequest({
+      confirmation: "reset everyone",
+    }));
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION_INVALID",
+        message: `Type ${HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION} to continue.`,
+        retryable: false,
+      },
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedOpsMemberUsageResetAllBatch).not.toHaveBeenCalled();
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+  });
+
+  test("requires a valid operation UUID before reading a reset-everyone batch", async () => {
+    const response = await route.POST(makeResetAllRequest({
+      operationId: "not-a-uuid",
+    }));
+
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), {
+      error: {
+        code: "HOSTED_OPS_USAGE_RESET_ALL_OPERATION_ID_INVALID",
+        message: "Restart Reset everyone from the confirmation dialog.",
+        retryable: false,
+      },
+    });
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledTimes(1);
+    expect(mocks.readHostedOpsMemberUsageResetAllBatch).not.toHaveBeenCalled();
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+  });
+
+  test("processes reset-everyone members sequentially and rechecks only after each commit", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds: ["hbm_reset_001", "hbm_reset_002"],
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_001",
+        outcome: "reset",
+        resetMode: "starter_allowance",
+        runtimeRecheckRequired: true,
+        timestamp: NOW.toISOString(),
+      })
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_002",
+        outcome: "unchanged",
+        resetMode: "included_usage",
+        runtimeRecheckRequired: true,
+        timestamp: NOW.toISOString(),
+      });
+    mocks.signalHostedRuntimeRecheckRuntime
+      .mockResolvedValueOnce({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:hbm_reset_001",
+      })
+      .mockRejectedValueOnce(new Error("Temporal unavailable"));
+
+    try {
+      const response = await route.POST(makeResetAllRequest());
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        counts: {
+          failed: 0,
+          pendingWake: 1,
+          processed: 2,
+          reset: 1,
+          skipped: 0,
+          unchanged: 1,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_002",
+      });
+      const resetCallOrder = mocks.resetHostedOpsMemberUsageForResetAll
+        .mock.invocationCallOrder;
+      const wakeCallOrder = mocks.signalHostedRuntimeRecheckRuntime
+        .mock.invocationCallOrder;
+      expect(resetCallOrder[0]).toBeLessThan(Number(wakeCallOrder[0]));
+      expect(wakeCallOrder[0]).toBeLessThan(Number(resetCallOrder[1]));
+      expect(resetCallOrder[1]).toBeLessThan(Number(wakeCallOrder[1]));
+      expect(mocks.resetHostedOpsMemberUsageForResetAll)
+        .toHaveBeenNthCalledWith(1, {
+          memberId: "hbm_reset_001",
+          operationId: RESET_ALL_OPERATION_ID,
+        });
+      expect(mocks.resetHostedOpsMemberUsageForResetAll)
+        .toHaveBeenNthCalledWith(2, {
+          memberId: "hbm_reset_002",
+          operationId: RESET_ALL_OPERATION_ID,
+        });
+      expect(consoleInfoSpy).toHaveBeenCalledWith(
+        "Hosted ops reset-everyone batch completed.",
+        {
+          counts: {
+            failed: 0,
+            pendingWake: 1,
+            processed: 2,
+            reset: 1,
+            skipped: 0,
+            unchanged: 1,
+          },
+          done: true,
+          stoppedOnFailure: false,
+        },
+      );
+      expect(JSON.stringify(consoleInfoSpy.mock.calls)).not.toContain(
+        "hbm_reset_001",
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("shares one wake deadline across the maximum reset-everyone batch", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const memberIds = Array.from(
+      { length: 10 },
+      (_, index) => `hbm_reset_${String(index + 1).padStart(3, "0")}`,
+    );
+    let activeResetTransactions = 0;
+    let maximumActiveResetTransactions = 0;
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds,
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll.mockImplementation(
+      async ({ memberId }: { memberId: string }) => {
+        activeResetTransactions += 1;
+        maximumActiveResetTransactions = Math.max(
+          maximumActiveResetTransactions,
+          activeResetTransactions,
+        );
+        await Promise.resolve();
+        activeResetTransactions -= 1;
+        return {
+          memberId,
+          outcome: "unchanged",
+          resetMode: "included_usage",
+          runtimeRecheckRequired: true,
+          timestamp: NOW.toISOString(),
+        } as const;
+      },
+    );
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+
+    try {
+      const responsePromise = route.POST(makeResetAllRequest());
+      await vi.waitFor(() => {
+        expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(HOSTED_POST_COMMIT_TIMEOUT_MS);
+      const response = await responsePromise;
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        counts: {
+          failed: 0,
+          pendingWake: 10,
+          processed: 10,
+          reset: 0,
+          skipped: 0,
+          unchanged: 10,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_010",
+      });
+      expect(mocks.resetHostedOpsMemberUsageForResetAll).toHaveBeenCalledTimes(10);
+      expect(maximumActiveResetTransactions).toBe(1);
+      expect(activeResetTransactions).toBe(0);
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+      const observedAbortSignal = mocks.signalHostedRuntimeRecheckRuntime
+        .mock.calls[0]?.[0]?.abortSignal;
+      expect(observedAbortSignal).toBeInstanceOf(AbortSignal);
+      expect(observedAbortSignal.aborted).toBe(true);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("keeps a healthy maximum reset batch fully serial through every wake", async () => {
+    const memberIds = Array.from(
+      { length: 10 },
+      (_, index) => `hbm_reset_${String(index + 1).padStart(3, "0")}`,
+    );
+    const events: string[] = [];
+    let activeResetTransactions = 0;
+    let activeRuntimeWakes = 0;
+    let maximumActiveResetTransactions = 0;
+    let maximumActiveRuntimeWakes = 0;
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds,
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll.mockImplementation(
+      async ({ memberId }: { memberId: string }) => {
+        events.push(`reset:start:${memberId}`);
+        activeResetTransactions += 1;
+        maximumActiveResetTransactions = Math.max(
+          maximumActiveResetTransactions,
+          activeResetTransactions,
+        );
+        await Promise.resolve();
+        activeResetTransactions -= 1;
+        events.push(`reset:end:${memberId}`);
+        return {
+          memberId,
+          outcome: "unchanged",
+          resetMode: "included_usage",
+          runtimeRecheckRequired: true,
+          timestamp: NOW.toISOString(),
+        } as const;
+      },
+    );
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        events.push(`wake:start:${userId}`);
+        activeRuntimeWakes += 1;
+        maximumActiveRuntimeWakes = Math.max(
+          maximumActiveRuntimeWakes,
+          activeRuntimeWakes,
+        );
+        await Promise.resolve();
+        activeRuntimeWakes -= 1;
+        events.push(`wake:end:${userId}`);
+        return {
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${userId}`,
+        };
+      },
+    );
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 10,
+        reset: 0,
+        skipped: 0,
+        unchanged: 10,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_010",
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).toHaveBeenCalledTimes(10);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(10);
+    expect(maximumActiveResetTransactions).toBe(1);
+    expect(maximumActiveRuntimeWakes).toBe(1);
+    expect(activeResetTransactions).toBe(0);
+    expect(activeRuntimeWakes).toBe(0);
+    for (const [index, memberId] of memberIds.entries()) {
+      const resetEnd = events.indexOf(`reset:end:${memberId}`);
+      const wakeStart = events.indexOf(`wake:start:${memberId}`);
+      const wakeEnd = events.indexOf(`wake:end:${memberId}`);
+      expect(resetEnd).toBeLessThan(wakeStart);
+      expect(wakeStart).toBeLessThan(wakeEnd);
+      if (index < memberIds.length - 1) {
+        expect(wakeEnd).toBeLessThan(
+          events.indexOf(`reset:start:${memberIds[index + 1]}`),
+        );
+      }
+    }
+  });
+
+  test("acknowledges a stable no-period skip and advances to the next member", async () => {
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds: ["hbm_reset_001", "hbm_reset_002"],
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_001",
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+        timestamp: NOW.toISOString(),
+      })
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_002",
+        outcome: "reset",
+        resetMode: "included_usage",
+        runtimeRecheckRequired: false,
+        timestamp: NOW.toISOString(),
+      });
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 2,
+        reset: 1,
+        skipped: 1,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_002",
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll)
+      .toHaveBeenNthCalledWith(2, {
+        memberId: "hbm_reset_002",
+        operationId: RESET_ALL_OPERATION_ID,
+      });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  test("settles a reset-everyone member when runtime access is terminally inactive", async () => {
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds: ["hbm_reset_001"],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      makeInactiveRuntimeError(false),
+    );
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 1,
+        reset: 0,
+        skipped: 0,
+        unchanged: 1,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    });
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted ops reset-everyone runtime recheck is no longer applicable.",
+      { timestamp: NOW.toISOString() },
+    );
+  });
+
+  test("recovers only wake-required receipts without re-entering reset transactions", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts: [
+        {
+          memberId: "hbm_reset_001",
+          timestamp: NOW.toISOString(),
+        },
+        {
+          memberId: "hbm_reset_002",
+          timestamp: NOW.toISOString(),
+        },
+      ],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime
+      .mockResolvedValueOnce({
+        signalAccepted: true,
+        workflowId: "hosted-user-runtime:hbm_reset_001",
+      })
+      .mockRejectedValueOnce(new Error("Temporal unavailable"));
+
+    try {
+      const response = await route.POST(makeWakeRecoveryRequest({
+        afterMemberId: "hbm_reset_000",
+      }));
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        attempted: 2,
+        done: true,
+        lastAcknowledgedCursor: "hbm_reset_002",
+        pendingWake: 1,
+      });
+      expect(mocks.readHostedOpsMemberUsageResetAllWakeBatch)
+        .toHaveBeenCalledWith({
+          afterMemberId: "hbm_reset_000",
+          operationId: RESET_ALL_OPERATION_ID,
+        });
+      expect(mocks.readHostedOpsMemberUsageResetAllBatch).not.toHaveBeenCalled();
+      expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+      expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+      expect(consoleInfoSpy).toHaveBeenCalledWith(
+        "Hosted ops reset-everyone wake batch completed.",
+        {
+          attempted: 2,
+          done: true,
+          pendingWake: 1,
+        },
+      );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("shares one wake deadline across the maximum receipt-only batch", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const receipts = Array.from({ length: 10 }, (_, index) => ({
+      memberId: `hbm_reset_${String(index + 1).padStart(3, "0")}`,
+      timestamp: NOW.toISOString(),
+    }));
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts,
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+
+    try {
+      const responsePromise = route.POST(makeWakeRecoveryRequest());
+      await vi.waitFor(() => {
+        expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+      });
+      await vi.advanceTimersByTimeAsync(HOSTED_POST_COMMIT_TIMEOUT_MS);
+      const response = await responsePromise;
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        attempted: 10,
+        done: true,
+        lastAcknowledgedCursor: "hbm_reset_010",
+        pendingWake: 10,
+      });
+      expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+      expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
+      expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(1);
+      const observedAbortSignal = mocks.signalHostedRuntimeRecheckRuntime
+        .mock.calls[0]?.[0]?.abortSignal;
+      expect(observedAbortSignal).toBeInstanceOf(AbortSignal);
+      expect(observedAbortSignal.aborted).toBe(true);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("attempts every healthy wake in a maximum receipt-only batch serially", async () => {
+    const receipts = Array.from({ length: 10 }, (_, index) => ({
+      memberId: `hbm_reset_${String(index + 1).padStart(3, "0")}`,
+      timestamp: NOW.toISOString(),
+    }));
+    const awakenedMemberIds: string[] = [];
+    let activeRuntimeWakes = 0;
+    let maximumActiveRuntimeWakes = 0;
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts,
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        activeRuntimeWakes += 1;
+        maximumActiveRuntimeWakes = Math.max(
+          maximumActiveRuntimeWakes,
+          activeRuntimeWakes,
+        );
+        awakenedMemberIds.push(userId);
+        await Promise.resolve();
+        activeRuntimeWakes -= 1;
+        return {
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${userId}`,
+        };
+      },
+    );
+
+    const response = await route.POST(makeWakeRecoveryRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      attempted: 10,
+      done: true,
+      lastAcknowledgedCursor: "hbm_reset_010",
+      pendingWake: 0,
+    });
+    expect(awakenedMemberIds).toEqual(
+      receipts.map((receipt) => receipt.memberId),
+    );
+    expect(maximumActiveRuntimeWakes).toBe(1);
+    expect(activeRuntimeWakes).toBe(0);
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+    expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
+  });
+
+  test("advances wake recovery past terminally inactive runtime access", async () => {
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts: [{
+        memberId: "hbm_reset_001",
+        timestamp: NOW.toISOString(),
+      }],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      makeInactiveRuntimeError(false),
+    );
+
+    const response = await route.POST(makeWakeRecoveryRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      attempted: 1,
+      done: true,
+      lastAcknowledgedCursor: "hbm_reset_001",
+      pendingWake: 0,
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+  });
+
+  test("keeps retryable inactive runtime errors pending during wake recovery", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts: [{
+        memberId: "hbm_reset_001",
+        timestamp: NOW.toISOString(),
+      }],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      makeInactiveRuntimeError(true),
+    );
+
+    try {
+      const response = await route.POST(makeWakeRecoveryRequest());
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        attempted: 1,
+        done: true,
+        lastAcknowledgedCursor: "hbm_reset_001",
+        pendingWake: 1,
+      });
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("stops at a failed member and returns the last acknowledged cursor", async () => {
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: true,
+      memberIds: ["hbm_reset_001", "hbm_reset_002", "hbm_reset_003"],
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_001",
+        outcome: "reset",
+        resetMode: "included_usage",
+        runtimeRecheckRequired: false,
+        timestamp: NOW.toISOString(),
+      })
+      .mockRejectedValueOnce(new HostedOpsMemberUsageResetNoticeInFlightError(
+        new Date(NOW.getTime() + 60_000),
+      ));
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 1,
+        pendingWake: 0,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: false,
+      failure: {
+        code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+        memberId: "hbm_reset_002",
+        message:
+          "A usage-limit notice is currently being sent. Retry from the last acknowledged member after that dispatch settles.",
+        retryable: true,
+      },
+      lastAcknowledgedCursor: "hbm_reset_001",
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).toHaveBeenCalledTimes(2);
+    expect(mocks.resetHostedOpsMemberUsageForResetAll)
+      .not.toHaveBeenCalledWith(expect.objectContaining({
+        memberId: "hbm_reset_003",
+      }));
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
+  test("continues a reset-everyone walk strictly after the acknowledged cursor", async () => {
+    const response = await route.POST(makeResetAllRequest({
+      afterMemberId: "hbm_reset_010",
+    }));
+
+    assert.equal(response.status, 200);
+    expect(mocks.readHostedOpsMemberUsageResetAllBatch).toHaveBeenCalledWith({
+      afterMemberId: "hbm_reset_010",
+    });
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 0,
+        reset: 0,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_010",
+    });
+  });
+
   test("hides the route from members outside the ops allowlist", async () => {
     mocks.requireActiveHostedAppSessionFromRequest.mockResolvedValue({
       member: { id: "hbm_other" },
@@ -317,6 +969,25 @@ function makeRequest(overrides: Record<string, unknown> = {}): Request {
   });
 }
 
+function makeResetAllRequest(
+  overrides: Record<string, unknown> = {},
+): Request {
+  return new Request("http://localhost/api/ops/usage-reset", {
+    body: JSON.stringify({
+      afterMemberId: null,
+      confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+      operation: "reset_all_batch",
+      operationId: RESET_ALL_OPERATION_ID,
+      ...overrides,
+    }),
+    headers: {
+      "content-type": "application/json",
+      origin: "http://localhost",
+    },
+    method: "POST",
+  });
+}
+
 function makeRuntimeRecheckRequest(): Request {
   return new Request("http://localhost/api/ops/usage-reset", {
     body: JSON.stringify({
@@ -328,6 +999,24 @@ function makeRuntimeRecheckRequest(): Request {
       origin: "http://localhost",
     },
     method: "POST",
+  });
+}
+
+function makeWakeRecoveryRequest(
+  overrides: Record<string, unknown> = {},
+): Request {
+  return makeResetAllRequest({
+    operation: "recover_reset_all_wakes",
+    ...overrides,
+  });
+}
+
+function makeInactiveRuntimeError(retryable: boolean): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    httpStatus: 409,
+    message: "Hosted runtime access is inactive.",
+    retryable,
   });
 }
 
