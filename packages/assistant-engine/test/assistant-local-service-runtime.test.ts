@@ -5990,6 +5990,9 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     )
   const resetScenario = () => {
     resetAcceptedInputJournal()
+    mocks.appendAssistantTranscriptEntries.mockClear()
+    mocks.appendAssistantTranscriptEntriesWithRefs.mockClear()
+    mocks.appendAssistantTurnReceiptEvent.mockClear()
     mocks.executeCodexTurnWithRecovery.mockReset()
     mocks.deliverAssistantPrecedingReplies.mockClear()
     mocks.deliverAssistantProgressUpdate.mockClear()
@@ -6001,6 +6004,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.recordAssistantUsageEvent.mockClear()
     mocks.resolveAssistantAcceptedMessageTarget.mockClear()
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mockClear()
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs.mockClear()
   }
   const addFirstDraft = (
     ready: Deferred<void>,
@@ -6448,6 +6452,61 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 
   resetScenario()
+  const abortedSilenceDraftReady = createDeferred<void>()
+  const abortController = new AbortController()
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      abortedSilenceDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-aborted-silence',
+          finalAction: { kind: 'none' },
+          response: '',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: null,
+        },
+      }
+    },
+  )
+  const abortedSilence = capture(sendAssistantMessageLocal({
+    abortSignal: abortController.signal,
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: groupConversation,
+    deliverResponse: true,
+    prompt: 'Initial human-owned group beat',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  }))
+  await abortedSilenceDraftReady.promise
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+  abortController.abort()
+  const abortedSilenceOutcome = await abortedSilence
+  assert.equal(abortedSilenceOutcome.status, 'rejected')
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
+
+  resetScenario()
   const quietSilenceDraftReady = createDeferred<void>()
   const quietNoReplyAccepted = vi.fn(async () => undefined)
   mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
@@ -6493,6 +6552,11 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
   ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
   await vi.advanceTimersByTimeAsync(4_000)
   const quietSilenceOutcome = await quietSilence
   assert.equal(quietSilenceOutcome.status, 'fulfilled')
@@ -6510,6 +6574,22 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock
       .invocationCallOrder[0],
   ).toBeLessThan(quietNoReplyAccepted.mock.invocationCallOrder[0]!)
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).toHaveBeenCalledOnce()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).toHaveBeenCalledWith(
+    '/vaults/test',
+    session.sessionId,
+    [expect.objectContaining({
+      kind: 'user',
+      text: 'Initial human-owned group beat',
+    })],
+  )
+  expect(mocks.appendAssistantTurnReceiptEvent).toHaveBeenCalledOnce()
+  expect(mocks.appendAssistantTurnReceiptEvent).toHaveBeenCalledWith(
+    expect.objectContaining({ kind: 'user.persisted' }),
+  )
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).toHaveBeenCalledOnce()
 
   resetScenario()
   const initialFailure = new Error('initial provider failed after no reply')
@@ -6561,6 +6641,11 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTurnReceiptEvent).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
   ).not.toHaveBeenCalled()
 
   resetScenario()

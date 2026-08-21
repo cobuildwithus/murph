@@ -1526,16 +1526,16 @@ export async function sendAssistantMessageLocal(
                 sessionId: currentSession.sessionId,
                 throughDeliveryContextOrdinal: deliveryContextOrdinal,
               })
-              await persistInitialUserPromptToTranscriptIfNeeded({
-                detail: 'user prompt persisted before no-reply completion',
-                prompt: currentInput.prompt,
-                vault: currentInput.vault,
-              })
-              const acceptedInputIds =
-                resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                  deliveryContextOrdinal,
-                )
               if (!holdGroupReplyDraft) {
+                await persistInitialUserPromptToTranscriptIfNeeded({
+                  detail: 'user prompt persisted before no-reply completion',
+                  prompt: currentInput.prompt,
+                  vault: currentInput.vault,
+                })
+                const acceptedInputIds =
+                  resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
+                    deliveryContextOrdinal,
+                  )
                 await currentInput.onFinishWithoutReplyAccepted?.({
                   acceptedInputIds,
                   deliveryContextOrdinal,

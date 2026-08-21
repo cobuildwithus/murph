@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-20
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -42,7 +42,7 @@ Updated: 2026-08-20
   changelog entry.
 - Out of scope: outbox or intent changes, schema/migration work, persisted drafts,
   reply-candidate or supersession models, queues/services, configuration or
-  feature flags, effect reversal, more than two provider requests, and merge.
+  feature flags, effect reversal, and more than two provider requests.
 
 ## Constraints
 
@@ -53,7 +53,8 @@ Updated: 2026-08-20
   source probe; never wait inside a database transaction.
 - Product/process constraints: smallest maintainable owner extension, fixed
   approximately four-second hold, one terminal group action, no model-directed
-  shell sleeps, no private evidence in fixtures or PR text, and do not merge.
+  shell sleeps, no private evidence in fixtures or PR text, and merge only after
+  the corrected exact head passes ReviewGPT and required CI.
 
 ## Risks and mitigations
 
@@ -86,7 +87,7 @@ Updated: 2026-08-20
    scenarios.
 5. Run focused proof and Product UX walkthrough, commit/push/open the draft PR,
    complete preliminary and final ReviewGPT gates plus required CI, resolve all
-   accepted findings, close the plan, and push the final scoped commit.
+   accepted findings, close the plan, push the final scoped commit, and merge.
 
 ## Decisions
 
@@ -163,8 +164,15 @@ Updated: 2026-08-20
   textual equivalence while exact rich-output reuse remains deliberately deferred.
   The round-1 segment-preservation correction and its incompatible expectations
   are reverted, restoring one selection owner and deleting behavior and proof.
-- Remaining: corrected pushed-head ReviewGPT round 3 and CI, parent
-  final review, plan closure, and merge-tree proof. The PR remains unmerged.
+- Round 3 confirmed the prior corrections and found one remaining provisional
+  persistence leak. The finding is accepted: request 0's no-reply callback now
+  leaves the initial user transcript, `user.persisted` receipt event, and
+  accepted-input transcript reference untouched while a group reply remains
+  held. Production-shaped proof covers abort/restart, terminal failure, and one
+  canonical user write after retry without adding lifecycle state.
+- Remaining: corrected pushed-head ReviewGPT round 4 and CI, parent final
+  review, plan closure, current-base merge-tree proof, and merge. The PR remains
+  unmerged.
 
 ## Product UX walkthrough
 
