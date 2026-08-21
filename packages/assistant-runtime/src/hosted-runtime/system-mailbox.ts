@@ -857,6 +857,23 @@ export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailu
   );
 }
 
+export async function retainHostedSystemMailboxItemUntilDeliveryWake(input: {
+  item: HostedSystemMailboxPendingItem;
+  nextWakeAt: string;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxPendingItem> {
+  const retainedItem: HostedSystemMailboxPendingItem = {
+    ...input.item,
+    nextAttemptAt: input.nextWakeAt,
+    status: "recording",
+  };
+  await updateHostedSystemMailboxPendingItem({
+    item: retainedItem,
+    vaultRoot: input.vaultRoot,
+  });
+  return retainedItem;
+}
+
 function isHostedDeviceSyncDirtyPostCheckpointRecord(
   record: HostedSystemMailboxPostCheckpointRecord,
 ): boolean {

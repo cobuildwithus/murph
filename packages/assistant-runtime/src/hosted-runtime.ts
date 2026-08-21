@@ -209,6 +209,7 @@ import {
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  retainHostedSystemMailboxItemUntilDeliveryWake,
   resolveHostedSystemMailboxNextWakeCandidate,
   type HostedSystemMailboxCheckpointPreparation,
 } from "./hosted-runtime/system-mailbox.ts";
@@ -255,6 +256,7 @@ import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "./hosted-runtime/callbacks.ts";
 import {
@@ -2805,21 +2807,40 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 signal: runtimeAbortController.signal,
                 vaultRoot: restored.vaultRoot,
               });
+              const preparationRecordItem =
+                readHostedSystemMailboxCheckpointPreparationRecordItem(
+                  preparation,
+                );
               if (
-                preparation?.status !== "processed"
+                !preparationRecordItem
                 || !isHostedSystemMailboxModelFreeExactNotificationItem(
-                  preparation.item,
+                  preparationRecordItem,
                 )
               ) {
                 return {
+                  exactDeliveryIntentState: null,
                   exactDeliveryEffects: [],
                   exactDeliveryPreparation: null,
+                  exactDeliveryRecordItem: null,
                   preparation,
                 };
               }
 
+              const deliveryIdempotencyKey =
+                preparationRecordItem.wake.kind ===
+                    "assistant.notification.requested"
+                  ? preparationRecordItem.wake.notification
+                    .deliveryIdempotencyKey ?? ""
+                  : "";
+              const exactDeliveryIntentState =
+                await resolveHostedAssistantDeliveryIntentState({
+                  deliveryIdempotencyKey,
+                  vaultRoot: restored.vaultRoot,
+                });
               const preferredIntentIds =
-                preparation.metrics.deliveryIntentIds ?? [];
+                exactDeliveryIntentState && !exactDeliveryIntentState.terminal
+                  ? [exactDeliveryIntentState.intentId]
+                  : [];
               const preferredIntentIdSet = new Set(preferredIntentIds);
               const exactDeliveryEffects =
                 (await collectHostedAssistantDeliverySideEffects({
@@ -2838,16 +2859,31 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     vaultRoot: restored.vaultRoot,
                   })
                 : null;
+              const exactDeliveryRecordItem =
+                exactDeliveryEffects.length === 0
+                  && exactDeliveryIntentState
+                  && !exactDeliveryIntentState.terminal
+                  && exactDeliveryIntentState.nextWakeAt
+                  ? await retainHostedSystemMailboxItemUntilDeliveryWake({
+                      item: preparationRecordItem,
+                      nextWakeAt: exactDeliveryIntentState.nextWakeAt,
+                      vaultRoot: restored.vaultRoot,
+                    })
+                  : preparationRecordItem;
               return {
+                exactDeliveryIntentState,
                 exactDeliveryEffects,
                 exactDeliveryPreparation,
+                exactDeliveryRecordItem,
                 preparation,
               };
             },
           });
           const {
+            exactDeliveryIntentState,
             exactDeliveryEffects,
             exactDeliveryPreparation,
+            exactDeliveryRecordItem,
             preparation,
           } = persistedPreparation.result;
           if (persistedPreparation.canonicalWritePersisted) {
@@ -2884,13 +2920,91 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (hostAbortObserved || consumeForegroundWake()) {
             return { preempted: true, prepared: preparation !== null };
           }
-          const recordItem = readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
+          const recordItem = exactDeliveryRecordItem
+            ?? readHostedSystemMailboxCheckpointPreparationRecordItem(preparation);
           if (!recordItem) {
             return { preempted: false, prepared: preparation !== null };
           }
           const ownsExactModelFreeDelivery =
             isHostedSystemMailboxModelFreeExactNotificationItem(recordItem);
-          let exactModelFreeDeliveryCompleted = false;
+          const recordSystemMailboxItem = async (recordInput: {
+            exactDeliveryCompleted: boolean;
+            item: HostedSystemMailboxCheckpointPreparationRecordItem;
+            vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
+          }): Promise<{
+            preempted: boolean;
+            prepared: boolean;
+          }> => {
+            const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
+              enabled: true,
+              runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+            });
+            const recordSignal = recordWakeInterruption.signal
+              ? AbortSignal.any([
+                  runtimeAbortController.signal,
+                  recordWakeInterruption.signal,
+                ])
+              : runtimeAbortController.signal;
+            try {
+              const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
+                item: recordInput.item,
+                operatorHomeRoot: restored.operatorHomeRoot,
+                runtime: foregroundRuntime,
+                signal: recordSignal,
+                ...(recordInput.vaultShareProjectionResult
+                  ? {
+                      vaultShareProjectionResult:
+                        recordInput.vaultShareProjectionResult,
+                    }
+                  : {}),
+                vaultRoot: restored.vaultRoot,
+              });
+              const recordWake = selectHostedRuntimeWakeCandidate([
+                createHostedRuntimeWakeCandidate(
+                  recordInput.exactDeliveryCompleted
+                    ? null
+                    : recordResult.nextWakeAt,
+                  isHostedSystemMailboxModelFreeExactNotificationItem(
+                      recordInput.item,
+                    )
+                    && recordResult.nextWakeAt
+                    ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+                    : recordResult.nextWakeReason ?? null,
+                ),
+                recordInput.exactDeliveryCompleted
+                  || recordInput.item.postCheckpointRecord
+                  ? null
+                  : preparationWake,
+              ]);
+              rememberSystemMailboxPostRecordWake(recordWake);
+              await checkpointSystemMailboxMode(
+                `${inputItem.stagePrefix}.checkpoint.record`,
+                recordWake.at ? [recordWake] : [],
+                recordWakeInterruption.signal,
+              );
+            } catch (error) {
+              await recordWakeInterruption.dispose();
+              if (recordWakeInterruption.takeNotification()) {
+                foregroundWakeObserved = true;
+                return { preempted: true, prepared: true };
+              }
+              throw error;
+            }
+            await recordWakeInterruption.dispose();
+            if (recordWakeInterruption.takeNotification()) {
+              foregroundWakeObserved = true;
+            }
+            return {
+              preempted: shouldYieldSystemMailboxWork(),
+              prepared: true,
+            };
+          };
+          if (ownsExactModelFreeDelivery && exactDeliveryIntentState?.terminal) {
+            return await recordSystemMailboxItem({
+              exactDeliveryCompleted: true,
+              item: recordItem,
+            });
+          }
           if (ownsExactModelFreeDelivery && exactDeliveryEffects.length === 0) {
             return { preempted: true, prepared: true };
           }
@@ -2901,30 +3015,55 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 ...baseRunnerInput,
                 workspace: activeWorkspace,
               },
-              write: async () => await drainHostedPreparedAssistantDeliveries({
-                actionApprovalPort:
-                  foregroundRuntime.platform.actionApprovalPort ?? null,
-                allowPreparedSending: true,
-                assertLiveness: async () => {
-                  assertRuntimeNotAborted();
-                },
-                assistantDeliveryEffects: exactDeliveryEffects,
-                effectsPort: foregroundRuntime.platform.effectsPort,
-                forwardedEnv: foregroundRuntime.forwardedEnv,
-                platform: foregroundRuntime.platform,
-                platformEnv: foregroundRuntime.platformEnv,
-                preparedDispatches:
-                  exactDeliveryPreparation?.preparedDispatches ?? null,
-                providerFetch:
-                  foregroundRuntime.platform.providerFetch ?? null,
-                publicInternetFetch:
-                  foregroundRuntime.platform.publicInternetFetch ?? null,
-                shouldYieldBackgroundDelivery: shouldYieldSystemMailboxWork,
-                signal: runtimeAbortController.signal,
-                userEnv: foregroundRuntime.userEnv,
-                vaultRoot: restored.vaultRoot,
-                wake: recordItem.wake,
-              }),
+              write: async () => {
+                await drainHostedPreparedAssistantDeliveries({
+                  actionApprovalPort:
+                    foregroundRuntime.platform.actionApprovalPort ?? null,
+                  allowPreparedSending: true,
+                  assertLiveness: async () => {
+                    assertRuntimeNotAborted();
+                  },
+                  assistantDeliveryEffects: exactDeliveryEffects,
+                  effectsPort: foregroundRuntime.platform.effectsPort,
+                  forwardedEnv: foregroundRuntime.forwardedEnv,
+                  platform: foregroundRuntime.platform,
+                  platformEnv: foregroundRuntime.platformEnv,
+                  preparedDispatches:
+                    exactDeliveryPreparation?.preparedDispatches ?? null,
+                  providerFetch:
+                    foregroundRuntime.platform.providerFetch ?? null,
+                  publicInternetFetch:
+                    foregroundRuntime.platform.publicInternetFetch ?? null,
+                  shouldYieldBackgroundDelivery: shouldYieldSystemMailboxWork,
+                  signal: runtimeAbortController.signal,
+                  userEnv: foregroundRuntime.userEnv,
+                  vaultRoot: restored.vaultRoot,
+                  wake: recordItem.wake,
+                });
+                const deliveryIdempotencyKey =
+                  recordItem.wake.kind === "assistant.notification.requested"
+                    ? recordItem.wake.notification.deliveryIdempotencyKey ?? ""
+                    : "";
+                const refreshedIntentState =
+                  await resolveHostedAssistantDeliveryIntentState({
+                    deliveryIdempotencyKey,
+                    vaultRoot: restored.vaultRoot,
+                  });
+                const refreshedRecordItem =
+                  refreshedIntentState
+                  && !refreshedIntentState.terminal
+                  && refreshedIntentState.nextWakeAt
+                    ? await retainHostedSystemMailboxItemUntilDeliveryWake({
+                        item: recordItem,
+                        nextWakeAt: refreshedIntentState.nextWakeAt,
+                        vaultRoot: restored.vaultRoot,
+                      })
+                    : recordItem;
+                return {
+                  intentState: refreshedIntentState,
+                  recordItem: refreshedRecordItem,
+                };
+              },
             });
             if (persistedDelivery.canonicalWritePersisted) {
               activeWorkspace = persistedDelivery.workspace;
@@ -2933,21 +3072,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 ?? persistedDelivery.workspace?.redactedStatus
                 ?? currentRedactedStatus;
             }
-            const deliveryOutcomes = persistedDelivery.result;
-            const deliveryNeedsRetry =
-              deliveryOutcomes.length !== exactDeliveryEffects.length
-              || deliveryOutcomes.some((outcome) =>
-                outcome.retryable
-                || outcome.deliveryStatus === "missing-result"
-                || outcome.deliveryStatus === "pending"
-                || outcome.deliveryStatus === "retryable"
-                || outcome.deliveryStatus === "sending"
-                || outcome.deliveryStatus === "threw"
-              );
-            if (deliveryNeedsRetry) {
+            if (!persistedDelivery.result.intentState?.terminal) {
               return { preempted: true, prepared: true };
             }
-            exactModelFreeDeliveryCompleted = true;
+            return await recordSystemMailboxItem({
+              exactDeliveryCompleted: true,
+              item: persistedDelivery.result.recordItem,
+            });
           }
           const isVaultShareProjectionRecord =
             recordItem.postCheckpointRecord?.kind === "vault-share.projection";
@@ -3030,64 +3161,13 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
           }
-          const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
-            enabled: true,
-            runtimeWakeSignal: options.runtimeWakeSignal ?? null,
+          return await recordSystemMailboxItem({
+            exactDeliveryCompleted: false,
+            item: recordItem,
+            ...(isVaultShareProjectionRecord
+              ? { vaultShareProjectionResult: projectionOpportunity.result }
+              : {}),
           });
-          const recordSignal = recordWakeInterruption.signal
-            ? AbortSignal.any([
-                runtimeAbortController.signal,
-                recordWakeInterruption.signal,
-              ])
-            : runtimeAbortController.signal;
-          try {
-            const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
-              item: recordItem,
-              operatorHomeRoot: restored.operatorHomeRoot,
-              runtime: foregroundRuntime,
-              signal: recordSignal,
-              ...(isVaultShareProjectionRecord
-                ? { vaultShareProjectionResult: projectionOpportunity.result }
-                : {}),
-              vaultRoot: restored.vaultRoot,
-            });
-            const recordWake = selectHostedRuntimeWakeCandidate([
-              createHostedRuntimeWakeCandidate(
-                exactModelFreeDeliveryCompleted
-                  ? null
-                  : recordResult.nextWakeAt,
-                isHostedSystemMailboxModelFreeExactNotificationItem(recordItem)
-                  && recordResult.nextWakeAt
-                  ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
-                  : recordResult.nextWakeReason ?? null,
-              ),
-              exactModelFreeDeliveryCompleted
-                || recordItem.postCheckpointRecord
-                ? null
-                : preparationWake,
-            ]);
-            rememberSystemMailboxPostRecordWake(recordWake);
-            await checkpointSystemMailboxMode(
-              `${inputItem.stagePrefix}.checkpoint.record`,
-              recordWake.at ? [recordWake] : [],
-              recordWakeInterruption.signal,
-            );
-          } catch (error) {
-            await recordWakeInterruption.dispose();
-            if (recordWakeInterruption.takeNotification()) {
-              foregroundWakeObserved = true;
-              return { preempted: true, prepared: true };
-            }
-            throw error;
-          }
-          await recordWakeInterruption.dispose();
-          if (recordWakeInterruption.takeNotification()) {
-            foregroundWakeObserved = true;
-          }
-          return {
-            preempted: shouldYieldSystemMailboxWork(),
-            prepared: true,
-          };
         });
       };
 
