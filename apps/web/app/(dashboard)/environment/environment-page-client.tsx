@@ -202,6 +202,20 @@ export default function EnvironmentPageClient({
       voiceRefreshState.status === "processing"
         ? voiceRefreshState.baselineValues
         : voiceRefreshBaselineRef.current;
+    const baselineDataVersion = voiceRefreshBaselineDataVersionRef.current;
+    if (
+      baseline !== null &&
+      baselineDataVersion !== null &&
+      dataVersion !== null &&
+      dataVersion !== baselineDataVersion
+    ) {
+      voiceVaultRefreshRequestedRef.current = false;
+      setVoiceRefreshState({
+        baselineValues: baseline,
+        status: "completed",
+      });
+      return;
+    }
     const acceptanceGeneration = voiceAcceptanceGenerationRef.current;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
