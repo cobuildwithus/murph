@@ -3070,13 +3070,15 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                     deliveryIdempotencyKey,
                     vaultRoot: restored.vaultRoot,
                   });
+                const nonterminalDeliveryWakeAt =
+                  refreshedIntentState && !refreshedIntentState.terminal
+                    ? refreshedIntentState.nextWakeAt
+                    : null;
                 const refreshedRecordItem =
-                  refreshedIntentState
-                  && !refreshedIntentState.terminal
-                  && refreshedIntentState.nextWakeAt
+                  nonterminalDeliveryWakeAt
                     ? await retainHostedSystemMailboxItemUntilDeliveryWake({
                         item: recordItem,
-                        nextWakeAt: refreshedIntentState.nextWakeAt,
+                        nextWakeAt: nonterminalDeliveryWakeAt,
                         vaultRoot: restored.vaultRoot,
                       })
                     : recordItem;
@@ -3094,6 +3096,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 ?? currentRedactedStatus;
             }
             if (!persistedDelivery.result.intentState?.terminal) {
+              const nextWakeAt = persistedDelivery.result.intentState?.nextWakeAt;
+              if (nextWakeAt) {
+                await checkpointSystemMailboxMode(
+                  `${inputItem.stagePrefix}.checkpoint.delivery_retry`,
+                  [createHostedRuntimeWakeCandidate(
+                    nextWakeAt,
+                    HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+                  )],
+                );
+              }
               return { preempted: true, prepared: true };
             }
             return await recordSystemMailboxItem({
