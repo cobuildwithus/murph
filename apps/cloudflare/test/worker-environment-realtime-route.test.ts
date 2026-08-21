@@ -60,7 +60,10 @@ describe("worker Environment Realtime route", () => {
       tool_choice: string;
       tools: Array<{
         name: string;
-        parameters: { properties?: { action?: { enum?: string[] } } };
+        parameters: {
+          anyOf?: unknown;
+          properties?: { action?: { enum?: string[] } };
+        };
       }>;
     };
     expect(session).toMatchObject({
@@ -82,6 +85,12 @@ describe("worker Environment Realtime route", () => {
           tool.name === ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
       )?.parameters.properties?.action?.enum,
     ).toEqual(["back", "next", "skip", "finish"]);
+    expect(
+      session.tools.find(
+        (tool) =>
+          tool.name === ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
+      )?.parameters.anyOf,
+    ).toBeUndefined();
   });
 
   it("fails closed when the provider key is unavailable", async () => {

@@ -337,6 +337,12 @@ test("saves current and next-topic facts before navigation", async () => {
         tool.name === "update_environment_interview",
     );
     assert.ok(updateTool);
+    assert.ok("parameters" in updateTool);
+    assert.ok(
+      typeof updateTool.parameters === "object" &&
+        updateTool.parameters !== null,
+    );
+    assert.equal("anyOf" in updateTool.parameters, false);
     assert.match(JSON.stringify(updateTool), /sleep:0/);
     assert.match(JSON.stringify(updateTool), /workspace:0/);
     assert.match(JSON.stringify(updateTool), /"next"/);
