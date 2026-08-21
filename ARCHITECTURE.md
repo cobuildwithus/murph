@@ -3716,7 +3716,12 @@ reconciliation for the oldest unresolved guard, never a provider create or recal
 Web first claims the exact accepted assistant input in a durable recovery row
 under the member lock and binds it to that selected guard. A completed replay
 returns the stored bounded response without another provider read or transition;
-an interrupted claim remains unconfirmed and fails closed. Thus a restarted
+an interrupted pre-terminal claim remains unconfirmed and fails closed. When
+provider evidence permits a terminal result, Web commits the note transition,
+paid-usage settlement, blocker narrowing, remaining-guard fact, and stored
+recovery response in the same member-locked transaction. A result-write failure
+therefore rolls back every terminal mutation and leaves the same note eligible
+for a new accepted recovery input. Thus a restarted
 assistant turn cannot use one accepted request to advance a second guard, and a
 new accepted input is required for each additional reconciliation.
 Direct and authenticated-group authority is rechecked at the Web boundary; recent

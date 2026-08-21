@@ -1404,7 +1404,7 @@ describe("recoverHostedPhysicalNote", () => {
     });
   });
 
-  it("leaves an interrupted recovery replay unconfirmed without advancing another guard", async () => {
+  it("rolls back terminal recovery when result persistence fails", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(216);
@@ -1440,6 +1440,11 @@ describe("recoverHostedPhysicalNote", () => {
     })).rejects.toThrow("recovery result is unconfirmed");
 
     expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: null,
+      providerLetterId: null,
+      status: "failed",
+    });
     expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
       failureReason: null,
       providerLetterId: null,
@@ -1452,6 +1457,92 @@ describe("recoverHostedPhysicalNote", () => {
         resultStatus: null,
       }),
     ]);
+
+    const retryProvider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_retry_first_guard",
+    }]);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(217),
+      prisma: store.prisma,
+      runtime: retryProvider.runtime,
+    })).resolves.toEqual({
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "accepted",
+    });
+    expect(retryProvider.findLetterByNoteId).toHaveBeenCalledWith({
+      noteId: guardId,
+      signal: undefined,
+    });
+  });
+
+  it("rolls back an aged absence and blocker cleanup when result persistence fails", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(218);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(219),
+      prisma: store.prisma,
+      runtime: createPhysicalNoteRuntime([]).runtime,
+    });
+    const blockedId = blocked.physicalNoteId!;
+    store.setCreatedAt(
+      guardId,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 1),
+    );
+    const originAssistantInputId = recoveryOrigin(218);
+    const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
+    store.failNextRecoveryCompletion();
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).rejects.toThrow("simulated recovery result persistence failure");
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).rejects.toThrow("recovery result is unconfirmed");
+
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: null,
+      providerLetterId: null,
+      status: "failed",
+    });
+    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
+      failureReason: "prior_note_unresolved",
+      providerLetterId: null,
+      status: "failed",
+    });
+    expect(store.allRecoveries()).toEqual([
+      expect.objectContaining({
+        originAssistantInputId,
+        physicalNoteId: guardId,
+        resultStatus: null,
+      }),
+    ]);
+
+    const retryProvider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(219),
+      prisma: store.prisma,
+      runtime: retryProvider.runtime,
+    })).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    });
+    expect(store.allRows()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ failureReason: "unknown", id: guardId }),
+      expect.objectContaining({ failureReason: "unknown", id: blockedId }),
+    ]));
   });
 
   it("restores accepted provider evidence without sending another note", async () => {
@@ -2058,7 +2149,23 @@ function createPhysicalNoteStore(
     async $transaction<T>(
       callback: (tx: Prisma.TransactionClient) => Promise<T>,
     ): Promise<T> {
-      return await callback(asPhysicalNoteTransactionClient(prisma));
+      const rowSnapshot = new Map(
+        [...rows].map(([id, row]) => [id, cloneRow(row)]),
+      );
+      const recoverySnapshot = new Map(
+        [...recoveryRows].map(([id, row]) => [id, cloneRecoveryRow(row)]),
+      );
+      try {
+        return await callback(asPhysicalNoteTransactionClient(prisma));
+      } catch (error) {
+        rows.clear();
+        for (const [id, row] of rowSnapshot) rows.set(id, row);
+        recoveryRows.clear();
+        for (const [id, row] of recoverySnapshot) {
+          recoveryRows.set(id, row);
+        }
+        throw error;
+      }
     },
     hostedPhysicalNote,
     hostedPhysicalNoteRecovery,

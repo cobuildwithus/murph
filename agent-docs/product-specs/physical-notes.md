@@ -105,8 +105,13 @@ accepted assistant input to the selected guard and, after reconciliation, its
 bounded response. The binding is created under the member lock before any
 provider read. A completed replay returns the stored response without selecting
 another guard, calling the provider, or settling usage again. An interrupted
-binding has no stored result; its replay fails closed as unconfirmed and cannot
-touch another guard. A newly accepted explicit input is required to try again.
+pre-terminal binding has no stored result; its replay fails closed as
+unconfirmed and cannot touch another guard. Terminal acceptance or aged-absence
+reconciliation commits the checked-note transition, blocker settlement, any
+paid usage, the remaining-guard fact, and the stored response in one
+member-locked transaction. If result persistence fails, those terminal writes
+all roll back and a newly accepted explicit input can rediscover the same guard.
+A newly accepted explicit input is required to try again.
 The binding remains even if its optional note pointer is later removed.
 
 The current accepted direct or authenticated-group message authorizes one

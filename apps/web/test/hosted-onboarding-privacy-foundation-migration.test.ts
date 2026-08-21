@@ -86,6 +86,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     "pendingGroupSetup HostedPendingGroupSetup?",
+    "physicalNoteRecoveries HostedPhysicalNoteRecovery[]",
     "physicalNotes HostedPhysicalNote[]",
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
     'signupNotificationEmailAttemptedAt DateTime? @map("signup_notification_email_attempted_at")',
@@ -1129,6 +1130,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260815010000_hosted_phone_call_stop_intent",
       "20260815120000_hosted_phone_call_result_notification_channel",
       "20260815190000_outbound_message_volume_receipts",
+      "20260820170000_hosted_physical_note_recovery",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

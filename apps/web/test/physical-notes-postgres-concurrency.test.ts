@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
@@ -84,13 +84,17 @@ describe.skipIf(!runPostgresProof)(
 
     beforeEach(async () => {
       const first = requirePrisma(firstClient);
+      await first.hostedAiUsage.deleteMany({
+        where: { memberId: requireMemberId(memberId) },
+      });
       await first.hostedPhysicalNoteRecovery.deleteMany({
         where: { memberId: requireMemberId(memberId) },
       });
       await first.hostedPhysicalNote.deleteMany({
         where: { memberId: requireMemberId(memberId) },
       });
-      mocks.recordUsage.mockClear();
+      mocks.recordUsage.mockReset();
+      mocks.recordUsage.mockResolvedValue(undefined);
     });
 
     afterAll(async () => {
@@ -878,6 +882,287 @@ describe.skipIf(!runPostgresProof)(
       expect(findProviderLetter).toHaveBeenCalledTimes(2);
       expect(findProviderLetter.mock.calls.map(([input]) => input.noteId))
         .toEqual([firstId, secondId]);
+    });
+
+    it("commits accepted recovery state, usage, blockers, and replay result atomically", async () => {
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const noteId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const blockerId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const usageId = `usage_${randomUUID().replaceAll("-", "")}`;
+      const usageTurnId = `turn_${randomUUID().replaceAll("-", "")}`;
+      const failedOrigin = buildRequest(14, beneficiary).originAssistantInputId;
+      const retryOrigin = buildRequest(15, beneficiary).originAssistantInputId;
+      const { recoverHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      await observer.hostedPhysicalNote.createMany({
+        data: [
+          {
+            complimentaryOfferCode: null,
+            createdAt: new Date(Date.now() - 1_000),
+            id: noteId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `atomic-accepted-${noteId}`,
+            requestKey: `atomic-accepted-${noteId}`,
+            status: "starting",
+          },
+          {
+            complimentaryOfferCode: null,
+            failureReason: "prior_note_unresolved",
+            id: blockerId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `atomic-accepted-blocker-${blockerId}`,
+            requestKey: `atomic-accepted-blocker-${blockerId}`,
+            status: "failed",
+          },
+        ],
+      });
+      mocks.recordUsage.mockImplementation(async (input: {
+        prisma?: Prisma.TransactionClient;
+        trustedUserId?: string | null;
+      }) => {
+        if (!input.prisma || input.trustedUserId !== beneficiary) {
+          throw new Error("Physical-note usage must use the member transaction.");
+        }
+        await input.prisma.hostedAiUsage.create({
+          data: {
+            attemptCount: 1,
+            id: usageId,
+            memberId: beneficiary,
+            occurredAt: new Date(),
+            provider: "lob",
+            sessionId: `physical-note-${noteId}`,
+            turnId: usageTurnId,
+          },
+        });
+        return { recordedIds: [usageId] };
+      });
+      let failNextRecoveryCompletion = true;
+      const recoveryClient = observer.$extends({
+        query: {
+          hostedPhysicalNoteRecovery: {
+            async updateMany({ args, query }) {
+              if (failNextRecoveryCompletion) {
+                failNextRecoveryCompletion = false;
+                throw new Error("simulated atomic recovery result failure");
+              }
+              return query(args);
+            },
+          },
+        },
+      }) as unknown as PrismaClient;
+      const findProviderLetter = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: `ltr_${noteId}`,
+      }));
+      const runtime = {
+        async create() {
+          throw new Error("Recovery must not create a physical note.");
+        },
+        findLetterByNoteId: findProviderLetter,
+      };
+
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: failedOrigin,
+        prisma: recoveryClient,
+        runtime,
+      })).rejects.toThrow("simulated atomic recovery result failure");
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: noteId },
+      })).resolves.toMatchObject({
+        acceptedAt: null,
+        providerLetterId: null,
+        status: "starting",
+      });
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: blockerId },
+      })).resolves.toMatchObject({
+        failureReason: "prior_note_unresolved",
+        status: "failed",
+      });
+      await expect(observer.hostedAiUsage.count({
+        where: { id: usageId },
+      })).resolves.toBe(0);
+      await expect(observer.hostedPhysicalNoteRecovery.findUnique({
+        where: { originAssistantInputId: failedOrigin },
+      })).resolves.toMatchObject({
+        physicalNoteId: noteId,
+        resultStatus: null,
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: failedOrigin,
+        prisma: recoveryClient,
+        runtime,
+      })).rejects.toThrow("recovery result is unconfirmed");
+
+      const accepted = await recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: retryOrigin,
+        prisma: recoveryClient,
+        runtime,
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: retryOrigin,
+        prisma: recoveryClient,
+        runtime,
+      })).resolves.toEqual(accepted);
+      expect(accepted).toEqual({
+        remainingUnresolved: false,
+        retryAfter: null,
+        status: "accepted",
+      });
+      expect(findProviderLetter).toHaveBeenCalledTimes(2);
+      expect(mocks.recordUsage).toHaveBeenCalledTimes(2);
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: noteId },
+      })).resolves.toMatchObject({
+        providerLetterId: `ltr_${noteId}`,
+        status: "accepted",
+      });
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: blockerId },
+      })).resolves.toMatchObject({
+        failureReason: "prior_note_accepted",
+        status: "failed",
+      });
+      await expect(observer.hostedAiUsage.count({
+        where: { id: usageId },
+      })).resolves.toBe(1);
+      await expect(observer.hostedPhysicalNoteRecovery.findUnique({
+        where: { originAssistantInputId: retryOrigin },
+      })).resolves.toMatchObject({
+        physicalNoteId: noteId,
+        remainingUnresolved: false,
+        resultStatus: "accepted",
+      });
+    });
+
+    it("commits aged absence, blocker cleanup, and replay result atomically", async () => {
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const noteId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const blockerId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const failedOrigin = buildRequest(16, beneficiary).originAssistantInputId;
+      const retryOrigin = buildRequest(17, beneficiary).originAssistantInputId;
+      const { recoverHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      await observer.hostedPhysicalNote.createMany({
+        data: [
+          {
+            complimentaryOfferCode: null,
+            createdAt: new Date(Date.now() - 24 * 60 * 60 * 1_000),
+            failureReason: null,
+            id: noteId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `atomic-clear-${noteId}`,
+            requestKey: `atomic-clear-${noteId}`,
+            status: "failed",
+          },
+          {
+            complimentaryOfferCode: null,
+            failureReason: "prior_note_unresolved",
+            id: blockerId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `atomic-clear-blocker-${blockerId}`,
+            requestKey: `atomic-clear-blocker-${blockerId}`,
+            status: "failed",
+          },
+        ],
+      });
+      let failNextRecoveryCompletion = true;
+      const recoveryClient = observer.$extends({
+        query: {
+          hostedPhysicalNoteRecovery: {
+            async updateMany({ args, query }) {
+              if (failNextRecoveryCompletion) {
+                failNextRecoveryCompletion = false;
+                throw new Error("simulated atomic recovery result failure");
+              }
+              return query(args);
+            },
+          },
+        },
+      }) as unknown as PrismaClient;
+      const findProviderLetter = vi.fn(async () => ({
+        kind: "absent" as const,
+      }));
+      const runtime = {
+        async create() {
+          throw new Error("Recovery must not create a physical note.");
+        },
+        findLetterByNoteId: findProviderLetter,
+      };
+
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: failedOrigin,
+        prisma: recoveryClient,
+        runtime,
+      })).rejects.toThrow("simulated atomic recovery result failure");
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: noteId },
+      })).resolves.toMatchObject({ failureReason: null, status: "failed" });
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: blockerId },
+      })).resolves.toMatchObject({
+        failureReason: "prior_note_unresolved",
+        status: "failed",
+      });
+      await expect(observer.hostedPhysicalNoteRecovery.findUnique({
+        where: { originAssistantInputId: failedOrigin },
+      })).resolves.toMatchObject({
+        physicalNoteId: noteId,
+        resultStatus: null,
+      });
+
+      const cleared = await recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: retryOrigin,
+        prisma: recoveryClient,
+        runtime,
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: retryOrigin,
+        prisma: recoveryClient,
+        runtime,
+      })).resolves.toEqual(cleared);
+      expect(cleared).toEqual({
+        remainingUnresolved: false,
+        retryAfter: null,
+        status: "clear",
+      });
+      expect(findProviderLetter).toHaveBeenCalledTimes(2);
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: noteId },
+      })).resolves.toMatchObject({ failureReason: "unknown", status: "failed" });
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: blockerId },
+      })).resolves.toMatchObject({ failureReason: "unknown", status: "failed" });
+      await expect(observer.hostedPhysicalNoteRecovery.findUnique({
+        where: { originAssistantInputId: retryOrigin },
+      })).resolves.toMatchObject({
+        physicalNoteId: noteId,
+        remainingUnresolved: false,
+        resultStatus: "clear",
+      });
     });
 
     it("keeps a restarted incomplete recovery bound to its terminalized guard", async () => {

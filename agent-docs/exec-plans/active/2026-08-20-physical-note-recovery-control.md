@@ -124,9 +124,11 @@ Result: Ready.
 - Already clear or unavailable: no provider read occurs for an already-clear
   member, and missing provider configuration leaves an existing guard intact.
 - Turn replay: a completed accepted input returns its stored checked-guard
-  response with zero additional provider reads, while an interrupted result
-  remains unconfirmed and cannot advance a second guard. A new accepted input
-  is required to check the next guard.
+  response with zero additional provider reads. An interrupted pre-terminal
+  claim remains unconfirmed and cannot advance a second guard. Terminal note,
+  blocker, usage, remaining-guard, and response writes commit together; a
+  response-write failure rolls them all back so a new accepted input can retry
+  the same guard. A new accepted input is required to check the next guard.
 
 The walkthrough uses the production-shaped Web owner, Cloudflare control port,
 and Assistant Engine tool-result tests. A rendered image adds no material proof
@@ -186,8 +188,16 @@ not Web presentation.
   Web-owned accepted-input claim/result row. Completed replay returns the
   stored response with no provider call; interrupted replay remains unconfirmed;
   only a new accepted input may advance the next guard.
-- Corrected-head focused proof passes: 36 Web service tests, 5 storage-contract
-  tests, 10 real-PostgreSQL admission/replay tests, 16 Cloudflare port tests,
+- Final ReviewGPT round 5 verified the replay fence and found one terminal
+  atomicity gap: note state, blockers, and paid usage committed before the
+  recovery response, so a result-write failure could strand an incomplete
+  claim after terminalizing the guard. The finding was accepted. Terminal
+  recovery now moves the existing remaining-guard read and result persistence
+  into the existing member-locked note transaction; pending and unavailable
+  outcomes remain on the separate nonterminal completion path. This adds no
+  table, query, provider call, lock, dependency, retry, or lifecycle.
+- Corrected-head focused proof passes: 37 Web service tests, 5 storage-contract
+  tests, 12 real-PostgreSQL admission/replay tests, 16 Cloudflare port tests,
   36 Assistant physical-note tests, 6 hosted-contract tests, the pinned deferred provider-boundary
   scenario, and all affected Web, Cloudflare, hosted-execution, Assistant
   Engine, and Assistant Runtime typechecks. The production runner bundle is
@@ -207,6 +217,13 @@ not Web presentation.
   claim unconfirmed after restart, and permits only a new accepted input to
   advance the next guard. Focused Web lint/typecheck, Prisma validation and
   generation, documentation drift, and documentation gardening pass.
+- Round-5 remediation injects a recovery-result write failure after accepted
+  note, usage, and blocker mutations and after aged-absence blocker cleanup.
+  Both the in-memory rollback model and real PostgreSQL prove that every
+  terminal mutation rolls back while the accepted-input claim stays incomplete;
+  a new accepted input then reconciles the same guard, commits one result, and
+  replays without another provider read or usage settlement. The final
+  corrected-head ReviewGPT round and exact-head CI remain open.
 
 Status: active
 Updated: 2026-08-20
