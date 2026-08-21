@@ -45,10 +45,13 @@ describe('Codex thread instructions', () => {
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'Search deferred tools with `tool_search` before saying a capability is unavailable',
+      'search deferred tools via `tool_search`',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
-      'eager-tool absence is not proof',
+      'code-mode `ALL_TOOLS`',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'eager absence is not proof',
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',
