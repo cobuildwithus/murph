@@ -53,6 +53,8 @@ export {
   deleteEvent,
   findEventByExternalRef,
   findEventsByRawRefs,
+  readEvent,
+  readOwnedEvent,
   upsertEvent,
 } from "./events/ledger.ts";
 export {
@@ -80,6 +82,9 @@ export type {
   EventRawRefMatch,
   FindEventByExternalRefInput,
   FindEventsByRawRefsInput,
+  ReadEventInput,
+  ReadEventResult,
+  ReadOwnedEventInput,
   UpsertEventDraftInput,
   UpsertEventInput,
   UpsertEventPayloadInput,

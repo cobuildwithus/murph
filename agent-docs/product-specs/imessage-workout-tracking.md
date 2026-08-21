@@ -175,6 +175,48 @@ Every mutation carries the exact canonical workout id and uses that workout's
 record-scoped lock. Multiple unfinished workouts are valid; there is no global
 active or focused singleton.
 
+Replacing one fully specified ad-hoc unfinished draft is an approval-bound,
+create-first workflow only when the batch-start representation is lossless.
+Murph first exact-reads the draft and retains its id and lifecycle revision from
+the bounded deletion proposal. A qualifying draft has no end time, routine
+ownership, completed-set actuals, set notes, metrics, zones, route, media,
+attachments, provider workout identity, or other member-owned or
+history-bearing field that batch start cannot preserve; every set is an
+unlogged placeholder. After approval Murph preserves the draft's start time,
+activity type, and session note unless their change was explicit, and creates
+the complete ordered replacement with one `workout start` invocation and
+repeated compact exercise values. The canonical event is valid before its one
+creation write; Murph never starts an empty event and appends the initial
+exercises. Exact member-stated repetitions for every set of an exercise are
+stored on that exercise in that creation write.
+
+Murph verifies the successful creation result before issuing the exact old
+workout delete with the proposal-time lifecycle revision. It never deletes
+first. A creation failure leaves the old workout untouched. A stale or failed
+delete leaves both workouts, never rolls back the successfully created
+replacement, and requires fresh exact reconciliation before any later deletion.
+Other unfinished workouts remain valid and untouched. Saved-routine starts and
+exact-reference reminder flows keep their specialized precedence.
+
+A missing, interrupted, or otherwise ambiguous start result consumes that
+approval and is never retried. Murph retains the old workout and performs one
+exceptional bounded workout list on the preserved start date, then exact-reads
+every candidate other than the old event. A committed replacement is recovered
+only when exactly one candidate was recorded between approval and recovery and
+exactly matches every approved session and ordered exercise fact. Zero,
+multiple, truncated, or unreadable candidates keep every record, disclose the
+uncertainty and exact candidate ids, and require a fresh bounded member choice;
+they never trigger another creation or any deletion. This projection-backed
+reconciliation is reserved for ambiguous post-invocation recovery and is not
+part of the normal exact-command path.
+
+Historical or completed workout intent takes precedence over replacement.
+Requests naming yesterday, an older date, a completed workout, an older workout
+id, or an older card stay on the existing exact-record correction path and do
+not issue the start-and-delete sequence. An ineligible or incompletely read
+record is retained. Any broader historical replacement must be separately
+specified and approved with complete, loss-aware representation.
+
 Generic full-structure edits preserve exercise-owned repetition and finite-plan
 facts only across proven exercise continuity. An existing stable
 `sourceExerciseId` must match exactly and may support a label change or reorder;

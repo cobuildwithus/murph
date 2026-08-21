@@ -104,7 +104,7 @@ describe('repeated workout tally guidance', () => {
     )
   })
 
-  it('documents the fail-closed structured workout replacement guard', async () => {
+  it('documents the fail-closed structured workout edit guard', async () => {
     const trackedTable = await readSkill('tracked-table')
 
     expect(trackedTable).toContain(

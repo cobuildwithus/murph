@@ -54,6 +54,8 @@ import {
   listHistoryEvents,
   promoteInboxExperimentNote,
   promoteInboxJournal,
+  readEvent,
+  readOwnedEvent,
   removeAutomaticMealPhoto,
   parseFrontmatterDocument,
   projectAssessmentResponse,
@@ -572,6 +574,7 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   });
   const aprilResult = await upsertEvent({
     vaultRoot,
+    expectedRevision: 1,
     payload: {
       id: eventId,
       kind: "note",
@@ -584,6 +587,29 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.equal(marchResult.created, true);
   assert.equal(aprilResult.created, false);
   assert.notEqual(aprilResult.ledgerFile, marchResult.ledgerFile);
+  assert.equal(aprilResult.event.lifecycle?.revision, 2);
+  assert.equal(aprilResult.event.note, "Updated note.");
+
+  const current = await readEvent({ vaultRoot, eventId });
+  assert.equal(current.ledgerFile, aprilResult.ledgerFile);
+  assert.equal(current.event.lifecycle?.revision, 2);
+  assert.equal(current.event.note, "Updated note.");
+
+  await assert.rejects(
+    () => upsertEvent({
+      vaultRoot,
+      expectedRevision: 1,
+      payload: {
+        id: eventId,
+        kind: "note",
+        occurredAt: "2026-04-02T07:00:00.000Z",
+        title: "Morning note",
+        note: "Stale update.",
+      },
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_REVISION_CONFLICT",
+  );
 
   const marchRecords = await readJsonlRecords({
     vaultRoot,
@@ -606,6 +632,28 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.equal(updatedEvent.lifecycle?.revision, 2);
   assert.equal(updatedEvent.note, "Updated note.");
 
+  await assert.rejects(
+    () => deleteEvent({
+      vaultRoot,
+      eventId,
+      expectedRevision: 1,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_REVISION_CONFLICT",
+  );
+  const aprilRecordsAfterConflict = await readJsonlRecords({
+    vaultRoot,
+    relativePath: aprilResult.ledgerFile,
+  });
+  assert.equal(aprilRecordsAfterConflict.length, 1);
+  assert.equal(
+    aprilRecordsAfterConflict.some(
+      (record) =>
+        expectRecord<EventRecord>(record).lifecycle?.state === "deleted",
+    ),
+    false,
+  );
+
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-04-02T08:00:00.000Z"));
   let deleted;
@@ -613,6 +661,7 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
     deleted = await deleteEvent({
       vaultRoot,
       eventId,
+      expectedRevision: 2,
     });
   } finally {
     vi.useRealTimers();
@@ -635,6 +684,11 @@ test("upsertEvent appends revisions across shards and deleteEvent appends a tomb
   assert.ok(tombstoneEvent);
   assert.equal(tombstoneEvent.lifecycle?.revision, 3);
   assert.equal(tombstoneEvent.note, "Updated note.");
+  await assert.rejects(
+    () => readEvent({ vaultRoot, eventId }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_MISSING",
+  );
 
   const marchAuditRecords = await readJsonlRecords({
     vaultRoot,
@@ -1329,6 +1383,43 @@ test("note-only meals stay first-class meal events without raw artifacts", async
   assert.equal(meal.photo, null);
   assert.equal(meal.audio, null);
   assert.deepEqual(manifest.artifacts, []);
+});
+
+test("readOwnedEvent resolves the current meal owner without a query projection", async () => {
+  const vaultRoot = await makeTempDirectory("murph-owned-event-read");
+  await initializeVault({ vaultRoot });
+  const meal = await addMeal({
+    vaultRoot,
+    occurredAt: "2026-03-10T18:30:00.000Z",
+    note: "toast and eggs",
+  });
+  const unrelatedShard = path.join(vaultRoot, "ledger/events/2025/2025-01.jsonl");
+  await fs.mkdir(path.dirname(unrelatedShard), { recursive: true });
+  await fs.writeFile(
+    unrelatedShard,
+    `${JSON.stringify({ id: "evt_unrelated", kind: "unsupported" })}\n`,
+    "utf8",
+  );
+
+  const owned = await readOwnedEvent({
+    vaultRoot,
+    kind: "meal",
+    ownerId: meal.event.mealId,
+  });
+  assert.equal(owned.eventId, meal.event.id);
+  assert.equal(owned.event.kind, "meal");
+  assert.equal(owned.ledgerFile, meal.eventPath);
+
+  await deleteEvent({ vaultRoot, eventId: meal.event.id });
+  await assert.rejects(
+    () => readOwnedEvent({
+      vaultRoot,
+      kind: "meal",
+      ownerId: meal.event.mealId,
+    }),
+    (error: unknown) =>
+      error instanceof VaultError && error.code === "EVENT_MISSING",
+  );
 });
 
 test("structured-only meals persist source, ingredients, and nutrition without raw artifacts", async () => {

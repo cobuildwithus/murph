@@ -1164,6 +1164,9 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
           data: {
             distanceKm?: number
             durationMinutes?: number
+            lifecycle?: {
+              revision?: number
+            }
             note?: string
           }
           id: string
@@ -1246,6 +1249,9 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
           data: {
             distanceKm?: number
             durationMinutes?: number
+            lifecycle?: {
+              revision?: number
+            }
             note?: string
           }
           id: string
@@ -1273,6 +1279,8 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
   assert.equal(edited.entity.data.durationMinutes, 50)
   assert.equal(edited.entity.data.distanceKm, undefined)
   assert.equal(edited.entity.title, '50-minute ride')
+  const editedRevision = edited.entity.data.lifecycle?.revision
+  assert.equal(typeof editedRevision, 'number')
 
   const deleted = requireData(
     (
@@ -1284,6 +1292,8 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
         'workout',
         'delete',
         workoutId,
+        '--expected-revision',
+        String(editedRevision),
         '--vault',
         vaultRoot,
       ])

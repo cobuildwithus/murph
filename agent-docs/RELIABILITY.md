@@ -2451,6 +2451,6 @@ rejection, and another unfinished workout cannot receive the action. Every
 different action must match the current revision
 before positional mutation. The serialized mailbox lane means
 one last-applied id is sufficient until its terminal outcome commits, without a
-second receipt store. Validated set removal uses one narrow canonical replacement
-operation, while every generic workout replacement remains fail-closed against
-saved-set loss.
+second receipt store. Validated set removal uses the existing exact-workout
+canonical rewrite after full binding validation, while generic structural edits
+remain fail-closed against saved-set loss.
