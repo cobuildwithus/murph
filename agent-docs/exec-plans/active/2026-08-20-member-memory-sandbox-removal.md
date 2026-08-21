@@ -6,7 +6,7 @@ Updated: 2026-08-21
 ## Goal
 
 Delete the member-memory-specific filesystem/network permission profile while
-preserving the simpler tool-only maintenance boundary and successful overnight
+preserving the simpler one-shot maintenance path and successful overnight
 memory consolidation.
 
 ## Evidence
@@ -17,9 +17,10 @@ memory consolidation.
 - The repaired implementation no longer reads or writes memory through shell or
   filesystem access. The host exposes one canonical `murph.member_memory` tool
   only to the exact managed automation.
-- The maintenance thread already disables shell, apps, browser use, plugins,
-  web search, environment tools, hosted tool context, artifact materialization,
-  progress delivery, and public internet fetch.
+- The maintenance thread already requests suppression of shell, apps, browser
+  use, plugins, web search, environment tools, hosted tool context, artifact
+  materialization, progress delivery, and public internet fetch. Host execution
+  remains the effect boundary when a provider still advertises native controls.
 - The remaining member-specific permission profile duplicates those denials and
   is not the owner of memory read or write authority.
 
@@ -35,7 +36,7 @@ memory consolidation.
 
 1. Remove the member-memory-specific permission profile and its generated
    hosted config.
-2. Leave the shared tool-only thread restriction and host-owned memory tool
+2. Leave the shared restricted thread configuration and host-owned memory tool
    unchanged.
 3. Update focused tests and durable security/reliability claims to describe the
    capability boundary instead of the deleted sandbox mechanism.
@@ -51,8 +52,10 @@ memory consolidation.
   with no provider-authority, model-pricing, or target-reconciliation delta.
 - Focused permission-config, assistant-turn, provider-seam, hosted-config, and
   real App Server memory-boundary tests: passed. The App Server scenario ran
-  with `danger-full-access`, did not expose or execute the attempted shell call,
-  and completed canonical memory read/write through `murph.member_memory`.
+  with `danger-full-access`; its provider advertised native controls, the host
+  suppressed the attempted shell effect, and canonical memory read/write
+  completed through `murph.member_memory`. Per the explicit simplicity
+  decision, this PR adds no provider-catalog inventory enforcement.
 - Affected `hosted-execution`, `assistant-runtime`, and `assistant-engine`
   package typechecks: passed.
 - Exact-head CI and review gates: pending.

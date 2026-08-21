@@ -576,11 +576,12 @@ supported provider credential.
   fixed delivery without retaining its source, account, or snapshot.
   `packages/assistant-runtime/test/hosted-runtime-codex-config.test.ts` proves
   hosted config emits no member-memory permission profile. Assistant-engine
-  planning, tool-boundary, provider-seam, and real App Server tests prove only
-  the exact managed id receives `murph.member_memory`, shell and every other
-  native capability stay disabled even without a sandbox profile, and the
-  trusted host performs canonical memory reads and audited writes; reminder
-  availability needs no Codex permission profile.
+  planning, tool-boundary, provider-seam, and real App Server tests prove the
+  exact managed id alone receives the `murph.member_memory` state tool, an
+  attempted shell effect is suppressed without the dedicated profile, and the
+  trusted host performs canonical memory reads and audited writes. They do not
+  impose a provider-catalog inventory contract on this maintenance turn;
+  reminder availability needs no Codex permission profile.
   `packages/core/test/automation-availability.test.ts` proves exact
   policy/source/account authorization, canonical populated and empty snapshot
   parsing/removal, host-only prompt sanitation, exact-time normalization, and
