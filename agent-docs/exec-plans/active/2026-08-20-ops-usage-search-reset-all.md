@@ -125,9 +125,11 @@ through a final reset, skipped, pending-wake, and failed summary.
 3. Add one authenticated same-origin reset-all operation that reads and applies
    a fixed small ID-ordered batch through the canonical per-member reset owner,
    atomically records its stable outcome in one per-member receipt, then
-   performs runtime rechecks only after each database transaction commits. Once
-   population work completes, recover pending wakes from the operation's
-   receipt set without re-reading live members or re-entering reset work.
+   performs runtime rechecks only after each database transaction commits and
+   under one request-level five-second wake budget. Once population work
+   completes, recover pending wakes from the operation's receipt set without
+   re-reading live members or re-entering reset work, using the same bounded
+   request-level wake budget.
 4. Add a prominent destructive control, typed confirmation, progress and final
    outcome UI. Preserve a hidden or same-tab restored operation with a validated
    browser-session locator written before each request, warn before abandoning

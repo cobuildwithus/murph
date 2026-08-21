@@ -375,6 +375,9 @@ Last verified: 2026-08-20
   per-member serializable reset sequentially. It performs at most one stale
   re-read for that member, stops before acknowledging a remaining failure, and
   calls the bounded runtime recheck only after the member transaction commits.
+  All runtime rechecks in that request share one five-second deadline; after it
+  expires, later latency hints become pending without another provider call,
+  while the remaining canonical member transactions continue sequentially.
   The browser issues at most one batch request at a time and carries the last
   acknowledged ID plus one operation UUID created at destructive confirmation;
   there is no population snapshot, concurrent interactive transaction fanout,
@@ -394,9 +397,10 @@ Last verified: 2026-08-20
   the sole effect owner. After population completion,
   committed wake recovery instead pages at most 11 existing wake-required
   receipts for that UUID, admits 10, and invokes only sequential bounded runtime
-  rechecks. It never reads current hosted-member rows or enters the reset
-  transaction, so a member created after confirmation cannot join the old
-  operation. That receipt-only phase may be hidden without locking ordinary
+  rechecks under one five-second request deadline. It never reads current
+  hosted-member rows or enters the reset transaction, so a member created after
+  confirmation cannot join the old operation. That receipt-only phase may be
+  hidden without locking ordinary
   search or row recovery, reopened under the same UUID, or cleared only after a
   transient warned abandonment; the abandonment presentation is not persisted.
   Each population member first reads the append-only

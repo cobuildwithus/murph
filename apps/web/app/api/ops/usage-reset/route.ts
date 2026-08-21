@@ -126,6 +126,7 @@ async function resetEveryoneBatch(input: {
   afterMemberId: string | null;
   operationId: string;
 }): Promise<HostedOpsMemberUsageResetAllBatchResponse> {
+  const runtimeRecheckDeadlineMs = createHostedPostCommitDeadline(undefined);
   const batch = await readHostedOpsMemberUsageResetAllBatch({
     afterMemberId: input.afterMemberId,
   });
@@ -153,6 +154,7 @@ async function resetEveryoneBatch(input: {
         const runtimeRecheckStatus = await trySignalHostedResetAllRuntimeRecheck(
           result.memberId,
           result.timestamp,
+          runtimeRecheckDeadlineMs,
         );
         if (runtimeRecheckStatus === "pending") {
           counts.pendingWake += 1;
@@ -184,6 +186,7 @@ async function recoverResetEveryoneWakes(input: {
   afterMemberId: string | null;
   operationId: string;
 }): Promise<HostedOpsMemberUsageResetAllWakeBatchResponse> {
+  const runtimeRecheckDeadlineMs = createHostedPostCommitDeadline(undefined);
   const batch = await readHostedOpsMemberUsageResetAllWakeBatch({
     afterMemberId: input.afterMemberId,
     operationId: input.operationId,
@@ -195,6 +198,7 @@ async function recoverResetEveryoneWakes(input: {
     const runtimeRecheckStatus = await trySignalHostedResetAllRuntimeRecheck(
       receipt.memberId,
       receipt.timestamp,
+      runtimeRecheckDeadlineMs,
     );
     if (runtimeRecheckStatus === "pending") {
       pendingWake += 1;
@@ -221,7 +225,10 @@ async function trySignalHostedRuntimeRecheck(
   timestamp = new Date().toISOString(),
 ): Promise<"accepted" | "pending"> {
   try {
-    await signalHostedOpsRuntimeRecheck(memberId);
+    await signalHostedOpsRuntimeRecheck(
+      memberId,
+      createHostedPostCommitDeadline(undefined),
+    );
     return "accepted";
   } catch (error) {
     console.error("Hosted ops runtime recheck failed.", {
@@ -235,9 +242,10 @@ async function trySignalHostedRuntimeRecheck(
 async function trySignalHostedResetAllRuntimeRecheck(
   memberId: string,
   timestamp: string,
+  deadlineMs: number,
 ): Promise<"pending" | "settled"> {
   try {
-    await signalHostedOpsRuntimeRecheck(memberId);
+    await signalHostedOpsRuntimeRecheck(memberId, deadlineMs);
     return "settled";
   } catch (error) {
     if (
@@ -259,9 +267,12 @@ async function trySignalHostedResetAllRuntimeRecheck(
   }
 }
 
-async function signalHostedOpsRuntimeRecheck(memberId: string): Promise<void> {
+async function signalHostedOpsRuntimeRecheck(
+  memberId: string,
+  deadlineMs: number,
+): Promise<void> {
   await waitForHostedPostCommitOperation({
-    deadlineMs: createHostedPostCommitDeadline(undefined),
+    deadlineMs,
     operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
       abortSignal,
       userId: memberId,
