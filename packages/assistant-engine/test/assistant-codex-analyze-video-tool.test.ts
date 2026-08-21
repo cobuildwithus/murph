@@ -643,7 +643,7 @@ describe('executeAnalyzeVideoTool', () => {
       }],
       success: true,
     })
-    expect(result.requiredFinalResponseFallback).toBeUndefined()
+    expect(result.requiredFinalResponseFallback).toContain('eight push-ups')
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 

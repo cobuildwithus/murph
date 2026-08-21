@@ -3240,6 +3240,10 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
+  let requiredFinalResponseFallbackOutcome:
+    | 'analyze-video-failure'
+    | 'analyze-video-success'
+    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -4737,9 +4741,18 @@ async function runCodexAppServerTurnOnProcess(
         releaseDynamicProgressPending?.()
       }
       if (dynamicToolRequest.kind === 'analyze-video') {
-        requiredFinalResponseFallback = normalizeNullableString(
+        const analyzeVideoFallback = normalizeNullableString(
           result.requiredFinalResponseFallback,
         )
+        if (analyzeVideoFallback !== null) {
+          if (result.rpcResult.success) {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
+          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
+          }
+        }
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)

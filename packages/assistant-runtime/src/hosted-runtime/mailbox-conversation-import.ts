@@ -14,6 +14,10 @@ import {
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
+} from "@murphai/hosted-execution/assistant-capabilities";
+import {
   parseHostedEmailThreadTarget,
   redactHostedGroupEmailPromptText,
 } from "@murphai/runtime-state";
@@ -182,7 +186,7 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   attachmentDescriptorCount?: number;
-  hasVideoAttachmentCandidate?: boolean;
+  hasAnalyzeVideoAttachmentCandidate?: boolean;
   inputId: string;
   recordAttachmentEvidence?(
     attachmentEvidence: AssistantInputAttachmentEvidence,
@@ -395,7 +399,11 @@ export async function importHostedConversationMailboxItem(input: {
       : null;
   const deferActiveTurnNotificationUntilProjection =
     foregroundAssistantInputId !== null
-    && stagedInput.hasVideoAttachmentCandidate === true;
+    && stagedInput.hasAnalyzeVideoAttachmentCandidate === true
+    && isHostedConversationAnalyzeVideoRuntimeEligible({
+      runtime: input.runtime,
+      wake: decoded.wake,
+    });
   const notifyActiveTurnInputAvailable = async (): Promise<void> => {
     if (!foregroundAssistantInputId) {
       return;
@@ -1000,9 +1008,9 @@ async function stageHostedConversationAssistantInputEvent(input: {
 
   return {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
-    hasVideoAttachmentCandidate:
+    hasAnalyzeVideoAttachmentCandidate:
       event.content.attachmentDescriptors.some(
-        isHostedConversationVideoAttachmentDescriptor,
+        isHostedConversationAnalyzeVideoAttachmentDescriptor,
       ),
     inputId: event.inputId,
     async recordAttachmentEvidence(attachmentEvidence) {
@@ -1841,16 +1849,51 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
   return [];
 }
 
-function isHostedConversationVideoAttachmentDescriptor(
+const analyzeVideoSupportedMimeTypes = new Set<string>(
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
+);
+
+function isHostedConversationAnalyzeVideoRuntimeEligible(input: {
+  runtime: HostedConversationMailboxRuntime;
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  return hasHostedGeminiVideoAnalysisRuntimeKey(input.runtime)
+    && isHostedConversationPrivateDirectWake(input.wake);
+}
+
+function hasHostedGeminiVideoAnalysisRuntimeKey(
+  runtime: HostedConversationMailboxRuntime,
+): boolean {
+  return typeof runtime.forwardedEnv[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV] === "string"
+    && runtime.forwardedEnv[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV].trim().length > 0;
+}
+
+function isHostedConversationPrivateDirectWake(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return wake.message.linqMessage.threadIsDirect !== false;
+  }
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return wake.message.telegramMessage.threadIsDirect !== false;
+  }
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return resolveHostedEmailConversationDirectness({
+      message: wake.message,
+      threadTarget: parseHostedEmailThreadTarget(wake.message.threadTarget),
+    }) === true;
+  }
+  return false;
+}
+
+function isHostedConversationAnalyzeVideoAttachmentDescriptor(
   descriptor: AssistantInputAttachmentDescriptor,
 ): boolean {
   const contentType = descriptor.contentType?.trim().toLowerCase() ?? "";
-  if (contentType.startsWith("video/")) {
+  if (contentType === "video/mov") {
     return true;
   }
-
-  const kind = descriptor.kind?.trim().toLowerCase() ?? "";
-  if (kind === "video" || kind === "video_note" || kind === "animation") {
+  if (analyzeVideoSupportedMimeTypes.has(contentType)) {
     return true;
   }
 

@@ -1080,7 +1080,8 @@ export interface MurphDynamicToolExecutionResult {
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
   /**
    * Trusted runtime-owned text that must be delivered when the model supplies
-   * no response text or card. Currently reserved for analyze-video failures.
+   * no response text or card. Analyze-video uses this for the best completed
+   * tool outcome so successful observations cannot disappear behind no-reply.
    */
   requiredFinalResponseFallback?: string
   requiredVaultFileApprovalUrl?: string

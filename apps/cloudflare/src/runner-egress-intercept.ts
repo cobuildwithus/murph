@@ -2272,29 +2272,22 @@ async function maybeHandleGeminiRequest(input: {
     });
     return new Response("Hosted Gemini response too large.", { status: 502 });
   }
-  try {
-    await recordHostedGeminiVideoAnalysisUsage({
-      env: input.env,
-      memberId: authorization.userId,
-      model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
-      occurredAt: new Date(providerRequestStartedAt).toISOString(),
-      providerRequestId:
-        response.headers.get("x-goog-request-id")
-        ?? response.headers.get("x-request-id"),
-      usage: readHostedGeminiVideoAnalysisUsageMetadata(responseBody),
-    });
-  } catch (error) {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        ...buildHostedExecutionSafeErrorDetails(error),
-        providerKind: "gemini",
-      },
-      level: "warn",
-      message: "Hosted Gemini video usage recording failed; response withheld.",
-      phase: "wake.running",
-    });
-    return new Response("Hosted Gemini usage recording failed.", { status: 502 });
+  const usageRecording = recordHostedGeminiVideoAnalysisUsage({
+    env: input.env,
+    memberId: authorization.userId,
+    model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+    occurredAt: new Date(providerRequestStartedAt).toISOString(),
+    providerRequestId:
+      response.headers.get("x-goog-request-id")
+      ?? response.headers.get("x-request-id"),
+    responseBody,
+  });
+  if (typeof input.ctx?.waitUntil === "function") {
+    input.ctx.waitUntil(usageRecording);
+  } else {
+    // Production container interception has no waitUntil. The recorder owns
+    // its catch/log path, so usage accounting cannot withhold the answer.
+    void usageRecording;
   }
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-encoding");
@@ -2306,42 +2299,55 @@ async function maybeHandleGeminiRequest(input: {
   });
 }
 
-async function recordHostedGeminiVideoAnalysisUsage(input: {
+function recordHostedGeminiVideoAnalysisUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
   occurredAt: string;
   providerRequestId: string | null;
-  usage: Record<string, unknown> | null;
+  responseBody: ArrayBuffer;
 }): Promise<void> {
-  if (!input.memberId) {
-    throw new TypeError("Hosted Gemini video usage recording requires a member id.");
-  }
-  const environment = readHostedExecutionEnvironment(
-    asWorkerStringEnvironment(input.env),
-  );
-  const record = buildHostedGeminiVideoAnalysisUsageRecord({
-    memberId: input.memberId,
-    model: input.model,
-    occurredAt: input.occurredAt,
-    providerRequestId: input.providerRequestId,
-    usage: input.usage,
+  return (async () => {
+    if (!input.memberId) {
+      throw new TypeError("Hosted Gemini video usage recording requires a member id.");
+    }
+    const environment = readHostedExecutionEnvironment(
+      asWorkerStringEnvironment(input.env),
+    );
+    const record = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: input.memberId,
+      model: input.model,
+      occurredAt: input.occurredAt,
+      providerRequestId: input.providerRequestId,
+      usage: readHostedGeminiVideoAnalysisUsageMetadata(input.responseBody),
+    });
+    const result = await recordHostedRuntimeUsageRecord({
+      boundUserId: input.memberId,
+      fetchImpl: fetch,
+      record,
+      timeoutMs: environment.webControlTimeoutMs,
+      transport: {
+        callbackSigning: environment.webCallbackSigning,
+        mode: "direct",
+        webControlBaseUrl: environment.hostedWebBaseUrl,
+        workspaceCheckpointBridge: null,
+      },
+    });
+    if (!result.recorded || result.usageId !== record.usageId) {
+      throw new Error("Hosted Gemini video usage was not durably accepted.");
+    }
+  })().catch((error: unknown) => {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "gemini",
+      },
+      level: "warn",
+      message: "Hosted Gemini video usage recording failed; response delivery unaffected.",
+      phase: "wake.running",
+    });
   });
-  const result = await recordHostedRuntimeUsageRecord({
-    boundUserId: input.memberId,
-    fetchImpl: fetch,
-    record,
-    timeoutMs: environment.webControlTimeoutMs,
-    transport: {
-      callbackSigning: environment.webCallbackSigning,
-      mode: "direct",
-      webControlBaseUrl: environment.hostedWebBaseUrl,
-      workspaceCheckpointBridge: null,
-    },
-  });
-  if (!result.recorded || result.usageId !== record.usageId) {
-    throw new Error("Hosted Gemini video usage was not durably accepted.");
-  }
 }
 
 async function maybeHandleXaiRequest(input: {

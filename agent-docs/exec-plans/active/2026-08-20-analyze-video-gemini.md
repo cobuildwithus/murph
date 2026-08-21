@@ -7,7 +7,8 @@ Murph can inspect one user-supplied video attachment through a new
 1 FPS, sends one bounded request to Gemini 3.7 Flash, and returns a compact,
 explicitly untrusted analysis to the assistant. Hosted credentials remain
 Worker-owned and protocol-valid successful provider calls enter the existing
-hosted usage accounting path before their response is released.
+hosted usage accounting path without making accounting a second success
+authority for returning the provider answer.
 
 ## Product UX plan
 
@@ -16,11 +17,13 @@ hosted usage accounting path before their response is released.
   observation in that same conversation.
 - Entry and promise: the member attaches or refers to an accepted video and asks
   a focused question. Murph makes at most one analysis call per host turn,
-  waits for the bounded same-turn provider request and usage acceptance, and
-  replies in the originating private conversation. If the attachment is
-  unavailable, changed, unsupported, or too large, or Gemini or usage recording
-  fails, Murph must say that no analysis completed and leave the member with a
-  clear retry path rather than a silent stall or invented result.
+  waits for the bounded same-turn provider request, and replies in the
+  originating private conversation. If the attachment is unavailable, changed,
+  unsupported, or too large, or Gemini fails, Murph must say that no analysis
+  completed and leave the member with a clear retry path rather than a silent
+  stall or invented result. If usage recording fails after Gemini has returned
+  a valid answer, the answer still reaches the member while accounting records a
+  secret-safe degradation off the foreground reply path.
 - Authority and audience: the first release is private-direct only. Group use is
   excluded until the requester/uploader authority rule is explicitly approved
   and covered through final group delivery; sharing a clip in a group alone is
@@ -47,7 +50,8 @@ hosted usage accounting path before their response is released.
   untrusted observations rather than instructions.
 - Hosted execution injects `GEMINI_API_KEY` only at the Worker egress boundary,
   records token usage without prompts, paths, video bytes, or response text,
-  and prices the usage before the tool is deployed.
+  and prices the usage before the tool is deployed. Usage recording failure
+  must not withhold an already-valid provider answer.
 - Focused unit/integration tests, affected typechecks, dependency checks, exact-
   head ReviewGPT, CI, and a clean merge-tree proof pass before handoff.
 
@@ -75,7 +79,7 @@ hosted usage accounting path before their response is released.
   catalog registration, planning availability, and per-turn call state.
 - Hosted-execution usage record construction.
 - Cloudflare Worker contracts, secret/env policy, egress interception, and
-  synchronous Web usage acceptance before successful response release.
+  failure-isolated Web usage recording after a successful Gemini response.
 - Web hosted allowance pricing for Gemini 3.7 Flash.
 - Provider-boundary registration, environment example, architecture/security/
   deployment/testing documentation, deferred post-activation changelog, and
@@ -96,11 +100,13 @@ hosted usage accounting path before their response is released.
   key. V1 accepts this bounded at-least-once residual; exact-once recovery would
   require a durable receipt and cached-result/recovery retention design outside
   this minimal release.
-- A completed turn cannot silently suppress an analyze-video failure: trusted
-  fallback text fills blank/no-reply output while model/card wording still wins.
-  If the primary provider transport itself fails after the tool result, the
-  ordinary outer-turn retry owns recovery; v1 does not add a separate failed-
-  attempt delivery path for that narrow window.
+- A completed turn cannot silently suppress an analyze-video outcome: trusted
+  fallback text fills blank/no-reply output while model/card wording still wins,
+  and a successful analysis remains the selected fallback even if a later
+  same-turn tool attempt hits the one-call limit. If the primary provider
+  transport itself fails after the tool result, the ordinary outer-turn retry
+  owns recovery; v1 does not add a separate failed-attempt delivery path for
+  that narrow window.
 - Rollback is removal of Cloudflare tool exposure/secret injection after Web
   pricing support has shipped; absent `GEMINI_API_KEY` is the safe skew state.
 

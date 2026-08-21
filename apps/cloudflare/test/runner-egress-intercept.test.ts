@@ -2084,7 +2084,7 @@ describe("hostedRunnerIntercept", () => {
     expect(await forwardedRequest.clone().json()).toEqual(requestBody);
     expect(await response.clone().json()).toEqual(upstreamPayload);
 
-    expect(waitUntilPromises).toHaveLength(0);
+    expect(waitUntilPromises).toHaveLength(1);
     await Promise.all(waitUntilPromises);
     const usageCall = findFetchCall(fetchMock, "web.example.test");
     expect(usageCall).toBeDefined();
@@ -2110,7 +2110,7 @@ describe("hostedRunnerIntercept", () => {
     });
   });
 
-  it("withholds a successful Gemini response when durable usage recording fails", async () => {
+  it("keeps a successful Gemini response when durable usage recording fails", async () => {
     const upstreamPayload = {
       candidates: [{
         content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
@@ -2156,17 +2156,87 @@ describe("hostedRunnerIntercept", () => {
       },
     );
 
-    expect(response.status).toBe(502);
-    expect(await response.text()).toBe("Hosted Gemini usage recording failed.");
-    expect(waitUntilPromises).toHaveLength(0);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(upstreamPayload);
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
     expect(findFetchCall(fetchMock, "web.example.test")).toBeDefined();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         details: expect.objectContaining({ providerKind: "gemini" }),
         level: "warn",
-        message: "Hosted Gemini video usage recording failed; response withheld.",
+        message: "Hosted Gemini video usage recording failed; response delivery unaffected.",
       }),
     );
+  });
+
+  it("returns the buffered Gemini response without awaiting slow accounting when waitUntil is unavailable", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    let markAccountingStarted: (() => void) | undefined;
+    const accountingStarted = new Promise<void>((resolve) => {
+      markAccountingStarted = resolve;
+    });
+    let finishAccounting: ((response: Response) => void) | undefined;
+    const pendingAccounting = new Promise<Response>((resolve) => {
+      finishAccounting = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        markAccountingStarted?.();
+        return await pendingAccounting;
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request(
+            `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+            {
+              body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+              headers: {
+                ...BOUND_USER_WRITE_FENCE_HEADERS,
+                "content-type": "application/json",
+                "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+              },
+              method: "POST",
+            },
+          ),
+          createInterceptEnv({
+            GEMINI_API_KEY: "gemini-worker-secret",
+            validateRuntimeWriteFence: async () => true,
+          }),
+          { containerId: RUNNER_CONTAINER_NAME },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Gemini delivery waited for the accounting callback"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(upstreamPayload);
+      await accountingStarted;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      finishAccounting?.(Response.json({ recorded: true, usageId: "usage_1" }));
+    }
   });
 
   it("rejects an oversized Gemini response without widening the delivery buffer", async () => {

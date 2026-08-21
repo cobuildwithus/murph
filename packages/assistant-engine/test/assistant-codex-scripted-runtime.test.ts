@@ -10431,6 +10431,164 @@ text(JSON.stringify(result));
     },
   )
 
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      name: 'the model returns empty text',
+      providerResponses: [{ text: '' }],
+    },
+    {
+      allowFinishWithoutReply: true,
+      name: 'the model explicitly selects no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+    },
+  ] satisfies readonly {
+    allowFinishWithoutReply: boolean
+    name: string
+    providerResponses: readonly ScriptedResponse[]
+  }[])(
+    'delivers the trusted video-analysis success fallback when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ allowFinishWithoutReply, providerResponses }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        Response.json({
+          candidates: [{
+            content: {
+              parts: [{
+                text:
+                  'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+              }],
+              role: 'model',
+            },
+            finishReason: 'STOP',
+          }],
+        }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        ...providerResponses,
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          allowFinishWithoutReply,
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalAction).toBeNull()
+      expect(result.finalActionExplicit).toBe(false)
+      expect(result.finalMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toContain('Gemini video analysis below')
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(
+        allowFinishWithoutReply ? 3 : 2,
+      )
+    },
+  )
+
+  it('preserves the first successful video-analysis fallback after a later limit failure', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        candidates: [{
+          content: {
+            parts: [{
+              text:
+                'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+            }],
+            role: 'model',
+          },
+          finishReason: 'STOP',
+        }],
+      }),
+    )
+    const analyzeCall = {
+      functionCall: {
+        arguments: {
+          message_ref: fixture.inputId,
+          question: 'Count the visible push-ups and describe the form.',
+        },
+        name: 'analyze_video',
+        namespace: 'murph',
+      },
+    } satisfies ScriptedResponse
+    scenario.stub.queue(
+      analyzeCall,
+      analyzeCall,
+      { text: '' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: geminiFetch,
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: fixture.hostedToolContext,
+      prompt: 'Analyze my attached video twice and answer my question.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(toolOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('Eight visible push-ups'),
+      expect.stringContaining('Video analysis limit reached for this turn'),
+    ]))
+    expect(geminiFetch).toHaveBeenCalledOnce()
+    expect(result.finalMessage).toContain('Eight visible push-ups')
+    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.transcriptMessage).toContain('Eight visible push-ups')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
   it('ends an accepted group email effect without another provider request', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

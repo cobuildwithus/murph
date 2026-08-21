@@ -100,9 +100,7 @@ export async function executeAnalyzeVideoDynamicTool(input: {
     vaultRoot: input.vaultRoot ?? null,
   })
   return {
-    ...(result.rpcSuccess
-      ? {}
-      : { requiredFinalResponseFallback: result.rpcText }),
+    requiredFinalResponseFallback: result.rpcText,
     rpcResult: {
       success: result.rpcSuccess,
       contentItems: [{ type: 'inputText', text: result.rpcText }],
