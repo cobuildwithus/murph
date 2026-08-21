@@ -4,7 +4,6 @@ import { type PrismaClient } from "@prisma/client";
 import { after } from "next/server";
 
 import { getPrisma } from "../prisma";
-import { parseCommaSeparatedList } from "../primitives";
 import {
   claimHostedMemberSignupNotificationEmailAttempt,
   readHostedMemberCoreState,
@@ -14,10 +13,12 @@ import {
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
   HostedResendPlainTextEmailError,
-  readHostedResendPlainTextEmailConfig,
   sendHostedResendPlainTextEmail,
-  type HostedResendPlainTextEmailConfig,
 } from "./resend-plain-text-email";
+import {
+  readHostedSignupNotificationEmailConfig,
+  type HostedSignupNotificationEmailEnv,
+} from "./signup-notification-email-config";
 import {
   formatHostedSignupLocation,
   formatHostedSignupSurface,
@@ -26,8 +27,6 @@ import {
 } from "./signup-notification-context";
 
 const HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT = "New Murph signup";
-
-type HostedSignupNotificationEmailEnv = Readonly<Record<string, string | undefined>>;
 
 export type HostedSignupNotificationEmailResult =
   | {
@@ -185,47 +184,6 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     providerMessageId: result.providerMessageId,
     status: "sent",
   };
-}
-
-type HostedSignupNotificationEmailConfig = {
-  recipients: string[];
-  resend: HostedResendPlainTextEmailConfig;
-};
-
-function readHostedSignupNotificationEmailConfig(
-  source: HostedSignupNotificationEmailEnv,
-): HostedSignupNotificationEmailConfig | null {
-  const resend = readHostedResendPlainTextEmailConfig(source);
-  const recipients = readHostedSignupNotificationEmailRecipients(
-    source.HOSTED_SIGNUP_NOTIFICATION_EMAILS,
-  );
-
-  if (!resend || recipients.length === 0) {
-    return null;
-  }
-
-  return {
-    recipients,
-    resend,
-  };
-}
-
-function readHostedSignupNotificationEmailRecipients(value: string | undefined): string[] {
-  const recipients: string[] = [];
-  const seen = new Set<string>();
-
-  for (const email of parseCommaSeparatedList(value)) {
-    const seenKey = email.toLowerCase();
-
-    if (seen.has(seenKey)) {
-      continue;
-    }
-
-    seen.add(seenKey);
-    recipients.push(email);
-  }
-
-  return recipients;
 }
 
 function buildHostedSignupNotificationEmailText(input: {

@@ -26,6 +26,9 @@ import {
   buildHostedSignupNotificationContext,
 } from "@/src/lib/hosted-onboarding/signup-notification-context";
 import {
+  isHostedSignupNotificationEmailConfigured,
+} from "@/src/lib/hosted-onboarding/signup-notification-email-config";
+import {
   readHostedConsentStatus,
   type HostedConsentStatus,
 } from "@/src/lib/legal/consent";
@@ -60,17 +63,20 @@ export const POST = withJsonError(async (request: Request) => {
       headers: request.headers,
     });
     const now = new Date();
+    const signupNotificationContext = isHostedSignupNotificationEmailConfigured()
+      ? buildHostedSignupNotificationContext({
+          headers: request.headers,
+          occurredAt: now,
+          surface: "website",
+          timeZone,
+        })
+      : undefined;
     const result = await completeHostedPrivyVerification({
       authMethod,
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
       now,
-      signupNotificationContext: buildHostedSignupNotificationContext({
-        headers: request.headers,
-        occurredAt: now,
-        surface: "website",
-        timeZone,
-      }),
+      ...(signupNotificationContext ? { signupNotificationContext } : {}),
       ...(timeZone ? { timeZone } : {}),
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);

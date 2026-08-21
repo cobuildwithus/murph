@@ -25,6 +25,9 @@ import {
   buildHostedSignupNotificationContext,
   type HostedSignupNotificationContextV1,
 } from "./signup-notification-context";
+import {
+  isHostedSignupNotificationEmailConfigured,
+} from "./signup-notification-email-config";
 import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
 
 /**
@@ -50,16 +53,19 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
   }
 
   const now = new Date();
+  const signupNotificationContext = isHostedSignupNotificationEmailConfigured()
+    ? buildHostedSignupNotificationContext({
+        headers: input.request.headers,
+        occurredAt: now,
+        surface: "mobile_app",
+        timeZone: input.timeZone,
+      })
+    : undefined;
   return ensureHostedCompanionMemberId({
     identity: session.identity,
     now,
     prisma,
-    signupNotificationContext: buildHostedSignupNotificationContext({
-      headers: input.request.headers,
-      occurredAt: now,
-      surface: "mobile_app",
-      timeZone: input.timeZone,
-    }),
+    ...(signupNotificationContext ? { signupNotificationContext } : {}),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
@@ -101,7 +107,9 @@ export async function ensureHostedCompanionMemberId(input: {
     identity: input.identity,
     now,
     prisma,
-    signupNotificationContext: input.signupNotificationContext,
+    ...(input.signupNotificationContext
+      ? { signupNotificationContext: input.signupNotificationContext }
+      : {}),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   }).catch((error: unknown) => {
     throw remapHostedPrivyCompletionLagError(error);

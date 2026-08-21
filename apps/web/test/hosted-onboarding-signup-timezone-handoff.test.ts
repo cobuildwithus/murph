@@ -240,6 +240,44 @@ describe("hosted signup timezone handoff", () => {
       }));
   });
 
+  it("leaves inactive signup notification context empty when request capture is omitted", async () => {
+    let signupNotificationContextEncrypted: string | null = null;
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback(prisma)),
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: MEMBER.billingStatus,
+          suspendedAt: null,
+          threadContainer: null,
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    } as unknown as PrismaClient;
+    mocks.writeHostedMemberSignupNotificationContextIfPendingTx
+      .mockImplementationOnce(async () => {
+        signupNotificationContextEncrypted = "encrypted-context";
+        return true;
+      });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: IDENTITY,
+        now: NOW,
+        prisma,
+        timeZone: "Europe/Warsaw",
+      }),
+    ).resolves.toMatchObject({
+      memberId: MEMBER.id,
+      stage: "checkout",
+    });
+
+    expect(mocks.writeHostedMemberSignupNotificationContextIfPendingTx)
+      .not.toHaveBeenCalled();
+    expect(signupNotificationContextEncrypted).toBeNull();
+  });
+
   it("prepares a private reply alias from the authoritative live email", async () => {
     const staleIdentity = {
       email: {
