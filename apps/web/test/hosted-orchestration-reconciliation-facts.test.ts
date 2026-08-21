@@ -613,11 +613,21 @@ describe("hosted orchestration reconciliation facts", () => {
   });
 
   it.each([
-    ["device-sync.wake", "model_free"],
-    ["assistant.ask.completed", "default_owned"],
+    ["device-sync.wake", "device-sync.wake:item", "model_free"],
+    [
+      "assistant.notification.requested",
+      "assistant.notification.requested:group-join:membership",
+      "model_free",
+    ],
+    [
+      "assistant.notification.requested",
+      "assistant.notification.requested:generic",
+      "default_owned",
+    ],
+    ["assistant.ask.completed", "assistant.ask.completed:item", "default_owned"],
   ] as const)(
-    "classifies the first live system mailbox item %s as %s",
-    async (kind, expectedFrontier) => {
+    "classifies the first live system mailbox item %s with dedupe %s as %s",
+    async (kind, dedupeKey, expectedFrontier) => {
       mocks.readHostedWorkspace.mockResolvedValue(buildWorkspaceRecord({
         redactedStatusJson: {
           conversationImportedSeq: "0",
@@ -630,6 +640,7 @@ describe("hosted orchestration reconciliation facts", () => {
         { lane: "system", maxSeq: "7" },
       ]);
       mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+        dedupeKey,
         kind,
         laneSeq: "5",
       });
@@ -657,6 +668,7 @@ describe("hosted orchestration reconciliation facts", () => {
       { lane: "system", maxSeq: "1" },
     ]);
     mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+      dedupeKey: "runtime.maintenance-requested:item",
       kind: "runtime.maintenance-requested",
       laneSeq: "1",
     });
@@ -1356,6 +1368,7 @@ describe("hosted orchestration reconciliation facts", () => {
       { lane: "system", maxSeq: "5" },
     ]);
     mocks.readHostedMailboxFirstLiveSystemItemAfterSeq.mockResolvedValue({
+      dedupeKey: "assistant.ask.completed:item",
       kind: "assistant.ask.completed",
       laneSeq: "5",
     });

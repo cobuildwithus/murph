@@ -4,12 +4,18 @@ import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
+  isHostedSystemMailboxModelFreeNotification,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
   parseHostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records-boundary";
+import {
+  persistHostedRuntimeStateAtCanonicalBoundary,
+} from "@murphai/core";
 import {
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
@@ -233,11 +239,15 @@ export async function removeHostedSystemMailboxPendingItems(input: {
 export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
   nextWakeAt: string | null;
   now?: () => string;
+  persistAtCanonicalBoundary?: boolean;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
   if (!input.nextWakeAt) {
     await removePendingHostedDeviceSyncDenseRawRetentionMailboxSuccessors(input.vaultRoot);
+    if (input.persistAtCanonicalBoundary === true) {
+      await persistHostedRuntimeStateAtCanonicalBoundary();
+    }
     return;
   }
 
@@ -275,6 +285,9 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
       nextItem,
     ],
   }));
+  if (input.persistAtCanonicalBoundary === true) {
+    await persistHostedRuntimeStateAtCanonicalBoundary();
+  }
 }
 
 async function removePendingHostedDeviceSyncDenseRawRetentionMailboxSuccessors(
@@ -324,10 +337,16 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
 }): Promise<HostedRuntimeWakeCandidate> {
   const now = (input.now ?? (() => new Date().toISOString()))();
   const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const notificationProjectedState = shouldProjectHostedSystemMailboxModelFreeNotifications({
+    allowedRouteActions: input.allowedRouteActions ?? null,
+    allowedWakeKinds: input.allowedWakeKinds ?? null,
+  })
+    ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
+    : state;
   const selectionState = input.allowedWakeKinds == null
-    ? state
+    ? notificationProjectedState
     : {
-        pending: state.pending.filter((item) =>
+        pending: notificationProjectedState.pending.filter((item) =>
           input.allowedWakeKinds?.includes(item.wake.kind)
         ),
       };
@@ -399,6 +418,57 @@ export function isHostedApprovedContinuationSystemMailboxItem(
 ): boolean {
   return item.routeAction === "apply-runtime-control-request"
     && item.wake.kind === "runtime.pending-effects-reconcile-requested";
+}
+
+export function isHostedSystemMailboxModelFreeExactNotificationItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  if (
+    item.routeAction !== "dispatch-assistant-notification"
+    || item.wake.kind !== "assistant.notification.requested"
+  ) {
+    return false;
+  }
+
+  const notification = item.wake.notification;
+  const deliveryDedupeToken = notification.deliveryDedupeToken ?? "";
+  const deliveryIdempotencyKey = notification.deliveryIdempotencyKey ?? "";
+  const expectedDedupeKey =
+    `assistant.notification.requested:${deliveryDedupeToken}`;
+
+  return deliveryDedupeToken.length > 0
+    && deliveryDedupeToken === deliveryIdempotencyKey
+    && item.mailboxDedupeKey === expectedDedupeKey
+    && item.wake.eventId === expectedDedupeKey
+    && notification.deliveryDispatchMode === "queue-only"
+    && notification.responsePolicy?.kind === "require_send_exact_text"
+    && notification.responsePolicy.text.length > 0
+    && isHostedSystemMailboxModelFreeNotification({
+      dedupeKey: item.mailboxDedupeKey,
+      kind: item.wake.kind,
+    });
+}
+
+export function projectHostedSystemMailboxModelFreeNotificationFrontier(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxState {
+  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(state.pending);
+  if (
+    !durableFrontier
+    || durableFrontier.wake.kind !== "assistant.notification.requested"
+  ) {
+    return {
+      pending: state.pending.filter((item) =>
+        item.wake.kind !== "assistant.notification.requested"
+      ),
+    };
+  }
+
+  return {
+    pending: isHostedSystemMailboxModelFreeExactNotificationItem(durableFrontier)
+      ? [durableFrontier]
+      : [],
+  };
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {
@@ -826,6 +896,41 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
     items.push(item);
   }
   return items;
+}
+
+function shouldProjectHostedSystemMailboxModelFreeNotifications(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds: readonly HostedExecutionSystemWake["kind"][] | null;
+}): boolean {
+  const includesModelFreeMaintenanceAction =
+    input.allowedRouteActions?.includes("apply-runtime-control-request") === true
+    || input.allowedRouteActions?.includes("run-device-sync-wake") === true;
+  return input.allowedRouteActions?.includes(
+    "dispatch-assistant-notification",
+  ) === true
+    && includesModelFreeMaintenanceAction
+    && input.allowedWakeKinds?.includes(
+      "assistant.notification.requested",
+    ) === true;
+}
+
+function findHostedSystemMailboxDurableFrontierItem(
+  pending: readonly HostedSystemMailboxPendingItem[],
+): HostedSystemMailboxPendingItem | null {
+  let frontier: HostedSystemMailboxPendingItem | null = null;
+  let frontierSeq: bigint | null = null;
+  for (const item of pending) {
+    if (item.mailboxLaneSeq === null) {
+      continue;
+    }
+
+    const seq = BigInt(item.mailboxLaneSeq);
+    if (frontierSeq === null || seq < frontierSeq) {
+      frontier = item;
+      frontierSeq = seq;
+    }
+  }
+  return frontier;
 }
 
 function systemMailboxItemRouteActionAllowed(

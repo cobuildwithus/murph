@@ -1788,7 +1788,11 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
   at: Date;
   prisma?: HostedMailboxStoreClient;
   userId: string;
-}): Promise<{ kind: HostedMailboxKind; laneSeq: string } | null> {
+}): Promise<{
+  dedupeKey: string;
+  kind: HostedMailboxKind;
+  laneSeq: string;
+} | null> {
   const prisma = input.prisma ?? getPrisma();
   const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
   const afterSeq = normalizeHostedMailboxSeq(
@@ -1800,6 +1804,7 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
       laneSeq: "asc",
     },
     select: {
+      dedupeKey: true,
       kind: true,
       laneSeq: true,
     },
@@ -1815,6 +1820,7 @@ export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
 
   return row
     ? {
+        dedupeKey: row.dedupeKey,
         kind: requireHostedMailboxKind(row.kind),
         laneSeq: row.laneSeq.toString(),
       }

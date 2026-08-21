@@ -11,6 +11,7 @@ import {
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+  isHostedSystemMailboxModelFreeNotification,
   type HostedRuntimeReconciliationBlockedReason,
   type HostedRuntimeReconciliationFacts,
   type HostedRuntimeReconciliationFactsRequest,
@@ -810,8 +811,24 @@ async function readHostedRuntimeSystemMailboxFrontier(input: {
     return null;
   }
 
-  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.some(
-    (kind) => kind === frontier.kind,
+  return classifyHostedFirstLiveSystemItemOwnership(frontier);
+}
+
+export function classifyHostedFirstLiveSystemItemOwnership(input: {
+  dedupeKey: string | null | undefined;
+  kind: string;
+}): HostedRuntimeSystemMailboxFrontierClass {
+  if (
+    isHostedSystemMailboxModelFreeNotification({
+      dedupeKey: input.dedupeKey,
+      kind: input.kind,
+    })
+  ) {
+    return "model_free";
+  }
+
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS.some((kind) =>
+    kind === input.kind && kind !== "assistant.notification.requested"
   )
     ? "model_free"
     : "default_owned";
