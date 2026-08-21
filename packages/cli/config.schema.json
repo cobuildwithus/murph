@@ -4238,6 +4238,14 @@
                             "minLength": 3
                           }
                         },
+                        "indicatorNote": {
+                          "description": "Concise context like sauna_type=Dry home sauna, up to 100°C, Harvia heater. Repeat --indicator-note for multiple values; use null to clear.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 3
+                          }
+                        },
                         "recordedAt": {
                           "description": "ISO date stamped on the saved indicators. Defaults to today.",
                           "type": "string",

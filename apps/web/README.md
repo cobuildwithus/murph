@@ -2072,30 +2072,69 @@ Current hosted billing assumptions:
 - `/ops/usage` is the operator-only allowance inspection and recovery surface.
   It derives personal-member and synthetic-group message activity from retained
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
-  rows, and labels the mailbox retention boundary. The table and reset reuse the
-  runtime's canonical allowance gate. A row reset verifies the displayed
-  current-period and usage-credit versions. Paid, Family, and container resets
-  atomically clear current included spend and the block. An exhausted canonical
-  Starter reset instead appends one fresh $4.50 grant under the beneficiary
-  lock, keyed to the displayed ledger version, then clears the derived period.
-  The distinct Ops grant source is excluded from Starter enrollment and
-  conversion metrics. Both paths release only that capacity epoch's logical
-  notice claim, preserve immutable usage, prior grants and debits, purchased and
-  referral credit, billing state, mailbox rows, and delivery history, and refuse
-  to race an in-flight notice dispatch. After commit the route signals the
-  existing runtime recheck; a
-  rejected or bounded-timeout wake is returned as a committed partial result
-  with a wake-only retry. For Starter recovery, the page reconstructs that
-  wake-only action after close or reload from the active Ops grant and
-  unconsumed mailbox work previously denied for usage. The table reads its
-  decision and reset version from one repeatable database snapshot, and derives
-  blocked/available only from
-  that canonical decision rather than the potentially stale persisted marker.
-  Historical notice status is displayed independently from current admission.
-  A later crossing reuses the logical claim key but receives a fresh durable
-  delivery ID and provider idempotency key. Generic runtime and webhook
+  rows, and labels the mailbox retention boundary. The ordinary list keeps its
+  25-row primary-key cursor pages. URL-backed search has no page controls and
+  accepts only one complete hosted ID, one exact verified email, or four final
+  phone digits. Email lookup uses the existing blind-index read candidates and
+  never selects or decrypts the encrypted address; phone lookup uses only the
+  persisted masked hint. Search hydrates at most 100 ID-ordered matches and
+  explicitly asks the operator to narrow the query when a 101st match proves
+  overflow. Capped or multi-member email/phone candidates are discovery-only;
+  row mutations remain locked until exact hosted-ID lookup resolves one target.
+  Submitting or clearing a query closes any open row confirmation and locks the
+  old result set's row mutation paths until the new server render arrives.
+  Whole-population summary totals remain unfiltered.
+- The table and reset reuse the runtime's canonical allowance gate. A row reset
+  verifies the displayed current-period and usage-credit versions. Paid,
+  Family, and container resets atomically clear current included spend and the
+  block. An exhausted canonical Starter reset instead appends one fresh $4.50
+  grant under the beneficiary lock, keyed to the displayed ledger version, then
+  clears the derived period. The distinct Ops grant source is excluded from
+  Starter enrollment and conversion metrics. Both paths release only that
+  capacity epoch's logical notice claim, preserve immutable usage, prior grants
+  and debits, purchased and referral credit, billing state, mailbox rows, and
+  delivery history, and refuse to race an in-flight notice dispatch. After
+  commit the route signals the existing runtime recheck; a rejected or
+  bounded-timeout wake is returned as a committed partial result with a
+  wake-only retry. For Starter recovery, the page reconstructs that wake-only
+  action after close or reload from the active Ops grant and unconsumed mailbox
+  work previously denied for usage. The table reads its decision and reset
+  version in one short repeatable-read transaction per admitted row, processed
+  sequentially, and derives blocked/available only from that canonical decision
+  rather than the potentially stale persisted
+  marker. Historical notice status is displayed independently from current
+  admission. A later crossing reuses the logical claim key but receives a fresh
+  durable delivery ID and provider idempotency key. Generic runtime and webhook
   delivery fences keep deterministic durable IDs for latency and receipt
   correlation.
+- `Reset everyone` requires the exact typed phrase, ignores any active search,
+  and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Members are reset sequentially through the same canonical transaction; one
+  stale re-read is allowed, the batch stops before acknowledging a remaining
+  failure, and each runtime wake begins only after that member commits. The page
+  reports processed/reset/unchanged/skipped/pending-wake/failed outcomes, loops
+  one request at a time while open, records the unfiltered starting population
+  as a reference, and makes clear that the live population can change. An
+  operator-requested pause takes effect after the current acknowledged batch
+  and resumes the same operation from that cursor. Known failures use the same
+  resume boundary. Ambiguous population responses may rewalk from the
+  beginning with the same browser-generated operation UUID. Pending-wake
+  recovery instead pages only that UUID's existing receipts and never re-enters
+  population mutation. It can be hidden without locking ordinary search or row
+  recovery, remains hidden across remounts and search navigation until the
+  operator explicitly reopens it under the same UUID, or is cleared after a
+  transient warned abandonment. One append-only
+  per-member receipt is written atomically with the first reset outcome; replay
+  returns that outcome without clearing later included usage or duplicating a
+  consumed Starter grant, and can repeat only a required post-commit runtime
+  wake. The same locked transaction reads the live gate and exact period: a
+  valid included allowance with no materialized zero-usage row commits a skip
+  and advances, while accounting that commits first leaves a period for the
+  reset to observe. The dialog claims completion only after a pass has no
+  pending wake. It
+  does not snapshot the population, pause usage, overlap interactive
+  transactions, or add a campaign, queue, scheduler, or duplicate usage read
+  model.
 - Delayed legacy Stripe trial objects remain eligible only for exact bounded
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.

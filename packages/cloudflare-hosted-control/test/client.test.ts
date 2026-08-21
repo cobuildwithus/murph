@@ -39,6 +39,7 @@ describe("createCloudflareHostedControlClient", () => {
     expect(Object.keys(client).sort()).toEqual([
       "createBrowserVaultExportSession",
       "createBrowserVaultSession",
+      "createEnvironmentRealtimeCall",
       "deleteEnvironmentVoice",
       "deleteMealPhoto",
       "deleteUserData",

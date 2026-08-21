@@ -444,9 +444,9 @@ async function hasHostedAiUsageThreadContainerAccess(input: {
 
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_VERSION = "openai-api-pricing-2026-05-05-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_PRICING_VERSION =
-  "openai-api-pricing-2026-07-30-gpt-5.6-standard";
+  "openai-api-pricing-2026-08-21-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_OPENAI_FLEX_PRICING_VERSION =
-  "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex";
+  "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex";
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_VENICE_PRICING_VERSION =
   "venice-api-pricing-2026-08-04-gpt-5.6-standard";
 const HOSTED_AI_USAGE_ALLOWANCE_PRICING_SOURCE =
@@ -574,10 +574,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_RAW_USAGE_KEYS: ReadonlySet<string>
   ]);
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
-  cachedInputUsdMicrosPerMillionTokens: 500_000n,
-  cacheWriteUsdMicrosPerMillionTokens: 6_250_000n,
-  inputUsdMicrosPerMillionTokens: 5_000_000n,
-  outputUsdMicrosPerMillionTokens: 30_000_000n,
+  cachedInputUsdMicrosPerMillionTokens: 400_000n,
+  cacheWriteUsdMicrosPerMillionTokens: 5_000_000n,
+  inputUsdMicrosPerMillionTokens: 4_000_000n,
+  outputUsdMicrosPerMillionTokens: 20_000_000n,
 } as const;
 
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_TERRA_MODEL_PRICE = {

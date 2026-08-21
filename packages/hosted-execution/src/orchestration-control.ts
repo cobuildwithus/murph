@@ -117,6 +117,7 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 
 export interface HostedRuntimeReconciliationFacts {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
+  environmentInterviewPending: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }

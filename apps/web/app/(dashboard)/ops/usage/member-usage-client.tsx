@@ -2,7 +2,13 @@
 
 import { RotateCcwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -15,6 +21,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/src/components/ui/field";
+import { Input } from "@/src/components/ui/input";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
   Table,
@@ -29,6 +42,13 @@ import type {
   HostedOpsMemberUsageResetResponse,
   HostedOpsMemberUsageRow,
 } from "@/src/lib/hosted-ops/member-usage";
+import {
+  HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+  type HostedOpsMemberUsageResetAllBatchResponse,
+  type HostedOpsMemberUsageResetAllCounts,
+  type HostedOpsMemberUsageResetAllWakeBatchResponse,
+  isHostedOpsUsageResetAllOperationId,
+} from "@/src/lib/hosted-ops/member-usage-contract";
 
 interface UsageResetMessage {
   text: string;
@@ -53,6 +73,57 @@ interface UsageRuntimeRecheckResponse {
   runtimeRecheckStatus: "accepted" | "pending";
 }
 
+export type MemberUsageClientDesignState =
+  | "row_stale_error"
+  | "search_loading"
+  | "reset_all_abandonment"
+  | "reset_all_complete"
+  | "reset_all_confirmation"
+  | "reset_all_partial_failure"
+  | "reset_all_progress"
+  | "reset_all_wake_recovery";
+
+interface UsageResetAllFailureState {
+  ambiguous: boolean;
+  memberId: string | null;
+  message: string;
+}
+
+interface UsageResetAllState {
+  counts: HostedOpsMemberUsageResetAllCounts;
+  failure: UsageResetAllFailureState | null;
+  lastAcknowledgedCursor: string | null;
+  phase:
+    | "complete"
+    | "confirming"
+    | "idle"
+    | "paused"
+    | "recovering_wakes"
+    | "running";
+}
+
+interface UsageResetAllSessionOperation {
+  operationId: string;
+  operatorMemberId: string;
+  startingPopulationCount: number;
+  state: UsageResetAllState;
+}
+
+type UsageResetAllRunMode = "recover_wakes" | "resume" | "start";
+
+const EMPTY_RESET_ALL_COUNTS: HostedOpsMemberUsageResetAllCounts = {
+  failed: 0,
+  pendingWake: 0,
+  processed: 0,
+  reset: 0,
+  skipped: 0,
+  unchanged: 0,
+};
+const RESET_ALL_SESSION_STORAGE_KEY = "murph.ops.usage.reset-all.v1";
+const RESET_ALL_MEMBER_ID_PATTERN = /^hbm_[A-Za-z0-9_-]+$/u;
+const RESET_ALL_MAX_MEMBER_ID_LENGTH = 128;
+const RESET_ALL_MAX_FAILURE_MESSAGE_LENGTH = 2_000;
+
 class UsageResetRequestError extends Error {
   constructor(
     message: string,
@@ -63,29 +134,183 @@ class UsageResetRequestError extends Error {
   }
 }
 
-export function MemberUsageClient({
-  dashboard,
-}: {
+interface MemberUsageClientProps {
   dashboard: HostedOpsMemberUsageDashboard;
-}) {
+  designResetAllDialogInert?: boolean;
+  designResetAllInline?: boolean;
+  designState?: MemberUsageClientDesignState;
+  operatorMemberId: string | null;
+}
+
+export function MemberUsageClient(props: MemberUsageClientProps) {
+  return (
+    <MemberUsageClientSurface
+      key={`${props.operatorMemberId ?? "design"}:${props.dashboard.search.query ?? ""}`}
+      {...props}
+    />
+  );
+}
+
+function MemberUsageClientSurface({
+  dashboard,
+  designResetAllDialogInert = false,
+  designResetAllInline = false,
+  designState,
+  operatorMemberId,
+}: MemberUsageClientProps) {
   const router = useRouter();
+  const resetAllAcknowledgedCursors = useRef<Set<string>>(new Set());
+  const resetAllOperationId = useRef<string | null>(null);
+  const resetAllPageActive = useRef(true);
+  const resetAllPauseRequested = useRef(false);
+  const resetAllRunInFlight = useRef(false);
+  const resetAllTrigger = useRef<HTMLButtonElement | null>(null);
+  const resetAllStartingPopulationCount = useRef(
+    readResetAllStartingPopulationCount(dashboard),
+  );
+  const initialResetAllState = createInitialResetAllState(designState);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [resettingMemberId, setResettingMemberId] = useState<string | null>(
     null,
   );
-  const [message, setMessage] = useState<UsageResetMessage | null>(null);
+  const [message, setMessage] = useState<UsageResetMessage | null>(
+    designState === "row_stale_error"
+      ? {
+          text:
+            "Usage changed after this table loaded. Refresh and review the current row before resetting it.",
+          tone: "error",
+        }
+      : null,
+  );
   const [postCommit, setPostCommit] = useState<UsagePostCommit | null>(null);
+  const [searchQuery, setSearchQuery] = useState(
+    dashboard.search.query ?? "",
+  );
+  const [searchNavigationPending, setSearchNavigationPending] = useState(
+    designState === "search_loading",
+  );
+  const [resetAllSessionCheckComplete, setResetAllSessionCheckComplete] =
+    useState(designState !== undefined || operatorMemberId === null);
+  const [resetAllOpen, setResetAllOpen] = useState(
+    initialResetAllState.phase !== "idle",
+  );
+  const [resetAllAbandonmentOpen, setResetAllAbandonmentOpen] = useState(
+    designState === "reset_all_abandonment",
+  );
+  const [resetAllConfirmation, setResetAllConfirmation] = useState(
+    designState === "reset_all_confirmation"
+      ? HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
+      : "",
+  );
+  const [resetAllPausePending, setResetAllPausePending] = useState(false);
+  const [resetAllState, setResetAllStateValue] = useState(initialResetAllState);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
     [dashboard.rows, selectedMemberId],
   );
   const isResetting = resettingMemberId !== null;
+  const preservedResetAllOperation = !resetAllOpen
+    && (
+      resetAllState.phase === "paused"
+      || resetAllState.phase === "recovering_wakes"
+    )
+    && resetAllOperationId.current !== null;
+  const globalResetActive = !resetAllSessionCheckComplete
+    || resetAllState.phase === "confirming"
+    || resetAllState.phase === "paused"
+    || resetAllState.phase === "running";
+  const contactSearchRequiresExactLookup =
+    (
+      dashboard.search.kind === "email"
+      || dashboard.search.kind === "phone_last_four"
+    )
+    && (dashboard.search.capped || dashboard.search.resultCount !== 1);
   const selectedRecovery = selectedRow
     ? readUsageRowRecovery(dashboard.capturedAt, postCommit, selectedRow)
     : null;
   const selectedRuntimeRecheck =
     selectedRecovery?.runtimeRecheckAvailable ?? false;
+
+  useEffect(() => {
+    resetAllPageActive.current = true;
+    return () => {
+      resetAllPageActive.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (designState || !operatorMemberId) {
+      return;
+    }
+    const restoredOperation = readResetAllSessionOperation(operatorMemberId);
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) {
+        return;
+      }
+      if (restoredOperation) {
+        resetAllOperationId.current = restoredOperation.operationId;
+        resetAllStartingPopulationCount.current =
+          restoredOperation.startingPopulationCount;
+        resetAllAcknowledgedCursors.current.clear();
+        if (restoredOperation.state.lastAcknowledgedCursor) {
+          resetAllAcknowledgedCursors.current.add(
+            restoredOperation.state.lastAcknowledgedCursor,
+          );
+        }
+        setResetAllConfirmation(HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION);
+        setResetAllAbandonmentOpen(false);
+        const restoredState = restoreInterruptedResetAllState(
+          restoredOperation.state,
+        );
+        setResetAllStateValue(restoredState);
+        setResetAllOpen(restoredState.phase !== "recovering_wakes");
+      }
+      setResetAllSessionCheckComplete(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [designState, operatorMemberId]);
+
+  function setResetAllState(nextState: UsageResetAllState): boolean {
+    const operationId = resetAllOperationId.current;
+    if (
+      operationId
+      && (
+        !operatorMemberId
+        || !writeResetAllSessionOperation(
+          operationId,
+          operatorMemberId,
+          resetAllStartingPopulationCount.current,
+          nextState,
+        )
+      )
+    ) {
+      const storageFailureMessage =
+        "This browser could not preserve the latest reset progress, so no further batch was started. Keep this tab open and retry, or abandon the operation explicitly.";
+      setResetAllStateValue({
+        ...nextState,
+        failure: nextState.failure
+          ? {
+              ...nextState.failure,
+              message: `${nextState.failure.message} ${storageFailureMessage}`,
+            }
+          : {
+              ambiguous: false,
+              memberId: null,
+              message: storageFailureMessage,
+            },
+        phase: nextState.phase === "recovering_wakes"
+          ? "recovering_wakes"
+          : "paused",
+      });
+      return false;
+    }
+    setResetAllStateValue(nextState);
+    return true;
+  }
 
   function openPage(
     direction: "after" | "before",
@@ -98,8 +323,446 @@ export function MemberUsageClient({
     router.push(`/ops/usage?${params.toString()}`);
   }
 
+  function submitSearch(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (searchNavigationPending || globalResetActive) {
+      return;
+    }
+    const query = searchQuery.trim();
+    if (query === (dashboard.search.query ?? "")) {
+      return;
+    }
+    const targetQuery = query.length > 0 ? query : null;
+    startSearchNavigation(targetQuery
+      ? `/ops/usage?${new URLSearchParams({ q: targetQuery }).toString()}`
+      : "/ops/usage");
+  }
+
+  function startSearchNavigation(target: string): void {
+    if (searchNavigationPending || globalResetActive) {
+      return;
+    }
+    setSelectedMemberId(null);
+    setMessage(null);
+    setSearchNavigationPending(true);
+    router.push(target);
+  }
+
+  function openResetAllDialog(): void {
+    if (isResetting || !resetAllSessionCheckComplete) {
+      return;
+    }
+    setSelectedMemberId(null);
+    setMessage(null);
+    if (
+      resetAllOperationId.current
+      && (
+        resetAllState.phase === "paused"
+        || resetAllState.phase === "recovering_wakes"
+      )
+    ) {
+      setResetAllAbandonmentOpen(false);
+      setResetAllOpen(true);
+      return;
+    }
+    resetAllAcknowledgedCursors.current.clear();
+    resetAllOperationId.current = null;
+    resetAllStartingPopulationCount.current =
+      readResetAllStartingPopulationCount(dashboard);
+    setResetAllAbandonmentOpen(false);
+    setResetAllConfirmation("");
+    setResetAllState(createInitialResetAllState("reset_all_confirmation"));
+    setResetAllOpen(true);
+  }
+
+  function closeResetAllDialog(): void {
+    if (
+      resetAllRunInFlight.current
+      || resetAllState.phase === "running"
+    ) {
+      return;
+    }
+    if (
+      resetAllOperationId.current
+      && (
+        resetAllState.phase === "paused"
+        || resetAllState.phase === "recovering_wakes"
+      )
+    ) {
+      setResetAllAbandonmentOpen(false);
+      setResetAllOpen(false);
+      return;
+    }
+    clearResetAllOperation();
+  }
+
+  function clearResetAllOperation(): void {
+    setResetAllAbandonmentOpen(false);
+    if (
+      resetAllOperationId.current
+      && !removeResetAllSessionOperation()
+    ) {
+      setResetAllOpen(true);
+      setResetAllStateValue({
+        ...resetAllState,
+        failure: {
+          ambiguous: false,
+          memberId: null,
+          message:
+            "This browser could not forget the saved reset operation. Keep it and retry, or close this browser tab to end its session before starting another operation.",
+        },
+        phase: resetAllState.phase === "recovering_wakes"
+          ? "recovering_wakes"
+          : "paused",
+      });
+      return;
+    }
+    setResetAllOpen(false);
+    resetAllAcknowledgedCursors.current.clear();
+    resetAllOperationId.current = null;
+    resetAllStartingPopulationCount.current =
+      readResetAllStartingPopulationCount(dashboard);
+    setResetAllConfirmation("");
+    setResetAllStateValue(createInitialResetAllState(undefined));
+  }
+
+  function requestResetAllAbandonment(): void {
+    if (
+      resetAllOperationId.current
+      && (
+        resetAllState.phase === "paused"
+        || resetAllState.phase === "recovering_wakes"
+      )
+    ) {
+      setResetAllAbandonmentOpen(true);
+    }
+  }
+
+  function keepResetAllOperation(): void {
+    setResetAllAbandonmentOpen(false);
+  }
+
+  function requestResetAllPause(): void {
+    if (
+      resetAllState.phase !== "running"
+      || !resetAllRunInFlight.current
+      || resetAllPauseRequested.current
+    ) {
+      return;
+    }
+    resetAllPauseRequested.current = true;
+    setResetAllPausePending(true);
+  }
+
+  async function runResetAll(input: { mode: UsageResetAllRunMode }): Promise<void> {
+    if (resetAllRunInFlight.current) {
+      return;
+    }
+    resetAllPauseRequested.current = false;
+    setResetAllPausePending(false);
+    resetAllRunInFlight.current = true;
+    try {
+      if (input.mode === "recover_wakes") {
+        const operationId = resetAllOperationId.current;
+        if (!operationId) {
+          setResetAllState({
+            ...resetAllState,
+            failure: {
+              ambiguous: false,
+              memberId: null,
+              message:
+                "This reset operation is no longer available. Close and start Reset everyone again.",
+            },
+            phase: "recovering_wakes",
+          });
+          return;
+        }
+        await runResetAllWakeRecovery(operationId);
+        return;
+      }
+      if (input.mode !== "resume") {
+        resetAllAcknowledgedCursors.current.clear();
+      } else if (resetAllState.lastAcknowledgedCursor) {
+        resetAllAcknowledgedCursors.current.add(
+          resetAllState.lastAcknowledgedCursor,
+        );
+      }
+      const startingCounts = input.mode !== "resume"
+        ? { ...EMPTY_RESET_ALL_COUNTS }
+        : { ...resetAllState.counts, failed: 0 };
+      let counts = startingCounts;
+      let lastAcknowledgedCursor = input.mode !== "resume"
+        ? null
+        : resetAllState.lastAcknowledgedCursor;
+      let operationId = resetAllOperationId.current;
+      if (!operationId) {
+        try {
+          operationId = createResetAllOperationId();
+          resetAllOperationId.current = operationId;
+        } catch (error) {
+          if (resetAllPageActive.current) {
+            setResetAllState({
+              counts,
+              failure: {
+                ambiguous: false,
+                memberId: null,
+                message: error instanceof Error
+                  ? error.message
+                  : "This browser cannot start Reset everyone safely.",
+              },
+              lastAcknowledgedCursor,
+              phase: "paused",
+            });
+          }
+          return;
+        }
+      }
+      if (!setResetAllState({
+        counts,
+        failure: null,
+        lastAcknowledgedCursor,
+        phase: "running",
+      })) {
+        return;
+      }
+
+      while (resetAllPageActive.current) {
+        const previousCursor = lastAcknowledgedCursor;
+        let batch: HostedOpsMemberUsageResetAllBatchResponse;
+        try {
+          batch = await requestResetAllBatch(
+            lastAcknowledgedCursor,
+            operationId,
+          );
+        } catch (error) {
+          if (!resetAllPageActive.current) {
+            return;
+          }
+          setResetAllState({
+            counts,
+            failure: {
+              ambiguous: true,
+              memberId: null,
+              message: error instanceof Error
+                ? error.message
+                : "The batch response was ambiguous. Resume from the last acknowledged cursor.",
+            },
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+        if (!resetAllPageActive.current) {
+          return;
+        }
+
+        const acknowledgedCursor = batch.lastAcknowledgedCursor;
+        const cursorAcknowledgesBatch = batch.counts.processed === 0
+          ? acknowledgedCursor === previousCursor
+          : acknowledgedCursor !== null
+            && acknowledgedCursor !== previousCursor
+            && !resetAllAcknowledgedCursors.current.has(acknowledgedCursor);
+        if (
+          !cursorAcknowledgesBatch
+          || (
+            batch.counts.processed === 0
+            && batch.failure === null
+            && !batch.done
+          )
+        ) {
+          setResetAllState({
+            counts,
+            failure: {
+              ambiguous: true,
+              memberId: null,
+              message:
+                "The server did not acknowledge forward progress. Resume from the last acknowledged cursor.",
+            },
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+
+        counts = addResetAllCounts(counts, batch.counts);
+        lastAcknowledgedCursor = acknowledgedCursor;
+        if (acknowledgedCursor) {
+          resetAllAcknowledgedCursors.current.add(acknowledgedCursor);
+        }
+        if (batch.failure) {
+          setResetAllState({
+            counts,
+            failure: {
+              ambiguous: false,
+              memberId: batch.failure.memberId,
+              message: batch.failure.message,
+            },
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+        if (batch.done) {
+          if (counts.pendingWake > 0) {
+            setResetAllState({
+              counts,
+              failure: null,
+              lastAcknowledgedCursor,
+              phase: "recovering_wakes",
+            });
+            router.refresh();
+            return;
+          }
+          setResetAllState({
+            counts,
+            failure: null,
+            lastAcknowledgedCursor,
+            phase: "complete",
+          });
+          router.refresh();
+          return;
+        }
+        if (resetAllPauseRequested.current) {
+          setResetAllState({
+            counts,
+            failure: null,
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+        if (!setResetAllState({
+          counts,
+          failure: null,
+          lastAcknowledgedCursor,
+          phase: "running",
+        })) {
+          return;
+        }
+      }
+    } finally {
+      resetAllRunInFlight.current = false;
+      resetAllPauseRequested.current = false;
+      if (resetAllPageActive.current) {
+        setResetAllPausePending(false);
+      }
+    }
+  }
+
+  async function runResetAllWakeRecovery(operationId: string): Promise<void> {
+    const wakeAcknowledgedCursors = new Set<string>();
+    let wakeCursor: string | null = null;
+    let counts = {
+      ...resetAllState.counts,
+      failed: 0,
+      pendingWake: 0,
+    };
+    if (!setResetAllState({
+      counts,
+      failure: null,
+      lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+      phase: "recovering_wakes",
+    })) {
+      return;
+    }
+
+    while (resetAllPageActive.current) {
+      const previousWakeCursor = wakeCursor;
+      let batch: HostedOpsMemberUsageResetAllWakeBatchResponse;
+      try {
+        batch = await requestResetAllWakeBatch(wakeCursor, operationId);
+      } catch (error) {
+        if (!resetAllPageActive.current) {
+          return;
+        }
+        setResetAllState({
+          counts,
+          failure: {
+            ambiguous: true,
+            memberId: null,
+            message: error instanceof Error
+              ? error.message
+              : "Runtime wake recovery returned an ambiguous response. Retry the wake-only pass.",
+          },
+          lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+          phase: "recovering_wakes",
+        });
+        return;
+      }
+      if (!resetAllPageActive.current) {
+        return;
+      }
+
+      const acknowledgedWakeCursor = batch.lastAcknowledgedCursor;
+      const cursorAcknowledgesBatch = batch.attempted === 0
+        ? acknowledgedWakeCursor === previousWakeCursor
+        : acknowledgedWakeCursor !== null
+          && acknowledgedWakeCursor !== previousWakeCursor
+          && !wakeAcknowledgedCursors.has(acknowledgedWakeCursor);
+      if (
+        !cursorAcknowledgesBatch
+        || (batch.attempted === 0 && !batch.done)
+      ) {
+        setResetAllState({
+          counts,
+          failure: {
+            ambiguous: true,
+            memberId: null,
+            message:
+              "The server did not acknowledge wake-recovery progress. Retry the wake-only pass.",
+          },
+          lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+          phase: "recovering_wakes",
+        });
+        return;
+      }
+
+      counts = {
+        ...counts,
+        pendingWake: counts.pendingWake + batch.pendingWake,
+      };
+      wakeCursor = acknowledgedWakeCursor;
+      if (acknowledgedWakeCursor) {
+        wakeAcknowledgedCursors.add(acknowledgedWakeCursor);
+      }
+      if (batch.done) {
+        if (counts.pendingWake > 0) {
+          setResetAllState({
+            counts,
+            failure: null,
+            lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+            phase: "recovering_wakes",
+          });
+          return;
+        }
+        setResetAllState({
+          counts,
+          failure: null,
+          lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+          phase: "complete",
+        });
+        router.refresh();
+        return;
+      }
+      if (!setResetAllState({
+        counts,
+        failure: null,
+        lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
+        phase: "recovering_wakes",
+      })) {
+        return;
+      }
+    }
+  }
+
   async function resetUsage(row: HostedOpsMemberUsageRow): Promise<void> {
-    if (!row.currentPeriod || isResetting) {
+    if (
+      !row.currentPeriod
+      || isResetting
+      || globalResetActive
+      || searchNavigationPending
+      || contactSearchRequiresExactLookup
+    ) {
       return;
     }
     setResettingMemberId(row.memberId);
@@ -204,7 +867,11 @@ export function MemberUsageClient({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div
+      aria-busy={!resetAllSessionCheckComplete}
+      className="flex flex-col gap-8"
+      data-reset-all-session-ready={resetAllSessionCheckComplete}
+    >
       <header className="border-b border-border/70 pb-6">
         <div className="max-w-3xl">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-chart-5">
@@ -246,6 +913,115 @@ export function MemberUsageClient({
         />
       </section>
 
+      <section
+        aria-label="Usage controls"
+        className="grid gap-4 rounded-xl border border-border/70 bg-card/70 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.55fr)] lg:items-end"
+      >
+        <form onSubmit={submitSearch}>
+          <FieldGroup className="gap-2">
+            <Field>
+              <FieldLabel htmlFor="ops-usage-search">
+                Search members and containers
+              </FieldLabel>
+              <FieldDescription className="text-xs leading-5">
+                Enter a complete hosted ID, an exact verified email, or the
+                final four phone digits. Email lookup uses only blind indexes;
+                email values are never decrypted for this surface.
+              </FieldDescription>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  autoComplete="off"
+                  disabled={globalResetActive || searchNavigationPending}
+                  id="ops-usage-search"
+                  maxLength={256}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                  }}
+                  placeholder="hbm_… · verified email · 1234"
+                  value={searchQuery}
+                />
+                <Button
+                  disabled={searchNavigationPending || globalResetActive}
+                  type="submit"
+                  variant="outline"
+                >
+                  {searchNavigationPending ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : null}
+                  {searchNavigationPending ? "Searching" : "Search"}
+                </Button>
+                {dashboard.search.query !== null ? (
+                  <Button
+                    disabled={searchNavigationPending || globalResetActive}
+                    onClick={() => {
+                      setSearchQuery("");
+                      startSearchNavigation("/ops/usage");
+                    }}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+            </Field>
+          </FieldGroup>
+        </form>
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-serif text-lg font-semibold text-foreground">
+            Population recovery
+          </p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Reset everyone runs small ID-ordered batches and explicitly ignores
+            any active search filter. It is bounded and non-atomic.
+          </p>
+          <Button
+            className="mt-3 w-full sm:w-auto lg:w-full"
+            disabled={
+              isResetting
+              || !resetAllSessionCheckComplete
+              || resetAllOpen
+              || searchNavigationPending
+            }
+            onClick={openResetAllDialog}
+            ref={resetAllTrigger}
+            type="button"
+            variant="destructive"
+          >
+            <RotateCcwIcon data-icon="inline-start" />
+            {preservedResetAllOperation
+              ? resetAllState.phase === "recovering_wakes"
+                ? "Resume runtime recovery"
+                : "Resume reset operation"
+              : "Reset everyone"}
+          </Button>
+        </div>
+      </section>
+
+      {dashboard.search.error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{dashboard.search.error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {dashboard.search.query !== null && !dashboard.search.error ? (
+        <Alert
+          variant={
+            dashboard.search.capped || contactSearchRequiresExactLookup
+              ? "destructive"
+              : "default"
+          }
+        >
+          <AlertDescription>
+            {contactSearchRequiresExactLookup
+              ? `Showing ${formatInteger(dashboard.search.resultCount)} ${dashboard.search.kind === "email" ? "verified-email" : "phone-suffix"} ${dashboard.search.capped ? `candidates (safety cap ${formatInteger(dashboard.search.cap)}; more exist)` : "candidates"}. These contact matches are candidate-only; reset controls are locked until you search by the exact hosted ID.`
+              : dashboard.search.capped
+              ? `Showing ${formatInteger(dashboard.search.resultCount)} ID-ordered matches (safety cap ${formatInteger(dashboard.search.cap)}). More matches exist; narrow the search to see a complete set.`
+              : `${formatInteger(dashboard.search.resultCount)} complete search ${dashboard.search.resultCount === 1 ? "result" : "results"}.`}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {message ? (
         <Alert variant={message.tone === "error" ? "destructive" : "default"}>
           <AlertDescription>{message.text}</AlertDescription>
@@ -264,8 +1040,9 @@ export function MemberUsageClient({
             Retained inbound messages cover the canonical {dashboard.messageRetentionDays}-day
             mailbox window. Last 7 days and daily average use the trailing seven
             24-hour periods. AI usage is all-time counted priced cost from
-            immutable usage rows. Rows are ordered by member ID and limited to{" "}
-            {dashboard.pagination.pageSize} per page.
+            immutable usage rows. Rows are ordered by member ID. {dashboard.search.query !== null
+              ? `Search returns the complete matching set up to the documented ${formatInteger(dashboard.search.cap)}-row safety cap.`
+              : `The ordinary list remains limited to ${formatInteger(dashboard.pagination.pageSize)} rows per page.`}
           </p>
           <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
             Captured {formatTimestamp(dashboard.capturedAt)}
@@ -275,12 +1052,17 @@ export function MemberUsageClient({
         <div className="mt-5 grid gap-3 xl:hidden">
           {dashboard.rows.length === 0 ? (
             <div className="rounded-xl border border-border/70 bg-card/90 px-4 py-10 text-center text-sm text-muted-foreground">
-              No hosted members or group containers were found on this page.
+              {readEmptyUsageMessage(dashboard)}
             </div>
           ) : (
             dashboard.rows.map((row) => (
               <UsageCompactRow
-                disabled={isResetting}
+                disabled={
+                  isResetting
+                  || globalResetActive
+                  || searchNavigationPending
+                  || contactSearchRequiresExactLookup
+                }
                 key={row.memberId}
                 onSelect={() => {
                   setMessage(null);
@@ -327,13 +1109,18 @@ export function MemberUsageClient({
                     className="py-10 text-center text-muted-foreground"
                     colSpan={9}
                   >
-                    No hosted members or group containers were found on this page.
+                    {readEmptyUsageMessage(dashboard)}
                   </TableCell>
                 </TableRow>
               ) : (
                 dashboard.rows.map((row) => (
                   <UsageRow
-                    disabled={isResetting}
+                    disabled={
+                      isResetting
+                      || globalResetActive
+                      || searchNavigationPending
+                      || contactSearchRequiresExactLookup
+                    }
                     key={row.memberId}
                     onSelect={() => {
                       setMessage(null);
@@ -351,38 +1138,40 @@ export function MemberUsageClient({
             </TableBody>
           </Table>
         </div>
-        <nav
-          aria-label="Member usage pages"
-          className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p className="text-xs text-muted-foreground">
-            {formatInteger(dashboard.rows.length)} rows shown · {formatInteger(
-              dashboard.pagination.pageSize,
-            )} rows per page
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              disabled={dashboard.pagination.previousCursor === null}
-              onClick={() => {
-                openPage("before", dashboard.pagination.previousCursor);
-              }}
-              type="button"
-              variant="outline"
-            >
-              Previous
-            </Button>
-            <Button
-              disabled={dashboard.pagination.nextCursor === null}
-              onClick={() => {
-                openPage("after", dashboard.pagination.nextCursor);
-              }}
-              type="button"
-              variant="outline"
-            >
-              Next
-            </Button>
-          </div>
-        </nav>
+        {dashboard.search.query === null ? (
+          <nav
+            aria-label="Member usage pages"
+            className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <p className="text-xs text-muted-foreground">
+              {formatInteger(dashboard.rows.length)} rows shown · {formatInteger(
+                dashboard.pagination.pageSize,
+              )} rows per page
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                disabled={dashboard.pagination.previousCursor === null}
+                onClick={() => {
+                  openPage("before", dashboard.pagination.previousCursor);
+                }}
+                type="button"
+                variant="outline"
+              >
+                Previous
+              </Button>
+              <Button
+                disabled={dashboard.pagination.nextCursor === null}
+                onClick={() => {
+                  openPage("after", dashboard.pagination.nextCursor);
+                }}
+                type="button"
+                variant="outline"
+              >
+                Next
+              </Button>
+            </div>
+          </nav>
+        ) : null}
       </section>
 
       <Dialog
@@ -445,7 +1234,11 @@ export function MemberUsageClient({
           ) : null}
           <DialogFooter>
             <Button
-              disabled={isResetting}
+              disabled={
+                isResetting
+                || globalResetActive
+                || searchNavigationPending
+              }
               onClick={() => {
                 setSelectedMemberId(null);
               }}
@@ -464,6 +1257,9 @@ export function MemberUsageClient({
                   && !selectedRuntimeRecheck
                 )
                 || isResetting
+                || globalResetActive
+                || searchNavigationPending
+                || contactSearchRequiresExactLookup
               }
               onClick={() => {
                 if (selectedRow) {
@@ -487,8 +1283,716 @@ export function MemberUsageClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {designResetAllInline && resetAllOpen ? (
+        <div
+          className="mx-auto grid w-full max-w-sm gap-4 rounded-3xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10"
+          data-design-state={designState}
+        >
+          <UsageResetAllSurface
+            abandonmentOpen={resetAllAbandonmentOpen}
+            confirmation={resetAllConfirmation}
+            dashboard={dashboard}
+            inline
+            onRequestPause={requestResetAllPause}
+            onAbandon={clearResetAllOperation}
+            onClose={closeResetAllDialog}
+            onConfirmationChange={setResetAllConfirmation}
+            onKeep={keepResetAllOperation}
+            onRequestAbandon={requestResetAllAbandonment}
+            onRun={(mode) => {
+              void runResetAll({ mode });
+            }}
+            pausePending={resetAllPausePending}
+            startingPopulationCount={resetAllStartingPopulationCount.current}
+            state={resetAllState}
+          />
+        </div>
+      ) : null}
+
+      {!designResetAllInline ? (
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) {
+              closeResetAllDialog();
+            }
+          }}
+          onOpenChangeComplete={(open) => {
+            if (!open) {
+              resetAllTrigger.current?.focus();
+            }
+          }}
+          open={resetAllOpen}
+        >
+          <DialogContent
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            finalFocus={resetAllTrigger}
+            inert={designResetAllDialogInert ? true : undefined}
+            showCloseButton={resetAllState.phase !== "running"}
+          >
+            <UsageResetAllSurface
+              abandonmentOpen={resetAllAbandonmentOpen}
+              confirmation={resetAllConfirmation}
+              dashboard={dashboard}
+              onAbandon={clearResetAllOperation}
+              onClose={closeResetAllDialog}
+              onConfirmationChange={setResetAllConfirmation}
+              onKeep={keepResetAllOperation}
+              onRequestAbandon={requestResetAllAbandonment}
+              onRequestPause={requestResetAllPause}
+              onRun={(mode) => {
+                void runResetAll({ mode });
+              }}
+              pausePending={resetAllPausePending}
+              startingPopulationCount={
+                resetAllStartingPopulationCount.current
+              }
+              state={resetAllState}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
+}
+
+function UsageResetAllSurface(input: {
+  abandonmentOpen: boolean;
+  confirmation: string;
+  dashboard: HostedOpsMemberUsageDashboard;
+  inline?: boolean;
+  onAbandon: () => void;
+  onClose: () => void;
+  onConfirmationChange: (value: string) => void;
+  onKeep: () => void;
+  onRequestAbandon: () => void;
+  onRequestPause: () => void;
+  onRun: (mode: UsageResetAllRunMode) => void;
+  pausePending: boolean;
+  startingPopulationCount: number;
+  state: UsageResetAllState;
+}) {
+  const state = input.state;
+  const title = input.abandonmentOpen
+    ? "Abandon reset operation?"
+    : state.phase === "confirming"
+      ? "Reset everyone?"
+      : state.phase === "running"
+        ? "Resetting everyone"
+        : state.phase === "complete"
+          ? "Reset everyone complete"
+          : state.phase === "recovering_wakes"
+            ? "Population reset complete; runtime recovery remains"
+            : "Reset everyone paused";
+  const description = (
+    <>
+      This operation ignores the active search filter and walks the hosted
+      population in fixed, small ID-ordered batches. It is not atomic, does not
+      capture a population snapshot, and does not pause ongoing usage. Each
+      member commits independently before any runtime recheck. The starting
+      population was {formatInteger(input.startingPopulationCount)}; the live
+      total may change while the walk runs.
+    </>
+  );
+  return (
+    <>
+      <DialogHeader>
+        {input.inline ? (
+          <h2 className="font-serif text-base leading-none font-medium text-balance">
+            {title}
+          </h2>
+        ) : (
+          <DialogTitle>{title}</DialogTitle>
+        )}
+        {input.inline ? (
+          <p className="text-sm text-pretty text-muted-foreground">
+            {description}
+          </p>
+        ) : (
+          <DialogDescription>{description}</DialogDescription>
+        )}
+      </DialogHeader>
+
+      {state.phase === "confirming" ? (
+        <div className="grid gap-4">
+          <Alert variant="destructive">
+            <AlertDescription>
+              Paid, Family-sponsored, and group-container rows clear current
+              included spend and blocking. Exhausted direct Starter rows get the
+              existing one-policy allowance recovery. Immutable usage history,
+              purchased credits, and referral credits remain unchanged. The
+              server processes up to 10 members serially per request. At the
+              starting count, that is about {formatInteger(Math.ceil(
+                input.startingPopulationCount / 10,
+              ))} requests; each can spend up to five seconds on runtime wakes,
+              plus database work. Keep this tab open, or pause after the current
+              request once work starts. {input.dashboard.search.query !== null
+                ? "The active search filter will be ignored."
+                : "No search filter is active."}
+            </AlertDescription>
+          </Alert>
+          <Field>
+            <FieldLabel htmlFor="ops-usage-reset-all-confirmation">
+              Type {HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION} to continue
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="ops-usage-reset-all-confirmation"
+              onChange={(event) => {
+                input.onConfirmationChange(event.target.value);
+              }}
+              value={input.confirmation}
+            />
+          </Field>
+        </div>
+      ) : input.abandonmentOpen ? (
+        <div className="grid gap-4">
+          <Alert variant="destructive">
+            <AlertDescription>
+              Already committed member resets will remain. Abandoning forgets
+              this browser&apos;s operation ID, cursor, and progress. Starting
+              Reset everyone later creates a new operation that can process
+              those members again from their then-current state.
+            </AlertDescription>
+          </Alert>
+          <UsageResetAllProgress
+            startingPopulationCount={input.startingPopulationCount}
+            state={state}
+          />
+        </div>
+      ) : (
+        <UsageResetAllProgress
+          startingPopulationCount={input.startingPopulationCount}
+          state={state}
+        />
+      )}
+
+      <DialogFooter className="sm:flex-wrap">
+        {input.abandonmentOpen ? (
+          <>
+            <Button onClick={input.onKeep} type="button" variant="outline">
+              Keep operation
+            </Button>
+            <Button
+              onClick={input.onAbandon}
+              type="button"
+              variant="destructive"
+            >
+              Abandon operation
+            </Button>
+          </>
+        ) : state.phase === "confirming" ? (
+          <>
+            <Button onClick={input.onClose} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              aria-label="Confirm reset everyone"
+              disabled={
+                input.confirmation !== HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
+              }
+              onClick={() => {
+                input.onRun("start");
+              }}
+              type="button"
+              variant="destructive"
+            >
+              <RotateCcwIcon data-icon="inline-start" />
+              Reset everyone
+            </Button>
+          </>
+        ) : state.phase === "running" ? (
+          <Button
+            disabled={input.pausePending}
+            onClick={input.onRequestPause}
+            type="button"
+            variant="outline"
+          >
+            {input.pausePending ? <Spinner data-icon="inline-start" /> : null}
+            {input.pausePending
+              ? "Finishing current batch"
+              : "Pause after current batch"}
+          </Button>
+        ) : state.phase === "paused" ? (
+          <>
+            <Button onClick={input.onClose} type="button" variant="outline">
+              Hide for now
+            </Button>
+            <Button
+              onClick={input.onRequestAbandon}
+              type="button"
+              variant="outline"
+            >
+              Abandon operation
+            </Button>
+            <Button
+              onClick={() => {
+                input.onRun("resume");
+              }}
+              type="button"
+              variant="destructive"
+            >
+              Resume
+            </Button>
+          </>
+        ) : state.phase === "recovering_wakes" ? (
+          <>
+            <Button onClick={input.onClose} type="button" variant="outline">
+              Hide for now
+            </Button>
+            <Button
+              onClick={input.onRequestAbandon}
+              type="button"
+              variant="outline"
+            >
+              Abandon operation
+            </Button>
+            <Button
+              onClick={() => {
+                input.onRun("recover_wakes");
+              }}
+              type="button"
+              variant="destructive"
+            >
+              Retry pending runtime wakes
+            </Button>
+          </>
+        ) : (
+          <Button onClick={input.onClose} type="button" variant="outline">
+            Close
+          </Button>
+        )}
+      </DialogFooter>
+    </>
+  );
+}
+
+function UsageResetAllProgress(input: {
+  startingPopulationCount: number;
+  state: UsageResetAllState;
+}) {
+  const state = input.state;
+  return (
+    <div aria-live="polite" className="grid gap-4">
+      {state.phase === "complete" ? (
+        <Alert>
+          <AlertDescription>
+            Every ID returned by the live ID-ordered walk was acknowledged.
+            This was not an atomic snapshot; members could continue using Murph
+            throughout the operation.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.phase === "recovering_wakes" ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Every population row was acknowledged, but one or more runtimes did
+            not accept their recheck. Retry now, hide this recovery and continue
+            support work, or explicitly abandon its saved browser state.
+            Recovery pages only this operation&apos;s existing wake-required
+            receipts; it cannot admit a later member or enter a reset
+            transaction again.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.failure ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            {state.failure.message} {state.failure.memberId
+              ? `The unacknowledged member is ${state.failure.memberId}.`
+              : null} {state.failure.ambiguous
+              ? "No unacknowledged outcome was added to the totals below."
+              : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.phase === "paused" && !state.failure ? (
+        <Alert>
+          <AlertDescription>
+            Paused after the last acknowledged batch. Resume under the same
+            operation to continue from the saved cursor.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.phase === "running" ? (
+        <p className="text-sm leading-6 text-muted-foreground">
+          The page is continuing one bounded request at a time. A pause request
+          takes effect after the current request returns. Per-row reset controls
+          remain disabled until this operation stops or completes.
+        </p>
+      ) : null}
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <UsageResetAllMetric
+          label="Starting population"
+          value={input.startingPopulationCount}
+        />
+        <UsageResetAllMetric label="Processed" value={state.counts.processed} />
+        <UsageResetAllMetric label="Reset" value={state.counts.reset} />
+        <UsageResetAllMetric label="Unchanged" value={state.counts.unchanged} />
+        <UsageResetAllMetric label="Skipped" value={state.counts.skipped} />
+        <UsageResetAllMetric
+          label="Wake pending"
+          value={state.counts.pendingWake}
+        />
+        <UsageResetAllMetric label="Failed" value={state.counts.failed} />
+      </dl>
+      <p className="break-all font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+        Last acknowledged cursor: {state.lastAcknowledgedCursor ?? "start"}
+      </p>
+      {state.counts.pendingWake > 0 ? (
+        <p className="text-xs leading-5 text-muted-foreground">
+          Pending-wake rows already committed their usage reset. Recovery
+          replays the existing per-member operation receipts and retries only
+          the runtime wake.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function UsageResetAllMetric(input: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-card px-3 py-3">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+        {input.label}
+      </dt>
+      <dd className="mt-1 font-serif text-xl font-semibold tabular-nums text-foreground">
+        {formatInteger(input.value)}
+      </dd>
+    </div>
+  );
+}
+
+function createInitialResetAllState(
+  designState: MemberUsageClientDesignState | undefined,
+): UsageResetAllState {
+  if (designState === "reset_all_progress") {
+    return {
+      counts: {
+        failed: 0,
+        pendingWake: 1,
+        processed: 20,
+        reset: 8,
+        skipped: 3,
+        unchanged: 9,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_020",
+      phase: "running",
+    };
+  }
+  if (designState === "reset_all_abandonment") {
+    return {
+      counts: {
+        failed: 1,
+        pendingWake: 0,
+        processed: 24,
+        reset: 10,
+        skipped: 4,
+        unchanged: 10,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_024",
+      phase: "paused",
+    };
+  }
+  if (designState === "reset_all_complete") {
+    return {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 47,
+        reset: 19,
+        skipped: 8,
+        unchanged: 20,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_047",
+      phase: "complete",
+    };
+  }
+  if (designState === "reset_all_wake_recovery") {
+    return {
+      counts: {
+        failed: 0,
+        pendingWake: 2,
+        processed: 47,
+        reset: 19,
+        skipped: 8,
+        unchanged: 20,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_047",
+      phase: "recovering_wakes",
+    };
+  }
+  if (designState === "reset_all_partial_failure") {
+    return {
+      counts: {
+        failed: 1,
+        pendingWake: 1,
+        processed: 24,
+        reset: 10,
+        skipped: 4,
+        unchanged: 10,
+      },
+      failure: {
+        ambiguous: false,
+        memberId: "hbm_design_025",
+        message:
+          "A usage-limit notice is currently being sent. Retry from the last acknowledged member after that dispatch settles.",
+      },
+      lastAcknowledgedCursor: "hbm_design_024",
+      phase: "paused",
+    };
+  }
+  if (designState === "reset_all_confirmation") {
+    return {
+      counts: { ...EMPTY_RESET_ALL_COUNTS },
+      failure: null,
+      lastAcknowledgedCursor: null,
+      phase: "confirming",
+    };
+  }
+  return {
+    counts: { ...EMPTY_RESET_ALL_COUNTS },
+    failure: null,
+    lastAcknowledgedCursor: null,
+    phase: "idle",
+  };
+}
+
+function addResetAllCounts(
+  left: HostedOpsMemberUsageResetAllCounts,
+  right: HostedOpsMemberUsageResetAllCounts,
+): HostedOpsMemberUsageResetAllCounts {
+  return {
+    failed: left.failed + right.failed,
+    pendingWake: left.pendingWake + right.pendingWake,
+    processed: left.processed + right.processed,
+    reset: left.reset + right.reset,
+    skipped: left.skipped + right.skipped,
+    unchanged: left.unchanged + right.unchanged,
+  };
+}
+
+function readResetAllSessionOperation(
+  operatorMemberId: string,
+): UsageResetAllSessionOperation | null {
+  try {
+    const storedValue = window.sessionStorage.getItem(
+      RESET_ALL_SESSION_STORAGE_KEY,
+    );
+    if (!storedValue) {
+      return null;
+    }
+    const parsedValue: unknown = JSON.parse(storedValue);
+    const operation = parseResetAllSessionOperation(
+      parsedValue,
+      operatorMemberId,
+    );
+    if (!operation) {
+      window.sessionStorage.removeItem(RESET_ALL_SESSION_STORAGE_KEY);
+    }
+    return operation;
+  } catch {
+    return null;
+  }
+}
+
+function writeResetAllSessionOperation(
+  operationId: string,
+  operatorMemberId: string,
+  startingPopulationCount: number,
+  state: UsageResetAllState,
+): boolean {
+  try {
+    window.sessionStorage.setItem(
+      RESET_ALL_SESSION_STORAGE_KEY,
+      JSON.stringify({
+        operationId,
+        operatorMemberId,
+        startingPopulationCount,
+        state,
+      }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeResetAllSessionOperation(): boolean {
+  try {
+    window.sessionStorage.removeItem(RESET_ALL_SESSION_STORAGE_KEY);
+    return window.sessionStorage.getItem(RESET_ALL_SESSION_STORAGE_KEY) === null;
+  } catch {
+    return false;
+  }
+}
+
+function parseResetAllSessionOperation(
+  value: unknown,
+  expectedOperatorMemberId: string,
+): UsageResetAllSessionOperation | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const operationId = Reflect.get(value, "operationId");
+  const operatorMemberId = Reflect.get(value, "operatorMemberId");
+  const startingPopulationCount = Reflect.get(
+    value,
+    "startingPopulationCount",
+  );
+  const state = parseResetAllSessionState(Reflect.get(value, "state"));
+  if (
+    !isHostedOpsUsageResetAllOperationId(operationId)
+    || operatorMemberId !== expectedOperatorMemberId
+    || !isNonNegativeInteger(startingPopulationCount)
+    || !state
+  ) {
+    return null;
+  }
+  return {
+    operationId,
+    operatorMemberId,
+    startingPopulationCount,
+    state,
+  };
+}
+
+function parseResetAllSessionState(value: unknown): UsageResetAllState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const counts = Reflect.get(value, "counts");
+  if (!counts || typeof counts !== "object") {
+    return null;
+  }
+  const failed = Reflect.get(counts, "failed");
+  const pendingWake = Reflect.get(counts, "pendingWake");
+  const processed = Reflect.get(counts, "processed");
+  const reset = Reflect.get(counts, "reset");
+  const skipped = Reflect.get(counts, "skipped");
+  const unchanged = Reflect.get(counts, "unchanged");
+  if (
+    !isNonNegativeInteger(failed)
+    || !isNonNegativeInteger(pendingWake)
+    || !isNonNegativeInteger(processed)
+    || !isNonNegativeInteger(reset)
+    || !isNonNegativeInteger(skipped)
+    || !isNonNegativeInteger(unchanged)
+    || processed !== reset + skipped + unchanged
+    || pendingWake > reset + unchanged
+  ) {
+    return null;
+  }
+  const failure = parseResetAllSessionFailure(Reflect.get(value, "failure"));
+  if (failure === undefined) {
+    return null;
+  }
+  const lastAcknowledgedCursor = Reflect.get(
+    value,
+    "lastAcknowledgedCursor",
+  );
+  if (!isResetAllSessionMemberId(lastAcknowledgedCursor)) {
+    return null;
+  }
+  const phase = Reflect.get(value, "phase");
+  if (!isResetAllPersistedPhase(phase)) {
+    return null;
+  }
+  return {
+    counts: {
+      failed,
+      pendingWake,
+      processed,
+      reset,
+      skipped,
+      unchanged,
+    },
+    failure,
+    lastAcknowledgedCursor,
+    phase,
+  };
+}
+
+function parseResetAllSessionFailure(
+  value: unknown,
+): UsageResetAllFailureState | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const ambiguous = Reflect.get(value, "ambiguous");
+  const memberId = Reflect.get(value, "memberId");
+  const message = Reflect.get(value, "message");
+  if (
+    typeof ambiguous !== "boolean"
+    || !isResetAllSessionMemberId(memberId)
+    || typeof message !== "string"
+    || message.length === 0
+    || message.length > RESET_ALL_MAX_FAILURE_MESSAGE_LENGTH
+  ) {
+    return undefined;
+  }
+  return { ambiguous, memberId, message };
+}
+
+function isResetAllSessionMemberId(value: unknown): value is string | null {
+  return value === null
+    || (
+      typeof value === "string"
+      && value.length <= RESET_ALL_MAX_MEMBER_ID_LENGTH
+      && RESET_ALL_MEMBER_ID_PATTERN.test(value)
+    );
+}
+
+function isResetAllPersistedPhase(
+  value: unknown,
+): value is "complete" | "paused" | "recovering_wakes" | "running" {
+  return value === "complete"
+    || value === "paused"
+    || value === "recovering_wakes"
+    || value === "running";
+}
+
+function restoreInterruptedResetAllState(
+  state: UsageResetAllState,
+): UsageResetAllState {
+  if (state.phase === "running") {
+    return {
+      ...state,
+      failure: {
+        ambiguous: true,
+        memberId: null,
+        message:
+          "This page was interrupted while a batch may have committed. Resume with the same operation from the last acknowledged cursor.",
+      },
+      phase: "paused",
+    };
+  }
+  return state;
+}
+
+function readResetAllStartingPopulationCount(
+  dashboard: HostedOpsMemberUsageDashboard,
+): number {
+  return dashboard.summary.members + dashboard.summary.groupContainers;
+}
+
+function readEmptyUsageMessage(
+  dashboard: HostedOpsMemberUsageDashboard,
+): string {
+  if (dashboard.search.error) {
+    return "No rows are shown until the search is corrected.";
+  }
+  if (dashboard.search.query !== null) {
+    return "No hosted members or group containers matched this search.";
+  }
+  return "No hosted members or group containers were found on this page.";
 }
 
 interface UsageRowControlInput {
@@ -764,6 +2268,92 @@ function readEntitySecondaryLabel(row: HostedOpsMemberUsageRow): string {
   return row.maskedPhoneNumberHint ?? `Created ${formatDate(row.createdAt)}`;
 }
 
+function createResetAllOperationId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  if (typeof randomUUID !== "function") {
+    throw new Error(
+      "This browser cannot start Reset everyone safely. Reload in a supported browser.",
+    );
+  }
+  return randomUUID.call(globalThis.crypto);
+}
+
+async function requestResetAllBatch(
+  afterMemberId: string | null,
+  operationId: string,
+): Promise<HostedOpsMemberUsageResetAllBatchResponse> {
+  const response = await fetch("/api/ops/usage-reset", {
+    body: JSON.stringify({
+      afterMemberId,
+      confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+      operation: "reset_all_batch",
+      operationId,
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(
+      "Reset everyone returned an unreadable response. Resume from the last acknowledged cursor.",
+    );
+  }
+  if (!response.ok) {
+    throw new UsageResetRequestError(
+      readResponseErrorMessage(payload),
+      readResponseErrorCode(payload),
+    );
+  }
+  if (!isHostedOpsMemberUsageResetAllBatchResponse(payload)) {
+    throw new Error(
+      "Reset everyone returned an invalid response. Resume from the last acknowledged cursor.",
+    );
+  }
+  return payload;
+}
+
+async function requestResetAllWakeBatch(
+  afterMemberId: string | null,
+  operationId: string,
+): Promise<HostedOpsMemberUsageResetAllWakeBatchResponse> {
+  const response = await fetch("/api/ops/usage-reset", {
+    body: JSON.stringify({
+      afterMemberId,
+      confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+      operation: "recover_reset_all_wakes",
+      operationId,
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(
+      "Runtime wake recovery returned an unreadable response. Retry the wake-only pass.",
+    );
+  }
+  if (!response.ok) {
+    throw new UsageResetRequestError(
+      readResponseErrorMessage(payload),
+      readResponseErrorCode(payload),
+    );
+  }
+  if (!isHostedOpsMemberUsageResetAllWakeBatchResponse(payload)) {
+    throw new Error(
+      "Runtime wake recovery returned an invalid response. Retry the wake-only pass.",
+    );
+  }
+  return payload;
+}
+
 async function requestUsageReset(
   row: HostedOpsMemberUsageRow,
 ): Promise<HostedOpsMemberUsageResetResponse> {
@@ -831,6 +2421,77 @@ async function requestRuntimeRecheck(
     throw new Error("Runtime recheck returned an invalid response.");
   }
   return payload;
+}
+
+function isHostedOpsMemberUsageResetAllBatchResponse(
+  value: unknown,
+): value is HostedOpsMemberUsageResetAllBatchResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const counts = Reflect.get(value, "counts");
+  if (!counts || typeof counts !== "object") {
+    return false;
+  }
+  const processed = Reflect.get(counts, "processed");
+  const reset = Reflect.get(counts, "reset");
+  const unchanged = Reflect.get(counts, "unchanged");
+  const skipped = Reflect.get(counts, "skipped");
+  const pendingWake = Reflect.get(counts, "pendingWake");
+  const failed = Reflect.get(counts, "failed");
+  if (
+    !isNonNegativeInteger(processed)
+    || !isNonNegativeInteger(reset)
+    || !isNonNegativeInteger(unchanged)
+    || !isNonNegativeInteger(skipped)
+    || !isNonNegativeInteger(pendingWake)
+    || !isNonNegativeInteger(failed)
+    || processed !== reset + unchanged + skipped
+    || pendingWake > reset + unchanged
+  ) {
+    return false;
+  }
+  const cursor = Reflect.get(value, "lastAcknowledgedCursor");
+  if (cursor !== null && typeof cursor !== "string") {
+    return false;
+  }
+  const done = Reflect.get(value, "done");
+  if (typeof done !== "boolean") {
+    return false;
+  }
+  const failure = Reflect.get(value, "failure");
+  if (failure === null) {
+    return failed === 0;
+  }
+  return failed === 1
+    && done === false
+    && typeof failure === "object"
+    && typeof Reflect.get(failure, "code") === "string"
+    && typeof Reflect.get(failure, "memberId") === "string"
+    && typeof Reflect.get(failure, "message") === "string"
+    && typeof Reflect.get(failure, "retryable") === "boolean";
+}
+
+function isHostedOpsMemberUsageResetAllWakeBatchResponse(
+  value: unknown,
+): value is HostedOpsMemberUsageResetAllWakeBatchResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const attempted = Reflect.get(value, "attempted");
+  const pendingWake = Reflect.get(value, "pendingWake");
+  const cursor = Reflect.get(value, "lastAcknowledgedCursor");
+  return isNonNegativeInteger(attempted)
+    && isNonNegativeInteger(pendingWake)
+    && pendingWake <= attempted
+    && (cursor === null || typeof cursor === "string")
+    && typeof Reflect.get(value, "done") === "boolean";
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0;
 }
 
 function isHostedOpsMemberUsageResetResult(

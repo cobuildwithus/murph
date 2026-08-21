@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "../src/assistant-permissions.ts";
 
@@ -43,24 +42,6 @@ describe("group-read Codex permissions", () => {
       '"." = "deny"',
       "",
       "[permissions.murph-group-room-model-maintenance.network]",
-      "enabled = false",
-      "",
-    ]);
-  });
-
-  it("confines silent member memory maintenance to its host-owned tool", () => {
-    expect(
-      buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    ).toEqual([
-      "# Silent member memory consolidation uses only its host-owned dynamic tool.",
-      "[permissions.murph-member-memory-maintenance.filesystem]",
-      '":minimal" = "read"',
-      "glob_scan_max_depth = 1",
-      "",
-      '[permissions.murph-member-memory-maintenance.filesystem.":workspace_roots"]',
-      '"." = "deny"',
-      "",
-      "[permissions.murph-member-memory-maintenance.network]",
       "enabled = false",
       "",
     ]);

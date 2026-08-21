@@ -431,3 +431,131 @@ Static rollout also requires physical macOS and no-extension iPhone proof of the
 final balloon, image-failure behavior, accessibility behavior, and App Store
 affordance. Provider acceptance, direct route renders, and delivery receipts do
 not prove those device behaviors.
+
+## Deferred schema-7 workout-card foundation (not implemented)
+
+Status: the architecture is accepted for a future implementation, but V1–V6
+remain the complete production contract until the reader-first rollout below is
+finished. This section records the intended foundation; it does not authorize a
+producer change, relax any current rollout gate, or describe behavior already
+in production.
+
+### Permanent envelope
+
+Schema 7 introduces one permanent outer envelope for native workout cards:
+
+```json
+{
+  "schemaVersion": 7,
+  "card": { "...complete readable workout presentation...": "..." },
+  "editor": { "...optional typed editing capability...": "..." }
+}
+```
+
+- `schemaVersion: 7` is frozen permanently. Future compatible capabilities do
+  not increment the outer version.
+- `card` is required, strict, and self-sufficient. It carries the complete
+  readable V4-style workout presentation, so rendering never depends on
+  `editor` or another capability.
+- `editor` is optional and independently versioned. A reader validates it
+  separately from `card`; an absent, malformed, unsupported, or unfamiliar
+  editor is ignored in full and the unchanged card renders read-only.
+- A schema-7 reader validates the known base while ignoring unrecognized
+  optional top-level capability fields. Add a future capability as one direct
+  optional field only when the product needs it. Introduce no generic module or
+  capability registry until multiple implemented capabilities demonstrate a
+  shared abstraction.
+- V1–V6 decoders remain permanent historical readers. Schema 7 does not
+  reinterpret, migrate, or delete already-sent envelopes.
+
+The editor remains only a typed projection for actions against one immutable
+card. In addition to its own version and the existing opaque stale-action
+binding, its presentation delta needs only the unit for each exercise and typed
+results for completed sets. Pending-set editor placeholders are redundant:
+their coordinates and readable state already come from `card`. The editor does
+not become canonical workout state, an authorization source, or a duplicate
+readable presentation.
+
+Authorization, access checks, stale-card rejection, action delivery, and the
+canonical workout mutation remain with their existing owners. This foundation
+adds no client-version negotiation, device registry, server handshake,
+per-member rollout state, dynamic UI protocol, compression scheme, queue,
+cache, or service.
+
+### Encoding and bounded fallback
+
+The producer uses one deterministic sequence:
+
+1. Build and validate the complete readable `card`.
+2. When editing is eligible, encode schema 7 with the whole `editor`.
+3. If that URL exceeds the existing 2,048-character ceiling, remove the entire
+   `editor` and encode the exact same schema-7 `card` read-only. Do not truncate
+   either projection or emit a partial editor.
+4. If the readable base still does not fit, use the existing complete
+   semantic-text recovery path.
+
+The representative six-exercise, four-set measurement that justifies this
+fallback is:
+
+| Snapshot | Encoded length | Result |
+| --- | ---: | --- |
+| Initial card with editor | 1,695 characters | Fits |
+| Late card with editor | 2,299 characters | Too large |
+| Same late card without editor | 1,612 characters | Fits read-only |
+
+These measurements establish the algorithm, not a second capacity limit.
+Validation of the final encoded URL remains authoritative.
+
+### Deliberately narrow scope
+
+Schema 7 applies only to native workout cards. The static workout-image route
+continues using its authority-free V4 envelope. Generic compact tables,
+nutrition cards, standings, and other card families keep their current
+protocols. Their implementations may reuse parsing mechanics where useful, but
+uniformity alone is not a reason to migrate them.
+
+### Reader-first rollout and compatibility boundary
+
+Rollout is global and reader-first:
+
+1. Release an iOS Messages-extension reader that renders the schema-7 `card`
+   independently and preserves every V1–V6 decoder.
+2. Update every existing server, outbox, renderer, and recovery reader that can
+   encounter the envelope. Prove that each accepts schema 7 without requiring
+   `editor` and ignores an invalid or unknown editor without changing the card.
+3. Only after those readers are live, switch the workout-card producer globally.
+   Do not add negotiation or per-member rollout machinery for the transition.
+
+Previously released pre-foundation extensions cannot understand schema 7 and
+are the one explicit compatibility exception to the permanent rule above.
+Reader-first deployment narrows but cannot eliminate that installed-build
+window because the provider does not negotiate decoder versions. This exception
+must be acknowledged in the release decision and is not precedent for later
+breaks. Once schema 7 ships, every later optional capability degrades in the
+original schema-7 client to the same complete read-only `card`.
+
+The server persisted-state rollback floor still applies: all strict readers
+must be live before the first schema-7 envelope is persisted or emitted. After
+that point, recovery is a forward fix or a compatible bundle, never rollback to
+a reader that rejects schema 7.
+
+### Required implementation proof
+
+Implementation is complete only when focused fixtures and end-to-end proof
+cover all of the following:
+
+- the same card renders from a valid editor, no editor, a malformed editor, and
+  an unknown editor version;
+- unknown optional schema-7 capability fields do not prevent base-card
+  rendering;
+- every V1–V6 historical fixture still decodes through its original path;
+- editor projection contains completed-set typed results and per-exercise units
+  without pending-set placeholders or a second readable presentation;
+- boundary tests prove the editor-first, whole-editor-drop, and semantic-text
+  branches at the actual URL ceiling;
+- the static image remains V4 and non-workout card families retain their
+  existing envelopes;
+- persisted outbox and hosted-delivery round trips accept both editable and
+  read-only schema-7 workout cards; and
+- physical Messages-extension proof covers editable schema 7, read-only
+  fallback, malformed or unsupported editor fallback, and legacy V1–V6 cards.

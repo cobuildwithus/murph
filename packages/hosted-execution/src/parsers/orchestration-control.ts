@@ -18,6 +18,7 @@ import {
 } from "../orchestration-control.ts";
 import {
   requireArray,
+  requireBoolean,
   requireObject,
   requireString,
   readNullableString,
@@ -103,6 +104,7 @@ export function parseHostedRuntimeReconciliationFacts(
   const record = requireObject(value, "Hosted runtime reconciliation facts");
   assertExactKeys(record, "Hosted runtime reconciliation facts", [
     "blocked",
+    "environmentInterviewPending",
     "mailboxLag",
     "workspace",
   ]);
@@ -111,6 +113,12 @@ export function parseHostedRuntimeReconciliationFacts(
     blocked: record.blocked === null
       ? null
       : parseHostedRuntimeReconciliationFactsBlocked(record.blocked),
+    environmentInterviewPending: record.environmentInterviewPending === undefined
+      ? false
+      : requireBoolean(
+          record.environmentInterviewPending,
+          "Hosted runtime reconciliation facts environmentInterviewPending",
+        ),
     mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
       record.mailboxLag,
       "Hosted runtime reconciliation facts mailboxLag",

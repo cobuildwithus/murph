@@ -3183,6 +3183,12 @@ export const habitatFrontmatterSchema = withContractMetadata(
         patternedString(HABITAT_INDICATOR_ID_PATTERN),
         habitatStoredIndicatorValueSchema,
       ),
+      indicatorNotes: z
+        .record(
+          patternedString(HABITAT_INDICATOR_ID_PATTERN),
+          boundedString(1, 400),
+        )
+        .optional(),
       indicatorRecordedAt: z
         .record(patternedString(HABITAT_INDICATOR_ID_PATTERN), isoDateString())
         .optional(),
@@ -3264,6 +3270,27 @@ export const habitatFrontmatterSchema = withContractMetadata(
             code: "custom",
             path: ["indicatorRecordedAt", indicatorId],
             message: `Indicator timestamp "${indicatorId}" has no stored indicator value.`,
+          });
+        }
+      }
+
+      for (const indicatorId of Object.keys(value.indicatorNotes ?? {})) {
+        const definition = getHabitatIndicatorDefinition(value.aspect, indicatorId);
+
+        if (!definition) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorNotes", indicatorId],
+            message: `Indicator note "${indicatorId}" is not part of habitat aspect "${value.aspect}".`,
+          });
+          continue;
+        }
+
+        if (!(indicatorId in value.indicators)) {
+          context.addIssue({
+            code: "custom",
+            path: ["indicatorNotes", indicatorId],
+            message: `Indicator note "${indicatorId}" has no stored indicator value.`,
           });
         }
       }
