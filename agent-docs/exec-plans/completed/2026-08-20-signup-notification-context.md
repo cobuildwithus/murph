@@ -1,6 +1,6 @@
 # Enrich signup notifications with coarse location, local time, and source
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-21
 
@@ -163,3 +163,16 @@ Updated: 2026-08-21
   reflects both nullable context columns, the PostgreSQL trigger proof clears
   both fields, no private identifiers enter the diff, and exact-head required
   CI plus ReviewGPT report no unresolved finding.
+
+## Completion
+
+- Follow-up PR #2123 preserves the one-shot notification when either optional
+  context or email enrichment is unreadable and removes the unnecessary SQL
+  statement lexer.
+- Focused verification passed 77 tests, the prepared Web typecheck, Prisma
+  validation, documentation drift checks, scoped lint, `git diff --check`, and
+  the identifier scan.
+- The preliminary specialist finding was reproduced and resolved. Final
+  ReviewGPT round two returned `ROUND_OUTCOME: PASS`, and all required checks
+  passed on the reviewed implementation head.
+Completed: 2026-08-21
