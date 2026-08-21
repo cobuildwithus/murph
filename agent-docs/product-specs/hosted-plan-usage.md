@@ -356,6 +356,18 @@ for those same IDs. Whole-population member/container counts, seven-day active
 entity count, and all-time counted usage sum remain scalar set-based aggregates;
 they never materialize one aggregate result per lifetime member.
 
+Search is URL-backed and replaces ordinary pagination for that render. A query
+must be one complete hosted member/container ID, one exact verified email, or
+exactly the final four phone digits. Member ID lookup remains in the
+hosted-member owner. Exact email lookup derives the existing current-and-read
+blind-index candidates and selects only verified authorization rows; it never
+selects or decrypts the encrypted email column. Final-four lookup uses only the
+persisted plaintext masked-phone hint. Each search reads one ID-ordered
+cap-plus-one candidate set, hydrates at most 100 matches through the same usage
+read, and shows no page controls. If the 101st match exists, the page says the
+set is capped and requires the operator to narrow the query rather than claiming
+the first 100 are complete. Whole-population summary totals stay unfiltered.
+
 Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
 the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
 Venice's documented regular GPT-5.6 input, cache-read, cache-write, and output
@@ -375,6 +387,29 @@ that credit is consumed and the current canonical gate is fully exhausted
 again; this is discretionary support recovery, not an automatic or member-owned
 refill promise.
 
+`Reset everyone` is an explicit destructive recovery walk, not a bulk database
+mutation. It always ignores the active search query, requires the operator to
+type `RESET EVERYONE`, and explains that the population is not snapshotted and
+ongoing usage is not paused. Each authenticated same-origin request reads at
+most 11 hosted IDs in ascending order, admits 10, and processes those members
+one at a time through the canonical single-member reset. A stale member is
+re-read once before the request stops; notice-claim contention and any remaining
+failure stop the batch before the failed member is acknowledged. No interactive
+transactions overlap, and runtime recheck happens only after that member's reset
+transaction commits.
+
+The response reports processed, reset, unchanged, skipped, pending-wake, and
+failed outcomes plus the last acknowledged member ID. While the page remains
+open, the client may issue the next bounded request. It pauses on a known or
+ambiguous failure, can continue strictly after the last acknowledged cursor,
+and can restart from the beginning when the prior response is unknown. The
+confirmation creates one browser operation UUID and reuses it across continue
+and restart requests while the dialog remains open. A reset-everyone Starter
+grant records that UUID only in the existing immutable semantic source key, so
+even a fully consumed grant from an ambiguously acknowledged request cannot be
+appended twice. The walk owns no campaign row, queue, scheduler, or second usage
+projection.
+
 The server locks the member and period in the same order as usage accounting
 and verifies the period timestamp and usage-credit ledger version shown to the
 operator. In the same serializable transaction it releases only the matching
@@ -385,8 +420,9 @@ send.
 
 For each displayed row, the table reads the canonical gate decision and exact
 persisted-period concurrency timestamp inside one short repeatable-read
-transaction. Those transactions run sequentially and the page cap bounds them
-at 25; no transaction spans multiple members or the whole dashboard render.
+transaction. Those transactions run sequentially and are bounded by the
+ordinary 25-row page or the 100-row search cap; no transaction spans multiple
+members or the whole dashboard render.
 Its blocked/available label comes from the canonical gate decision, never from
 the persisted `blocked_at` marker, because a plan change can make that storage
 marker stale until the mutating gate reconciles it. A historical notice claim

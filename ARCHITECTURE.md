@@ -3394,6 +3394,18 @@ from enrollment and conversion metrics. A later discretionary reset requires
 the prior credit to be consumed and the current direct-Starter gate to be fully
 exhausted again; it is not an automatic or member-owned refill. Recovery never
 replenishes an old grant projection or mutates purchased and referral credit.
+The operator surface can also walk all hosted IDs in fixed batches of 10, but it
+creates no bulk transaction or campaign authority: each member re-enters this
+same single-member reset sequentially, commits before its runtime wake, and is
+acknowledged only by an ID cursor returned to the browser. The walk ignores
+search, does not snapshot or pause the population, and converges after retries
+through the existing period, ledger-version, notice-claim, and member-lock
+checks. One browser-generated operation UUID is reused across continue and
+restart requests and appears only in the existing immutable semantic source key
+for any reset-everyone Starter grant. That authority prevents a second grant
+even when the first was fully consumed before an ambiguous request is replayed;
+it adds no campaign row or second usage owner. Durable Starter wake-only evidence
+continues to recover a committed grant whose runtime wake remains pending.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

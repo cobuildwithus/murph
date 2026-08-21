@@ -1,9 +1,18 @@
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
+  HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+  isHostedOpsUsageResetAllOperationId,
+  type HostedOpsMemberUsageResetAllBatchResponse,
+  type HostedOpsMemberUsageResetAllCounts,
+  type HostedOpsMemberUsageResetAllFailure,
+} from "@/src/lib/hosted-ops/member-usage-contract";
+import {
   HostedOpsMemberUsageResetNotFoundError,
   HostedOpsMemberUsageResetNoticeInFlightError,
   HostedOpsMemberUsageResetStaleError,
+  readHostedOpsMemberUsageResetAllBatch,
   resetHostedOpsMemberUsage,
+  resetHostedOpsMemberUsageForResetAll,
 } from "@/src/lib/hosted-ops/member-usage";
 import {
   signalHostedRuntimeRecheckRuntime,
@@ -35,9 +44,9 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "HOSTED_OPS_USAGE_RESET_REQUEST_TOO_LARGE",
     tooLargeErrorMessage: "Hosted ops usage reset request body is too large.",
   });
-  const memberId = readMemberId(body.memberId);
 
   if (body.operation === "runtime_recheck") {
+    const memberId = readMemberId(body.memberId);
     const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(memberId);
     return jsonOk({
       memberId,
@@ -45,6 +54,15 @@ export const POST = withJsonError(async (request: Request) => {
     }, runtimeRecheckStatus === "accepted" ? 200 : 202);
   }
 
+  if (body.operation === "reset_all_batch") {
+    readResetAllConfirmation(body.confirmation);
+    return jsonOk(await resetEveryoneBatch({
+      afterMemberId: readOptionalMemberId(body.afterMemberId),
+      operationId: readResetAllOperationId(body.operationId),
+    }));
+  }
+
+  const memberId = readMemberId(body.memberId);
   try {
     const result = await resetHostedOpsMemberUsage({
       expectedPeriodUpdatedAt: readIsoDate(
@@ -87,34 +105,66 @@ export const POST = withJsonError(async (request: Request) => {
       runtimeRecheckStatus: "accepted",
     });
   } catch (error) {
-    if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
-      throw hostedOnboardingError({
-        code: "HOSTED_OPS_USAGE_RESET_NOT_FOUND",
-        httpStatus: 404,
-        message: error.message,
-        retryable: false,
-      });
-    }
-    if (error instanceof HostedOpsMemberUsageResetStaleError) {
-      throw hostedOnboardingError({
-        code: "HOSTED_OPS_USAGE_RESET_STALE",
-        httpStatus: 409,
-        message: error.message,
-        retryable: false,
-      });
-    }
-    if (error instanceof HostedOpsMemberUsageResetNoticeInFlightError) {
-      throw hostedOnboardingError({
-        code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
-        details: { retryAt: error.retryAt.toISOString() },
-        httpStatus: 409,
-        message: error.message,
-        retryable: true,
-      });
-    }
-    throw error;
+    throw mapSingleResetError(error);
   }
 });
+
+async function resetEveryoneBatch(input: {
+  afterMemberId: string | null;
+  operationId: string;
+}): Promise<HostedOpsMemberUsageResetAllBatchResponse> {
+  const batch = await readHostedOpsMemberUsageResetAllBatch({
+    afterMemberId: input.afterMemberId,
+  });
+  const counts: HostedOpsMemberUsageResetAllCounts = {
+    failed: 0,
+    pendingWake: 0,
+    processed: 0,
+    reset: 0,
+    skipped: 0,
+    unchanged: 0,
+  };
+  let failure: HostedOpsMemberUsageResetAllFailure | null = null;
+  let lastAcknowledgedCursor = input.afterMemberId;
+
+  for (const memberId of batch.memberIds) {
+    try {
+      const result = await resetHostedOpsMemberUsageForResetAll({
+        memberId,
+        operationId: input.operationId,
+      });
+      counts.processed += 1;
+      counts[result.outcome] += 1;
+      lastAcknowledgedCursor = memberId;
+      if (result.runtimeRecheckRequired) {
+        const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(
+          result.memberId,
+          result.timestamp,
+        );
+        if (runtimeRecheckStatus === "pending") {
+          counts.pendingWake += 1;
+        }
+      }
+    } catch (error) {
+      counts.failed += 1;
+      failure = mapResetAllFailure(error, memberId);
+      break;
+    }
+  }
+
+  const response = {
+    counts,
+    done: failure === null && !batch.hasMore,
+    failure,
+    lastAcknowledgedCursor,
+  } satisfies HostedOpsMemberUsageResetAllBatchResponse;
+  console.info("Hosted ops reset-everyone batch completed.", {
+    counts,
+    done: response.done,
+    stoppedOnFailure: failure !== null,
+  });
+  return response;
+}
 
 async function trySignalHostedRuntimeRecheck(
   memberId: string,
@@ -136,6 +186,106 @@ async function trySignalHostedRuntimeRecheck(
     });
     return "pending";
   }
+}
+
+function mapSingleResetError(error: unknown): Error {
+  if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
+    return hostedOnboardingError({
+      code: "HOSTED_OPS_USAGE_RESET_NOT_FOUND",
+      httpStatus: 404,
+      message: error.message,
+      retryable: false,
+    });
+  }
+  if (error instanceof HostedOpsMemberUsageResetStaleError) {
+    return hostedOnboardingError({
+      code: "HOSTED_OPS_USAGE_RESET_STALE",
+      httpStatus: 409,
+      message: error.message,
+      retryable: false,
+    });
+  }
+  if (error instanceof HostedOpsMemberUsageResetNoticeInFlightError) {
+    return hostedOnboardingError({
+      code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+      details: { retryAt: error.retryAt.toISOString() },
+      httpStatus: 409,
+      message: error.message,
+      retryable: true,
+    });
+  }
+  return error instanceof Error ? error : new Error("Hosted ops usage reset failed.");
+}
+
+function mapResetAllFailure(
+  error: unknown,
+  memberId: string,
+): HostedOpsMemberUsageResetAllFailure {
+  if (error instanceof HostedOpsMemberUsageResetNoticeInFlightError) {
+    return {
+      code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+      memberId,
+      message:
+        "A usage-limit notice is currently being sent. Retry from the last acknowledged member after that dispatch settles.",
+      retryable: true,
+    };
+  }
+  if (error instanceof HostedOpsMemberUsageResetStaleError) {
+    return {
+      code: "HOSTED_OPS_USAGE_RESET_STALE",
+      memberId,
+      message:
+        "Usage changed while this batch was processing. Retry from the last acknowledged member.",
+      retryable: true,
+    };
+  }
+  if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
+    return {
+      code: "HOSTED_OPS_USAGE_RESET_NOT_FOUND",
+      memberId,
+      message:
+        "The member changed while this batch was processing. Retry from the last acknowledged member.",
+      retryable: true,
+    };
+  }
+  return {
+    code: "HOSTED_OPS_USAGE_RESET_ALL_FAILED",
+    memberId,
+    message:
+      "This batch stopped before the next member was acknowledged. Retry or restart safely.",
+    retryable: true,
+  };
+}
+
+function readResetAllConfirmation(value: unknown): void {
+  if (value === HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION_INVALID",
+    httpStatus: 400,
+    message: `Type ${HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION} to continue.`,
+    retryable: false,
+  });
+}
+
+function readResetAllOperationId(value: unknown): string {
+  if (isHostedOpsUsageResetAllOperationId(value)) {
+    return value;
+  }
+  throw hostedOnboardingError({
+    code: "HOSTED_OPS_USAGE_RESET_ALL_OPERATION_ID_INVALID",
+    httpStatus: 400,
+    message: "Restart Reset everyone from the confirmation dialog.",
+    retryable: false,
+  });
+}
+
+function readOptionalMemberId(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return readMemberId(value);
 }
 
 function readMemberId(value: unknown): string {

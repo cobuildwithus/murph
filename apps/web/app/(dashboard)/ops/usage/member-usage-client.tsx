@@ -2,7 +2,13 @@
 
 import { RotateCcwIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import {
+  type FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Alert, AlertDescription } from "@/src/components/ui/alert";
 import { Badge } from "@/src/components/ui/badge";
@@ -15,6 +21,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/src/components/ui/dialog";
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+} from "@/src/components/ui/field";
+import { Input } from "@/src/components/ui/input";
 import { Spinner } from "@/src/components/ui/spinner";
 import {
   Table,
@@ -29,6 +42,11 @@ import type {
   HostedOpsMemberUsageResetResponse,
   HostedOpsMemberUsageRow,
 } from "@/src/lib/hosted-ops/member-usage";
+import {
+  HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+  type HostedOpsMemberUsageResetAllBatchResponse,
+  type HostedOpsMemberUsageResetAllCounts,
+} from "@/src/lib/hosted-ops/member-usage-contract";
 
 interface UsageResetMessage {
   text: string;
@@ -53,6 +71,36 @@ interface UsageRuntimeRecheckResponse {
   runtimeRecheckStatus: "accepted" | "pending";
 }
 
+export type MemberUsageClientDesignState =
+  | "row_stale_error"
+  | "search_loading"
+  | "reset_all_complete"
+  | "reset_all_confirmation"
+  | "reset_all_partial_failure"
+  | "reset_all_progress";
+
+interface UsageResetAllFailureState {
+  ambiguous: boolean;
+  memberId: string | null;
+  message: string;
+}
+
+interface UsageResetAllState {
+  counts: HostedOpsMemberUsageResetAllCounts;
+  failure: UsageResetAllFailureState | null;
+  lastAcknowledgedCursor: string | null;
+  phase: "complete" | "confirming" | "idle" | "paused" | "running";
+}
+
+const EMPTY_RESET_ALL_COUNTS: HostedOpsMemberUsageResetAllCounts = {
+  failed: 0,
+  pendingWake: 0,
+  processed: 0,
+  reset: 0,
+  skipped: 0,
+  unchanged: 0,
+};
+
 class UsageResetRequestError extends Error {
   constructor(
     message: string,
@@ -63,29 +111,80 @@ class UsageResetRequestError extends Error {
   }
 }
 
-export function MemberUsageClient({
-  dashboard,
-}: {
+interface MemberUsageClientProps {
   dashboard: HostedOpsMemberUsageDashboard;
-}) {
+  designResetAllInline?: boolean;
+  designState?: MemberUsageClientDesignState;
+}
+
+export function MemberUsageClient(props: MemberUsageClientProps) {
+  return (
+    <MemberUsageClientSurface
+      key={props.dashboard.search.query ?? ""}
+      {...props}
+    />
+  );
+}
+
+function MemberUsageClientSurface({
+  dashboard,
+  designResetAllInline = false,
+  designState,
+}: MemberUsageClientProps) {
   const router = useRouter();
+  const resetAllAcknowledgedCursors = useRef<Set<string>>(new Set());
+  const resetAllOperationId = useRef<string | null>(null);
+  const resetAllPageActive = useRef(true);
+  const resetAllRunInFlight = useRef(false);
+  const initialResetAllState = createInitialResetAllState(designState);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [resettingMemberId, setResettingMemberId] = useState<string | null>(
     null,
   );
-  const [message, setMessage] = useState<UsageResetMessage | null>(null);
+  const [message, setMessage] = useState<UsageResetMessage | null>(
+    designState === "row_stale_error"
+      ? {
+          text:
+            "Usage changed after this table loaded. Refresh and review the current row before resetting it.",
+          tone: "error",
+        }
+      : null,
+  );
   const [postCommit, setPostCommit] = useState<UsagePostCommit | null>(null);
+  const [searchQuery, setSearchQuery] = useState(
+    dashboard.search.query ?? "",
+  );
+  const [searchNavigationPending, setSearchNavigationPending] = useState(
+    designState === "search_loading",
+  );
+  const [resetAllOpen, setResetAllOpen] = useState(
+    initialResetAllState.phase !== "idle",
+  );
+  const [resetAllConfirmation, setResetAllConfirmation] = useState(
+    designState === "reset_all_confirmation"
+      ? HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
+      : "",
+  );
+  const [resetAllState, setResetAllState] = useState(initialResetAllState);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
     [dashboard.rows, selectedMemberId],
   );
   const isResetting = resettingMemberId !== null;
+  const globalResetActive = resetAllOpen;
   const selectedRecovery = selectedRow
     ? readUsageRowRecovery(dashboard.capturedAt, postCommit, selectedRow)
     : null;
   const selectedRuntimeRecheck =
     selectedRecovery?.runtimeRecheckAvailable ?? false;
+
+  useEffect(() => {
+    resetAllPageActive.current = true;
+    return () => {
+      resetAllPageActive.current = false;
+    };
+  }, []);
 
   function openPage(
     direction: "after" | "before",
@@ -98,8 +197,196 @@ export function MemberUsageClient({
     router.push(`/ops/usage?${params.toString()}`);
   }
 
+  function submitSearch(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (searchNavigationPending || globalResetActive) {
+      return;
+    }
+    const query = searchQuery.trim();
+    if (query === (dashboard.search.query ?? "")) {
+      return;
+    }
+    const targetQuery = query.length > 0 ? query : null;
+    setSearchNavigationPending(true);
+    router.push(targetQuery
+      ? `/ops/usage?${new URLSearchParams({ q: targetQuery }).toString()}`
+      : "/ops/usage");
+  }
+
+  function openResetAllDialog(): void {
+    if (isResetting) {
+      return;
+    }
+    setSelectedMemberId(null);
+    setMessage(null);
+    resetAllAcknowledgedCursors.current.clear();
+    resetAllOperationId.current = null;
+    setResetAllConfirmation("");
+    setResetAllState(createInitialResetAllState("reset_all_confirmation"));
+    setResetAllOpen(true);
+  }
+
+  function closeResetAllDialog(): void {
+    if (resetAllRunInFlight.current || resetAllState.phase === "running") {
+      return;
+    }
+    setResetAllOpen(false);
+    resetAllAcknowledgedCursors.current.clear();
+    resetAllOperationId.current = null;
+    setResetAllConfirmation("");
+    setResetAllState(createInitialResetAllState(undefined));
+  }
+
+  async function runResetAll(input: { restart: boolean }): Promise<void> {
+    if (resetAllRunInFlight.current) {
+      return;
+    }
+    resetAllRunInFlight.current = true;
+    try {
+      if (input.restart) {
+        resetAllAcknowledgedCursors.current.clear();
+      } else if (resetAllState.lastAcknowledgedCursor) {
+        resetAllAcknowledgedCursors.current.add(
+          resetAllState.lastAcknowledgedCursor,
+        );
+      }
+      const startingCounts = input.restart
+        ? { ...EMPTY_RESET_ALL_COUNTS }
+        : { ...resetAllState.counts, failed: 0 };
+      let counts = startingCounts;
+      let lastAcknowledgedCursor = input.restart
+        ? null
+        : resetAllState.lastAcknowledgedCursor;
+      let operationId = resetAllOperationId.current;
+      if (!operationId) {
+        try {
+          operationId = createResetAllOperationId();
+          resetAllOperationId.current = operationId;
+        } catch (error) {
+          if (resetAllPageActive.current) {
+            setResetAllState({
+              counts,
+              failure: {
+                ambiguous: false,
+                memberId: null,
+                message: error instanceof Error
+                  ? error.message
+                  : "This browser cannot start Reset everyone safely.",
+              },
+              lastAcknowledgedCursor,
+              phase: "paused",
+            });
+          }
+          return;
+        }
+      }
+      setResetAllState({
+        counts,
+        failure: null,
+        lastAcknowledgedCursor,
+        phase: "running",
+      });
+
+      while (resetAllPageActive.current) {
+        const previousCursor = lastAcknowledgedCursor;
+        let batch: HostedOpsMemberUsageResetAllBatchResponse;
+        try {
+          batch = await requestResetAllBatch(
+            lastAcknowledgedCursor,
+            operationId,
+          );
+        } catch (error) {
+          if (!resetAllPageActive.current) {
+            return;
+          }
+          setResetAllState({
+            counts,
+            failure: {
+              ambiguous: true,
+              memberId: null,
+              message: error instanceof Error
+                ? error.message
+                : "The batch response was ambiguous. Retry or restart safely.",
+            },
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+        if (!resetAllPageActive.current) {
+          return;
+        }
+
+        const acknowledgedCursor = batch.lastAcknowledgedCursor;
+        const cursorAcknowledgesBatch = batch.counts.processed === 0
+          ? acknowledgedCursor === previousCursor
+          : acknowledgedCursor !== null
+            && acknowledgedCursor !== previousCursor
+            && !resetAllAcknowledgedCursors.current.has(acknowledgedCursor);
+        if (
+          !cursorAcknowledgesBatch
+          || (
+            batch.counts.processed === 0
+            && batch.failure === null
+            && !batch.done
+          )
+        ) {
+          setResetAllState({
+            counts,
+            failure: {
+              ambiguous: true,
+              memberId: null,
+              message:
+                "The server did not acknowledge forward progress. Retry or restart safely.",
+            },
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+
+        counts = addResetAllCounts(counts, batch.counts);
+        lastAcknowledgedCursor = acknowledgedCursor;
+        if (acknowledgedCursor) {
+          resetAllAcknowledgedCursors.current.add(acknowledgedCursor);
+        }
+        if (batch.failure) {
+          setResetAllState({
+            counts,
+            failure: {
+              ambiguous: false,
+              memberId: batch.failure.memberId,
+              message: batch.failure.message,
+            },
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
+        if (batch.done) {
+          setResetAllState({
+            counts,
+            failure: null,
+            lastAcknowledgedCursor,
+            phase: "complete",
+          });
+          router.refresh();
+          return;
+        }
+        setResetAllState({
+          counts,
+          failure: null,
+          lastAcknowledgedCursor,
+          phase: "running",
+        });
+      }
+    } finally {
+      resetAllRunInFlight.current = false;
+    }
+  }
+
   async function resetUsage(row: HostedOpsMemberUsageRow): Promise<void> {
-    if (!row.currentPeriod || isResetting) {
+    if (!row.currentPeriod || isResetting || globalResetActive) {
       return;
     }
     setResettingMemberId(row.memberId);
@@ -246,6 +533,100 @@ export function MemberUsageClient({
         />
       </section>
 
+      <section
+        aria-label="Usage controls"
+        className="grid gap-4 rounded-xl border border-border/70 bg-card/70 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,0.55fr)] lg:items-end"
+      >
+        <form onSubmit={submitSearch}>
+          <FieldGroup className="gap-2">
+            <Field>
+              <FieldLabel htmlFor="ops-usage-search">
+                Search members and containers
+              </FieldLabel>
+              <FieldDescription className="text-xs leading-5">
+                Enter a complete hosted ID, an exact verified email, or the
+                final four phone digits. Email lookup uses only blind indexes;
+                email values are never decrypted for this surface.
+              </FieldDescription>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  autoComplete="off"
+                  disabled={globalResetActive || searchNavigationPending}
+                  id="ops-usage-search"
+                  maxLength={256}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                  }}
+                  placeholder="hbm_… · verified email · 1234"
+                  value={searchQuery}
+                />
+                <Button
+                  disabled={searchNavigationPending || globalResetActive}
+                  type="submit"
+                  variant="outline"
+                >
+                  {searchNavigationPending ? (
+                    <Spinner data-icon="inline-start" />
+                  ) : null}
+                  {searchNavigationPending ? "Searching" : "Search"}
+                </Button>
+                {dashboard.search.query !== null ? (
+                  <Button
+                    disabled={searchNavigationPending || globalResetActive}
+                    onClick={() => {
+                      setSearchQuery("");
+                      setSearchNavigationPending(true);
+                      router.push("/ops/usage");
+                    }}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Clear
+                  </Button>
+                ) : null}
+              </div>
+            </Field>
+          </FieldGroup>
+        </form>
+        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <p className="font-serif text-lg font-semibold text-foreground">
+            Population recovery
+          </p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Reset everyone runs small ID-ordered batches and explicitly ignores
+            any active search filter. It is bounded and non-atomic.
+          </p>
+          <Button
+            className="mt-3 w-full sm:w-auto lg:w-full"
+            disabled={
+              isResetting || globalResetActive || searchNavigationPending
+            }
+            onClick={openResetAllDialog}
+            type="button"
+            variant="destructive"
+          >
+            <RotateCcwIcon data-icon="inline-start" />
+            Reset everyone
+          </Button>
+        </div>
+      </section>
+
+      {dashboard.search.error ? (
+        <Alert variant="destructive">
+          <AlertDescription>{dashboard.search.error}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {dashboard.search.query !== null && !dashboard.search.error ? (
+        <Alert variant={dashboard.search.capped ? "destructive" : "default"}>
+          <AlertDescription>
+            {dashboard.search.capped
+              ? `Showing ${formatInteger(dashboard.search.resultCount)} ID-ordered matches (safety cap ${formatInteger(dashboard.search.cap)}). More matches exist; narrow the search to see a complete set.`
+              : `${formatInteger(dashboard.search.resultCount)} complete search ${dashboard.search.resultCount === 1 ? "result" : "results"}.`}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       {message ? (
         <Alert variant={message.tone === "error" ? "destructive" : "default"}>
           <AlertDescription>{message.text}</AlertDescription>
@@ -264,8 +645,9 @@ export function MemberUsageClient({
             Retained inbound messages cover the canonical {dashboard.messageRetentionDays}-day
             mailbox window. Last 7 days and daily average use the trailing seven
             24-hour periods. AI usage is all-time counted priced cost from
-            immutable usage rows. Rows are ordered by member ID and limited to{" "}
-            {dashboard.pagination.pageSize} per page.
+            immutable usage rows. Rows are ordered by member ID. {dashboard.search.query !== null
+              ? `Search returns the complete matching set up to the documented ${formatInteger(dashboard.search.cap)}-row safety cap.`
+              : `The ordinary list remains limited to ${formatInteger(dashboard.pagination.pageSize)} rows per page.`}
           </p>
           <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground">
             Captured {formatTimestamp(dashboard.capturedAt)}
@@ -275,12 +657,12 @@ export function MemberUsageClient({
         <div className="mt-5 grid gap-3 xl:hidden">
           {dashboard.rows.length === 0 ? (
             <div className="rounded-xl border border-border/70 bg-card/90 px-4 py-10 text-center text-sm text-muted-foreground">
-              No hosted members or group containers were found on this page.
+              {readEmptyUsageMessage(dashboard)}
             </div>
           ) : (
             dashboard.rows.map((row) => (
               <UsageCompactRow
-                disabled={isResetting}
+                disabled={isResetting || globalResetActive}
                 key={row.memberId}
                 onSelect={() => {
                   setMessage(null);
@@ -327,13 +709,13 @@ export function MemberUsageClient({
                     className="py-10 text-center text-muted-foreground"
                     colSpan={9}
                   >
-                    No hosted members or group containers were found on this page.
+                    {readEmptyUsageMessage(dashboard)}
                   </TableCell>
                 </TableRow>
               ) : (
                 dashboard.rows.map((row) => (
                   <UsageRow
-                    disabled={isResetting}
+                    disabled={isResetting || globalResetActive}
                     key={row.memberId}
                     onSelect={() => {
                       setMessage(null);
@@ -351,38 +733,40 @@ export function MemberUsageClient({
             </TableBody>
           </Table>
         </div>
-        <nav
-          aria-label="Member usage pages"
-          className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p className="text-xs text-muted-foreground">
-            {formatInteger(dashboard.rows.length)} rows shown · {formatInteger(
-              dashboard.pagination.pageSize,
-            )} rows per page
-          </p>
-          <div className="flex items-center gap-2">
-            <Button
-              disabled={dashboard.pagination.previousCursor === null}
-              onClick={() => {
-                openPage("before", dashboard.pagination.previousCursor);
-              }}
-              type="button"
-              variant="outline"
-            >
-              Previous
-            </Button>
-            <Button
-              disabled={dashboard.pagination.nextCursor === null}
-              onClick={() => {
-                openPage("after", dashboard.pagination.nextCursor);
-              }}
-              type="button"
-              variant="outline"
-            >
-              Next
-            </Button>
-          </div>
-        </nav>
+        {dashboard.search.query === null ? (
+          <nav
+            aria-label="Member usage pages"
+            className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <p className="text-xs text-muted-foreground">
+              {formatInteger(dashboard.rows.length)} rows shown · {formatInteger(
+                dashboard.pagination.pageSize,
+              )} rows per page
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                disabled={dashboard.pagination.previousCursor === null}
+                onClick={() => {
+                  openPage("before", dashboard.pagination.previousCursor);
+                }}
+                type="button"
+                variant="outline"
+              >
+                Previous
+              </Button>
+              <Button
+                disabled={dashboard.pagination.nextCursor === null}
+                onClick={() => {
+                  openPage("after", dashboard.pagination.nextCursor);
+                }}
+                type="button"
+                variant="outline"
+              >
+                Next
+              </Button>
+            </div>
+          </nav>
+        ) : null}
       </section>
 
       <Dialog
@@ -445,7 +829,7 @@ export function MemberUsageClient({
           ) : null}
           <DialogFooter>
             <Button
-              disabled={isResetting}
+              disabled={isResetting || globalResetActive}
               onClick={() => {
                 setSelectedMemberId(null);
               }}
@@ -487,8 +871,351 @@ export function MemberUsageClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {designResetAllInline && resetAllOpen ? (
+        <div
+          className="mx-auto grid w-full max-w-sm gap-4 rounded-3xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10"
+          data-design-state={designState}
+        >
+          <UsageResetAllSurface
+            confirmation={resetAllConfirmation}
+            dashboard={dashboard}
+            inline
+            onClose={closeResetAllDialog}
+            onConfirmationChange={setResetAllConfirmation}
+            onRun={(restart) => {
+              void runResetAll({ restart });
+            }}
+            state={resetAllState}
+          />
+        </div>
+      ) : null}
+
+      {!designResetAllInline ? (
+        <Dialog
+          onOpenChange={(open) => {
+            if (!open) {
+              closeResetAllDialog();
+            }
+          }}
+          open={resetAllOpen}
+        >
+          <DialogContent
+            className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            showCloseButton={resetAllState.phase !== "running"}
+          >
+            <UsageResetAllSurface
+              confirmation={resetAllConfirmation}
+              dashboard={dashboard}
+              onClose={closeResetAllDialog}
+              onConfirmationChange={setResetAllConfirmation}
+              onRun={(restart) => {
+                void runResetAll({ restart });
+              }}
+              state={resetAllState}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
+}
+
+function UsageResetAllSurface(input: {
+  confirmation: string;
+  dashboard: HostedOpsMemberUsageDashboard;
+  inline?: boolean;
+  onClose: () => void;
+  onConfirmationChange: (value: string) => void;
+  onRun: (restart: boolean) => void;
+  state: UsageResetAllState;
+}) {
+  const state = input.state;
+  const title = state.phase === "confirming"
+    ? "Reset everyone?"
+    : state.phase === "running"
+      ? "Resetting everyone"
+      : state.phase === "complete"
+        ? "Reset everyone complete"
+        : "Reset everyone paused";
+  const description = (
+    <>
+      This operation ignores the active search filter and walks the hosted
+      population in fixed, small ID-ordered batches. It is not atomic, does not
+      capture a population snapshot, and does not pause ongoing usage. Each
+      member commits independently before any runtime recheck.
+    </>
+  );
+  return (
+    <>
+      <DialogHeader>
+        {input.inline ? (
+          <h2 className="font-serif text-base leading-none font-medium text-balance">
+            {title}
+          </h2>
+        ) : (
+          <DialogTitle>{title}</DialogTitle>
+        )}
+        {input.inline ? (
+          <p className="text-sm text-pretty text-muted-foreground">
+            {description}
+          </p>
+        ) : (
+          <DialogDescription>{description}</DialogDescription>
+        )}
+      </DialogHeader>
+
+      {state.phase === "confirming" ? (
+        <div className="grid gap-4">
+          <Alert variant="destructive">
+            <AlertDescription>
+              Paid, Family-sponsored, and group-container rows clear current
+              included spend and blocking. Exhausted direct Starter rows get the
+              existing one-policy allowance recovery. Immutable usage history,
+              purchased credits, and referral credits remain unchanged. {input.dashboard.search.query !== null
+                ? "The active search filter will be ignored."
+                : "No search filter is active."}
+            </AlertDescription>
+          </Alert>
+          <Field>
+            <FieldLabel htmlFor="ops-usage-reset-all-confirmation">
+              Type {HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION} to continue
+            </FieldLabel>
+            <Input
+              autoComplete="off"
+              id="ops-usage-reset-all-confirmation"
+              onChange={(event) => {
+                input.onConfirmationChange(event.target.value);
+              }}
+              value={input.confirmation}
+            />
+          </Field>
+        </div>
+      ) : (
+        <UsageResetAllProgress state={state} />
+      )}
+
+      <DialogFooter>
+        {state.phase === "confirming" ? (
+          <>
+            <Button onClick={input.onClose} type="button" variant="outline">
+              Cancel
+            </Button>
+            <Button
+              aria-label="Confirm reset everyone"
+              disabled={
+                input.confirmation !== HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
+              }
+              onClick={() => {
+                input.onRun(true);
+              }}
+              type="button"
+              variant="destructive"
+            >
+              <RotateCcwIcon data-icon="inline-start" />
+              Reset everyone
+            </Button>
+          </>
+        ) : state.phase === "running" ? (
+          <Button disabled type="button" variant="destructive">
+            <Spinner data-icon="inline-start" />
+            Processing bounded batches
+          </Button>
+        ) : state.phase === "paused" ? (
+          <>
+            <Button onClick={input.onClose} type="button" variant="outline">
+              Close
+            </Button>
+            <Button
+              onClick={() => {
+                input.onRun(true);
+              }}
+              type="button"
+              variant="outline"
+            >
+              Restart safely
+            </Button>
+            <Button
+              onClick={() => {
+                input.onRun(false);
+              }}
+              type="button"
+              variant="destructive"
+            >
+              Retry / continue
+            </Button>
+          </>
+        ) : (
+          <Button onClick={input.onClose} type="button" variant="outline">
+            Close
+          </Button>
+        )}
+      </DialogFooter>
+    </>
+  );
+}
+
+function UsageResetAllProgress(input: { state: UsageResetAllState }) {
+  const state = input.state;
+  return (
+    <div aria-live="polite" className="grid gap-4">
+      {state.phase === "complete" ? (
+        <Alert>
+          <AlertDescription>
+            Every ID returned by the live ID-ordered walk was acknowledged.
+            This was not an atomic snapshot; members could continue using Murph
+            throughout the operation.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.failure ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            {state.failure.message} {state.failure.memberId
+              ? `The unacknowledged member is ${state.failure.memberId}.`
+              : null} {state.failure.ambiguous
+              ? "No unacknowledged outcome was added to the totals below."
+              : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.phase === "running" ? (
+        <p className="text-sm leading-6 text-muted-foreground">
+          The page is continuing one bounded request at a time. Per-row reset
+          controls remain disabled until this operation stops or completes.
+        </p>
+      ) : null}
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <UsageResetAllMetric label="Processed" value={state.counts.processed} />
+        <UsageResetAllMetric label="Reset" value={state.counts.reset} />
+        <UsageResetAllMetric label="Unchanged" value={state.counts.unchanged} />
+        <UsageResetAllMetric label="Skipped" value={state.counts.skipped} />
+        <UsageResetAllMetric
+          label="Wake pending"
+          value={state.counts.pendingWake}
+        />
+        <UsageResetAllMetric label="Failed" value={state.counts.failed} />
+      </dl>
+      <p className="break-all font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+        Last acknowledged cursor: {state.lastAcknowledgedCursor ?? "start"}
+      </p>
+      {state.counts.pendingWake > 0 ? (
+        <p className="text-xs leading-5 text-muted-foreground">
+          Pending-wake rows already committed their usage reset. A safe restart
+          reuses the existing wake-only recovery path and does not append a
+          second Starter grant.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function UsageResetAllMetric(input: { label: string; value: number }) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-card px-3 py-3">
+      <dt className="font-mono text-[10px] uppercase tracking-[0.08em] text-muted-foreground">
+        {input.label}
+      </dt>
+      <dd className="mt-1 font-serif text-xl font-semibold tabular-nums text-foreground">
+        {formatInteger(input.value)}
+      </dd>
+    </div>
+  );
+}
+
+function createInitialResetAllState(
+  designState: MemberUsageClientDesignState | undefined,
+): UsageResetAllState {
+  if (designState === "reset_all_progress") {
+    return {
+      counts: {
+        failed: 0,
+        pendingWake: 1,
+        processed: 20,
+        reset: 8,
+        skipped: 3,
+        unchanged: 9,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_020",
+      phase: "running",
+    };
+  }
+  if (designState === "reset_all_complete") {
+    return {
+      counts: {
+        failed: 0,
+        pendingWake: 2,
+        processed: 47,
+        reset: 19,
+        skipped: 8,
+        unchanged: 20,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_047",
+      phase: "complete",
+    };
+  }
+  if (designState === "reset_all_partial_failure") {
+    return {
+      counts: {
+        failed: 1,
+        pendingWake: 1,
+        processed: 24,
+        reset: 10,
+        skipped: 4,
+        unchanged: 10,
+      },
+      failure: {
+        ambiguous: false,
+        memberId: "hbm_design_025",
+        message:
+          "A usage-limit notice is currently being sent. Retry from the last acknowledged member after that dispatch settles.",
+      },
+      lastAcknowledgedCursor: "hbm_design_024",
+      phase: "paused",
+    };
+  }
+  if (designState === "reset_all_confirmation") {
+    return {
+      counts: { ...EMPTY_RESET_ALL_COUNTS },
+      failure: null,
+      lastAcknowledgedCursor: null,
+      phase: "confirming",
+    };
+  }
+  return {
+    counts: { ...EMPTY_RESET_ALL_COUNTS },
+    failure: null,
+    lastAcknowledgedCursor: null,
+    phase: "idle",
+  };
+}
+
+function addResetAllCounts(
+  left: HostedOpsMemberUsageResetAllCounts,
+  right: HostedOpsMemberUsageResetAllCounts,
+): HostedOpsMemberUsageResetAllCounts {
+  return {
+    failed: left.failed + right.failed,
+    pendingWake: left.pendingWake + right.pendingWake,
+    processed: left.processed + right.processed,
+    reset: left.reset + right.reset,
+    skipped: left.skipped + right.skipped,
+    unchanged: left.unchanged + right.unchanged,
+  };
+}
+
+function readEmptyUsageMessage(
+  dashboard: HostedOpsMemberUsageDashboard,
+): string {
+  if (dashboard.search.error) {
+    return "No rows are shown until the search is corrected.";
+  }
+  if (dashboard.search.query !== null) {
+    return "No hosted members or group containers matched this search.";
+  }
+  return "No hosted members or group containers were found on this page.";
 }
 
 interface UsageRowControlInput {
@@ -764,6 +1491,54 @@ function readEntitySecondaryLabel(row: HostedOpsMemberUsageRow): string {
   return row.maskedPhoneNumberHint ?? `Created ${formatDate(row.createdAt)}`;
 }
 
+function createResetAllOperationId(): string {
+  const randomUUID = globalThis.crypto?.randomUUID;
+  if (typeof randomUUID !== "function") {
+    throw new Error(
+      "This browser cannot start Reset everyone safely. Reload in a supported browser.",
+    );
+  }
+  return randomUUID.call(globalThis.crypto);
+}
+
+async function requestResetAllBatch(
+  afterMemberId: string | null,
+  operationId: string,
+): Promise<HostedOpsMemberUsageResetAllBatchResponse> {
+  const response = await fetch("/api/ops/usage-reset", {
+    body: JSON.stringify({
+      afterMemberId,
+      confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+      operation: "reset_all_batch",
+      operationId,
+    }),
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(
+      "Reset everyone returned an unreadable response. Retry or restart safely from the last acknowledged cursor.",
+    );
+  }
+  if (!response.ok) {
+    throw new UsageResetRequestError(
+      readResponseErrorMessage(payload),
+      readResponseErrorCode(payload),
+    );
+  }
+  if (!isHostedOpsMemberUsageResetAllBatchResponse(payload)) {
+    throw new Error(
+      "Reset everyone returned an invalid response. Retry or restart safely from the last acknowledged cursor.",
+    );
+  }
+  return payload;
+}
+
 async function requestUsageReset(
   row: HostedOpsMemberUsageRow,
 ): Promise<HostedOpsMemberUsageResetResponse> {
@@ -831,6 +1606,61 @@ async function requestRuntimeRecheck(
     throw new Error("Runtime recheck returned an invalid response.");
   }
   return payload;
+}
+
+function isHostedOpsMemberUsageResetAllBatchResponse(
+  value: unknown,
+): value is HostedOpsMemberUsageResetAllBatchResponse {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const counts = Reflect.get(value, "counts");
+  if (!counts || typeof counts !== "object") {
+    return false;
+  }
+  const processed = Reflect.get(counts, "processed");
+  const reset = Reflect.get(counts, "reset");
+  const unchanged = Reflect.get(counts, "unchanged");
+  const skipped = Reflect.get(counts, "skipped");
+  const pendingWake = Reflect.get(counts, "pendingWake");
+  const failed = Reflect.get(counts, "failed");
+  if (
+    !isNonNegativeInteger(processed)
+    || !isNonNegativeInteger(reset)
+    || !isNonNegativeInteger(unchanged)
+    || !isNonNegativeInteger(skipped)
+    || !isNonNegativeInteger(pendingWake)
+    || !isNonNegativeInteger(failed)
+    || processed !== reset + unchanged + skipped
+    || pendingWake > reset + unchanged
+  ) {
+    return false;
+  }
+  const cursor = Reflect.get(value, "lastAcknowledgedCursor");
+  if (cursor !== null && typeof cursor !== "string") {
+    return false;
+  }
+  const done = Reflect.get(value, "done");
+  if (typeof done !== "boolean") {
+    return false;
+  }
+  const failure = Reflect.get(value, "failure");
+  if (failure === null) {
+    return failed === 0;
+  }
+  return failed === 1
+    && done === false
+    && typeof failure === "object"
+    && typeof Reflect.get(failure, "code") === "string"
+    && typeof Reflect.get(failure, "memberId") === "string"
+    && typeof Reflect.get(failure, "message") === "string"
+    && typeof Reflect.get(failure, "retryable") === "boolean";
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0;
 }
 
 function isHostedOpsMemberUsageResetResult(

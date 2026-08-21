@@ -10,6 +10,9 @@ const usageAllowanceMocks = vi.hoisted(() => ({
 const usageCreditGrantMocks = vi.hoisted(() => ({
   appendHostedUsageCreditGrantTx: vi.fn(),
 }));
+const contactPrivacyMocks = vi.hoisted(() => ({
+  createHostedEmailLookupKeyReadCandidates: vi.fn(),
+}));
 
 vi.mock("../src/lib/hosted-execution/usage-allowance", async () => {
   const actual = await vi.importActual<
@@ -34,13 +37,28 @@ vi.mock("../src/lib/hosted-execution/usage-credit-grant", async () => {
   };
 });
 
+vi.mock("../src/lib/hosted-onboarding/contact-privacy", async () => {
+  const actual = await vi.importActual<
+    typeof import("../src/lib/hosted-onboarding/contact-privacy")
+  >("../src/lib/hosted-onboarding/contact-privacy");
+  return {
+    ...actual,
+    createHostedEmailLookupKeyReadCandidates:
+      contactPrivacyMocks.createHostedEmailLookupKeyReadCandidates,
+  };
+});
+
 import {
   HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+  HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE,
+  HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
   HostedOpsMemberUsageResetNotFoundError,
   HostedOpsMemberUsageResetNoticeInFlightError,
   HostedOpsMemberUsageResetStaleError,
   readHostedOpsMemberUsage,
+  readHostedOpsMemberUsageResetAllBatch,
   resetHostedOpsMemberUsage,
+  resetHostedOpsMemberUsageForResetAll,
 } from "../src/lib/hosted-ops/member-usage";
 import {
   buildHostedAiUsageGateNoticeIdempotencyKey,
@@ -54,6 +72,7 @@ const PERIOD_START = new Date("2026-07-01T00:00:00.000Z");
 const PERIOD_END = new Date("2026-08-01T00:00:00.000Z");
 const PERIOD_UPDATED_AT = new Date("2026-07-22T17:30:00.000Z");
 const PLAN_RESET_AT = new Date("2026-07-12T15:00:00.000Z");
+const RESET_ALL_OPERATION_ID = "12345678-1234-4abc-8def-1234567890ab";
 
 describe("hosted ops member usage", () => {
   beforeEach(() => {
@@ -67,6 +86,8 @@ describe("hosted ops member usage", () => {
     usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValue(
       new Map(),
     );
+    contactPrivacyMocks.createHostedEmailLookupKeyReadCandidates
+      .mockReturnValue(["hbidx:email:v2:design", "hbidx:email:v1:design"]);
     usageCreditGrantMocks.appendHostedUsageCreditGrantTx.mockResolvedValue({
       balanceUsdMicros: 4_500_000n,
       entryId: "huce_ops_starter_reset",
@@ -91,6 +112,330 @@ describe("hosted ops member usage", () => {
     );
 
     expect(findMembers).not.toHaveBeenCalled();
+  });
+
+  test("searches an exact verified email only through blind-index candidates", async () => {
+    const findEmailMatches = vi.fn(async () => [{ memberId: "hbm_email" }]);
+    const findMembers = vi.fn(async () => [makeMember({ id: "hbm_email" })]);
+    const prisma = asPrismaClientForHostedOpsDashboardTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+      hostedMemberEmailAuthorization: { findMany: findEmailMatches },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      after: "hbm_ignored",
+      now: NOW,
+      prisma,
+      search: "Verified@Example.com",
+    });
+
+    expect(contactPrivacyMocks.createHostedEmailLookupKeyReadCandidates)
+      .toHaveBeenCalledWith("verified@example.com");
+    expect(findEmailMatches).toHaveBeenCalledWith({
+      orderBy: { memberId: "asc" },
+      select: { memberId: true },
+      take: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1,
+      where: {
+        verifiedEmailLookupKey: {
+          in: ["hbidx:email:v2:design", "hbidx:email:v1:design"],
+        },
+        verifiedEmailVerifiedAt: { not: null },
+      },
+    });
+    expect(JSON.stringify(findEmailMatches.mock.calls)).not.toContain(
+      "verifiedEmailAddressEncrypted",
+    );
+    expect(findMembers).toHaveBeenCalledTimes(1);
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual(["hbm_email"]);
+    expect(dashboard.pagination).toEqual({
+      nextCursor: null,
+      pageSize: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+      previousCursor: null,
+    });
+    expect(dashboard.search).toEqual({
+      cap: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
+      capped: false,
+      error: null,
+      query: "Verified@Example.com",
+      resultCount: 1,
+    });
+  });
+
+  test("searches a complete final-four phone set up to an explicit cap", async () => {
+    const candidateIds = Array.from(
+      { length: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1 },
+      (_, index) => `hbm_phone_${String(index + 1).padStart(3, "0")}`,
+    );
+    const findPhoneMatches = vi.fn(async () =>
+      candidateIds.map((memberId) => ({ memberId }))
+    );
+    const admittedIds = candidateIds.slice(0, HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT);
+    const findMembers = vi.fn(async () =>
+      admittedIds.map((id) => makeMember({ id }))
+    );
+    const prisma = asPrismaClientForHostedOpsDashboardTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+      hostedMemberIdentity: { findMany: findPhoneMatches },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      now: NOW,
+      prisma,
+      search: "0101",
+    });
+
+    expect(findPhoneMatches).toHaveBeenCalledWith({
+      orderBy: { memberId: "asc" },
+      select: { memberId: true },
+      take: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1,
+      where: { maskedPhoneNumberHint: { endsWith: "0101" } },
+    });
+    expect(dashboard.rows).toHaveLength(HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT);
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual(admittedIds);
+    expect(dashboard.search).toEqual({
+      cap: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
+      capped: true,
+      error: null,
+      query: "0101",
+      resultCount: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
+    });
+  });
+
+  test("keeps hosted member ID search in the hosted-member owner", async () => {
+    const findMembers = vi.fn()
+      .mockResolvedValueOnce([{ id: "hbm_exact" }])
+      .mockResolvedValueOnce([makeMember({ id: "hbm_exact" })]);
+    const prisma = asPrismaClientForHostedOpsDashboardTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      now: NOW,
+      prisma,
+      search: "hbm_exact",
+    });
+
+    expect(findMembers).toHaveBeenNthCalledWith(1, {
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1,
+      where: { id: "hbm_exact" },
+    });
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual(["hbm_exact"]);
+  });
+
+  test("returns an inline search error without scanning members", async () => {
+    const findMembers = vi.fn();
+    const prisma = asPrismaClientForHostedOpsDashboardTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedMember: { findMany: findMembers },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      now: NOW,
+      prisma,
+      search: "12",
+    });
+
+    expect(findMembers).not.toHaveBeenCalled();
+    expect(dashboard.rows).toEqual([]);
+    expect(dashboard.search.error).toContain("complete hosted member/container ID");
+    expect(dashboard.summary).toEqual({
+      activeEntitiesLast7Days: 1,
+      groupContainers: 1,
+      members: 1,
+      totalAllTimeUsageUsdMicros: "8500000",
+    });
+  });
+
+  test("reads one fixed ID-ordered reset-everyone batch after the acknowledged cursor", async () => {
+    const candidates = Array.from(
+      { length: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1 },
+      (_, index) => ({
+        id: `hbm_reset_${String(index + 11).padStart(3, "0")}`,
+      }),
+    );
+    const findMembers = vi.fn(async () => candidates);
+    const prisma = asPrismaClientForHostedOpsTest({
+      hostedMember: { findMany: findMembers },
+    });
+
+    const batch = await readHostedOpsMemberUsageResetAllBatch({
+      afterMemberId: "hbm_reset_010",
+      prisma,
+    });
+
+    expect(findMembers).toHaveBeenCalledWith({
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1,
+      where: { id: { gt: "hbm_reset_010" } },
+    });
+    expect(batch).toEqual({
+      hasMore: true,
+      memberIds: candidates
+        .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
+        .map((candidate) => candidate.id),
+    });
+  });
+
+  test("reuses active Starter wake recovery instead of granting again", async () => {
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValueOnce(
+      new Map([["hbm_starter", {
+        decision: makeUsageGateDecision({
+          allowed: true,
+          allowanceSource: "direct_starter",
+          limitUsdMicros: 0n,
+          memberId: "hbm_starter",
+          periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+          periodStart: new Date(0),
+          planResetAt: null,
+          remainingUsdMicros: 4_500_000n,
+          spentUsdMicros: 0n,
+          usageCreditBalanceUsdMicros: 4_500_000n,
+          usageCreditLedgerVersion: 44n,
+        }),
+        periodPersistedAt: PERIOD_UPDATED_AT,
+      }]]),
+    );
+    const transaction = vi.fn();
+    const findOperationGrant = vi.fn(async () => null);
+    const findResetGrants = vi.fn(async () => [{
+      beneficiaryMemberId: "hbm_starter",
+    }]);
+    const findStalledMailboxItems = vi.fn(async () => [{
+      userId: "hbm_starter",
+    }]);
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: transaction,
+      hostedMailboxItem: { findMany: findStalledMailboxItems },
+      hostedUsageCreditEntry: {
+        findMany: findResetGrants,
+        findUnique: findOperationGrant,
+      },
+    });
+
+    const result = await resetHostedOpsMemberUsageForResetAll({
+      memberId: "hbm_starter",
+      now: NOW,
+      operationId: RESET_ALL_OPERATION_ID,
+    }, prisma);
+
+    expect(result).toEqual({
+      memberId: "hbm_starter",
+      outcome: "unchanged",
+      resetMode: "starter_allowance",
+      runtimeRecheckRequired: true,
+      timestamp: NOW.toISOString(),
+    });
+    expect(findOperationGrant).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        semanticSourceKey:
+          `hosted-ops-usage-reset-all:${RESET_ALL_OPERATION_ID}:hbm_starter:starter:v1`,
+      },
+    }));
+    expect(findResetGrants).toHaveBeenCalledWith({
+      select: { beneficiaryMemberId: true },
+      take: 1,
+      where: {
+        beneficiaryMemberId: "hbm_starter",
+        grant: { remainingUsdMicros: { gt: 0n } },
+        kind: "starter_grant",
+        sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+      },
+    });
+    expect(findStalledMailboxItems).toHaveBeenCalledWith({
+      select: { userId: true },
+      take: 1,
+      where: {
+        aiUsageDeniedAt: { not: null },
+        consumedAt: null,
+        userId: "hbm_starter",
+      },
+    });
+    expect(transaction).not.toHaveBeenCalled();
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
+      .not.toHaveBeenCalled();
+  });
+
+  test("does not append a second reset-everyone Starter grant after the first was consumed", async () => {
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValueOnce(
+      new Map([["hbm_starter", {
+        decision: makeUsageGateDecision({
+          allowanceSource: "direct_starter",
+          limitUsdMicros: 0n,
+          memberId: "hbm_starter",
+          periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+          periodStart: new Date(0),
+          planResetAt: null,
+          remainingUsdMicros: 0n,
+          spentUsdMicros: 0n,
+          usageCreditBalanceUsdMicros: 0n,
+          usageCreditLedgerVersion: 45n,
+        }),
+        periodPersistedAt: PERIOD_UPDATED_AT,
+      }]]),
+    );
+    const transaction = vi.fn();
+    const findOperationGrant = vi.fn(async () => ({
+      amountUsdMicros: 4_500_000n,
+      beneficiaryMemberId: "hbm_starter",
+      beneficiarySequence: 44n,
+      grant: {
+        beneficiaryMemberId: "hbm_starter",
+        beneficiarySequence: 44n,
+        remainingUsdMicros: 0n,
+      },
+      kind: "starter_grant",
+      parentGrantEntryId: null,
+      purchaseId: null,
+      referralId: null,
+      sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
+    }));
+    const findResetGrants = vi.fn(async () => []);
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: transaction,
+      hostedUsageCreditEntry: {
+        findMany: findResetGrants,
+        findUnique: findOperationGrant,
+      },
+    });
+
+    const result = await resetHostedOpsMemberUsageForResetAll({
+      memberId: "hbm_starter",
+      now: NOW,
+      operationId: RESET_ALL_OPERATION_ID,
+    }, prisma);
+
+    expect(result).toEqual({
+      memberId: "hbm_starter",
+      outcome: "unchanged",
+      resetMode: "starter_allowance",
+      runtimeRecheckRequired: false,
+      timestamp: NOW.toISOString(),
+    });
+    expect(findOperationGrant).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        semanticSourceKey:
+          `hosted-ops-usage-reset-all:${RESET_ALL_OPERATION_ID}:hbm_starter:starter:v1`,
+      },
+    }));
+    expect(findResetGrants).toHaveBeenCalledTimes(1);
+    expect(transaction).not.toHaveBeenCalled();
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
+      .not.toHaveBeenCalled();
   });
 
   test("reports members and containers from canonical retained and immutable rows", async () => {
@@ -797,6 +1142,68 @@ describe("hosted ops member usage", () => {
       });
   });
 
+  test("re-reads one stale reset-everyone member before applying the canonical reset", async () => {
+    const refreshedPeriodUpdatedAt = new Date(
+      PERIOD_UPDATED_AT.getTime() + 1_000,
+    );
+    usageAllowanceMocks.readHostedAiUsageGateSnapshots
+      .mockResolvedValueOnce(new Map([["hbm_container", {
+        decision: makeUsageGateDecision({
+          usageCreditBalanceUsdMicros: 0n,
+          usageCreditLedgerVersion: 4n,
+        }),
+        periodPersistedAt: PERIOD_UPDATED_AT,
+      }]]))
+      .mockResolvedValueOnce(new Map([["hbm_container", {
+        decision: makeUsageGateDecision({
+          usageCreditBalanceUsdMicros: 0n,
+          usageCreditLedgerVersion: 5n,
+        }),
+        periodPersistedAt: refreshedPeriodUpdatedAt,
+      }]]));
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+      makeUsageGateDecision({
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 5n,
+      }),
+    );
+    const staleTx = createResetTransactionFixture({
+      usageCreditLedgerVersion: 5n,
+    });
+    const refreshedTx = createResetTransactionFixture({
+      periodUpdatedAt: refreshedPeriodUpdatedAt,
+      usageCreditLedgerVersion: 5n,
+    });
+    const transaction = vi.fn()
+      .mockImplementationOnce(async (
+        run: (client: typeof staleTx) => Promise<unknown>,
+      ) => run(staleTx))
+      .mockImplementationOnce(async (
+        run: (client: typeof refreshedTx) => Promise<unknown>,
+      ) => run(refreshedTx));
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: transaction,
+    });
+
+    const result = await resetHostedOpsMemberUsageForResetAll({
+      memberId: "hbm_container",
+      now: NOW,
+      operationId: RESET_ALL_OPERATION_ID,
+    }, prisma);
+
+    expect(result).toMatchObject({
+      memberId: "hbm_container",
+      outcome: "reset",
+      resetMode: "included_usage",
+      runtimeRecheckRequired: true,
+    });
+    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+      .toHaveBeenCalledTimes(2);
+    expect(transaction).toHaveBeenCalledTimes(2);
+    expect(staleTx.hostedLinqDelivery.update).not.toHaveBeenCalled();
+    expect(refreshedTx.hostedAiUsagePeriod.updateMany).toHaveBeenCalledTimes(1);
+  });
+
   test("atomically clears included spend and releases only the current notice claim", async () => {
     const tx = createResetTransactionFixture({
       delivery: makeDelivery({ status: "accepted" }),
@@ -917,6 +1324,45 @@ describe("hosted ops member usage", () => {
           tx.hostedAiUsagePeriod.updateMany.mock.invocationCallOrder[0],
         ),
       );
+  });
+
+  test("keys a reset-everyone Starter grant to its operation UUID", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+      makeUsageGateDecision({
+        allowanceSource: "direct_starter",
+        limitUsdMicros: 0n,
+        periodEnd: new Date("2099-12-31T23:59:59.999Z"),
+        periodStart: PERIOD_START,
+        planResetAt: null,
+        remainingUsdMicros: 0n,
+        spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 4n,
+      }),
+    );
+    const tx = createResetTransactionFixture({
+      spentUsdMicros: 0n,
+      usageCreditBalanceUsdMicros: 0n,
+    });
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) =>
+        run(tx)),
+    });
+
+    await resetHostedOpsMemberUsage({
+      expectedPeriodUpdatedAt: PERIOD_UPDATED_AT,
+      expectedUsageCreditLedgerVersion: 4n,
+      memberId: "hbm_container",
+      now: NOW,
+      periodStart: PERIOD_START,
+      resetAllOperationId: RESET_ALL_OPERATION_ID,
+    }, prisma);
+
+    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        semanticSourceKey:
+          `hosted-ops-usage-reset-all:${RESET_ALL_OPERATION_ID}:hbm_container:starter:v1`,
+      }));
   });
 
   test("refuses to grant another Starter allowance while credit remains", async () => {
