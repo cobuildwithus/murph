@@ -7,7 +7,10 @@ import { config, proxy, rejectMalformedWorkflowWebhookToken } from "../proxy";
 
 describe("workflow webhook proxy", () => {
   it("guards the generated workflow webhook route", () => {
-    assert.equal(config.matcher, "/.well-known/workflow/v1/webhook/:path*");
+    assert.deepEqual(config.matcher, [
+      "/",
+      "/.well-known/workflow/v1/webhook/:path*",
+    ]);
   });
 
   it("returns 400 for malformed percent-encoded webhook tokens", async () => {
