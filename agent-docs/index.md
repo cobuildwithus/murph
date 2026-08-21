@@ -100,6 +100,15 @@ boundary is jointly specified by `agent-docs/SECURITY.md` and
 `agent-docs/RELIABILITY.md`; its completed round-three scope decision is recorded
 in `agent-docs/exec-plans/completed/2026-08-20-public-email-bootstrap-round-3-retrospective.md`.
 
+The internal hosted signup notification replaces opaque identifiers with local
+time, exact signup or activation provenance, and an explicitly approximate
+network location. Its request context is disclosed for at most 24 hours; reads
+stop at expiry, the existing hourly retention owner retires overdue ciphertext
+in bounded indexed batches, and a database-owned attempt trigger clears both
+value and expiry across mixed Web versions. Batch activation without
+member-level provenance omits source. This boundary is
+jointly specified by `ARCHITECTURE.md` and `agent-docs/SECURITY.md`.
+
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion

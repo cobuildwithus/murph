@@ -3068,6 +3068,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     });
 
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "telegram",
       memberIds: [acceptedMemberId],
       prisma,
     });

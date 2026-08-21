@@ -6579,6 +6579,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timeoutMs: expect.any(Number),
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "imessage",
       memberIds: ["member_family"],
       prisma,
     });
