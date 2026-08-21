@@ -366,7 +366,10 @@ persisted plaintext masked-phone hint. Each search reads one ID-ordered
 cap-plus-one candidate set, hydrates at most 100 matches through the same usage
 read, and shows no page controls. If the 101st match exists, the page says the
 set is capped and requires the operator to narrow the query rather than claiming
-the first 100 are complete. Whole-population summary totals stay unfiltered.
+the first 100 are complete. A verified-email or phone-derived result is
+actionable only when that uncapped candidate set resolves to exactly one member;
+otherwise every row mutation stays locked until the operator searches by exact
+hosted ID. Whole-population summary totals stay unfiltered.
 
 Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
 the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
@@ -403,17 +406,21 @@ failed outcomes plus the last acknowledged member ID. The client issues only
 one bounded request at a time. It pauses on a known or ambiguous failure and
 can resume strictly after the last acknowledged cursor. Hiding a paused dialog
 preserves the operation while keeping conflicting row and search mutations
-locked. A validated, operator-bound `sessionStorage` locator preserves the
+locked. Once population mutation is fully acknowledged, wake-only recovery can
+instead be hidden without locking ordinary search or single-row recovery; the
+saved Reset-everyone entry reopens that same receipt-only operation. A validated,
+operator-bound `sessionStorage` locator preserves the
 browser-created UUID, cursor, counts, failure, and recovery phase for one
 authenticated browser-tab session, including component remounts, same-tab
 navigation, reload, and browser-provided restoration of that tab session. An
 operator identity mismatch discards it, and it deliberately does not promise
 recovery in another tab or a new or closed tab session. The client synchronously
 writes this locator before the first or any next mutation; if that write fails,
-it pauses without sending the request. The operator must pass a separate warning
-that clears the locator before starting another operation. The locator is not
-reset authority; immutable per-member receipts remain the sole effect and replay
-owner. Starting again after abandonment creates a new UUID and may process
+it pauses without sending the request. The operator must pass a separate,
+transient warning that clears the locator before starting another operation;
+the abandonment presentation itself is not persisted as a recovery phase. The
+locator is not reset authority; immutable per-member receipts remain the sole
+effect and replay owner. Starting again after abandonment creates a new UUID and may process
 previously committed members from their then-current state.
 When a population response is unknown, recovery may rewalk from the beginning
 with the same browser-created operation UUID. After the population is fully
@@ -423,6 +430,9 @@ bounded post-commit runtime recheck. It never reads the current member
 population or enters a reset transaction, so members created after the original
 typed confirmation cannot be admitted to that operation. The dialog does not
 claim completion until a full receipt-owned wake pass reports no pending wake.
+The operator may defer or explicitly abandon this latency recovery because the
+database reset is already committed; retry continues to use only the retained
+operation UUID and its receipts.
 Terminal non-retryable inactive-runtime results count as no longer applicable;
 retryable runtime and transport failures remain pending.
 The walk owns no campaign row, queue, scheduler, or second usage projection;

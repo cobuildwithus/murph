@@ -50,7 +50,9 @@ through a final reset, skipped, pending-wake, and failed summary.
 
 - Operator locating one member: an exact verified email uses the existing
   blind index, phone last four uses the persisted masked hint, and member ID
-  uses the hosted-member owner. The result exposes no decrypted email.
+  uses the hosted-member owner. The result exposes no decrypted email. A capped
+  or multi-member contact-derived set is candidate-only until exact hosted-ID
+  lookup resolves the intended member.
 - Operator resetting paid, Family-sponsored, or group-container usage: current
   included spend and blocking are cleared through the existing compare-and-swap
   transaction; history and purchased credits remain unchanged.
@@ -78,6 +80,9 @@ through a final reset, skipped, pending-wake, and failed summary.
 - Member whose hosted runtime becomes terminally inactive after commit: reset
   remains committed and wake recovery advances because no runtime remains
   applicable. Retryable runtime or transport failures remain visibly pending.
+  Because only latency recovery remains, the operator can hide it and continue
+  ordinary search or row recovery, reopen it under the same UUID, or clear the
+  saved locator through a transient warned abandonment.
 - Member created after the confirmed population walk: wake recovery pages only
   the operation's existing wake-required receipts, so the later member cannot
   be reset or granted capacity under the old confirmation.

@@ -201,7 +201,7 @@ describe("MemberUsageClient", () => {
       "Showing 100 phone-suffix candidates (safety cap 100; more exist)",
     );
     expect(rendered.container.textContent).toContain(
-      "Reset controls are locked until you search by the exact hosted ID or exact verified email",
+      "These contact matches are candidate-only; reset controls are locked until you search by the exact hosted ID",
     );
     expect(getButton(rendered.container, "Reset").disabled).toBe(true);
     expect(
@@ -236,6 +236,46 @@ describe("MemberUsageClient", () => {
       "verified@example.invalid",
     );
     expect(getButton(rendered.container, "Search").disabled).toBe(false);
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+  });
+
+  test("locks every row action for an ambiguous exact-email candidate set", async () => {
+    const dashboard = makeDashboard();
+    dashboard.rows = [
+      { ...dashboard.rows[0], memberId: "hbm_email_current" },
+      { ...dashboard.rows[0], memberId: "hbm_email_prior" },
+    ];
+    dashboard.search = {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: "email",
+      query: "ambiguous@example.invalid",
+      resultCount: 2,
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    expect(rendered.container.textContent).toContain(
+      "Showing 2 verified-email candidates",
+    );
+    expect(rendered.container.textContent).toContain(
+      "These contact matches are candidate-only; reset controls are locked until you search by the exact hosted ID",
+    );
+    const resetButtons = [...rendered.container.querySelectorAll("button")]
+      .filter((button) => button.textContent?.trim() === "Reset");
+    expect(resetButtons).toHaveLength(4);
+    expect(resetButtons.every((button) => button.disabled)).toBe(true);
+
+    const uniqueDashboard = structuredClone(dashboard);
+    uniqueDashboard.rows = [uniqueDashboard.rows[0]];
+    uniqueDashboard.search.resultCount = 1;
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: uniqueDashboard }),
+    );
+
     expect(getButton(rendered.container, "Reset").disabled).toBe(false);
   });
 
@@ -345,7 +385,7 @@ describe("MemberUsageClient", () => {
     expect(rendered.container.textContent).not.toContain(
       "Reset everyone complete",
     );
-    expect(routerRefresh).not.toHaveBeenCalled();
+    expect(routerRefresh).toHaveBeenCalledTimes(1);
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/ops/usage-reset", {
       body: JSON.stringify({
@@ -406,7 +446,99 @@ describe("MemberUsageClient", () => {
     expect(readMetric(rendered.container, "Unchanged")).toBe("1");
     expect(readMetric(rendered.container, "Skipped")).toBe("1");
     expect(readMetric(rendered.container, "Wake pending")).toBe("0");
-    expect(routerRefresh).toHaveBeenCalledTimes(1);
+    expect(routerRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  test("defers and restores wake-only recovery without locking support work", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 1,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    })).mockResolvedValueOnce(jsonResponse({
+      attempted: 1,
+      done: true,
+      pendingWake: 0,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    }));
+    const sessionStorage = createMemoryStorage();
+    let rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Population reset complete; runtime recovery remains",
+      );
+    });
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Hide for now"),
+    );
+
+    expect(getButton(rendered.container, "Search").disabled).toBe(false);
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    expect(getButton(rendered.container, "Reset usage").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Cancel"));
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .toContain(RESET_ALL_OPERATION_ID);
+
+    const cleanup = rendered.cleanup;
+    cleanupRender = null;
+    await cleanup();
+    rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Population reset complete; runtime recovery remains",
+      );
+    });
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+    expect(rendered.container.textContent).toContain("Abandon reset operation?");
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .not.toContain("abandoning");
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Keep operation"),
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Retry pending runtime wakes"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "recover_reset_all_wakes",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
   });
 
   test("starts only one reset-everyone loop for rapid repeated confirmation", async () => {

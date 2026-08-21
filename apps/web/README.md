@@ -2079,7 +2079,9 @@ Current hosted billing assumptions:
   never selects or decrypts the encrypted address; phone lookup uses only the
   persisted masked hint. Search hydrates at most 100 ID-ordered matches and
   explicitly asks the operator to narrow the query when a 101st match proves
-  overflow. Whole-population summary totals remain unfiltered.
+  overflow. Capped or multi-member email/phone candidates are discovery-only;
+  row mutations remain locked until exact hosted-ID lookup resolves one target.
+  Whole-population summary totals remain unfiltered.
 - The table and reset reuse the runtime's canonical allowance gate. A row reset
   verifies the displayed current-period and usage-credit versions. Paid,
   Family, and container resets atomically clear current included spend and the
@@ -2110,8 +2112,12 @@ Current hosted billing assumptions:
   failure, and each runtime wake begins only after that member commits. The page
   reports processed/reset/unchanged/skipped/pending-wake/failed outcomes, loops
   one request at a time while open, and resumes a known failure from the last
-  acknowledged cursor. Ambiguous-response and pending-wake recovery rewalk from
-  the beginning with the same browser-generated operation UUID. One append-only
+  acknowledged cursor. Ambiguous population responses may rewalk from the
+  beginning with the same browser-generated operation UUID. Pending-wake
+  recovery instead pages only that UUID's existing receipts and never re-enters
+  population mutation. It can be hidden without locking ordinary search or row
+  recovery, reopened under the same UUID, or cleared after a transient warned
+  abandonment. One append-only
   per-member receipt is written atomically with the first reset outcome; replay
   returns that outcome without clearing later included usage or duplicating a
   consumed Starter grant, and can repeat only a required post-commit runtime

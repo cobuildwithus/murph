@@ -94,7 +94,6 @@ interface UsageResetAllState {
   failure: UsageResetAllFailureState | null;
   lastAcknowledgedCursor: string | null;
   phase:
-    | "abandoning"
     | "complete"
     | "confirming"
     | "idle"
@@ -185,6 +184,9 @@ function MemberUsageClientSurface({
   const [resetAllOpen, setResetAllOpen] = useState(
     initialResetAllState.phase !== "idle",
   );
+  const [resetAllAbandonmentOpen, setResetAllAbandonmentOpen] = useState(
+    designState === "reset_all_abandonment",
+  );
   const [resetAllConfirmation, setResetAllConfirmation] = useState(
     designState === "reset_all_confirmation"
       ? HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
@@ -198,11 +200,19 @@ function MemberUsageClientSurface({
   );
   const isResetting = resettingMemberId !== null;
   const preservedResetAllOperation = !resetAllOpen
-    && resetAllState.phase === "paused"
+    && (
+      resetAllState.phase === "paused"
+      || resetAllState.phase === "recovering_wakes"
+    )
     && resetAllOperationId.current !== null;
-  const globalResetActive = resetAllOpen || preservedResetAllOperation;
-  const phoneSearchRequiresExactLookup =
-    dashboard.search.kind === "phone_last_four"
+  const globalResetActive = resetAllState.phase === "confirming"
+    || resetAllState.phase === "paused"
+    || resetAllState.phase === "running";
+  const contactSearchRequiresExactLookup =
+    (
+      dashboard.search.kind === "email"
+      || dashboard.search.kind === "phone_last_four"
+    )
     && (dashboard.search.capped || dashboard.search.resultCount !== 1);
   const selectedRecovery = selectedRow
     ? readUsageRowRecovery(dashboard.capturedAt, postCommit, selectedRow)
@@ -238,6 +248,7 @@ function MemberUsageClientSurface({
         );
       }
       setResetAllConfirmation(HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION);
+      setResetAllAbandonmentOpen(false);
       setResetAllStateValue(
         restoreInterruptedResetAllState(restoredOperation.state),
       );
@@ -275,7 +286,9 @@ function MemberUsageClientSurface({
               memberId: null,
               message: storageFailureMessage,
             },
-        phase: "paused",
+        phase: nextState.phase === "recovering_wakes"
+          ? "recovering_wakes"
+          : "paused",
       });
       return false;
     }
@@ -318,13 +331,18 @@ function MemberUsageClientSurface({
     setMessage(null);
     if (
       resetAllOperationId.current
-      && resetAllState.phase === "paused"
+      && (
+        resetAllState.phase === "paused"
+        || resetAllState.phase === "recovering_wakes"
+      )
     ) {
+      setResetAllAbandonmentOpen(false);
       setResetAllOpen(true);
       return;
     }
     resetAllAcknowledgedCursors.current.clear();
     resetAllOperationId.current = null;
+    setResetAllAbandonmentOpen(false);
     setResetAllConfirmation("");
     setResetAllState(createInitialResetAllState("reset_all_confirmation"));
     setResetAllOpen(true);
@@ -334,7 +352,6 @@ function MemberUsageClientSurface({
     if (
       resetAllRunInFlight.current
       || resetAllState.phase === "running"
-      || resetAllState.phase === "recovering_wakes"
     ) {
       return;
     }
@@ -342,12 +359,10 @@ function MemberUsageClientSurface({
       resetAllOperationId.current
       && (
         resetAllState.phase === "paused"
-        || resetAllState.phase === "abandoning"
+        || resetAllState.phase === "recovering_wakes"
       )
     ) {
-      if (!setResetAllState({ ...resetAllState, phase: "paused" })) {
-        return;
-      }
+      setResetAllAbandonmentOpen(false);
       setResetAllOpen(false);
       return;
     }
@@ -355,6 +370,7 @@ function MemberUsageClientSurface({
   }
 
   function clearResetAllOperation(): void {
+    setResetAllAbandonmentOpen(false);
     if (
       resetAllOperationId.current
       && !removeResetAllSessionOperation()
@@ -368,7 +384,9 @@ function MemberUsageClientSurface({
           message:
             "This browser could not forget the saved reset operation. Keep it and retry, or close this browser tab to end its session before starting another operation.",
         },
-        phase: "paused",
+        phase: resetAllState.phase === "recovering_wakes"
+          ? "recovering_wakes"
+          : "paused",
       });
       return;
     }
@@ -382,14 +400,17 @@ function MemberUsageClientSurface({
   function requestResetAllAbandonment(): void {
     if (
       resetAllOperationId.current
-      && resetAllState.phase === "paused"
+      && (
+        resetAllState.phase === "paused"
+        || resetAllState.phase === "recovering_wakes"
+      )
     ) {
-      setResetAllState({ ...resetAllState, phase: "abandoning" });
+      setResetAllAbandonmentOpen(true);
     }
   }
 
   function keepResetAllOperation(): void {
-    setResetAllState({ ...resetAllState, phase: "paused" });
+    setResetAllAbandonmentOpen(false);
   }
 
   async function runResetAll(input: { mode: UsageResetAllRunMode }): Promise<void> {
@@ -546,6 +567,7 @@ function MemberUsageClientSurface({
               lastAcknowledgedCursor,
               phase: "recovering_wakes",
             });
+            router.refresh();
             return;
           }
           setResetAllState({
@@ -899,7 +921,9 @@ function MemberUsageClientSurface({
           >
             <RotateCcwIcon data-icon="inline-start" />
             {preservedResetAllOperation
-              ? "Resume reset operation"
+              ? resetAllState.phase === "recovering_wakes"
+                ? "Resume runtime recovery"
+                : "Resume reset operation"
               : "Reset everyone"}
           </Button>
         </div>
@@ -914,14 +938,14 @@ function MemberUsageClientSurface({
       {dashboard.search.query !== null && !dashboard.search.error ? (
         <Alert
           variant={
-            dashboard.search.capped || phoneSearchRequiresExactLookup
+            dashboard.search.capped || contactSearchRequiresExactLookup
               ? "destructive"
               : "default"
           }
         >
           <AlertDescription>
-            {phoneSearchRequiresExactLookup
-              ? `Showing ${formatInteger(dashboard.search.resultCount)} phone-suffix ${dashboard.search.capped ? `candidates (safety cap ${formatInteger(dashboard.search.cap)}; more exist)` : dashboard.search.resultCount === 1 ? "candidate" : "candidates"}. Reset controls are locked until you search by the exact hosted ID or exact verified email.`
+            {contactSearchRequiresExactLookup
+              ? `Showing ${formatInteger(dashboard.search.resultCount)} ${dashboard.search.kind === "email" ? "verified-email" : "phone-suffix"} ${dashboard.search.capped ? `candidates (safety cap ${formatInteger(dashboard.search.cap)}; more exist)` : "candidates"}. These contact matches are candidate-only; reset controls are locked until you search by the exact hosted ID.`
               : dashboard.search.capped
               ? `Showing ${formatInteger(dashboard.search.resultCount)} ID-ordered matches (safety cap ${formatInteger(dashboard.search.cap)}). More matches exist; narrow the search to see a complete set.`
               : `${formatInteger(dashboard.search.resultCount)} complete search ${dashboard.search.resultCount === 1 ? "result" : "results"}.`}
@@ -967,7 +991,7 @@ function MemberUsageClientSurface({
                 disabled={
                   isResetting
                   || globalResetActive
-                  || phoneSearchRequiresExactLookup
+                  || contactSearchRequiresExactLookup
                 }
                 key={row.memberId}
                 onSelect={() => {
@@ -1024,7 +1048,7 @@ function MemberUsageClientSurface({
                     disabled={
                       isResetting
                       || globalResetActive
-                      || phoneSearchRequiresExactLookup
+                      || contactSearchRequiresExactLookup
                     }
                     key={row.memberId}
                     onSelect={() => {
@@ -1188,6 +1212,7 @@ function MemberUsageClientSurface({
           data-design-state={designState}
         >
           <UsageResetAllSurface
+            abandonmentOpen={resetAllAbandonmentOpen}
             confirmation={resetAllConfirmation}
             dashboard={dashboard}
             inline
@@ -1215,12 +1240,10 @@ function MemberUsageClientSurface({
         >
           <DialogContent
             className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            showCloseButton={
-              resetAllState.phase !== "running"
-              && resetAllState.phase !== "recovering_wakes"
-            }
+            showCloseButton={resetAllState.phase !== "running"}
           >
             <UsageResetAllSurface
+              abandonmentOpen={resetAllAbandonmentOpen}
               confirmation={resetAllConfirmation}
               dashboard={dashboard}
               onAbandon={clearResetAllOperation}
@@ -1241,6 +1264,7 @@ function MemberUsageClientSurface({
 }
 
 function UsageResetAllSurface(input: {
+  abandonmentOpen: boolean;
   confirmation: string;
   dashboard: HostedOpsMemberUsageDashboard;
   inline?: boolean;
@@ -1253,7 +1277,7 @@ function UsageResetAllSurface(input: {
   state: UsageResetAllState;
 }) {
   const state = input.state;
-  const title = state.phase === "abandoning"
+  const title = input.abandonmentOpen
     ? "Abandon reset operation?"
     : state.phase === "confirming"
       ? "Reset everyone?"
@@ -1317,7 +1341,7 @@ function UsageResetAllSurface(input: {
             />
           </Field>
         </div>
-      ) : state.phase === "abandoning" ? (
+      ) : input.abandonmentOpen ? (
         <div className="grid gap-4">
           <Alert variant="destructive">
             <AlertDescription>
@@ -1334,7 +1358,7 @@ function UsageResetAllSurface(input: {
       )}
 
       <DialogFooter>
-        {state.phase === "abandoning" ? (
+        {input.abandonmentOpen ? (
           <>
             <Button onClick={input.onKeep} type="button" variant="outline">
               Keep operation
@@ -1395,15 +1419,27 @@ function UsageResetAllSurface(input: {
             </Button>
           </>
         ) : state.phase === "recovering_wakes" ? (
-          <Button
-            onClick={() => {
-              input.onRun("recover_wakes");
-            }}
-            type="button"
-            variant="destructive"
-          >
-            Retry pending runtime wakes
-          </Button>
+          <>
+            <Button onClick={input.onClose} type="button" variant="outline">
+              Hide for now
+            </Button>
+            <Button
+              onClick={input.onRequestAbandon}
+              type="button"
+              variant="outline"
+            >
+              Abandon operation
+            </Button>
+            <Button
+              onClick={() => {
+                input.onRun("recover_wakes");
+              }}
+              type="button"
+              variant="destructive"
+            >
+              Retry pending runtime wakes
+            </Button>
+          </>
         ) : (
           <Button onClick={input.onClose} type="button" variant="outline">
             Close
@@ -1431,7 +1467,8 @@ function UsageResetAllProgress(input: { state: UsageResetAllState }) {
         <Alert variant="destructive">
           <AlertDescription>
             Every population row was acknowledged, but one or more runtimes did
-            not accept their recheck. Retry the wake recovery before closing.
+            not accept their recheck. Retry now, hide this recovery and continue
+            support work, or explicitly abandon its saved browser state.
             Recovery pages only this operation&apos;s existing wake-required
             receipts; it cannot admit a later member or enter a reset
             transaction again.
@@ -1523,7 +1560,7 @@ function createInitialResetAllState(
       },
       failure: null,
       lastAcknowledgedCursor: "hbm_design_024",
-      phase: "abandoning",
+      phase: "paused",
     };
   }
   if (designState === "reset_all_complete") {
@@ -1766,9 +1803,8 @@ function isResetAllSessionMemberId(value: unknown): value is string | null {
 
 function isResetAllPersistedPhase(
   value: unknown,
-): value is "abandoning" | "complete" | "paused" | "recovering_wakes" | "running" {
-  return value === "abandoning"
-    || value === "complete"
+): value is "complete" | "paused" | "recovering_wakes" | "running" {
+  return value === "complete"
     || value === "paused"
     || value === "recovering_wakes"
     || value === "running";
@@ -1785,18 +1821,6 @@ function restoreInterruptedResetAllState(
         memberId: null,
         message:
           "This page was interrupted while a batch may have committed. Resume with the same operation from the last acknowledged cursor.",
-      },
-      phase: "paused",
-    };
-  }
-  if (state.phase === "abandoning") {
-    return {
-      ...state,
-      failure: {
-        ambiguous: false,
-        memberId: null,
-        message:
-          "This page was interrupted before abandonment was confirmed. The saved reset operation is still available.",
       },
       phase: "paused",
     };

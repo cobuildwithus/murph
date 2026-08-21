@@ -167,6 +167,48 @@ describe("hosted ops member usage", () => {
     });
   });
 
+  test("returns every distinct member for an ambiguous exact verified email", async () => {
+    const findEmailMatches = vi.fn(async () => [
+      { memberId: "hbm_email_current" },
+      { memberId: "hbm_email_prior" },
+      { memberId: "hbm_email_prior" },
+    ]);
+    const findMembers = vi.fn(async () => [
+      makeMember({ id: "hbm_email_current" }),
+      makeMember({ id: "hbm_email_prior" }),
+    ]);
+    const prisma = asPrismaClientForHostedOpsDashboardTest({
+      $queryRaw: vi.fn(async () => makeSummaryRows()),
+      hostedAiUsage: { groupBy: vi.fn(async () => []) },
+      hostedLinqDelivery: { findMany: vi.fn(async () => []) },
+      hostedMailboxItem: { groupBy: vi.fn(async () => []) },
+      hostedMember: { findMany: findMembers },
+      hostedMemberEmailAuthorization: { findMany: findEmailMatches },
+    });
+
+    const dashboard = await readHostedOpsMemberUsage({
+      now: NOW,
+      prisma,
+      search: "ambiguous@example.com",
+    });
+
+    expect(dashboard.rows.map((row) => row.memberId)).toEqual([
+      "hbm_email_current",
+      "hbm_email_prior",
+    ]);
+    expect(dashboard.search).toEqual({
+      cap: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
+      capped: false,
+      error: null,
+      kind: "email",
+      query: "ambiguous@example.com",
+      resultCount: 2,
+    });
+    expect(JSON.stringify(findEmailMatches.mock.calls)).not.toContain(
+      "verifiedEmailAddressEncrypted",
+    );
+  });
+
   test("searches a complete final-four phone set up to an explicit cap", async () => {
     const candidateIds = Array.from(
       { length: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1 },

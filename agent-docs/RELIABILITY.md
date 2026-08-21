@@ -363,6 +363,8 @@ Last verified: 2026-08-20
   pages and surfaces the 101st row only as overflow evidence. The suffix
   predicate has no dedicated index and may inspect the identity table, so it is
   an operator-only lookup and must not become a hot-path or background scan.
+  Any capped or multi-member email/phone candidate set is discovery-only and
+  keeps mutations locked until exact hosted-ID lookup resolves the target.
   Both modes use one scalar unfiltered whole-population aggregate, scope mailbox
   and immutable-usage groupings to admitted IDs, and run the canonical allowance
   gate sequentially in one short repeatable-read transaction per displayed
@@ -394,7 +396,10 @@ Last verified: 2026-08-20
   receipts for that UUID, admits 10, and invokes only sequential bounded runtime
   rechecks. It never reads current hosted-member rows or enters the reset
   transaction, so a member created after confirmation cannot join the old
-  operation. Each population member first reads the append-only
+  operation. That receipt-only phase may be hidden without locking ordinary
+  search or row recovery, reopened under the same UUID, or cleared only after a
+  transient warned abandonment; the abandonment presentation is not persisted.
+  Each population member first reads the append-only
   `(operation_id, member_id)` reset receipt;
   the initial serializable member transaction writes that receipt atomically
   with any reset or grant, and one bounded conflict retry covers a concurrent

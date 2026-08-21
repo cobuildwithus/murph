@@ -3417,7 +3417,10 @@ authority or server campaign; the receipt remains the sole per-member replay
 owner. Once the population walk is complete, wake recovery pages only that
 operation's existing wake-required receipts in the same fixed ID-ordered
 batches; it never reads the current hosted-member population or re-enters a
-reset transaction.
+reset transaction. That wake-only phase can be hidden without locking ordinary
+search or per-row recovery and reopened under the same UUID. Its abandonment
+warning is transient UI; only the underlying recovery phase is stored until the
+operator confirms that the locator should be cleared.
 The canonical per-member reset transaction writes one
 append-only receipt keyed by that UUID and member ID; the receipt freezes every
 stable outcome so replay cannot clear included usage that accrued after the
