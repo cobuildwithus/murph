@@ -35,6 +35,8 @@ Updated: 2026-08-21
    Mitigation: retain useful property types/descriptions where derivable, keep canonical runtime parsing fail-closed, and add representative valid/invalid execution regressions.
 3. Risk: a second compact schema drifts from runtime truth.
    Mitigation: forbid handwritten duplication and derive only from the canonical schema object.
+4. Risk: the changed dynamic-tool descriptor rotates existing native provider threads once at deployment and bounded replay can omit older context.
+   Mitigation: keep the existing fingerprint and fallback owners, document the transition, and prove the exact full-schema-to-compact-schema replay plus following-turn resume path.
 
 ## Tasks
 
@@ -43,7 +45,7 @@ Updated: 2026-08-21
 3. [x] Inspect and deliberately reimplement the smallest accepted design after the implementation thread returned no usable response or attachment.
 4. [x] Reconcile review A's independent result and reject any recommendation that adds a second schema owner or depends on unproven `$ref` expansion across deferred discovery consumers.
 5. [x] Run focused automation behavior, schema parity, token-budget, and typecheck proof.
-6. Commit/push the candidate, open the PR, and start preliminary specialist and final ReviewGPT gates concurrently with CI.
+6. [x] Commit/push the candidate, open the PR, and start preliminary specialist and final ReviewGPT gates concurrently with CI.
 7. Resolve findings, merge the approved exact head, and retire the worktree.
 
 ## Decisions

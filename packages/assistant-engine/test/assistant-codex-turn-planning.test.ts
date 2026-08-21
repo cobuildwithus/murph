@@ -117,6 +117,10 @@ import {
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.js'
 import {
+  MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+  MURPH_AUTOMATION_TOOL,
+} from '../src/assistant-codex/dynamic-tools/automation.js'
+import {
   MURPH_GENERATE_SONG_TOOL,
 } from '../src/assistant-codex/dynamic-tools/generate-song.js'
 import {
@@ -5029,6 +5033,120 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.resume).toBeNull()
     expect(plan.assistantContractFingerprint).not.toBe(oldToolContractFingerprint)
+  })
+
+  it('replays bounded history once when the automation descriptor compacts, then resumes', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-automation-schema-transition-',
+    ))
+    const route = createRoute()
+    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      automationTool: { request: vi.fn() },
+    }
+    const buildPlan = async (session: AssistantSession) =>
+      await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'America/Chicago',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+    const baseSession = createSession({ turnCount: 1 })
+
+    try {
+      await appendAssistantTranscriptEntries(
+        vault,
+        baseSession.sessionId,
+        Array.from({ length: 30 }, (_, index) => ({
+          kind: 'assistant' as const,
+          text: `Committed automation context ${index + 1}: ${'x'.repeat(600)}`,
+        })),
+      )
+
+      const currentPlan = await buildPlan(baseSession)
+      expect(currentPlan.dynamicTools).toContainEqual(MURPH_AUTOMATION_TOOL)
+      const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+        tool.name === MURPH_AUTOMATION_TOOL.name
+          ? {
+              ...tool,
+              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+            }
+          : tool)
+      const oldContractFingerprint = buildAssistantCodexContractFingerprint({
+        developerInstructions: currentPlan.developerInstructions,
+        dynamicTools: oldDynamicTools,
+        routeFingerprint,
+      })
+      const transitionSession = createSession({
+        resumeState: {
+          assistantContractFingerprint: oldContractFingerprint,
+          routeFingerprint,
+          threadId: 'thread-full-automation-schema',
+        },
+        turnCount: 1,
+      })
+
+      const transitionPlan = await buildPlan(transitionSession)
+      expect(transitionPlan.resume).toBeNull()
+      expect(transitionPlan.assistantContractFingerprint)
+        .not.toBe(oldContractFingerprint)
+      expect(transitionPlan.conversationHistoryMessages?.[0]).toEqual({
+        content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+        role: 'assistant',
+      })
+      expect(transitionPlan.conversationHistoryMessages?.length)
+        .toBeGreaterThan(1)
+      expect(transitionPlan.conversationHistoryMessages?.length)
+        .toBeLessThanOrEqual(24)
+      expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
+        .not.toContain('Committed automation context 1:')
+      expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
+        .toContain('Committed automation context 30:')
+
+      const transitionedSession =
+        await applyAssistantSessionCodexResumeStateAction({
+          action: 'persist-from-provider-turn',
+          assistantContractFingerprint:
+            transitionPlan.assistantContractFingerprint,
+          codexRolloutRelativePath: null,
+          codexThreadId: 'thread-compact-automation-schema',
+          routeFingerprint,
+          session: transitionSession,
+          vault,
+        })
+      const resumedPlan = await buildPlan(transitionedSession)
+      expect(resumedPlan.resume?.codexThreadId)
+        .toBe('thread-compact-automation-schema')
+      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(resumedPlan.assistantContractFingerprint)
+        .toBe(transitionPlan.assistantContractFingerprint)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
   })
 
   it('reads current assistant context snapshot on sensitive native resume', async () => {
