@@ -138,9 +138,17 @@ Updated: 2026-08-20
   `session_start_request` owns the response-header boundary and
   `session_start_response_decode` owns the successful body and JSON boundary
   under the remaining part of the same six-second deadline.
-- Passed: full KMS coverage 50/50; Cloudflare runner snapshot coverage 195/195;
+- Passed: full KMS coverage 50/50; Cloudflare runner snapshot coverage 196/196;
   assistant-runtime checkpoint coverage 52/52; Web, Cloudflare runner, and
   assistant-runtime typechecks; `git diff --check`; direct-identifier review;
   and two independent read-only subagent audits of the Round 5 KMS correction.
+- Passed: an independent checkpoint-boundary audit found no release-blocking
+  implementation defect. A separate coverage audit identified four weak test
+  assertions, now resolved: the no-headers case fails from the actual request
+  signal; a delayed response proves body decoding receives only the remaining
+  deadline; wake-first response-body cancellation preserves the exact caller
+  error without diagnostic mutation; and both new phases plus HTTP status
+  precedence are projected explicitly. The focused suites pass 196/196 and
+  52/52 after those changes.
 - Remaining: final ReviewGPT rerun, exact-head GitHub checks, merge/deploy, and
   bounded postdeploy Vercel/runtime-log queries.

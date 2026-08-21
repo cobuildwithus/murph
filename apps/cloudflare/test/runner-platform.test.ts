@@ -2716,38 +2716,27 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     await abortSnapshotSession;
   });
 
-  it("caps delayed session start and heartbeats before the stale boundary", async () => {
+  it("uses only the remaining session-start deadline after delayed response headers", async () => {
     vi.useFakeTimers();
     const startedAtMs = Date.parse("2026-04-27T00:00:00.000Z");
     vi.setSystemTime(startedAtMs);
-    const snapshotId = "snapshot_runner_platform_delayed_start";
-    const objectKey =
-      `users/hsn_0123456789abcdef01234567/workspace-snapshots/${snapshotId}.snapshot.enc`;
-    const dataKeyBase64 = encodeHostedWorkspaceSnapshotV2DataKey(
-      Uint8Array.from({ length: 32 }, (_, index) => index + 1),
-    );
     const startResponse = createDeferred<Response>();
-    const timeoutCalls: number[] = [];
+    const timeoutControllers: Array<{
+      controller: AbortController;
+      delayMs: number;
+    }> = [];
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((delayMs) => {
-      timeoutCalls.push(delayMs);
-      return new AbortController().signal;
+      const controller = new AbortController();
+      timeoutControllers.push({ controller, delayMs });
+      return controller.signal;
     });
-    let firstHeartbeatAtMs: number | null = null;
     const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
       const request = requireFetchRequest(args, "delayed workspace snapshot start");
       if (request.url.endsWith("/workspace-snapshots/start")) {
         return await startResponse.promise;
       }
-      if (request.url.endsWith(`/workspace-snapshots/${snapshotId}/heartbeat`)) {
-        firstHeartbeatAtMs = Date.now();
-        return new Response(JSON.stringify({ alive: true, ok: true }), {
-          headers: { "content-type": "application/json; charset=utf-8" },
-          status: 200,
-        });
-      }
       return new Response("unexpected", { status: 500 });
     });
-    const snapshotAbort = new AbortController();
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       commitTimeoutMs: 30_000,
@@ -2758,23 +2747,34 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const startSnapshotSession = platform.workspaceSnapshotPort!.startSnapshotSession({
         expectedWorkspaceVersion: "4",
         reason: "idle_shutdown",
-        signal: snapshotAbort.signal,
       });
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
       vi.setSystemTime(startedAtMs + 5_500);
-      startResponse.resolve(createWorkspaceSnapshotSessionStartResponse({
-        dataKeyBase64,
-        objectKey,
-        snapshotId,
-      }));
-      await startSnapshotSession;
-      await vi.waitFor(() => expect(firstHeartbeatAtMs).not.toBeNull());
+      startResponse.resolve(new Response(
+        new ReadableStream<Uint8Array>({ start: () => undefined }),
+        {
+          headers: { "content-type": "application/json; charset=utf-8" },
+          status: 200,
+        },
+      ));
+      await vi.waitFor(() =>
+        expect(timeoutControllers.some(({ delayMs }) => delayMs === 500)).toBe(true)
+      );
+      const responseDecodeTimeout = timeoutControllers.find(({ delayMs }) => delayMs === 500);
+      if (!responseDecodeTimeout) {
+        throw new Error("Remaining workspace snapshot response deadline was not created.");
+      }
+      const timeoutError = new Error("The operation timed out.");
+      timeoutError.name = "TimeoutError";
+      responseDecodeTimeout.controller.abort(timeoutError);
 
-      expect(timeoutCalls).toContain(6_000);
-      expect(firstHeartbeatAtMs).toBe(startedAtMs + 5_500);
-      expect((firstHeartbeatAtMs ?? Infinity) - startedAtMs).toBeLessThan(10_000);
+      await expect(startSnapshotSession).rejects.toBe(timeoutError);
+      expect(timeoutError).toMatchObject({
+        phase: "session_start_response_decode",
+        timeoutMs: 500,
+      });
+      expect(timeoutControllers.some(({ delayMs }) => delayMs === 6_000)).toBe(true);
     } finally {
-      snapshotAbort.abort(new Error("test complete"));
       timeoutSpy.mockRestore();
     }
   });
@@ -2789,13 +2789,11 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       timeoutControllers.push({ controller, delayMs });
       return controller.signal;
     });
-    const fetchControl: { reject: ((reason?: unknown) => void) | null } = {
-      reject: null,
-    };
-    const fetchMock = vi.fn(async () =>
-      await new Promise<Response>((_resolve, reject) => {
-        fetchControl.reject = reject;
-      }));
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const request = requireFetchRequest(args, "workspace snapshot start without response headers");
+      await delayWithAbort(60_000, request.signal);
+      return new Response("unexpected", { status: 500 });
+    });
     const platform = buildTestHostedExecutionRuntimePlatform({
       boundUserId: "member_123",
       commitTimeoutMs: 30_000,
@@ -2817,11 +2815,6 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       const timeoutError = new Error("The operation timed out.");
       timeoutError.name = "TimeoutError";
       startTimeout.controller.abort(timeoutError);
-      const rejectStartedFetch = fetchControl.reject;
-      if (!rejectStartedFetch) {
-        throw new Error("Workspace snapshot start fetch did not begin.");
-      }
-      rejectStartedFetch(new DOMException("The operation was aborted.", "AbortError"));
 
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
       expect(timeoutError).toMatchObject({
@@ -2909,6 +2902,35 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
+  it("preserves a runtime wake while a successful session-start body is stalled", async () => {
+    const snapshotAbort = new AbortController();
+    const wakeError = new Error("runtime wake interrupted session-start response decoding");
+    const fetchMock = vi.fn(async () => new Response(
+      new ReadableStream<Uint8Array>({ start: () => undefined }),
+      {
+        headers: { "content-type": "application/json; charset=utf-8" },
+        status: 200,
+      },
+    ));
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      commitTimeoutMs: 30_000,
+      fetchImpl: fetchMock as typeof fetch,
+    });
+
+    const start = platform.workspaceSnapshotPort!.startSnapshotSession({
+      expectedWorkspaceVersion: "4",
+      reason: "idle_shutdown",
+      signal: snapshotAbort.signal,
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    snapshotAbort.abort(wakeError);
+
+    await expect(start).rejects.toBe(wakeError);
+    expect(wakeError).not.toHaveProperty("phase");
+    expect(wakeError).not.toHaveProperty("timeoutMs");
+  });
+
   it("preserves a session-start HTTP failure when a runtime wake interrupts its body", async () => {
     const snapshotAbort = new AbortController();
     const wakeError = new Error("runtime wake arrived after session-start HTTP failure");
@@ -2936,7 +2958,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       signal: snapshotAbort.signal,
     });
 
-    await expect(start).rejects.toMatchObject({ status: 503, statusCode: 503 });
+    await expect(start).rejects.toMatchObject({
+      phase: "session_start_request",
+      status: 503,
+      statusCode: 503,
+      timeoutMs: 6_000,
+    });
     await expect(start).rejects.not.toBe(wakeError);
     expect(fetchMock).toHaveBeenCalledOnce();
   });

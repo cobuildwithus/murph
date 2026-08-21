@@ -402,15 +402,17 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   }
 
   it("emits one bounded failure record at each fixed snapshot lifecycle stage", async () => {
-    const failureStages = [
-      "plan",
-      "session",
-      "archive",
-      "upload",
-      "checkpoint",
+    const failureCases = [
+      { stage: "plan" },
+      { sessionPhase: "session_start_request", stage: "session" },
+      { sessionPhase: "session_start_response_decode", stage: "session" },
+      { stage: "archive" },
+      { stage: "upload" },
+      { stage: "checkpoint" },
     ] as const;
 
-    for (const expectedStage of failureStages) {
+    for (const failureCase of failureCases) {
+      const expectedStage = failureCase.stage;
       const vaultRoot = await createVaultRoot();
       const { calls, platform } = createRuntimePlatform();
       const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
@@ -421,7 +423,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       );
       if (expectedStage === "session") {
         Object.assign(failure, {
-          phase: "session_start_response_decode",
+          phase: failureCase.sessionPhase,
           timeoutMs: 6_000,
         });
       } else if (expectedStage === "checkpoint") {
@@ -472,7 +474,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
             ...(expectedStage === "session"
               ? {
                   snapshotSessionStartElapsedMs: expect.any(Number),
-                  snapshotSessionStartFailurePhase: "session_start_response_decode",
+                  snapshotSessionStartFailurePhase: failureCase.sessionPhase,
                   snapshotSessionStartTimeoutMs: 6_000,
                 }
               : expectedStage === "checkpoint"
