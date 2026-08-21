@@ -700,7 +700,12 @@ function MemberUsageClientSurface({
   }
 
   async function resetUsage(row: HostedOpsMemberUsageRow): Promise<void> {
-    if (!row.currentPeriod || isResetting || globalResetActive) {
+    if (
+      !row.currentPeriod
+      || isResetting
+      || globalResetActive
+      || contactSearchRequiresExactLookup
+    ) {
       return;
     }
     setResettingMemberId(row.memberId);
@@ -1182,6 +1187,7 @@ function MemberUsageClientSurface({
                   && !selectedRuntimeRecheck
                 )
                 || isResetting
+                || contactSearchRequiresExactLookup
               }
               onClick={() => {
                 if (selectedRow) {

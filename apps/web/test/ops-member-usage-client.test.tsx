@@ -277,6 +277,18 @@ describe("MemberUsageClient", () => {
     );
 
     expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    expect(getButton(rendered.container, "Reset usage").disabled).toBe(false);
+
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    expect(getButton(rendered.container, "Reset usage").disabled).toBe(true);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset usage"),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("does not enter a loading state when the normalized search is unchanged", async () => {
