@@ -790,9 +790,16 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
           throw createOperationTimeoutError();
         }
         const unavailable = isUnavailableError(error);
-        const providerReason = attemptTimedOut
+        const normalizedProviderReason = readProviderReason(
+          error,
+          readProviderHttpStatus(error),
+        );
+        const sharedAuthRefreshTimedOut = normalizedProviderReason === "UNKNOWN"
+          && isHostedGcpKmsInnerAuthFailureStage(failureStage)
+          && attemptContext.diagnostics.sharedAuthRefreshContext?.signal.aborted === true;
+        const providerReason = attemptTimedOut || sharedAuthRefreshTimedOut
           ? "DEADLINE_EXCEEDED"
-          : readProviderReason(error, readProviderHttpStatus(error));
+          : normalizedProviderReason;
         if (
           retryTransientDecrypt
           && attempt < maxAttempts
