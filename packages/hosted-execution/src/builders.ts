@@ -496,6 +496,7 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   initialGroupRoomModelMarkdown?: string | null;
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
+  onboardingFollowupEnrollment?: boolean;
   onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   occurredAt: string;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
@@ -519,6 +520,7 @@ export function buildHostedExecutionMemberActivatedWake(input: {
       ? {}
       : { initialGroupRoomModelMarkdown }),
     memberChannels: { ...input.memberChannels },
+    onboardingFollowupEnrollment: input.onboardingFollowupEnrollment ?? true,
     ...(input.onboardingFollowupRoute === undefined
       ? {}
       : {

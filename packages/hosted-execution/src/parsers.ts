@@ -267,6 +267,14 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
           record.memberChannels,
           "Hosted execution wake member.activated memberChannels",
         ),
+        ...(record.onboardingFollowupEnrollment === undefined
+          ? {}
+          : {
+              onboardingFollowupEnrollment: requireBoolean(
+                record.onboardingFollowupEnrollment,
+                "Hosted execution wake member.activated onboardingFollowupEnrollment",
+              ),
+            }),
         memberId: wireUserId,
         ...(record.onboardingFollowupRoute === undefined
           ? {}
@@ -1376,6 +1384,14 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
           record.memberChannels,
           "Hosted execution member.activated memberChannels",
         ),
+        ...(record.onboardingFollowupEnrollment === undefined
+          ? {}
+          : {
+              onboardingFollowupEnrollment: requireBoolean(
+                record.onboardingFollowupEnrollment,
+                "Hosted execution member.activated onboardingFollowupEnrollment",
+              ),
+            }),
         ...(record.onboardingFollowupRoute === undefined
           ? {}
           : {

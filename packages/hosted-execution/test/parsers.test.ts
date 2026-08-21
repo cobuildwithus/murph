@@ -461,6 +461,7 @@ describe("parseHostedExecutionEvent", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupEnrollment: true,
         onboardingFollowupRoute: {
           actorId: "+15550002222",
           channel: "linq",
@@ -503,6 +504,7 @@ describe("parseHostedExecutionEvent", () => {
         linq: true,
         telegram: false,
       },
+      onboardingFollowupEnrollment: true,
       onboardingFollowupRoute: {
         actorId: "+15550002222",
         channel: "linq",
@@ -4276,6 +4278,7 @@ describe("parseHostedExecutionWake", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupEnrollment: true,
         onboardingFollowupRoute: {
           actorId: "+15550002222",
           channel: "linq",
@@ -4320,6 +4323,7 @@ describe("parseHostedExecutionWake", () => {
         linq: true,
         telegram: false,
       },
+      onboardingFollowupEnrollment: true,
       onboardingFollowupRoute: {
         actorId: "+15550002222",
         channel: "linq",
@@ -4347,6 +4351,28 @@ describe("parseHostedExecutionWake", () => {
         text: "Welcome to Murph.",
       },
       userId: "user-1",
+    });
+  });
+
+  it("preserves an explicit member activation follow-up opt-out", () => {
+    expect(
+      parseHostedExecutionWake({
+        eventId: "member.activated:thread-container:linq:thread-1",
+        kind: "member.activated",
+        memberChannels: {
+          email: false,
+          linq: true,
+          telegram: false,
+        },
+        onboardingFollowupEnrollment: false,
+        occurredAt: "2026-04-18T00:00:00.000Z",
+        signupWelcome: null,
+        userId: "member_container_123",
+      }),
+    ).toMatchObject({
+      kind: "member.activated",
+      onboardingFollowupEnrollment: false,
+      signupWelcome: null,
     });
   });
 

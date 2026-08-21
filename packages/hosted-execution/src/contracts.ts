@@ -187,6 +187,7 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
   onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
@@ -787,6 +788,7 @@ export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseW
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
   onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;

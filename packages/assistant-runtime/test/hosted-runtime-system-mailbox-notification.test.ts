@@ -358,6 +358,7 @@ describe("hosted system mailbox notification execution context", () => {
         telegram: false,
       },
       memberId: "member_group_runtime",
+      onboardingFollowupEnrollment: false,
       occurredAt: FIXED_NOW,
       signupWelcome: null,
     });
@@ -376,6 +377,7 @@ describe("hosted system mailbox notification execution context", () => {
               routeAction: "initialize-group-room-model",
               wake: {
                 kind: "member.activated",
+                onboardingFollowupEnrollment: false,
               },
             },
           ],

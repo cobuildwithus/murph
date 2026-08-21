@@ -677,6 +677,7 @@ function buildHostedMemberActivationWake(input: {
       },
     }),
     memberId: input.memberId,
+    onboardingFollowupEnrollment: true,
     onboardingFollowupRoute: input.onboardingFollowupRoute ?? null,
     occurredAt: input.occurredAt,
     signupWelcome: buildHostedMemberSignupWelcomePayload({

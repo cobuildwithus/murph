@@ -377,6 +377,7 @@ describe("hosted onboarding member activation", () => {
           linq: true,
           telegram: false,
         },
+        onboardingFollowupEnrollment: true,
         onboardingFollowupRoute: expectedRoute,
         signupWelcome: expect.objectContaining({
           route: expectedRoute,
@@ -865,6 +866,7 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
       envelope: expect.objectContaining({
         kind: "member.activated",
+        onboardingFollowupEnrollment: true,
         onboardingFollowupRoute: expectedLinqParticipantWelcomeRoute(),
         signupWelcome: null,
       }),
@@ -1078,6 +1080,7 @@ describe("hosted onboarding member activation", () => {
           linq: false,
           telegram: true,
         },
+        onboardingFollowupEnrollment: true,
         onboardingFollowupRoute:
           buildHostedMemberActivationOnboardingFollowupRoute({
             linqChatId: null,

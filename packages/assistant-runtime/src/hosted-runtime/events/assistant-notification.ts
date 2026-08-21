@@ -157,10 +157,14 @@ export async function executeHostedMemberActivatedWake(input: {
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
-  await startAssistantOnboarding({
-    startedAt: input.wake.occurredAt,
-    vault: input.vaultRoot,
-  });
+  const ownsOnboardingFollowup =
+    input.wake.onboardingFollowupEnrollment !== false;
+  if (ownsOnboardingFollowup) {
+    await startAssistantOnboarding({
+      startedAt: input.wake.occurredAt,
+      vault: input.vaultRoot,
+    });
+  }
   const initialGroupRoomModelMarkdown =
     input.wake.initialGroupRoomModelMarkdown;
   if (initialGroupRoomModelMarkdown) {
@@ -191,10 +195,11 @@ export async function executeHostedMemberActivatedWake(input: {
   }
 
   const signupWelcome = input.wake.signupWelcome;
-  const onboardingFollowupRoute =
-    input.wake.onboardingFollowupRoute === undefined
+  const onboardingFollowupRoute = ownsOnboardingFollowup
+    ? input.wake.onboardingFollowupRoute === undefined
       ? signupWelcome?.route ?? null
-      : input.wake.onboardingFollowupRoute;
+      : input.wake.onboardingFollowupRoute
+    : null;
   const seededOnboardingFollowupWakeAt = onboardingFollowupRoute
     ? await seedOnboardingFollowupAutomation({
         logDetails: buildHostedOnboardingFollowupLogDetails(

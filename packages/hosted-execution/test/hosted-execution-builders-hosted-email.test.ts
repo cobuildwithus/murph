@@ -108,6 +108,7 @@ describe("hosted execution wake builders", () => {
       initialGroupRoomModelMarkdown:
         "## Explicit setup\n\nKeep this room low-key.",
       kind: "member.activated",
+      onboardingFollowupEnrollment: true,
       onboardingFollowupRoute: {
         actorId: "+15551234567",
         channel: "linq",

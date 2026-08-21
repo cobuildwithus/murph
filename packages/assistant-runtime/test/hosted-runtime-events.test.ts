@@ -2427,7 +2427,7 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("initializes explicit group room setup before accepting activation replay", async () => {
+  it("initializes group room setup without starting personal onboarding", async () => {
     const roomContext = "## Explicit setup\n\nKeep this room low-key.";
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:linq-group:member_123:evt_room_setup",
@@ -2438,6 +2438,7 @@ describe("executeHostedMailboxEvent", () => {
         telegram: false,
       },
       memberId: "member_123",
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
     });
@@ -2455,6 +2456,10 @@ describe("executeHostedMailboxEvent", () => {
       body: roomContext,
       vaultRoot: "/tmp/assistant-runtime-events",
     });
+    expect(mocks.startAssistantOnboarding).not.toHaveBeenCalled();
+    expect(
+      mocks.seedMurphOnboardingFollowupFromStartedOnboarding,
+    ).not.toHaveBeenCalled();
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
@@ -2468,6 +2473,35 @@ describe("executeHostedMailboxEvent", () => {
       ],
     });
     expect(JSON.stringify(result.redactedLogEntries)).not.toContain(roomContext);
+  });
+
+  it("keeps legacy activation wakes without enrollment intent enrolled", async () => {
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:legacy:member_123:evt_activation",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      signupWelcome: null,
+    });
+    delete wake.onboardingFollowupEnrollment;
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_legacy_activation_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.startAssistantOnboarding).toHaveBeenCalledExactlyOnceWith({
+      startedAt: wake.occurredAt,
+      vault: "/tmp/assistant-runtime-events",
+    });
   });
 
   it("keeps activation retryable without logging room setup when initialization is unavailable", async () => {
@@ -2484,6 +2518,7 @@ describe("executeHostedMailboxEvent", () => {
         telegram: false,
       },
       memberId: "member_123",
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
     });
@@ -2509,6 +2544,10 @@ describe("executeHostedMailboxEvent", () => {
     expect(
       JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
     ).not.toContain(roomContext);
+    expect(mocks.startAssistantOnboarding).not.toHaveBeenCalled();
+    expect(
+      mocks.seedMurphOnboardingFollowupFromStartedOnboarding,
+    ).not.toHaveBeenCalled();
   });
 
   it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {

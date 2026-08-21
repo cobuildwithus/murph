@@ -20597,6 +20597,7 @@ function createGroupRoomModelInitializationSystemMailboxItem() {
         linq: true,
         telegram: false,
       },
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
       userId: "member_synthetic_phase",
