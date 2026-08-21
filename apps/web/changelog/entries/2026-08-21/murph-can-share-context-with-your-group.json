@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Murph can share context with your group",
-    "summary": "When you explicitly ask, your private Murph can now pass a bounded verified update to one joined group and let that group’s Murph write the message in the room’s own voice.",
+    "summary": "When you explicitly ask, your private Murph can now pass a bounded, verified update to one joined group and let that group’s Murph write the message in the room’s own voice.",
     "details": "The handoff is pinned to the exact private request, current membership, and group route. It does not give the group continuing access to your private Murph or vault, and a queued handoff is not claimed as delivered until the normal group message path completes.",
     "relevanceTags": [
       "assistant",
