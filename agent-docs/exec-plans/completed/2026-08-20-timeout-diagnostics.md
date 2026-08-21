@@ -1,8 +1,8 @@
 # KMS and checkpoint timeout diagnostics
 
-Status: active
+Status: completed
 Created: 2026-08-20
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -150,5 +150,23 @@ Updated: 2026-08-20
   error without diagnostic mutation; and both new phases plus HTTP status
   precedence are projected explicitly. The focused suites pass 196/196 and
   52/52 after those changes.
-- Remaining: final ReviewGPT rerun, exact-head GitHub checks, merge/deploy, and
-  bounded postdeploy Vercel/runtime-log queries.
+- Passed: final ReviewGPT Round 7 on immutable head `4f1df303e357` returned
+  `ROUND_OUTCOME: PASS` after verifying every accepted correction and the full
+  current patch. The response turn identifies the GPT-5.6 Pro backend; the
+  reviewer itself reported model confirmation as unavailable and completed the
+  required audit without findings.
+- Passed: the one permitted base update merged current `origin/main` at
+  `b22f6274d593`. The only manual conflict retained this change's KMS and
+  checkpoint diagnostics alongside main's newer artifact-read/upload and
+  canonical-checkpoint reconciliation contract. An independent read-only audit
+  found no other release-blocking overlap.
+- Passed after the base update: complete Cloudflare runner coverage 201/201,
+  assistant-runtime checkpoint coverage 52/52, Web KMS coverage 50/50, all
+  three affected package typechecks, and `git diff --check`. Web's first
+  prepared typecheck correctly exposed a stale generated Prisma client after
+  main added a model; the repository's normal Prisma generation completed and
+  the exact same typecheck then passed without source changes.
+- Operational follow-through after merge: exact-head required GitHub checks,
+  Web deployment readiness, Cloudflare protected deployment, and bounded
+  postdeploy Vercel/runtime-log verification.
+Completed: 2026-08-21
