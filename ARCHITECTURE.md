@@ -2334,11 +2334,16 @@ line exists. Successful or first-contact-superseded welcome delivery seeds the
 existing finite unfinished-onboarding automation. Because Telegram forbids
 proactive activation outreach, its first accepted direct onboarding reply owns
 the equivalent transition: accepted delivery commits the existing durable
-first-contact marker, then post-checkpoint managed-automation maintenance
-observes that marker and writes the canonical seed. A transient seed write
-uses the existing bounded managed-setup wake ladder, so recovery needs neither
-another member message nor replay of the accepted reply; activation remains
-silent, the seed is idempotent, and an archived follow-up is never reopened.
+first-contact marker plus one immutable pointer to that accepted turn, then
+post-checkpoint managed-automation maintenance resolves the completed receipt
+and exact sent outbox intent before writing the canonical seed. The receipt
+anchors the original local-day window and the outbox intent anchors the route;
+ambient managed routes and retry time are never eligibility authority.
+Historical markers without the turn pointer are ineligible, and recovery after
+the original window is a no-op. A transient seed write uses the existing bounded
+managed-setup wake ladder, so recovery needs neither another member message nor
+replay of the accepted reply; activation remains silent, the seed is idempotent,
+and an archived follow-up is never reopened.
 The automation has at most one low-pressure opportunity on
 each of the next three local days and the existing completion, decline,
 response, suspension, and expiry stops. The companion path does not send the

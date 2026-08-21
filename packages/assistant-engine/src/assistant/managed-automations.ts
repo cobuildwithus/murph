@@ -1260,15 +1260,7 @@ export async function applyMurphManagedAutomations(
       return { ...result, yielded: true }
     }
     if (!existingOnboardingFollowup) {
-      const route = await resolveCreateRoute()
-      if (input.shouldYield?.() === true) {
-        return { ...result, yielded: true }
-      }
-      if (
-        route?.channel === 'telegram' &&
-        route.threadIsDirect === true &&
-        !scheduleStableKeyUnavailable
-      ) {
+      if (!scheduleStableKeyUnavailable) {
         let stableKey: string | null = null
         try {
           stableKey = await resolveScheduleStableKey()
@@ -1283,7 +1275,7 @@ export async function applyMurphManagedAutomations(
         if (stableKey !== null) {
           const seedResult =
             await seedMurphOnboardingFollowupAfterTelegramFirstContact({
-              route,
+              now,
               stableKey,
               vault: input.vaultRoot,
             })

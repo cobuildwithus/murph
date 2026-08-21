@@ -1071,8 +1071,14 @@ export async function finalizeAssistantTurnFromDeliveryOutcome(input: {
     response !== '' &&
     isAssistantFirstContactAcceptedForDelivery(input.outcome)
   if (firstContactAcceptedForDelivery) {
+    const acceptedRoute = input.outcome.session.binding
     await markAssistantFirstContactSeen({
       docIds: input.firstContactStateDocIds ?? [],
+      onboardingFollowupAcceptedTurnId:
+        acceptedRoute.channel?.trim().toLowerCase() === 'telegram' &&
+        acceptedRoute.threadIsDirect === true
+          ? input.turnId
+          : null,
       seenAt: completedAt,
       vault: input.vault,
     })

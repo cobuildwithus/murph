@@ -311,11 +311,14 @@ The hosted-local first-contact scenario proves that activation produces neither
 a signup welcome nor a follow-up seed, the first accepted private reply creates
 one metadata-attested canonical finite seed, and replay of the same inbound wake
 creates neither another provider turn, another reply, nor another seed. Focused
-assistant-engine tests prove canonical route selection, stable scheduling,
-durable first-contact gating, idempotent replay, completed-onboarding closure,
-and archived-record preservation. Assistant-runtime tests prove post-checkpoint
-ordering, metadata-only seed attestation, and recovery from a transient
-canonical write on the existing bounded wake ladder without new member input.
+assistant-engine tests prove that the immutable accepted-turn pointer resolves
+the exact sent outbox route even when ambient managed routing differs, keeps the
+cutoff anchored to the original completed receipt across a delayed retry,
+rejects historical markers and expired windows, and preserves idempotent replay,
+completed-onboarding closure, and archived records. Assistant-runtime tests
+prove post-checkpoint ordering, metadata-only seed attestation, and recovery
+from a transient canonical write on the existing bounded wake ladder without
+new member input.
 The existing hosted-local scheduled-reminder scenario remains the downstream
 proof for Telegram scheduler, outbox, and provider delivery.
 

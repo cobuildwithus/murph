@@ -3365,6 +3365,15 @@ describe("assistant delivery orchestration seam", () => {
   it("finalizes receipts and marks first contact for accepted injected turns", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T12:30:00.000Z"));
+    const directTelegramBinding = {
+      actorId: "telegram-participant",
+      channel: "telegram",
+      conversationKey: "telegram-conversation",
+      delivery: { kind: "thread" as const, target: "thread-1" },
+      identityId: "telegram-identity",
+      threadId: "thread-1",
+      threadIsDirect: true,
+    };
     await finalizeAssistantTurnFromDeliveryOutcome({
       firstContactGuidanceInjected: true,
       firstContactStateDocIds: ["doc-1", "doc-2"],
@@ -3383,6 +3392,7 @@ describe("assistant delivery orchestration seam", () => {
         kind: "sent",
         media: [],
         session: createAssistantSession({
+          binding: directTelegramBinding,
           sessionId: "session-sent",
         }),
       },
@@ -3410,6 +3420,7 @@ describe("assistant delivery orchestration seam", () => {
     );
     expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
       docIds: ["doc-1", "doc-2"],
+      onboardingFollowupAcceptedTurnId: "turn-finalize",
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
@@ -3424,6 +3435,7 @@ describe("assistant delivery orchestration seam", () => {
         kind: "queued",
         media: [],
         session: createAssistantSession({
+          binding: directTelegramBinding,
           sessionId: "session-queued",
         }),
       },
@@ -3434,6 +3446,7 @@ describe("assistant delivery orchestration seam", () => {
 
     expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
       docIds: ["doc-1"],
+      onboardingFollowupAcceptedTurnId: "turn-queued-finalize",
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });
@@ -3460,6 +3473,7 @@ describe("assistant delivery orchestration seam", () => {
         kind: "sent",
         media: [],
         session: createAssistantSession({
+          binding: directTelegramBinding,
           sessionId: "session-organic-reply",
         }),
       },
@@ -3470,6 +3484,46 @@ describe("assistant delivery orchestration seam", () => {
 
     expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
       docIds: ["doc-organic-reply"],
+      onboardingFollowupAcceptedTurnId: "turn-organic-reply-finalize",
+      seenAt: "2026-04-08T12:30:00.000Z",
+      vault: "/vault",
+    });
+    seamMocks.markAssistantFirstContactSeen.mockClear();
+
+    await finalizeAssistantTurnFromDeliveryOutcome({
+      firstContactGuidanceInjected: true,
+      firstContactStateDocIds: ["doc-telegram-group"],
+      outcome: {
+        delivery: {
+          channel: "telegram",
+          idempotencyKey: null,
+          messageLength: 11,
+          providerMessageId: "provider-telegram-group",
+          providerThreadId: null,
+          sentAt: "2026-04-08T12:30:00.000Z",
+          target: "group-thread",
+          targetKind: "thread",
+        },
+        intentId: "intent-telegram-group",
+        kind: "sent",
+        media: [],
+        session: createAssistantSession({
+          binding: {
+            ...directTelegramBinding,
+            threadId: "group-thread",
+            threadIsDirect: false,
+          },
+          sessionId: "session-telegram-group",
+        }),
+      },
+      response: "Group reply",
+      turnId: "turn-telegram-group",
+      vault: "/vault",
+    });
+
+    expect(seamMocks.markAssistantFirstContactSeen).toHaveBeenCalledWith({
+      docIds: ["doc-telegram-group"],
+      onboardingFollowupAcceptedTurnId: null,
       seenAt: "2026-04-08T12:30:00.000Z",
       vault: "/vault",
     });

@@ -73,22 +73,35 @@ delivery proof.
 ## Progress
 
 - Accepted early-onboarding delivery now commits only the existing durable
-  first-contact marker. Post-checkpoint managed-automation maintenance reads
-  that marker on an exact direct Telegram route and invokes the canonical
-  finite follow-up seed only while onboarding remains open.
+  first-contact marker plus an immutable pointer to the exact accepted turn.
+  Post-checkpoint managed-automation maintenance resolves that turn's completed
+  receipt and exact sent outbox intent, then invokes the canonical finite seed
+  only while onboarding remains open and the original window is still live.
 - The existing managed-setup retry ladder owns transient seed-write recovery,
   so the member's reply does not wait on automation maintenance and recovery
   does not require another member message or replay the accepted input.
 - ReviewGPT identified the original foreground best-effort callback as an
   unrecoverable write gap; the callback plumbing was removed in favor of this
   durable owner and a production-shaped failure-then-retry test.
+- ReviewGPT round 2 then identified retry-time and ambient-route reconstruction
+  inside the replacement owner. The recorded retrospective chose a bounded
+  redesign: historical markers are ineligible, later replies cannot replace the
+  first turn, route comes from its exact sent intent, and the cutoff comes from
+  its completed receipt. No new queue, scheduler, or lifecycle owner was added.
+- The accepted-turn anchor uses the existing per-vault runtime write owner and
+  atomic no-clobber state-file adoption. A concurrent first-contact test caught
+  and prevented a transient hard-link race, proving that racing accepted turns
+  still leave exactly one immutable pointer.
 - Focused engine/runtime suites, all three affected package typechecks, agent
   docs drift, public changelog tests, and hosted runner bundle parity pass
-  locally. The runner bundle is 11,102,727 bytes of its 11,393,617-byte budget.
+  locally. The six focused suites pass all 672 assertions, the changelog suites
+  pass all 49 assertions, and the runner bundle is 11,105,923 bytes of its
+  11,393,617-byte budget.
 - The production-shape first-contact E2E is prepared with direct-wake local
-  orchestration, but the local harness could not start because the pinned
-  public MinIO fallback never became ready. The test body did not run; exact-
-  head CI remains the next available environment for this proof.
+  orchestration, but the local harness exhausted its five-minute setup hook
+  while the pinned MinIO mirror fell back to the public image. The four
+  application assertions were skipped; exact-head CI remains the next
+  available environment for this proof.
 
 ## Product UX Walkthrough
 
@@ -98,10 +111,12 @@ delivery proof.
   whose follow-up is archived stays closed. Telegram groups and other channels
   retain their existing paths.
 - `Evidence`: focused engine integration proves exact direct-route selection,
-  durable first-contact gating, one stable schedule, replay idempotency,
-  completed-state closure, and archive preservation; hosted runtime tests
-  prove post-checkpoint invocation and a transient canonical-write failure
-  recovering on the next managed wake without new member input;
+  immutable first-turn gating, divergent ambient-route rejection, an original
+  cutoff preserved through delayed recovery, historical-marker and expired-
+  window exclusion, replay idempotency, completed-state closure, and archive
+  preservation; hosted runtime tests prove post-checkpoint invocation and a
+  transient canonical-write failure recovering on the next managed wake
+  without new member input;
   the hosted-local first-contact scenario locks activation silence, ordinary
   reply delivery, durable seed attestation, and exact inbound replay. The
   existing scheduled-reminder scenario proves downstream Telegram delivery.
