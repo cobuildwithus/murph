@@ -365,6 +365,10 @@ import {
   prepareHostedWakeContext,
 } from "../src/hosted-runtime/context.ts";
 import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
+  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
+} from "../src/hosted-runtime/codex-runtime-env.ts";
+import {
   importHostedConversationMailboxItem,
 } from "../src/hosted-runtime/mailbox-conversation-import.ts";
 import {
@@ -2792,6 +2796,83 @@ describe("hosted workspace runtime entrypoint", () => {
           process.env[key] = value;
         }
       }
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("admits a fence-bound custom target without storing it as the product provider", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const events: string[] = [];
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const runtimeEnvs: Readonly<Record<string, string>>[] = [];
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          forwardedEnv: {
+            HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+            [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
+            [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
+              "hosted-custom-inference",
+            MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
+          },
+          request: {
+            attemptId: "attempt_synthetic_custom_inference_target",
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import"
+                  ? "7".repeat(64)
+                  : "8".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-custom-target.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            mailboxPort: createMailboxPort({
+              events,
+              items: [
+                createMailboxItem({
+                  id: "mailbox_item_entrypoint_custom_inference_target",
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            runtimeEnvs.push(input.runtimeEnv);
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(runtimeEnvs.length, 1);
+      assert.equal(runtimeEnvs[0]?.HOSTED_ASSISTANT_PROVIDER, "openai");
+      assert.equal(runtimeEnvs[0]?.HOSTED_ASSISTANT_MODEL, "gpt-synthetic");
+      assert.equal(
+        runtimeEnvs[0]?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+        "hosted-custom-inference",
+      );
+      assert.equal(
+        runtimeEnvs[0]?.[HOSTED_CODEX_EFFECTIVE_MODEL_ENV],
+        "murph-custom-r7",
+      );
+    } finally {
       await removeTempRoot(vaultRoot);
     }
   });

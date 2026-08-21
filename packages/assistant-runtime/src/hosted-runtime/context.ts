@@ -46,6 +46,7 @@ import {
   HOSTED_INBOUND_SELF_HEAL_AUTO_REPLY_CHANNELS,
 } from "./managed-auto-reply.ts";
 import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./codex-runtime-env.ts";
 import {
@@ -466,7 +467,11 @@ export async function readHostedAssistantExecutionDefaultTarget(input: {
 
   return applyHostedCodexRuntimeCommandTarget({
     codexCommand: readHostedCodexRuntimeCommandOverride(input.runtimeEnv),
-    target: applyHostedCodexRuntimeModelProviderTarget({
+    target: applyHostedCodexRuntimeTarget({
+      model: normalizeHostedContextString(
+        input.runtimeEnv?.[HOSTED_CODEX_EFFECTIVE_MODEL_ENV]
+          ?? process.env[HOSTED_CODEX_EFFECTIVE_MODEL_ENV],
+      ),
       modelProviderId: normalizeHostedContextString(
         input.runtimeEnv?.[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]
           ?? process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
@@ -555,7 +560,8 @@ function applyHostedCodexRuntimeCommandTarget(input: {
   };
 }
 
-function applyHostedCodexRuntimeModelProviderTarget(input: {
+function applyHostedCodexRuntimeTarget(input: {
+  model?: string | null;
   modelProviderId?: string | null;
   target: AssistantModelTarget | null;
 }): AssistantModelTarget | null {
@@ -564,15 +570,16 @@ function applyHostedCodexRuntimeModelProviderTarget(input: {
   }
 
   if (
-    !input.modelProviderId
-    || input.modelProviderId === input.target.modelProvider
+    (!input.modelProviderId || input.modelProviderId === input.target.modelProvider)
+    && (!input.model || input.model === input.target.model)
   ) {
     return input.target;
   }
 
   return {
     ...input.target,
-    modelProvider: input.modelProviderId,
+    ...(input.model ? { model: input.model } : {}),
+    ...(input.modelProviderId ? { modelProvider: input.modelProviderId } : {}),
   };
 }
 

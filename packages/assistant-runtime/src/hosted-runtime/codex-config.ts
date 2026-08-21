@@ -47,6 +47,7 @@ import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "./launch-spec.ts";
 import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./codex-runtime-env.ts";
 import {
@@ -180,8 +181,9 @@ export async function prepareHostedCodexRuntimeEnvironment(
   rejectDeprecatedHostedCodexAppServerProxyEnv(input.runtimeEnv);
   rejectInvalidHostedCodexAppServerCommandOverride(input.runtimeEnv);
 
+  const invocationTarget = resolveHostedCodexInvocationTarget(input.runtimeEnv);
   const providerConfig = resolveHostedCodexModelProviderConfig({
-    provider: normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_PROVIDER),
+    provider: invocationTarget.modelProvider,
     runtimeEnv: input.runtimeEnv,
   });
   const customInferenceProvider =
@@ -239,11 +241,13 @@ export async function prepareHostedCodexRuntimeEnvironment(
   }
 
   const runtimeEnv = projectHostedRuntimeProcessEnvironment(input);
-  const hostedModel = normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_MODEL);
+  const productModel = normalizeHostedCodexEnvString(
+    input.runtimeEnv.HOSTED_ASSISTANT_MODEL,
+  );
   delete runtimeEnv.HOSTED_ASSISTANT_MODEL;
   Object.assign(runtimeEnv, {
     CODEX_HOME: codexHome,
-    ...(hostedModel ? { HOSTED_ASSISTANT_MODEL: hostedModel } : {}),
+    ...(productModel ? { HOSTED_ASSISTANT_MODEL: productModel } : {}),
     HOSTED_ASSISTANT_REASONING_EFFORT:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_REASONING_EFFORT)
       ?? DEFAULT_HOSTED_CODEX_REASONING_EFFORT,
@@ -253,6 +257,9 @@ export async function prepareHostedCodexRuntimeEnvironment(
     HOSTED_ASSISTANT_SANDBOX:
       normalizeHostedCodexEnvString(input.runtimeEnv.HOSTED_ASSISTANT_SANDBOX)
       ?? DEFAULT_HOSTED_CODEX_SANDBOX,
+    ...(invocationTarget.model
+      ? { [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: invocationTarget.model }
+      : {}),
     [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]: chatGptAuth
       ? HOSTED_CHATGPT_OPENAI_CODEX_MODEL_PROVIDER_ID
       : providerConfig.id,
@@ -261,7 +268,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     buildHostedCodexConfigToml({
       chatGptAuth,
-      model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
+      model: invocationTarget.model,
       contextWindowTokens,
       provider: providerConfig,
       reasoningEffort: customInferenceProvider
@@ -279,6 +286,57 @@ export async function prepareHostedCodexRuntimeEnvironment(
     codexConfigPath,
     codexHome,
     runtimeEnv,
+  };
+}
+
+function resolveHostedCodexInvocationTarget(
+  runtimeEnv: Readonly<Record<string, string>>,
+): {
+  model: string | null;
+  modelProvider: string | null;
+} {
+  const invocationModelProvider = normalizeHostedCodexEnvString(
+    runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
+  );
+  if (
+    invocationModelProvider !== null
+    && invocationModelProvider !== HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
+  ) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV} may only carry a fence-bound custom inference target before Codex preparation.`,
+    );
+  }
+
+  if (invocationModelProvider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID) {
+    const invocationModel = normalizeHostedCodexEnvString(
+      runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV],
+    );
+    if (!invocationModel) {
+      throw new HostedAssistantConfigurationError(
+        "HOSTED_ASSISTANT_CONFIG_INVALID",
+        `${HOSTED_CODEX_EFFECTIVE_MODEL_ENV} is required for fence-bound custom inference.`,
+      );
+    }
+    return {
+      model: invocationModel,
+      modelProvider: invocationModelProvider,
+    };
+  }
+
+  const productProvider = normalizeHostedCodexEnvString(
+    runtimeEnv.HOSTED_ASSISTANT_PROVIDER,
+  );
+  if (productProvider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID) {
+    throw new HostedAssistantConfigurationError(
+      "HOSTED_ASSISTANT_CONFIG_INVALID",
+      `${HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID} is invocation-bound and cannot be stored in HOSTED_ASSISTANT_PROVIDER.`,
+    );
+  }
+
+  return {
+    model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
+    modelProvider: productProvider,
   };
 }
 

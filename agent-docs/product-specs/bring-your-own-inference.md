@@ -91,8 +91,11 @@ reuse the old provider thread.
 4. Cloudflare revalidates endpoint policy, seals the target under a
    context-separated Worker key, and binds the envelope to the existing active
    UserRunner write fence beside workspace version and platform-usage authority.
-5. Cloudflare launches Codex with one fixed internal provider, a
-   revision-derived model alias, and a public non-secret sentinel.
+5. Cloudflare keeps the dormant OpenAI/Venice product preference in the normal
+   hosted assistant fields and passes the fence-bound custom provider plus its
+   revision-derived model alias as separate invocation-local Codex target
+   facts. Runtime preparation uses those facts for the generated Codex config
+   without saving the internal custom provider in operator config.
 6. Codex sends Responses requests to the fixed custom-inference internal
    origin. Existing provider fetch attaches only the current opaque
    provider-egress authority.

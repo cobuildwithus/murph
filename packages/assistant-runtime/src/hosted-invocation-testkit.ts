@@ -16,6 +16,12 @@ export {
   createHostedRuntimeBridgeLeaseFromWorkspaceRequest,
   createHostedWorkspaceRuntimeBridgeJobOptions,
 } from "./hosted-runtime/snapshot-bridge.ts";
+export {
+  prepareHostedCodexRuntimeEnvironment,
+} from "./hosted-runtime/codex-config.ts";
+export {
+  readHostedAssistantExecutionDefaultTarget,
+} from "./hosted-runtime/context.ts";
 export type {
   HostedMailboxPayloadDecodeInput,
   HostedMailboxPayloadDecodeItemRef,

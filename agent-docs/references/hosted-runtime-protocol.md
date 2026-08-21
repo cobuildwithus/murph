@@ -93,6 +93,13 @@ invocation compares its invocation provider with the live Web-owned preference.
 A mismatch stops that invocation from servicing further wakes, makes its dirty
 workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
 so Cloudflare releases the provider-specific invocation and starts a fresh one.
+A selected custom endpoint is the narrow exception to that product-preference
+comparison: Web and Cloudflare already pin its exact revision to the invocation
+write fence. The runner keeps the dormant OpenAI/Venice preference separate,
+hydrates the effective Codex model/provider from the fence-bound invocation
+facts, and never saves the internal custom provider as an operator preference.
+A stale or replaced fence therefore fails before custom provider egress instead
+of falling back to the dormant managed preference.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
 provider-entry revalidation remain the recovery path. The signal carries no

@@ -88,6 +88,7 @@ import {
   projectHostedRuntimeProcessEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
+  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./hosted-runtime/codex-runtime-env.ts";
 import {
@@ -3027,6 +3028,10 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       throw new TypeError("Default hosted runtime processing requires Codex setup.");
     }
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
+    const invocationModelProvider =
+      runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV];
+    const customInferenceInvocation =
+      invocationModelProvider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
     const invocationAssistantProvider = runtimeEnv.HOSTED_ASSISTANT_PROVIDER;
     if (!isHostedAssistantProvider(invocationAssistantProvider)) {
       throw new TypeError(
@@ -3059,6 +3064,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     const resolveInvocationAssistantProviderAuthority = async (): Promise<
       "current" | "handoff"
     > => {
+      // The custom endpoint and revision are already pinned to this invocation's
+      // write fence. The OpenAI/Venice preference is dormant on this path and
+      // must not replace or invalidate that effective target.
+      if (customInferenceInvocation) {
+        return "current";
+      }
       const liveAssistantProvider = await readLiveAssistantProvider();
       if (liveAssistantProvider === invocationAssistantProvider) {
         return "current";
@@ -3501,7 +3512,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       },
       env: hostedCodexRuntime.runtimeEnv,
       memberId: input.request.userId,
-      model: hostedCodexRuntime.runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
+      model:
+        hostedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV]
+        ?? null,
       modelProvider:
         hostedCodexRuntime.runtimeEnv[
           HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV
@@ -5364,7 +5377,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
         const idleMaintenanceModel =
           readConfirmedAssistantTarget()?.model
-          ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
+          ?? runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV]
           ?? null;
         let idleMaintenance: HostedIdleMaintenanceOutcome;
         try {
@@ -5382,7 +5395,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               credentialSource: resolveAssistantUsageCredentialSource({
                 apiKeyEnv: null,
                 credentialSourceHint:
-                  runtimeEnv.HOSTED_ASSISTANT_PROVIDER
+                  runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]
                     === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
                     ? "member"
                     : null,

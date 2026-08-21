@@ -82,6 +82,23 @@ memory consolidation.
   Server tests pass (346 assertions). The App Server cases cover managed OpenAI
   and custom inference and assert exactly `murph.member_memory` on every
   provider request. Assistant-engine, assistant-runtime, and hosted-execution
-  typechecks pass for the provider-aware change; exact-head CI remains pending.
-- Exact-head CI and next final review gate: pending.
+  typechecks pass for the provider-aware change.
+- The next full audit proved the custom-inference correction could not reach the
+  provider-aware route because Cloudflare overloaded the saved
+  `HOSTED_ASSISTANT_PROVIDER` field with the internal custom provider. The
+  top-level hosted runtime and operator-config bootstrap both reject that value
+  before assistant execution. The remediation keeps the dormant OpenAI/Venice
+  product fields intact and passes the existing fence-bound custom provider
+  plus opaque revision model as separate invocation-local Codex target facts.
+  Runtime preparation, target hydration, detached work, and usage attribution
+  now derive from that effective pair; the internal provider is never saved as
+  an operator preference and no managed fallback was added.
+- The composed Cloudflare projection, real Codex preparation, and hosted target
+  hydration regression passes while proving saved product defaults stay
+  unchanged. The hosted runtime entrypoint admits the custom target (339 tests),
+  config/target regressions pass (51 tests), Cloudflare projection tests pass
+  (19 tests), provider routing passes (12 tests), and both real App Server memory
+  scenarios pass with the exact one-tool inventory. Assistant-runtime and
+  Cloudflare typechecks pass for this remediation.
+- Exact-head CI and next full final review gate: pending.
 - Production deploy and bounded runtime-log verification: pending.
