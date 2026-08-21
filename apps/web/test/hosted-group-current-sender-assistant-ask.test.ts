@@ -21,6 +21,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeTx: vi.fn(),
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
   assertHostedLinqRouteEgressAuthority: vi.fn(),
   assertHostedThreadRouteEgressAuthority: vi.fn(),
   hostedGroupCurrentSenderClarificationFindUnique: vi.fn(),
@@ -40,6 +41,8 @@ const mocks = vi.hoisted(() => ({
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
   resolveHostedAssistantNotificationDestination: vi.fn(),
+  runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
+  bindHostedAssistantNotificationDestination: vi.fn(),
   resolveHostedMemberRoutingByTelegramUserId: vi.fn(),
 }));
 
@@ -69,6 +72,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeTx: mocks.appendHostedMailboxEnvelopeTx,
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxConversationInputAuthorityByAssistantInputIdTx:
@@ -77,6 +82,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
+  runWithPreparedHostedMailboxItemAppendCrypto:
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -108,6 +115,8 @@ vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
+  bindHostedAssistantNotificationDestination:
+    mocks.bindHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination:
     mocks.resolveHostedAssistantNotificationDestination,
 }));
