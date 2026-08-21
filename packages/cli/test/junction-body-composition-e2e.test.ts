@@ -7,12 +7,12 @@ import {
   eventRevisionFromLifecycle,
 } from '@murphai/contracts'
 import * as coreRuntime from '@murphai/core'
-import {
-  createJunctionDeviceSyncProvider,
-  type DeviceSyncAccount,
-  type DeviceSyncJobRecord,
-  type ProviderJobContext,
-} from '@murphai/device-syncd'
+import { createConfiguredDeviceSyncProvidersFromConfigs } from '@murphai/device-syncd/config'
+import type {
+  DeviceSyncAccount,
+  DeviceSyncJobRecord,
+  ProviderJobContext,
+} from '@murphai/device-syncd/types'
 import {
   importDeviceProviderSnapshot,
 } from '@murphai/importers'
@@ -127,7 +127,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
       vaultRoot,
     })
 
-    const provider = createJunctionDeviceSyncProvider({
+    const junctionConfig = {
       apiKey: 'sk_us_test_123',
       clientUserIdSecret: 'junction-test-client-secret',
       environment: 'sandbox',
@@ -240,7 +240,11 @@ test('Junction body data composes from provider jobs through canonical vault rea
           }],
         } })
       },
+    }
+    const [provider] = createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: junctionConfig,
     })
+    assert.ok(provider)
     const imports: DeviceBatchImportResult[] = []
     const account = createAccount()
     const context = (now: string): ProviderJobContext => ({
