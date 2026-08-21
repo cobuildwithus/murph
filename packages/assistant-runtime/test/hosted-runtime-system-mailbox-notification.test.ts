@@ -254,7 +254,7 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("finishes a bootstrap-only member activation during import", async () => {
+  it("queues no-welcome activation for the activation owner", async () => {
     const workspace = await createHostedRuntimeWorkspace("murph-hosted-system-mailbox-");
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:bootstrap-before-maintenance",
@@ -269,22 +269,27 @@ describe("hosted system mailbox notification execution context", () => {
     });
 
     try {
-      assert.deepEqual(
-        await enqueueHostedSystemMailboxItem({
-          item: createResolvedActivationItem(),
-          vaultRoot: workspace.vaultRoot,
-          wake,
-        }),
-        {
-          reasonCode: "system_mailbox.activation_bootstrapped",
-          status: "imported",
-        },
-      );
+      await expect(enqueueHostedSystemMailboxItem({
+        item: createResolvedActivationItem(),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      })).resolves.toEqual({
+        reasonCode: "system_mailbox.queued",
+        status: "imported",
+      });
       await access(path.join(workspace.vaultRoot, VAULT_LAYOUT.metadata));
       expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
-      expect(await readHostedSystemMailboxState(workspace.vaultRoot)).toEqual({
-        pending: [],
-      });
+      expect(await readHostedSystemMailboxState(workspace.vaultRoot))
+        .toMatchObject({
+          pending: [
+            {
+              routeAction: "apply-member-activation",
+              wake: {
+                kind: "member.activated",
+              },
+            },
+          ],
+        });
     } finally {
       await workspace.cleanup();
     }

@@ -15,7 +15,6 @@ import {
   createHostedRuntimeEffectsPortStub,
   createHostedRuntimeResolvedConfig,
 } from "./hosted-runtime-test-helpers.ts";
-import { MURPH_ONBOARDING_FOLLOWUP_AUTOMATION } from "@murphai/assistant-engine";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -1857,94 +1856,6 @@ describe("executeHostedMailboxEvent", () => {
       vault: "/tmp/assistant-runtime-events",
     });
     expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
-    const seedInput = {
-      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
-    };
-    const scheduledContinuationScenarios = [
-      {
-        clause: "If `onboarding.status` is `completed`, return skip.",
-        state: "completed",
-      },
-      {
-        clause:
-          "This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state.",
-        state: "overall decline",
-      },
-      {
-        clause:
-          "If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip.",
-        state: "reflection-only next step",
-      },
-      {
-        clause:
-          "Follow the onboarding skill’s finite three-day recovery rule exactly.",
-        state: "latest question unanswered",
-      },
-      {
-        clause:
-          "Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win.",
-        state: "checkpoint answered or category skipped",
-      },
-      {
-        clause:
-          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the reopening question would not be timely or useful.",
-        state: "deferred until later",
-      },
-      {
-        clause:
-          "It must contain exactly one easy, reply-oriented question; otherwise return an ordinary skip.",
-        state: "eligible continuation",
-      },
-    ] as const;
-    for (const scenario of scheduledContinuationScenarios) {
-      expect(
-        seedInput?.instructions,
-        `scheduled onboarding state: ${scenario.state}`,
-      ).toContain(scenario.clause);
-    }
-    expect(seedInput?.instructions).toContain(
-      "The managed-automation owner archives this follow-up deterministically.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Goal: use this finite three-day window to make at most one low-pressure daily attempt to continue unfinished Murph onboarding and get a reply.",
-    );
-    expect(seedInput?.instructions).toContain("Success criteria:");
-    expect(seedInput?.instructions).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
-    );
-    expect(seedInput?.instructions).toContain(
-      "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Only a later foreground user reply may advance or complete onboarding.",
-    );
-    expect(seedInput?.instructions).not.toContain(
-      "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "This automation never owns a promised check-in, reminder, or proactive support action.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Output: send at most one brief, natural, low-pressure in-chat continuation.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "The user's reply will be handled by the next normal Murph onboarding turn",
-    );
-    expect(seedInput?.instructions).toContain("available recent user messages");
-    expect(seedInput?.instructions).toContain(
-      "one brief, skill-compatible question gives the member an easy way to reply and continue",
-    );
-    expect(seedInput?.instructions).not.toContain("The six checkpoints are");
-    expect(seedInput?.instructions).toContain("return skip");
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({

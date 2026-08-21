@@ -238,21 +238,6 @@ export async function enqueueHostedSystemMailboxItem(input: {
   ) {
     await bootstrapHostedMemberContext(input.vaultRoot, input.wake);
   }
-  if (
-    routeAction === "apply-member-activation"
-    && input.wake.kind === "member.activated"
-    && !input.wake.initialGroupRoomModelMarkdown
-    && !input.wake.signupWelcome
-  ) {
-    // Member context is the complete effect for an activation without room
-    // setup or a welcome delivery. Finish it in the importing canonical write
-    // instead of creating a second no-op queue item that can trail the first
-    // foreground conversation until another owner starts.
-    return {
-      reasonCode: "system_mailbox.activation_bootstrapped",
-      status: "imported",
-    };
-  }
   const nextItem: HostedSystemMailboxPendingItem = {
     attemptCount: 0,
     itemId: input.item.item.id,

@@ -67,5 +67,19 @@ follow-up.
   original finite window, and uses the existing automation slug for idempotency.
 - Managed reconciliation fills the route-later case without reconstructing
   conversation receipts or creating a Telegram-specific lifecycle.
-- Focused engine and runtime regression suites pass. Remaining work is final
-  documentation, full affected checks, exact-head CI, and review gates.
+- Preliminary specialist review found that the system-mailbox importer still
+  treated no-welcome activation as bootstrap-only and acknowledged it before
+  the activation owner ran. The obsolete terminal shortcut is now deleted, so
+  every activation reaches the same owner; the corrected importer boundary is
+  covered directly.
+- Prompt proof now reads the automation actually persisted by the engine
+  instead of reasserting an imported constant in an unrelated runtime test.
+- The Telegram hosted-local scenario now reads canonical onboarding and
+  automation state through the production CLI before checking inbound replay.
+  Local execution built the runner and passed parity and bundle budgets, but
+  the full stack cannot start without the private Temporal worker package;
+  exact-head integration CI owns that remaining environment proof.
+- Focused remediation proof passes: 109 assistant-runtime tests, 45
+  assistant-engine tests, and typechecks for assistant-runtime,
+  assistant-engine, and Cloudflare. Remaining work is the corrected exact-head
+  CI run, final ReviewGPT round, parent review, and plan closure.

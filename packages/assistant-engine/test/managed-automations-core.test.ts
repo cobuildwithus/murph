@@ -244,6 +244,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
     expect(automation).toMatchObject({
+      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
       route,
       schedule: { kind: 'dailyLocal' },
       slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
