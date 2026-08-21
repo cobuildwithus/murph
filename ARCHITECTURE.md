@@ -3401,11 +3401,14 @@ acknowledged only by an ID cursor returned to the browser. The walk ignores
 search, does not snapshot or pause the population, and converges after retries
 through the existing period, ledger-version, notice-claim, and member-lock
 checks. One browser-generated operation UUID is reused across continue and
-restart requests and appears only in the existing immutable semantic source key
-for any reset-everyone Starter grant. That authority prevents a second grant
-even when the first was fully consumed before an ambiguous request is replayed;
-it adds no campaign row or second usage owner. Durable Starter wake-only evidence
-continues to recover a committed grant whose runtime wake remains pending.
+recovery requests. The canonical per-member reset transaction writes one
+append-only receipt keyed by that UUID and member ID; the receipt freezes every
+stable outcome so replay cannot clear included usage that accrued after the
+first reset or append another Starter grant after the first was consumed.
+Starter grants retain the same immutable semantic source key. This adds no
+campaign, queue, scheduler, population snapshot, or second usage projection. A
+replayed receipt may repeat only the post-commit runtime recheck when its frozen
+outcome requires one.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

@@ -77,7 +77,8 @@ export type MemberUsageClientDesignState =
   | "reset_all_complete"
   | "reset_all_confirmation"
   | "reset_all_partial_failure"
-  | "reset_all_progress";
+  | "reset_all_progress"
+  | "reset_all_wake_recovery";
 
 interface UsageResetAllFailureState {
   ambiguous: boolean;
@@ -89,8 +90,16 @@ interface UsageResetAllState {
   counts: HostedOpsMemberUsageResetAllCounts;
   failure: UsageResetAllFailureState | null;
   lastAcknowledgedCursor: string | null;
-  phase: "complete" | "confirming" | "idle" | "paused" | "running";
+  phase:
+    | "complete"
+    | "confirming"
+    | "idle"
+    | "paused"
+    | "recovering_wakes"
+    | "running";
 }
+
+type UsageResetAllRunMode = "recover_wakes" | "resume" | "start";
 
 const EMPTY_RESET_ALL_COUNTS: HostedOpsMemberUsageResetAllCounts = {
   failed: 0,
@@ -173,6 +182,9 @@ function MemberUsageClientSurface({
   );
   const isResetting = resettingMemberId !== null;
   const globalResetActive = resetAllOpen;
+  const phoneSearchRequiresExactLookup =
+    dashboard.search.kind === "phone_last_four"
+    && (dashboard.search.capped || dashboard.search.resultCount !== 1);
   const selectedRecovery = selectedRow
     ? readUsageRowRecovery(dashboard.capturedAt, postCommit, selectedRow)
     : null;
@@ -227,7 +239,11 @@ function MemberUsageClientSurface({
   }
 
   function closeResetAllDialog(): void {
-    if (resetAllRunInFlight.current || resetAllState.phase === "running") {
+    if (
+      resetAllRunInFlight.current
+      || resetAllState.phase === "running"
+      || resetAllState.phase === "recovering_wakes"
+    ) {
       return;
     }
     setResetAllOpen(false);
@@ -237,24 +253,24 @@ function MemberUsageClientSurface({
     setResetAllState(createInitialResetAllState(undefined));
   }
 
-  async function runResetAll(input: { restart: boolean }): Promise<void> {
+  async function runResetAll(input: { mode: UsageResetAllRunMode }): Promise<void> {
     if (resetAllRunInFlight.current) {
       return;
     }
     resetAllRunInFlight.current = true;
     try {
-      if (input.restart) {
+      if (input.mode !== "resume") {
         resetAllAcknowledgedCursors.current.clear();
       } else if (resetAllState.lastAcknowledgedCursor) {
         resetAllAcknowledgedCursors.current.add(
           resetAllState.lastAcknowledgedCursor,
         );
       }
-      const startingCounts = input.restart
+      const startingCounts = input.mode !== "resume"
         ? { ...EMPTY_RESET_ALL_COUNTS }
         : { ...resetAllState.counts, failed: 0 };
       let counts = startingCounts;
-      let lastAcknowledgedCursor = input.restart
+      let lastAcknowledgedCursor = input.mode !== "resume"
         ? null
         : resetAllState.lastAcknowledgedCursor;
       let operationId = resetAllOperationId.current;
@@ -306,7 +322,7 @@ function MemberUsageClientSurface({
               memberId: null,
               message: error instanceof Error
                 ? error.message
-                : "The batch response was ambiguous. Retry or restart safely.",
+                : "The batch response was ambiguous. Resume from the last acknowledged cursor.",
             },
             lastAcknowledgedCursor,
             phase: "paused",
@@ -337,7 +353,7 @@ function MemberUsageClientSurface({
               ambiguous: true,
               memberId: null,
               message:
-                "The server did not acknowledge forward progress. Retry or restart safely.",
+                "The server did not acknowledge forward progress. Resume from the last acknowledged cursor.",
             },
             lastAcknowledgedCursor,
             phase: "paused",
@@ -364,6 +380,15 @@ function MemberUsageClientSurface({
           return;
         }
         if (batch.done) {
+          if (counts.pendingWake > 0) {
+            setResetAllState({
+              counts,
+              failure: null,
+              lastAcknowledgedCursor,
+              phase: "recovering_wakes",
+            });
+            return;
+          }
           setResetAllState({
             counts,
             failure: null,
@@ -618,9 +643,17 @@ function MemberUsageClientSurface({
       ) : null}
 
       {dashboard.search.query !== null && !dashboard.search.error ? (
-        <Alert variant={dashboard.search.capped ? "destructive" : "default"}>
+        <Alert
+          variant={
+            dashboard.search.capped || phoneSearchRequiresExactLookup
+              ? "destructive"
+              : "default"
+          }
+        >
           <AlertDescription>
-            {dashboard.search.capped
+            {phoneSearchRequiresExactLookup
+              ? `Showing ${formatInteger(dashboard.search.resultCount)} phone-suffix ${dashboard.search.capped ? `candidates (safety cap ${formatInteger(dashboard.search.cap)}; more exist)` : dashboard.search.resultCount === 1 ? "candidate" : "candidates"}. Reset controls are locked until you search by the exact hosted ID or exact verified email.`
+              : dashboard.search.capped
               ? `Showing ${formatInteger(dashboard.search.resultCount)} ID-ordered matches (safety cap ${formatInteger(dashboard.search.cap)}). More matches exist; narrow the search to see a complete set.`
               : `${formatInteger(dashboard.search.resultCount)} complete search ${dashboard.search.resultCount === 1 ? "result" : "results"}.`}
           </AlertDescription>
@@ -662,7 +695,11 @@ function MemberUsageClientSurface({
           ) : (
             dashboard.rows.map((row) => (
               <UsageCompactRow
-                disabled={isResetting || globalResetActive}
+                disabled={
+                  isResetting
+                  || globalResetActive
+                  || phoneSearchRequiresExactLookup
+                }
                 key={row.memberId}
                 onSelect={() => {
                   setMessage(null);
@@ -715,7 +752,11 @@ function MemberUsageClientSurface({
               ) : (
                 dashboard.rows.map((row) => (
                   <UsageRow
-                    disabled={isResetting || globalResetActive}
+                    disabled={
+                      isResetting
+                      || globalResetActive
+                      || phoneSearchRequiresExactLookup
+                    }
                     key={row.memberId}
                     onSelect={() => {
                       setMessage(null);
@@ -883,8 +924,8 @@ function MemberUsageClientSurface({
             inline
             onClose={closeResetAllDialog}
             onConfirmationChange={setResetAllConfirmation}
-            onRun={(restart) => {
-              void runResetAll({ restart });
+            onRun={(mode) => {
+              void runResetAll({ mode });
             }}
             state={resetAllState}
           />
@@ -902,15 +943,18 @@ function MemberUsageClientSurface({
         >
           <DialogContent
             className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            showCloseButton={resetAllState.phase !== "running"}
+            showCloseButton={
+              resetAllState.phase !== "running"
+              && resetAllState.phase !== "recovering_wakes"
+            }
           >
             <UsageResetAllSurface
               confirmation={resetAllConfirmation}
               dashboard={dashboard}
               onClose={closeResetAllDialog}
               onConfirmationChange={setResetAllConfirmation}
-              onRun={(restart) => {
-                void runResetAll({ restart });
+              onRun={(mode) => {
+                void runResetAll({ mode });
               }}
               state={resetAllState}
             />
@@ -927,7 +971,7 @@ function UsageResetAllSurface(input: {
   inline?: boolean;
   onClose: () => void;
   onConfirmationChange: (value: string) => void;
-  onRun: (restart: boolean) => void;
+  onRun: (mode: UsageResetAllRunMode) => void;
   state: UsageResetAllState;
 }) {
   const state = input.state;
@@ -937,7 +981,9 @@ function UsageResetAllSurface(input: {
       ? "Resetting everyone"
       : state.phase === "complete"
         ? "Reset everyone complete"
-        : "Reset everyone paused";
+        : state.phase === "recovering_wakes"
+          ? "Population reset complete; runtime recovery remains"
+          : "Reset everyone paused";
   const description = (
     <>
       This operation ignores the active search filter and walks the hosted
@@ -1007,7 +1053,7 @@ function UsageResetAllSurface(input: {
                 input.confirmation !== HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
               }
               onClick={() => {
-                input.onRun(true);
+                input.onRun("start");
               }}
               type="button"
               variant="destructive"
@@ -1028,23 +1074,24 @@ function UsageResetAllSurface(input: {
             </Button>
             <Button
               onClick={() => {
-                input.onRun(true);
-              }}
-              type="button"
-              variant="outline"
-            >
-              Restart safely
-            </Button>
-            <Button
-              onClick={() => {
-                input.onRun(false);
+                input.onRun("resume");
               }}
               type="button"
               variant="destructive"
             >
-              Retry / continue
+              Resume
             </Button>
           </>
+        ) : state.phase === "recovering_wakes" ? (
+          <Button
+            onClick={() => {
+              input.onRun("recover_wakes");
+            }}
+            type="button"
+            variant="destructive"
+          >
+            Retry pending runtime wakes
+          </Button>
         ) : (
           <Button onClick={input.onClose} type="button" variant="outline">
             Close
@@ -1065,6 +1112,16 @@ function UsageResetAllProgress(input: { state: UsageResetAllState }) {
             Every ID returned by the live ID-ordered walk was acknowledged.
             This was not an atomic snapshot; members could continue using Murph
             throughout the operation.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {state.phase === "recovering_wakes" ? (
+        <Alert variant="destructive">
+          <AlertDescription>
+            Every population row was acknowledged, but one or more runtimes did
+            not accept their recheck. Retry the wake recovery before closing;
+            the same operation receipts prevent any included-usage reset or
+            Starter grant from being applied again.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1101,9 +1158,9 @@ function UsageResetAllProgress(input: { state: UsageResetAllState }) {
       </p>
       {state.counts.pendingWake > 0 ? (
         <p className="text-xs leading-5 text-muted-foreground">
-          Pending-wake rows already committed their usage reset. A safe restart
-          reuses the existing wake-only recovery path and does not append a
-          second Starter grant.
+          Pending-wake rows already committed their usage reset. Recovery
+          replays the existing per-member operation receipts and retries only
+          the runtime wake.
         </p>
       ) : null}
     </div>
@@ -1145,7 +1202,7 @@ function createInitialResetAllState(
     return {
       counts: {
         failed: 0,
-        pendingWake: 2,
+        pendingWake: 0,
         processed: 47,
         reset: 19,
         skipped: 8,
@@ -1154,6 +1211,21 @@ function createInitialResetAllState(
       failure: null,
       lastAcknowledgedCursor: "hbm_design_047",
       phase: "complete",
+    };
+  }
+  if (designState === "reset_all_wake_recovery") {
+    return {
+      counts: {
+        failed: 0,
+        pendingWake: 2,
+        processed: 47,
+        reset: 19,
+        skipped: 8,
+        unchanged: 20,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_047",
+      phase: "recovering_wakes",
     };
   }
   if (designState === "reset_all_partial_failure") {
@@ -1522,7 +1594,7 @@ async function requestResetAllBatch(
     payload = await response.json();
   } catch {
     throw new Error(
-      "Reset everyone returned an unreadable response. Retry or restart safely from the last acknowledged cursor.",
+      "Reset everyone returned an unreadable response. Resume from the last acknowledged cursor.",
     );
   }
   if (!response.ok) {
@@ -1533,7 +1605,7 @@ async function requestResetAllBatch(
   }
   if (!isHostedOpsMemberUsageResetAllBatchResponse(payload)) {
     throw new Error(
-      "Reset everyone returned an invalid response. Retry or restart safely from the last acknowledged cursor.",
+      "Reset everyone returned an invalid response. Resume from the last acknowledged cursor.",
     );
   }
   return payload;

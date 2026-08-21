@@ -94,6 +94,7 @@ export interface HostedOpsMemberUsageDashboard {
     cap: number;
     capped: boolean;
     error: string | null;
+    kind: HostedOpsMemberUsageSearchKind;
     query: string | null;
     resultCount: number;
   };
@@ -104,6 +105,12 @@ export interface HostedOpsMemberUsageDashboard {
     totalAllTimeUsageUsdMicros: string;
   };
 }
+
+export type HostedOpsMemberUsageSearchKind =
+  | "email"
+  | "member_id"
+  | "phone_last_four"
+  | null;
 
 export interface HostedOpsMemberUsageReadInput {
   after?: string | null;
@@ -194,11 +201,33 @@ export class HostedOpsMemberUsageResetNoticeInFlightError extends Error {
   }
 }
 
+class HostedOpsMemberUsageResetAllReplayError extends Error {
+  constructor(
+    readonly result: HostedOpsMemberUsageResetAllReceiptResult,
+  ) {
+    super("Hosted ops reset-everyone member operation already completed.");
+    this.name = "HostedOpsMemberUsageResetAllReplayError";
+  }
+}
+
 interface HostedOpsMemberUsageSearchPlan {
   emailLookupKeys: string[];
   error: string | null;
-  kind: "email" | "member_id" | "phone_last_four" | null;
+  kind: HostedOpsMemberUsageSearchKind;
   query: string | null;
+}
+
+type HostedOpsMemberUsageReceiptClient =
+  | PrismaClient
+  | Prisma.TransactionClient;
+
+interface HostedOpsMemberUsageResetAllReceiptResult
+  extends HostedOpsMemberUsageResetAllMemberResult {
+  noticeClaimReleased: boolean;
+  periodStart: Date | null;
+  previousSpentUsdMicros: bigint | null;
+  updatedAt: Date | null;
+  usageCreditGrantedUsdMicros: bigint;
 }
 
 function normalizeHostedOpsMemberUsageSearch(
@@ -683,6 +712,7 @@ export async function readHostedOpsMemberUsage(
       cap: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
       capped: searchCapped,
       error: searchPlan.error,
+      kind: searchPlan.kind,
       query: searchPlan.query,
       resultCount: rows.length,
     },
@@ -735,64 +765,56 @@ export async function resetHostedOpsMemberUsageForResetAll(
     attempt <= HOSTED_OPS_MEMBER_USAGE_RESET_ALL_STALE_RETRIES;
     attempt += 1
   ) {
-    const snapshots = await readHostedAiUsageGateSnapshots({
-      memberIds: [input.memberId],
-      now,
-      prisma,
-    });
-    const snapshot = snapshots.get(input.memberId) ?? null;
-    const decision = snapshot?.decision ?? null;
-    const resettableDecision = decision !== null && (
-      decision.allowed || decision.reason === "ai_usage_limit_exceeded"
-    );
-    if (!snapshot?.periodPersistedAt || !decision || !resettableDecision) {
-      return {
-        memberId: input.memberId,
-        outcome: "skipped",
-        resetMode: null,
-        runtimeRecheckRequired: false,
-        timestamp: now.toISOString(),
-      };
-    }
-
-    if (decision.allowanceSource === "direct_starter") {
-      const operationGrantExists =
-        await hasHostedOpsResetAllStarterGrant({
-          memberId: input.memberId,
-          operationId: input.operationId,
-          prisma,
-        });
-      if (operationGrantExists) {
-        const runtimeRecheckRequired =
-          await hasHostedOpsStarterResetRuntimeRecovery({
-            memberId: input.memberId,
-            prisma,
-          });
-        return {
-          memberId: input.memberId,
-          outcome: "unchanged",
-          resetMode: "starter_allowance",
-          runtimeRecheckRequired,
-          timestamp: now.toISOString(),
-        };
-      }
-      if (decision.allowed) {
-        const runtimeRecheckRequired =
-          await hasHostedOpsStarterResetRuntimeRecovery({
-            memberId: input.memberId,
-            prisma,
-          });
-        return {
-          memberId: input.memberId,
-          outcome: runtimeRecheckRequired ? "unchanged" : "skipped",
-          resetMode: runtimeRecheckRequired ? "starter_allowance" : null,
-          runtimeRecheckRequired,
-          timestamp: now.toISOString(),
-        };
-      }
-    }
-
     try {
+      const replay = await readHostedOpsMemberUsageResetAllReceipt({
+        memberId: input.memberId,
+        operationId: input.operationId,
+        prisma,
+      });
+      if (replay) {
+        return toHostedOpsMemberUsageResetAllResult(replay);
+      }
+
+      const snapshots = await readHostedAiUsageGateSnapshots({
+        memberIds: [input.memberId],
+        now,
+        prisma,
+      });
+      const snapshot = snapshots.get(input.memberId) ?? null;
+      const decision = snapshot?.decision ?? null;
+      const resettableDecision = decision !== null && (
+        decision.allowed || decision.reason === "ai_usage_limit_exceeded"
+      );
+      if (!snapshot?.periodPersistedAt || !decision || !resettableDecision) {
+        return toHostedOpsMemberUsageResetAllResult(
+          await recordHostedOpsMemberUsageResetAllNoop({
+            memberId: input.memberId,
+            now,
+            operationId: input.operationId,
+            prisma,
+          }),
+        );
+      }
+
+      if (decision.allowanceSource === "direct_starter") {
+        const operationGrantExists =
+          await hasHostedOpsResetAllStarterGrant({
+            memberId: input.memberId,
+            operationId: input.operationId,
+            prisma,
+          });
+        if (operationGrantExists || decision.allowed) {
+          return toHostedOpsMemberUsageResetAllResult(
+            await recordHostedOpsMemberUsageResetAllNoop({
+              memberId: input.memberId,
+              now,
+              operationId: input.operationId,
+              prisma,
+            }),
+          );
+        }
+      }
+
       const result = await resetHostedOpsMemberUsage({
         expectedPeriodUpdatedAt: snapshot.periodPersistedAt,
         expectedUsageCreditLedgerVersion:
@@ -810,6 +832,9 @@ export async function resetHostedOpsMemberUsageForResetAll(
         timestamp: result.resetAt,
       };
     } catch (error) {
+      if (error instanceof HostedOpsMemberUsageResetAllReplayError) {
+        return toHostedOpsMemberUsageResetAllResult(error.result);
+      }
       if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
         return {
           memberId: input.memberId,
@@ -820,7 +845,10 @@ export async function resetHostedOpsMemberUsageForResetAll(
         };
       }
       if (
-        error instanceof HostedOpsMemberUsageResetStaleError
+        (
+          error instanceof HostedOpsMemberUsageResetStaleError
+          || isHostedOpsMemberUsageResetAllTransactionConflict(error)
+        )
         && attempt < HOSTED_OPS_MEMBER_USAGE_RESET_ALL_STALE_RETRIES
       ) {
         continue;
@@ -832,10 +860,162 @@ export async function resetHostedOpsMemberUsageForResetAll(
   throw new HostedOpsMemberUsageResetStaleError();
 }
 
+async function readHostedOpsMemberUsageResetAllReceipt(input: {
+  memberId: string;
+  operationId: string;
+  prisma: HostedOpsMemberUsageReceiptClient;
+}): Promise<HostedOpsMemberUsageResetAllReceiptResult | null> {
+  const receipt = await input.prisma.hostedOpsUsageResetReceipt.findUnique({
+    where: {
+      operationId_memberId: {
+        memberId: input.memberId,
+        operationId: input.operationId,
+      },
+    },
+  });
+  if (!receipt) {
+    return null;
+  }
+  if (
+    receipt.memberId !== input.memberId
+    || receipt.operationId !== input.operationId
+    || !isHostedOpsMemberUsageResetOutcome(receipt.outcome)
+    || !isHostedOpsMemberUsageResetMode(receipt.resetMode)
+    || receipt.usageCreditGrantedUsdMicros < 0n
+  ) {
+    throw new TypeError(
+      "Hosted ops reset-everyone receipt invariant failed.",
+    );
+  }
+  return {
+    memberId: receipt.memberId,
+    noticeClaimReleased: receipt.noticeClaimReleased,
+    outcome: receipt.outcome,
+    periodStart: receipt.periodStart,
+    previousSpentUsdMicros: receipt.previousSpentUsdMicros,
+    resetMode: receipt.resetMode,
+    runtimeRecheckRequired: receipt.runtimeRecheckRequired,
+    timestamp: receipt.resetAt.toISOString(),
+    updatedAt: receipt.updatedAt,
+    usageCreditGrantedUsdMicros: receipt.usageCreditGrantedUsdMicros,
+  };
+}
+
+async function recordHostedOpsMemberUsageResetAllNoop(input: {
+  memberId: string;
+  now: Date;
+  operationId: string;
+  prisma: PrismaClient;
+}): Promise<HostedOpsMemberUsageResetAllReceiptResult> {
+  return input.prisma.$transaction(async (tx) => {
+    const memberRows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT "id"
+      FROM "hosted_member"
+      WHERE "id" = ${input.memberId}
+      FOR UPDATE
+    `;
+    if (!memberRows[0]) {
+      return createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+      });
+    }
+    const replay = await readHostedOpsMemberUsageResetAllReceipt({
+      memberId: input.memberId,
+      operationId: input.operationId,
+      prisma: tx,
+    });
+    if (replay) {
+      return replay;
+    }
+
+    const decision = await readHostedAiUsageGate({
+      memberId: input.memberId,
+      now: input.now,
+      prisma: tx,
+    });
+    const operationGrantExists = decision.allowanceSource === "direct_starter"
+      && await hasHostedOpsResetAllStarterGrant({
+        memberId: input.memberId,
+        operationId: input.operationId,
+        prisma: tx,
+      });
+    const requiresReset = decision.allowed
+      ? decision.allowanceSource !== "direct_starter"
+      : decision.reason === "ai_usage_limit_exceeded";
+    if (!operationGrantExists && requiresReset) {
+      throw new HostedOpsMemberUsageResetStaleError();
+    }
+    const runtimeRecheckRequired = decision.allowanceSource === "direct_starter"
+      && (operationGrantExists || decision.allowed)
+      ? await hasHostedOpsStarterResetRuntimeRecovery({
+          memberId: input.memberId,
+          prisma: tx,
+        })
+      : false;
+    const result = createHostedOpsMemberUsageResetAllNoopResult({
+      memberId: input.memberId,
+      now: input.now,
+      outcome: operationGrantExists || runtimeRecheckRequired
+        ? "unchanged"
+        : "skipped",
+      resetMode: operationGrantExists || runtimeRecheckRequired
+        ? "starter_allowance"
+        : null,
+      runtimeRecheckRequired,
+    });
+    await createHostedOpsMemberUsageResetAllReceipt({
+      operationId: input.operationId,
+      result,
+      tx,
+    });
+    return result;
+  }, {
+    ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+  });
+}
+
+function createHostedOpsMemberUsageResetAllNoopResult(input: {
+  memberId: string;
+  now: Date;
+  outcome: "skipped" | "unchanged";
+  resetMode: HostedOpsMemberUsageResetMode | null;
+  runtimeRecheckRequired: boolean;
+}): HostedOpsMemberUsageResetAllReceiptResult {
+  return {
+    memberId: input.memberId,
+    noticeClaimReleased: false,
+    outcome: input.outcome,
+    periodStart: null,
+    previousSpentUsdMicros: null,
+    resetMode: input.resetMode,
+    runtimeRecheckRequired: input.runtimeRecheckRequired,
+    timestamp: input.now.toISOString(),
+    updatedAt: null,
+    usageCreditGrantedUsdMicros: 0n,
+  };
+}
+
+function toHostedOpsMemberUsageResetAllResult(
+  result: HostedOpsMemberUsageResetAllReceiptResult,
+): HostedOpsMemberUsageResetAllMemberResult {
+  return {
+    memberId: result.memberId,
+    outcome: result.outcome,
+    resetMode: result.resetMode,
+    runtimeRecheckRequired: result.runtimeRecheckRequired,
+    timestamp: result.timestamp,
+  };
+}
+
 async function hasHostedOpsResetAllStarterGrant(input: {
   memberId: string;
   operationId: string;
-  prisma: PrismaClient;
+  prisma: HostedOpsMemberUsageReceiptClient;
 }): Promise<boolean> {
   const semanticSourceKey = buildHostedOpsStarterResetAllSemanticSourceKey({
     memberId: input.memberId,
@@ -888,7 +1068,7 @@ async function hasHostedOpsResetAllStarterGrant(input: {
 
 async function hasHostedOpsStarterResetRuntimeRecovery(input: {
   memberId: string;
-  prisma: PrismaClient;
+  prisma: HostedOpsMemberUsageReceiptClient;
 }): Promise<boolean> {
   const activeResetGrants = await input.prisma.hostedUsageCreditEntry.findMany({
     select: { beneficiaryMemberId: true },
@@ -962,6 +1142,16 @@ export async function resetHostedOpsMemberUsage(
     const member = memberRows[0];
     if (!member) {
       throw new HostedOpsMemberUsageResetNotFoundError();
+    }
+    if (input.resetAllOperationId) {
+      const replay = await readHostedOpsMemberUsageResetAllReceipt({
+        memberId: input.memberId,
+        operationId: input.resetAllOperationId,
+        prisma: tx,
+      });
+      if (replay) {
+        throw new HostedOpsMemberUsageResetAllReplayError(replay);
+      }
     }
     const usageCreditLedgerVersion = normalizeNonNegativeBigInt(
       member.usageCreditLedgerVersion,
@@ -1149,7 +1339,7 @@ export async function resetHostedOpsMemberUsage(
       }
     }
 
-    return {
+    const result = {
       memberId: input.memberId,
       noticeClaimReleased: delivery !== null,
       outcome,
@@ -1161,11 +1351,115 @@ export async function resetHostedOpsMemberUsage(
         ? now.toISOString()
         : period.updatedAt.toISOString(),
       usageCreditGrantedUsdMicros: usageCreditGrantedUsdMicros.toString(),
-    };
+    } satisfies HostedOpsMemberUsageResetResult;
+    if (input.resetAllOperationId) {
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.resetAllOperationId,
+        result: {
+          memberId: result.memberId,
+          noticeClaimReleased: result.noticeClaimReleased,
+          outcome: result.outcome,
+          periodStart: input.periodStart,
+          previousSpentUsdMicros: period.spentUsdMicros,
+          resetMode: result.resetMode,
+          runtimeRecheckRequired: true,
+          timestamp: result.resetAt,
+          updatedAt: outcome === "reset" ? now : period.updatedAt,
+          usageCreditGrantedUsdMicros,
+        },
+        tx,
+      });
+    }
+    return result;
   }, {
     ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
+}
+
+async function createHostedOpsMemberUsageResetAllReceipt(input: {
+  operationId: string;
+  result: HostedOpsMemberUsageResetAllReceiptResult;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedOpsUsageResetReceipt.create({
+    data: {
+      memberId: input.result.memberId,
+      noticeClaimReleased: input.result.noticeClaimReleased,
+      operationId: input.operationId,
+      outcome: input.result.outcome,
+      periodStart: input.result.periodStart,
+      previousSpentUsdMicros: input.result.previousSpentUsdMicros,
+      resetAt: new Date(input.result.timestamp),
+      resetMode: input.result.resetMode,
+      runtimeRecheckRequired: input.result.runtimeRecheckRequired,
+      updatedAt: input.result.updatedAt,
+      usageCreditGrantedUsdMicros:
+        input.result.usageCreditGrantedUsdMicros,
+    },
+  });
+}
+
+function isHostedOpsMemberUsageResetOutcome(
+  value: string,
+): value is HostedOpsMemberUsageResetAllMemberResult["outcome"] {
+  return value === "reset" || value === "skipped" || value === "unchanged";
+}
+
+function isHostedOpsMemberUsageResetMode(
+  value: string | null,
+): value is HostedOpsMemberUsageResetMode | null {
+  return value === null
+    || value === "included_usage"
+    || value === "starter_allowance";
+}
+
+function isHostedOpsMemberUsageResetAllTransactionConflict(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+  const code = typeof error.code === "string" ? error.code : null;
+  if (code === "P2034") {
+    return true;
+  }
+  if (code !== "P2010" || !("meta" in error)) {
+    return false;
+  }
+  return readHostedOpsMemberUsagePostgresErrorCode(error.meta) === "40001";
+}
+
+function readHostedOpsMemberUsagePostgresErrorCode(
+  meta: unknown,
+): string | null {
+  if (!meta || typeof meta !== "object") {
+    return null;
+  }
+  if ("code" in meta && typeof meta.code === "string") {
+    return meta.code;
+  }
+  if (!("driverAdapterError" in meta)) {
+    return null;
+  }
+  const driverAdapterError = meta.driverAdapterError;
+  if (
+    !driverAdapterError
+    || typeof driverAdapterError !== "object"
+    || !("cause" in driverAdapterError)
+  ) {
+    return null;
+  }
+  const cause = driverAdapterError.cause;
+  if (!cause || typeof cause !== "object") {
+    return null;
+  }
+  if ("originalCode" in cause && typeof cause.originalCode === "string") {
+    return cause.originalCode;
+  }
+  return "code" in cause && typeof cause.code === "string"
+    ? cause.code
+    : null;
 }
 
 function buildHostedOpsStarterResetAllSemanticSourceKey(input: {

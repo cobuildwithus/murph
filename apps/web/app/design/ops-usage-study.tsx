@@ -103,6 +103,7 @@ const DESIGN_OPS_USAGE_DASHBOARD: HostedOpsMemberUsageDashboard = {
     cap: 100,
     capped: false,
     error: null,
+    kind: null,
     query: null,
     resultCount: 3,
   },
@@ -125,6 +126,7 @@ const DESIGN_OPS_USAGE_SEARCH_DASHBOARD: HostedOpsMemberUsageDashboard = {
     cap: 100,
     capped: true,
     error: null,
+    kind: "phone_last_four",
     query: "0101",
     resultCount: 100,
   },
@@ -137,6 +139,7 @@ const DESIGN_OPS_USAGE_EMPTY_SEARCH_DASHBOARD: HostedOpsMemberUsageDashboard = {
     cap: 100,
     capped: false,
     error: null,
+    kind: "member_id",
     query: "hbm_design_missing",
     resultCount: 0,
   },
@@ -149,6 +152,7 @@ const DESIGN_OPS_USAGE_ERROR_SEARCH_DASHBOARD: HostedOpsMemberUsageDashboard = {
     capped: false,
     error:
       "Enter a complete hosted member/container ID, an exact verified email, or exactly four phone digits.",
+    kind: null,
     query: "12",
     resultCount: 0,
   },
@@ -166,6 +170,9 @@ const RESET_STATES: Array<{
 }, {
   state: "reset_all_complete",
   title: "Completion",
+}, {
+  state: "reset_all_wake_recovery",
+  title: "Population complete with runtime recovery remaining",
 }, {
   state: "reset_all_partial_failure",
   title: "Partial failure and recovery",

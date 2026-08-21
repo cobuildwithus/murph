@@ -401,14 +401,24 @@ transaction commits.
 The response reports processed, reset, unchanged, skipped, pending-wake, and
 failed outcomes plus the last acknowledged member ID. While the page remains
 open, the client may issue the next bounded request. It pauses on a known or
-ambiguous failure, can continue strictly after the last acknowledged cursor,
-and can restart from the beginning when the prior response is unknown. The
-confirmation creates one browser operation UUID and reuses it across continue
-and restart requests while the dialog remains open. A reset-everyone Starter
-grant records that UUID only in the existing immutable semantic source key, so
-even a fully consumed grant from an ambiguously acknowledged request cannot be
-appended twice. The walk owns no campaign row, queue, scheduler, or second usage
-projection.
+ambiguous failure and can resume strictly after the last acknowledged cursor.
+When the prior response is unknown, or any committed member still needs a
+runtime wake, recovery rewalks from the beginning with the same browser-created
+operation UUID. The server returns the frozen per-member receipt on replay,
+without applying that member's reset again, while it may retry a required
+post-commit runtime wake. The dialog does not claim completion until a full
+pass reports no pending wake. The walk owns no campaign row, queue, scheduler,
+or second usage projection.
+
+Every reset-everyone member outcome has one append-only receipt keyed by the
+operation UUID and member ID. The first serializable member transaction inserts
+the receipt atomically with any included-usage reset, Starter grant, or stable
+unchanged/skipped decision. A replay therefore cannot clear included usage
+accrued after an earlier committed reset, and it cannot append another Starter
+grant after the first was fully consumed. Starter grants also retain the UUID
+in their immutable semantic source key. A concurrent same-operation request
+that loses the receipt race receives one bounded serialization retry. Receipts
+contain no decrypted contact value and are deleted with their member.
 
 The server locks the member and period in the same order as usage accounting
 and verifies the period timestamp and usage-credit ledger version shown to the

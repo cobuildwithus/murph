@@ -172,6 +172,7 @@ describe("MemberUsageClient", () => {
       cap: 100,
       capped: true,
       error: null,
+      kind: "phone_last_four",
       query: "0101",
       resultCount: 100,
     };
@@ -181,11 +182,12 @@ describe("MemberUsageClient", () => {
     cleanupRender = rendered.cleanup;
 
     expect(rendered.container.textContent).toContain(
-      "Showing 100 ID-ordered matches (safety cap 100)",
+      "Showing 100 phone-suffix candidates (safety cap 100; more exist)",
     );
     expect(rendered.container.textContent).toContain(
-      "More matches exist; narrow the search",
+      "Reset controls are locked until you search by the exact hosted ID or exact verified email",
     );
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
     expect(
       rendered.container.querySelector(
         'nav[aria-label="Member usage pages"]',
@@ -206,7 +208,10 @@ describe("MemberUsageClient", () => {
 
     const searchedDashboard = structuredClone(dashboard);
     searchedDashboard.capturedAt = "2026-07-22T18:00:01.000Z";
+    searchedDashboard.search.capped = false;
+    searchedDashboard.search.kind = "email";
     searchedDashboard.search.query = "verified@example.invalid";
+    searchedDashboard.search.resultCount = 1;
     await rendered.rerender(
       createElement(MemberUsageClient, { dashboard: searchedDashboard }),
     );
@@ -215,6 +220,7 @@ describe("MemberUsageClient", () => {
       "verified@example.invalid",
     );
     expect(getButton(rendered.container, "Search").disabled).toBe(false);
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
   });
 
   test("does not enter a loading state when the normalized search is unchanged", async () => {
@@ -223,6 +229,7 @@ describe("MemberUsageClient", () => {
       cap: 100,
       capped: false,
       error: null,
+      kind: "phone_last_four",
       query: "0101",
       resultCount: 1,
     };
@@ -244,6 +251,7 @@ describe("MemberUsageClient", () => {
       cap: 100,
       capped: false,
       error: null,
+      kind: "phone_last_four",
       query: "0101",
       resultCount: 1,
     };
@@ -268,6 +276,19 @@ describe("MemberUsageClient", () => {
           processed: 1,
           reset: 0,
           skipped: 0,
+          unchanged: 1,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_003",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 3,
+          reset: 1,
+          skipped: 1,
           unchanged: 1,
         },
         done: true,
@@ -309,9 +330,13 @@ describe("MemberUsageClient", () => {
     );
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain(
-        "Reset everyone complete",
+        "Population reset complete; runtime recovery remains",
       );
     });
+    expect(rendered.container.textContent).not.toContain(
+      "Reset everyone complete",
+    );
+    expect(routerRefresh).not.toHaveBeenCalled();
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/ops/usage-reset", {
       body: JSON.stringify({
@@ -346,6 +371,28 @@ describe("MemberUsageClient", () => {
     expect(rendered.container.textContent).toContain(
       "Last acknowledged cursor: hbm_reset_003",
     );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Retry pending runtime wakes"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone complete",
+      );
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Wake pending")).toBe("0");
     expect(routerRefresh).toHaveBeenCalledTimes(1);
   });
 
@@ -496,14 +543,11 @@ describe("MemberUsageClient", () => {
     );
     expect(readMetric(rendered.container, "Processed")).toBe("1");
     expect(readMetric(rendered.container, "Failed")).toBe("1");
-    expect(getButton(rendered.container, "Retry / continue").disabled)
-      .toBe(false);
-    expect(getButton(rendered.container, "Restart safely").disabled)
-      .toBe(false);
+    expect(getButton(rendered.container, "Resume").disabled).toBe(false);
 
     await clickButton(
       rendered.window,
-      getButton(rendered.container, "Retry / continue"),
+      getButton(rendered.container, "Resume"),
     );
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain(
@@ -527,7 +571,7 @@ describe("MemberUsageClient", () => {
     expect(readMetric(rendered.container, "Failed")).toBe("0");
   });
 
-  test("offers a full safe restart after an ambiguous batch response", async () => {
+  test("resumes the same operation after an ambiguous batch response", async () => {
     fetchMock
       .mockRejectedValueOnce(new Error("Connection closed"))
       .mockResolvedValueOnce(jsonResponse({
@@ -561,7 +605,7 @@ describe("MemberUsageClient", () => {
     expect(readMetric(rendered.container, "Processed")).toBe("0");
     await clickButton(
       rendered.window,
-      getButton(rendered.container, "Restart safely"),
+      getButton(rendered.container, "Resume"),
     );
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain(
@@ -1206,6 +1250,7 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
       cap: 100,
       capped: false,
       error: null,
+      kind: null,
       query: null,
       resultCount: 1,
     },

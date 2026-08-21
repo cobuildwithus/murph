@@ -376,12 +376,21 @@ Last verified: 2026-08-20
   The browser issues at most one batch request at a time and carries the last
   acknowledged ID plus one operation UUID created at destructive confirmation;
   there is no population snapshot, concurrent interactive transaction fanout,
-  queue, scheduler, or persisted campaign. A known failure continues strictly
-  after the acknowledged cursor, while an ambiguous response can restart at the
-  beginning with the same UUID. Reset-everyone Starter grants store that UUID
-  only in their existing immutable semantic source key, so even a fully consumed
-  grant converges instead of being appended twice; durable wake-only evidence
-  still reconstructs a committed grant whose runtime recheck remains pending.
+  queue, scheduler, or persisted campaign. A known failure resumes strictly
+  after the acknowledged cursor. Recovery after an ambiguous response or a
+  committed wake failure rewalks from the beginning with the same UUID. Each
+  member first reads the append-only `(operation_id, member_id)` reset receipt;
+  the initial serializable member transaction writes that receipt atomically
+  with any reset or grant, and one bounded conflict retry covers a concurrent
+  request that races the same receipt. Receipt replay returns the frozen reset,
+  unchanged, or skipped outcome without mutating current usage, while a frozen
+  wake requirement may repeat only the bounded post-commit runtime recheck.
+  Starter grants also retain the UUID in their existing immutable semantic key.
+  Thus a lost response cannot re-clear later included usage or append another
+  grant after consumption. Receipt lookup is one compound-primary-key read per
+  admitted member and initial mutation adds one insert; fixed sequential
+  cardinality and peak connection ownership remain unchanged. Receipts contain
+  no decrypted contact fact and cascade with member deletion.
 - An authenticated Settings provider change commits Postgres first and then
   sends the payload-free `runtime_wake_requested` Temporal signal. The per-user
   workflow coalesces duplicate wakes as one boolean and calls the existing

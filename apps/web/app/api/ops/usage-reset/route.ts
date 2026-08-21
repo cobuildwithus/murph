@@ -152,15 +152,16 @@ async function resetEveryoneBatch(input: {
     }
   }
 
+  const done = failure === null && !batch.hasMore;
   const response = {
     counts,
-    done: failure === null && !batch.hasMore,
+    done,
     failure,
     lastAcknowledgedCursor,
   } satisfies HostedOpsMemberUsageResetAllBatchResponse;
   console.info("Hosted ops reset-everyone batch completed.", {
     counts,
-    done: response.done,
+    done,
     stoppedOnFailure: failure !== null,
   });
   return response;
@@ -252,7 +253,7 @@ function mapResetAllFailure(
     code: "HOSTED_OPS_USAGE_RESET_ALL_FAILED",
     memberId,
     message:
-      "This batch stopped before the next member was acknowledged. Retry or restart safely.",
+      "This batch stopped before the next member was acknowledged. Resume from the last acknowledged cursor.",
     retryable: true,
   };
 }

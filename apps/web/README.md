@@ -2109,13 +2109,16 @@ Current hosted billing assumptions:
   stale re-read is allowed, the batch stops before acknowledging a remaining
   failure, and each runtime wake begins only after that member commits. The page
   reports processed/reset/unchanged/skipped/pending-wake/failed outcomes, loops
-  one request at a time while open, and can continue from the last acknowledged
-  cursor or restart safely after an ambiguous response. The dialog keeps one
-  browser-generated operation UUID across retry and restart; Starter grants use
-  it only in the existing immutable semantic idempotency key, so a consumed
-  grant cannot be appended twice. It does not snapshot the population, pause
-  usage, overlap interactive transactions, or add a campaign, queue, scheduler,
-  schema change, or duplicate usage read model.
+  one request at a time while open, and resumes a known failure from the last
+  acknowledged cursor. Ambiguous-response and pending-wake recovery rewalk from
+  the beginning with the same browser-generated operation UUID. One append-only
+  per-member receipt is written atomically with the first reset outcome; replay
+  returns that outcome without clearing later included usage or duplicating a
+  consumed Starter grant, and can repeat only a required post-commit runtime
+  wake. The dialog claims completion only after a pass has no pending wake. It
+  does not snapshot the population, pause usage, overlap interactive
+  transactions, or add a campaign, queue, scheduler, or duplicate usage read
+  model.
 - Delayed legacy Stripe trial objects remain eligible only for exact bounded
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.

@@ -61,8 +61,9 @@ through a final reset, skipped, pending-wake, and failed summary.
   unsafe work fails closed for that member and remains visible in the final
   batch result instead of making the global action look fully successful.
 - Interrupted operator: each request handles a fixed small batch. Retrying from
-  the last acknowledged cursor, or safely restarting after an ambiguous
-  response, reuses canonical state rather than manufacturing a second reset.
+  the last acknowledged cursor, or recovering from the beginning after an
+  ambiguous response with the same operation UUID, reuses immutable member
+  receipts rather than applying a second reset.
 
 ### Deliberate exclusions
 
@@ -71,7 +72,9 @@ through a final reset, skipped, pending-wake, and failed summary.
 - Search does not change whole-population summary totals.
 - Reset-all is not atomic across the whole population and does not pause new
   usage while later members are processed.
-- No new queue, scheduler, persisted campaign, or duplicate usage read model.
+- No new queue, scheduler, persisted campaign, or duplicate usage read model;
+  the only new persisted authority is the per-member immutable effect receipt
+  required to make retry safe after later included usage or grant consumption.
 
 ### Done when
 
@@ -96,7 +99,8 @@ through a final reset, skipped, pending-wake, and failed summary.
    primitives and the existing Ops usage design study.
 3. Add one authenticated same-origin reset-all operation that reads and applies
    a fixed small ID-ordered batch through the canonical per-member reset owner,
-   then performs runtime rechecks only after each database transaction commits.
+   atomically records its stable outcome in one per-member receipt, then
+   performs runtime rechecks only after each database transaction commits.
 4. Add a prominent destructive control, typed confirmation, progress and final
    outcome UI. Disable conflicting row mutations while the global action runs.
 5. Add focused regression coverage and update the owning hosted usage contract,
@@ -120,8 +124,11 @@ through a final reset, skipped, pending-wake, and failed summary.
 
 ## Deployment
 
-Expected to be Web-only with no schema change and no Cloudflare protocol change.
-Confirm that conclusion against the final patch. Post-deploy, use synthetic or
-staging data to prove one exact-email lookup, one phone-hint lookup, one
-single-member reset, and a bounded reset-all batch with no duplicate Starter
-grant on retry.
+Deploy the additive Web database migration before the Web build; there is no
+Cloudflare protocol change. The prior Web build remains compatible after the
+table exists, so rollback does not require dropping the receipt table. After
+deploy, use synthetic or staging data to prove one exact-email lookup, one
+phone-hint lookup, one single-member reset, an included reset whose response is
+replayed after new usage, and a consumed Starter grant replay. Confirm each
+same-operation replay reuses one receipt and that pending runtime wakes recover
+without reapplying usage mutation.
