@@ -123,6 +123,10 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // static-closure topology. The resulting public Linux baseline is 9,340,623 B;
 // the total cap retains 32 KiB of graph allowance plus an 8 KiB reserve for
 // the measured production overlay.
+// Batched workout creation and exact canonical event reads replace the
+// projection-backed command path without adding a package or changing the
+// static startup closure. The merged public Linux graph measured 9,360,190 B
+// on 2026-08-21 and remains within that retained allowance.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended

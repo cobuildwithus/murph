@@ -16,6 +16,7 @@ import {
 } from '@murphai/vault-usecases'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
+  deleteResultSchema,
   occurredAtOptionSchema,
   isoTimestampSchema,
   listResultSchema,
@@ -58,7 +59,6 @@ import {
 import {
   appendTypedClear,
   appendTypedSet,
-  createDirectEntityDeleteCommandDefinition,
   createDirectEventBackedEntityEditCommandDefinition,
   emptyToUndefined,
   numberOption,
@@ -831,19 +831,42 @@ export function registerWorkoutCommands(
     },
   }))
 
-  workout.command('delete', createDirectEntityDeleteCommandDefinition({
-    arg: {
-      name: 'id',
-      schema: workoutLookupSchema,
-    },
-    description: 'Delete one workout activity_session event.',
-    run(input) {
+  workout.command('delete', {
+    description:
+      'Delete one exact workout only when its canonical lifecycle revision is unchanged.',
+    args: z.object({
+      id: workoutLookupSchema,
+    }),
+    examples: [
+      {
+        description: 'Delete the exact workout revision approved by the member.',
+        args: {
+          id: 'evt_01JABC123',
+        },
+        options: {
+          expectedRevision: 3,
+          vault: './vault',
+        },
+      },
+    ],
+    hint:
+      'Read the exact workout first and pass its lifecycle.revision. A conflict leaves the workout unchanged.',
+    options: withBaseOptions({
+      expectedRevision: z
+        .number()
+        .int()
+        .positive()
+        .describe('Exact lifecycle revision observed when deletion was approved.'),
+    }),
+    output: deleteResultSchema,
+    async run({ args, options }) {
       return deleteWorkoutRecord({
-        vault: input.vault,
-        lookup: input.lookup,
+        vault: options.vault,
+        lookup: args.id,
+        expectedRevision: options.expectedRevision,
       })
     },
-  }))
+  })
 
   const units = Cli.create('units', {
     description:

@@ -14,6 +14,7 @@ import {
   toListEntity,
 } from './shared.js'
 import { applyRecordPatch } from './record-mutations.js'
+import { readExactEventRecord } from './exact-event-record.js'
 import {
   compactObject,
   inferVaultLinkKind,
@@ -664,13 +665,11 @@ export async function upsertEventRecordFromInput(input: {
 }
 
 export async function showEventRecord(vault: string, eventId: string) {
-  const query = await loadProviderEventQueryRuntime()
-  const readModel = await query.readVault(vault)
-  const record = query.lookupEntityById(readModel, eventId)
-
-  if (!record || record.family !== 'event') {
-    throw new VaultCliError('not_found', `No event found for "${eventId}".`)
-  }
+  const { record } = await readExactEventRecord({
+    vault,
+    lookup: eventId,
+    entityLabel: 'event',
+  })
 
   return {
     vault,

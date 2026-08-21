@@ -179,6 +179,10 @@ export type {
   RepairExperimentMediaResult,
 } from "./experiment-media-repair.ts";
 export {
+  readEvent,
+  readOwnedEvent,
+} from "./domains/events.ts";
+export {
   listHabitatAspects,
   readHabitatAspect,
 } from "./bank/habitat.ts";
@@ -358,6 +362,9 @@ export type {
   FindEventsByRawRefsInput,
   PublicEventDraft,
   PublicWritableEventKind,
+  ReadEventInput,
+  ReadEventResult,
+  ReadOwnedEventInput,
   RemoveAutomaticMealPhotoInput,
   RemoveAutomaticMealPhotoResult,
   RunGeneratedImageCaptureRetentionInput,
