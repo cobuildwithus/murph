@@ -1598,8 +1598,10 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   prevents a later context update from restoring it. The email labels the
   network location as approximate. It uses member creation time in UTC and
   labels an exact fallback as the activation surface when no request context
-  exists; batch activation omits the source when it lacks per-member
-  provenance. The email excludes member and provider event identifiers. A
+  exists. An unreadable optional context also degrades to that context-free
+  fallback instead of suppressing the one allowed notification attempt; batch
+  activation omits the source when it lacks per-member provenance. The email
+  excludes member and provider event identifiers. A
   welcome-only or later paid-billing event is not signup evidence. Later
   successful payments and accepted-invite replays must not repeat activation
   side effects, and email paths must not persist provider payloads or expose

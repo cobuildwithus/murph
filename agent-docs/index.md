@@ -105,8 +105,9 @@ time, exact signup or activation provenance, and an explicitly approximate
 network location. Its request context is disclosed for at most 24 hours; reads
 stop at expiry, the existing hourly retention owner retires overdue ciphertext
 in bounded indexed batches, and a database-owned attempt trigger clears both
-value and expiry across mixed Web versions. Batch activation without
-member-level provenance omits source. This boundary is
+value and expiry across mixed Web versions. Unreadable optional context
+degrades to the context-free notice instead of suppressing delivery. Batch
+activation without member-level provenance omits source. This boundary is
 jointly specified by `ARCHITECTURE.md` and `agent-docs/SECURITY.md`.
 
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical

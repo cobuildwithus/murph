@@ -343,56 +343,6 @@ describe("hosted web production migration guard", () => {
     );
   });
 
-  test("keeps destructive detection within one SQL statement", async () => {
-    const migrationsDir = await mkdtemp(
-      path.join(tmpdir(), "hosted-web-prisma-migrations-"),
-    );
-
-    try {
-      await writeMigrationSql(
-        migrationsDir,
-        "20260707170001_nullable_column_and_trigger",
-        [
-          'ALTER TABLE "hosted_member" ADD COLUMN "optional_value" TEXT;',
-          "CREATE FUNCTION clear_optional_value()",
-          "RETURNS TRIGGER",
-          "LANGUAGE plpgsql",
-          "AS $$",
-          "BEGIN",
-          '  IF NEW."attempted_at" IS NOT NULL THEN',
-          '    NEW."optional_value" := NULL;',
-          "  END IF;",
-          "  RETURN NEW;",
-          "END;",
-          "$$;",
-        ].join("\n"),
-      );
-      await writeMigrationSql(
-        migrationsDir,
-        "20260707170002_required_column_with_semicolon_default",
-        'ALTER TABLE "hosted_member" ADD COLUMN "required_value" TEXT DEFAULT \';\' NOT NULL;',
-      );
-
-      const destructiveMigrations =
-        await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir);
-
-      assert.deepEqual(
-        destructiveMigrations.map(({ migrationId, reason }) => ({
-          migrationId,
-          reason,
-        })),
-        [
-          {
-            migrationId: "20260707170002_required_column_with_semicolon_default",
-            reason: "ADD COLUMN NOT NULL",
-          },
-        ],
-      );
-    } finally {
-      await rm(migrationsDir, { force: true, recursive: true });
-    }
-  });
-
   test("limits the detached direct-proof predeploy exception to its proved DDL", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

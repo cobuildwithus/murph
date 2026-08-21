@@ -509,7 +509,7 @@ export async function readHostedMemberSignupNotificationContext(input: {
         memberId: record.id,
         prisma: input.prisma,
         value: record.signupNotificationContextEncrypted,
-      })
+      }).catch(() => null)
     : null;
   return {
     context: parseHostedSignupNotificationContextOrNull(plaintext),

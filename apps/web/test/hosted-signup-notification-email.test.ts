@@ -316,7 +316,11 @@ describe("hosted signup notification email", () => {
     });
   });
 
-  it("labels fallback time and activation surface without claiming signup provenance", async () => {
+  it("claims and sends a truthful fallback when optional context is unavailable", async () => {
+    mocks.readHostedMemberSignupNotificationContext.mockResolvedValue({
+      context: null,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toMatchObject({
@@ -344,6 +348,7 @@ describe("hosted signup notification email", () => {
       memberId: "member_123",
       activationSurface: "telegram",
     })).resolves.toMatchObject({ status: "sent" });
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
   });
 
   it("includes verified email when available", async () => {
