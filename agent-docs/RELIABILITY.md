@@ -1444,8 +1444,9 @@ Last verified: 2026-08-20
   webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable and inert until either a proof-verified
   browser callback completes or hosted Web verifies the exact prepared source
-  against Junction's current provider list after an authenticated,
-  source-attributed webhook. The webhook is only a reconciliation trigger. It
+  has only the literal status `connected` in Junction's current provider list
+  after an authenticated, source-attributed webhook. The webhook is only a
+  reconciliation trigger. It
   cannot confirm setup by itself. Hosted recovery rechecks consent, shared-app
   binding, connection epoch, credential epoch, source epoch, and disconnect
   fences before it commits `source_confirmed`, source admission,
