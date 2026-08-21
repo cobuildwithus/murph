@@ -23,6 +23,10 @@ and bounded safety recovery.
 - The remaining applicable coverage finding identified test-local target
   resolution and pre-scripted tool calls as insufficient proof of model-owned
   decisions.
+- Final ReviewGPT round 4 found that the invocation-aware global progress owner
+  still coexisted with research-owned timing and a media-specific bare tool
+  directive. A direct email route could therefore omit the tool while retaining
+  an impossible instruction to call it.
 
 ## Tasks
 
@@ -35,6 +39,9 @@ and bounded safety recovery.
    same-id recovery, or fail-closed behavior.
 4. Run focused tests, typecheck, provider-input measurement, exact-head final
    ReviewGPT, required CI, and current-base merge proof.
+5. Delete the research and media progress directives, keep their evidence and
+   bounded-inspection contracts, and prove complete no-progress email plus
+   progress-capable direct/group prompts have one executable global owner.
 
 ## Constraints
 
@@ -47,19 +54,20 @@ and bounded safety recovery.
 
 ## Verification
 
-- Focused assistant-engine prompt, skill, card, turn-planning, scripted-runtime,
-  and opted real-model E2E test files: 8 files passed, 299 tests passed, 75
-  opt-in real-provider tests skipped.
+- Focused assistant-engine prompt, skill, card, research, turn-planning,
+  scripted-runtime, and opted real-model E2E test files: 9 files passed, 301
+  tests passed, 75 opt-in real-provider tests skipped. The round-4 assembled
+  route also passed independently in the turn-planning file's 91-test run.
 - Assistant-engine typecheck and `git diff --check`: passed.
 - `pnpm test:diff` across every changed assistant-engine path exited 0. It
   passed affected package typechecks and tests, hosted web tests/lint/dev smoke/
   production build, and Cloudflare Node/Workers verification. The workspace
   boundary step also printed two unrelated existing Junction test import
   diagnostics outside this diff.
-- The direct provider-visible prompt/tool subset is 22 `o200k_harmony`
-  tokens and 98 serialized bytes larger than reviewed source head `585bc2090621`.
-  Applying that exact delta to its complete private-direct measurement gives
-  16,071 tokens and 72,204 bytes. The unchanged group route remains 14,187
-  tokens and 61,593 bytes.
+- The specialist delta initially added 22 `o200k_harmony` tokens and 98
+  serialized bytes over reviewed source head `585bc2090621`. Round-4 deletion
+  then removed 25 tokens / 129 bytes from private direct input and 19 tokens /
+  104 bytes from group input. The resulting complete measurements are 16,046
+  tokens / 72,075 bytes for private direct and 14,168 / 61,489 for group.
 - Exact-head ReviewGPT round after the substantive remediation and required
   GitHub checks.

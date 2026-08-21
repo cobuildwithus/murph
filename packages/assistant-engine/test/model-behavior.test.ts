@@ -1703,7 +1703,10 @@ describe('assistant local PDF evidence guidance', () => {
       'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',
     )
     expect(prompt).toContain(
-      'When transcripts are missing and the task truly needs the media content, call `send_progress_update` before bounded local media tools',
+      'When transcripts are missing and the task truly needs the media content, use bounded local media tools',
+    )
+    expect(prompt).not.toContain(
+      'call `send_progress_update` before bounded local media tools',
     )
     expect(prompt).not.toContain(
       'This applies even when the platform has already extracted the text',

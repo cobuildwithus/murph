@@ -279,11 +279,14 @@ describe('assistant Codex turn planning', () => {
     }
     const route = createRoute()
     const resolvePlan = async (input: {
+      channel?: 'email' | 'telegram'
       configured: boolean
       group?: boolean
+      progressAvailable?: boolean
       scheduled?: boolean
     }) => {
       const group = input.group ?? false
+      const channel = input.channel ?? 'telegram'
       return await resolveAssistantRouteTurnPlan({
         executionContext: group
           ? {
@@ -296,7 +299,7 @@ describe('assistant Codex turn planning', () => {
           : null,
         input: {
           ...createMessageInput(),
-          channel: 'telegram',
+          channel,
           threadIsDirect: !group,
           ...(input.scheduled
             ? {
@@ -312,6 +315,11 @@ describe('assistant Codex turn planning', () => {
         preferenceContext,
         profile,
         promptTimeContext,
+        progressDelivery: input.progressAvailable
+          ? {
+              send: async () => ({ kind: 'sent', source: 'model' }),
+            }
+          : null,
         route,
         session: createSession(),
         sharedPlan: createSharedPlan({
@@ -321,7 +329,7 @@ describe('assistant Codex turn planning', () => {
             setupCommand: 'murph',
           },
         }, {
-          channel: 'telegram',
+          channel,
           effectiveThreadIsDirect: !group,
           threadId: 'thread-test',
           threadIsDirect: !group,
@@ -350,6 +358,63 @@ describe('assistant Codex turn planning', () => {
         'never send a mode-less single-scout request',
       )
     }
+
+    const directProgressPlan = await resolvePlan({
+      configured: true,
+      progressAvailable: true,
+    })
+    const groupProgressPlan = await resolvePlan({
+      configured: true,
+      group: true,
+      progressAvailable: true,
+    })
+    const emailWithoutProgressPlan = await resolvePlan({
+      channel: 'email',
+      configured: true,
+    })
+    const directProgressPrompt = directProgressPlan.systemPrompt
+    const groupProgressPrompt = groupProgressPlan.systemPrompt
+    if (!directProgressPrompt || !groupProgressPrompt) {
+      throw new Error('Expected progress-capable conversation prompts.')
+    }
+
+    expect(directProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
+      'send_progress_update',
+    )
+    expect(directProgressPrompt.match(
+      /Use `murph\.send_progress_update` for interim updates/gu,
+    )).toHaveLength(1)
+    expect(groupProgressPlan.dynamicTools.map((tool) => tool.name)).toContain(
+      'send_progress_update',
+    )
+    expect(groupProgressPrompt.match(
+      /use `murph\.send_progress_update` much more sparingly/gu,
+    )).toHaveLength(1)
+    for (const plan of [directProgressPlan, groupProgressPlan]) {
+      expect(plan.systemPrompt).not.toContain(
+        'Before a noticeable foreground pass',
+      )
+      expect(plan.systemPrompt).not.toContain(
+        'a research lookup alone does not justify a status message',
+      )
+      expect(plan.systemPrompt).not.toContain(
+        'call `send_progress_update` before bounded local media tools',
+      )
+    }
+
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'Configured Exa research:',
+    )
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'For voice memos and audio/video, use transcript fragments directly',
+    )
+    expect(emailWithoutProgressPlan.systemPrompt).toContain(
+      'Member-visible interim progress is unavailable on this route',
+    )
+    expect(emailWithoutProgressPlan.dynamicTools.map((tool) => tool.name))
+      .not.toContain('send_progress_update')
+    expect(emailWithoutProgressPlan.systemPrompt)
+      .not.toContain('send_progress_update')
 
     for (const unavailablePlan of await Promise.all([
       resolvePlan({ configured: false }),

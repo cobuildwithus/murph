@@ -695,9 +695,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
     ...(assistantResearchAvailable
-      ? [buildAssistantResearchScoutCapabilityText({
-          progressUpdateMode: authenticatedGroupChatRuntime ? 'group' : 'direct',
-        })]
+      ? [buildAssistantResearchScoutCapabilityText()]
       : []),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn

@@ -3106,9 +3106,7 @@ esac
         return { kind: 'sent' as const, source: 'model' as const }
       },
     }
-    const directGuidance = buildAssistantResearchScoutCapabilityText({
-      progressUpdateMode: 'direct',
-    })
+    const directGuidance = buildAssistantResearchScoutCapabilityText()
 
     scenario.stub.queue(
       {
