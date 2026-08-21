@@ -345,6 +345,7 @@ describe("hosted-local test RunnerContainer outbound composition", () => {
       if (
         host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.transcribe
         || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.openAi
+        || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini
         || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane
         || host === HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.workspaceSnapshotStore
       ) {
