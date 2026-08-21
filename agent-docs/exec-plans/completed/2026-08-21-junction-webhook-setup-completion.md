@@ -1,6 +1,6 @@
 # Recover Junction setup when the browser callback is lost
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-21
 
@@ -108,3 +108,4 @@ Updated: 2026-08-21
 - `DATABASE_URL=<LOCAL_POSTGRES_URL> pnpm --dir apps/web typecheck` passed.
 - Web's changed test file passed focused ESLint. The device-sync package has no
   package-owned ESLint binary; its focused tests and typecheck are green.
+Completed: 2026-08-21
