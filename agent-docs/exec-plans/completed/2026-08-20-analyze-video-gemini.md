@@ -119,14 +119,15 @@ authority for returning the provider answer.
       documentation.
 - [x] Remove the pre-activation changelog entry so the Web-first pricing deploy
       does not advertise an unavailable tool.
-- [ ] Publish a separate member-visible changelog item only after the production
-      key, Worker, runner, pricing path, and consented private-direct smoke have
+- [x] Keep the member-visible changelog out of this implementation PR and defer
+      it to a post-activation Web release, only after the production key,
+      Worker, runner, pricing path, and consented private-direct smoke have
       passed.
 - [x] Run focused tests/typechecks, dependency policy checks, diff audit, and
       privacy scan.
-- [ ] Commit and push a review candidate, open a new PR, then run preliminary
+- [x] Commit and push a review candidate, open a new PR, then run preliminary
       completion-specialist and final sensitive exact-head ReviewGPT passes.
-- [ ] Resolve findings, obtain exact-head CI evidence, finish this plan, and
+- [x] Resolve findings, obtain exact-head CI evidence, finish this plan, and
       prove a clean merge tree against current `origin/main`.
 
 ## Verification
@@ -155,5 +156,6 @@ authority for returning the provider answer.
    a priced usage record, then publish the changelog item in a follow-up Web
    release.
 
-Status: active
-Updated: 2026-08-20
+Status: completed
+Updated: 2026-08-21
+Completed: 2026-08-21
