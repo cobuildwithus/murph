@@ -90,6 +90,7 @@ import {
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
+  restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
@@ -10770,31 +10771,49 @@ describe("hosted workspace runtime entrypoint", () => {
 
   test.each([
     {
+      channel: "linq" as const,
       checkpointConversationInputAhead: false,
       expectedProviderSends: 1,
       initialOutboxState: "pending" as const,
     },
     {
+      channel: "linq" as const,
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "pending" as const,
     },
     {
+      channel: "linq" as const,
       checkpointConversationInputAhead: true,
       expectedProviderSends: 0,
       initialOutboxState: "due_retryable" as const,
     },
     {
+      channel: "linq" as const,
       checkpointConversationInputAhead: false,
       expectedProviderSends: 0,
       initialOutboxState: "retryable" as const,
     },
     {
+      channel: "linq" as const,
       checkpointConversationInputAhead: false,
       expectedProviderSends: 0,
       initialOutboxState: "sent" as const,
     },
-  ])("system mailbox mode resumes a restored exact group-join delivery from its durable identity ($initialOutboxState outbox, foreground checkpoint: $checkpointConversationInputAhead)", async ({
+    {
+      channel: "telegram" as const,
+      checkpointConversationInputAhead: true,
+      expectedProviderSends: 0,
+      initialOutboxState: "pending" as const,
+    },
+    {
+      channel: "telegram" as const,
+      checkpointConversationInputAhead: true,
+      expectedProviderSends: 0,
+      initialOutboxState: "due_retryable" as const,
+    },
+  ])("system mailbox mode resumes a restored exact group-join delivery from its durable identity ($channel, $initialOutboxState outbox, foreground checkpoint: $checkpointConversationInputAhead)", async ({
+    channel,
     checkpointConversationInputAhead,
     expectedProviderSends,
     initialOutboxState,
@@ -10805,6 +10824,15 @@ describe("hosted workspace runtime entrypoint", () => {
     const deliveryBodies: unknown[] = [];
     const exactText = "You are now part of the synthetic group.";
     const exactDeliveryKey = "group-join:membership_restored_exact";
+    const exactTarget = channel === "telegram"
+      ? "123456789"
+      : "linq_private_group_join_thread";
+    const exactIdentityId = channel === "telegram"
+      ? "telegram-bot"
+      : "hbidx:phone:v1:group-join-restored-test";
+    const exactThreadId = channel === "telegram"
+      ? exactTarget
+      : "hbidx:thread:v1:group-join-restored-test";
     const exactDedupeKey =
       `assistant.notification.requested:${exactDeliveryKey}`;
     const retryWakeAt = new Date(
@@ -10831,13 +10859,13 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         route: {
           actorId: null,
-          channel: "linq",
+          channel,
           delivery: {
             kind: "thread",
-            target: "linq_private_group_join_thread",
+            target: exactTarget,
           },
-          identityId: "hbidx:phone:v1:group-join-restored-test",
-          threadId: "hbidx:thread:v1:group-join-restored-test",
+          identityId: exactIdentityId,
+          threadId: exactThreadId,
           threadIsDirect: true,
         },
       },
@@ -10848,11 +10876,24 @@ describe("hosted workspace runtime entrypoint", () => {
         init?.method
         ?? (request instanceof Request ? request.method : "GET");
       const url = request instanceof Request ? request.url : String(request);
-      if (method === "POST" && url.includes("/messages")) {
+      if (
+        method === "POST"
+        && (
+          (channel === "linq" && url.includes("/messages"))
+          || (channel === "telegram" && url.endsWith("/sendMessage"))
+        )
+      ) {
         deliveryBodies.push(JSON.parse(String(init?.body)));
-        return new Response(JSON.stringify({
-          message: { id: "provider_group_join_restored_confirmation" },
-        }), {
+        return new Response(JSON.stringify(
+          channel === "telegram"
+            ? {
+                ok: true,
+                result: { message_id: 123 },
+              }
+            : {
+                message: { id: "provider_group_join_restored_confirmation" },
+              },
+        ), {
           headers: { "content-type": "application/json" },
           status: 200,
         });
@@ -10861,13 +10902,14 @@ describe("hosted workspace runtime entrypoint", () => {
     });
     const effectsPort = {
       async assertLinqRecentInboundEngagement() {
+        assert.equal(channel, "linq");
         return {
           providerDispatchClaimed: true,
           resolvedRoute: {
             conversationThreadId: null,
             directRecipientPhoneNumber: null,
             fromPhoneNumber: null,
-            target: "linq_private_group_join_thread",
+            target: exactTarget,
             targetKind: "thread" as const,
             threadIsDirect: true,
           },
@@ -10931,16 +10973,16 @@ describe("hosted workspace runtime entrypoint", () => {
         ),
       }));
       const exactIntent = await createAssistantOutboxIntent({
-        channel: "linq",
+        channel,
         createdAt: TEST_NOW,
         dedupeToken: exactDeliveryKey,
         deliveryIdempotencyKey: exactDeliveryKey,
-        deliveryTransportIdempotent: true,
-        explicitTarget: "linq_private_group_join_thread",
-        identityId: "hbidx:phone:v1:group-join-restored-test",
+        deliveryTransportIdempotent: channel === "linq",
+        explicitTarget: exactTarget,
+        identityId: exactIdentityId,
         message: exactText,
         sessionId: "session_group_join_restored_exact",
-        threadId: "hbidx:thread:v1:group-join-restored-test",
+        threadId: exactThreadId,
         threadIsDirect: true,
         turnId: "turn_group_join_restored_exact",
         vault: vaultRoot,
@@ -10966,13 +11008,13 @@ describe("hosted workspace runtime entrypoint", () => {
       if (initialOutboxState === "sent") {
         const sentIntent = await markAssistantOutboxIntentSentById({
           delivery: {
-            channel: "linq",
+            channel,
             idempotencyKey: exactDeliveryKey,
             messageLength: exactText.length,
             providerMessageId: "provider_group_join_already_sent",
-            providerThreadId: "linq_private_group_join_thread",
+            providerThreadId: exactTarget,
             sentAt: TEST_NOW,
-            target: "linq_private_group_join_thread",
+            target: exactTarget,
             targetKind: "explicit",
           },
           intentId: exactIntent.intentId,
@@ -10993,8 +11035,14 @@ describe("hosted workspace runtime entrypoint", () => {
 
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
-          platformEnv: { TELEGRAM_BOT_TOKEN: "" },
-          forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
+          platformEnv: {
+            TELEGRAM_BOT_TOKEN:
+              channel === "telegram" ? "synthetic-telegram-token" : "",
+          },
+          forwardedEnv: {
+            LINQ_API_TOKEN:
+              channel === "linq" ? "synthetic-linq-token" : "",
+          },
           request: {
             assistantExecutionBlocked: true,
             attemptId: "attempt_synthetic_blocked_group_join_restored_exact",
@@ -11004,13 +11052,13 @@ describe("hosted workspace runtime entrypoint", () => {
           resolvedConfig: {
             channelCapabilities: {
               emailSendReady: false,
-              telegramBotConfigured: false,
+              telegramBotConfigured: channel === "telegram",
             },
             deviceSync: null,
             managedAutoReplyChannels: [{
               capabilityReady: true,
-              channel: "linq",
-              memberChannel: "linq",
+              channel,
+              memberChannel: channel,
             }],
           },
         }),
@@ -11077,6 +11125,36 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
+
+      if (channel === "telegram" && checkpointConversationInputAhead) {
+        const preparedWorkspace = checkpointBundles.at(0);
+        assert.ok(preparedWorkspace);
+        const preparedCheckpointRoot = await mkdtemp(
+          path.join(tmpdir(), "murph-workspace-entrypoint-prepared-checkpoint-"),
+        );
+        try {
+          await restoreHostedBundleRoots({
+            bytes: preparedWorkspace.bytes,
+            expectedKind: "vault",
+            roots: { vault: preparedCheckpointRoot },
+          });
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(preparedCheckpointRoot)).map(
+              (intent) => ({
+                preparedDispatchTokenPresent:
+                  intent.preparedDispatchToken !== null,
+                status: intent.status,
+              }),
+            ),
+            [{
+              preparedDispatchTokenPresent: true,
+              status: "sending",
+            }],
+          );
+        } finally {
+          await removeTempRoot(preparedCheckpointRoot);
+        }
+      }
 
       assert.equal(deliveryBodies.length, expectedProviderSends, JSON.stringify({
         outbox: (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
@@ -11167,6 +11245,96 @@ describe("hosted workspace runtime entrypoint", () => {
           checkpointRequests.map((request) => request.expectedWorkspaceVersion),
           ["0", "1"],
         );
+        if (channel === "telegram") {
+          const ambiguousWorkspace = checkpointBundles.at(0);
+          assert.ok(ambiguousWorkspace);
+          const ambiguousCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+          const ambiguousResult = await runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput({
+              platformEnv: {
+                TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
+              },
+              forwardedEnv: { LINQ_API_TOKEN: "" },
+              request: {
+                assistantExecutionBlocked: true,
+                attemptId:
+                  "attempt_synthetic_blocked_group_join_restored_telegram_ambiguous",
+                processingMode: "system_mailbox",
+                workspaceVersion: "1",
+              },
+              resolvedConfig: {
+                channelCapabilities: {
+                  emailSendReady: false,
+                  telegramBotConfigured: true,
+                },
+                deviceSync: null,
+                managedAutoReplyChannels: [{
+                  capabilityReady: true,
+                  channel: "telegram",
+                  memberChannel: "telegram",
+                }],
+              },
+            }),
+            {
+              async createCheckpointSnapshot() {
+                return {
+                  snapshotRef: createBundleRef({
+                    hash: "f".repeat(64),
+                    key:
+                      "users/bundles/member-synthetic/"
+                      + "blocked-group-join-restored-telegram-ambiguous.bundle.json",
+                    size: 512,
+                  }),
+                };
+              },
+              async importItem() {
+                throw new Error(
+                  "Ambiguous Telegram notification must not import a new row.",
+                );
+              },
+              platform: {
+                ...createPlatform({
+                  artifactBytesByHash: new Map([
+                    [ambiguousWorkspace.hash, ambiguousWorkspace.bytes],
+                  ]),
+                  mailboxPort: createMailboxPort({ events, items: [] }),
+                  workspacePort: createWorkspacePort({
+                    checkpointRequests: ambiguousCheckpointRequests,
+                    events,
+                    workspace: createWorkspaceState({
+                      snapshotRef: ambiguousWorkspace.snapshotRef,
+                      version: "1",
+                    }),
+                  }),
+                }),
+                effectsPort,
+                providerFetch,
+              },
+              async runAssistantPhase() {
+                throw new Error(
+                  "Ambiguous Telegram notification must not enter assistant execution.",
+                );
+              },
+              vaultRoot,
+            },
+          );
+
+          assert.equal(deliveryBodies.length, 0);
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
+              preparedDispatchTokenPresent:
+                intent.preparedDispatchToken !== null,
+              status: intent.status,
+            })),
+            [{
+              preparedDispatchTokenPresent: true,
+              status: "sending",
+            }],
+          );
+          assert.equal(ambiguousResult.status, "scheduled");
+          assert.ok(ambiguousResult.nextWakeAt);
+          assert.ok(ambiguousResult.nextWakeAt > TEST_NOW);
+        }
         const resumedWorkspaceVersion = String(
           BigInt(
             checkpointRequests.at(-1)?.expectedWorkspaceVersion ?? "0",
@@ -11177,8 +11345,14 @@ describe("hosted workspace runtime entrypoint", () => {
         const resumedCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
         const resumedResult = await runHostedWorkspaceRuntimeJobInProcess(
           createWorkspaceRuntimeJobInput({
-            platformEnv: { TELEGRAM_BOT_TOKEN: "" },
-            forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
+            platformEnv: {
+              TELEGRAM_BOT_TOKEN:
+                channel === "telegram" ? "synthetic-telegram-token" : "",
+            },
+            forwardedEnv: {
+              LINQ_API_TOKEN:
+                channel === "linq" ? "synthetic-linq-token" : "",
+            },
             request: {
               assistantExecutionBlocked: true,
               attemptId:
@@ -11189,13 +11363,13 @@ describe("hosted workspace runtime entrypoint", () => {
             resolvedConfig: {
               channelCapabilities: {
                 emailSendReady: false,
-                telegramBotConfigured: false,
+                telegramBotConfigured: channel === "telegram",
               },
               deviceSync: null,
               managedAutoReplyChannels: [{
                 capabilityReady: true,
-                channel: "linq",
-                memberChannel: "linq",
+                channel,
+                memberChannel: channel,
               }],
             },
           }),

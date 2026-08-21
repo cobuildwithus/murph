@@ -2857,6 +2857,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               const exactDeliveryPreparation = exactDeliveryEffects.length > 0
                 ? await prepareHostedAssistantDeliveryEffectsForDispatch({
                     assistantDeliveryEffects: exactDeliveryEffects,
+                    selectedNonIdempotentEffectIds: exactDeliveryEffects
+                      .filter((effect) =>
+                        effect.payload.transportIdempotent !== true
+                      )
+                      .map((effect) => effect.effectId),
                     vaultRoot: restored.vaultRoot,
                   })
                 : null;
