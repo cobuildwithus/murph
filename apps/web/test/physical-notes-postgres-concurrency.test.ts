@@ -1052,6 +1052,21 @@ describe.skipIf(!runPostgresProof)(
         resultStatus: "accepted",
         settledUsageCostUsdMicros: 250_000n,
       });
+      await observer.hostedPhysicalNote.delete({ where: { id: noteId } });
+      await expect(observer.hostedPhysicalNoteRecovery.findUnique({
+        where: { originAssistantInputId: retryOrigin },
+      })).resolves.toMatchObject({
+        physicalNoteId: null,
+        settledUsageCostUsdMicros: 250_000n,
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: retryOrigin,
+        prisma: recoveryClient,
+        runtime,
+      })).resolves.toEqual(accepted);
+      expect(findProviderLetter).toHaveBeenCalledTimes(2);
+      expect(mocks.recordUsage).toHaveBeenCalledTimes(2);
     });
 
     it("commits aged absence, blocker cleanup, and replay result atomically", async () => {
