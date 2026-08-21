@@ -1067,7 +1067,7 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
-    it("keeps an unsupported missing Junction source retryable without creating state", async () => {
+    it("settles an unsupported missing Junction source without creating state", async () => {
       const sourceProviderSlug = "future_sensor";
       const fixture = await createFixture({ sourceLastErrorCode: null });
       const providerFetch = vi.fn(async () => new Response(JSON.stringify({
@@ -1093,23 +1093,27 @@ describe.skipIf(!runPostgresProof)(
           store: fixture.store,
         });
 
-        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
-          code: "WEBHOOK_SOURCE_NOT_READY",
-          retryable: true,
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
         });
 
         expect(providerFetch).not.toHaveBeenCalled();
         await expect(fixture.prisma.deviceConnectionSource.count({
           where: { connectionId: fixture.connectionId },
         })).resolves.toBe(0);
-        await expect(fixture.prisma.deviceWebhookTrace.findUnique({
+        await expect(fixture.prisma.deviceWebhookTrace.findUniqueOrThrow({
+          select: { claimToken: true, status: true },
           where: {
             provider_traceId: {
               provider: "junction",
               traceId: prepared.traceId,
             },
           },
-        })).resolves.toBeNull();
+        })).resolves.toMatchObject({
+          claimToken: null,
+          status: "processed",
+        });
         await expect(fixture.prisma.deviceSyncDirtyConnection.count({
           where: { connectionId: fixture.connectionId },
         })).resolves.toBe(0);

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 100,
+  "item": {
+    "id": "faster-workout-commands",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Faster workout setup and updates",
+    "summary": "Murph can now save a complete ad-hoc workout with all of its exercises in one step.",
+    "details": "Exact workout reads and updates no longer rebuild unrelated vault summaries first, while revision checks still prevent stale changes and other unfinished workouts remain untouched.",
+    "relevanceTags": ["assistant", "workouts", "messaging", "performance", "reliability"],
+    "sourcePullRequests": [2070]
+  }
+}

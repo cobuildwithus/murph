@@ -5934,6 +5934,16 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "exercise": {
+                          "description": "Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          }
+                        },
                         "type": {
                           "description": "Optional activity type override. Defaults to strength-training.",
                           "type": "string",
@@ -6792,6 +6802,12 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "description": "Exact lifecycle revision observed when deletion was approved."
                         }
                       }
                     }

@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -9,6 +10,7 @@ import {
   isMealPhotoCaptureScopedAuthorization,
   parseMealPhotoCaptureEnrollmentRequest,
   parseMealPhotoCaptureRevocationRequest,
+  readAndValidateManualMealPhotoUpload,
   readAndValidateMealPhotoUpload,
 } from "../src/lib/device-sync/meal-photo-capture";
 
@@ -127,6 +129,40 @@ describe("meal photo capture validation", () => {
     expect(upload.sha256).toMatch(/^[0-9a-f]{64}$/u);
   });
 
+  it("derives a stable member-bound capture id for manual UUID retries", async () => {
+    const jpeg = createMinimalJpeg({ height: 2, width: 3 });
+    const idempotencyKey = "F47AC10B-58CC-4372-A567-0E02B2C3D479";
+    const upload = await readAndValidateManualMealPhotoUpload({
+      memberId: "member_1",
+      request: createUploadRequest(jpeg, { idempotencyKey }),
+    });
+
+    expect(upload.captureId).toBe(createHash("sha256")
+      .update("murph:manual-meal-photo:v1\0")
+      .update("member_1")
+      .update("\0")
+      .update(idempotencyKey.toLowerCase())
+      .digest("hex"));
+
+    const otherMemberUpload = await readAndValidateManualMealPhotoUpload({
+      memberId: "member_2",
+      request: createUploadRequest(jpeg, { idempotencyKey }),
+    });
+    expect(otherMemberUpload.captureId).not.toBe(upload.captureId);
+  });
+
+  it("rejects a non-UUID manual idempotency key", async () => {
+    await expect(readAndValidateManualMealPhotoUpload({
+      memberId: "member_1",
+      request: createUploadRequest(createMinimalJpeg(), {
+        idempotencyKey: CAPTURE_ID,
+      }),
+    })).rejects.toMatchObject({
+      code: "MEAL_PHOTO_UPLOAD_INVALID",
+      httpStatus: 422,
+    });
+  });
+
   it.each([
     ...Array.from({ length: 16 }, (_, index) => ({
       label: `APP${index}`,
@@ -201,11 +237,14 @@ describe("meal photo capture validation", () => {
 
 function createUploadRequest(
   body: Buffer,
-  options: { contentType?: string } = {},
+  options: { contentType?: string; idempotencyKey?: string } = {},
 ): Request {
   return new Request("https://example.test/photos", {
     body: requestBody(body),
-    headers: uploadHeaders({ contentType: options.contentType }),
+    headers: uploadHeaders({
+      contentType: options.contentType,
+      idempotencyKey: options.idempotencyKey,
+    }),
     method: "POST",
   });
 }
@@ -217,11 +256,12 @@ function requestBody(body: Buffer): ArrayBuffer {
 function uploadHeaders(input: {
   contentLength?: string;
   contentType?: string;
+  idempotencyKey?: string;
 } = {}): HeadersInit {
   return {
     ...(input.contentLength ? { "content-length": input.contentLength } : {}),
     "content-type": input.contentType ?? "image/jpeg",
-    "idempotency-key": CAPTURE_ID,
+    "idempotency-key": input.idempotencyKey ?? CAPTURE_ID,
     "x-murph-captured-at": "2026-07-12T12:30:45-04:00",
     "x-murph-meal-capture-schema": "1",
   };

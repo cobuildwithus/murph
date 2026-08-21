@@ -242,6 +242,12 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   EVENT_CONTRACT_INVALID: {
     code: 'contract_invalid',
   },
+  EVENT_MISSING: {
+    code: 'not_found',
+  },
+  EVENT_REVISION_CONFLICT: {
+    code: 'conflict',
+  },
   INVALID_TIMESTAMP: {
     code: 'invalid_timestamp',
   },

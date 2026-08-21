@@ -334,7 +334,9 @@ per-installation revision fence, credential-free revocation tombstone,
 prepared-before-active iOS credential handoff, bodyless scoped activation,
 member-plus-Family-sponsorship authority serialization,
 schema-v1 revision-zero compatibility, expand/contract migration sequence, and
-focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,
+the independent identity-authenticated foreground camera/Photos submission
+path with member-bound UUID retry identity and shared private ingestion, plus
+the focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
