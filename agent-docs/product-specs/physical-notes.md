@@ -105,10 +105,15 @@ accepted direct or authenticated-group message authorizes one provider metadata
 lookup. Provider acceptance settles the guarded row as accepted. Proven absence
 clears it only after the existing 23-hour safety window. A recent absence or an
 indeterminate lookup leaves the guard unchanged and returns `pending`, with the
-end of the safety window when it is still in the future. An already-clear member
-returns `clear` without a provider read. Recovery never calls provider create,
-and there is no transport replay, model retry, notification, or automatic
-follow-up.
+end of the safety window when it is still in the future. The response `status`
+describes that checked oldest guard, while `remainingUnresolved` is derived from
+the existing remaining-guard read. An already-clear member returns `clear` with
+`remainingUnresolved: false` without a provider read. When a checked guard
+reaches `accepted` or `clear` but another guard remains, the response preserves
+that checked outcome with `remainingUnresolved: true`; the member learns that
+one reconciliation succeeded and that another explicit request is required.
+Recovery never calls provider create, and there is no transport replay, model
+retry, notification, or automatic follow-up.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -126,7 +131,10 @@ evidence can finalize the original row after local commit failure. Recent absent
 or indeterminate evidence remains pending; only aged proven absence uses the
 existing unknown transition. Every other unresolved row keeps its independent
 admission authority, so new effects remain blocked until all such rows are
-terminal. A distinct request
+terminal. One recovery request still checks only the oldest row: it reports the
+checked outcome and the independently derived remaining-blocker fact instead of
+turning the latter into a false claim that the checked provider result stayed
+indeterminate. A distinct request
 is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
 explicit request may, after the 23-hour provider window, reconcile the guarded
 row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps

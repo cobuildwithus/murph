@@ -3715,7 +3715,9 @@ does not depend on image completion. It authorizes one Web-owned provider metada
 reconciliation for the oldest unresolved guard, never a provider create or recall.
 Direct and authenticated-group authority is rechecked at the Web boundary; recent
 absence and indeterminate evidence remain pending, while only aged proven absence
-can clear the guard.
+can clear the guard. Web returns the checked guard's outcome separately from a
+derived remaining-unresolved fact, so clearing one legacy guard cannot be reported
+as an indeterminate check merely because another independent guard still blocks.
 Native provider resume is only the fast path: the transcript owner also commits a
 bounded runtime-authored provenance marker for every trusted ready generated-image
 completion. An attached image retains its actual response ordinal; a completion

@@ -138,17 +138,44 @@ describe('assistant physical notes', () => {
   it.each([
     {
       expected: 'cannot be treated as canceled',
-      response: { retryAfter: null, status: 'accepted' as const },
+      response: {
+        remainingUnresolved: false,
+        retryAfter: null,
+        status: 'accepted' as const,
+      },
       success: true,
     },
     {
       expected: 'No unresolved physical-note submission remains',
-      response: { retryAfter: null, status: 'clear' as const },
+      response: {
+        remainingUnresolved: false,
+        retryAfter: null,
+        status: 'clear' as const,
+      },
+      success: true,
+    },
+    {
+      expected: 'different unresolved submission remains',
+      response: {
+        remainingUnresolved: true,
+        retryAfter: null,
+        status: 'accepted' as const,
+      },
+      success: true,
+    },
+    {
+      expected: 'checked earlier submission was cleared',
+      response: {
+        remainingUnresolved: true,
+        retryAfter: null,
+        status: 'clear' as const,
+      },
       success: true,
     },
     {
       expected: 'No automatic retry or follow-up is running',
       response: {
+        remainingUnresolved: true,
         retryAfter: '2026-08-21T18:00:00.000Z',
         status: 'pending' as const,
       },
@@ -156,12 +183,20 @@ describe('assistant physical notes', () => {
     },
     {
       expected: 'not available to the current participant',
-      response: { retryAfter: null, status: 'permission_denied' as const },
+      response: {
+        remainingUnresolved: null,
+        retryAfter: null,
+        status: 'permission_denied' as const,
+      },
       success: false,
     },
     {
       expected: 'recovery is currently unavailable',
-      response: { retryAfter: null, status: 'unavailable' as const },
+      response: {
+        remainingUnresolved: true,
+        retryAfter: null,
+        status: 'unavailable' as const,
+      },
       success: false,
     },
   ])('reports recovery status $response.status literally', async ({
@@ -195,6 +230,25 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       `\"status\":\"${response.status}\"`,
     )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      `\"remainingUnresolved\":${String(response.remainingUnresolved)}`,
+    )
+    if (response.remainingUnresolved && response.status === 'clear') {
+      expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+        'No unresolved physical-note submission remains',
+      )
+    }
+    if (
+      response.remainingUnresolved
+      && (response.status === 'accepted' || response.status === 'clear')
+    ) {
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'different unresolved submission remains',
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'another explicit recovery request',
+      )
+    }
     if (response.status === 'unavailable') {
       expect(result.rpcResult.contentItems[0]?.text).toContain(
         'earlier submission was not cleared',

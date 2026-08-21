@@ -328,12 +328,12 @@ export async function recoverHostedPhysicalNote(
     prisma,
   });
   if (!guard) {
-    return physicalNoteRecoveryResponse("clear");
+    return physicalNoteRecoveryResponse("clear", false);
   }
 
   const config = readPhysicalNoteConfig();
   if (!config) {
-    return physicalNoteRecoveryResponse("unavailable");
+    return physicalNoteRecoveryResponse("unavailable", true);
   }
   await reassertActionOrigin();
   input.signal?.throwIfAborted();
@@ -349,21 +349,23 @@ export async function recoverHostedPhysicalNote(
     }),
     signal: input.signal,
   });
-  const reconciled = await prisma.hostedPhysicalNote.findUnique({
+  const reconciled = await prisma.hostedPhysicalNote.findUniqueOrThrow({
     where: { id: guard.id },
   });
-  if (reconciled?.status === "accepted") {
-    return physicalNoteRecoveryResponse("accepted");
-  }
   const remainingGuard = await findPhysicalNoteEffectGuard({
     memberId: input.memberId,
     prisma,
   });
-  if (!remainingGuard) {
-    return physicalNoteRecoveryResponse("clear");
+  const remainingUnresolved = remainingGuard !== null;
+  if (reconciled.status === "accepted") {
+    return physicalNoteRecoveryResponse("accepted", remainingUnresolved);
+  }
+  if (remainingGuard?.id !== guard.id) {
+    return physicalNoteRecoveryResponse("clear", remainingUnresolved);
   }
   const retryAfterMs = remainingGuard.createdAt.getTime() + REPLAY_WINDOW_MS;
   return {
+    remainingUnresolved: true,
     retryAfter: retryAfterMs > Date.now()
       ? new Date(retryAfterMs).toISOString()
       : null,
@@ -958,6 +960,7 @@ function unavailableResponse(): HostedPhysicalNoteSendResponse {
 
 function physicalNoteRecoveryResponse(
   status: HostedPhysicalNoteRecoveryResponse["status"],
+  remainingUnresolved: boolean,
 ): HostedPhysicalNoteRecoveryResponse {
-  return { retryAfter: null, status };
+  return { remainingUnresolved, retryAfter: null, status };
 }

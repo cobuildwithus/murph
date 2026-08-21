@@ -2567,19 +2567,26 @@ export async function executeMurphDynamicToolRequest(input: {
             return physicalNoteRecoveryToolResult(
               true,
               result.status,
-              'The earlier note was accepted for printing, not delivered, and cannot be treated as canceled. This recovery sent nothing new.',
+              result.remainingUnresolved
+                ? 'The checked earlier note was accepted for printing, not delivered, and cannot be treated as canceled. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing new.'
+                : 'The earlier note was accepted for printing, not delivered, and cannot be treated as canceled. This recovery sent nothing new.',
+              result.remainingUnresolved,
             )
           case 'clear':
             return physicalNoteRecoveryToolResult(
               true,
               result.status,
-              'No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
+              result.remainingUnresolved
+                ? 'The checked earlier submission was cleared. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing.'
+                : 'No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
+              result.remainingUnresolved,
             )
           case 'pending':
             return physicalNoteRecoveryToolResult(
               true,
               result.status,
               'The earlier outcome is unresolved and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
+              result.remainingUnresolved,
               result.retryAfter,
             )
           case 'permission_denied':
@@ -2587,12 +2594,14 @@ export async function executeMurphDynamicToolRequest(input: {
               false,
               result.status,
               'The earlier submission was not changed because recovery is not available to the current participant.',
+              result.remainingUnresolved,
             )
           case 'unavailable':
             return physicalNoteRecoveryToolResult(
               false,
               result.status,
               'Physical-note recovery is currently unavailable. The earlier submission was not cleared; nothing new was sent and no automatic retry is running.',
+              result.remainingUnresolved,
             )
         }
       } catch {
@@ -2600,6 +2609,7 @@ export async function executeMurphDynamicToolRequest(input: {
           false,
           'unavailable',
           'The recovery response was lost, so the earlier submission\'s final state is unconfirmed. Do not claim it cleared or was accepted. Nothing new was sent and no automatic retry is running.',
+          null,
         )
       }
     }
@@ -6591,11 +6601,12 @@ function physicalNoteRecoveryToolResult(
   success: boolean,
   status: 'accepted' | 'clear' | 'pending' | 'permission_denied' | 'unavailable',
   note: string,
+  remainingUnresolved: boolean | null,
   retryAfter: string | null = null,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     success,
-    JSON.stringify({ note, retryAfter, status }),
+    JSON.stringify({ note, remainingUnresolved, retryAfter, status }),
   )
 }
 

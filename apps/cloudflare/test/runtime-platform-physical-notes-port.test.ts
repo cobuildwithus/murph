@@ -100,6 +100,7 @@ describe("createHostedWebPhysicalNotePort", () => {
 
   it("forwards and parses one physical-note recovery check", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      remainingUnresolved: false,
       retryAfter: null,
       status: "clear",
     }));
@@ -111,6 +112,7 @@ describe("createHostedWebPhysicalNotePort", () => {
     });
 
     await expect(port.resolve!(RECOVERY_REQUEST)).resolves.toEqual({
+      remainingUnresolved: false,
       retryAfter: null,
       status: "clear",
     });
@@ -156,6 +158,7 @@ describe("createHostedWebPhysicalNotePort", () => {
       });
 
       await expect(port.resolve!(RECOVERY_REQUEST)).resolves.toEqual({
+        remainingUnresolved: null,
         retryAfter: null,
         status: expectedStatus,
       });

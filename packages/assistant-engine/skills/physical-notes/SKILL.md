@@ -18,12 +18,14 @@ or call `murph.send_physical_note` as part of recovery.
 
 Treat its result literally:
 
-- `accepted` means provider records prove the earlier submission was accepted
+- `accepted` means provider records prove the checked submission was accepted
   for printing. It cannot be treated as canceled or recalled. Say accepted for
   printing, not delivered, and say this recovery sent nothing new.
-- `clear` means no unresolved submission remains. Say the blocker is clear and
-  this recovery sent nothing; a future note still needs a separate explicit
-  send request.
+- `clear` means the checked submission no longer blocks. When
+  `remainingUnresolved` is false, say no unresolved submission remains. When it
+  is true, say the checked submission cleared but a different unresolved
+  submission remains and needs another explicit recovery request. This recovery
+  sent nothing; a future note still needs a separate explicit send request.
 - `pending` means the outcome still cannot be safely resolved. If
   `retryAfter` is present, state that Murph can check again after that time only
   if the person explicitly asks. Never promise or schedule an automatic check.
@@ -34,6 +36,11 @@ Treat its result literally:
   while a lost or invalid response leaves the final state unconfirmed. Never
   infer a state change or no-change from the status alone. Say nothing new was
   sent, say no automatic retry is running, and do not retry automatically.
+
+For `accepted` or `clear`, `remainingUnresolved: true` is an independent
+member-wide blocker fact. Report it even though the checked submission reached
+a terminal outcome, and require another explicit recovery request before one
+more check. Never call the tool twice from one authorization.
 
 The recovery tool never sends a new note or recalls an accepted one. Never say
 “canceled” unless a future provider contract explicitly adds that outcome.

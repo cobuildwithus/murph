@@ -74,7 +74,7 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
     'Call exactly once only when a person explicitly asks to check, clear, resolve, or cancel an earlier unresolved physical-note submission.',
     'Supply the exact current Message ref that authorizes the check.',
     'This checks provider records and may safely clear a blocker; it never sends a new note or recalls an accepted one.',
-    'Report accepted, clear, pending, permission_denied, or unavailable literally. Never retry automatically.',
+    'Report the checked accepted, clear, pending, permission_denied, or unavailable status and the independent remainingUnresolved fact literally. Never retry automatically.',
   ].join(' '),
   inputSchema: {
     type: 'object',

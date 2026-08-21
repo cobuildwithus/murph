@@ -68,6 +68,7 @@ export const hostedPhysicalNoteRecoveryRequestSchema = z
 
 export const hostedPhysicalNoteRecoveryResponseSchema = z
   .object({
+    remainingUnresolved: z.boolean().nullable(),
     retryAfter: z.string().datetime({ offset: true }).nullable(),
     status: z.enum([
       "accepted",

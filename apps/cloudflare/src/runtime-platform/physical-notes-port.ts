@@ -44,6 +44,7 @@ export function createHostedWebPhysicalNotePort(input: {
           && error.status !== 408
         ) {
           return {
+            remainingUnresolved: null,
             retryAfter: null,
             status: error.status === 403
               ? "permission_denied" as const

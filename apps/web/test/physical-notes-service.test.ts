@@ -1268,7 +1268,11 @@ describe("recoverHostedPhysicalNote", () => {
       originAssistantInputId: buildRequest(1).originAssistantInputId,
       prisma: store.prisma,
       runtime: provider.runtime,
-    })).resolves.toEqual({ retryAfter: null, status: "clear" });
+    })).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    });
     expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
     expect(provider.create).not.toHaveBeenCalled();
   });
@@ -1286,11 +1290,54 @@ describe("recoverHostedPhysicalNote", () => {
       originAssistantInputId: buildRequest(201).originAssistantInputId,
       prisma: store.prisma,
       runtime: provider.runtime,
-    })).resolves.toEqual({ retryAfter: null, status: "accepted" });
+    })).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "accepted",
+    });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
       failureReason: "prior_note_accepted",
       providerLetterId: "ltr_recovered",
       status: "accepted",
+    });
+    expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("reports accepted evidence separately when another guard remains", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(210);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(211),
+      prisma: store.prisma,
+      runtime: createPhysicalNoteRuntime([]).runtime,
+    });
+    store.setFailureReason(blocked.physicalNoteId!, null);
+    const provider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_recovered_with_remaining",
+    }]);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(210).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "accepted",
+    });
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: "prior_note_accepted",
+      providerLetterId: "ltr_recovered_with_remaining",
+      status: "accepted",
+    });
+    expect(store.allRows().find(
+      (row) => row.id === blocked.physicalNoteId,
+    )).toMatchObject({
+      failureReason: null,
+      status: "failed",
     });
     expect(provider.create).not.toHaveBeenCalled();
   });
@@ -1308,6 +1355,7 @@ describe("recoverHostedPhysicalNote", () => {
     });
 
     expect(response).toEqual({
+      remainingUnresolved: true,
       retryAfter: expect.stringMatching(/Z$/u),
       status: "pending",
     });
@@ -1340,7 +1388,11 @@ describe("recoverHostedPhysicalNote", () => {
       originAssistantInputId: buildRequest(203).originAssistantInputId,
       prisma: store.prisma,
       runtime: provider.runtime,
-    })).resolves.toEqual({ retryAfter: null, status: "clear" });
+    })).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    });
     expect(blocked).toMatchObject({
       failureReason: "prior_note_unresolved",
       status: "failed",
@@ -1360,7 +1412,7 @@ describe("recoverHostedPhysicalNote", () => {
     expect(provider.create).not.toHaveBeenCalled();
   });
 
-  it("does not claim clear when another legacy unresolved guard remains", async () => {
+  it("reports a cleared check separately when another guard remains", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const { guardId, store } = await createLegacyPhysicalNoteGuard(208);
@@ -1385,8 +1437,9 @@ describe("recoverHostedPhysicalNote", () => {
     });
 
     expect(response).toEqual({
-      retryAfter: expect.stringMatching(/Z$/u),
-      status: "pending",
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "clear",
     });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
       failureReason: "unknown",
@@ -1414,7 +1467,11 @@ describe("recoverHostedPhysicalNote", () => {
       originAssistantInputId: buildRequest(205).originAssistantInputId,
       prisma: store.prisma,
       runtime: provider.runtime,
-    })).resolves.toEqual({ retryAfter: null, status: "pending" });
+    })).resolves.toEqual({
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "pending",
+    });
     expect(provider.create).not.toHaveBeenCalled();
   });
 
@@ -1459,7 +1516,11 @@ describe("recoverHostedPhysicalNote", () => {
       originAssistantInputId: buildRequest(207).originAssistantInputId,
       prisma: store.prisma,
       runtime: provider.runtime,
-    })).resolves.toEqual({ retryAfter: null, status: "unavailable" });
+    })).resolves.toEqual({
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "unavailable",
+    });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
       failureReason: null,
       status: "failed",

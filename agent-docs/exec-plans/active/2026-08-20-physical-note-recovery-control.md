@@ -26,7 +26,9 @@ Classification: Product change.
 
 A member can ask Murph to resolve an old physical-note attempt, and Murph will
 either confirm that it was accepted, safely clear a provider-proven absence, or
-say that the outcome is still uncertain without sending anything new.
+say that the outcome is still uncertain without sending anything new. When
+multiple independent guards exist, Murph also distinguishes the checked
+attempt's outcome from the fact that another unresolved blocker remains.
 
 ### Entry and promise
 
@@ -47,6 +49,9 @@ There is no automatic retry, notification, or background follow-up.
 - A member whose provider read is recent or indeterminate needs the blocker to
   remain in place and a clear statement that nothing new was sent and no
   automatic follow-up is running.
+- A member with multiple legacy unresolved rows needs to learn when the checked
+  oldest row was accepted or cleared, that a different blocker remains, and
+  that another current explicit request is required for one more check.
 
 ### Proof path
 
@@ -105,6 +110,11 @@ Result: Ready.
 - Recent or indeterminate evidence: the guard remains unchanged. Recent absence
   returns the existing safety-window end, while aged indeterminate evidence
   returns no false retry time; both say there is no automatic follow-up.
+- Multiple legacy guards: one provider read resolves only the checked oldest
+  guard. The result preserves its `accepted` or `clear` outcome and separately
+  reports that another unresolved submission remains; Murph asks for another
+  explicit recovery request instead of calling twice or describing the
+  successful check as indeterminate.
 - Authenticated group: participant and exact route authority are checked at
   entry and again immediately before the provider read.
 - Already clear or unavailable: no provider read occurs for an already-clear
@@ -149,12 +159,27 @@ not Web presentation.
   accepted transport-loss finding and no other cross-cutting finding. The
   correction preserves definite no-change copy for a returned Web
   `unavailable` result while keeping thrown/lost responses uncertainty-safe.
+- Final ReviewGPT round 2 verified those corrections and required a
+  retrospective for the repeated coarse-status mechanism: after Web cleared a
+  checked oldest guard, a different remaining guard could make the aggregate
+  response `pending` and cause false row-specific copy. The PR retrospective
+  chose one Web-owned response correction: `status` now describes the checked
+  guard and `remainingUnresolved` derives from the remaining-guard read already
+  on the path. No state owner, query, provider call, retry, or lifecycle was
+  added.
+- Corrected-head focused proof passes: 32 Web service tests, 16 Cloudflare port
+  tests, 32 Assistant physical-note tests, the pinned deferred provider-boundary
+  scenario, and all affected Web, Cloudflare, hosted-execution, Assistant
+  Engine, and Assistant Runtime typechecks. The production runner bundle is
+  9,390,194 bytes against a 9,397,704-byte ceiling, leaving 7,510 bytes of
+  headroom.
 - Post-finding canonical affected verification (`pnpm test:diff`): pass. This
   includes 4,006 Assistant Engine tests, 2,430 Assistant Runtime tests, 1,182
   CLI tests, 10,788 hosted Web tests plus lint/dev-smoke/production build, and
   2,612 Cloudflare Node plus 15 Workers tests.
-- Candidate is published as PR #2099; final ReviewGPT re-review and exact-head
-  CI remain open before plan closure.
+- Candidate is published as PR #2099; the next final ReviewGPT round, canonical
+  corrected-head verification, and exact-head CI remain open before plan
+  closure.
 
 Status: active
 Updated: 2026-08-20

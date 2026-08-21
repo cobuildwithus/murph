@@ -9589,7 +9589,11 @@ text(result.output);
       physicalNotes: {
         resolve: async (request) => {
           recoveryRequests.push(request)
-          return { retryAfter: null, status: 'clear' }
+          return {
+            remainingUnresolved: false,
+            retryAfter: null,
+            status: 'clear',
+          }
         },
         send: async () => {
           throw new Error('Physical-note sending is unavailable in this test.')
