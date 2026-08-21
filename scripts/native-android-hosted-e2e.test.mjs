@@ -567,9 +567,13 @@ test("trusted workflow is pinned, protected, source-bound, and shares the destru
   assert.match(workflow, /secrets\.NATIVE_IOS_E2E_DATABASE_URL/u);
   assert.match(workflow, /secrets\.NATIVE_IOS_E2E_PRIVY_TEST_PHONE/u);
   assert.match(workflow, /secrets\.NATIVE_IOS_E2E_VERCEL_TOKEN/u);
+  assert.match(workflow, /vars\.NATIVE_IOS_E2E_PRIVY_APP_ID/u);
+  assert.match(workflow, /vars\.NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID/u);
   assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_DATABASE_URL/u);
   assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_PRIVY_TEST_PHONE/u);
   assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_VERCEL_TOKEN/u);
+  assert.doesNotMatch(workflow, /vars\.NATIVE_ANDROID_E2E_PRIVY_APP_ID/u);
+  assert.doesNotMatch(workflow, /vars\.NATIVE_ANDROID_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID/u);
   assert.doesNotMatch(workflow, /create-github-app-token|NATIVE_ANDROID_E2E_GITHUB_TOKEN/u);
   assert.doesNotMatch(workflow, /upload-artifact|download-artifact/u);
   for (const line of workflow.split("\n").filter((value) => /^\s*uses:/u.test(value))) {

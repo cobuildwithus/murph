@@ -88,11 +88,11 @@ before deployment. It removes the App id and private key from its process
 environment immediately after constructing that ephemeral supplier; child
 commands and summaries never receive either value. The protected phone must be the
 same reusable E.164 identity configured in the Android repository's protected
-workflow environment. `NATIVE_ANDROID_E2E_PRIVY_APP_ID` must identify the same
-Privy application as the private Android environment's public app id, and that
-Android environment's client id must belong to it. The fixed OTP remains only
-in the private Android repository; the shared backend neither receives nor
-stores it.
+workflow environment. The shared `NATIVE_IOS_E2E_PRIVY_APP_ID` must identify
+the same Privy application as the private Android environment's public app id,
+and that Android environment's client id must belong to it. The fixed OTP
+remains only in the private Android repository; the shared backend neither
+receives nor stores it.
 
 The database URLs name the same explicit E2E/test database. The shared Vercel
 custom environment and Junction namespace remain the existing hosted-native
