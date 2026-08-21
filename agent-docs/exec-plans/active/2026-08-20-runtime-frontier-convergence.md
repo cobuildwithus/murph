@@ -1,7 +1,7 @@
 # Hosted Runtime Frontier Convergence
 
 Status: active
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -47,7 +47,53 @@ truth:
 
 ## Verification
 
-- Pending ReviewGPT implementation result.
-- Pending focused local proof.
-- Pending exact-head CI and ReviewGPT gates.
+- ReviewGPT reproduced both exact-delivery checkpoint gaps. The public runtime
+  corrections are implemented with focused red-before/green-after regressions.
+- Public package build, typecheck, and full runtime tests pass. Private Temporal
+  PR #40 is merged with its replay-safe bounded redispatch proof.
+- Pending final exact-head CI and ReviewGPT gate.
 - Pending safe deployment and production convergence proof.
+
+## Review Anomaly Retrospective
+
+Substantive round 3 triggered the required direction-level retrospective. Both
+accepted findings occurred where an exact notification crosses a checkpoint
+while the runtime can restart or yield to foreground work.
+
+The first-reviewed patch had 402 authored-source lines of churn. The current
+patch has 658. Review remediation added 356 source lines of commit churn and
+631 test lines of commit churn across two rounds:
+
+- round 1 added stable-key outbox re-resolution, terminal/retry-state reading,
+  mailbox wake projection, and restart recovery coverage;
+- round 2 added token-checked release of a prepared pre-provider dispatch,
+  a checkpoint for that release, and preemption/restore coverage.
+
+The authority decision is explicit: the outbox intent wholly owns delivery
+state, including due time, prepared/sending state, retry, ambiguity fences, and
+terminal disposition. The system mailbox owns FIFO membership and
+handled-through advancement only. Its `nextAttemptAt` is a derived scheduler
+projection of the outbox wake, not an independent delivery decision; every
+resume re-derives it from the stable outbox identity.
+
+The provider-entry contract is:
+
+1. Before provider entry, the outbox is pending/retryable. A prepared claim is
+   durably checkpointed only to fence provider dispatch.
+2. If foreground work wins before provider entry, the existing prepared token
+   restores the captured prior outbox state and that release is checkpointed.
+3. After provider entry, the existing outbox idempotency and non-idempotent
+   ambiguity rules own recovery.
+4. Retryable outbox state projects its wake to the recording mailbox item;
+   terminal outbox state retires that item and advances FIFO handled-through.
+
+Decision: continue the current joined PR without another architectural owner.
+Deletion or reverting either correction would reopen a reproduced infinite
+restart loop, duplicate-send window, or ten-minute unsent-confirmation delay.
+Moving preparation after the foreground checkpoint would require a second
+checkpoint on every normal send to preserve the pre-provider fence; the current
+extra checkpoint occurs only on the rare preemption path. Splitting the already
+complete device retry change would not reduce the exact-delivery lifecycle or
+its deploy contract. The current direction adds no queue, scheduler, state
+field, lifecycle enum, migration, compatibility path, or reconciliation loop;
+it tightens existing mailbox, outbox, and checkpoint boundaries.
