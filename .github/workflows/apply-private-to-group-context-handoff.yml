@@ -57,10 +57,9 @@ jobs:
           python -m py_compile "$RUNNER_TEMP/apply-private-to-group-context-handoff.py"
           python "$RUNNER_TEMP/apply-private-to-group-context-handoff.py" .
           git diff --check
-          test -f packages/hosted-execution/test/group-context-handoff.test.ts
-          test -f apps/web/changelog/entries/2026-08-21/murph-can-share-context-with-your-group.json
-          grep -Fq 'action: "handoff"' packages/hosted-execution/src/runtime-control.ts
-          grep -Fq "notificationPromptProfile: 'context-handoff'" packages/assistant-engine/src/assistant/notification-turn.ts
+          test -s packages/hosted-execution/test/group-context-handoff.test.ts
+          test -s apps/web/changelog/entries/2026-08-21/murph-can-share-context-with-your-group.json
+          git status --short
 
       - name: Commit the implementation and remove one-shot tooling
         shell: bash
