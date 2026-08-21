@@ -40,6 +40,7 @@ describe("environment voice script", () => {
     });
 
     expect(script.flow).toBe("fill-gaps");
+    expect(script.initialCoveredDetails).toBe(1);
     const focus = script.topics.flatMap((topic) => topic.focus ?? []);
     expect(focus).toContain("Your city or region, not your address");
     expect(focus).toContain("How fresh air enters your home");
@@ -48,6 +49,7 @@ describe("environment voice script", () => {
     expect(focus).not.toContain("Where your phone stays at night");
     expect(focus).not.toContain("Whether your home has been tested for radon");
     expect(focus).not.toContain("Your drinking water source or filter");
+    expect(script.topics[0]?.prompt).toMatch(/Leave .* for later/i);
   });
 
   it("omits declined gaps and switches to an open update only when collection gaps are resolved", () => {

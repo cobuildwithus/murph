@@ -1,7 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ENVIRONMENT_INTERVIEW_NOTE_MAX_LENGTH } from "@murphai/contracts";
+import {
+  ENVIRONMENT_INTERVIEW_NOTE_MAX_LENGTH,
+  HABITAT_DECLINED_VALUE,
+} from "@murphai/contracts";
 import {
   ArrowLeft,
   ArrowRight,
@@ -61,6 +64,36 @@ type CompletionSummary = {
   savedDetails: number;
   totalDetails: number | null;
 };
+
+export function summarizeEnvironmentInterviewCompletion(
+  script: EnvironmentVoiceScript,
+  savedValues: ReadonlyMap<string, string | number | boolean>,
+): CompletionSummary {
+  const fieldKeys = new Set(
+    script.topics.flatMap((topic) =>
+      (topic.fields ?? []).map((field) =>
+        environmentFieldKey(field.aspectId, field.indicatorId),
+      ),
+    ),
+  );
+  const savedDetails = [...fieldKeys].filter((key) => {
+    const value = savedValues.get(key);
+    return value !== undefined && value !== HABITAT_DECLINED_VALUE;
+  }).length;
+  const unresolvedDetails = [...fieldKeys].filter(
+    (key) => !savedValues.has(key),
+  ).length;
+  const totalDetails = script.totalDetails ?? fieldKeys.size;
+  return {
+    coveredDetails: Math.min(
+      totalDetails,
+      (script.initialCoveredDetails ?? 0) + savedDetails,
+    ),
+    remainingDetails: script.flow === "update" ? null : unresolvedDetails,
+    savedDetails,
+    totalDetails,
+  };
+}
 
 type EnvironmentTopicAnswer = {
   aspectId: string;
@@ -220,7 +253,6 @@ export function EnvironmentVoiceCapture({
       preview || requestedTopicId ? script : null,
     );
   const completedTopicIdsRef = useRef(new Set<string>());
-  const acceptedRefreshStartedRef = useRef(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
@@ -440,30 +472,12 @@ export function EnvironmentVoiceCapture({
 
   const completeInterview = useCallback(() => {
     const currentScript = sessionScript ?? script;
-    const fieldKeys = new Set(
-      currentScript.topics.flatMap((candidate) =>
-        (candidate.fields ?? []).map((field) =>
-          environmentFieldKey(field.aspectId, field.indicatorId),
-        ),
+    setCompletionSummary(
+      summarizeEnvironmentInterviewCompletion(
+        currentScript,
+        savedFieldValuesRef.current,
       ),
     );
-    const savedDetails = [...fieldKeys].filter((key) =>
-      savedFieldValuesRef.current.has(key),
-    ).length;
-    const totalDetails = currentScript.totalDetails ?? fieldKeys.size;
-    const coveredDetails = Math.min(
-      totalDetails,
-      (currentScript.initialCoveredDetails ?? 0) + savedDetails,
-    );
-    setCompletionSummary({
-      coveredDetails,
-      remainingDetails:
-        currentScript.flow === "update"
-          ? null
-          : Math.max(0, totalDetails - coveredDetails),
-      savedDetails,
-      totalDetails,
-    });
     clearFinishTimeout();
     finishRequestedRef.current = false;
     closeConnection();
@@ -474,7 +488,6 @@ export function EnvironmentVoiceCapture({
     clearFinishTimeout();
     closeConnection();
     completedTopicIdsRef.current = new Set();
-    acceptedRefreshStartedRef.current = false;
     handledCallIdsRef.current = new Set();
     hasTurnAudioRef.current = false;
     heardAudioRef.current = false;
@@ -681,10 +694,7 @@ export function EnvironmentVoiceCapture({
           }
         }
         setCapturedFieldKeys((current) => new Set([...current, ...fieldKeys]));
-        if (!acceptedRefreshStartedRef.current) {
-          acceptedRefreshStartedRef.current = true;
-          onAccepted?.();
-        }
+        onAccepted?.();
         return true;
       } catch (error) {
         setNotice(
@@ -1072,7 +1082,7 @@ export function EnvironmentVoiceCapture({
               completeInterview();
             } else if (action === "back") {
               goBackOneTopic();
-            } else if (action === "skip") {
+            } else if (action === "skip" || action === "next") {
               advanceCurrentTopic();
             }
             window.setTimeout(requestQueuedResponse, 0);
@@ -1603,7 +1613,7 @@ export function EnvironmentVoiceCapture({
                 <ol className="mt-4 space-y-3 sm:mt-7 sm:space-y-5" role="list">
                   {[
                     "Cover the short list shown for each topic.",
-                    "Say that you want to skip anything you do not know or prefer not to answer.",
+                    "Leave anything you do not know for later. Say skip only if you prefer not to answer.",
                     "Use Back and Next, or say where you want to go.",
                   ].map((instruction, index) => (
                     <li
@@ -1633,9 +1643,7 @@ export function EnvironmentVoiceCapture({
                 Your answers were accepted
               </h2>
               <p className="mt-3 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground">
-                Murph accepted {completionSummary.savedDetails} clear{" "}
-                {completionSummary.savedDetails === 1 ? "detail" : "details"}{" "}
-                from this conversation. Your report will update shortly.
+                Your answers are safe. Your report will update shortly.
               </p>
               {completionSummary.totalDetails ? (
                 <div className="mt-5 w-full max-w-sm text-left">
@@ -1646,10 +1654,6 @@ export function EnvironmentVoiceCapture({
                           completionSummary.totalDetails,
                       )}
                       % complete
-                    </span>
-                    <span className="text-muted-foreground">
-                      {completionSummary.coveredDetails} of{" "}
-                      {completionSummary.totalDetails}
                     </span>
                   </div>
                   <div
@@ -2133,13 +2137,13 @@ function buildRealtimeTools(
     },
     {
       description:
-        "Move through or finish the interview when the member gives a clear navigation command. Include any explicit current-topic facts spoken with the command. A skip action automatically declines every other unresolved field in the current topic.",
+        "Move through or finish the interview when the member gives a clear navigation command. Include any explicit current-topic facts spoken with the command. Next moves without changing unresolved fields. Skip declines every other unresolved field in the current topic.",
       name: "control_environment_interview",
       parameters: {
         additionalProperties: false,
         properties: {
           action: {
-            enum: ["back", "skip", "finish"],
+            enum: ["back", "next", "skip", "finish"],
             type: "string",
           },
           fields: {
@@ -2331,10 +2335,11 @@ function buildTopicInstructions(
     "If the member asks to change language, call set_environment_language.",
     "A clear request to end, stop, finish, save and end, or conclude the conversation is a finish command in any language.",
     "Navigation commands take priority over every other tool. Call control_environment_interview and include explicit current-topic facts spoken with the command.",
+    "For next, include explicit facts spoken with the command and leave other fields unresolved.",
     "For skip, include explicit facts spoken with the command. The client records every other unresolved current field as declined.",
     "When the current topic is complete, call save_environment_topics. Include the next topic only if the member clearly answered it early.",
     "When calling save_environment_topics, include the ISO 639-1 code of the language spoken in the latest answer.",
-    "Use declined only after an explicit skip, refusal, or stated lack of knowledge.",
+    "Uncertainty or lack of knowledge leaves the field unresolved and writes nothing. Use declined only for an explicit skip, refusal, or preference not to answer.",
     "Call continue_environment_interview only when the latest turn is unrelated, unintelligible, or contains no explicit new fact or interview command. Never call it for a concise answer that is semantically valid for the visible field.",
     "If a detail remains unclear, leave it unchecked. The member can see the missing fields and decide what to say next.",
   ].join("\n");
@@ -2532,7 +2537,7 @@ function normalizeLanguageCommand(value: string): string {
 
 function parseToolInterviewAction(
   value: unknown,
-): "back" | "skip" | "finish" | null {
+): "back" | "next" | "skip" | "finish" | null {
   let parsed: unknown = value;
   if (typeof value === "string") {
     try {
@@ -2543,6 +2548,7 @@ function parseToolInterviewAction(
   }
   return isRecord(parsed) &&
     (parsed.action === "back" ||
+      parsed.action === "next" ||
       parsed.action === "skip" ||
       parsed.action === "finish")
     ? parsed.action

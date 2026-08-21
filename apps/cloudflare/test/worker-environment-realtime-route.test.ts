@@ -53,15 +53,28 @@ describe("worker Environment Realtime route", () => {
     const body = init?.body;
     expect(body).toBeInstanceOf(FormData);
     const session = JSON.parse(String((body as FormData).get("session"))) as {
+      instructions: string;
       model: string;
       output_modalities: string[];
       tool_choice: string;
+      tools: Array<{
+        name: string;
+        parameters: { properties?: { action?: { enum?: string[] } } };
+      }>;
     };
     expect(session).toMatchObject({
       model: "gpt-realtime-2.1",
       output_modalities: ["text"],
       tool_choice: "required",
     });
+    expect(session.instructions).toContain(
+      "Uncertainty or lack of knowledge leaves the field unresolved",
+    );
+    expect(
+      session.tools.find((tool) =>
+        tool.name === "control_environment_interview"
+      )?.parameters.properties?.action?.enum,
+    ).toEqual(["back", "next", "skip", "finish"]);
   });
 
   it("fails closed when the provider key is unavailable", async () => {

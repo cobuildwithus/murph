@@ -51,7 +51,9 @@ vi.mock(
       disabled?: boolean;
       onAccepted?: () => void;
       triggerLabel: ReactNode;
-    }) =>
+    }) => createElement(
+      "div",
+      null,
       createElement(
         "button",
         {
@@ -65,6 +67,13 @@ vi.mock(
         },
         triggerLabel,
       ),
+      createElement("button", {
+        "aria-label": "Accept another realtime topic",
+        hidden: true,
+        onClick: () => onAccepted?.(),
+        type: "button",
+      }),
+    ),
   }),
 );
 
@@ -177,6 +186,50 @@ test("waits for changed Environment values after realtime topic processing", asy
       refreshOptions?.requestRuntimeRefreshUntilAfterRequest,
       undefined,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
+
+test("restarts replica tracking for every accepted realtime topic", async () => {
+  vi.useFakeTimers();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async () => Response.json({ processing: false }));
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const acceptAnother = rendered.window.document.querySelector(
+      '[aria-label="Accept another realtime topic"]',
+    );
+    assert.ok(acceptAnother instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      acceptAnother.click();
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+
+    await act(async () => {
+      acceptAnother.click();
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();

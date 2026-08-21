@@ -18,6 +18,7 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
+  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -32,6 +33,7 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -10491,6 +10493,106 @@ describe("hosted workspace runtime entrypoint", () => {
     } finally {
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("environment interview mode applies only Habitat answers and refreshes the browser replica", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const interviewItem = createMailboxItem({
+      dedupeKey: "environment-interview:entrypoint-isolation",
+      id: "mailbox_item_environment_interview_entrypoint_isolation",
+      kind: "environment-interview.completed",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueEnvironmentInterviewSystemMailboxItemForTest({
+        item: interviewItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/environment-interview-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_environment_interview_entrypoint_isolation",
+            processingMode: "environment_interview",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/environment-interview-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported Environment work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [createMailboxItem({
+                id: "mailbox_item_environment_interview_unrelated_conversation",
+                kind: "conversation.message",
+                lane: "conversation",
+                laneSeq: "1",
+              })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assert.equal(input.foregroundCausalOnly, true);
+            return await runHostedWorkspaceAssistantPhase(input);
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"]],
+      );
+      await expect(readHabitatAspect({
+        slug: "sleep-environment",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        indicators: { night_temp_c: 19 },
+      });
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.prepareHostedCodexRuntimeEnvironment).not.toHaveBeenCalled();
+      expect(mocks.prepareHostedCodexAssistantProcess).not.toHaveBeenCalled();
+      expect(result.status).toBe("idle");
+    } finally {
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -41115,6 +41217,52 @@ async function enqueueDeviceSyncSystemMailboxItemForTest(input: {
     item: createResolvedDeviceSyncSystemMailboxItem(input.item),
     vaultRoot: input.vaultRoot,
     wake: createDeviceSyncSystemWakeForMailboxItem(input.item),
+  });
+}
+
+async function enqueueEnvironmentInterviewSystemMailboxItemForTest(input: {
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}) {
+  return await enqueueHostedSystemMailboxItem({
+    item: {
+      item: input.item,
+      payload: {
+        payloadCiphertext: "ciphertext",
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        requestId: "request_entrypoint_environment_interview",
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "run-environment-interview",
+        advanceProgress: true,
+        itemRef: {
+          id: input.item.id,
+          kind: input.item.kind,
+          lane: input.item.lane,
+          laneSeq: input.item.laneSeq,
+        },
+        state: "route",
+      },
+    },
+    vaultRoot: input.vaultRoot,
+    wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
+      completedAt: input.item.occurredAt,
+      completionId: "550e8400-e29b-41d4-a716-446655440000",
+      eventId: input.item.dedupeKey,
+      memberId: TEST_USER_ID,
+      occurredAt: input.item.occurredAt,
+      topics: [{
+        answers: [{
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+          note: "The bedroom stays near 19 degrees at night.",
+          value: 19,
+        }],
+        topicId: "sleep:0",
+      }],
+    }),
   });
 }
 

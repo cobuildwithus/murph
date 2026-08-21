@@ -76,6 +76,7 @@ import {
   addDeclinedAnswersForSkippedTopic,
   EnvironmentVoiceCapture,
   microphoneAccessNotice,
+  summarizeEnvironmentInterviewCompletion,
 } from "../app/(dashboard)/environment/environment-voice-capture";
 import type { EnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
 import { renderClientComponent } from "./render-client-component";
@@ -245,7 +246,43 @@ test("turns every unresolved field into a decline on skip", () => {
   ]);
 });
 
+test("does not count declined fields as clear progress", () => {
+  assert.deepEqual(
+    summarizeEnvironmentInterviewCompletion(
+      { ...SCRIPT, initialCoveredDetails: 0, totalDetails: 2 },
+      new Map([
+        ["sleep-environment.night_temp_c", "declined"],
+        ["workspace.work_mode", "declined"],
+      ]),
+    ),
+    {
+      coveredDetails: 0,
+      remainingDetails: 0,
+      savedDetails: 0,
+      totalDetails: 2,
+    },
+  );
+});
+
 test("accepts a realtime field tool call and starts the report refresh", async () => {
+  const runtimeScript: EnvironmentVoiceScript = {
+    ...SCRIPT,
+    topics: [
+      ...SCRIPT.topics,
+      {
+        eyebrow: "Light",
+        fields: [{
+          aspectId: "light",
+          indicatorId: "daylight",
+          label: "Daylight access",
+          valueType: { kind: "boolean" },
+        }],
+        id: "light:0",
+        prompt: "Describe the item below.",
+        title: "Your daylight",
+      },
+    ],
+  };
   const originalPeerConnection = Reflect.get(globalThis, "RTCPeerConnection");
   const dataChannel = new FakeDataChannel();
   const track = {
@@ -294,7 +331,7 @@ test("accepts a realtime field tool call and starts the report refresh", async (
   const rendered = await renderClientComponent(
     createElement(EnvironmentVoiceCapture, {
       onAccepted,
-      script: SCRIPT,
+      script: runtimeScript,
       triggerLabel: "Start report",
     }),
   );
@@ -341,6 +378,54 @@ test("accepts a realtime field tool call and starts the report refresh", async (
       assert.equal(onAccepted.mock.calls.length, 1);
       assert.match(rendered.window.document.body.textContent ?? "", /Workspace/);
     });
+    await act(async () => {
+      dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({
+            fields: [
+              {
+                aspectId: "workspace",
+                indicatorId: "work_mode",
+                value: "home",
+              },
+            ],
+          }),
+          call_id: "call_2",
+          name: "mark_environment_fields",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.equal(onAccepted.mock.calls.length, 2);
+      assert.match(rendered.window.document.body.textContent ?? "", /Your daylight/);
+    });
+    await act(async () => {
+      dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({ action: "next" }),
+          call_id: "call_3",
+          name: "control_environment_interview",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.match(
+        rendered.window.document.body.textContent ?? "",
+        /Your answers were accepted/,
+      );
+    });
+    assert.equal(
+      fetchMock.mock.calls.filter(
+        ([input]) => input === "/api/environment/realtime/topics",
+      ).length,
+      2,
+    );
     const topicRequest = fetchMock.mock.calls.find(
       ([input]) => input === "/api/environment/realtime/topics",
     );

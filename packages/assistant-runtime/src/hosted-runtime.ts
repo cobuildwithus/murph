@@ -414,6 +414,14 @@ const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS = [
   "apply-runtime-control-request",
   "run-device-sync-wake",
 ] as const;
+const HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_ROUTE_ACTIONS = [
+  "apply-runtime-control-request",
+  "run-environment-interview",
+] as const;
+const HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_KINDS = [
+  "environment-interview.completed",
+  "runtime.browser-vault-refresh-requested",
+] as const;
 const HOSTED_INITIAL_BOOTSTRAP_PENDING_REASON_CODE = "bootstrap.pending";
 const HOSTED_RUNTIME_ISSUE_POST_CHECKPOINT_EXPORT_TIMEOUT_MS = 2_500;
 const HOSTED_VAULT_FORMAT_MIGRATION_MAX_BUNDLES = 500;
@@ -1915,6 +1923,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     const systemMailboxProcessingMode =
       input.request.processingMode === "system_mailbox";
+    const environmentInterviewProcessingMode =
+      input.request.processingMode === "environment_interview";
     // This marker can only suppress assistant execution. The Cloudflare
     // boundary sets it when platform policy has already made the normal
     // assistant handoff impossible. Assistant sources remain durable in the
@@ -1976,7 +1986,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       });
       return preparedCodexRuntime;
     };
-    if (!systemMailboxProcessingMode) {
+    if (!systemMailboxProcessingMode && !environmentInterviewProcessingMode) {
       hostedCodexRuntime = await prepareInvocationCodexRuntime();
     }
     assertRuntimeNotAborted();
@@ -3006,8 +3016,12 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       }
 
       const modelFreePass = await runSystemMailboxLifecycleItem({
-        allowedRouteActions: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
-        allowedWakeKinds: HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
+        allowedRouteActions: environmentInterviewProcessingMode
+          ? HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_ROUTE_ACTIONS
+          : HOSTED_SYSTEM_MAILBOX_MODEL_FREE_ROUTE_ACTIONS,
+        allowedWakeKinds: environmentInterviewProcessingMode
+          ? HOSTED_ENVIRONMENT_INTERVIEW_MODEL_FREE_KINDS
+          : HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS,
         stagePrefix: "system_mailbox.model_free",
       });
       assertRuntimeNotAborted();
@@ -3037,6 +3051,9 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
     };
     if (initialMailboxImportResult.bootstrapPending) {
       return await returnInitialMailboxImportBeforeForeground();
+    }
+    if (environmentInterviewProcessingMode) {
+      return await returnSystemMailboxProcessingModeAfterInitialImport();
     }
     let systemMailboxForegroundWakePrefetch: HostedMailboxPrefixPrefetch | null = null;
     let systemMailboxForegroundWakeResult: HostedWorkspaceInvocationResult | null = null;

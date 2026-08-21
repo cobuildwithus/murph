@@ -1,5 +1,6 @@
 import {
   ENVIRONMENT_INTERVIEW_TOPIC_GROUPS,
+  HABITAT_DECLINED_VALUE,
   listEnvironmentInterviewFields,
   type HabitatIndicatorValueType,
 } from "@murphai/contracts";
@@ -286,7 +287,10 @@ function buildMissingScript(
   );
   const totalDetails = interviewFields.length;
   const initialCoveredDetails = interviewFields.filter(
-    ({ aspectId, indicator }) => values[aspectId]?.[indicator.id] !== undefined,
+    ({ aspectId, indicator }) => {
+      const value = values[aspectId]?.[indicator.id];
+      return value !== undefined && value !== HABITAT_DECLINED_VALUE;
+    },
   ).length;
   const topics = ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap((group) => {
     const missingFields = listEnvironmentInterviewFields(group.id)
@@ -365,9 +369,9 @@ function toVoiceField({
 
 function topicPrompt(fieldCount: number): string {
   if (fieldCount === 1) {
-    return "Describe the item below. If you do not know, say so.";
+    return "Describe the item below. Leave it for later if you do not know.";
   }
-  return "Describe each item below. If you do not know something, say so.";
+  return "Describe each item below. Leave anything unknown for later.";
 }
 
 function chunk<T>(values: readonly T[], size: number): T[][] {

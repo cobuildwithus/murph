@@ -140,7 +140,7 @@ function buildEnvironmentRealtimeSession() {
       "Navigation commands take priority over every other tool. Call control_environment_interview and include explicit current-topic facts spoken with the command.",
       "When the current topic has enough clear answers, call save_environment_topics.",
       "A topic can also be completed when the member explicitly declines its remaining fields.",
-      "Use the string declined only for an explicit skip, refusal, or stated lack of knowledge.",
+      "Uncertainty or lack of knowledge leaves the field unresolved and writes nothing. Use the string declined only for an explicit skip, refusal, or preference not to answer.",
       "If the member clearly answers the next visible topic early, include that topic too.",
       "When saving, include the ISO 639-1 code of the language spoken in the latest answer.",
     ].join(" "),
@@ -215,7 +215,7 @@ function buildEnvironmentRealtimeSession() {
           additionalProperties: false,
           properties: {
             action: {
-              enum: ["back", "skip", "finish"],
+              enum: ["back", "next", "skip", "finish"],
               type: "string",
             },
             fields: {

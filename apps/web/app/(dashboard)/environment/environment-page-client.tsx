@@ -108,6 +108,7 @@ export default function EnvironmentPageClient({
   const voiceRefreshStartedAtRef = useRef<number | null>(null);
   const voiceRecheckRequestedAtRef = useRef(0);
   const voiceVaultRefreshRequestedRef = useRef(false);
+  const voiceAcceptanceGenerationRef = useRef(0);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -144,6 +145,7 @@ export default function EnvironmentPageClient({
     displayedVoiceRefreshState.status === "processing" ||
     displayedVoiceRefreshState.status === "delayed";
   const onVoiceAccepted = useCallback(() => {
+    voiceAcceptanceGenerationRef.current += 1;
     voiceRefreshBaselineRef.current = valuesSignature;
     voiceRefreshBaselineDataVersionRef.current = dataVersion;
     voiceRefreshStartedAtRef.current = Date.now();
@@ -200,19 +202,7 @@ export default function EnvironmentPageClient({
       voiceRefreshState.status === "processing"
         ? voiceRefreshState.baselineValues
         : voiceRefreshBaselineRef.current;
-    if (
-      baseline &&
-      (valuesSignature !== baseline ||
-        (voiceRefreshBaselineDataVersionRef.current !== null &&
-          dataVersion !== voiceRefreshBaselineDataVersionRef.current))
-    ) {
-      voiceVaultRefreshRequestedRef.current = false;
-      setVoiceRefreshState({
-        baselineValues: baseline,
-        status: "completed",
-      });
-      return;
-    }
+    const acceptanceGeneration = voiceAcceptanceGenerationRef.current;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const poll = async () => {
@@ -238,18 +228,34 @@ export default function EnvironmentPageClient({
           const refreshBaseline = baseline ?? valuesSignature;
           const refreshBaselineDataVersion =
             voiceRefreshBaselineDataVersionRef.current;
+          let observedUpdatedReplica = false;
           await refresh({
             background: true,
-            requestRuntimeRefreshUntil: (nextClient, nextRef) =>
-              nextRef.dataVersion !== refreshBaselineDataVersion ||
-              JSON.stringify({
-                indicatorNotes:
-                  selectEnvironmentHabitatIndicatorNotes(nextClient),
-                values: selectEnvironmentHabitatValues(nextClient),
-              }) !== refreshBaseline,
+            requestRuntimeRefreshUntil: (nextClient, nextRef) => {
+              observedUpdatedReplica =
+                nextRef.dataVersion !== refreshBaselineDataVersion ||
+                JSON.stringify({
+                  indicatorNotes:
+                    selectEnvironmentHabitatIndicatorNotes(nextClient),
+                  values: selectEnvironmentHabitatValues(nextClient),
+                }) !== refreshBaseline;
+              return observedUpdatedReplica;
+            },
           }).catch(() => {
             voiceVaultRefreshRequestedRef.current = false;
           });
+          if (
+            !cancelled &&
+            voiceAcceptanceGenerationRef.current === acceptanceGeneration &&
+            observedUpdatedReplica
+          ) {
+            voiceVaultRefreshRequestedRef.current = false;
+            setVoiceRefreshState({
+              baselineValues: refreshBaseline,
+              status: "completed",
+            });
+            return;
+          }
         }
         if (!cancelled) {
           timeoutId = setTimeout(
