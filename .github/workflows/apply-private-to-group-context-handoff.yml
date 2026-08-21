@@ -8,25 +8,19 @@ on:
       - .github/handoff-codemod-trigger
       - .github/workflows/apply-private-to-group-context-handoff.yml
       - scripts/apply-private-to-group-context-handoff.mjs
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - reopened
-      - synchronize
-    paths:
-      - .github/handoff-codemod-trigger
-      - .github/workflows/apply-private-to-group-context-handoff.yml
-      - scripts/apply-private-to-group-context-handoff.mjs
+      - scripts/apply-private-to-group-context-handoff.py.gz.b64
 
 permissions:
   contents: write
 
+concurrency:
+  group: apply-private-to-group-context-handoff
+  cancel-in-progress: false
+
 jobs:
   apply:
-    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'feat/private-to-group-context-handoff'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out feature branch
         uses: actions/checkout@v4
@@ -34,34 +28,45 @@ jobs:
           fetch-depth: 0
           ref: feat/private-to-group-context-handoff
 
-      - name: Apply bounded codemod
+      - name: Configure commit identity
         shell: bash
         run: |
           set -euo pipefail
-          sed -i '4i const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX = "${HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX}";' scripts/apply-private-to-group-context-handoff.mjs
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("scripts/apply-private-to-group-context-handoff.mjs")
-          source = path.read_text()
-          before = '''  `  HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,\\n  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,`,
-  `  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,\\n  HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,\\n  HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,`,'''
-          after = '''  `  HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,`,
-  `  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,\\n  HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,`,'''
-          if source.count(before) != 1:
-              raise SystemExit("parser import codemod anchor is not unique")
-          path.write_text(source.replace(before, after))
-          PY
-          node scripts/apply-private-to-group-context-handoff.mjs
-
-      - name: Commit the implementation and remove the one-shot tooling
-        shell: bash
-        run: |
-          set -euo pipefail
-          git rm scripts/apply-private-to-group-context-handoff.mjs .github/workflows/apply-private-to-group-context-handoff.yml .github/handoff-codemod-trigger
-          git add --all
-          git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge the current target branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git merge --no-edit origin/main
+
+      - name: Apply the bounded codemod
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode scripts/apply-private-to-group-context-handoff.py.gz.b64 \
+            | gzip --decompress \
+            > "$RUNNER_TEMP/apply-private-to-group-context-handoff.py"
+          python -m py_compile "$RUNNER_TEMP/apply-private-to-group-context-handoff.py"
+          python "$RUNNER_TEMP/apply-private-to-group-context-handoff.py" .
+          git diff --check
+          test -f packages/hosted-execution/test/group-context-handoff.test.ts
+          test -f apps/web/changelog/entries/2026-08-21/murph-can-share-context-with-your-group.json
+          grep -Fq 'action: "handoff"' packages/hosted-execution/src/runtime-control.ts
+          grep -Fq "notificationPromptProfile: 'context-handoff'" packages/assistant-engine/src/assistant/notification-turn.ts
+
+      - name: Commit the implementation and remove one-shot tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm \
+            .github/handoff-codemod-trigger \
+            .github/workflows/apply-private-to-group-context-handoff.yml \
+            scripts/apply-private-to-group-context-handoff.mjs \
+            scripts/apply-private-to-group-context-handoff.py.gz.b64
+          git add --all
+          git diff --cached --check
           git commit -m "Add private-to-group context handoff"
           git push origin HEAD:feat/private-to-group-context-handoff
