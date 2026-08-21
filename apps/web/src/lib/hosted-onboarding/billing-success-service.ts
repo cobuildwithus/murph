@@ -79,9 +79,9 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   });
   if (activationOutcome.newlyActivatedMemberIds.length > 0) {
     scheduleHostedSignupNotificationEmails({
+      activationSurface: "website",
       memberIds: activationOutcome.newlyActivatedMemberIds,
       prisma,
-      surface: "website",
     });
   }
   if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {

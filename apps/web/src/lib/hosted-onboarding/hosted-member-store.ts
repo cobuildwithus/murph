@@ -397,7 +397,6 @@ export async function claimHostedMemberSignupNotificationEmailAttempt(input: {
 }): Promise<boolean> {
   const result = await input.prisma.hostedMember.updateMany({
     data: {
-      signupNotificationContextEncrypted: null,
       signupNotificationEmailAttemptedAt: input.attemptedAt,
     },
     where: {

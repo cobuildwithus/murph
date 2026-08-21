@@ -687,9 +687,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma,
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "website",
       memberIds: ["member_123"],
       prisma,
-      surface: "website",
     });
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
       hostedExecutionEventId: "wake_123",
@@ -738,9 +738,9 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     })).rejects.toThrow("cleanup unavailable");
 
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "website",
       memberIds: ["member_123"],
       prisma,
-      surface: "website",
     });
     expect(
       mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],

@@ -143,13 +143,13 @@ describe("hosted signup notification email", () => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toEqual({
         from: "Murph <welcome@example.com>",
-        subject: "New Murph signup from Atlanta",
+        subject: "New Murph signup near Atlanta",
         text: [
-          "New Murph signup from Atlanta.",
+          "New Murph signup near Atlanta.",
           "",
           "Signed up: Aug 20, 2026, 8:07 PM (America/New_York)",
-          "Source: Website",
-          "Location: Atlanta, GA, US",
+          "Signed up via: Website",
+          "Approximate location (network): Atlanta, GA, US",
         ].join("\n"),
         to: ["Founder@example.com", "cofounder@example.com"],
       });
@@ -161,6 +161,7 @@ describe("hosted signup notification email", () => {
     };
 
     await expect(sendHostedSignupNotificationEmailForMember({
+      activationSurface: "telegram",
       env: {
         HOSTED_SIGNUP_NOTIFICATION_EMAILS: "Founder@example.com, cofounder@example.com",
         HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
@@ -282,7 +283,7 @@ describe("hosted signup notification email", () => {
       },
       fetchImpl: fetchMock,
       memberId: "member_123",
-      surface: "website",
+      activationSurface: "website",
     })).resolves.toMatchObject({ status: "sent" });
 
     expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
@@ -315,7 +316,7 @@ describe("hosted signup notification email", () => {
     });
   });
 
-  it("falls back to the member creation time and activation surface", async () => {
+  it("labels fallback time and activation surface without claiming signup provenance", async () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
       expect(payload).toMatchObject({
@@ -324,7 +325,7 @@ describe("hosted signup notification email", () => {
           "New Murph signup.",
           "",
           "Signed up: May 1, 2026, 12:00 AM (UTC)",
-          "Source: Telegram",
+          "Activated via: Telegram",
         ].join("\n"),
       });
 
@@ -341,7 +342,7 @@ describe("hosted signup notification email", () => {
       },
       fetchImpl: fetchMock,
       memberId: "member_123",
-      surface: "telegram",
+      activationSurface: "telegram",
     })).resolves.toMatchObject({ status: "sent" });
   });
 
@@ -489,9 +490,9 @@ describe("hosted signup notification email", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     scheduleHostedSignupNotificationEmails({
+      activationSurface: "website",
       memberIds: ["member_1", "member_2", "member_1"],
       prisma: mocks.prisma as never,
-      surface: "website",
     });
 
     expect(nextServerMocks.after).toHaveBeenCalledOnce();

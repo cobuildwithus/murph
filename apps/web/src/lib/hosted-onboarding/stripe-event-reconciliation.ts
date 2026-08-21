@@ -936,7 +936,6 @@ async function processClaimedHostedStripeEvent(
       scheduleHostedSignupNotificationEmails({
         memberIds: result.newlyActivatedMemberIds,
         prisma,
-        surface: "website",
       });
     }
     if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {

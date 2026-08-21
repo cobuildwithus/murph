@@ -2164,8 +2164,20 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedSignupNotificationContextMigrationSql).toContain(
       'ADD COLUMN "signup_notification_context_encrypted" TEXT',
     );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      "CREATE FUNCTION clear_hosted_signup_notification_context_on_attempt()",
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_signup_notification_context_attempt_clear"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'BEFORE UPDATE OF\n  "signup_notification_email_attempted_at",\n  "signup_notification_context_encrypted"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).not.toContain(
+      'ADD COLUMN "signup_notification_context_encrypted" TEXT NOT NULL',
+    );
     expect(hostedSignupNotificationContextMigrationSql).not.toMatch(
-      /UPDATE|NOT\s+NULL|CREATE\s+(?:UNIQUE\s+)?INDEX/iu,
+      /CREATE\s+(?:UNIQUE\s+)?INDEX/iu,
     );
     expect(hostedSubscriptionCancellationEmailSentMigrationSql).toContain(
       'ADD COLUMN "subscription_cancellation_email_sent_at" TIMESTAMP(3)',

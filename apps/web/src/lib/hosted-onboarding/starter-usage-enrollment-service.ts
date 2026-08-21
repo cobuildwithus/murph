@@ -489,9 +489,9 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
 
   if (outcome.effects.signupNotificationEmailMemberId) {
     scheduleHostedSignupNotificationEmails({
+      activationSurface: resolveHostedStarterSignupSurface(policy.source),
       memberIds: [outcome.effects.signupNotificationEmailMemberId],
       prisma,
-      surface: resolveHostedStarterSignupSurface(policy.source),
     });
   }
 

@@ -1586,15 +1586,19 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   including Family sponsorship. The first authenticated website or companion
   request may write one schema-closed signup context while the notification is
   pending: server occurrence time, validated IANA time zone, closed signup
-  surface, and Vercel's advisory city/region/country headers. Web encrypts that
-  context with the member control root, never stores the request IP or precise
-  coordinates, and atomically clears the ciphertext when it claims the durable
-  email attempt. The email uses member creation time in UTC plus the activation
-  surface when no request context exists, and excludes member and provider
-  event identifiers. A welcome-only or later paid-billing event is not signup
-  evidence. Later successful payments and accepted-invite replays must not
-  repeat activation side effects, and email paths must not persist provider
-  payloads or expose recipients in logs.
+  surface, and Vercel's advisory network city/region/country headers. Web
+  encrypts that context with the member control root and never stores the
+  request IP or precise coordinates. A database trigger clears the ciphertext
+  for every durable email-attempt claim, including one from a rollback runner,
+  and prevents a later context update from restoring it. The email labels the
+  network location as approximate. It uses member creation time in UTC and
+  labels an exact fallback as the activation surface when no request context
+  exists; batch activation omits the source when it lacks per-member
+  provenance. The email excludes member and provider event identifiers. A
+  welcome-only or later paid-billing event is not signup evidence. Later
+  successful payments and accepted-invite replays must not repeat activation
+  side effects, and email paths must not persist provider payloads or expose
+  recipients in logs.
 
   Reserved support escalation uses the existing product-feedback callback as a
   one-turn explicit action. A verified-private request for Murph human support

@@ -21,8 +21,8 @@ Updated: 2026-08-20
   writer wins while the notification remains pending, and the attempt claim
   clears it atomically before provider entry.
 - The email omits member ID and Stripe event metadata, uses a location-aware
-  subject when possible, and renders the signup date/time in the captured local
-  time zone.
+  subject when possible, explicitly labels network location as approximate, and
+  renders the signup date/time in the captured local time zone.
 - Context-free activation paths still send a truthful fallback notification.
 - Focused Web tests, typecheck, migration/schema checks, required ReviewGPT
   gates, and exact-head CI pass on a pushed PR.
@@ -41,21 +41,36 @@ Updated: 2026-08-20
 - Technical constraints: no provider/KMS work inside database transactions;
   reuse prepared control roots; preserve canonical access checks, durable
   per-member claiming, plain-text Resend delivery, and sanitized logs.
-- Product/process constraints: internal-only Product UX; coarse IP location is
-  advisory display data, never identity or authorization; no changelog item;
-  use the worktree/PR lane and exact pushed-head completion reviews.
+- Product/process constraints: coarse IP location is advisory display data,
+  never identity or authorization; no changelog item; use the worktree/PR lane
+  and exact pushed-head completion reviews.
+
+## Product UX walkthrough
+
+- Internal recipient: gets a concise notice with no opaque IDs. Captured Web or
+  companion context says `Signed up via`; an exact context-free activation path
+  says `Activated via`; a batch path with no per-member provenance omits the
+  source. Network location is visibly approximate in both subject and body.
+- Member represented by the notice: has no IP address, coordinates, or postal
+  data retained or emailed. The bounded network projection is encrypted only
+  while the one-shot notice is pending, then the database clears it before
+  provider egress even if an older application runner performs the claim.
 
 ## Risks and mitigations
 
 1. Risk: IP-derived location is personal and can be absent or inaccurate.
-   Mitigation: capture only bounded coarse fields, label the source as signup
-   context, encrypt before persistence, omit missing values, and clear the
+   Mitigation: capture only bounded coarse fields, call the network projection
+   approximate, encrypt before persistence, omit missing values, and clear the
    ciphertext at the durable attempt claim.
 2. Risk: mixed deploy versions observe the new column.
-   Mitigation: use one nullable additive column; old Web ignores it, new Web
-   treats absence as a supported fallback, and rollback leaves only inert
-   encrypted data that a later compatible attempt clears.
-3. Risk: notification enrichment moves work onto activation transactions.
+   Mitigation: use one nullable additive column plus a database-owned clear
+   trigger; old Web ignores the column, and even an old attempt-only claim
+   clears pending ciphertext before the row update completes.
+3. Risk: an activation mechanism can be mistaken for the member's signup path.
+   Mitigation: distinguish captured signup surface from fallback activation
+   surface and omit the source for multi-member billing activation without
+   exact member-level provenance.
+4. Risk: notification enrichment moves work onto activation transactions.
    Mitigation: use the already-prepared local encryption root inside the auth
    transaction; all email reads, claim, formatting, and provider work remain in
    the existing post-commit task.

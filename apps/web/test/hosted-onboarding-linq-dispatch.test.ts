@@ -6579,9 +6579,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       timeoutMs: expect.any(Number),
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "imessage",
       memberIds: ["member_family"],
       prisma,
-      surface: "imessage",
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],

@@ -47,9 +47,9 @@ export const HostedSignupNotificationEmailError = HostedResendPlainTextEmailErro
 export type HostedSignupNotificationEmailError = HostedResendPlainTextEmailError;
 
 export function scheduleHostedSignupNotificationEmails(input: {
+  activationSurface?: HostedSignupSurface;
   memberIds: readonly string[];
   prisma: PrismaClient;
-  surface?: HostedSignupSurface;
 }): void {
   const memberIds = [...new Set(input.memberIds)];
   if (memberIds.length === 0) {
@@ -59,9 +59,9 @@ export function scheduleHostedSignupNotificationEmails(input: {
   const task = async () => {
     for (const memberId of memberIds) {
       await sendHostedSignupNotificationEmailForMemberBestEffort({
+        activationSurface: input.activationSurface,
         memberId,
         prisma: input.prisma,
-        surface: input.surface,
       });
     }
   };
@@ -74,12 +74,12 @@ export function scheduleHostedSignupNotificationEmails(input: {
 }
 
 export async function sendHostedSignupNotificationEmailForMemberBestEffort(input: {
+  activationSurface?: HostedSignupSurface;
   env?: HostedSignupNotificationEmailEnv;
   fetchImpl?: typeof fetch;
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
-  surface?: HostedSignupSurface;
 }): Promise<void> {
   try {
     await sendHostedSignupNotificationEmailForMember(input);
@@ -98,12 +98,12 @@ export async function sendHostedSignupNotificationEmailForMemberBestEffort(input
 }
 
 export async function sendHostedSignupNotificationEmailForMember(input: {
+  activationSurface?: HostedSignupSurface;
   env?: HostedSignupNotificationEmailEnv;
   fetchImpl?: typeof fetch;
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
-  surface?: HostedSignupSurface;
 }): Promise<HostedSignupNotificationEmailResult> {
   const config = readHostedSignupNotificationEmailConfig(input.env ?? process.env);
 
@@ -174,8 +174,8 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     subject: buildHostedSignupNotificationEmailSubject(signupSnapshot.context),
     text: buildHostedSignupNotificationEmailText({
       customerEmail,
+      activationSurface: input.activationSurface,
       fallbackOccurredAt: signupSnapshot.createdAt,
-      fallbackSurface: input.surface,
       signupContext: signupSnapshot.context,
     }),
     to: config.recipients,
@@ -229,15 +229,15 @@ function readHostedSignupNotificationEmailRecipients(value: string | undefined):
 }
 
 function buildHostedSignupNotificationEmailText(input: {
+  activationSurface?: HostedSignupSurface;
   customerEmail?: string | null;
   fallbackOccurredAt: Date;
-  fallbackSurface?: HostedSignupSurface;
   signupContext: HostedSignupNotificationContextV1 | null;
 }): string {
   const location = formatHostedSignupLocation(input.signupContext?.location);
   const occurredAt = input.signupContext?.occurredAt
     ?? input.fallbackOccurredAt.toISOString();
-  const surface = input.signupContext?.surface ?? input.fallbackSurface;
+  const signupSurface = input.signupContext?.surface;
   const timeZone = input.signupContext?.timeZone ?? "UTC";
   const subject = buildHostedSignupNotificationEmailSubject(input.signupContext);
 
@@ -245,8 +245,12 @@ function buildHostedSignupNotificationEmailText(input: {
     `${subject}.`,
     "",
     `Signed up: ${formatHostedSignupLocalDateTime(occurredAt, timeZone)} (${timeZone})`,
-    surface ? `Source: ${formatHostedSignupSurface(surface)}` : null,
-    location ? `Location: ${location}` : null,
+    signupSurface
+      ? `Signed up via: ${formatHostedSignupSurface(signupSurface)}`
+      : input.activationSurface
+      ? `Activated via: ${formatHostedSignupSurface(input.activationSurface)}`
+      : null,
+    location ? `Approximate location (network): ${location}` : null,
     input.customerEmail ? `Email: ${input.customerEmail}` : null,
   ].filter((line): line is string => line !== null).join("\n");
 }
@@ -254,9 +258,8 @@ function buildHostedSignupNotificationEmailText(input: {
 function buildHostedSignupNotificationEmailSubject(
   context: HostedSignupNotificationContextV1 | null,
 ): string {
-  const location = formatHostedSignupLocation(context?.location);
-  return location
-    ? `${HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT} from ${context?.location?.city ?? location}`
+  return context?.location?.city
+    ? `${HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT} near ${context.location.city}`
     : HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT;
 }
 

@@ -121,7 +121,6 @@ describe("hosted-member-store", () => {
 
     expect(updateMany).toHaveBeenCalledWith({
       data: {
-        signupNotificationContextEncrypted: null,
         signupNotificationEmailAttemptedAt: attemptedAt,
       },
       where: {
