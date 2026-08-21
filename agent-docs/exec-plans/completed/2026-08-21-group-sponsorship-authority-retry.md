@@ -1,6 +1,6 @@
 # Keep automatic sponsorship refills retryable
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-21
 
@@ -86,16 +86,17 @@ Updated: 2026-08-21
 
 ## Verification
 
-- Commands to run:
-  - Focused Vitest for runtime access and sponsorship refill dispatch.
-  - Local PostgreSQL concurrency proof when the repository test database is
-    available.
-  - `pnpm --filter @murphai/web typecheck`.
-  - Changelog generation and focused changelog tests.
-  - Required GitHub Actions and exact-head ReviewGPT gates.
-- Expected outcomes:
-  - Valid authority plus a retryable/unknown access-check failure leaves the
-    automatic purchase retryable and does not cancel the untouched intent.
-  - Canonical inactive access still returns `false` and preserves the safe
-    no-charge path.
-  - No provider-input, hot reply-path, schema, or cross-deploy contract change.
+- Focused runtime-access, purchase-service, and sponsorship-dispatch Vitest:
+  219 tests passed.
+- Focused changelog Vitest: 57 tests passed.
+- `pnpm --filter @murphai/hosted-web typecheck`: passed.
+- Focused ESLint for the changed source and tests: passed.
+- PR evidence guard unit tests: 25 tests passed.
+- Exact-head preliminary Product UX, prompt, frontend, and coverage review:
+  passed with no findings.
+- Exact-head final cross-cutting review: passed with no findings.
+- Direct behavior proof confirms retryable and unknown access-check failures
+  leave the automatic purchase untouched for the next bounded sweep, while
+  canonical inactive access preserves the safe no-charge path.
+- No provider-input, hot reply-path, schema, or cross-deploy contract changed.
+Completed: 2026-08-21
