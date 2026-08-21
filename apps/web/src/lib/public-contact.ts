@@ -1,5 +1,7 @@
 export const MURPH_SUPPORT_EMAIL = "support@withmurph.ai";
 export const MURPH_LEGAL_EMAIL = "legal@justco.build";
+export const MURPH_SECURITY_MAILTO_HREF =
+  `mailto:${MURPH_SUPPORT_EMAIL}?subject=Security`;
 export const MURPH_ORGANIZATION_LEGAL_NAME = "Just Cobuild, Co.";
 export const MURPH_ORGANIZATION_POSTAL_ADDRESS = {
   addressCountry: "US",

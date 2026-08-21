@@ -34,7 +34,7 @@ export function PublicTrustPageContent({
               >
                 {content.action.label}
               </a>
-              <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/50">
+              <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#f5f0e8]/70">
                 {content.action.detail}
               </p>
             </div>
@@ -56,6 +56,19 @@ export function PublicTrustPageContent({
                 {section.paragraphs.map((paragraph) => (
                   <p key={paragraph}>{paragraph}</p>
                 ))}
+                {section.action ? (
+                  <div>
+                    <a
+                      className="font-serif text-lg font-semibold text-[#2d3436] underline decoration-[#c4a882] underline-offset-4 transition-colors hover:text-[#66563f]"
+                      href={section.action.href}
+                    >
+                      {section.action.label}
+                    </a>
+                    <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.12em] text-[#66563f]">
+                      {section.action.detail}
+                    </p>
+                  </div>
+                ) : null}
               </div>
             </section>
           ))}

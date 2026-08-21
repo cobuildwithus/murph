@@ -20,7 +20,15 @@ import {
   ABOUT_MURPH_CONTENT,
   CONTACT_MURPH_CONTENT,
 } from "../src/lib/public-trust-pages";
+import {
+  MURPH_LEGAL_EMAIL,
+  MURPH_SECURITY_MAILTO_HREF,
+  MURPH_SUPPORT_EMAIL,
+} from "../src/lib/public-contact";
 import { proxy } from "../proxy";
+
+const PUBLIC_AGENT_CACHE_CONTROL =
+  "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400";
 
 describe("public agent content", () => {
   it("negotiates a substantive Markdown homepage with cache-safe variants", async () => {
@@ -32,11 +40,28 @@ describe("public agent content", () => {
 
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.equal(response.headers.get("cache-control"), PUBLIC_AGENT_CACHE_CONTROL);
     assert.equal(response.headers.get("vary"), MURPH_AGENT_CONTENT_VARY);
     assert.equal(await response.text(), MURPH_AGENT_GUIDE_MARKDOWN);
     assert.match(MURPH_AGENT_GUIDE_MARKDOWN, /^## When to use Murph$/mu);
     assert.match(MURPH_AGENT_GUIDE_MARKDOWN, /^## Who Murph is for$/mu);
     assert.ok(MURPH_AGENT_GUIDE_MARKDOWN.length > 1_500);
+    assert.ok(MURPH_AGENT_GUIDE_MARKDOWN.includes(MURPH_SECURITY_MAILTO_HREF));
+  });
+
+  it("serves negotiated Markdown HEAD requests without a response body", async () => {
+    const response = proxy(new NextRequest("https://example.test/", {
+      headers: {
+        Accept: "text/markdown",
+      },
+      method: "HEAD",
+    }));
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.equal(response.headers.get("cache-control"), PUBLIC_AGENT_CACHE_CONTROL);
+    assert.equal(response.headers.get("vary"), MURPH_AGENT_CONTENT_VARY);
+    assert.equal(await response.text(), "");
   });
 
   it("keeps HTML requests on the page renderer while varying on Accept", () => {
@@ -72,6 +97,7 @@ describe("public agent content", () => {
     const response = getLlmsText();
 
     assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.equal(response.headers.get("cache-control"), PUBLIC_AGENT_CACHE_CONTROL);
     assert.equal(response.headers.get("vary"), MURPH_AGENT_CONTENT_VARY);
     assert.equal(await response.text(), MURPH_AGENT_GUIDE_MARKDOWN);
   });
@@ -126,5 +152,15 @@ describe("public trust pages", () => {
 
     assert.match(markup, /href="\/about"/u);
     assert.match(markup, /href="\/contact"/u);
+  });
+
+  it("links each Contact journey to its owned inbox", () => {
+    const markup = renderToStaticMarkup(
+      createElement(PublicTrustPageContent, { content: CONTACT_MURPH_CONTENT }),
+    );
+
+    assert.ok(markup.includes(`href="mailto:${MURPH_SUPPORT_EMAIL}"`));
+    assert.ok(markup.includes(`href="mailto:${MURPH_LEGAL_EMAIL}"`));
+    assert.ok(markup.includes(`href="${MURPH_SECURITY_MAILTO_HREF}"`));
   });
 });

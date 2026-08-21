@@ -2,6 +2,7 @@ import {
   MURPH_ORGANIZATION_LEGAL_NAME,
   MURPH_ORGANIZATION_POSTAL_ADDRESS,
   MURPH_LEGAL_EMAIL,
+  MURPH_SECURITY_MAILTO_HREF,
   MURPH_SUPPORT_EMAIL,
 } from "./public-contact";
 
@@ -58,7 +59,7 @@ Murph is for adults who want practical, ongoing help understanding their own hea
 
 ## How agents should use these pages
 
-Use the public pages to explain Murph or help someone decide whether it fits their goal. Send account, billing, or product-support questions to [${MURPH_SUPPORT_EMAIL}](mailto:${MURPH_SUPPORT_EMAIL}) and privacy or legal requests to [${MURPH_LEGAL_EMAIL}](mailto:${MURPH_LEGAL_EMAIL}). Do not submit private health information to public pages, infer that group members can see a person's private assistant data, or present Murph's educational guidance as medical care.
+Use the public pages to explain Murph or help someone decide whether it fits their goal. Send account, billing, or product-support questions to [${MURPH_SUPPORT_EMAIL}](mailto:${MURPH_SUPPORT_EMAIL}), privacy or legal requests to [${MURPH_LEGAL_EMAIL}](mailto:${MURPH_LEGAL_EMAIL}), and security reports to [${MURPH_SUPPORT_EMAIL}](${MURPH_SECURITY_MAILTO_HREF}) with “Security” in the subject. Do not submit private health information to public pages, infer that group members can see a person's private assistant data, or present Murph's educational guidance as medical care.
 `;
 
 export const MURPH_ORGANIZATION_STRUCTURED_DATA = {

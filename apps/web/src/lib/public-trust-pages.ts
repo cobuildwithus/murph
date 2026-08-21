@@ -2,18 +2,22 @@ import {
   MURPH_LEGAL_EMAIL,
   MURPH_ORGANIZATION_LEGAL_NAME,
   MURPH_ORGANIZATION_POSTAL_ADDRESS,
+  MURPH_SECURITY_MAILTO_HREF,
   MURPH_SUPPORT_EMAIL,
 } from "./public-contact";
 
+export interface PublicTrustPageAction {
+  detail: string;
+  href: string;
+  label: string;
+}
+
 export interface PublicTrustPageContent {
-  action?: {
-    detail: string;
-    href: string;
-    label: string;
-  };
+  action?: PublicTrustPageAction;
   eyebrow: string;
   introduction: string;
   sections: readonly {
+    action?: PublicTrustPageAction;
     paragraphs: readonly string[];
     title: string;
   }[];
@@ -75,14 +79,24 @@ export const CONTACT_MURPH_CONTENT: PublicTrustPageContent = {
     },
     {
       title: "Privacy and data requests",
+      action: {
+        detail: "Privacy and formal legal requests",
+        href: `mailto:${MURPH_LEGAL_EMAIL}`,
+        label: MURPH_LEGAL_EMAIL,
+      },
       paragraphs: [
         `Privacy questions, access requests, correction requests, export questions, and deletion requests can begin at ${MURPH_LEGAL_EMAIL}. Say that the message concerns privacy and identify the request you want to make. The privacy policy and consumer health data notice explain available rights, verification, retention, and appeal paths.`,
       ],
     },
     {
       title: "Security concerns",
+      action: {
+        detail: "Security reports · subject: Security",
+        href: MURPH_SECURITY_MAILTO_HREF,
+        label: MURPH_SUPPORT_EMAIL,
+      },
       paragraphs: [
-        "If you believe you found a security problem, put “Security” in the subject and describe the affected public surface and the minimum steps needed to reproduce it. Do not include another person's data, exploit a live account, or send secrets. The public security page explains Murph's hosted and local security model.",
+        "If you believe you found a security problem, put “Security” in the subject and describe the affected Murph surface and the minimum steps needed to reproduce it. Do not include another person's data, exploit a live account, or send secrets. The public security page explains Murph's hosted and local security model.",
       ],
     },
     {
