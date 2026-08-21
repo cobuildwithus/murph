@@ -235,7 +235,6 @@ function buildEnvironmentRealtimeSession() {
               type: "array",
             },
           },
-          anyOf: [{ required: ["topics"] }, { required: ["action"] }],
           type: "object",
         },
         type: "function",
