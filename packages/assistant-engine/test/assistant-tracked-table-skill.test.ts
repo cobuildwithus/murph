@@ -249,6 +249,36 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).not.toContain('No active live workout was found')
   })
 
+  it('limits create-first replacement to losslessly representable unfinished drafts', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+    const compactSkill = skill.replaceAll(/\s+/gu, ' ')
+
+    expect(compactSkill).toContain(
+      'Create-first replacement is limited to one exact ad-hoc unfinished draft that the batch-start command can represent without loss.',
+    )
+    expect(compactSkill).toContain(
+      'a request naming yesterday, an older date, a completed workout, an older workout id, or an older card stays on the exact-record correction path and never enters this start-and-delete workflow.',
+    )
+    expect(compactSkill).toContain(
+      'Every existing set must be an unlogged placeholder.',
+    )
+    expect(compactSkill).toContain(
+      'retain the old workout and use the existing exact-record correction path; never issue the start-and-delete sequence.',
+    )
+    expect(compactSkill).toContain(
+      "the qualifying draft's exact `--started-at`, `--type`, and, when present, `--note`",
+    )
+    expect(compactSkill).toContain(
+      'Only after that verified creation, run',
+    )
+    expect(compactSkill).toContain(
+      '`vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`.',
+    )
+  })
+
   it('uses reminder references without reviving a workout singleton', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
