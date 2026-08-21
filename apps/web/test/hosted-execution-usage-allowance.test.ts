@@ -466,30 +466,6 @@ describe("hosted AI usage allowance pricing", () => {
     });
   });
 
-  it("prices the code-owned GPT-5.5 maintenance target at the official standard rate", () => {
-    expect(priceHostedAiUsageForAllowance({
-      ...BASE_USAGE_RECORD,
-      providerName: "hosted-openai",
-      requestedModel: "gpt-5.5",
-      servedModel: "gpt-5.5",
-      tokenPricingBasis: "standard",
-    })).toMatchObject({
-      costUsdMicros: 1_896n,
-      counted: true,
-      pricingSnapshot: {
-        model: "gpt-5.5",
-        pricingSource: "https://developers.openai.com/api/docs/pricing",
-        ratesUsdMicrosPerMillionTokens: {
-          cachedInput: "500000",
-          input: "5000000",
-          output: "30000000",
-        },
-        tokenPricingBasis: "standard",
-      },
-      pricingVersion: "openai-api-pricing-2026-08-20-gpt-5.5-standard",
-    });
-  });
-
   it("prices canonical model reroutes from the served model", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
@@ -912,7 +888,7 @@ describe("hosted AI usage allowance pricing", () => {
     })).toThrow("pricing is missing");
   });
 
-  it("prices every allowance-priced assistant text model", () => {
+  it("prices every hosted assistant launch model accepted by deploy preflight", () => {
     for (const model of HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS) {
       expect(priceHostedAiUsageForAllowance({
         ...BASE_USAGE_RECORD,

@@ -253,7 +253,7 @@ describe("hosted assistant configuration tool port", () => {
     ) => {
       const request = requireRequest(input, init);
       const body = await request.clone().json() as {
-        action: "read" | "read_provider_authority" | "update";
+        action: "read" | "update";
       };
       const snapshot = {
         availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],
@@ -272,12 +272,7 @@ describe("hosted assistant configuration tool port", () => {
             action: "read",
             result: snapshot,
           }
-        : body.action === "read_provider_authority"
-          ? {
-              action: "read_provider_authority",
-              result: { kind: "custom", revision: 7 },
-            }
-          : {
+        : {
             action: "update",
             result: {
               ...snapshot,
@@ -321,12 +316,8 @@ describe("hosted assistant configuration tool port", () => {
         status: "updated",
       },
     });
-    await expect(port.readProviderAuthority?.()).resolves.toEqual({
-      kind: "custom",
-      revision: 7,
-    });
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     const requests = fetchMock.mock.calls.map(([input, init]) =>
       requireRequest(input, init)
     );
@@ -344,9 +335,6 @@ describe("hosted assistant configuration tool port", () => {
       model: HOSTED_ASSISTANT_LUNA_MODEL,
       provider: "venice",
       reasoningEffort: "high",
-    });
-    await expect(requests[2]!.json()).resolves.toEqual({
-      action: "read_provider_authority",
     });
   });
 

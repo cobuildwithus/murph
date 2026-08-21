@@ -1,7 +1,7 @@
 # Bring Your Own Inference
 
 Status: specified
-Last verified: 2026-08-21
+Last verified: 2026-08-03
 
 ## Outcome
 
@@ -91,23 +91,12 @@ reuse the old provider thread.
 4. Cloudflare revalidates endpoint policy, seals the target under a
    context-separated Worker key, and binds the envelope to the existing active
    UserRunner write fence beside workspace version and platform-usage authority.
-5. Cloudflare keeps the dormant OpenAI/Venice product preference in the normal
-   hosted assistant fields and passes the fence-bound custom provider plus its
-   revision-derived model alias as separate invocation-local Codex target
-   facts. Runtime preparation uses those facts for the generated Codex config
-   without saving the internal custom provider in operator config.
-6. Before a warm invocation services a wake and immediately before provider
-   input is accepted, the runtime uses the existing signed assistant-configuration
-   callback to read one live Web-owned authority fact: managed provider or
-   selected custom revision. The invocation continues only when that fact
-   matches its effective provider identity. A missing, replaced, deleted, or
-   unverifiable custom revision hands off or fails closed before provider entry;
-   the Cloudflare write fence and sealed envelope are execution authority, not
-   current provider-selection authority.
-7. Codex sends Responses requests to the fixed custom-inference internal
+5. Cloudflare launches Codex with one fixed internal provider, a
+   revision-derived model alias, and a public non-secret sentinel.
+6. Codex sends Responses requests to the fixed custom-inference internal
    origin. Existing provider fetch attaches only the current opaque
    provider-egress authority.
-8. Cloudflare validates that authority against the active fence, opens the
+7. Cloudflare validates that authority against the active fence, opens the
    pinned envelope, rewrites model/auth, and streams the result through the
    selected protocol adapter.
 
@@ -189,11 +178,7 @@ compaction against the exact pinned Codex build.
   lifecycle; never substitute another provider.
 - Deployment skew: a selected custom workspace is returned only to a Worker that
   advertises custom-inference contract version 1. Older consumers receive a hard
-  incompatibility response rather than managed defaults. For the live authority
-  cutover, deploy Web's additive control-only `read_provider_authority` action
-  before the Worker/runner that calls it; existing runtime `read` responses stay
-  unchanged. Roll back the Worker/runner first while Web retains the additive
-  action.
+  incompatibility response rather than managed defaults.
 - Rollback: disable new custom selection first, return selected members to
   managed inference explicitly, then roll back Worker/runner support.
 

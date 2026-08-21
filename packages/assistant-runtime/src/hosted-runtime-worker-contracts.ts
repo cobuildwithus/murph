@@ -64,10 +64,6 @@ export {
   projectHostedRuntimeProcessEnv,
 } from "./hosted-runtime/environment.ts";
 export {
-  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
-  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
-} from "./hosted-runtime/codex-runtime-env.ts";
-export {
   buildHostedRuntimeChildEnv,
   buildHostedRuntimeForwardedEnv,
   buildHostedRuntimeLaunchSpec,

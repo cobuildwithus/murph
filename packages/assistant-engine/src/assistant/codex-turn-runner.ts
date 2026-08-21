@@ -169,13 +169,6 @@ const ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES = [
   'memories.use_memories=false',
   'features.shell_tool=false',
 ] as const
-const ASSISTANT_MEMBER_MEMORY_MAINTENANCE_CODEX_CONFIG_OVERRIDES = [
-  ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_CODEX_CONFIG_OVERRIDES,
-  'tools.experimental_request_user_input.enabled=false',
-  'tools.update_plan.enabled=false',
-  'orchestrator.skills.enabled=false',
-  'orchestrator.mcp.enabled=false',
-] as const
 const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
   'features.shell_tool=false',
   'features.multi_agent=false',
@@ -185,17 +178,10 @@ const ASSISTANT_FILESYSTEM_DISABLED_CODEX_CONFIG_OVERRIDES = [
 
 function resolveAssistantCodexConfigOverrides(input: {
   filesystemDisabledTurn: boolean
-  memberMemoryMaintenanceTurn: boolean
   nativeCapabilitiesRestrictedTurn: boolean
   shellPreservingCapabilitiesRestrictedTurn: boolean
   requested: readonly string[] | null
 }): readonly string[] | null {
-  if (input.memberMemoryMaintenanceTurn) {
-    return [
-      ...(input.requested ?? []),
-      ...ASSISTANT_MEMBER_MEMORY_MAINTENANCE_CODEX_CONFIG_OVERRIDES,
-    ]
-  }
   if (input.nativeCapabilitiesRestrictedTurn) {
     return [
       ...(input.requested ?? []),
@@ -488,18 +474,6 @@ async function executeAssistantCodexAttempt(input: {
   providerStartCriticalPath?: AssistantProviderStartCriticalPathContext | null
 }): Promise<AssistantCodexAttemptOutcome> {
   const { attemptPlan, executionPlan } = input
-  const groupRoomModelMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'group-room-model' &&
-    executionPlan.input.scheduledInvocationAuthority?.automationId ===
-      MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
-  const memberMemoryMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'member-memory' &&
-    executionPlan.input.scheduledInvocationAuthority?.automationId ===
-      MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-  const toolOnlyMaintenanceTurn =
-    groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
   let attemptMetadata: AssistantProviderAttemptMetadata = {
     activityLabels: [] as readonly string[],
     executedToolCount: 0,
@@ -585,6 +559,18 @@ async function executeAssistantCodexAttempt(input: {
     const systemNotificationTurn =
       executionPlan.profile.promptProfile === 'system-notification' ||
       executionPlan.profile.promptProfile === 'creative-notification'
+    const groupRoomModelMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'group-room-model' &&
+      executionPlan.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
+    const memberMemoryMaintenanceTurn =
+      executionPlan.profile.toolProfile === 'maintenance-turn' &&
+      executionPlan.input.maintenanceProfile === 'member-memory' &&
+      executionPlan.input.scheduledInvocationAuthority?.automationId ===
+        MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    const toolOnlyMaintenanceTurn =
+      groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
     const restrictedOneShotTurn =
       groupRoomModelMaintenanceTurn ||
       memberMemoryMaintenanceTurn ||
@@ -648,7 +634,6 @@ async function executeAssistantCodexAttempt(input: {
           executionPlan.authorizeAcceptedMessageTarget ?? null,
         codexConfigOverrides: resolveAssistantCodexConfigOverrides({
           filesystemDisabledTurn: groupEmailTurn,
-          memberMemoryMaintenanceTurn,
           nativeCapabilitiesRestrictedTurn:
             hostedImageCompletionNativeCapabilitiesRestrictedTurn,
           shellPreservingCapabilitiesRestrictedTurn:

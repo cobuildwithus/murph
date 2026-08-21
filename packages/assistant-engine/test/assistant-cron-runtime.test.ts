@@ -4541,7 +4541,6 @@ describe('assistant cron runtime orchestration', () => {
         participantId: null,
         responsePolicy: null,
         sessionId: null,
-        serviceTier: null,
         threadId: null,
         threadIsDirect: null,
         turnPolicy: {
@@ -4552,9 +4551,6 @@ describe('assistant cron runtime orchestration', () => {
         turnTrigger: 'automation-cron',
       }),
     )
-    expect(
-      cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0],
-    ).not.toHaveProperty('assistantTargetOverride')
   })
 
   it('runs retained group room-model maintenance silently with the group evidence profile', async () => {
@@ -4698,7 +4694,6 @@ describe('assistant cron runtime orchestration', () => {
         identityId: null,
         participantId: null,
         sessionId: null,
-        serviceTier: null,
         threadId: null,
         threadIsDirect: null,
         turnPolicy: {
@@ -4708,9 +4703,6 @@ describe('assistant cron runtime orchestration', () => {
         },
       }),
     )
-    expect(
-      cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0],
-    ).not.toHaveProperty('assistantTargetOverride')
     expect(findCanonicalAutomation(
       vaultRoot,
       MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
@@ -13109,11 +13101,6 @@ function addGroupRoomModelConsolidationAutomation(vaultRoot: string): void {
 function addOvernightMemoryConsolidationAutomation(vaultRoot: string): void {
   getVaultAutomationStore(vaultRoot).push({
     automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-    // A pre-correction record can retain this stale persisted hint when an
-    // earlier managed seed fails. Admission must ignore it.
-    assistantTargetOverride: {
-      reasoningEffort: 'medium',
-    },
     continuityPolicy: 'fresh',
     createdAt: '2026-04-08T08:00:00.000Z',
     instructions: 'Consolidate canonical vault memory.',

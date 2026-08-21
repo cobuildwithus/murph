@@ -1,6 +1,3 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import path from "node:path";
-
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -21,14 +18,6 @@ import {
 import type {
   HostedAssistantCustomInferenceOverride,
 } from "@murphai/hosted-execution/assistant-inference";
-import {
-  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
-  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
-} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
-import {
-  prepareHostedCodexRuntimeEnvironment,
-  readHostedAssistantExecutionDefaultTarget,
-} from "@murphai/assistant-runtime/hosted-invocation-testkit";
 
 import {
   readHostedRunnerContainerIdentity,
@@ -499,55 +488,13 @@ describe("hosted runner container identity", () => {
     expect(prepared.job.request.processingMode).toBeUndefined();
     expect(forwardedEnv).toMatchObject({
       HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
-      [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
-        "hosted-custom-inference",
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
       MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
     });
     expect(forwardedEnv).not.toHaveProperty("HOSTED_ASSISTANT_REASONING_EFFORT");
     expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.endpointUrl);
     expect(JSON.stringify(prepared.job)).not.toContain(runtimeTarget.auth.secret);
-
-    const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
-    if (!testTempRoot) {
-      throw new Error("MURPH_VITEST_TEMP_ROOT is required.");
-    }
-    const operatorHomeRoot = await mkdtemp(
-      path.join(testTempRoot, "custom-inference-target-"),
-    );
-    try {
-      if (!forwardedEnv) {
-        throw new Error("Expected the prepared runner environment.");
-      }
-      const preparedRuntime = await prepareHostedCodexRuntimeEnvironment({
-        operatorHomeRoot,
-        runtimeEnv: forwardedEnv,
-      });
-      const executionTarget = await readHostedAssistantExecutionDefaultTarget({
-        homeDirectory: operatorHomeRoot,
-        runtimeEnv: preparedRuntime.runtimeEnv,
-      });
-      expect(executionTarget).toMatchObject({
-        model: "murph-custom-r7",
-        modelProvider: "hosted-custom-inference",
-      });
-
-      const productEnv = { ...preparedRuntime.runtimeEnv };
-      delete productEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV];
-      delete productEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV];
-      const savedProductTarget = await readHostedAssistantExecutionDefaultTarget({
-        homeDirectory: operatorHomeRoot,
-        runtimeEnv: productEnv,
-      });
-      expect(savedProductTarget).toMatchObject({
-        model: HOSTED_ASSISTANT_TERRA_MODEL,
-        modelProvider: "openai",
-      });
-    } finally {
-      await rm(operatorHomeRoot, { force: true, recursive: true });
-    }
 
     if (!token.providerEgressToken) {
       throw new Error("Expected a provider egress token on the active fence.");
@@ -631,11 +578,8 @@ describe("hosted runner container identity", () => {
       processingMode: "system_mailbox",
     });
     expect(prepared.job.runtime?.forwardedEnv).toMatchObject({
-      HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
-      [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
-        "hosted-custom-inference",
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
     });
   });
 

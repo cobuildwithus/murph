@@ -776,7 +776,9 @@ export const MURPH_MANAGED_AUTOMATIONS = [
     continuityPolicy: 'fresh',
     ownerScope: 'member',
     hostedRuntimeOnly: true,
-    assistantTargetOverride: null,
+    assistantTargetOverride: {
+      reasoningEffort: 'medium',
+    },
     tags: [
       'murph-managed:overnight-memory-consolidation',
       'runtime-maintenance',

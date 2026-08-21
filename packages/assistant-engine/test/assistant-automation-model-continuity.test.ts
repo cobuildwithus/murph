@@ -13,8 +13,6 @@ import {
 } from '@murphai/operator-config/assistant/codex-resume-state'
 import {
   HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-  VENICE_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import type {
   AssistantTurnSharedPlan,
@@ -67,56 +65,6 @@ beforeEach(() => {
 })
 
 describe('automation model continuity', () => {
-  it.each([
-    {
-      expectedModel: 'gpt-5.5',
-      label: 'managed OpenAI on GPT-5.5',
-      selectedModel: 'gpt-5.6-terra',
-      selectedProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-    },
-    {
-      expectedModel: 'murph-custom-r7',
-      label: 'custom inference on its opaque model',
-      selectedModel: 'murph-custom-r7',
-      selectedProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-    },
-  ])('keeps member-memory maintenance inside $label', ({
-    expectedModel,
-    selectedModel,
-    selectedProvider,
-  }) => {
-    const route = resolveAssistantTurnRoute(
-      createMemberMemoryInput(),
-      null,
-      resolvedSession(createGroupSession(
-        requireTarget(selectedModel, 'low', selectedProvider),
-        null,
-      )),
-    )
-
-    expect(route.providerOptions).toMatchObject({
-      model: expectedModel,
-      modelProvider: selectedProvider,
-      reasoningEffort: 'low',
-    })
-  })
-
-  it('fails member-memory maintenance before unsupported Venice provider entry', () => {
-    const veniceTarget = requireTarget(
-      'gpt-5.6-terra',
-      'low',
-      VENICE_CODEX_MODEL_PROVIDER_ID,
-    )
-
-    expect(() => resolveAssistantTurnRoute(
-      createMemberMemoryInput(),
-      null,
-      resolvedSession(createGroupSession(veniceTarget, null)),
-    )).toThrow(expect.objectContaining({
-      code: 'ASSISTANT_PROVIDER_UNSUPPORTED',
-    }))
-  })
-
   it.each([
     ['gpt-5.6-luna', 'high'],
     ['gpt-5.6-terra', 'low'],
@@ -385,19 +333,6 @@ function createAutomationInput(
     prompt: 'Send the scheduled reminder.',
     turnTrigger: 'automation-cron',
     vault: '/vault',
-  }
-}
-
-function createMemberMemoryInput(): Parameters<
-  typeof resolveAssistantTurnRoute
->[0] {
-  return {
-    ...createAutomationInput({
-      model: 'gpt-5.6-sol',
-      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-      reasoningEffort: 'high',
-    }),
-    maintenanceProfile: 'member-memory',
   }
 }
 

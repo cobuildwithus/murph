@@ -14,10 +14,6 @@ import type {
   HostedAssistantCustomInferenceOverride,
 } from "@murphai/hosted-execution/assistant-inference";
 import {
-  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
-  HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
-} from "@murphai/assistant-runtime/hosted-runtime-worker-contracts";
-import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
@@ -868,9 +864,8 @@ export class RuntimeInvocationService {
       this.input.runnerRuntimeEnvSource,
     );
     if (input.hostedAssistantCustomInferenceOverride !== null) {
-      forwardedEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV] =
-        HOSTED_CUSTOM_INFERENCE_PROVIDER;
-      forwardedEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV] =
+      forwardedEnv.HOSTED_ASSISTANT_PROVIDER = HOSTED_CUSTOM_INFERENCE_PROVIDER;
+      forwardedEnv.HOSTED_ASSISTANT_MODEL =
         input.hostedAssistantCustomInferenceOverride.modelAlias;
       forwardedEnv[HOSTED_CUSTOM_INFERENCE_API_KEY_ENV] =
         HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL;

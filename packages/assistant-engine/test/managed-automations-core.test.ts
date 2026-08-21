@@ -1081,7 +1081,9 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toMatchObject({
       automationId: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-      assistantTargetOverride: null,
+      assistantTargetOverride: {
+        reasoningEffort: 'medium',
+      },
       continuityPolicy: 'fresh',
       route: defaultRoute,
       schedule: {

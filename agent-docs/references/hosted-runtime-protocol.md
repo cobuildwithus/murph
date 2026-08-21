@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-21
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -89,19 +89,10 @@ provider changed. The per-user workflow coalesces duplicate wakes as one
 boolean and invokes its existing Cloudflare processing adapter even when Web
 reconciliation facts are idle. Blocked facts discard the wake; accepted
 processing clears it only when no newer wake arrived during that call. A warm
-invocation compares its effective provider identity with one live Web-owned
-authority fact: managed provider or selected custom revision. A mismatch stops
-that invocation from servicing further wakes, makes its dirty workspace
-checkpoint, and returns the existing `immediateRecheckRequested` edge so
-Cloudflare releases the provider-specific invocation and starts a fresh one.
-The same comparison runs immediately before provider-accepted inputs; an
-unavailable authority read fails closed there. The runner keeps the dormant
-OpenAI/Venice preference separate, hydrates a custom Codex model/provider from
-the fence-bound invocation facts, and never saves the internal custom provider
-as an operator preference. The write fence and sealed custom envelope prove
-execution and egress ownership only. They do not extend selection consent after
-Web reports managed selection, another custom revision, deletion, or an
-unverifiable custom connection.
+invocation compares its invocation provider with the live Web-owned preference.
+A mismatch stops that invocation from servicing further wakes, makes its dirty
+workspace checkpoint, and returns the existing `immediateRecheckRequested` edge
+so Cloudflare releases the provider-specific invocation and starts a fresh one.
 A failed best-effort signal
 leaves the durable preference intact; the next invocation and the mandatory
 provider-entry revalidation remain the recovery path. The signal carries no

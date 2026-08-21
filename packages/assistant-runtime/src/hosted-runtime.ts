@@ -6,7 +6,6 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   attachHostedRuntimeFailurePhaseCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
-  type HostedRuntimeAssistantProviderAuthority,
   type HostedRuntimeFailurePhaseName,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
@@ -75,10 +74,8 @@ import {
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   isHostedAssistantProvider,
+  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
-import {
-  buildHostedCustomInferenceModelAlias,
-} from "@murphai/hosted-execution/assistant-inference";
 import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
@@ -91,7 +88,6 @@ import {
   projectHostedRuntimeProcessEnvironment,
 } from "./hosted-runtime/codex-config.ts";
 import {
-  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "./hosted-runtime/codex-runtime-env.ts";
 import {
@@ -1845,16 +1841,11 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       confirmedAssistantTarget;
     const assistantConfigurationToolPort =
       guardedRuntime.platform.assistantConfigurationToolPort ?? null;
-    const readAssistantProviderAuthority =
-      assistantConfigurationToolPort?.readProviderAuthority;
     let assistantProviderHandoffRequested = false;
     const invocationAssistantConfigurationToolPort: HostedRuntimePlatform[
       "assistantConfigurationToolPort"
     ] = assistantConfigurationToolPort
       ? {
-          ...(readAssistantProviderAuthority
-            ? { readProviderAuthority: readAssistantProviderAuthority }
-            : {}),
           async request(request) {
             const response = await assistantConfigurationToolPort.request(request);
             if (
@@ -3114,45 +3105,40 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       throw new TypeError("Default hosted runtime processing requires Codex setup.");
     }
     const runtimeEnv = hostedCodexRuntime.runtimeEnv;
-    const invocationModelProvider =
-      runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV];
-    const customInferenceInvocation =
-      invocationModelProvider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
-    const invocationEffectiveModel = runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV];
     const invocationAssistantProvider = runtimeEnv.HOSTED_ASSISTANT_PROVIDER;
     if (!isHostedAssistantProvider(invocationAssistantProvider)) {
       throw new TypeError(
         "Hosted runtime invocation assistant provider is not supported.",
       );
     }
-    const readLiveAssistantProviderAuthority = async (): Promise<
-      HostedRuntimeAssistantProviderAuthority
-    > => {
-      if (!assistantConfigurationToolPort?.readProviderAuthority) {
+    const readLiveAssistantProvider = async (): Promise<HostedAssistantProvider> => {
+      if (!assistantConfigurationToolPort) {
         throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider authority is temporarily unavailable; retry the turn later.",
+          "Assistant provider choice is temporarily unavailable; retry the turn later.",
         );
       }
+      let response: Awaited<
+        ReturnType<typeof assistantConfigurationToolPort.request>
+      >;
       try {
-        return await assistantConfigurationToolPort.readProviderAuthority();
+        response = await assistantConfigurationToolPort.request({ action: "read" });
       } catch {
         throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider authority is temporarily unavailable; retry the turn later.",
+          "Assistant provider choice is temporarily unavailable; retry the turn later.",
         );
       }
+      if (response.action !== "read") {
+        throw new AssistantActiveTurnInputUnavailableError(
+          "Assistant provider choice is temporarily unavailable; retry the turn later.",
+        );
+      }
+      return response.result.provider;
     };
     const resolveInvocationAssistantProviderAuthority = async (): Promise<
       "current" | "handoff"
     > => {
-      const liveAuthority = await readLiveAssistantProviderAuthority();
-      const invocationIsCurrent = customInferenceInvocation
-        ? liveAuthority.kind === "custom"
-          && liveAuthority.revision !== null
-          && invocationEffectiveModel
-            === buildHostedCustomInferenceModelAlias(liveAuthority.revision)
-        : liveAuthority.kind === "managed"
-          && liveAuthority.provider === invocationAssistantProvider;
-      if (invocationIsCurrent) {
+      const liveAssistantProvider = await readLiveAssistantProvider();
+      if (liveAssistantProvider === invocationAssistantProvider) {
         return "current";
       }
       assistantProviderHandoffRequested = true;
@@ -3628,9 +3614,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       },
       env: hostedCodexRuntime.runtimeEnv,
       memberId: input.request.userId,
-      model:
-        hostedCodexRuntime.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV]
-        ?? null,
+      model: hostedCodexRuntime.runtimeEnv.HOSTED_ASSISTANT_MODEL ?? null,
       modelProvider:
         hostedCodexRuntime.runtimeEnv[
           HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV
@@ -5493,7 +5477,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               < HOSTED_IDLE_COMPACT_TIMEOUT_MS);
         const idleMaintenanceModel =
           readConfirmedAssistantTarget()?.model
-          ?? runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV]
+          ?? runtimeEnv.HOSTED_ASSISTANT_MODEL
           ?? null;
         let idleMaintenance: HostedIdleMaintenanceOutcome;
         try {
@@ -5511,7 +5495,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               credentialSource: resolveAssistantUsageCredentialSource({
                 apiKeyEnv: null,
                 credentialSourceHint:
-                  runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]
+                  runtimeEnv.HOSTED_ASSISTANT_PROVIDER
                     === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID
                     ? "member"
                     : null,

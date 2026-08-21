@@ -209,8 +209,6 @@ export {
   parseHostedRuntimeIMessageContactToolRequest,
   parseHostedRuntimeIMessageContactToolResponse,
   parseHostedRuntimeAssistantConfigurationControlRequest,
-  parseHostedRuntimeAssistantConfigurationWebControlRequest,
-  parseHostedRuntimeAssistantConfigurationWebControlResponse,
   parseHostedRuntimeAssistantConfigurationToolRequest,
   parseHostedRuntimeAssistantConfigurationToolResponse,
   parseHostedRuntimeProductFeedbackRecordRequest,

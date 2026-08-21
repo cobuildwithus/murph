@@ -1,14 +1,7 @@
-import {
-  assistantBackendTargetToProviderConfigInput,
-  type AssistantModelTarget,
+import type {
+  AssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import type { AssistantOperatorDefaults } from '@murphai/operator-config/operator-config'
-import {
-  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
-  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-  resolveAssistantCodexUsageProviderName,
-} from '@murphai/operator-config/assistant/target-runtime'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import {
   compactAssistantProviderConfigInput,
@@ -69,8 +62,8 @@ export async function resolveAssistantTurnRouteForMessage(
 
     return resolveAssistantExecutionPlan({
       defaults: null,
-      override: resolveAssistantTurnAutomationTargetOverride(
-        input,
+      override: resolveAutomationAssistantTargetOverrideForTarget(
+        input.assistantTargetOverride,
         sessionInput.target,
       ),
       sessionTarget: sessionInput.target,
@@ -88,8 +81,8 @@ function resolveAssistantTurnRouteOverride(
     messageOverride,
   )
   const automationOverride =
-    resolveAssistantTurnAutomationTargetOverride(
-      input,
+    resolveAutomationAssistantTargetOverrideForTarget(
+      input.assistantTargetOverride,
       automationBaseTarget,
     )
 
@@ -97,39 +90,6 @@ function resolveAssistantTurnRouteOverride(
     ...(messageOverride ?? {}),
     ...(automationOverride ?? {}),
   })
-}
-
-function resolveAssistantTurnAutomationTargetOverride(
-  input: AssistantMessageInput,
-  baseTarget: AssistantModelTarget | null | undefined,
-): AssistantProviderConfigInput | null {
-  if (input.maintenanceProfile !== 'member-memory') {
-    return resolveAutomationAssistantTargetOverrideForTarget(
-      input.assistantTargetOverride,
-      baseTarget,
-    )
-  }
-
-  // The profile is engine-owned. Its persisted automation target is ignored;
-  // the invocation's already-hydrated provider remains the provider authority.
-  const baseProvider = resolveAssistantCodexUsageProviderName(
-    baseTarget
-      ? assistantBackendTargetToProviderConfigInput(baseTarget).modelProvider ?? null
-      : null,
-  )
-  if (baseProvider === HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID) {
-    return {
-      model: 'gpt-5.5',
-      reasoningEffort: 'low',
-    }
-  }
-  if (baseProvider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID) {
-    return null
-  }
-  throw new VaultCliError(
-    'ASSISTANT_PROVIDER_UNSUPPORTED',
-    'The selected provider cannot execute the member-memory maintenance tool contract.',
-  )
 }
 
 function applyAssistantProviderConfigOverrideToTarget(

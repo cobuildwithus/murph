@@ -23,7 +23,6 @@ import {
   readHostedAssistantExecutionDefaultTarget,
 } from "../src/hosted-runtime/context.ts";
 import {
-  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
 
@@ -153,33 +152,12 @@ test("hosted assistant hydration applies runtime env over stale saved platform p
   });
 });
 
-test("hosted assistant hydration keeps custom inference out of saved product defaults", async () => {
-  await withTemporaryHostedAssistantEnv(async () => {
-    const customTarget = await readHostedAssistantExecutionDefaultTarget({
-      runtimeEnv: {
-        ...HOSTED_ASSISTANT_RUNTIME_ENV,
-        [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
-        [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
-          "hosted-custom-inference",
-      },
-    });
-
-    assert.equal(customTarget?.model, "murph-custom-r7");
-    assert.equal(customTarget?.modelProvider, "hosted-custom-inference");
-
-    const savedProductTarget = await readHostedAssistantExecutionDefaultTarget();
-    assert.equal(savedProductTarget?.model, "gpt-5.6-terra");
-    assert.equal(savedProductTarget?.modelProvider, "openai");
-  });
-});
-
 async function withTemporaryHostedAssistantEnv(
   run: () => Promise<void>,
 ): Promise<void> {
   const operatorHomeRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-target-"));
   const previousEnv = captureEnv([
     "HOME",
-    HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
     HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
     HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV,
     ...Object.keys(HOSTED_ASSISTANT_ENV),
@@ -187,7 +165,6 @@ async function withTemporaryHostedAssistantEnv(
 
   try {
     process.env.HOME = operatorHomeRoot;
-    delete process.env[HOSTED_CODEX_EFFECTIVE_MODEL_ENV];
     delete process.env[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV];
     for (const [key, value] of Object.entries(HOSTED_ASSISTANT_ENV)) {
       process.env[key] = value;

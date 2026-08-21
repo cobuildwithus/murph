@@ -44,7 +44,6 @@ import {
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
 } from "../src/hosted-runtime/launch-spec.ts";
 import {
-  HOSTED_CODEX_EFFECTIVE_MODEL_ENV,
   HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV,
 } from "../src/hosted-runtime/codex-runtime-env.ts";
 import {
@@ -195,11 +194,8 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
     operatorHomeRoot,
     runtimeEnv: {
       HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-      HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-      HOSTED_ASSISTANT_PROVIDER: "openai",
-      [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
-      [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
-        "hosted-custom-inference",
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
       MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
     },
   });
@@ -208,12 +204,6 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
     result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
     "hosted-custom-inference",
   );
-  assert.equal(
-    result.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV],
-    "murph-custom-r7",
-  );
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_MODEL, "gpt-5.6-terra");
-  assert.equal(result.runtimeEnv.HOSTED_ASSISTANT_PROVIDER, "openai");
   const config = await readFile(result.codexConfigPath, "utf8");
   assert.match(config, /^model = "murph-custom-r7"$/mu);
   assert.match(config, /^model_provider = "hosted-custom-inference"$/mu);
@@ -241,26 +231,6 @@ test("hosted Codex runtime config preserves capabilities with custom inference",
     new Set<string>(HOSTED_CODEX_SHELL_ENVIRONMENT_INCLUDE_ONLY)
       .has("MURPH_CUSTOM_INFERENCE_API_KEY"),
     false,
-  );
-});
-
-test("hosted Codex runtime rejects custom inference as a saved product provider", async () => {
-  const operatorHomeRoot = await createTemporaryDirectory();
-
-  await assert.rejects(
-    prepareHostedCodexRuntimeEnvironment({
-      operatorHomeRoot,
-      runtimeEnv: {
-        HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-        HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
-        HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
-        MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
-      },
-    }),
-    (error: unknown) =>
-      error instanceof HostedAssistantConfigurationError
-      && error.code === "HOSTED_ASSISTANT_CONFIG_INVALID"
-      && error.message.includes("invocation-bound"),
   );
 });
 
@@ -1425,11 +1395,8 @@ async function runHostedCodexAutocompactionE2e(
       providerKind === "custom"
       ? {
           HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
-          HOSTED_ASSISTANT_MODEL: "gpt-5.6-terra",
-          HOSTED_ASSISTANT_PROVIDER: "openai",
-          [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
-          [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
-            "hosted-custom-inference",
+          HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+          HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
           MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
         }
       : {

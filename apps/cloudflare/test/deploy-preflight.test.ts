@@ -891,17 +891,6 @@ describe("deploy preflight helpers", () => {
     expect(
       listHostedDeployEnvironmentInvariantErrors(
         createRequiredWorkerDeployEnv({
-          HOSTED_ASSISTANT_MODEL: "gpt-5.5",
-        }),
-        { deployWorker: true },
-      ),
-    ).toContain(
-      HOSTED_ASSISTANT_MODEL_PRICING_ERROR,
-    );
-
-    expect(
-      listHostedDeployEnvironmentInvariantErrors(
-        createRequiredWorkerDeployEnv({
           HOSTED_ASSISTANT_MODEL: "gpt-4.1-mini",
         }),
         { deployWorker: true },

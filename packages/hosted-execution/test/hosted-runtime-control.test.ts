@@ -76,8 +76,6 @@ import {
   parseHostedCodexAuthUpdateResponse,
   parseHostedRuntimeDeviceSyncBridgeEnvelope,
   parseHostedRuntimeAssistantConfigurationControlRequest,
-  parseHostedRuntimeAssistantConfigurationWebControlRequest,
-  parseHostedRuntimeAssistantConfigurationWebControlResponse,
   parseHostedRuntimeAssistantConfigurationToolRequest,
   parseHostedRuntimeAssistantConfigurationToolResponse,
   parseHostedRuntimeIMessageContactToolRequest,
@@ -378,7 +376,7 @@ describe("hosted runtime control contracts", () => {
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBe("gpt-5.6-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-5.6-terra-2026-07-08")).toBe("gpt-5.6-terra");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBe("gpt-5.6-luna");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBe("gpt-5.5");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-terra")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luma-2026-07-08")).toBeNull();
@@ -438,15 +436,6 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedRuntimeAssistantConfigurationToolRequest({
       action: "read",
     })).toEqual({ action: "read" });
-    expect(parseHostedRuntimeAssistantConfigurationWebControlRequest({
-      action: "read_provider_authority",
-    })).toEqual({ action: "read_provider_authority" });
-    expect(() => parseHostedRuntimeAssistantConfigurationControlRequest({
-      action: "read_provider_authority",
-    })).toThrow(/not supported/u);
-    expect(() => parseHostedRuntimeAssistantConfigurationToolRequest({
-      action: "read_provider_authority",
-    })).toThrow(/not supported/u);
 
     for (const model of HOSTED_ASSISTANT_PRODUCT_MODELS) {
       expect(parseHostedRuntimeAssistantConfigurationToolRequest({
@@ -591,31 +580,6 @@ describe("hosted runtime control contracts", () => {
       action: "read",
       result: snapshot,
     });
-    for (const authority of [
-      { kind: "managed", provider: "openai" } as const,
-      { kind: "custom", revision: 7 } as const,
-      { kind: "custom", revision: null } as const,
-    ]) {
-      expect(parseHostedRuntimeAssistantConfigurationWebControlResponse({
-        action: "read_provider_authority",
-        result: authority,
-      })).toEqual({
-        action: "read_provider_authority",
-        result: authority,
-      });
-    }
-    expect(() => parseHostedRuntimeAssistantConfigurationWebControlResponse({
-      action: "read_provider_authority",
-      result: { kind: "custom", revision: 0 },
-    })).toThrow(/revision/u);
-    expect(() => parseHostedRuntimeAssistantConfigurationWebControlResponse({
-      action: "read_provider_authority",
-      result: { kind: "managed", provider: "openai", revision: 7 },
-    })).toThrow(/not allowed/u);
-    expect(() => parseHostedRuntimeAssistantConfigurationToolResponse({
-      action: "read_provider_authority",
-      result: { kind: "custom", revision: 7 },
-    })).toThrow(/not supported/u);
     const {
       availableProviders: _legacyAvailableProviders,
       provider: _legacyProvider,
@@ -702,11 +666,6 @@ describe("hosted runtime control contracts", () => {
       providerName: "hosted-openai",
       serviceTier: "flex",
     })).toBe("openai-flex");
-    expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-5.5",
-      providerName: "hosted-openai",
-      serviceTier: "flex",
-    })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "gpt-5.6-terra",
       providerName: "openai-local-test",

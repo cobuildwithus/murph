@@ -594,7 +594,6 @@ export async function executeClaimedAssistantCronJob(
   // (hosted passes the same predicate as both callbacks) created a race
   // where whichever poll aborted first decided between a clean maintenance
   // release and a spurious failed foreground-yield run.
-  const maintenancePolicy = resolveAssistantCronBackgroundMaintenancePolicy(input.job)
   const maintenanceJob = assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
   let maintenanceProviderStarted = false
   let notificationProviderStarted = false
@@ -835,7 +834,6 @@ export async function executeClaimedAssistantCronJob(
         const serviceTier = resolveAssistantCronTurnServiceTier({
           executionContext: input.executionContext ?? null,
           job: claimedJob,
-          maintenancePolicy,
         })
         const scheduledInvocationAuthority =
           resolveAssistantCronScheduledInvocationAuthority({
@@ -1963,17 +1961,9 @@ function assistantCronTimestampIsLater(
 function resolveAssistantCronTurnServiceTier(input: {
   executionContext: AssistantExecutionContext | null
   job: AssistantCronJob
-  maintenancePolicy: MurphManagedMaintenancePolicy | null
 }): AssistantProviderServiceTier | null {
   // Hosted API-key turns only; dev/local Codex subscription auth has no tiers.
   if (!input.executionContext?.hosted) {
-    return null
-  }
-
-  // The member-memory target is admitted from immutable code-owned policy and
-  // intentionally uses standard service because the hosted Codex catalog does
-  // not advertise Flex for GPT-5.5.
-  if (input.maintenancePolicy?.profile === 'member-memory') {
     return null
   }
 
@@ -1985,13 +1975,9 @@ function resolveAssistantCronTurnServiceTier(input: {
 function resolveAssistantCronAutomationTargetOverride(
   job: ResolvedAssistantCronJob,
 ): AutomationQueryRecord['assistantTargetOverride'] | null {
-  if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
-    return null
-  }
-  return resolveMurphManagedMaintenancePolicy(job.source.automationId)
-    ?.profile === 'member-memory'
-    ? null
-    : job.source.assistantTargetOverride
+  return job.kind === 'canonical' && job.source.kind === 'automation'
+    ? job.source.assistantTargetOverride
+    : null
 }
 
 export function resolveAssistantCronScheduledInvocationAuthority(input: {
