@@ -6707,8 +6707,92 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   expect(
     mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
   ).not.toHaveBeenCalled()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).not.toHaveBeenCalled()
+  expect(
+    mocks.appendAssistantTurnReceiptEvent.mock.calls
+      .map(([event]) => event.kind)
+      .filter((kind) => kind === 'user.persisted'),
+  ).toEqual([])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).not.toHaveBeenCalled()
   expect(mocks.finalizeAssistantTurnReceipt).toHaveBeenCalledWith(
     expect.objectContaining({ response: null, status: 'failed' }),
+  )
+
+  resetScenario()
+  const retryDraftReady = createDeferred<void>()
+  const retryNoReplyAccepted = vi.fn(async () => undefined)
+  addFirstDraft(retryDraftReady, 'provider-thread-group-retry')
+  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
+    async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-retry',
+          finalAction: { kind: 'none' },
+          response: '',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: null,
+        },
+      }
+    },
+  )
+  const retryTurn = await startHeldTurn({
+    firstDraftReady: retryDraftReady,
+    latePrompt: 'New group input',
+    onFinishWithoutReplyAccepted: retryNoReplyAccepted,
+  })
+  const retryOutcomes = await Promise.all([
+    retryTurn.initial,
+    retryTurn.late,
+  ])
+  expect(retryOutcomes.every((outcome) => outcome.status === 'fulfilled')).toBe(
+    true,
+  )
+  for (const outcome of retryOutcomes) {
+    assert.equal(outcome.status, 'fulfilled')
+    expect(outcome.result).toMatchObject({
+      response: '',
+      responseDisposition: 'none',
+    })
+  }
+  expect(retryNoReplyAccepted).toHaveBeenCalledOnce()
+  expect(mocks.appendAssistantTranscriptEntriesWithRefs).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.appendAssistantTranscriptEntriesWithRefs.mock.calls.map(
+      ([, , entries]) => entries.map((entry) => entry.text),
+    ),
+  ).toEqual([
+    ['Initial group message'],
+    ['New group input'],
+  ])
+  expect(
+    mocks.appendAssistantTurnReceiptEvent.mock.calls
+      .map(([event]) => event.kind)
+      .filter((kind) => kind === 'user.persisted'),
+  ).toEqual(['user.persisted', 'user.persisted'])
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateTranscriptRefs,
+  ).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState.mock
+      .invocationCallOrder[0],
+  ).toBeLessThan(
+    mocks.appendAssistantTranscriptEntriesWithRefs.mock.invocationCallOrder[0]!,
   )
 })
 

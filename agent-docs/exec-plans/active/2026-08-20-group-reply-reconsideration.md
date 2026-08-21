@@ -110,6 +110,18 @@ Updated: 2026-08-21
 - Rejected reply candidates, durable draft state, outbox supersession, a configurable
   deadline, and retry-until-quiet loops because the existing controller, journal,
   provider continuation, commit boundary, and outbox already own the required facts.
+- Round-4 accepted-input ownership retrospective: the original requirement is
+  that request-1 failure leaves every source message retryable while no
+  pre-commit conversational artifact becomes canonical. The current request-1
+  shape exposed a second transcript owner: active-turn acceptance appended the
+  original and late user messages before the fallible continuation completed,
+  while the unchanged source events still owned retry. The decision is to keep
+  source events plus the accepted-input journal/checkpoint as the only
+  pre-commit recovery authority and let the existing selected-result commit
+  boundary own user transcript appends and transcript refs for held group turns.
+  Non-held live steering keeps its existing immediate persistence ordering. Do
+  not add retry-time content matching, cleanup, tombstones, reconciliation, or a
+  new durable state owner.
 
 ## Verification
 
@@ -170,9 +182,26 @@ Updated: 2026-08-21
   accepted-input transcript reference untouched while a group reply remains
   held. Production-shaped proof covers abort/restart, terminal failure, and one
   canonical user write after retry without adding lifecycle state.
-- Remaining: corrected pushed-head ReviewGPT round 4 and CI, parent final
-  review, plan closure, current-base merge-tree proof, and merge. The PR remains
-  unmerged.
+- Round 4 confirmed the prior corrections and triggered the accepted-input
+  ownership retrospective above. Its finding is accepted: request-1 admission
+  must not make user transcript state canonical while the selected result can
+  still fail and leave the same source events retryable.
+- Implemented the Round-4 decision by retaining held accepted inputs in memory
+  and moving their existing transcript appends and journal-ref updates after
+  `commit-started`. Non-held live steering keeps immediate persistence. A
+  failed request 1 now writes zero user transcript entries or refs; a fresh
+  successful retry writes the initial and late source messages exactly once.
+  No content matching, cleanup path, lifecycle state, or durable owner was
+  added.
+- The corrected head passes all 104 local-service runtime tests with the
+  repository-proven 6 GB heap, all 42 accepted-input journal/controller tests,
+  the Assistant Engine typecheck, documentation drift, and diff checks. The
+  default 4 GB combined focused invocation exhausted its test worker before
+  reporting assertions; isolated focused runs and the full 6 GB runtime file
+  pass.
+- Remaining: commit and push the retrospective fix, run exact-head ReviewGPT
+  round 5 concurrently with CI, close the plan, prove a clean current-base
+  merge tree, merge, and confirm production rollout. The PR remains unmerged.
 
 ## Product UX walkthrough
 

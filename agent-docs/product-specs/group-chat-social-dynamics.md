@@ -159,10 +159,13 @@ sent and may keep, replace, or suppress it. There is never a third provider
 request for the turn.
 
 The held response is not transcript, terminal no-reply evidence, or outbox
-state. Only the selected result crosses `commit-started`. At the final cutoff,
-later input remains pending for the next ordinary turn. Completed tools,
-progress messages, and other real-world effects are not provisional and must
-not be repeated by reconsideration.
+state. Until selection, source events and the accepted-input journal also own
+the user messages; their canonical transcript entries are written only after
+the selected turn crosses `commit-started`. A failed reconsideration can thus
+retry without duplicating the room's messages. At the final cutoff, later input
+remains pending for the next ordinary turn. Completed tools, progress messages,
+and other real-world effects are not provisional and must not be repeated by
+reconsideration.
 
 Completed conversational response segments are provisional under this feature,
 including an answer superseded by already-started live steering inside request
@@ -489,7 +492,7 @@ Regression coverage should represent both restraint and initiative:
     that held window -> exactly one same-thread request 1 and one terminal action
     for the room's updated beat, never one reply per accepted message;
 32. request 1 fails after accepting new input -> no stale request-0 draft,
-    transcript result, terminal evidence, or outbox intent;
+    user or assistant transcript append, terminal evidence, or outbox intent;
 33. another human takes the floor during the held window -> request 1 may select
     silence, while input after request 1's cutoff belongs to the next turn;
 34. an ordinary interactive group answer that needs several paragraphs -> one

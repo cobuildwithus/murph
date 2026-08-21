@@ -1110,6 +1110,13 @@ export async function sendAssistantMessageLocal(
         let providerRequestOrdinal = 0
         let providerRequestDeliveryContextBaseOrdinal = 0
         let nextUsageRecordOrdinal = 0
+        const heldGroupAcceptedTranscriptInputs: Array<{
+          acceptedInput: Extract<
+            AssistantActiveTurnInputAdmissionResult,
+            { kind: 'accepted' }
+          >
+          acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+        }> = []
         const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
           detail: string
           prompt: string
@@ -1147,6 +1154,32 @@ export async function sendAssistantMessageLocal(
             })
           }
         }
+        const persistAcceptedActiveTurnInputTranscripts = async (persistInput: {
+          acceptedInput: Extract<
+            AssistantActiveTurnInputAdmissionResult,
+            { kind: 'accepted' }
+          >
+          acceptedInputItems: readonly AssistantAcceptedTurnInputItemInput[]
+        }) => {
+          const transcriptRefsByInputId =
+            await appendAcceptedActiveTurnInputTranscriptEntries({
+              acceptedInput: persistInput.acceptedInput,
+              acceptedInputItems: persistInput.acceptedInputItems,
+              sessionId: resolved.session.sessionId,
+              turnId: currentUserTurn.turnId,
+              vault: currentInput.vault,
+            })
+          const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
+            inputs: persistInput.acceptedInputItems,
+            transcriptRefsByInputId,
+          })
+          if (transcriptRefUpdates.length > 0) {
+            await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
+              refs: transcriptRefUpdates,
+              turnId: currentUserTurn.turnId,
+            })
+          }
+        }
         const acceptActiveTurnInput = async (acceptanceInput: {
           activeTurnInput: Extract<
             AssistantActiveTurnInputAdmissionResult,
@@ -1157,11 +1190,13 @@ export async function sendAssistantMessageLocal(
           sessionId: string
         }) => {
           const previousInput = currentInput
-          await persistInitialUserPromptToTranscriptIfNeeded({
-            detail: 'user prompt persisted before active-turn input',
-            prompt: previousInput.prompt,
-            vault: previousInput.vault,
-          })
+          if (!holdGroupReplyDraft) {
+            await persistInitialUserPromptToTranscriptIfNeeded({
+              detail: 'user prompt persisted before active-turn input',
+              prompt: previousInput.prompt,
+              vault: previousInput.vault,
+            })
+          }
           const acceptedInputItems = resolveAcceptedActiveTurnInputItems({
             acceptedInput: acceptanceInput.activeTurnInput,
             input: currentInput,
@@ -1179,7 +1214,7 @@ export async function sendAssistantMessageLocal(
               inputs: acceptedInputItems,
             })
           }
-          let acceptedInputJournal =
+          const acceptedInputJournal =
             preProviderSteerJournal ??
             await runtimeState.turns.acceptedInputs.append({
               inputs: acceptedInputItems,
@@ -1193,24 +1228,16 @@ export async function sendAssistantMessageLocal(
             journal: acceptedInputJournal,
             vault: currentInput.vault,
           })
-          const transcriptRefsByInputId =
-            await appendAcceptedActiveTurnInputTranscriptEntries({
+          if (holdGroupReplyDraft) {
+            heldGroupAcceptedTranscriptInputs.push({
               acceptedInput: acceptanceInput.activeTurnInput,
               acceptedInputItems,
-              sessionId: resolved.session.sessionId,
-              turnId: currentUserTurn.turnId,
-              vault: currentInput.vault,
             })
-          const transcriptRefUpdates = resolveAcceptedTurnInputTranscriptRefUpdates({
-            inputs: acceptedInputItems,
-            transcriptRefsByInputId,
-          })
-          if (transcriptRefUpdates.length > 0) {
-            acceptedInputJournal =
-              await runtimeState.turns.acceptedInputs.updateTranscriptRefs({
-                refs: transcriptRefUpdates,
-                turnId: currentUserTurn.turnId,
-              }) ?? acceptedInputJournal
+          } else {
+            await persistAcceptedActiveTurnInputTranscripts({
+              acceptedInput: acceptanceInput.activeTurnInput,
+              acceptedInputItems,
+            })
           }
           await appendAssistantTurnReceiptEvent({
             vault: currentInput.vault,
@@ -2075,6 +2102,14 @@ export async function sendAssistantMessageLocal(
           turnId: currentUserTurn.turnId,
         })
         if (holdGroupReplyDraft) {
+          await persistInitialUserPromptToTranscriptIfNeeded({
+            detail: 'user prompt persisted after held group reply selection',
+            prompt: input.prompt,
+            vault: input.vault,
+          })
+          for (const heldInput of heldGroupAcceptedTranscriptInputs) {
+            await persistAcceptedActiveTurnInputTranscripts(heldInput)
+          }
           await commitSelectedNoReply(providerResult)
         }
         const precedingResponseSegments: AssistantPrecedingReplySegment[] = []

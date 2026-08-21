@@ -473,10 +473,10 @@ export async function updateAssistantAcceptedTurnInputTranscriptRefs(input: {
     if (input.refs.length === 0) {
       return existing
     }
-    if (existing.admissionState !== 'current-turn-open') {
+    if (existing.admissionState === 'passive-input-next-turn') {
       throw new VaultCliError(
         'ASSISTANT_TURN_INPUT_JOURNAL_ADMISSION_CLOSED',
-        'Accepted turn input transcript refs cannot be updated after current-turn admission closes.',
+        'Accepted turn input transcript refs cannot be updated after input ownership moves to a later turn.',
       )
     }
 

@@ -2715,8 +2715,13 @@ later assistant turn. Strict active-turn-targeted input still fails closed
 instead of falling through. Reconsideration is capped at provider request 1 and
 only its selected conversational result may enter transcript, terminal
 evidence, and outbox state; completed tools and progress effects remain
-authoritative and are not repeated. Final-delivery and
-hosted-tool effect keys use the newest accepted causal input as the stable
+authoritative and are not repeated. While either held request remains
+fallible, source events and the accepted-input journal own recovery; canonical
+user transcript entries and their journal references materialize only after
+the selected turn crosses `commit-started`. A failed request 1 can therefore
+retry the same source events without leaving duplicate transcript history.
+Final-delivery and hosted-tool effect keys use the newest accepted causal input
+as the stable
 replay anchor while the full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner
 publishes the receipt-log fingerprint and the advanced imported watermark in
