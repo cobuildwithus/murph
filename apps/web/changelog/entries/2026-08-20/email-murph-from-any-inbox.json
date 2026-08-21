@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 100,
+  "item": {
+    "id": "email-murph-from-any-inbox",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Email Murph from any inbox",
+    "summary": "Existing members can start a private email conversation by writing to mail@mail.withmurph.ai.",
+    "details": "Murph sends a private continuation to the verified inbox; reply there with the request. The unverified first email is not read or saved.",
+    "relevanceTags": [
+      "assistant",
+      "email",
+      "privacy",
+      "onboarding"
+    ],
+    "sourcePullRequests": [2083]
+  }
+}

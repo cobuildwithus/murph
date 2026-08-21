@@ -14,9 +14,11 @@ type CanonicalWorkoutExercise = CompleteNullableProjection<
 function projectWorkoutActionExerciseCoordinate(exercise: WorkoutExercise) {
   return {
     groupId: exercise.groupId ?? null,
+    memberRepsPerSet: exercise.memberRepsPerSet ?? null,
     mode: exercise.mode ?? null,
     name: exercise.name,
     note: exercise.note ?? null,
+    setPlanIsFinite: exercise.setPlanIsFinite ?? null,
     sets: exercise.sets
       .slice()
       .sort((left, right) => left.order - right.order)
@@ -54,10 +56,12 @@ export function deriveWorkoutActionBinding(
       const coordinate = projectWorkoutActionExerciseCoordinate(exercise)
       return {
         groupId: coordinate.groupId,
+        memberRepsPerSet: coordinate.memberRepsPerSet,
         mode: coordinate.mode,
         name: coordinate.name,
         note: coordinate.note,
         order: exercise.order,
+        setPlanIsFinite: coordinate.setPlanIsFinite,
         sets: coordinate.sets,
         sourceExerciseId: coordinate.sourceExerciseId,
         unitOverride: coordinate.unitOverride,
@@ -66,7 +70,7 @@ export function deriveWorkoutActionBinding(
 
   return createHash('sha256')
     .update(
-      `workout-action:v3:${workoutEntityId}:${workout.lastMemberActionId ?? ''}:${JSON.stringify(positionalIdentity)}`,
+      `workout-action:v4:${workoutEntityId}:${workout.lastMemberActionId ?? ''}:${JSON.stringify(positionalIdentity)}`,
     )
     .digest('hex')
 }
@@ -80,10 +84,12 @@ export function deriveWorkoutSetRemovalBinding(
     .sort((left, right) => left.order - right.order)
     .map((exercise) => ({
       groupId: exercise.groupId ?? null,
+      memberRepsPerSet: exercise.memberRepsPerSet ?? null,
       mode: exercise.mode ?? null,
       name: exercise.name,
       note: exercise.note ?? null,
       order: exercise.order,
+      setPlanIsFinite: exercise.setPlanIsFinite ?? null,
       sets: exercise.sets
         .slice()
         .sort((left, right) => left.order - right.order)
@@ -107,7 +113,7 @@ export function deriveWorkoutSetRemovalBinding(
 
   return createHash('sha256')
     .update(
-      `workout-set-removal:v1:${workoutEntityId}:${JSON.stringify(canonicalExercises)}`,
+      `workout-set-removal:v2:${workoutEntityId}:${JSON.stringify(canonicalExercises)}`,
     )
     .digest('hex')
 }

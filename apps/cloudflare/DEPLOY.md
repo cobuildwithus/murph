@@ -24,7 +24,7 @@ The rendered deploy helper path is the canonical direct Wrangler deploy contract
 `deploy:worker:apply` validates the generated Wrangler config, worker secrets payload, and `.deploy/runner-bundle/` manifest before invoking Wrangler. The runner bundle manifest records the assembled workspace closure and source/bundle fingerprints. Production assembly now builds the runner bundle first and renders those exact fingerprints into the Worker config; applying after a stale hosted-local bundle, a smoke-mutated bundle, or a config rendered for another bundle fails before upload.
 The deploy helper also rejects generated config or secrets that no longer match the current environment, and rejects runner bundles assembled with `runner:bundle:assemble-only` so smoke-only build shortcuts cannot be uploaded as production artifacts.
 Docker runner smoke derives a separate `.deploy/runner-smoke-bundle/` from the validated production bundle and overlays smoke-only entrypoints there, so the production `.deploy/runner-bundle/` remains the deploy artifact after smoke.
-Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
+Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budgets and assembly-time probes: the in-container `vault-cli` binary (`scripts/runner-bundle/bundle-cli.ts`) and the container entrypoint itself (`scripts/runner-bundle/bundle-entrypoint.ts`, output `dist-bundled/`, run by the image CMD). The Node-only CLI chunks use native UTF-8 output so existing Unicode literals are not expanded into ASCII escapes; the total-byte cap is ratcheted from the exact Linux baseline with its ordinary 32 KiB graph allowance plus an 8 KiB reserve for Murph Cloud's measured managed-runtime overlay. The CLI probe creates private synthetic initialized-vault fixtures, requires exact bundled/unbundled parity for populated `memory show --format json`, and separately preserves the successful empty result when canonical memory is absent. The bundled entrypoint cuts cold-boot module loading from ~960 file reads to ~27 chunk reads on lazily pulled image layers; package resolvers that derive asset paths from their own module location are pinned to the installed package copies via Dockerfile ENV (`MURPH_ASSISTANT_SKILLS_ROOT`, `MURPH_ASSISTANT_CLI_SURFACE_PREBUILT_ARTIFACT_PATH`, `MURPH_HEALTH_COMMONS_PACKAGE_ROOT`). Health Commons stays installed in the runner bundle for its compact protocol and biomarker desired-direction artifacts, while its JS is inlined and assembly probes set the same package-root pin for bundled and unbundled parity. The web-only Health Commons artifact tree remains excluded. Zod stays installed for deferred package-loader paths, but production assembly removes declaration files, TypeScript source, the legacy v3 runtime, and unused mini variants after verifying that staged JavaScript imports only the retained root and v4 surfaces.
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
@@ -510,6 +510,26 @@ and is visible before the next ordinary direct turn, whether that consumer is
 an attended member turn, an exact-session scheduled occurrence, or an
 exact-session Assistant Ask continuation, and before a direct exact notification
 can append newer ordinary-session history.
+
+## Record-Scoped Workout Tracking Rollout
+
+The record-scoped workout release adds optional `memberRepsPerSet` and
+`setPlanIsFinite` fields to the strict workout record and changes the bundled
+assistant CLI and prompt contract. Deploy the Cloudflare Worker and runner
+together with `container_rollout=immediate`; Web has no ordering dependency.
+Require managed-container smoke to report the exact new runner-bundle
+fingerprint before accepting workout traffic, and confirm that the bundled CLI
+exposes `workout exercise set-reps` and requires an exact workout id for every
+workout mutation.
+
+Existing workout records need no migration. Before the first new-field write,
+the preceding runner bundle is a safe rollback. After that write, the compatible
+runner is the rollback floor for the affected workspace because the preceding
+strict parser rejects the new fields. Forward-fix on that bundle or newer rather
+than rolling back below the floor. After convergence, exercise a controlled
+finite workout through stored repetitions, terse final-set completion, automatic
+closure, and a subsequent workout start. Monitor bounded hosted-runtime error
+aggregates for strict workout parse failures and rejected workout CLI commands.
 
 ## Audience-Key Rollout
 
@@ -1346,6 +1366,7 @@ Opt-in runtime integrations:
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
 - `JUNCTION_PROVIDER_FILTER`
+- `JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED`
 - `JUNCTION_SUMMARY_RESOURCES`
 - `JUNCTION_SUMMARY_BACKFILL_DAYS`
 - `JUNCTION_TIMESERIES_BACKFILL_DAYS`
@@ -1370,6 +1391,17 @@ Correct the callback hostname before either Web or Worker deployment, and ship
 the Web start/build guard with the Cloudflare preflight change. During a skewed
 rollout the Web start guard still fails closed before OAuth state or provider
 authorization; do not bypass it to recover an invalid split-host environment.
+
+`JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED` is an explicit production rollout gate
+for the bounded Garmin push-source recovery ladder. Leave it unset until a
+scoped operator recovery proves Junction enabled Bulk Trigger Historical Pull
+for the team; the vendor disables that Link Migration endpoint by default.
+After that proof, set the GitHub `production` environment variable to exactly
+`true`, deploy Cloudflare, and confirm aggregate recovery attempt/status
+metadata appears before relying on the ladder. A gated endpoint must remain an
+`unavailable` operational result, not a reason to reset or deregister a shared
+Junction connection. Disabling the variable and redeploying stops new automatic
+attempts without changing existing connection state.
 
 Device-webhook burst transport requires a main Queue and DLQ named from the
 deployed Worker (`<worker>-device-webhooks` and

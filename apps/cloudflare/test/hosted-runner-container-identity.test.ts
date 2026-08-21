@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedWorkspaceInvocationResult,
+  HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -681,6 +685,61 @@ describe("hosted runner container identity", () => {
     });
   });
 
+  it("keeps a due delivery-only wake on its outbox-owning phase while metered egress stays denied", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+      workspace: {
+        createdAt: "2026-06-02T23:59:00.000Z",
+        nextWakeAt: "2026-06-02T23:59:59.000Z",
+        nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+        snapshotRef: null,
+        updatedAt: "2026-06-02T23:59:59.000Z",
+        userId: TEST_USER_ID,
+        version: "5",
+      },
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_delivery_denied",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(prepared.job.request.processingMode).toBeUndefined();
+    expect(prepared.job.request.assistantExecutionBlocked).toBeUndefined();
+    if (!prepared.token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    await expect(stateStore.validateProviderEgressToken({
+      providerEgressToken: prepared.token.providerEgressToken,
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
+  });
+
   it("lets inbox media retention run under a denied allowance while metered egress stays blocked", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -942,6 +1001,7 @@ function createRuntimeInvocationService(input: {
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
   stateStore: RunnerStateStore;
+  workspace?: HostedWorkspaceState | null;
 }): RuntimeInvocationService {
   return new RuntimeInvocationService({
     assertWorkspaceBelongsToRunnerUser(workspace, userId) {
@@ -953,7 +1013,7 @@ function createRuntimeInvocationService(input: {
     readHostedRuntimeStatusFromWeb: async (userId) => ({
       mailboxLag: [],
       userId,
-      workspace: null,
+      workspace: input.workspace ?? null,
     }),
     readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => ({
@@ -982,7 +1042,7 @@ function createRuntimeInvocationService(input: {
               input.hostedAssistantReasoningEffortOverride,
           }
         : {}),
-      workspace: null,
+      workspace: input.workspace ?? null,
     }),
     runnerContainerNamespace: createRunnerContainerNamespace({
       invokedContainerNames: input.invokedContainerNames,

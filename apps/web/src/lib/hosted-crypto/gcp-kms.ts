@@ -74,9 +74,15 @@ const GRPC_STATUS_REASONS = new Map<number, string>([
   [16, "UNAUTHENTICATED"],
 ]);
 
-// One deadline owns subject-token acquisition, Google authentication, and the
-// KMS RPC. Provider failures are fail-closed and are never retried here.
+// One attempt deadline owns subject-token acquisition, Google authentication,
+// and the KMS RPC. Decrypt alone may make one idempotent transient retry under
+// the separate aggregate deadline below; every other operation remains
+// single-attempt and fail-closed.
 export const HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS = 10_000;
+export const HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS = 25_000;
+const HOSTED_GCP_KMS_DECRYPT_MAX_ATTEMPTS = 2;
+const HOSTED_GCP_KMS_DECRYPT_RETRY_MIN_DELAY_MS = 100;
+const HOSTED_GCP_KMS_DECRYPT_RETRY_JITTER_MS = 200;
 
 type OwnedBytes = Uint8Array<ArrayBuffer>;
 type HostedGcpKmsOperation = "asymmetricSign" | "decrypt" | "encrypt" | "macSign";
@@ -290,6 +296,13 @@ interface HostedGcpKmsOperationContext {
   deadlineAtMs: number;
   deadlineSignal: AbortSignal;
   signal: AbortSignal;
+  startedAtMs: number;
+}
+
+interface HostedGcpKmsAttemptContext {
+  deadlineSignal: AbortSignal;
+  signal: AbortSignal;
+  timeoutMs: number;
 }
 
 interface HostedGcpAuthRefreshContext {
@@ -460,8 +473,11 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
         ciphertextCrc32c: crc32c(ciphertext),
         name: keyName,
       };
-      const response = await this.callProvider("decrypt", input.signal, (options) =>
-        this.transport.decrypt(request, options));
+      const response = await this.callProvider(
+        "decrypt",
+        input.signal,
+        (options) => this.transport.decrypt(request, options),
+      );
       responsePlaintext = claimResponseBytes(
         response.plaintext,
         GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES,
@@ -620,26 +636,62 @@ class HostedGcpKmsSdkClient implements HostedGcpKmsClient {
     callerSignal: AbortSignal | undefined,
     invoke: (options: HostedGcpKmsSdkCallOptions) => Promise<TResponse>,
   ): Promise<TResponse> {
-    const context = createOperationContext(callerSignal);
-    throwIfOperationAborted(context);
-    const options: HostedGcpKmsSdkCallOptions = {
-      retry: false,
-      signal: context.signal,
-      timeoutMs: remainingOperationTimeoutMs(context),
-    };
-    try {
-      const response = await invoke(options);
+    const retryTransientDecrypt = operation === "decrypt";
+    const maxAttempts = retryTransientDecrypt
+      ? HOSTED_GCP_KMS_DECRYPT_MAX_ATTEMPTS
+      : 1;
+    const context = createOperationContext(
+      callerSignal,
+      retryTransientDecrypt
+        ? HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS
+        : HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    );
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       throwIfOperationAborted(context);
-      return response;
-    } catch (error) {
-      if (context.callerSignal?.aborted) {
-        throw createCallerAbortError();
+      const attemptContext = createProviderAttemptContext(context);
+      const options: HostedGcpKmsSdkCallOptions = {
+        retry: false,
+        signal: attemptContext.signal,
+        timeoutMs: attemptContext.timeoutMs,
+      };
+      try {
+        const response = await invoke(options);
+        throwIfProviderAttemptAborted(context, attemptContext);
+        return response;
+      } catch (error) {
+        if (context.callerSignal?.aborted) {
+          throw createCallerAbortError();
+        }
+        if (context.deadlineSignal.aborted) {
+          throw createOperationTimeoutError();
+        }
+        const attemptTimedOut = attemptContext.deadlineSignal.aborted || isTimeoutError(error);
+        const unavailable = isUnavailableError(error);
+        if (
+          retryTransientDecrypt
+          && attempt < maxAttempts
+          && (attemptTimedOut || unavailable)
+        ) {
+          const delayMs = createDecryptRetryDelayMs();
+          console.warn("Hosted Google Cloud KMS decrypt retrying after a transient failure.", {
+            attempt,
+            delayMs,
+            elapsedMs: Math.max(0, Date.now() - context.startedAtMs),
+            failureStage: "credential_or_rpc",
+            providerReason: attemptTimedOut ? "DEADLINE_EXCEEDED" : "UNAVAILABLE",
+          });
+          await waitForOperationRetryDelay({ context, delayMs });
+          continue;
+        }
+        if (attemptTimedOut) {
+          throw createOperationTimeoutError();
+        }
+        throw createProviderError(operation, error);
       }
-      if (context.deadlineSignal.aborted || isTimeoutError(error)) {
-        throw createOperationTimeoutError();
-      }
-      throw createProviderError(operation, error);
     }
+
+    throw new TypeError("Google Cloud KMS retry loop exhausted without a result.");
   }
 }
 
@@ -1238,15 +1290,33 @@ function assertGoogleSdkLoggingDisabled(source: NodeJS.ProcessEnv): void {
 
 function createOperationContext(
   callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
 ): HostedGcpKmsOperationContext {
-  const deadlineSignal = AbortSignal.timeout(HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
+  const startedAtMs = Date.now();
+  const deadlineSignal = AbortSignal.timeout(timeoutMs);
   return {
     callerSignal,
-    deadlineAtMs: Date.now() + HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    deadlineAtMs: startedAtMs + timeoutMs,
     deadlineSignal,
     signal: callerSignal
       ? AbortSignal.any([callerSignal, deadlineSignal])
       : deadlineSignal,
+    startedAtMs,
+  };
+}
+
+function createProviderAttemptContext(
+  context: HostedGcpKmsOperationContext,
+): HostedGcpKmsAttemptContext {
+  const timeoutMs = Math.min(
+    HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+    remainingOperationTimeoutMs(context),
+  );
+  const deadlineSignal = AbortSignal.timeout(timeoutMs);
+  return {
+    deadlineSignal,
+    signal: AbortSignal.any([context.signal, deadlineSignal]),
+    timeoutMs,
   };
 }
 
@@ -1283,6 +1353,16 @@ function throwIfOperationAborted(context: HostedGcpKmsOperationContext): void {
   }
 }
 
+function throwIfProviderAttemptAborted(
+  context: HostedGcpKmsOperationContext,
+  attempt: HostedGcpKmsAttemptContext,
+): void {
+  throwIfOperationAborted(context);
+  if (attempt.deadlineSignal.aborted) {
+    throw createOperationTimeoutError();
+  }
+}
+
 function throwIfCallerAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw createCallerAbortError();
@@ -1307,6 +1387,56 @@ function isTimeoutError(error: unknown): boolean {
   return error.code === 4
     || error.code === "DEADLINE_EXCEEDED"
     || error.status === "DEADLINE_EXCEEDED";
+}
+
+function isUnavailableError(error: unknown): boolean {
+  if (!isRecord(error)) {
+    return false;
+  }
+  return error.code === 14
+    || error.code === "UNAVAILABLE"
+    || error.status === "UNAVAILABLE";
+}
+
+function createDecryptRetryDelayMs(): number {
+  return HOSTED_GCP_KMS_DECRYPT_RETRY_MIN_DELAY_MS
+    + Math.floor(Math.random() * (HOSTED_GCP_KMS_DECRYPT_RETRY_JITTER_MS + 1));
+}
+
+async function waitForOperationRetryDelay(input: {
+  context: HostedGcpKmsOperationContext;
+  delayMs: number;
+}): Promise<void> {
+  throwIfOperationAborted(input.context);
+  if (remainingOperationTimeoutMs(input.context) <= input.delayMs) {
+    throw createOperationTimeoutError();
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const cleanup = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      input.context.signal.removeEventListener("abort", onAbort);
+    };
+    const onAbort = () => {
+      cleanup();
+      try {
+        throwIfOperationAborted(input.context);
+        reject(createOperationTimeoutError());
+      } catch (error) {
+        reject(error);
+      }
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, input.delayMs);
+    input.context.signal.addEventListener("abort", onAbort, { once: true });
+  });
+  throwIfOperationAborted(input.context);
 }
 
 function createProviderError(

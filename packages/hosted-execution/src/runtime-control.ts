@@ -3367,6 +3367,8 @@ export const HOSTED_RUNTIME_LOG_EVENT_CODES = [
   "device-sync.legacy_platform_env_present",
   "device-sync.maintenance_failed",
   "device-sync.module_load_failed",
+  "device-sync.pass_finished",
+  "device-sync.pass_started",
   "device-sync.source_stalled",
   "device-sync.wake_projection_failed",
   "mailbox.appended",

@@ -64,6 +64,9 @@ import {
   sendPendingHostedLinqAlertsBestEffort,
 } from "./linq-alert-email";
 import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import {
   ingestHostedLinqProviderEventTx,
 } from "./linq-provider-event-store";
 import {
@@ -707,6 +710,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prisma,
         });
+        if (planned.postCommitSignupNotificationMemberIds?.length) {
+          scheduleHostedSignupNotificationEmails({
+            memberIds: planned.postCommitSignupNotificationMemberIds,
+            prisma,
+          });
+        }
         if (
           planned.nextRequiredPendingGroupSetupCandidateId !== undefined
         ) {
@@ -1981,6 +1990,12 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     },
     prisma,
   });
+  if (plan.postCommitSignupNotificationMemberIds?.length) {
+    scheduleHostedSignupNotificationEmails({
+      memberIds: plan.postCommitSignupNotificationMemberIds,
+      prisma,
+    });
+  }
 
   if (plan.desiredSideEffects.length > 0) {
     throw new Error(

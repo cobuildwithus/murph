@@ -26,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   listBoundedConnectionSourcesForConnections: vi.fn(),
   listConnectionsForUser: vi.fn(),
   listMemberConnectionStatuses: vi.fn(),
-  listRecentConnectionWebhookSignals: vi.fn(),
+  listRecentConnectionStatusSignals: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
   persistHostedDeviceSyncCompanionMetadata: vi.fn(),
   prismaClient: {
@@ -269,7 +269,7 @@ describe("device sync companion routes", () => {
     mocks.listConnectionSources.mockResolvedValue([]);
     mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue([]);
     mocks.listMemberConnectionStatuses.mockResolvedValue([]);
-    mocks.listRecentConnectionWebhookSignals.mockResolvedValue([]);
+    mocks.listRecentConnectionStatusSignals.mockResolvedValue([]);
     mocks.persistHostedDeviceSyncCompanionMetadata.mockResolvedValue(undefined);
     mocks.createHostedDeviceSyncControlPlane.mockReturnValue({
       store: {
@@ -277,7 +277,7 @@ describe("device sync companion routes", () => {
         listBoundedConnectionSourcesForConnections: mocks.listBoundedConnectionSourcesForConnections,
         listConnectionsForUser: mocks.listConnectionsForUser,
         listMemberConnectionStatuses: mocks.listMemberConnectionStatuses,
-        listRecentConnectionWebhookSignals: mocks.listRecentConnectionWebhookSignals,
+        listRecentConnectionStatusSignals: mocks.listRecentConnectionStatusSignals,
       },
     });
     mocks.createHostedDeviceSyncPublicIngressService.mockReturnValue({
@@ -1290,7 +1290,7 @@ describe("device sync companion routes", () => {
           HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         sourceProviderSlugs: null,
       });
-      expect(mocks.listRecentConnectionWebhookSignals).not.toHaveBeenCalled();
+      expect(mocks.listRecentConnectionStatusSignals).not.toHaveBeenCalled();
     });
 
     it("returns unscoped status for a Junction connection with all 33 configured sources", async () => {
@@ -1307,7 +1307,7 @@ describe("device sync companion routes", () => {
           status: index === 32 ? "disconnected" : "connected",
         })),
       );
-      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
         connectionId: "dsc_1",
         createdAt: "2026-07-09T11:30:00.000Z",
         eventType: "daily.data.sleep.updated",
@@ -1332,7 +1332,7 @@ describe("device sync companion routes", () => {
           HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         sourceProviderSlugs: null,
       });
-      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledOnce();
+      expect(mocks.listRecentConnectionStatusSignals).toHaveBeenCalledOnce();
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
       expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
     });
@@ -1370,7 +1370,7 @@ describe("device sync companion routes", () => {
           status: "disconnected",
         },
       ]);
-      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([
         {
           createdAt: "2026-06-11T09:00:00.000Z",
           eventType: "provider.connection.created",
@@ -1403,7 +1403,7 @@ describe("device sync companion routes", () => {
           workouts: { lastReceivedAt: null },
         },
       });
-      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledWith({
+      expect(mocks.listRecentConnectionStatusSignals).toHaveBeenCalledWith({
         connectionIds: ["dsc_1"],
         userId: "member_1",
       });
@@ -1416,6 +1416,77 @@ describe("device sync companion routes", () => {
       });
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
       expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    });
+
+    it("uses canonical import completion time as backend-confirmed freshness", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listMemberConnectionStatuses.mockResolvedValue([{
+        id: "dsc_1",
+        status: "active",
+      }]);
+      mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue([{
+        connectionId: "dsc_1",
+        resourceAvailabilitySummary: { steps: true },
+        sourceProviderSlug: "apple_health_kit",
+        status: "connected",
+      }]);
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
+        createdAt: "2026-07-09T11:45:00.000Z",
+        eventType: "canonical.data.steps.imported",
+        kind: "canonical_import",
+        occurredAt: "2026-07-09T11:00:00.000Z",
+        sourceProviderSlug: "apple_health_kit",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "apple_health_kit",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: "2026-07-09T11:00:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
+        resources: {
+          steps: { lastReceivedAt: "2026-07-09T11:00:00.000Z" },
+        },
+      });
+    });
+
+    it("does not revive a disconnected source from a later import acknowledgement", async () => {
+      mockVerifiedPrivyUser();
+      mocks.listMemberConnectionStatuses.mockResolvedValue([{
+        id: "dsc_1",
+        status: "active",
+      }]);
+      mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue([{
+        connectionId: "dsc_1",
+        lastSeenAt: "2026-07-09T11:15:00.000Z",
+        resourceAvailabilitySummary: { steps: true },
+        sourceProviderSlug: "apple_health_kit",
+        status: "disconnected",
+      }]);
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
+        connectionId: "dsc_1",
+        createdAt: "2026-07-09T11:45:00.000Z",
+        eventType: "canonical.data.steps.imported",
+        kind: "canonical_import",
+        occurredAt: "2026-07-09T11:00:00.000Z",
+        sourceProviderSlug: "apple_health_kit",
+      }]);
+
+      const response = await statusRoute.GET(statusRequest(
+        "privy-identity-token",
+        "apple_health_kit",
+      ));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        lastDataReceivedAt: null,
+        observedAt: "2026-07-09T12:00:00.000Z",
+        resources: {},
+      });
     });
 
     it("scopes availability and receipt reads to Health Connect", async () => {
@@ -1438,7 +1509,7 @@ describe("device sync companion routes", () => {
           status: "connected",
         },
       ]);
-      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
         connectionId: "dsc_1",
         createdAt: "2026-07-25T18:00:00.000Z",
         eventType: "daily.data.workouts.updated",
@@ -1458,7 +1529,7 @@ describe("device sync companion routes", () => {
           workouts: { lastReceivedAt: "2026-07-25T18:00:00.000Z" },
         },
       });
-      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledWith({
+      expect(mocks.listRecentConnectionStatusSignals).toHaveBeenCalledWith({
         connectionIds: ["dsc_1"],
         sourceProviderSlug: "health_connect",
         userId: "member_1",
@@ -1500,7 +1571,7 @@ describe("device sync companion routes", () => {
           updatedAt: "2026-07-25T19:00:00.000Z",
         },
       ]);
-      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
         connectionId: "dsc_1",
         createdAt: "2026-07-25T18:00:00.000Z",
         eventType: "daily.data.workouts.updated",
@@ -1536,7 +1607,7 @@ describe("device sync companion routes", () => {
         // the same instant as the durable receipt without moving lastSeenAt.
         updatedAt: "2026-07-25T19:00:00.000Z",
       }]);
-      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
         connectionId: "dsc_1",
         createdAt: "2026-07-25T19:00:00.000Z",
         eventType: "daily.data.workouts.updated",
@@ -1571,7 +1642,7 @@ describe("device sync companion routes", () => {
         sourceProviderSlug: "apple_health_kit",
         status: "connected",
       }]);
-      mocks.listRecentConnectionWebhookSignals.mockResolvedValue([{
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
         connectionId: "dsc_1",
         createdAt: "2026-07-25T18:00:00.000Z",
         eventType: "daily.data.workouts.updated",
@@ -1630,7 +1701,7 @@ describe("device sync companion routes", () => {
       mocks.listBoundedConnectionSourcesForConnections.mockImplementation(async () =>
         runDatabaseRead(sources)
       );
-      mocks.listRecentConnectionWebhookSignals.mockImplementation(async () =>
+      mocks.listRecentConnectionStatusSignals.mockImplementation(async () =>
         runDatabaseRead(signals)
       );
 
@@ -1652,8 +1723,8 @@ describe("device sync companion routes", () => {
           HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
         sourceProviderSlugs: null,
       });
-      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledOnce();
-      expect(mocks.listRecentConnectionWebhookSignals).toHaveBeenCalledWith({
+      expect(mocks.listRecentConnectionStatusSignals).toHaveBeenCalledOnce();
+      expect(mocks.listRecentConnectionStatusSignals).toHaveBeenCalledWith({
         connectionIds,
         userId: "member_1",
       });
@@ -1684,7 +1755,7 @@ describe("device sync companion routes", () => {
         sourceProviderSlugs: ["health_connect"],
       });
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
-      expect(mocks.listRecentConnectionWebhookSignals).not.toHaveBeenCalled();
+      expect(mocks.listRecentConnectionStatusSignals).not.toHaveBeenCalled();
     });
   });
 

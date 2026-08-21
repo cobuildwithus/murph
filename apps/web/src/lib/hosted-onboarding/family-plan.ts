@@ -103,6 +103,9 @@ import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import {
   createHostedMember,
   readHostedMemberCoreState,
   type HostedMemberCoreState,
@@ -4941,6 +4944,12 @@ export async function acceptHostedFamilyInvite(input: {
   }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   const activation = activationHolder.value;
 
+  if (activation?.activated) {
+    scheduleHostedSignupNotificationEmails({
+      memberIds: [activation.memberId],
+      prisma,
+    });
+  }
   if (activation?.hostedExecutionEventId) {
     await signalHostedMemberActivationRuntimeWakeBestEffortResult({
       hostedExecutionEventId: activation.hostedExecutionEventId,

@@ -1056,11 +1056,23 @@ Last verified: 2026-08-20
   for the private message.
 - Foreground inbox/parser-backed daemon runs should favor restartable connectors with bounded backoff over permanently dead watch loops, while still keeping low-level restart behavior opt-in and always bounded by the owning abort signal.
 - Networked assistant/provider/channel calls should set explicit timeouts, propagate caller abort signals, and only auto-retry request shapes that are replay-safe or rate-limit directed.
-- Hosted artifact uploads are content-addressed and replay-safe. Transport failures
-  plus HTTP 408, 429, and 5xx responses carry typed retryability into the existing
-  device-sync job owner, which requeues with its normal bounded backoff. Write-fence
-  and authority failures, other HTTP responses, malformed data, and unclassified
-  errors remain terminal; the runtime must not create a second artifact retry queue.
+- Hosted Web Google Cloud KMS decrypts are replay-safe and use at most two
+  whole-operation attempts. Each attempt retains the ten-second bound across
+  Workload Identity authentication and the KMS RPC, while one 25-second
+  aggregate deadline and the caller abort signal own the full operation. Only
+  a local/provider deadline or provider `UNAVAILABLE` result may trigger the
+  second attempt, after 100–300 ms of abortable jitter. Encrypt, sign, MAC,
+  permission/authentication, quota, input, and integrity failures remain
+  single-attempt and fail closed; the official SDK's broad default retry budget
+  stays disabled.
+- Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
+  failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
+  existing device-sync job owner, which requeues with its normal bounded backoff.
+  A canonical device-sync checkpoint becomes retryable only after its existing
+  exact-successor reconciliation also fails for a proven timeout or transient
+  transport/status reason. Write-fence, lease, authority, deterministic 4xx,
+  malformed-data, parser, and unclassified failures remain terminal; the runtime
+  must not create a second artifact or checkpoint retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
   schedule consumed by the global due-reconcile sweep. The first durable
@@ -1107,6 +1119,23 @@ Last verified: 2026-08-20
   `device-sync.maintenance_failed`, and activity scheduling uses
   `assistant.device_activity_automation_failed`; none increments the
   failed-attempt metric.
+  Every hosted device-sync lane also enqueues a best-effort
+  `device-sync.pass_started` marker before snapshot/provider work and a paired
+  `device-sync.pass_finished` marker before returning or rethrowing. Both use
+  the existing ordered runtime-log buffer and bounded invocation-end drain, so
+  diagnostic transport never blocks provider start, foreground recovery, lane
+  return, or checkpoint/retry handoff. Both carry the invocation attempt, lease
+  generation, and workspace version in typed log columns. The terminal marker
+  contains only bounded metadata: the last pass stage, outcome, elapsed time,
+  processed-job count, checkpoint/retry presence, and a typed yield reason
+  (`foreground`, `timeout`, `invocation_preempted`, `container_destroyed`,
+  `outer_signal`, or `unknown`). A persisted start without a matching finish is
+  the queryable abrupt-loss signal and must be correlated with runner,
+  container, and checkpoint events for that attempt. The pair remains
+  best-effort: abrupt loss before the background writer flushes can omit either
+  marker. These entries
+  never include member/account/job identifiers, provider payloads, resource
+  values, or raw abort/error messages.
   This event taxonomy is a strict Web parser boundary. Shared workspace packages
   are build inputs, not separately deployed planes. Deploy the Web artifact that
   contains its parser first, then deploy and fully recycle the Cloudflare
@@ -2319,6 +2348,29 @@ planner therefore continues to omit `send_progress_update` while exposing the
 durable/final-result tools. Accepted-input personalization retains its existing
 message and route checks.
 
+## Public email bootstrap
+
+The canonical public mailbox owns no private message work. Cloudflare reads at
+most a bounded header prefix, accepts-and-drops malformed or spoofable input,
+and invokes Web asynchronously with only a normalized candidate address. Web
+serializes admission with a nonblocking global advisory lock and the member row
+lock. A colliding global claim is silently suppressed instead of waiting and
+occupying the shared Web database pool. The winner rechecks active access and
+current verified-email authority before provider entry and terminalizes
+provider ambiguity without an automatic resend. A confirmed provider no-send
+result admits a fresh public email only after a one-minute backoff; sent,
+ambiguous, claimed, and sending outcomes retain the 15-minute cooldown. Every
+admitted try still counts toward the three-attempt member daily and 100-attempt
+global hourly limits. A provider idempotency key and two-day attempt retention
+further bound abuse and replay. Authenticated Web actions that already hold the
+current signed alias send their prepared intent there directly, so Start
+Experiment and device-recovery mail can remain a one-step assistant turn.
+Verified-email authentication prepares alias rotation from the freshly read
+Privy identity, then changes the personal alias generation with the email in
+the same member transaction, so an old reply capability cannot be
+re-registered. Deploy the database migration and Web contract before
+Cloudflare; roll back Cloudflare first.
+
 ## Deterministic member action delivery
 
 Direct editors reuse the existing encrypted system mailbox rather than adding a
@@ -2350,10 +2402,11 @@ equals its prestate because that request has no observable structural effect.
 The canonical workout write atomically records the action id with the mutation;
 only that exact persisted id proves replay. A merely matching visible result is
 never success for a stale destructive action. Replay lookup checks that marker
-across the bounded canonical workout collection before revision and active-only
-eligibility, so the generation change caused by the original write, workout
-completion, or a newer active workout cannot replace a committed success with a
-terminal rejection. Every different action must match the current revision
+across the bounded canonical workout collection before revision and
+unfinished-record eligibility, so the generation change caused by the original
+write or workout completion cannot replace a committed success with a terminal
+rejection, and another unfinished workout cannot receive the action. Every
+different action must match the current revision
 before positional mutation. The serialized mailbox lane means
 one last-applied id is sufficient until its terminal outcome commits, without a
 second receipt store. Validated set removal uses one narrow canonical replacement

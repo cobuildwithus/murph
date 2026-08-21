@@ -45,6 +45,8 @@ import { asWorkerStringEnvironment } from "../worker-contracts.ts";
 import {
   appendHostedEmailIngressWakeInWeb,
 } from "../web-control-plane-email-ingress.ts";
+import { handleHostedEmailPublicBootstrap } from "./public-bootstrap.ts";
+import { isHostedEmailPublicBootstrapAddress } from "./route-addressing.ts";
 
 export interface HostedEmailIngressExecutionContext {
   waitUntil(promise: Promise<unknown>): void;
@@ -98,6 +100,21 @@ export async function handleHostedEmailIngress(
   }
 
   const config = readHostedEmailConfig(stringEnv);
+  if (isHostedEmailPublicBootstrapAddress(message.to, config)) {
+    const bootstrap = handleHostedEmailPublicBootstrap({
+      environment,
+      message,
+    });
+    if (_ctx) {
+      _ctx.waitUntil(bootstrap);
+    } else {
+      // Production always supplies an execution context. Awaiting here keeps
+      // local and unit invocations deterministic without changing SMTP output.
+      await bootstrap;
+    }
+    return;
+  }
+
   let rawBytes: Uint8Array;
 
   try {

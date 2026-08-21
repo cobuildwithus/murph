@@ -9,6 +9,7 @@ import {
   resolveMurphContactOptions,
   resolveMurphTelegramBotUsername,
   resolveMurphWebmailShortcut,
+  withMurphContactOptionBody,
 } from "@/src/lib/murph-contact-routing";
 
 const originalMurphTelegramUsernameOverride = process.env.MURPH_TELEGRAM_USERNAME_OVERRIDE;
@@ -34,6 +35,47 @@ test("resolveMurphContactOptions returns connected channels in priority order", 
   assert.equal(
     options[2]?.href,
     "mailto:murph+alias123@mail.withmurph.ai?subject=Hey%20Murph",
+  );
+});
+
+test("withMurphContactOptionBody carries one exact workout through every contact link", () => {
+  const body = "Continue workout workout_newer.";
+  const options = resolveMurphContactOptions({
+    contactChannels: { email: true, telegram: true, text: true },
+    message: { body: "Continue my active workout." },
+    murphEmailAddress: "murph+alias123@mail.withmurph.ai",
+    murphPhoneNumber: "+15550100001",
+    userEmailAddress: "member@gmail.com",
+  }).map((option) => withMurphContactOptionBody(option, body));
+
+  for (const option of options) {
+    const parameter = option.kind === "telegram" ? "text" : "body";
+    assert.equal(new URL(option.href).searchParams.get(parameter), body);
+    assert.ok(!option.href.includes("workout_older"));
+  }
+
+  const email = options.find((option) => option.kind === "email");
+  assert.ok(email?.webmail);
+  assert.equal(new URL(email.webmail.href).searchParams.get("body"), body);
+});
+
+test("withMurphContactOptionBody updates wrapped mailto shortcuts", () => {
+  const option = resolveMurphContactOptions({
+    contactChannels: { email: true },
+    message: { body: "Continue my active workout." },
+    userEmailAddress: "member@proton.me",
+  })[0];
+  assert.ok(option?.webmail);
+
+  const updated = withMurphContactOptionBody(
+    option,
+    "Continue workout workout_newer.",
+  );
+  const wrappedMailto = new URL(updated.webmail?.href ?? "").searchParams.get("mailto");
+  assert.ok(wrappedMailto);
+  assert.equal(
+    new URL(wrappedMailto).searchParams.get("body"),
+    "Continue workout workout_newer.",
   );
 });
 

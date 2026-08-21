@@ -346,6 +346,110 @@ describe("official Google Cloud KMS SDK boundary", () => {
     }
   });
 
+  it("retries one transient Decrypt call without repeating cold Workload Identity refresh", async () => {
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let decryptCalls = 0;
+    googleSdkMocks.kmsCall = async (call) => {
+      if (call.method !== "decrypt") {
+        return defaultKmsResponse(call);
+      }
+      decryptCalls += 1;
+      if (decryptCalls === 1) {
+        throw { code: 14 };
+      }
+      return defaultKmsResponse(call);
+    };
+
+    try {
+      const client = createHostedGcpKmsClientFromEnv(WORKLOAD_IDENTITY_ENV);
+      await expect(client.decrypt({
+        additionalAuthenticatedData: "domain=control",
+        ciphertext: Buffer.from(new Uint8Array([7, 8, 9])).toString("base64"),
+        keyName: KMS_KEY_NAME,
+      })).resolves.toEqual({ plaintext: new Uint8Array([1, 2, 3]) });
+
+      expect(decryptCalls).toBe(2);
+      expect(googleSdkMocks.authRequests.map((request) => request.kind)).toEqual(["sts", "iam"]);
+      expect(googleSdkMocks.kmsCalls).toHaveLength(2);
+      expect(googleSdkMocks.kmsCalls.every((call) =>
+        call.method === "decrypt"
+        && call.options.retry === null
+        && typeof call.options.timeout === "number"
+        && Number(call.options.timeout) > 0
+        && Number(call.options.timeout) <= 10_000
+      )).toBe(true);
+      expect(warning).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
+        expect.objectContaining({ providerReason: "UNAVAILABLE" }),
+      );
+    } finally {
+      random.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
+  it("cancels a timed-out official Decrypt call before retrying within the aggregate deadline", async () => {
+    const aggregateDeadline = new AbortController();
+    const firstAttemptDeadline = new AbortController();
+    const secondAttemptDeadline = new AbortController();
+    const deadlineSignals = [
+      aggregateDeadline.signal,
+      firstAttemptDeadline.signal,
+      secondAttemptDeadline.signal,
+    ];
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const signal = deadlineSignals.shift();
+      if (!signal) {
+        throw new Error("Unexpected Google KMS deadline allocation.");
+      }
+      return signal;
+    });
+    const random = vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let decryptCalls = 0;
+    googleSdkMocks.kmsCall = async (call) => {
+      if (call.method !== "decrypt") {
+        return defaultKmsResponse(call);
+      }
+      decryptCalls += 1;
+      if (decryptCalls === 1) {
+        return new Promise<never>(() => undefined);
+      }
+      return defaultKmsResponse(call);
+    };
+
+    try {
+      const client = createHostedGcpKmsClientFromEnv(STATIC_ENV);
+      const operation = client.decrypt({
+        additionalAuthenticatedData: "domain=control",
+        ciphertext: Buffer.from(new Uint8Array([7, 8, 9])).toString("base64"),
+        keyName: KMS_KEY_NAME,
+      });
+
+      await vi.waitFor(() => expect(googleSdkMocks.kmsCalls).toHaveLength(1));
+      firstAttemptDeadline.abort();
+
+      await expect(operation).resolves.toEqual({ plaintext: new Uint8Array([1, 2, 3]) });
+      expect(decryptCalls).toBe(2);
+      expect(googleSdkMocks.kmsCalls).toHaveLength(2);
+      expect(googleSdkMocks.kmsCalls[0]?.canceled).toBe(true);
+      expect(googleSdkMocks.kmsCalls[1]?.canceled).toBe(false);
+      expect(aggregateDeadline.signal.aborted).toBe(false);
+      expect(secondAttemptDeadline.signal.aborted).toBe(false);
+      expect(deadlineSignals).toHaveLength(0);
+      expect(timeout).toHaveBeenCalledTimes(3);
+      expect(warning).toHaveBeenCalledWith(
+        "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
+        expect.objectContaining({ providerReason: "DEADLINE_EXCEEDED" }),
+      );
+    } finally {
+      timeout.mockRestore();
+      random.mockRestore();
+      warning.mockRestore();
+    }
+  });
+
   it("does not let one caller abort cancel a shared cold Workload Identity refresh", async () => {
     let releaseSts: (value: unknown) => void = () => undefined;
     const pendingSts = new Promise<unknown>((resolve) => {

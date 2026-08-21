@@ -1,3 +1,5 @@
+import { HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS } from "@murphai/hosted-execution/hosted-email";
+
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
   extractHostedPrivyPhoneAccount,
@@ -8,7 +10,7 @@ import {
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
-export const MURPH_CONTACT_EMAIL = "murph@mail.withmurph.ai";
+export const MURPH_CONTACT_EMAIL = HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS;
 export const DEFAULT_MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
 export const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
 export const MURPH_TELEGRAM_BOT_USERNAME = resolveMurphTelegramBotUsername();
@@ -85,6 +87,27 @@ export function resolveMurphContactOptions(input: {
   }
 
   return options;
+}
+
+export function withMurphContactOptionBody(
+  option: MurphContactOption,
+  body: string,
+): MurphContactOption {
+  const href = new URL(option.href);
+  href.searchParams.set(option.kind === "telegram" ? "text" : "body", body);
+
+  return {
+    ...option,
+    href: href.toString(),
+    ...(option.webmail
+      ? {
+          webmail: {
+            ...option.webmail,
+            href: withMurphWebmailBody(option.webmail.href, body),
+          },
+        }
+      : {}),
+  };
 }
 
 const DEFAULT_MURPH_CONTACT_KIND_ORDER: readonly MurphContactKind[] = [
@@ -327,6 +350,21 @@ function buildMurphEmailContactOption(input: {
       userEmailAddress: input.userEmailAddress,
     }),
   };
+}
+
+function withMurphWebmailBody(href: string, body: string): string {
+  const url = new URL(href);
+  const mailto = url.searchParams.get("mailto");
+
+  if (!mailto) {
+    url.searchParams.set("body", body);
+    return url.toString();
+  }
+
+  const mailtoUrl = new URL(mailto);
+  mailtoUrl.searchParams.set("body", body);
+  url.searchParams.set("mailto", mailtoUrl.toString());
+  return url.toString();
 }
 
 type WebmailProvider =

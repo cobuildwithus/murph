@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "private-pages-recover-from-short-delays",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Private pages recover from short delays",
+    "summary": "Private pages that need protected account data now retry once after a short provider interruption, reducing failed page loads.",
+    "details": "The retry stays tightly timed and applies only to safe reads; permission and data-integrity failures still stop immediately.",
+    "relevanceTags": ["privacy", "reliability", "web"],
+    "sourcePullRequests": [2048]
+  }
+}

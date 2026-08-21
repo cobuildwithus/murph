@@ -1314,7 +1314,9 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           idempotencyKey: deliveryIdempotencyLookupKey,
           deliveredAt: null,
-          lastReceiptAt: null,
+          OR: expect.arrayContaining([
+            expect.objectContaining({ lastReceiptAt: null }),
+          ]),
           skippedAt: null,
         }),
       }),
@@ -2263,6 +2265,131 @@ describe("hosted Linq observability stores", () => {
     if (row.source === "hosted_webhook_side_effect") {
       expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
     }
+  });
+
+  it("reclaims an identifiable Linq usage-limit rich-link partial with the same provider key", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.052Z");
+    const previousAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const failedAt = new Date("2026-03-26T12:00:00.050Z");
+    const lastReceiptAt = new Date("2026-03-26T12:00:00.049Z");
+    const updatedAt = new Date("2026-03-26T12:00:00.051Z");
+    const currentIdempotencyKey = buildCurrentAiUsageNoticeKey();
+    const linqChatLookupKey = createHostedLinqChatLookupKey("chat_123");
+    const messageLookupKey = createHostedLinqMessageLookupKey(
+      "linq_text_accepted",
+    );
+    const sourceRef = createHostedLinqDeliverySourceRefLookupKey(
+      "linq-message:event-123",
+    );
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: previousAttemptedAt,
+      deliveredAt: null,
+      failedAt,
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_partial_usage_notice",
+      lastReceiptAt,
+      linqChatLookupKey,
+      messageLookupKey,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      sourceRef,
+      status: "failed",
+      targetKind: "thread",
+      template: "ai_usage_quota",
+      updatedAt,
+    });
+
+    await expect(startHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      periodStart: AI_USAGE_NOTICE_PERIOD_START,
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
+    })).resolves.toEqual({
+      idempotencyKey: currentIdempotencyKey,
+      providerIdempotencyKey: "ai-usage-attempt:hld_partial_usage_notice",
+      replayingRichLinkPartial: true,
+      status: "claimed",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: {
+        attemptedAt,
+        status: "provider_dispatch_started",
+        updatedAt: attemptedAt,
+      },
+      where: expect.objectContaining({
+        attemptedAt: previousAttemptedAt,
+        failedAt,
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_partial_usage_notice",
+        lastReceiptAt,
+        linqChatLookupKey,
+        messageLookupKey,
+        sourceRef,
+        status: "failed",
+        updatedAt,
+      }),
+    });
+  });
+
+  it("keeps a fresh usage-limit rich-link replay fence in flight", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const previousAttemptedAt = new Date("2026-03-26T12:04:00.000Z");
+    const lastReceiptAt = new Date("2026-03-26T12:03:59.000Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: previousAttemptedAt,
+      deliveredAt: null,
+      failedAt: new Date("2026-03-26T12:00:30.000Z"),
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_replaying_usage_notice",
+      lastReceiptAt,
+      linqChatLookupKey: createHostedLinqChatLookupKey("chat_123"),
+      messageLookupKey: createHostedLinqMessageLookupKey(
+        "linq_text_accepted",
+      ),
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+        "linq-message:event-123",
+      ),
+      status: "provider_dispatch_started",
+      targetKind: "thread",
+      template: "ai_usage_quota",
+      updatedAt: new Date("2026-03-26T12:04:01.000Z"),
+    });
+
+    await expect(startHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      periodStart: AI_USAGE_NOTICE_PERIOD_START,
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-123",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:19:00.000Z"),
+      status: "in_flight",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
   });
 
   it("keeps a fresh current AI usage notice claim in flight", async () => {
@@ -3984,7 +4111,6 @@ describe("hosted Linq observability stores", () => {
         where: expect.objectContaining({
           deliveredAt: null,
           idempotencyKey: deliveryIdempotencyLookupKey,
-          lastReceiptAt: null,
           skippedAt: null,
           OR: expect.arrayContaining([
             {
@@ -3992,12 +4118,76 @@ describe("hosted Linq observability stores", () => {
               failedAt: {
                 not: null,
               },
+              lastReceiptAt: null,
               messageLookupKey: null,
             },
           ]),
         }),
       }),
     );
+  });
+
+  it("lets a receipt-bearing usage-limit replay complete its rich-link checkpoint", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_partial_usage_notice",
+      sourceRef: null,
+      template: "ai_usage_quota",
+    });
+
+    await markHostedLinqDeliveryAcceptedTx({
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      linqChatId: "chat_123",
+      messageIds: ["linq_text_accepted", "linq_link_accepted"],
+      prisma: fixture.prisma as never,
+      replayingRichLinkPartial: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          acceptedAt: expect.any(Date),
+          failedAt: null,
+          failureCode: null,
+          messageLookupKey: createHostedLinqMessageLookupKey(
+            "linq_link_accepted",
+          ),
+          status: "accepted",
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{
+            acceptedAt: null,
+            failedAt: { not: null },
+            failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            messageLookupKey: createHostedLinqMessageLookupKey(
+              "linq_text_accepted",
+            ),
+            status: "provider_dispatch_started",
+          }]),
+        }),
+      }),
+    );
+    expect(fixture.hostedLinqDeliveryMessageCreateMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          deliveryId: "hld_partial_usage_notice",
+          messageLookupKey: createHostedLinqMessageLookupKey(
+            "linq_text_accepted",
+          ),
+          ordinal: 0,
+        }),
+        expect.objectContaining({
+          deliveryId: "hld_partial_usage_notice",
+          messageLookupKey: createHostedLinqMessageLookupKey(
+            "linq_link_accepted",
+          ),
+          ordinal: 1,
+        }),
+      ],
+      skipDuplicates: true,
+    });
   });
 
   it("does not downgrade an accepted delivery when an idempotent skip is recorded later", async () => {
@@ -4454,6 +4644,35 @@ describe("hosted Linq observability stores", () => {
             ordinal: 0,
           }),
         ],
+      }),
+    );
+  });
+
+  it("restores the partial checkpoint when a fenced rich-link replay stays ambiguous", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await markHostedLinqDeliverySendFailedTx({
+      expectedAttemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      idempotencyKey: "ai-usage-gate:member_123:2026-03",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      replayingRichLinkPartial: true,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+          status: "failed",
+        }),
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([{
+            failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+            messageLookupKey: { not: null },
+            status: "provider_dispatch_started",
+          }]),
+        }),
       }),
     );
   });
@@ -5286,6 +5505,47 @@ describe("owned multi-part Linq delivery receipts", () => {
     },
   );
 
+  it("keeps a receipt-bearing rich-link replay fenced until both children exist", async () => {
+    const partialFailedAt = new Date("2026-03-26T11:59:59.000Z");
+    const partialFailureReason =
+      "Linq could not confirm both rich-link provider identities.";
+    const fixture = createOwnedDeliveryReceiptPrismaFixture(
+      [buildOwnedDeliveryMessageState("delivered", "evt_replayed_primary")],
+      {
+        failedAt: partialFailedAt,
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        failureReason: partialFailureReason,
+        status: "provider_dispatch_started",
+      },
+    );
+
+    await applyHostedLinqDeliveryReceiptTx({
+      event: requireParsedProviderEvent(buildProviderEvent({
+        data: {
+          message_id: "msg_primary",
+          phone_number: "+15550000000",
+          service: "iMessage",
+        },
+        eventId: "evt_replayed_primary",
+        eventType: "message.delivered",
+      })),
+      prisma: fixture.prisma as never,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          deliveredAt: null,
+          failedAt: partialFailedAt,
+          failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+          failureReason: partialFailureReason,
+          status: "provider_dispatch_started",
+        }),
+        where: { id: "hld_owned_parts" },
+      }),
+    );
+  });
+
   it.each(["delivered", "failed"] as const)(
     "keeps a parent-only rich-link partial absorbing when its known provider message is %s",
     async (messageStatus) => {
@@ -5481,7 +5741,11 @@ function createOwnedDeliveryReceiptPrismaFixture(
     failedAt: Date | null;
     failureCode: string | null;
     failureReason: string | null;
-    status: "accepted" | "failed" | "sent_no_receipt_expected";
+    status:
+      | "accepted"
+      | "failed"
+      | "provider_dispatch_started"
+      | "sent_no_receipt_expected";
   } = {
     failedAt: null,
     failureCode: null,
