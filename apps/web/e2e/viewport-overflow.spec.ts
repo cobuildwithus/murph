@@ -695,7 +695,7 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
   }
 });
 
-test("clubs stays reachable through the global navigation at every breakpoint", async ({
+test("homepage omits retired links from the global navigation at every breakpoint", async ({
   page,
 }) => {
   for (const width of [768, 900, 1023, 1024] as const) {
@@ -708,29 +708,36 @@ test("clubs stays reachable through the global navigation at every breakpoint", 
       }
     });
 
-    const response = await page.goto("/clubs", { waitUntil: "load" });
-    expect(response?.status(), `/clubs should respond 200 at ${width}px`).toBe(
+    const response = await page.goto("/", { waitUntil: "load" });
+    expect(response?.status(), `homepage should respond 200 at ${width}px`).toBe(
       200,
     );
 
     const navigation = page.locator("nav.fixed").first();
-    const directClubsLink = navigation.locator('a[href="/clubs"]');
     const menuTrigger = navigation.getByRole("button", { name: "Open menu" });
 
+    await expect(navigation.locator('a[href="/#how"]')).toHaveCount(0);
+    await expect(navigation.locator('a[href="/clubs"]')).toHaveCount(0);
+
     if (width < 1024) {
-      await expect(directClubsLink).toBeHidden();
       await expect(menuTrigger).toBeVisible();
       await menuTrigger.click();
+      const dialog = page.getByRole("dialog");
       await expect(
-        page.getByRole("dialog").getByRole("link", {
-          name: "Clubs",
-          exact: true,
-        }),
+        dialog.getByRole("link", { name: "How it works", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        dialog.getByRole("link", { name: "Clubs", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        dialog.getByRole("link", { name: "FAQ", exact: true }),
       ).toBeVisible();
       await page.keyboard.press("Escape");
     } else {
-      await expect(directClubsLink).toBeVisible();
       await expect(menuTrigger).toBeHidden();
+      await expect(
+        navigation.getByRole("link", { name: "FAQ", exact: true }),
+      ).toBeVisible();
     }
   }
 });
