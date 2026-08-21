@@ -824,6 +824,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.hostedToolContext?.labsTool != null,
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+      assistantProgressUpdatesAvailable: input.progressDelivery != null,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:

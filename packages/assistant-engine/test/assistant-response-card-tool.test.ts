@@ -891,13 +891,10 @@ describe('murph.attach_response_card', () => {
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Skip progress within ordinary latency',
+      'use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution.',
     )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'use the direct-turn progress owner once before slow work',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Keep it outcome-oriented; never narrate safety, totals, estimation, or target resolution.',
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'progress owner',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'resolve calories from dietary-calories or read-only legacy calories in kcal',

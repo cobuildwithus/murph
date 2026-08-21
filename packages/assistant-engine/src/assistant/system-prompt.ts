@@ -57,6 +57,7 @@ export interface AssistantSystemPromptInput {
   assistantHostedDeviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[];
   assistantHostedLabsAvailable?: boolean;
   assistantKnowledgeToolsAvailable?: boolean;
+  assistantProgressUpdatesAvailable?: boolean;
   assistantToolNameAliases?: Readonly<Record<string, string>> | null;
   assistantPersona?: AssistantPersonaId | null;
   assistantPersonality?: AssistantPersonalityPreferences | null;
@@ -396,6 +397,8 @@ function buildStableRouteCapabilityPrompt(
     buildAssistantSkillRouteHintText(conversationScope),
     buildAssistantExecutionBehaviorText({
       profile: input.modelBehaviorProfile,
+      progressUpdatesAvailable:
+        input.assistantProgressUpdatesAvailable ?? true,
       progressUpdateMode: conversationScope === "group" ? "group" : "direct",
     }),
     conversationScope === "direct" ? buildAssistantComputerUseGuidanceText() : null,

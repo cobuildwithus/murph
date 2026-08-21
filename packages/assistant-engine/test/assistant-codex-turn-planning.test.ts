@@ -4396,6 +4396,8 @@ describe('assistant Codex turn planning', () => {
       const toolNames = plan.dynamicTools.map((tool) => tool.name)
       expect(toolNames.includes('create_phone_call')).toBe(expectedAvailable)
       expect(toolNames).not.toContain('submit_product_feedback')
+      expect(toolNames).not.toContain('send_progress_update')
+      expect(plan.systemPrompt).not.toContain('murph.send_progress_update')
       if (expectedAvailable) {
         expect(toolNames).toEqual(expect.arrayContaining([
           'assistant_style',
@@ -4404,7 +4406,6 @@ describe('assistant Codex turn planning', () => {
           'personalization',
           'send_physical_note',
         ]))
-        expect(toolNames).not.toContain('send_progress_update')
       }
       if (channel === 'email') {
         expect(toolNames).not.toContain('assistant_style')

@@ -49,9 +49,13 @@ export function isAssistantGpt5FamilyModel(
 
 export function buildAssistantExecutionBehaviorText(input: {
   profile: AssistantModelBehaviorProfile
+  progressUpdatesAvailable?: boolean
   progressUpdateMode?: 'direct' | 'group'
 }): string {
-  const progressUpdateGuidance = input.progressUpdateMode === 'group'
+  const progressUpdateGuidance = input.progressUpdatesAvailable === false
+    ? `
+- Member-visible interim progress is unavailable on this route. Continue the work and return only the final response.`
+    : input.progressUpdateMode === 'group'
     ? `
 - Native commentary is internal, not member-visible. In a group, use \`murph.send_progress_update\` much more sparingly than in a direct conversation: only when reply-critical work will leave the room waiting noticeably through genuinely long research, content inspection, or several substantive tool steps.
 - Skip group progress for challenge setup, the next setup question, permission offers, routine standings reads, and short tool sequences. Never use it for a setup-status or transition preamble; ask the useful next question directly.
@@ -59,6 +63,7 @@ export function buildAssistantExecutionBehaviorText(input: {
     : `
 - Native commentary is internal, not member-visible. Use \`murph.send_progress_update\` for interim updates the member must see; commentary does not count. It is not a final answer, so continue immediately with the first needed action.
 - Send an update before reply-critical work needing a multi-source or cross-owner evidence pass, several substantive tool calls, long research, parsing/scans, or content inspection. Before the first read in that pass, orient the member even when each lookup is routine; name the check and why. Do not wait until the work is done or the member asks about the delay. If the requested answer depends on a child and the wait may exceed ordinary latency, send it after spawning. Background work does not trigger progress by itself unless an active skill explicitly requires a receipt or start acknowledgement. Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update.
+- Routine daily-card reads alone do not trigger progress. Skip it within ordinary latency; for an expected delay, send one outcome-focused update before slow work. Never narrate safety, totals, estimates, or target resolution.
 - For work likely to finish within about a minute, send at most one update. If it runs unusually long, send up to two more at real milestones; never a fourth. Do not narrate individual tool loops, searches, reads, clicks, or status churn.
 - Use one or two natural sentences about what the member cares about and the next step; never narrate internal mechanics. Skip skill reads, setup checks, routine single-command reads, quick replies, one-shot logging/capture/memory saves, and auto-transcribed audio unless broader work is long-running.`
   const browserActionGuidance = `

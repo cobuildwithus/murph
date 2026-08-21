@@ -7839,6 +7839,7 @@ text(result.output);
             false,
             input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
             input.snapshotPrompt,
+            input.progressAvailable ?? false,
           ),
           dynamicTools: [
             MURPH_ATTACH_RESPONSE_CARD_TOOL,
@@ -11145,6 +11146,7 @@ function buildScriptedHostedSystemPrompt(
   onboardingGuidance = false,
   scheduledOccurrenceAt?: string,
   assistantContextSnapshotPrompt?: string,
+  assistantProgressUpdatesAvailable = true,
 ): string {
   return buildAssistantSystemPrompt({
     assistantCliContract: 'Stable CLI contract for scripted hosted proof.',
@@ -11152,6 +11154,7 @@ function buildScriptedHostedSystemPrompt(
     assistantHostedDeviceConnectAvailable: true,
     assistantHostedDeviceConnectProviders: [],
     assistantKnowledgeToolsAvailable: true,
+    assistantProgressUpdatesAvailable,
     channel: 'telegram',
     cliAccess: {
       rawCommand: 'vault-cli',

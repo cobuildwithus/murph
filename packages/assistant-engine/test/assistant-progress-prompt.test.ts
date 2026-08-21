@@ -41,6 +41,18 @@ describe('assistant progress prompt contract', () => {
       'Do not leave the member silent during reply-critical work; Linq/iMessage quota is not a reason to withhold a useful update',
     )
     expect(prompt).toContain(
+      'Routine daily-card reads alone do not trigger progress',
+    )
+    expect(prompt).toContain(
+      'Skip it within ordinary latency',
+    )
+    expect(prompt).toContain(
+      'for an expected delay, send one outcome-focused update before slow work',
+    )
+    expect(prompt).toContain(
+      'Never narrate safety, totals, estimates, or target resolution',
+    )
+    expect(prompt).toContain(
       'For work likely to finish within about a minute, send at most one update',
     )
     expect(prompt).toContain(
@@ -60,6 +72,20 @@ describe('assistant progress prompt contract', () => {
     )
     expect(prompt).not.toContain('saving recovered data')
     expect(prompt).not.toContain('before the first non-progress tool call')
+  })
+
+  it('does not instruct routes without progress delivery to call the tool', () => {
+    const prompt = buildAssistantExecutionBehaviorText({
+      profile: 'gpt5-agentic',
+      progressUpdatesAvailable: false,
+      progressUpdateMode: 'direct',
+    })
+
+    expect(prompt).toContain(
+      'Member-visible interim progress is unavailable on this route',
+    )
+    expect(prompt).not.toContain('murph.send_progress_update')
+    expect(prompt).not.toContain('Send an update before reply-critical work')
   })
 
   it('keeps the dynamic tool to a concise call contract', () => {

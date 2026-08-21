@@ -96,12 +96,9 @@ proposal workflow only if a target is genuinely missing after that read and the
 member made an explicit numeric-card or target-setting request. Default meal-card
 intent never invokes it.
 Treat a routine daily-card request, including a requested meal estimate needed
-for that card, as one fulfillment workflow. Skip progress when the pass will
-finish within ordinary conversational latency, then reply once with the card or
-one concise truthful fallback. If the pass is likely to keep the member waiting,
-reuse the existing direct-turn progress owner for one brief, outcome-oriented
-acknowledgement before the first slow phase. Never narrate individual safety,
-totals, estimation, or target-resolution mechanics.
+for that card, as one fulfillment workflow. Reply once with the card or one
+concise truthful fallback. Never narrate individual safety, totals, estimation,
+or target-resolution mechanics.
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
 pending explicit card request in that next response after the complete safety
