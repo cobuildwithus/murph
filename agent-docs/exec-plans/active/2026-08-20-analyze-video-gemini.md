@@ -75,7 +75,7 @@ accounting path.
 - [x] Implement the smallest accepted design with focused tests.
 - [x] Add security, architecture, deployment, testing-map, and environment
       documentation.
-- [ ] Add the member-visible changelog entry after the new PR number exists.
+- [x] Add the member-visible changelog entry after the new PR number exists.
 - [x] Run focused tests/typechecks, dependency policy checks, diff audit, and
       privacy scan.
 - [ ] Commit and push a review candidate, open a new PR, then run preliminary
