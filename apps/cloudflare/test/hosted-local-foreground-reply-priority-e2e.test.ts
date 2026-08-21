@@ -30,6 +30,7 @@ import {
   buildHostedExecutionCodexAuthRequestedWake,
   buildHostedExecutionDailyMetricReportedWake,
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionCompletedWake,
@@ -2277,6 +2278,21 @@ function buildEverySystemWake(
   ] as const;
 
   return [
+    buildHostedExecutionEnvironmentInterviewCompletedWake({
+      completedAt,
+      completionId: `environment_interview_priority_${runId}`,
+      eventId: `environment-interview.completed:priority:${runId}`,
+      memberId: identity.userId,
+      occurredAt: completedAt,
+      topics: [{
+        answers: [{
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+          value: 19,
+        }],
+        topicId: "sleep:0",
+      }],
+    }),
     buildHostedExecutionDeviceSyncWake({
       eventId: `device-sync.wake:priority:${runId}`,
       occurredAt: requestedAt,
