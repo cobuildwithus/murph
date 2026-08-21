@@ -10,7 +10,10 @@ const mocks = vi.hoisted(() => ({
   issueHostedInvite: vi.fn(),
   lookupHostedMemberForPrivyAuthAttempt: vi.fn(),
   lookupHostedMemberForPrivyPrincipal: vi.fn(),
+  prepareHostedMemberVerifiedEmailReplyAlias: vi.fn(),
+  readHostedPrivyUserById: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
+  syncHostedMemberVerifiedEmailAuthorization: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
@@ -33,14 +36,7 @@ vi.mock("@/src/lib/hosted-onboarding/privy", async (importOriginal) => {
   >();
   return {
     ...actual,
-    readHostedPrivyUserById: vi.fn().mockResolvedValue({
-      id: "did:privy:timezone-handoff",
-      linked_accounts: [{
-        phone_number: "+48123456789",
-        type: "phone",
-        verified_at: 1782043200,
-      }],
-    }),
+    readHostedPrivyUserById: mocks.readHostedPrivyUserById,
   };
 });
 
@@ -80,7 +76,11 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async (importOriginal
 
   return {
     ...actual,
+    prepareHostedMemberVerifiedEmailReplyAlias:
+      mocks.prepareHostedMemberVerifiedEmailReplyAlias,
     readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
+    syncHostedMemberVerifiedEmailAuthorization:
+      mocks.syncHostedMemberVerifiedEmailAuthorization,
   };
 });
 
@@ -132,6 +132,21 @@ describe("hosted signup timezone handoff", () => {
     mocks.readHostedMemberMessagingSetupState.mockResolvedValue(null);
     mocks.lookupHostedMemberForPrivyAuthAttempt.mockResolvedValue(null);
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
+    mocks.prepareHostedMemberVerifiedEmailReplyAlias.mockResolvedValue({
+      generation: 0,
+      lookupKey: "0123456789abcdef0123456789abcdef",
+      memberId: MEMBER.id,
+      verifiedEmailLookupKeys: ["live-email-lookup-key"],
+    });
+    mocks.readHostedPrivyUserById.mockResolvedValue({
+      id: "did:privy:timezone-handoff",
+      linked_accounts: [{
+        phone_number: "+48123456789",
+        type: "phone",
+        verified_at: 1782043200,
+      }],
+    });
+    mocks.syncHostedMemberVerifiedEmailAuthorization.mockResolvedValue({});
   });
 
   it("persists the signup timezone before activation can claim the member row", async () => {
@@ -191,5 +206,81 @@ describe("hosted signup timezone handoff", () => {
       "timezone:persist",
       "activation:claim",
     ]);
+  });
+
+  it("prepares a private reply alias from the authoritative live email", async () => {
+    const staleIdentity = {
+      email: {
+        address: "stale@example.test",
+        verifiedAt: 1_782_043_140,
+      },
+      phone: null,
+      telegram: null,
+      userId: "did:privy:timezone-handoff",
+    };
+    const liveIdentity = {
+      ...staleIdentity,
+      email: {
+        address: "live@example.test",
+        verifiedAt: 1_782_043_200,
+      },
+    };
+    mocks.readHostedPrivyUserById.mockResolvedValueOnce({
+      id: liveIdentity.userId,
+      linked_accounts: [{
+        address: liveIdentity.email.address,
+        type: "email",
+        verified_at: liveIdentity.email.verifiedAt,
+      }],
+    });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValueOnce(MEMBER);
+    mocks.ensureHostedMemberForPrivyIdentityResolutionTx.mockResolvedValueOnce({
+      created: false,
+      identity: liveIdentity,
+      member: MEMBER,
+    });
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback(prisma)),
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: MEMBER.billingStatus,
+          suspendedAt: null,
+          threadContainer: null,
+        })),
+      },
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberIdentity: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+    } as unknown as PrismaClient;
+
+    await expect(completeHostedPrivyVerification({
+      authMethod: "email",
+      identity: staleIdentity,
+      now: NOW,
+      prisma,
+    })).resolves.toMatchObject({ memberId: MEMBER.id });
+
+    expect(mocks.prepareHostedMemberVerifiedEmailReplyAlias)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        address: liveIdentity.email.address,
+        memberId: MEMBER.id,
+      }));
+    expect(mocks.prepareHostedMemberVerifiedEmailReplyAlias)
+      .not.toHaveBeenCalledWith(expect.objectContaining({
+        address: staleIdentity.email.address,
+      }));
+    expect(mocks.syncHostedMemberVerifiedEmailAuthorization)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        address: liveIdentity.email.address,
+        memberId: MEMBER.id,
+      }));
   });
 });

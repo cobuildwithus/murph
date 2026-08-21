@@ -25,6 +25,7 @@ import {
   composeHostedMemberSnapshot,
   createHostedMember as createHostedMemberStore,
   lookupHostedMemberByVerifiedEmailAddress,
+  prepareHostedMemberVerifiedEmailReplyAlias,
   readHostedMemberEmailSnapshots,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
@@ -61,6 +62,7 @@ import {
   lookupHostedMemberRoutingByTelegramUserLookupKey,
   readHostedMemberIdByReplyAliasLookupKey,
   readHostedMemberRoutingState,
+  resolveHostedMemberReplyAliasRegistrationTx,
   resolveHostedMemberCoreByTelegramUserId,
   type HostedMemberRoutingStateSnapshot,
   upsertHostedMemberHomeLinqBindingTx,
@@ -1545,7 +1547,7 @@ describe("hosted-member-store", () => {
     await upsertHostedMemberReplyAliasLookupKeyTx({
       memberId: "member_123",
       prisma,
-      replyAliasLookupKey: "  replyalias1234  ",
+      replyAliasLookupKey: "  0123456789abcdef0123456789abcdef  ",
     });
 
     expect(upsert).toHaveBeenCalledWith({
@@ -1559,14 +1561,112 @@ describe("hosted-member-store", () => {
         pendingLinqChatIdEncrypted: null,
         pendingLinqParticipantContactEncrypted: null,
         pendingLinqRecipientPhoneEncrypted: null,
-        replyAliasLookupKey: "replyalias1234",
+        replyAliasGeneration: 0,
+        replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
         telegramUserLookupKey: null,
         telegramUserIdEncrypted: null,
       },
       update: {
-        replyAliasLookupKey: "replyalias1234",
+        replyAliasGeneration: 0,
+        replyAliasLookupKey: "0123456789abcdef0123456789abcdef",
       },
     });
+  });
+
+  it("rejects a stale Worker alias after Web has rotated the current capability", async () => {
+    const prisma = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          replyAliasGeneration: 1,
+          replyAliasLookupKey: "11111111111111111111111111111111",
+        }),
+      },
+    } as never;
+
+    await expect(resolveHostedMemberReplyAliasRegistrationTx({
+      candidateLookupKey: "00000000000000000000000000000000",
+      fallbackGeneration: 1,
+      fallbackLookupKey: "00000000000000000000000000000000",
+      memberId: "member_123",
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_EMAIL_REPLY_ALIAS_STALE",
+      httpStatus: 409,
+    });
+  });
+
+  it("restores a missing alias at the current generation without reviving generation zero", async () => {
+    const upsert = vi.fn().mockResolvedValue({});
+    const prisma = {
+      $queryRaw: createMemberRowLockQueryRaw(),
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({
+          replyAliasGeneration: 3,
+          replyAliasLookupKey: null,
+        }),
+        upsert,
+      },
+    } as never;
+
+    await expect(resolveHostedMemberReplyAliasRegistrationTx({
+      candidateLookupKey: null,
+      fallbackGeneration: 3,
+      fallbackLookupKey: "33333333333333333333333333333333",
+      memberId: "member_123",
+      prisma,
+    })).resolves.toEqual({
+      generation: 3,
+      lookupKey: "33333333333333333333333333333333",
+    });
+    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: {
+        replyAliasGeneration: 3,
+        replyAliasLookupKey: "33333333333333333333333333333333",
+      },
+    }));
+  });
+
+  it("prepares the next reply-alias generation before a verified-email rotation transaction", async () => {
+    const previousDomain = process.env.HOSTED_EMAIL_DOMAIN;
+    const previousSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-reply-alias-signing-secret";
+    const currentLookupKey = createHostedEmailLookupKeyReadCandidates(
+      "current@example.test",
+    )[0];
+    const prisma = {
+      hostedMemberEmailAuthorization: {
+        findUnique: vi.fn().mockResolvedValue({
+          verifiedEmailLookupKey: currentLookupKey,
+          verifiedEmailVerifiedAt: new Date("2026-08-20T10:00:00.000Z"),
+        }),
+      },
+      hostedMemberRouting: {
+        findUnique: vi.fn().mockResolvedValue({ replyAliasGeneration: 4 }),
+      },
+    } as never;
+
+    try {
+      const current = await prepareHostedMemberVerifiedEmailReplyAlias({
+        address: "current@example.test",
+        memberId: "member_123",
+        prisma,
+      });
+      const rotated = await prepareHostedMemberVerifiedEmailReplyAlias({
+        address: "next@example.test",
+        memberId: "member_123",
+        prisma,
+      });
+
+      expect(current).toMatchObject({ generation: 4, memberId: "member_123" });
+      expect(rotated).toMatchObject({ generation: 5, memberId: "member_123" });
+      expect(rotated.lookupKey).toMatch(/^[0-9a-f]{32}$/u);
+      expect(rotated.lookupKey).not.toBe(current.lookupKey);
+    } finally {
+      restoreEnvValue("HOSTED_EMAIL_DOMAIN", previousDomain);
+      restoreEnvValue("HOSTED_EMAIL_SIGNING_SECRET", previousSigningSecret);
+    }
   });
 
   it("upserts home Linq chat bindings into the routing table with encrypted local storage", async () => {

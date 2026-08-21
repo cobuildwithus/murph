@@ -14,6 +14,7 @@ export interface HostedMemberReplyAliasRoute {
 }
 
 export async function createHostedMemberReplyAliasRoute(input: {
+  generation?: number;
   memberId: string;
   source?: HostedEmailReplyAliasEnvSource;
 }): Promise<HostedMemberReplyAliasRoute | null> {
@@ -24,6 +25,7 @@ export async function createHostedMemberReplyAliasRoute(input: {
 
   const route = await createHostedEmailUserReplyAliasRoute({
     domain: config.domain,
+    generation: input.generation,
     localPart: config.localPart,
     signingSecret: config.signingSecret,
     userId: input.memberId,
@@ -58,6 +60,12 @@ export async function createHostedMemberReplyAliasRouteFromLookupKey(input: {
     address: route.address,
     replyAliasLookupKey: route.aliasKey,
   };
+}
+
+export function readHostedMemberReplyAliasSigningSecret(
+  source: HostedEmailReplyAliasEnvSource = process.env,
+): string | null {
+  return readHostedMemberReplyAliasConfig(source)?.signingSecret ?? null;
 }
 
 function readHostedMemberReplyAliasConfig(

@@ -337,6 +337,22 @@ export function resolveHostedEmailInboundSenderAddress(input: {
     : null;
 }
 
+export function resolveHostedEmailBootstrapCandidateAddress(input: {
+  envelopeFrom?: string | null;
+  hasRepeatedHeaderFrom?: boolean;
+  headerFrom?: string | null;
+}): string | null {
+  if (input.hasRepeatedHeaderFrom) {
+    return null;
+  }
+
+  const envelopeSender = normalizeHostedEmailAddress(input.envelopeFrom);
+  const headerSender = resolveHostedEmailHeaderSenderAddress(input.headerFrom);
+  return envelopeSender && headerSender && envelopeSender === headerSender
+    ? headerSender
+    : null;
+}
+
 export function resolveHostedEmailDirectSenderLookupAddress(input: {
   authenticatedSender?: HostedEmailAuthenticatedSenderVerdict | null;
   envelopeFrom?: string | null;

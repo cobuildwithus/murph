@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "broader-connected-health-coverage",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Connected health covers more signals",
+    "summary": "Murph now checks all 48 supported connected-health data families, adding signals such as floors climbed, stand time, workout details, and ECG features when a connected source provides them.",
+    "details": "No reconnect is needed. Unavailable fields stay absent, and dense ECG and workout streams are reduced within existing safety limits before entering the health record.",
+    "relevanceTags": ["connected-health", "device-sync", "wearables"],
+    "sourcePullRequests": [2102]
+  }
+}

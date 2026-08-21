@@ -28,6 +28,7 @@ import { useExperimentStartContactContext } from "./start-experiment-contact-con
 
 interface StartExperimentButtonProps {
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
+  murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
   protocolDays: number;
   protocolTitle: string;
@@ -49,6 +50,7 @@ const CONTACT_OPTION_ICONS: Record<ExperimentStartContactKind, typeof MessageSqu
 
 export function StartExperimentButton({
   initialContactChannels = null,
+  murphEmailAddress = null,
   murphPhoneNumber = null,
   protocolDays,
   protocolTitle,
@@ -61,10 +63,16 @@ export function StartExperimentButton({
   const startContactAction = useMemo(
     () => resolveExperimentStartContactAction({
       initialContactChannels: resolvedInitialContactChannels,
+      murphEmailAddress,
       murphPhoneNumber: resolvedMurphPhoneNumber,
       protocolTitle,
     }),
-    [protocolTitle, resolvedInitialContactChannels, resolvedMurphPhoneNumber],
+    [
+      protocolTitle,
+      resolvedInitialContactChannels,
+      murphEmailAddress,
+      resolvedMurphPhoneNumber,
+    ],
   );
 
   function handleAuthenticatedStartClick() {
