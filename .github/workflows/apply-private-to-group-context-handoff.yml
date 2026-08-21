@@ -1,9 +1,13 @@
 name: Apply private-to-group context handoff patch
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/private-to-group-context-handoff
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
     paths:
       - .github/handoff-codemod-trigger
       - .github/workflows/apply-private-to-group-context-handoff.yml
@@ -19,6 +23,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.event.pull_request.head.ref == 'feat/private-to-group-context-handoff'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
