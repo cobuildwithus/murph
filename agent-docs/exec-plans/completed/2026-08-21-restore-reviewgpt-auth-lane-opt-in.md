@@ -1,6 +1,6 @@
 # Restore authenticated ReviewGPT lane default
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-21
 
@@ -68,3 +68,16 @@ Updated: 2026-08-21
   isolated storage-guard retry all passed. The broader diff lane found two
   unchanged workspace-boundary violations and one unrelated storage-guard
   timeout; the timed-out test passed alone in 3 seconds.
+
+## Completion review
+
+- The exact-head preliminary completion-specialists review applied the coverage
+  lens and returned `PASS` with zero findings and no patch artifact. Product UX,
+  prompt, and frontend lenses were correctly not applicable.
+- Parent diff review confirmed the implementation only restores the fallback
+  count. The six-lane map, explicit lane selection, count precedence, validation
+  bounds, and five- and six-lane opt-in coverage remain unchanged.
+- The preliminary pushed head passed its available repository checks while the
+  remaining hosted checks were still running. The plan-closure commit requires
+  a fresh exact-head CI read and current-base merge-tree proof before handoff.
+Completed: 2026-08-21
