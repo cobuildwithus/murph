@@ -109,7 +109,7 @@ import {
   type HostedRuntimeRedactedJson,
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
-  type HostedRuntimeAssistantConfigurationControlRequest,
+  type HostedRuntimeAssistantProviderAuthority,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedWorkspaceCheckpointRequest,
@@ -2921,6 +2921,122 @@ describe("hosted workspace runtime entrypoint", () => {
         runtimeEnvs[0]?.[HOSTED_CODEX_EFFECTIVE_MODEL_ENV],
         "murph-custom-r7",
       );
+    } finally {
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      authority: { kind: "custom", revision: 7 } as const,
+      label: "admits the unchanged selected custom revision",
+      providerAccepted: true,
+      slug: "same_revision",
+    },
+    {
+      authority: { kind: "custom", revision: 8 } as const,
+      label: "blocks a replaced custom revision",
+      providerAccepted: false,
+      slug: "replaced_revision",
+    },
+    {
+      authority: { kind: "managed", provider: "openai" } as const,
+      label: "blocks a custom revision after managed selection",
+      providerAccepted: false,
+      slug: "managed_selected",
+    },
+    {
+      authority: { kind: "custom", revision: null } as const,
+      label: "blocks an unverifiable selected custom revision",
+      providerAccepted: false,
+      slug: "unverifiable_revision",
+    },
+  ])("$label before provider entry", async ({
+    authority,
+    providerAccepted: expectedProviderAccepted,
+    slug,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    let providerAccepted = false;
+    let providerAuthorityReads = 0;
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+
+      await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          forwardedEnv: {
+            HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+            [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
+            [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
+              "hosted-custom-inference",
+            MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
+          },
+          request: {
+            attemptId: `attempt_synthetic_custom_provider_authority_${slug}`,
+          },
+        }),
+        {
+          async createCheckpointSnapshot(snapshotInput) {
+            return {
+              snapshotRef: createBundleRef({
+                hash: snapshotInput.reason === "import"
+                  ? "3".repeat(64)
+                  : "4".repeat(64),
+                key: `users/bundles/member-synthetic/${snapshotInput.reason}-${slug}.bundle.json`,
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            return { status: "imported" };
+          },
+          platform: createPlatform({
+            assistantConfigurationToolPort: {
+              async readProviderAuthority() {
+                providerAuthorityReads += 1;
+                return authority satisfies HostedRuntimeAssistantProviderAuthority;
+              },
+              async request() {
+                throw new Error("Configuration tool request was not expected.");
+              },
+            },
+            mailboxPort: createMailboxPort({
+              events: [],
+              items: [
+                createMailboxItem({
+                  id: `mailbox_item_custom_provider_authority_${slug}`,
+                  laneSeq: "1",
+                }),
+              ],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            const providerEntry = input.beforeProviderAcceptedInputs?.({
+              acceptedInputs: [],
+              turnId: `turn_custom_provider_authority_${slug}`,
+            });
+            assert.ok(providerEntry);
+            if (expectedProviderAccepted) {
+              const release = await providerEntry;
+              providerAccepted = true;
+              await release?.();
+            } else {
+              await expect(providerEntry).rejects.toThrow(/provider changed/u);
+            }
+            return { progressed: false };
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.equal(providerAuthorityReads, 1);
+      assert.equal(providerAccepted, expectedProviderAccepted);
     } finally {
       await removeTempRoot(vaultRoot);
     }
@@ -7255,6 +7371,7 @@ describe("hosted workspace runtime entrypoint", () => {
       futureMailboxWake: false,
       label: "keeps the idle window when the provider still matches",
       providerReadOutcome: "openai" as const,
+      runtimeTarget: "managed" as const,
       slug: "matching_provider",
     },
     {
@@ -7264,6 +7381,7 @@ describe("hosted workspace runtime entrypoint", () => {
       futureMailboxWake: false,
       label: "hands off immediately when the provider changed",
       providerReadOutcome: "venice" as const,
+      runtimeTarget: "managed" as const,
       slug: "changed_provider",
     },
     {
@@ -7273,6 +7391,7 @@ describe("hosted workspace runtime entrypoint", () => {
       futureMailboxWake: true,
       label: "hands off immediately with a future mailbox continuation",
       providerReadOutcome: "venice" as const,
+      runtimeTarget: "managed" as const,
       slug: "changed_provider_future_mailbox",
     },
     {
@@ -7282,7 +7401,18 @@ describe("hosted workspace runtime entrypoint", () => {
       futureMailboxWake: false,
       label: "hands foreground work to the saved provider before importing it",
       providerReadOutcome: "venice" as const,
+      runtimeTarget: "managed" as const,
       slug: "changed_provider_foreground_work",
+    },
+    {
+      expectImmediateRecheck: true,
+      expectedElapsedBoundaryMs: 650,
+      foregroundWork: true,
+      futureMailboxWake: false,
+      label: "hands a warm custom invocation back after managed selection",
+      providerReadOutcome: "openai" as const,
+      runtimeTarget: "custom" as const,
+      slug: "custom_to_managed",
     },
     {
       expectImmediateRecheck: false,
@@ -7291,6 +7421,7 @@ describe("hosted workspace runtime entrypoint", () => {
       futureMailboxWake: false,
       label: "keeps the idle window when provider authority is unavailable",
       providerReadOutcome: "unavailable" as const,
+      runtimeTarget: "managed" as const,
       slug: "provider_unavailable",
     },
   ])("$label after an external runtime wake", async ({
@@ -7299,6 +7430,7 @@ describe("hosted workspace runtime entrypoint", () => {
     foregroundWork,
     futureMailboxWake,
     providerReadOutcome,
+    runtimeTarget,
     slug,
   }) => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
@@ -7361,6 +7493,17 @@ describe("hosted workspace runtime entrypoint", () => {
       await initializeVault({ createdAt: TEST_NOW, vaultRoot });
 
       const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
+        ...(runtimeTarget === "custom"
+          ? {
+              forwardedEnv: {
+                HOSTED_ASSISTANT_CONTEXT_WINDOW_TOKENS: "131072",
+                [HOSTED_CODEX_EFFECTIVE_MODEL_ENV]: "murph-custom-r7",
+                [HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV]:
+                  "hosted-custom-inference",
+                MURPH_CUSTOM_INFERENCE_API_KEY: "__cloudflare_injected__",
+              },
+            }
+          : {}),
         request: {
           attemptId: `attempt_synthetic_external_wake_${slug}`,
           idleCheckpointDelayMs: 1_000,
@@ -7370,6 +7513,15 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       }), {
         async createCheckpointSnapshot(snapshotInput) {
+          if (snapshotInput.reason === "import") {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: `users/bundles/member-synthetic/external-wake-${slug}-import.bundle.json`,
+                size: 512,
+              }),
+            };
+          }
           snapshotCount += 1;
           assert.equal(snapshotInput.idleCheckpointTrigger, "idle_window");
           assert.equal(snapshotInput.runtimeWakePendingAtCheckpoint, true);
@@ -7387,25 +7539,18 @@ describe("hosted workspace runtime entrypoint", () => {
         },
         platform: createPlatform({
           assistantConfigurationToolPort: {
-            async request() {
+            async readProviderAuthority() {
               providerReadCount += 1;
               if (providerReadOutcome === "unavailable") {
                 throw new Error("control plane unavailable");
               }
               return {
-                action: "read",
-                result: {
-                  availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-                  availableProviders: ["openai", "venice"],
-                  availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                  configurationAvailable: true,
-                  dormantSolPreference: false,
-                  model: "gpt-5.6-terra",
-                  provider: providerReadOutcome,
-                  reasoningEffort: "low",
-                  solAvailable: false,
-                },
+                kind: "managed",
+                provider: providerReadOutcome,
               };
+            },
+            async request() {
+              throw new Error("Configuration tool request was not expected.");
             },
           },
           mailboxPort: createMailboxPort({
@@ -16366,7 +16511,7 @@ describe("hosted workspace runtime entrypoint", () => {
       createDeferred<void>(),
       createDeferred<void>(),
     ];
-    const configurationRequests: HostedRuntimeAssistantConfigurationControlRequest[] = [];
+    const configurationActions: string[] = [];
     const configurationResponses: HostedRuntimeAssistantConfigurationToolResponse[] = [
       {
         action: "update",
@@ -16500,8 +16645,12 @@ describe("hosted workspace runtime entrypoint", () => {
             },
             platform: createPlatform({
               assistantConfigurationToolPort: {
+                async readProviderAuthority() {
+                  configurationActions.push("read_provider_authority");
+                  return { kind: "managed", provider: "openai" };
+                },
                 async request(request) {
-                  configurationRequests.push(request);
+                  configurationActions.push(request.action);
                   if (request.action === "read") {
                     return {
                       action: "read",
@@ -16670,16 +16819,16 @@ describe("hosted workspace runtime entrypoint", () => {
           runtimeModel: "gpt-5.6-sol",
         },
       ]);
-      assert.deepEqual(configurationRequests.map((request) => request.action), [
+      assert.deepEqual(configurationActions, [
         "update",
-        "read",
-        "read",
-        "update",
+        "read_provider_authority",
         "read",
         "update",
-        "read",
+        "read_provider_authority",
         "update",
-        "read",
+        "read_provider_authority",
+        "update",
+        "read_provider_authority",
         "update",
       ]);
       assert.equal(configurationResponses.length, 0);
@@ -37103,21 +37252,14 @@ describe("hosted workspace runtime entrypoint", () => {
           },
           platform: createPlatform({
             assistantConfigurationToolPort: {
-              async request() {
+              async readProviderAuthority() {
                 return {
-                  action: "read",
-                  result: {
-                    availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-                    availableProviders: ["openai", "venice"],
-                    availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                    configurationAvailable: true,
-                    dormantSolPreference: false,
-                    model: "gpt-5.6-terra",
-                    provider: "venice",
-                    reasoningEffort: "low",
-                    solAvailable: false,
-                  },
+                  kind: "managed",
+                  provider: "venice",
                 };
+              },
+              async request() {
+                throw new Error("Configuration tool request was not expected.");
               },
             },
             mailboxPort: createMailboxPort({ events: [], items: mailboxItems }),
@@ -37328,21 +37470,14 @@ describe("hosted workspace runtime entrypoint", () => {
                 },
               },
               assistantConfigurationToolPort: {
-                async request() {
+                async readProviderAuthority() {
                   return {
-                    action: "read",
-                    result: {
-                      availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
-                      availableProviders: ["openai", "venice"],
-                      availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
-                      configurationAvailable: true,
-                      dormantSolPreference: false,
-                      model: "gpt-5.6-terra",
-                      provider: "venice",
-                      reasoningEffort: "low",
-                      solAvailable: false,
-                    },
+                    kind: "managed",
+                    provider: "venice",
                   };
+                },
+                async request() {
+                  throw new Error("Configuration tool request was not expected.");
                 },
               },
               mailboxPort: createMailboxPort({ events, items: [askItem] }),
@@ -40324,6 +40459,9 @@ function createPlatform(input: {
   const defaultAssistantConfigurationToolPort: NonNullable<
     HostedRuntimePlatform["assistantConfigurationToolPort"]
   > = {
+    async readProviderAuthority() {
+      return { kind: "managed", provider: "openai" };
+    },
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
         availableModels: ["gpt-5.6-luna", "gpt-5.6-terra"],
@@ -40336,17 +40474,18 @@ function createPlatform(input: {
         reasoningEffort: "low",
         solAvailable: false,
       };
-      return request.action === "read"
-        ? { action: "read", result: { ...snapshot } }
-        : {
-            action: "update",
-            result: {
-              ...snapshot,
-              appliesAt: "next_turn",
-              requiredPlan: null,
-              status: "unchanged",
-            },
-          };
+      if (request.action === "read") {
+        return { action: "read", result: { ...snapshot } };
+      }
+      return {
+        action: "update",
+        result: {
+          ...snapshot,
+          appliesAt: "next_turn",
+          requiredPlan: null,
+          status: "unchanged",
+        },
+      };
     },
   };
   const assistantConfigurationToolPort:

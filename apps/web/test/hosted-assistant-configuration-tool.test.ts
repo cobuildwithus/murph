@@ -71,6 +71,43 @@ describe("hosted runtime assistant configuration tool", () => {
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
 
+  it("projects one live managed or custom provider authority fact", async () => {
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: { action: "read_provider_authority" },
+    })).resolves.toEqual({
+      action: "read_provider_authority",
+      result: { kind: "managed", provider: "openai" },
+    });
+
+    mocks.readPreference.mockResolvedValue({
+      ...buildSnapshot(),
+      customInferenceReverificationRequired: false,
+      customInferenceSelected: true,
+      hostedAssistantCustomInferenceOverride: { revision: 7 },
+    });
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: { action: "read_provider_authority" },
+    })).resolves.toEqual({
+      action: "read_provider_authority",
+      result: { kind: "custom", revision: 7 },
+    });
+
+    mocks.readPreference.mockResolvedValue({
+      ...buildSnapshot(),
+      customInferenceReverificationRequired: true,
+      customInferenceSelected: true,
+    });
+    await expect(handleHostedRuntimeAssistantConfigurationTool({
+      memberId: "member_123",
+      request: { action: "read_provider_authority" },
+    })).resolves.toEqual({
+      action: "read_provider_authority",
+      result: { kind: "custom", revision: null },
+    });
+  });
+
   it("saves an explicitly requested model and reasoning effort from live conversation input", async () => {
     const request = {
       action: "update" as const,

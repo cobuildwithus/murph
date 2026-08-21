@@ -14,6 +14,7 @@ import {
 } from "../assistant-usage.ts";
 import {
   parseHostedAssistantCustomInferenceOverride,
+  requireHostedInferenceRevision,
 } from "../assistant-inference.ts";
 import {
   HOSTED_ASSISTANT_DEFAULT_PROVIDER,
@@ -137,6 +138,9 @@ import {
   type HostedRuntimeIMessageContactToolResponse,
   type HostedRuntimeAssistantConfigurationSnapshot,
   type HostedRuntimeAssistantConfigurationControlRequest,
+  type HostedRuntimeAssistantConfigurationWebControlRequest,
+  type HostedRuntimeAssistantConfigurationWebControlResponse,
+  type HostedRuntimeAssistantProviderAuthority,
   type HostedRuntimeAssistantConfigurationToolRequest,
   type HostedRuntimeAssistantConfigurationToolResponse,
   type HostedRuntimeAssistantConfigurationUpdateStatus,
@@ -4981,6 +4985,24 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
   return { action, assistantInputId, ...changes };
 }
 
+export function parseHostedRuntimeAssistantConfigurationWebControlRequest(
+  value: unknown,
+): HostedRuntimeAssistantConfigurationWebControlRequest {
+  const record = requireObject(
+    value,
+    "Hosted runtime assistant configuration web control request",
+  );
+  if (record.action === "read_provider_authority") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["action"]),
+      "Hosted runtime assistant configuration control provider authority request",
+    );
+    return { action: "read_provider_authority" };
+  }
+  return parseHostedRuntimeAssistantConfigurationControlRequest(value);
+}
+
 function parseHostedRuntimeAssistantConfigurationChanges(
   record: Record<string, unknown>,
   label: string,
@@ -5101,6 +5123,69 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
       ),
     },
   };
+}
+
+export function parseHostedRuntimeAssistantConfigurationWebControlResponse(
+  value: unknown,
+): HostedRuntimeAssistantConfigurationWebControlResponse {
+  const record = requireObject(
+    value,
+    "Hosted runtime assistant configuration web control response",
+  );
+  if (record.action !== "read_provider_authority") {
+    return parseHostedRuntimeAssistantConfigurationToolResponse(value);
+  }
+  assertAllowedObjectKeys(
+    record,
+    new Set(["action", "result"]),
+    "Hosted runtime assistant configuration provider authority response",
+  );
+  return {
+    action: "read_provider_authority",
+    result: parseHostedRuntimeAssistantProviderAuthority(requireObject(
+      record.result,
+      "Hosted runtime assistant provider authority response result",
+    )),
+  };
+}
+
+function parseHostedRuntimeAssistantProviderAuthority(
+  record: Record<string, unknown>,
+): HostedRuntimeAssistantProviderAuthority {
+  const kind = requireString(
+    record.kind,
+    "Hosted runtime assistant provider authority kind",
+  );
+  if (kind === "managed") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["kind", "provider"]),
+      "Hosted runtime managed assistant provider authority",
+    );
+    return {
+      kind,
+      provider: parseHostedRuntimeAssistantProvider(
+        record.provider,
+        "Hosted runtime assistant provider authority provider",
+      ),
+    };
+  }
+  if (kind === "custom") {
+    assertAllowedObjectKeys(
+      record,
+      new Set(["kind", "revision"]),
+      "Hosted runtime custom assistant provider authority",
+    );
+    return {
+      kind,
+      revision: record.revision === null
+        ? null
+        : requireHostedInferenceRevision(record.revision),
+    };
+  }
+  throw new TypeError(
+    "Hosted runtime assistant provider authority kind is not supported.",
+  );
 }
 
 function parseHostedRuntimeAssistantConfigurationSnapshot(

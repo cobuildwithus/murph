@@ -6,6 +6,7 @@ import {
   HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEYS,
   attachHostedRuntimeFailurePhaseCode,
   type HostedRuntimeAssistantConfigurationSnapshot,
+  type HostedRuntimeAssistantProviderAuthority,
   type HostedRuntimeFailurePhaseName,
   type HostedRuntimeLatencyPhaseBreakdown,
   type HostedRuntimeLatencyTraceMilestone,
@@ -74,8 +75,10 @@ import {
 } from "@murphai/assistant-engine/assistant-automation";
 import {
   isHostedAssistantProvider,
-  type HostedAssistantProvider,
 } from "@murphai/hosted-execution/assistant-model";
+import {
+  buildHostedCustomInferenceModelAlias,
+} from "@murphai/hosted-execution/assistant-inference";
 import {
   createHostedAssistantTurnEnvironment,
   normalizeHostedAssistantRuntimeConfig,
@@ -1842,11 +1845,16 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       confirmedAssistantTarget;
     const assistantConfigurationToolPort =
       guardedRuntime.platform.assistantConfigurationToolPort ?? null;
+    const readAssistantProviderAuthority =
+      assistantConfigurationToolPort?.readProviderAuthority;
     let assistantProviderHandoffRequested = false;
     const invocationAssistantConfigurationToolPort: HostedRuntimePlatform[
       "assistantConfigurationToolPort"
     ] = assistantConfigurationToolPort
       ? {
+          ...(readAssistantProviderAuthority
+            ? { readProviderAuthority: readAssistantProviderAuthority }
+            : {}),
           async request(request) {
             const response = await assistantConfigurationToolPort.request(request);
             if (
@@ -3110,46 +3118,41 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
       runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV];
     const customInferenceInvocation =
       invocationModelProvider === HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID;
+    const invocationEffectiveModel = runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_ENV];
     const invocationAssistantProvider = runtimeEnv.HOSTED_ASSISTANT_PROVIDER;
     if (!isHostedAssistantProvider(invocationAssistantProvider)) {
       throw new TypeError(
         "Hosted runtime invocation assistant provider is not supported.",
       );
     }
-    const readLiveAssistantProvider = async (): Promise<HostedAssistantProvider> => {
-      if (!assistantConfigurationToolPort) {
+    const readLiveAssistantProviderAuthority = async (): Promise<
+      HostedRuntimeAssistantProviderAuthority
+    > => {
+      if (!assistantConfigurationToolPort?.readProviderAuthority) {
         throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider choice is temporarily unavailable; retry the turn later.",
+          "Assistant provider authority is temporarily unavailable; retry the turn later.",
         );
       }
-      let response: Awaited<
-        ReturnType<typeof assistantConfigurationToolPort.request>
-      >;
       try {
-        response = await assistantConfigurationToolPort.request({ action: "read" });
+        return await assistantConfigurationToolPort.readProviderAuthority();
       } catch {
         throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider choice is temporarily unavailable; retry the turn later.",
+          "Assistant provider authority is temporarily unavailable; retry the turn later.",
         );
       }
-      if (response.action !== "read") {
-        throw new AssistantActiveTurnInputUnavailableError(
-          "Assistant provider choice is temporarily unavailable; retry the turn later.",
-        );
-      }
-      return response.result.provider;
     };
     const resolveInvocationAssistantProviderAuthority = async (): Promise<
       "current" | "handoff"
     > => {
-      // The custom endpoint and revision are already pinned to this invocation's
-      // write fence. The OpenAI/Venice preference is dormant on this path and
-      // must not replace or invalidate that effective target.
-      if (customInferenceInvocation) {
-        return "current";
-      }
-      const liveAssistantProvider = await readLiveAssistantProvider();
-      if (liveAssistantProvider === invocationAssistantProvider) {
+      const liveAuthority = await readLiveAssistantProviderAuthority();
+      const invocationIsCurrent = customInferenceInvocation
+        ? liveAuthority.kind === "custom"
+          && liveAuthority.revision !== null
+          && invocationEffectiveModel
+            === buildHostedCustomInferenceModelAlias(liveAuthority.revision)
+        : liveAuthority.kind === "managed"
+          && liveAuthority.provider === invocationAssistantProvider;
+      if (invocationIsCurrent) {
         return "current";
       }
       assistantProviderHandoffRequested = true;

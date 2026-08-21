@@ -2,8 +2,9 @@ import "server-only";
 
 import type {
   HostedRuntimeAssistantConfigurationSnapshot,
-  HostedRuntimeAssistantConfigurationControlRequest,
-  HostedRuntimeAssistantConfigurationToolResponse,
+  HostedRuntimeAssistantConfigurationWebControlRequest,
+  HostedRuntimeAssistantConfigurationWebControlResponse,
+  HostedRuntimeAssistantProviderAuthority,
 } from "@murphai/hosted-execution/runtime-control";
 import {
   readHostedMemberAssistantModelPreference,
@@ -23,17 +24,27 @@ import { getPrisma } from "../prisma";
 
 export async function handleHostedRuntimeAssistantConfigurationTool(input: {
   memberId: string;
-  request: HostedRuntimeAssistantConfigurationControlRequest;
-}): Promise<HostedRuntimeAssistantConfigurationToolResponse> {
+  request: HostedRuntimeAssistantConfigurationWebControlRequest;
+}): Promise<HostedRuntimeAssistantConfigurationWebControlResponse> {
   const prisma = getPrisma();
-  if (input.request.action === "read") {
+  if (
+    input.request.action === "read"
+    || input.request.action === "read_provider_authority"
+  ) {
+    const preference = await readHostedMemberAssistantModelPreference({
+      memberId: input.memberId,
+      prisma,
+    });
+    if (input.request.action === "read_provider_authority") {
+      return {
+        action: "read_provider_authority",
+        result: projectHostedRuntimeAssistantProviderAuthority(preference),
+      };
+    }
     return {
       action: "read",
       result: projectHostedRuntimeAssistantConfigurationSnapshot(
-        await readHostedMemberAssistantModelPreference({
-          memberId: input.memberId,
-          prisma,
-        }),
+        preference,
       ),
     };
   }
@@ -109,6 +120,23 @@ export async function handleHostedRuntimeAssistantConfigurationTool(input: {
       },
     };
   }
+}
+
+function projectHostedRuntimeAssistantProviderAuthority(input: {
+  customInferenceReverificationRequired: boolean;
+  customInferenceSelected: boolean;
+  hostedAssistantCustomInferenceOverride?: { revision: number };
+  provider: HostedRuntimeAssistantConfigurationSnapshot["provider"];
+}): HostedRuntimeAssistantProviderAuthority {
+  if (!input.customInferenceSelected) {
+    return { kind: "managed", provider: input.provider };
+  }
+  return {
+    kind: "custom",
+    revision: input.customInferenceReverificationRequired
+      ? null
+      : input.hostedAssistantCustomInferenceOverride?.revision ?? null,
+  };
 }
 
 function projectHostedRuntimeAssistantConfigurationSnapshot(input: {

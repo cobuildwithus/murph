@@ -2143,6 +2143,24 @@ export type HostedRuntimeAssistantConfigurationControlRequest =
       assistantInputId: string;
     } & HostedRuntimeAssistantConfigurationChanges);
 
+export type HostedRuntimeAssistantProviderAuthority =
+  | {
+      kind: "custom";
+      revision: number | null;
+    }
+  | {
+      kind: "managed";
+      provider: HostedAssistantProvider;
+    };
+
+export interface HostedRuntimeAssistantProviderAuthorityControlRequest {
+  action: "read_provider_authority";
+}
+
+export type HostedRuntimeAssistantConfigurationWebControlRequest =
+  | HostedRuntimeAssistantConfigurationControlRequest
+  | HostedRuntimeAssistantProviderAuthorityControlRequest;
+
 export interface HostedRuntimeAssistantConfigurationSnapshot {
   availableModels: HostedAssistantProductModel[];
   availableProviders: HostedAssistantProvider[];
@@ -2174,6 +2192,15 @@ export type HostedRuntimeAssistantConfigurationToolResponse =
         status: HostedRuntimeAssistantConfigurationUpdateStatus;
       };
     };
+
+export interface HostedRuntimeAssistantProviderAuthorityControlResponse {
+  action: "read_provider_authority";
+  result: HostedRuntimeAssistantProviderAuthority;
+}
+
+export type HostedRuntimeAssistantConfigurationWebControlResponse =
+  | HostedRuntimeAssistantConfigurationToolResponse
+  | HostedRuntimeAssistantProviderAuthorityControlResponse;
 
 export type HostedCodexAuthUpdate =
   | {

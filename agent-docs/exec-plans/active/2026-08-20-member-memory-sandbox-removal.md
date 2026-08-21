@@ -1,7 +1,7 @@
 # Remove Redundant Member-Memory Sandbox Profile
 
 Status: active
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -102,3 +102,72 @@ memory consolidation.
   Cloudflare typechecks pass for this remediation.
 - Exact-head CI and next full final review gate: pending.
 - Production deploy and bounded runtime-log verification: pending.
+
+## Provider-Authority Retrospective
+
+- Trigger: the fifth full audit proved that the custom-inference correction
+  treated an invocation write fence as provider-selection authority. A member
+  could deselect, replace, or delete revision R, successfully wake the still
+  warm invocation, and then have a later provider turn continue through the
+  fence-bound R envelope because the custom path skipped the live authority
+  read. This repeats the earlier split-target mechanism and is a privacy and
+  consent failure, so another local guard is not acceptable.
+- Product decision: the durable provider selection and custom connection
+  revision govern the next bounded provider turn. A warm invocation never
+  extends consent to a deselected, replaced, deleted, or unverifiable custom
+  endpoint.
+- Single authority owner: the existing Web-owned
+  `readHostedMemberAssistantModelPreference` read, reached through the existing
+  assistant-configuration tool port, resolves live provider authority. The
+  Cloudflare write fence remains execution and egress ownership only.
+- Single authority fact: live provider authority is one discriminated value:
+  managed provider identity or selected custom revision. Invocation transport
+  may still carry the prepared Codex model and sealed endpoint needed to run,
+  but neither is selection authority.
+- Complexity decision: delete the custom-only authority bypass. Compare the
+  invocation's effective provider identity/custom revision with the one live
+  authority value at wake admission and immediately before provider-accepted
+  inputs. A mismatch hands off before provider entry; an unavailable read fails
+  closed. Add no registry, copied Cloudflare selection state, lease, queue,
+  compatibility state, or reconciliation loop.
+- Required proof: a composed warm custom invocation at revision R must admit an
+  unchanged R, but after managed selection, replacement, deletion, or an
+  unverifiable selected connection it must send no new request to R and hand
+  off for a fresh invocation. Existing no-fallback behavior remains.
+- Implementation: the existing assistant-configuration callback now has one
+  control-only authority-read action. It reuses the existing Web preference
+  query and projects either the live managed provider or selected custom
+  revision. The model-facing tool parser and schema do not admit this action.
+  The runtime uses the same comparison at warm-wake admission, provider entry,
+  and detached-provider admission; the custom-only bypass is deleted.
+- Rolling deployment: existing configuration-read responses remain byte-shape
+  compatible. Deploy the additive Web control action first, then its
+  Worker/runner caller with immediate rollout; roll back the caller first. This
+  adds no state owner, background process, or reconciliation path.
+- Focused proof: strict control contracts, Web authority projection, the
+  Cloudflare transport, and the hosted runtime entrypoint pass. Runtime cases
+  admit selected revision 7 and block replacement revision 8, managed/deleted
+  state, and unverifiable custom state before provider entry; a composed warm
+  custom invocation also hands off immediately after the live authority becomes
+  managed. Affected hosted-execution, assistant-runtime, Cloudflare, and Web
+  typechecks pass.
+
+## State-Inconsistency Matrix
+
+Invariant: the next provider boundary may use a custom target only when the
+invocation's revision-derived model alias still equals Web's live selected,
+verified custom revision. The write fence and sealed envelope never substitute
+for that selection fact.
+
+| Durable mutation | Live Web authority | Warm revision R result |
+| --- | --- | --- |
+| No selection change | custom R | admitted |
+| Managed provider selected | managed provider | handoff before provider |
+| Connection replaced | managed provider until explicit reselection, then custom R+1 | handoff before provider |
+| Connection deleted | managed provider | handoff before provider |
+| Selected connection requires reverification | custom revision unavailable | fail closed before provider |
+| Authority read unavailable | unavailable | wake hint defers; provider entry fails closed |
+
+The only durable state owner is the existing Web preference/connection read.
+Invocation target facts and the Cloudflare fence remain ephemeral consumers;
+the correction adds no copied selector, registry, lease, queue, or repair loop.

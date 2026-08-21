@@ -1,6 +1,6 @@
 # Testing And CI Map
 
-Last verified: 2026-08-20
+Last verified: 2026-08-21
 
 ## Current Repo Checks
 
@@ -584,7 +584,10 @@ supported provider credential.
   before provider entry without fallback. Real App Server cases prove both
   managed OpenAI and custom inference advertise exactly that one function on
   every provider request; managed OpenAI uses standard service with durable
-  allowance pricing.
+  allowance pricing. Hosted runtime and Web callback tests prove the control-only
+  live authority fact admits the unchanged selected custom revision and blocks
+  managed selection, replacement, deletion, or unverifiable custom state both
+  on a warm wake and immediately before provider input.
   The hosted phase suite proves a permanent earlier managed-seed failure still
   reaches the automation lane without granting the stored hint authority.
   Shell and every other native capability stay disabled even without a sandbox

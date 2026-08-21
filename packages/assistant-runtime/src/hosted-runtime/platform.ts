@@ -32,6 +32,7 @@ import type {
   HostedRuntimeFamilyPlanToolRequest,
   HostedRuntimeFamilyPlanToolResponse,
   HostedRuntimeAssistantConfigurationControlRequest,
+  HostedRuntimeAssistantProviderAuthority,
   HostedRuntimeAssistantConfigurationToolResponse,
   HostedRuntimeAssistantAskControlRequest,
   HostedRuntimeAssistantAskControlResponse,
@@ -203,6 +204,7 @@ export class HostedRuntimeCanonicalCheckpointError extends Error {
 }
 
 export interface HostedRuntimeAssistantConfigurationToolPort {
+  readProviderAuthority?(): Promise<HostedRuntimeAssistantProviderAuthority>;
   request(
     request: HostedRuntimeAssistantConfigurationControlRequest,
   ): Promise<HostedRuntimeAssistantConfigurationToolResponse>;
