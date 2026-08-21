@@ -1621,7 +1621,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -1899,7 +1899,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
     expect(prReviewGptLoop).toContain('Apollo on')
     expect(prReviewGptLoop).toContain('`9454`, always with profile `Default`')
-    expect(prReviewGptLoop).toContain('through six lanes and defaults to all six')
+    expect(prReviewGptLoop).toContain('through six lanes and defaults to four')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
@@ -2447,8 +2447,8 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultBackgroundMode,
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
-      expect(['vonneumann', 'apollo']).toContain(defaultLane)
-      expect(defaultLaneCount).toBe('6')
+      expect(['eragon', 'phlebas', 'hercules', 'mountain']).toContain(defaultLane)
+      expect(defaultLaneCount).toBe('4')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2468,7 +2468,7 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(

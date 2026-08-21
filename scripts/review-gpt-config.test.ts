@@ -165,16 +165,16 @@ afterEach(() => {
 });
 
 describe("ReviewGPT repository config", () => {
-  it("includes every managed lane in the default automatic pool", () => {
+  it("keeps unprovisioned extra lanes out of the default automatic pool", () => {
     const harness = createHarness();
     const result = runConfig(harness, {
       REVIEW_GPT_BROWSER_LANE: "auto",
     });
 
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain("count=6\n");
+    expect(result.stdout).toContain("count=4\n");
     expect(result.stdout).toContain(
-      "pool=eragon phlebas hercules mountain vonneumann apollo\n",
+      "pool=eragon phlebas hercules mountain\n",
     );
     expect(existsSync(harness.mdfindMarker)).toBe(false);
   });
