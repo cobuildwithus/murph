@@ -23,7 +23,10 @@ import {
   createHostedPostCommitDeadline,
   waitForHostedPostCommitOperation,
 } from "@/src/lib/hosted-onboarding/bounded-post-commit";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "@/src/lib/hosted-onboarding/errors";
 import {
   jsonOk,
   readHostedOnboardingJsonObject,
@@ -147,7 +150,7 @@ async function resetEveryoneBatch(input: {
       counts[result.outcome] += 1;
       lastAcknowledgedCursor = memberId;
       if (result.runtimeRecheckRequired) {
-        const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(
+        const runtimeRecheckStatus = await trySignalHostedResetAllRuntimeRecheck(
           result.memberId,
           result.timestamp,
         );
@@ -189,7 +192,7 @@ async function recoverResetEveryoneWakes(input: {
   let pendingWake = 0;
 
   for (const receipt of batch.receipts) {
-    const runtimeRecheckStatus = await trySignalHostedRuntimeRecheck(
+    const runtimeRecheckStatus = await trySignalHostedResetAllRuntimeRecheck(
       receipt.memberId,
       receipt.timestamp,
     );
@@ -218,13 +221,7 @@ async function trySignalHostedRuntimeRecheck(
   timestamp = new Date().toISOString(),
 ): Promise<"accepted" | "pending"> {
   try {
-    await waitForHostedPostCommitOperation({
-      deadlineMs: createHostedPostCommitDeadline(undefined),
-      operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
-        abortSignal,
-        userId: memberId,
-      }),
-    });
+    await signalHostedOpsRuntimeRecheck(memberId);
     return "accepted";
   } catch (error) {
     console.error("Hosted ops runtime recheck failed.", {
@@ -233,6 +230,43 @@ async function trySignalHostedRuntimeRecheck(
     });
     return "pending";
   }
+}
+
+async function trySignalHostedResetAllRuntimeRecheck(
+  memberId: string,
+  timestamp: string,
+): Promise<"pending" | "settled"> {
+  try {
+    await signalHostedOpsRuntimeRecheck(memberId);
+    return "settled";
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_RUNTIME_USER_INACTIVE"
+      && !error.retryable
+    ) {
+      console.info(
+        "Hosted ops reset-everyone runtime recheck is no longer applicable.",
+        { timestamp },
+      );
+      return "settled";
+    }
+    console.error("Hosted ops runtime recheck failed.", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      timestamp,
+    });
+    return "pending";
+  }
+}
+
+async function signalHostedOpsRuntimeRecheck(memberId: string): Promise<void> {
+  await waitForHostedPostCommitOperation({
+    deadlineMs: createHostedPostCommitDeadline(undefined),
+    operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({
+      abortSignal,
+      userId: memberId,
+    }),
+  });
 }
 
 function mapSingleResetError(error: unknown): Error {

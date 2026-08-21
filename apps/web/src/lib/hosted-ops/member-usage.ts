@@ -928,60 +928,6 @@ function toHostedOpsMemberUsageResetAllResult(
   };
 }
 
-async function hasHostedOpsResetAllStarterGrant(input: {
-  memberId: string;
-  operationId: string;
-  prisma: HostedOpsMemberUsageReceiptClient;
-}): Promise<boolean> {
-  const semanticSourceKey = buildHostedOpsStarterResetAllSemanticSourceKey({
-    memberId: input.memberId,
-    operationId: input.operationId,
-  });
-  const entry = await input.prisma.hostedUsageCreditEntry.findUnique({
-    select: {
-      amountUsdMicros: true,
-      beneficiaryMemberId: true,
-      beneficiarySequence: true,
-      grant: {
-        select: {
-          beneficiaryMemberId: true,
-          beneficiarySequence: true,
-          remainingUsdMicros: true,
-        },
-      },
-      kind: true,
-      parentGrantEntryId: true,
-      purchaseId: true,
-      referralId: true,
-      sourceReferenceLookupKey: true,
-    },
-    where: { semanticSourceKey },
-  });
-  if (!entry) {
-    return false;
-  }
-  if (
-    entry.amountUsdMicros !== HOSTED_STARTER_USAGE_GRANT_USD_MICROS
-    || entry.beneficiaryMemberId !== input.memberId
-    || !entry.grant
-    || entry.grant.beneficiaryMemberId !== input.memberId
-    || entry.grant.beneficiarySequence !== entry.beneficiarySequence
-    || entry.grant.remainingUsdMicros < 0n
-    || entry.grant.remainingUsdMicros > entry.amountUsdMicros
-    || entry.kind !== "starter_grant"
-    || entry.parentGrantEntryId !== null
-    || entry.purchaseId !== null
-    || entry.referralId !== null
-    || entry.sourceReferenceLookupKey
-      !== HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY
-  ) {
-    throw new TypeError(
-      "Hosted ops reset-everyone Starter replay invariant failed.",
-    );
-  }
-  return true;
-}
-
 async function hasHostedOpsStarterResetRuntimeRecovery(input: {
   memberId: string;
   prisma: HostedOpsMemberUsageReceiptClient;
@@ -1115,18 +1061,10 @@ async function resetHostedOpsMemberUsageTransaction(
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
-    const operationGrantExists = input.operationId
-      && canonicalGate.allowanceSource === "direct_starter"
-      ? await hasHostedOpsResetAllStarterGrant({
-          memberId: input.memberId,
-          operationId: input.operationId,
-          prisma: tx,
-        })
-      : false;
     if (
       input.operationId
       && canonicalGate.allowanceSource === "direct_starter"
-      && (operationGrantExists || canonicalGate.allowed)
+      && canonicalGate.allowed
     ) {
       const runtimeRecheckRequired =
         await hasHostedOpsStarterResetRuntimeRecovery({
@@ -1136,10 +1074,8 @@ async function resetHostedOpsMemberUsageTransaction(
       const result = createHostedOpsMemberUsageResetAllNoopResult({
         memberId: input.memberId,
         now: input.now,
-        outcome: operationGrantExists || runtimeRecheckRequired
-          ? "unchanged"
-          : "skipped",
-        resetMode: operationGrantExists || runtimeRecheckRequired
+        outcome: runtimeRecheckRequired ? "unchanged" : "skipped",
+        resetMode: runtimeRecheckRequired
           ? "starter_allowance"
           : null,
         runtimeRecheckRequired,

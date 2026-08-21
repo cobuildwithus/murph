@@ -66,7 +66,12 @@ through a final reset, skipped, pending-wake, and failed summary.
 - Interrupted operator: each request handles a fixed small batch. Retrying from
   the last acknowledged cursor, or recovering from the beginning after an
   ambiguous response with the same operation UUID, reuses immutable member
-  receipts rather than applying a second reset.
+  receipts rather than applying a second reset. Hiding a paused dialog preserves
+  that operation and keeps conflicting mutations locked; a separate warned
+  abandonment is required before a later confirmation can create a new UUID.
+- Member whose hosted runtime becomes terminally inactive after commit: reset
+  remains committed and wake recovery advances because no runtime remains
+  applicable. Retryable runtime or transport failures remain visibly pending.
 - Member created after the confirmed population walk: wake recovery pages only
   the operation's existing wake-required receipts, so the later member cannot
   be reset or granted capacity under the old confirmation.
@@ -110,7 +115,8 @@ through a final reset, skipped, pending-wake, and failed summary.
    population work completes, recover pending wakes from the operation's
    receipt set without re-reading live members or re-entering reset work.
 4. Add a prominent destructive control, typed confirmation, progress and final
-   outcome UI. Disable conflicting row mutations while the global action runs.
+   outcome UI. Preserve a hidden paused operation, warn before abandoning it,
+   and disable conflicting row mutations while it runs or remains paused.
 5. Add focused regression coverage and update the owning hosted usage contract,
    Web documentation, reliability/load notes, and existing design study only as
    required by the final behavior.

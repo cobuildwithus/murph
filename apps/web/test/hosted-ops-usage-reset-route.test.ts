@@ -55,6 +55,7 @@ import {
 import {
   HOSTED_POST_COMMIT_TIMEOUT_MS,
 } from "@/src/lib/hosted-onboarding/bounded-post-commit";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 type RouteModule = typeof import("../app/api/ops/usage-reset/route");
 
@@ -422,6 +423,37 @@ describe("hosted ops usage reset route", () => {
     expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
   });
 
+  test("settles a reset-everyone member when runtime access is terminally inactive", async () => {
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds: ["hbm_reset_001"],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      makeInactiveRuntimeError(false),
+    );
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 1,
+        reset: 0,
+        skipped: 0,
+        unchanged: 1,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    });
+    expect(consoleInfoSpy).toHaveBeenCalledWith(
+      "Hosted ops reset-everyone runtime recheck is no longer applicable.",
+      { timestamp: NOW.toISOString() },
+    );
+  });
+
   test("recovers only wake-required receipts without re-entering reset transactions", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
@@ -473,6 +505,58 @@ describe("hosted ops usage reset route", () => {
           pendingWake: 1,
         },
       );
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  test("advances wake recovery past terminally inactive runtime access", async () => {
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts: [{
+        memberId: "hbm_reset_001",
+        timestamp: NOW.toISOString(),
+      }],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      makeInactiveRuntimeError(false),
+    );
+
+    const response = await route.POST(makeWakeRecoveryRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      attempted: 1,
+      done: true,
+      lastAcknowledgedCursor: "hbm_reset_001",
+      pendingWake: 0,
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+  });
+
+  test("keeps retryable inactive runtime errors pending during wake recovery", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts: [{
+        memberId: "hbm_reset_001",
+        timestamp: NOW.toISOString(),
+      }],
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockRejectedValueOnce(
+      makeInactiveRuntimeError(true),
+    );
+
+    try {
+      const response = await route.POST(makeWakeRecoveryRequest());
+
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        attempted: 1,
+        done: true,
+        lastAcknowledgedCursor: "hbm_reset_001",
+        pendingWake: 1,
+      });
     } finally {
       consoleErrorSpy.mockRestore();
     }
@@ -679,6 +763,15 @@ function makeWakeRecoveryRequest(
   return makeResetAllRequest({
     operation: "recover_reset_all_wakes",
     ...overrides,
+  });
+}
+
+function makeInactiveRuntimeError(retryable: boolean): Error {
+  return hostedOnboardingError({
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    httpStatus: 409,
+    message: "Hosted runtime access is inactive.",
+    retryable,
   });
 }
 

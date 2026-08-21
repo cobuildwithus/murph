@@ -352,7 +352,6 @@ describe("hosted ops member usage", () => {
           usageCreditLedgerVersion: 44n,
         });
     usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(decision);
-    const findOperationGrant = vi.fn(async () => null);
     const findResetGrants = vi.fn(async () => [{
       beneficiaryMemberId: "hbm_starter",
     }]);
@@ -372,7 +371,6 @@ describe("hosted ops member usage", () => {
       },
       hostedUsageCreditEntry: {
         findMany: findResetGrants,
-        findUnique: findOperationGrant,
       },
     };
     const transaction = vi.fn(async (
@@ -383,7 +381,6 @@ describe("hosted ops member usage", () => {
       hostedMailboxItem: { findMany: findStalledMailboxItems },
       hostedUsageCreditEntry: {
         findMany: findResetGrants,
-        findUnique: findOperationGrant,
       },
     });
 
@@ -400,12 +397,6 @@ describe("hosted ops member usage", () => {
       runtimeRecheckRequired: true,
       timestamp: NOW.toISOString(),
     });
-    expect(findOperationGrant).toHaveBeenCalledWith(expect.objectContaining({
-      where: {
-        semanticSourceKey:
-          `hosted-ops-usage-reset-all:${RESET_ALL_OPERATION_ID}:hbm_starter:starter:v1`,
-      },
-    }));
     expect(findResetGrants).toHaveBeenCalledWith({
       select: { beneficiaryMemberId: true },
       take: 1,
@@ -425,89 +416,6 @@ describe("hosted ops member usage", () => {
         userId: "hbm_starter",
       },
     });
-    expect(transaction).toHaveBeenCalledTimes(1);
-    expect(tx.hostedOpsUsageResetReceipt.create).toHaveBeenCalledTimes(1);
-    expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
-      .not.toHaveBeenCalled();
-  });
-
-  test("does not append a second reset-everyone Starter grant after the first was consumed", async () => {
-    const decision = makeUsageGateDecision({
-          allowanceSource: "direct_starter",
-          limitUsdMicros: 0n,
-          memberId: "hbm_starter",
-          periodEnd: new Date("2099-12-31T23:59:59.999Z"),
-          periodStart: new Date(0),
-          planResetAt: null,
-          remainingUsdMicros: 0n,
-          spentUsdMicros: 0n,
-          usageCreditBalanceUsdMicros: 0n,
-          usageCreditLedgerVersion: 45n,
-        });
-    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(decision);
-    const findOperationGrant = vi.fn(async () => ({
-      amountUsdMicros: 4_500_000n,
-      beneficiaryMemberId: "hbm_starter",
-      beneficiarySequence: 44n,
-      grant: {
-        beneficiaryMemberId: "hbm_starter",
-        beneficiarySequence: 44n,
-        remainingUsdMicros: 0n,
-      },
-      kind: "starter_grant",
-      parentGrantEntryId: null,
-      purchaseId: null,
-      referralId: null,
-      sourceReferenceLookupKey: "hosted-ops-usage-reset:starter:v1",
-    }));
-    const findResetGrants = vi.fn(async () => []);
-    const tx = {
-      $queryRaw: vi.fn(async () => [{
-        hasActiveUsageCreditGrant: false,
-        usageCreditBalanceUsdMicros: 0n,
-        usageCreditLedgerVersion: 45n,
-      }]),
-      hostedMailboxItem: { findMany: vi.fn(async () => []) },
-      hostedOpsUsageResetReceipt: {
-        create: vi.fn(async ({ data }) => data),
-        findUnique: vi.fn(async () => null),
-      },
-      hostedUsageCreditEntry: {
-        findMany: findResetGrants,
-        findUnique: findOperationGrant,
-      },
-    };
-    const transaction = vi.fn(async (
-      run: (client: typeof tx) => Promise<unknown>,
-    ) => run(tx));
-    const prisma = asPrismaClientForHostedOpsTest({
-      $transaction: transaction,
-      hostedUsageCreditEntry: {
-        findMany: findResetGrants,
-        findUnique: findOperationGrant,
-      },
-    });
-
-    const result = await resetHostedOpsMemberUsageForResetAll({
-      memberId: "hbm_starter",
-      now: NOW,
-      operationId: RESET_ALL_OPERATION_ID,
-    }, prisma);
-
-    expect(result).toEqual({
-      memberId: "hbm_starter",
-      outcome: "unchanged",
-      resetMode: "starter_allowance",
-      runtimeRecheckRequired: false,
-      timestamp: NOW.toISOString(),
-    });
-    expect(findOperationGrant).toHaveBeenCalledWith(expect.objectContaining({
-      where: {
-        semanticSourceKey:
-          `hosted-ops-usage-reset-all:${RESET_ALL_OPERATION_ID}:hbm_starter:starter:v1`,
-      },
-    }));
-    expect(findResetGrants).toHaveBeenCalledTimes(1);
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(tx.hostedOpsUsageResetReceipt.create).toHaveBeenCalledTimes(1);
     expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)

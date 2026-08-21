@@ -75,6 +75,7 @@ interface UsageRuntimeRecheckResponse {
 export type MemberUsageClientDesignState =
   | "row_stale_error"
   | "search_loading"
+  | "reset_all_abandonment"
   | "reset_all_complete"
   | "reset_all_confirmation"
   | "reset_all_partial_failure"
@@ -92,6 +93,7 @@ interface UsageResetAllState {
   failure: UsageResetAllFailureState | null;
   lastAcknowledgedCursor: string | null;
   phase:
+    | "abandoning"
     | "complete"
     | "confirming"
     | "idle"
@@ -182,7 +184,10 @@ function MemberUsageClientSurface({
     [dashboard.rows, selectedMemberId],
   );
   const isResetting = resettingMemberId !== null;
-  const globalResetActive = resetAllOpen;
+  const preservedResetAllOperation = !resetAllOpen
+    && resetAllState.phase === "paused"
+    && resetAllOperationId.current !== null;
+  const globalResetActive = resetAllOpen || preservedResetAllOperation;
   const phoneSearchRequiresExactLookup =
     dashboard.search.kind === "phone_last_four"
     && (dashboard.search.capped || dashboard.search.resultCount !== 1);
@@ -232,6 +237,13 @@ function MemberUsageClientSurface({
     }
     setSelectedMemberId(null);
     setMessage(null);
+    if (
+      resetAllOperationId.current
+      && resetAllState.phase === "paused"
+    ) {
+      setResetAllOpen(true);
+      return;
+    }
     resetAllAcknowledgedCursors.current.clear();
     resetAllOperationId.current = null;
     setResetAllConfirmation("");
@@ -247,11 +259,39 @@ function MemberUsageClientSurface({
     ) {
       return;
     }
+    if (
+      resetAllOperationId.current
+      && (
+        resetAllState.phase === "paused"
+        || resetAllState.phase === "abandoning"
+      )
+    ) {
+      setResetAllState({ ...resetAllState, phase: "paused" });
+      setResetAllOpen(false);
+      return;
+    }
+    clearResetAllOperation();
+  }
+
+  function clearResetAllOperation(): void {
     setResetAllOpen(false);
     resetAllAcknowledgedCursors.current.clear();
     resetAllOperationId.current = null;
     setResetAllConfirmation("");
     setResetAllState(createInitialResetAllState(undefined));
+  }
+
+  function requestResetAllAbandonment(): void {
+    if (
+      resetAllOperationId.current
+      && resetAllState.phase === "paused"
+    ) {
+      setResetAllState({ ...resetAllState, phase: "abandoning" });
+    }
+  }
+
+  function keepResetAllOperation(): void {
+    setResetAllState({ ...resetAllState, phase: "paused" });
   }
 
   async function runResetAll(input: { mode: UsageResetAllRunMode }): Promise<void> {
@@ -745,14 +785,16 @@ function MemberUsageClientSurface({
           <Button
             className="mt-3 w-full sm:w-auto lg:w-full"
             disabled={
-              isResetting || globalResetActive || searchNavigationPending
+              isResetting || resetAllOpen || searchNavigationPending
             }
             onClick={openResetAllDialog}
             type="button"
             variant="destructive"
           >
             <RotateCcwIcon data-icon="inline-start" />
-            Reset everyone
+            {preservedResetAllOperation
+              ? "Resume reset operation"
+              : "Reset everyone"}
           </Button>
         </div>
       </section>
@@ -1043,8 +1085,11 @@ function MemberUsageClientSurface({
             confirmation={resetAllConfirmation}
             dashboard={dashboard}
             inline
+            onAbandon={clearResetAllOperation}
             onClose={closeResetAllDialog}
             onConfirmationChange={setResetAllConfirmation}
+            onKeep={keepResetAllOperation}
+            onRequestAbandon={requestResetAllAbandonment}
             onRun={(mode) => {
               void runResetAll({ mode });
             }}
@@ -1072,8 +1117,11 @@ function MemberUsageClientSurface({
             <UsageResetAllSurface
               confirmation={resetAllConfirmation}
               dashboard={dashboard}
+              onAbandon={clearResetAllOperation}
               onClose={closeResetAllDialog}
               onConfirmationChange={setResetAllConfirmation}
+              onKeep={keepResetAllOperation}
+              onRequestAbandon={requestResetAllAbandonment}
               onRun={(mode) => {
                 void runResetAll({ mode });
               }}
@@ -1090,21 +1138,26 @@ function UsageResetAllSurface(input: {
   confirmation: string;
   dashboard: HostedOpsMemberUsageDashboard;
   inline?: boolean;
+  onAbandon: () => void;
   onClose: () => void;
   onConfirmationChange: (value: string) => void;
+  onKeep: () => void;
+  onRequestAbandon: () => void;
   onRun: (mode: UsageResetAllRunMode) => void;
   state: UsageResetAllState;
 }) {
   const state = input.state;
-  const title = state.phase === "confirming"
-    ? "Reset everyone?"
-    : state.phase === "running"
-      ? "Resetting everyone"
-      : state.phase === "complete"
-        ? "Reset everyone complete"
-        : state.phase === "recovering_wakes"
-          ? "Population reset complete; runtime recovery remains"
-          : "Reset everyone paused";
+  const title = state.phase === "abandoning"
+    ? "Abandon reset operation?"
+    : state.phase === "confirming"
+      ? "Reset everyone?"
+      : state.phase === "running"
+        ? "Resetting everyone"
+        : state.phase === "complete"
+          ? "Reset everyone complete"
+          : state.phase === "recovering_wakes"
+            ? "Population reset complete; runtime recovery remains"
+            : "Reset everyone paused";
   const description = (
     <>
       This operation ignores the active search filter and walks the hosted
@@ -1158,12 +1211,37 @@ function UsageResetAllSurface(input: {
             />
           </Field>
         </div>
+      ) : state.phase === "abandoning" ? (
+        <div className="grid gap-4">
+          <Alert variant="destructive">
+            <AlertDescription>
+              Already committed member resets will remain. Abandoning forgets
+              this browser&apos;s operation ID, cursor, and progress. Starting
+              Reset everyone later creates a new operation that can process
+              those members again from their then-current state.
+            </AlertDescription>
+          </Alert>
+          <UsageResetAllProgress state={state} />
+        </div>
       ) : (
         <UsageResetAllProgress state={state} />
       )}
 
       <DialogFooter>
-        {state.phase === "confirming" ? (
+        {state.phase === "abandoning" ? (
+          <>
+            <Button onClick={input.onKeep} type="button" variant="outline">
+              Keep operation
+            </Button>
+            <Button
+              onClick={input.onAbandon}
+              type="button"
+              variant="destructive"
+            >
+              Abandon operation
+            </Button>
+          </>
+        ) : state.phase === "confirming" ? (
           <>
             <Button onClick={input.onClose} type="button" variant="outline">
               Cancel
@@ -1191,7 +1269,14 @@ function UsageResetAllSurface(input: {
         ) : state.phase === "paused" ? (
           <>
             <Button onClick={input.onClose} type="button" variant="outline">
-              Close
+              Hide for now
+            </Button>
+            <Button
+              onClick={input.onRequestAbandon}
+              type="button"
+              variant="outline"
+            >
+              Abandon operation
             </Button>
             <Button
               onClick={() => {
@@ -1318,6 +1403,21 @@ function createInitialResetAllState(
       failure: null,
       lastAcknowledgedCursor: "hbm_design_020",
       phase: "running",
+    };
+  }
+  if (designState === "reset_all_abandonment") {
+    return {
+      counts: {
+        failed: 1,
+        pendingWake: 0,
+        processed: 24,
+        reset: 10,
+        skipped: 4,
+        unchanged: 10,
+      },
+      failure: null,
+      lastAcknowledgedCursor: "hbm_design_024",
+      phase: "abandoning",
     };
   }
   if (designState === "reset_all_complete") {

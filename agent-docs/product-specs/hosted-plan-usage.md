@@ -402,6 +402,11 @@ The response reports processed, reset, unchanged, skipped, pending-wake, and
 failed outcomes plus the last acknowledged member ID. While the page remains
 open, the client may issue the next bounded request. It pauses on a known or
 ambiguous failure and can resume strictly after the last acknowledged cursor.
+Hiding a paused dialog preserves the same in-memory operation UUID, cursor,
+counts, and failure while keeping conflicting row and search mutations locked.
+The operator must pass a separate warning to abandon that operation; starting
+again after abandonment creates a new UUID and may process previously committed
+members from their then-current state.
 When a population response is unknown, recovery may rewalk from the beginning
 with the same browser-created operation UUID. After the population is fully
 acknowledged, runtime-wake recovery has a narrower owner: it pages only that
@@ -410,6 +415,8 @@ bounded post-commit runtime recheck. It never reads the current member
 population or enters a reset transaction, so members created after the original
 typed confirmation cannot be admitted to that operation. The dialog does not
 claim completion until a full receipt-owned wake pass reports no pending wake.
+Terminal non-retryable inactive-runtime results count as no longer applicable;
+retryable runtime and transport failures remain pending.
 The walk owns no campaign row, queue, scheduler, or second usage projection.
 
 Every reset-everyone member outcome has one append-only receipt keyed by the
@@ -418,7 +425,8 @@ the receipt atomically with any included-usage reset, Starter grant, or stable
 unchanged/skipped decision. A replay therefore cannot clear included usage
 accrued after an earlier committed reset, and it cannot append another Starter
 grant after the first was fully consumed. Starter grants also retain the UUID
-in their immutable semantic source key. A concurrent same-operation request
+in their immutable semantic source key for append-time uniqueness only; the
+receipt is the sole replay authority. A concurrent same-operation request
 that loses the receipt race receives one bounded serialization retry. Receipts
 contain no decrypted contact value and are deleted with their member.
 

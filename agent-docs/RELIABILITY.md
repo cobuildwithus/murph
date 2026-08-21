@@ -378,7 +378,10 @@ Last verified: 2026-08-20
   there is no population snapshot, concurrent interactive transaction fanout,
   queue, scheduler, or persisted campaign. A known failure resumes strictly
   after the acknowledged cursor, while an ambiguous population response may
-  rewalk from the beginning with the same UUID. After population completion,
+  rewalk from the beginning with the same UUID. Hiding a paused dialog keeps
+  that UUID and cursor in memory and keeps conflicting mutations locked;
+  abandoning them requires a separate warned action. After population
+  completion,
   committed wake recovery instead pages at most 11 existing wake-required
   receipts for that UUID, admits 10, and invokes only sequential bounded runtime
   rechecks. It never reads current hosted-member rows or enters the reset
@@ -390,12 +393,16 @@ Last verified: 2026-08-20
   request that races the same receipt. Receipt replay returns the frozen reset,
   unchanged, or skipped outcome without mutating current usage, while a frozen
   wake requirement may repeat only the bounded post-commit runtime recheck.
+  A non-retryable `HOSTED_RUNTIME_USER_INACTIVE` result terminally settles that
+  wake because no runtime remains applicable; retryable inactive results,
+  transport failures, and orchestration timeouts remain pending.
   The locked transaction is the only outcome authority: it reads the live gate
   and exact period after the member lock. A valid included allowance with no
   materialized zero-usage period commits a skipped receipt and advances; if
   accounting materializes the period first, the reset observes that row, while
   accounting after a committed skip remains later usage protected by replay.
-  Starter grants also retain the UUID in their existing immutable semantic key.
+  The receipt is the only replay authority. Starter grants also retain the UUID
+  in their existing immutable semantic key solely for append-time uniqueness.
   Thus a lost response cannot re-clear later included usage or append another
   grant after consumption. Receipt lookup is one compound-primary-key read per
   admitted member and initial mutation adds one insert; fixed sequential

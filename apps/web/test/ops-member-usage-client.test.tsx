@@ -89,6 +89,7 @@ import { renderClientComponent } from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
 const RESET_ALL_OPERATION_ID = "12345678-1234-4abc-8def-1234567890ab";
+const SECOND_RESET_ALL_OPERATION_ID = "abcdefab-1234-4abc-8def-1234567890ab";
 const randomUuidMock = vi.fn(() => RESET_ALL_OPERATION_ID);
 let cleanupRender: (() => Promise<void>) | null = null;
 
@@ -544,6 +545,20 @@ describe("MemberUsageClient", () => {
 
     await clickButton(
       rendered.window,
+      getButton(rendered.container, "Hide for now"),
+    );
+    expect(rendered.container.textContent).not.toContain("Reset everyone paused");
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume reset operation"),
+    );
+    expect(rendered.container.textContent).toContain("Reset everyone paused");
+    expect(readMetric(rendered.container, "Processed")).toBe("1");
+    expect(readMetric(rendered.container, "Failed")).toBe("1");
+
+    await clickButton(
+      rendered.window,
       getButton(rendered.container, "Resume"),
     );
     await vi.waitFor(() => {
@@ -566,6 +581,106 @@ describe("MemberUsageClient", () => {
     });
     expect(readMetric(rendered.container, "Processed")).toBe("3");
     expect(readMetric(rendered.container, "Failed")).toBe("0");
+  });
+
+  test("requires an explicit warning before abandoning a paused operation", async () => {
+    randomUuidMock
+      .mockReturnValueOnce(RESET_ALL_OPERATION_ID)
+      .mockReturnValueOnce(SECOND_RESET_ALL_OPERATION_ID);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 1,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: false,
+        failure: {
+          code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+          memberId: "hbm_reset_002",
+          message: "Retry after the notice dispatch settles.",
+          retryable: true,
+        },
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+
+    expect(rendered.container.textContent).toContain("Abandon reset operation?");
+    expect(rendered.container.textContent).toContain(
+      "Already committed member resets will remain.",
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Keep operation"),
+    );
+    expect(rendered.container.textContent).toContain("Reset everyone paused");
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+    expect(rendered.container.textContent).not.toContain("Abandon reset operation?");
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset everyone"),
+    );
+    await setInputValue(
+      rendered.window,
+      getInput(rendered.container, "ops-usage-reset-all-confirmation"),
+      HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+    );
+    await clickButton(
+      rendered.window,
+      getButtonByAriaLabel(rendered.container, "Confirm reset everyone"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: SECOND_RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
   });
 
   test("resumes the same operation after an ambiguous batch response", async () => {

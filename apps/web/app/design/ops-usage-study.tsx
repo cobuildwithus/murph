@@ -165,6 +165,9 @@ const RESET_STATES: Array<{
   state: "reset_all_confirmation",
   title: "Destructive confirmation",
 }, {
+  state: "reset_all_abandonment",
+  title: "Explicit operation abandonment",
+}, {
   state: "reset_all_progress",
   title: "Bounded progress",
 }, {
