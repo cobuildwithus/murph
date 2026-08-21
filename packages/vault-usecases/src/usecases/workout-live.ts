@@ -20,7 +20,10 @@ import {
 } from '@murphai/operator-config/workout-action-binding'
 
 import { showWorkoutFormat } from './workout-format.js'
-import { addStructuredWorkoutRecord, editWorkoutRecord } from './workout.js'
+import {
+  addStructuredWorkoutRecord,
+  editWorkoutRecord,
+} from './workout.js'
 import {
   LIVE_WORKOUT_SOURCE_APP,
   type ApplyLiveWorkoutMemberActionInput,
@@ -28,8 +31,8 @@ import {
   type AddLiveWorkoutExerciseInput,
   type ClearLiveWorkoutSetInput,
   type FinishLiveWorkoutInput,
-  type LiveWorkoutLookupInput,
   type LogLiveWorkoutSetInput,
+  type StartLiveWorkoutExerciseInput,
   type SetLiveWorkoutExerciseRepsInput,
   type StartLiveWorkoutInput,
   buildLiveWorkoutCardEditor,
@@ -524,6 +527,64 @@ function projectMemberActionWorkoutSetResult(
   }
 }
 
+function buildInitialLiveWorkoutExercises(
+  exercises: readonly StartLiveWorkoutExerciseInput[],
+): WorkoutExercise[] {
+  if (exercises.length > MAX_LIVE_WORKOUT_EXERCISES) {
+    throw new VaultCliError(
+      'invalid_option',
+      `Live workouts support at most ${MAX_LIVE_WORKOUT_EXERCISES} exercises.`,
+    )
+  }
+
+  return exercises.map((exercise, index) => {
+    const setCount = exercise.setCount ?? 1
+    if (
+      !Number.isInteger(setCount)
+      || setCount < 1
+      || setCount > MAX_LIVE_WORKOUT_SETS_PER_EXERCISE
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        `Exercise set count must be between 1 and ${MAX_LIVE_WORKOUT_SETS_PER_EXERCISE}.`,
+      )
+    }
+    if (
+      exercise.reps !== undefined
+      && (
+        !Number.isInteger(exercise.reps)
+        || exercise.reps < 1
+        || exercise.reps > 999
+      )
+    ) {
+      throw new VaultCliError(
+        'invalid_option',
+        'Exercise repetitions per set must be an integer between 1 and 999.',
+      )
+    }
+
+    const sourceExerciseId = normalizeOptionalText(exercise.sourceExerciseId)
+    const groupId = normalizeOptionalText(exercise.groupId)
+    const note = normalizeOptionalText(exercise.note)
+    return {
+      name: requireNonEmptyText(exercise.name, 'Exercise name is required.'),
+      order: index + 1,
+      ...(sourceExerciseId ? { sourceExerciseId } : {}),
+      ...(groupId ? { groupId } : {}),
+      ...(exercise.mode ? { mode: exercise.mode } : {}),
+      ...(exercise.unitOverride ? { unitOverride: exercise.unitOverride } : {}),
+      ...(note ? { note } : {}),
+      ...(exercise.reps === undefined
+        ? {}
+        : { memberRepsPerSet: exercise.reps }),
+      setPlanIsFinite: exercise.setCount !== undefined,
+      sets: Array.from({ length: setCount }, (_, setIndex) => ({
+        order: setIndex + 1,
+      })),
+    }
+  })
+}
+
 export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   const routineLookup =
     input.routine === undefined
@@ -540,7 +601,14 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
   const name = normalizeOptionalText(input.name)
   const note = normalizeOptionalText(input.note)
   const activityTypeOverride = normalizeOptionalText(input.activityType)
+  const initialExercises = input.exercises ?? []
   const durationMinutes = elapsedDurationMinutes(startedAt, observedAt)
+  if (routineLookup !== undefined && initialExercises.length > 0) {
+    throw new VaultCliError(
+      'invalid_option',
+      '--exercise cannot be combined with --routine.',
+    )
+  }
   if (routineLookup !== undefined) {
     const routine = await showWorkoutFormat(input.vault, routineLookup)
     const routineTitle = requireString(
@@ -584,7 +652,7 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
     sourceApp: LIVE_WORKOUT_SOURCE_APP,
     startedAt,
     ...(note ? { sessionNote: note } : {}),
-    exercises: [],
+    exercises: buildInitialLiveWorkoutExercises(initialExercises),
   })
   return addStructuredWorkoutRecord({
     vault: input.vault,
@@ -625,10 +693,10 @@ async function addLiveWorkoutExerciseWithLockHeld(
   if (!Number.isInteger(order) || order < 1) {
     throw new VaultCliError('invalid_option', 'Exercise order must be a positive integer.')
   }
-  if (!Number.isInteger(setCount) || setCount < 1 || setCount > 150) {
+  if (!Number.isInteger(setCount) || setCount < 1 || setCount > MAX_LIVE_WORKOUT_SETS_PER_EXERCISE) {
     throw new VaultCliError(
       'invalid_option',
-      'Exercise set count must be between 1 and 150.',
+      `Exercise set count must be between 1 and ${MAX_LIVE_WORKOUT_SETS_PER_EXERCISE}.`,
     )
   }
 

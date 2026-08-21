@@ -121,6 +121,11 @@ const hostedMemberVerifiedEmailSelect =
     verifiedEmailVerifiedAt: true,
   });
 
+export type HostedMemberVerifiedEmailRecord =
+  Prisma.HostedMemberEmailAuthorizationGetPayload<{
+    select: typeof hostedMemberVerifiedEmailSelect;
+  }>;
+
 export type HostedMemberCoreState = Prisma.HostedMemberGetPayload<{
   select: typeof hostedMemberCoreStateSelect;
 }>;
@@ -368,6 +373,70 @@ export async function readHostedMemberVerifiedEmailSnapshots(input: {
           : null,
     };
   });
+}
+
+export async function readHostedMemberVerifiedEmailRecord(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberVerifiedEmailRecord | null> {
+  return input.prisma.hostedMemberEmailAuthorization.findUnique({
+    where: {
+      memberId: input.memberId,
+    },
+    select: hostedMemberVerifiedEmailSelect,
+  });
+}
+
+export async function projectHostedMemberVerifiedEmailRecord(
+  record: HostedMemberVerifiedEmailRecord,
+  prisma?: HostedOnboardingReadClient,
+): Promise<HostedMemberVerifiedEmailSnapshot> {
+  const address = await decryptHostedWebNullableString({
+    field: HOSTED_MEMBER_EMAIL_AUTH_VERIFIED_EMAIL_FIELD,
+    memberId: record.memberId,
+    prisma,
+    value: record.verifiedEmailAddressEncrypted,
+  });
+  return {
+    memberId: record.memberId,
+    verifiedEmail:
+      address
+      && record.verifiedEmailLookupKey
+      && record.verifiedEmailVerifiedAt
+        ? {
+            address,
+            lookupKey: record.verifiedEmailLookupKey,
+            verifiedAt: record.verifiedEmailVerifiedAt,
+          }
+        : null,
+  };
+}
+
+export function hostedMemberVerifiedEmailRecordsEqual(
+  current: HostedMemberVerifiedEmailRecord | null,
+  prepared: HostedMemberVerifiedEmailRecord | null,
+): boolean {
+  if (!current || !prepared) {
+    return current === prepared;
+  }
+  return current.memberId === prepared.memberId
+    && current.verifiedEmailAddressEncrypted
+      === prepared.verifiedEmailAddressEncrypted
+    && current.verifiedEmailLookupKey === prepared.verifiedEmailLookupKey
+    && current.verifiedEmailVerifiedAt?.getTime()
+      === prepared.verifiedEmailVerifiedAt?.getTime();
+}
+
+export async function lockHostedMemberVerifiedEmailRecordTx(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.prisma.$queryRaw`
+    SELECT 1
+    FROM "hosted_member_email_authorization"
+    WHERE "member_id" = ${input.memberId}
+    FOR UPDATE
+  `;
 }
 
 export async function claimHostedMemberSignupWelcomeEmailAttempt(input: {

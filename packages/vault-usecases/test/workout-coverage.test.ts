@@ -721,8 +721,13 @@ describe("workout", () => {
       relatedIds: [],
       timeZone: "UTC",
     }));
-    const editEventRecord = vi.fn(async () => ({ lookupId: "evt_edited" }));
-    const deleteEventRecord = vi.fn(async () => ({ deleted: true }));
+    const editEventRecord = vi.fn(async (_input: Record<string, unknown>) => ({
+      lookupId: "evt_edited",
+      entity: { id: "evt_edited" },
+    }));
+    const deleteEventRecord = vi.fn(async (_input: Record<string, unknown>) => ({
+      deleted: true,
+    }));
     const showWorkoutRecord = vi.fn(async () => ({
       vault: "./vault",
       entity: { id: "evt_edited" },
@@ -797,13 +802,22 @@ describe("workout", () => {
     });
     assert.equal(edited.entity.id, "evt_edited");
     assert.equal(editEventRecord.mock.calls.length, 1);
+    assert.equal(showWorkoutRecord.mock.calls.length, 0);
 
     const deleted = await workoutModule.deleteWorkoutRecord({
       vault: "./vault",
       lookup: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      expectedRevision: 3,
     });
     assert.equal(deleted.deleted, true);
     assert.equal(deleteEventRecord.mock.calls.length, 1);
+    assert.deepEqual(deleteEventRecord.mock.calls.at(0)?.[0], {
+      vault: "./vault",
+      lookup: "evt_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      expectedRevision: 3,
+      expectedKinds: ["activity_session"],
+      entityLabel: "workout",
+    });
   });
 });
 

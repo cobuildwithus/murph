@@ -94,6 +94,7 @@ import { getPrisma } from "../prisma";
 import { buildHostedGroupJoinUrl } from "./group-links";
 import {
   requestHostedGroupAssistantAsk,
+  requestHostedGroupContextHandoff,
   requestHostedGroupMemberAssistantAsk,
 } from "./group-assistant-ask";
 import {
@@ -188,6 +189,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   ask: "personal_active",
+  handoff: "personal_active",
   ask_current_sender: "participant_aware",
   record_current_sender_daily_metric: "participant_aware",
   ask_member: "participant_aware",
@@ -248,6 +250,19 @@ export async function handleHostedRuntimeGroupTool(input: {
       await input.scheduleMailboxWake?.(admission.mailboxWake);
     }
     return { action: "ask", result: admission.result };
+  }
+
+  if (input.request.action === "handoff") {
+    const admission = await requestHostedGroupContextHandoff({
+      context: input.request.context,
+      groupLabel: input.request.groupLabel,
+      memberId: input.memberId,
+      originAssistantInputId: input.request.originAssistantInputId,
+    });
+    if (admission.mailboxWake) {
+      await input.scheduleMailboxWake?.(admission.mailboxWake);
+    }
+    return { action: "handoff", result: admission.result };
   }
 
   if (input.request.action === "ask_current_sender") {

@@ -328,6 +328,7 @@ const HOSTED_PHONE_CALL_RESULT_MAILBOX_DEDUPE_KEY_PREFIX =
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   HOSTED_PHONE_CALL_RESULT_MAILBOX_DEDUPE_KEY_PREFIX,
   "assistant.notification.requested:usage-referral-reward:",
+  "assistant.notification.requested:group-context-handoff:",
   "aask_done_",
   "aask_private_",
 ] as const;
@@ -686,6 +687,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
   const unavailableReason = "authenticated_sender_required";
   switch (request.action) {
     case "ask":
+    case "handoff":
     case "record_current_sender_daily_metric":
     case "ask_member":
       return {

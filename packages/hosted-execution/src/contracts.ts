@@ -228,6 +228,7 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
   | "queue-only";
 
 export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
+  "context-handoff",
   "creative-response",
   "creative-response-text",
 ] as const;
@@ -269,12 +270,18 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
   requestId: string;
 }
 
+export interface HostedExecutionGroupContextHandoffNotification {
+  membershipId: string;
+  originAssistantInputId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;
   externalThreadRouteAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
+  groupContextHandoff?: HostedExecutionGroupContextHandoffNotification;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
   privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;

@@ -255,7 +255,7 @@ test('workout edit/delete schemas expose typed mutation options', async () => {
   assert.equal('type' in editSchema.options.properties, true)
   assert.equal('dayKeyPolicy' in editSchema.options.properties, true)
   assert.deepEqual(editSchema.options.required, ['vault'])
-  assert.deepEqual(deleteSchema.options.required, ['vault'])
+  assert.deepEqual(deleteSchema.options.required, ['vault', 'expectedRevision'])
 })
 
 test('workout add help keeps the positional text optional for typed captures', async () => {
@@ -1623,11 +1623,17 @@ test(
       assert.equal(requireData(edited).entity.data.durationMinutes, 50)
       assert.equal(requireData(edited).entity.data.distanceKm, undefined)
       assert.equal(requireData(edited).entity.title, '50-minute ride')
+      const editedRevision = (
+        requireData(edited).entity.data.lifecycle as { revision?: unknown } | undefined
+      )?.revision
+      assert.equal(typeof editedRevision, 'number')
 
       const deleted = await runCli<DeleteEnvelope>([
         'workout',
         'delete',
         requireData(created).eventId,
+        '--expected-revision',
+        String(editedRevision),
         '--vault',
         vaultRoot,
       ])

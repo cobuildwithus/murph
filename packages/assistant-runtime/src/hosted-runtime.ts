@@ -604,6 +604,7 @@ async function createHostedForegroundMailboxPrefetch(input: {
 const HOSTED_PRE_CHECKPOINT_EXTERNAL_COMPLETION_DEDUPE_KEY_PREFIXES = [
   "assistant.notification.requested:phone-call-result:",
   "assistant.notification.requested:usage-referral-reward:",
+  "assistant.notification.requested:group-context-handoff:",
   "aask_done_",
   "aask_private_",
 ] as const;
