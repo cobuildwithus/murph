@@ -2665,8 +2665,9 @@ account in `pending_link` or `link_returned` cannot accept ordinary webhook side
 effects, persist dirty work, wake or schedule the runtime, execute queued
 provider jobs, or promote itself through sync success. Hosted Web may recover a
 missing browser callback only after an authenticated, source-attributed webhook
-owns its trace and a live Junction provider-list read confirms the exact
-prepared source. The webhook is a trigger, not proof by itself. The runtime
+owns its trace and a live Junction provider-list read returns only the literal
+status `connected` for the exact prepared source. The webhook is a trigger, not
+proof by itself. The runtime
 rechecks consent, shared-app binding, connection and credential epochs, source
 epoch, and disconnect fences. It then commits `source_confirmed`, source
 admission, the callback-equivalent source-scoped initial jobs, a mandatory
@@ -3423,6 +3424,50 @@ from enrollment and conversion metrics. A later discretionary reset requires
 the prior credit to be consumed and the current direct-Starter gate to be fully
 exhausted again; it is not an automatic or member-owned refill. Recovery never
 replenishes an old grant projection or mutates purchased and referral credit.
+The operator surface can also walk all hosted IDs in fixed batches of 10, but it
+creates no bulk transaction or campaign authority: each member re-enters this
+same single-member reset sequentially, commits before its runtime wake, and is
+acknowledged only by an ID cursor returned to the browser. The walk ignores
+search, does not snapshot or pause the population, and converges after retries
+through the existing period, ledger-version, notice-claim, and member-lock
+checks. One browser-generated operation UUID is reused across continue,
+ambiguous population recovery, and wake-only recovery requests. Hiding a
+paused browser dialog preserves that UUID, cursor, and progress while keeping
+conflicting row mutations locked. One operator-bound, validated
+`sessionStorage` locator keeps the same operation and acknowledged progress
+through component remounts, same-tab navigation, reload, and browser-provided
+restoration of that tab session. An operator identity mismatch discards the
+locator, and this continuity is deliberately not shared with another tab or a
+new or closed tab session. The client writes the locator synchronously before
+issuing the first or next mutation and pauses without issuing that request when
+storage is unavailable. Discarding the locator
+requires a separate explicit abandonment warning because a later confirmation
+creates a new operation. The locator is browser recovery state, not an effect
+authority or server campaign; the receipt remains the sole per-member replay
+owner. Once the population walk is complete, wake recovery pages only that
+operation's existing wake-required receipts in the same fixed ID-ordered
+batches; it never reads the current hosted-member population or re-enters a
+reset transaction. That wake-only phase can be hidden without locking ordinary
+search or per-row recovery and reopened under the same UUID. Its abandonment
+warning is transient UI; only the underlying recovery phase is stored until the
+operator confirms that the locator should be cleared.
+The canonical per-member reset transaction writes one
+append-only receipt keyed by that UUID and member ID; the receipt freezes every
+stable outcome so replay cannot clear included usage that accrued after the
+first reset or append another Starter grant after the first was consumed.
+The same member-locked serializable owner resolves the live gate and exact
+period existence before choosing that outcome. A valid included allowance with
+no materialized zero-usage period records a skipped receipt and advances the
+walk without manufacturing a period; canonical accounting that wins the lock
+first instead leaves a real period for the reset to observe and clear.
+The receipt is the sole replay authority. Starter grants retain the same
+immutable semantic source key only as append-time ledger uniqueness. This
+adds no campaign, queue, scheduler, population snapshot, or second usage
+projection. A replayed receipt may repeat only the post-commit runtime recheck
+when its frozen outcome requires one. A terminal non-retryable inactive-runtime
+response settles that wake as no longer applicable, while transport and retryable runtime errors
+remain pending. Later members with no receipt remain outside the confirmed
+operation.
 
 Hosted signup-welcome admission is a separate line-owned outbound guard. Web
 serializes only the affected member's durable row, reads each healthy assignable

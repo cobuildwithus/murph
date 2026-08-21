@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ENVIRONMENT_REALTIME_TOOL_NAMES } from "@murphai/contracts";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import type {
@@ -59,7 +60,10 @@ describe("worker Environment Realtime route", () => {
       tool_choice: string;
       tools: Array<{
         name: string;
-        parameters: { properties?: { action?: { enum?: string[] } } };
+        parameters: {
+          anyOf?: unknown;
+          properties?: { action?: { enum?: string[] } };
+        };
       }>;
     };
     expect(session).toMatchObject({
@@ -70,11 +74,23 @@ describe("worker Environment Realtime route", () => {
     expect(session.instructions).toContain(
       "Uncertainty or lack of knowledge leaves the field unresolved",
     );
+    expect(session.tools.map((tool) => tool.name)).toEqual([
+      ENVIRONMENT_REALTIME_TOOL_NAMES.setLanguage,
+      ENVIRONMENT_REALTIME_TOOL_NAMES.continueInterview,
+      ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
+    ]);
     expect(
-      session.tools.find((tool) =>
-        tool.name === "control_environment_interview"
+      session.tools.find(
+        (tool) =>
+          tool.name === ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
       )?.parameters.properties?.action?.enum,
     ).toEqual(["back", "next", "skip", "finish"]);
+    expect(
+      session.tools.find(
+        (tool) =>
+          tool.name === ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
+      )?.parameters.anyOf,
+    ).toBeUndefined();
   });
 
   it("fails closed when the provider key is unavailable", async () => {

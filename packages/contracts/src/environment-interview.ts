@@ -76,6 +76,12 @@ export interface EnvironmentInterviewAnswer {
 
 export const ENVIRONMENT_INTERVIEW_NOTE_MAX_LENGTH = 400;
 
+export const ENVIRONMENT_REALTIME_TOOL_NAMES = {
+  continueInterview: "continue_environment_interview",
+  setLanguage: "set_environment_language",
+  updateInterview: "update_environment_interview",
+} as const;
+
 export function getEnvironmentInterviewTopicGroup(
   topicId: string,
 ): (typeof ENVIRONMENT_INTERVIEW_TOPIC_GROUPS)[number]

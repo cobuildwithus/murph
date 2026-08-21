@@ -1,4 +1,10 @@
-import { act, createElement, type ComponentProps } from "react";
+import {
+  act,
+  createElement,
+  type ComponentProps,
+  type InputHTMLAttributes,
+} from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const routerRefresh = vi.fn();
@@ -54,6 +60,14 @@ vi.mock("@/src/components/ui/dialog", () => ({
   DialogTitle: (props: ComponentProps<"h2">) => createElement("h2", props),
 }));
 
+vi.mock("@/src/components/ui/input", () => ({
+  Input({ inputSize, onChange, ...props }:
+    InputHTMLAttributes<HTMLInputElement> & { inputSize?: string }) {
+    void inputSize;
+    return createElement("input", { ...props, onInput: onChange });
+  },
+}));
+
 vi.mock("@/src/components/ui/spinner", () => ({
   Spinner: (props: ComponentProps<"span">) => createElement("span", props),
 }));
@@ -67,17 +81,41 @@ vi.mock("@/src/components/ui/table", () => ({
   TableRow: (props: ComponentProps<"tr">) => createElement("tr", props),
 }));
 
-import { MemberUsageClient } from "../app/(dashboard)/ops/usage/member-usage-client";
+import {
+  MemberUsageClient as ProductionMemberUsageClient,
+} from "../app/(dashboard)/ops/usage/member-usage-client";
 import type { HostedOpsMemberUsageDashboard } from "../src/lib/hosted-ops/member-usage";
-import { renderClientComponent } from "./render-client-component";
+import {
+  HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+} from "../src/lib/hosted-ops/member-usage-contract";
+import {
+  createMemoryStorage,
+  renderClientComponent,
+} from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
+const TEST_OPERATOR_MEMBER_ID = "hbm_ops_operator";
+const RESET_ALL_OPERATION_ID = "12345678-1234-4abc-8def-1234567890ab";
+const SECOND_RESET_ALL_OPERATION_ID = "abcdefab-1234-4abc-8def-1234567890ab";
+const randomUuidMock = vi.fn(() => RESET_ALL_OPERATION_ID);
 let cleanupRender: (() => Promise<void>) | null = null;
+
+function MemberUsageClient(
+  props: Omit<ComponentProps<typeof ProductionMemberUsageClient>, "operatorMemberId">,
+) {
+  return createElement(ProductionMemberUsageClient, {
+    ...props,
+    operatorMemberId: TEST_OPERATOR_MEMBER_ID,
+  });
+}
 
 beforeEach(() => {
   fetchMock.mockReset();
+  randomUuidMock.mockReset();
+  randomUuidMock.mockReturnValue(RESET_ALL_OPERATION_ID);
   routerPush.mockReset();
   routerRefresh.mockReset();
+  vi.stubGlobal("crypto", { randomUUID: randomUuidMock });
   vi.stubGlobal("fetch", fetchMock);
 });
 
@@ -90,6 +128,24 @@ afterEach(async () => {
 });
 
 describe("MemberUsageClient", () => {
+  test("renders mutation controls fail-closed before tab-session restoration", () => {
+    const markup = renderToStaticMarkup(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('data-reset-all-session-ready="false"');
+    expect(markup).toMatch(
+      /<input[^>]*disabled=""[^>]*id="ops-usage-search"/u,
+    );
+    expect(markup).toMatch(
+      /<button[^>]*disabled=""[^>]*type="submit"[^>]*>Search<\/button>/u,
+    );
+    expect(markup).toMatch(
+      /<button[^>]*disabled=""[^>]*type="button"[^>]*>[\s\S]*?Reset everyone<\/button>/u,
+    );
+  });
+
   test("shows members, containers, retained-message scope, and usage totals", async () => {
     const rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
@@ -138,6 +194,1205 @@ describe("MemberUsageClient", () => {
         'nav[aria-label="Member usage pages"]',
       ),
     ).not.toBeNull();
+  });
+
+  test("keeps capped search URL-backed and removes ordinary page controls", async () => {
+    const dashboard = makeDashboard();
+    dashboard.pagination = {
+      nextCursor: "hbm_050",
+      pageSize: 25,
+      previousCursor: "hbm_026",
+    };
+    dashboard.search = {
+      cap: 100,
+      capped: true,
+      error: null,
+      kind: "phone_last_four",
+      query: "0101",
+      resultCount: 100,
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    expect(rendered.container.textContent).toContain(
+      "Showing 100 phone-suffix candidates (safety cap 100; more exist)",
+    );
+    expect(rendered.container.textContent).toContain(
+      "These contact matches are candidate-only; reset controls are locked until you search by the exact hosted ID",
+    );
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
+    expect(
+      rendered.container.querySelector(
+        'nav[aria-label="Member usage pages"]',
+      ),
+    ).toBeNull();
+
+    const searchInput = getInput(rendered.container, "ops-usage-search");
+    await setInputValue(
+      rendered.window,
+      searchInput,
+      "verified@example.invalid",
+    );
+    await submitForm(rendered.window, searchInput.closest("form"));
+
+    expect(routerPush).toHaveBeenCalledWith(
+      "/ops/usage?q=verified%40example.invalid",
+    );
+
+    const searchedDashboard = structuredClone(dashboard);
+    searchedDashboard.capturedAt = "2026-07-22T18:00:01.000Z";
+    searchedDashboard.search.capped = false;
+    searchedDashboard.search.kind = "email";
+    searchedDashboard.search.query = "verified@example.invalid";
+    searchedDashboard.search.resultCount = 1;
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: searchedDashboard }),
+    );
+
+    expect(getInput(rendered.container, "ops-usage-search").value).toBe(
+      "verified@example.invalid",
+    );
+    expect(getButton(rendered.container, "Search").disabled).toBe(false);
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+  });
+
+  test("closes and locks stale row mutations during search navigation", async () => {
+    const dashboard = makeDashboard();
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    const staleConfirmation = getButton(rendered.container, "Reset usage");
+    expect(staleConfirmation.disabled).toBe(false);
+
+    const searchInput = getInput(rendered.container, "ops-usage-search");
+    await setInputValue(rendered.window, searchInput, "hbm_new_target");
+    await submitForm(rendered.window, searchInput.closest("form"));
+
+    expect(routerPush).toHaveBeenCalledWith("/ops/usage?q=hbm_new_target");
+    expect(rendered.container.textContent).not.toContain(
+      "Reset current included usage?",
+    );
+    const pendingResetButtons = [...rendered.container.querySelectorAll("button")]
+      .filter((button) => button.textContent?.trim() === "Reset");
+    expect(pendingResetButtons.length).toBeGreaterThan(0);
+    expect(pendingResetButtons.every((button) => button.disabled)).toBe(true);
+    await clickButton(rendered.window, staleConfirmation);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const searchedDashboard = structuredClone(dashboard);
+    searchedDashboard.rows[0].memberId = "hbm_new_target";
+    searchedDashboard.search = {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: "member_id",
+      query: "hbm_new_target",
+      resultCount: 1,
+    };
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: searchedDashboard }),
+    );
+
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    expect(rendered.container.textContent).toContain("hbm_new_target");
+    await clickButton(rendered.window, getButton(rendered.container, "Clear"));
+    expect(routerPush).toHaveBeenLastCalledWith("/ops/usage");
+    expect(rendered.container.textContent).not.toContain(
+      "Reset current included usage?",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("locks every row action for an ambiguous exact-email candidate set", async () => {
+    const dashboard = makeDashboard();
+    dashboard.rows = [
+      { ...dashboard.rows[0], memberId: "hbm_email_current" },
+      { ...dashboard.rows[0], memberId: "hbm_email_prior" },
+    ];
+    dashboard.search = {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: "email",
+      query: "ambiguous@example.invalid",
+      resultCount: 2,
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    expect(rendered.container.textContent).toContain(
+      "Showing 2 verified-email candidates",
+    );
+    expect(rendered.container.textContent).toContain(
+      "These contact matches are candidate-only; reset controls are locked until you search by the exact hosted ID",
+    );
+    const resetButtons = [...rendered.container.querySelectorAll("button")]
+      .filter((button) => button.textContent?.trim() === "Reset");
+    expect(resetButtons).toHaveLength(4);
+    expect(resetButtons.every((button) => button.disabled)).toBe(true);
+
+    const uniqueDashboard = structuredClone(dashboard);
+    uniqueDashboard.rows = [uniqueDashboard.rows[0]];
+    uniqueDashboard.search.resultCount = 1;
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: uniqueDashboard }),
+    );
+
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    expect(getButton(rendered.container, "Reset usage").disabled).toBe(false);
+
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    expect(getButton(rendered.container, "Reset usage").disabled).toBe(true);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset usage"),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("does not enter a loading state when the normalized search is unchanged", async () => {
+    const dashboard = makeDashboard();
+    dashboard.search = {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: "phone_last_four",
+      query: "0101",
+      resultCount: 1,
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    const searchInput = getInput(rendered.container, "ops-usage-search");
+    await submitForm(rendered.window, searchInput.closest("form"));
+
+    expect(routerPush).not.toHaveBeenCalled();
+    expect(getButton(rendered.container, "Search").disabled).toBe(false);
+  });
+
+  test("requires typed confirmation and continues bounded reset-everyone batches", async () => {
+    const dashboard = makeDashboard();
+    dashboard.search = {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: "phone_last_four",
+      query: "0101",
+      resultCount: 1,
+    };
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 2,
+          reset: 1,
+          skipped: 1,
+          unchanged: 0,
+        },
+        done: false,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_002",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 1,
+          processed: 1,
+          reset: 0,
+          skipped: 0,
+          unchanged: 1,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_003",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        attempted: 2,
+        done: true,
+        pendingWake: 0,
+        lastAcknowledgedCursor: "hbm_reset_003",
+      }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset everyone"),
+    );
+
+    expect(rendered.container.textContent).toContain(
+      "The active search filter will be ignored.",
+    );
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
+    const confirmButton = getButtonByAriaLabel(
+      rendered.container,
+      "Confirm reset everyone",
+    );
+    expect(confirmButton.disabled).toBe(true);
+    await setInputValue(
+      rendered.window,
+      getInput(rendered.container, "ops-usage-reset-all-confirmation"),
+      HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+    );
+    expect(getButtonByAriaLabel(
+      rendered.container,
+      "Confirm reset everyone",
+    ).disabled).toBe(false);
+
+    await clickButton(
+      rendered.window,
+      getButtonByAriaLabel(rendered.container, "Confirm reset everyone"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Population reset complete; runtime recovery remains",
+      );
+    });
+    expect(rendered.container.textContent).not.toContain(
+      "Reset everyone complete",
+    );
+    expect(routerRefresh).toHaveBeenCalledTimes(1);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: "hbm_reset_002",
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Processed")).toBe("3");
+    expect(readMetric(rendered.container, "Reset")).toBe("1");
+    expect(readMetric(rendered.container, "Unchanged")).toBe("1");
+    expect(readMetric(rendered.container, "Skipped")).toBe("1");
+    expect(readMetric(rendered.container, "Wake pending")).toBe("1");
+    expect(readMetric(rendered.container, "Failed")).toBe("0");
+    expect(rendered.container.textContent).toContain(
+      "Last acknowledged cursor: hbm_reset_003",
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Retry pending runtime wakes"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone complete",
+      );
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "recover_reset_all_wakes",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Processed")).toBe("3");
+    expect(readMetric(rendered.container, "Reset")).toBe("1");
+    expect(readMetric(rendered.container, "Unchanged")).toBe("1");
+    expect(readMetric(rendered.container, "Skipped")).toBe("1");
+    expect(readMetric(rendered.container, "Wake pending")).toBe("0");
+    expect(routerRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  test("defers and restores wake-only recovery without locking support work", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 1,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    })).mockResolvedValueOnce(jsonResponse({
+      attempted: 1,
+      done: true,
+      pendingWake: 0,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    }));
+    const sessionStorage = createMemoryStorage();
+    let rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Population reset complete; runtime recovery remains",
+      );
+    });
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Hide for now"),
+    );
+
+    expect(getButton(rendered.container, "Search").disabled).toBe(false);
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Reset"));
+    expect(getButton(rendered.container, "Reset usage").disabled).toBe(false);
+    await clickButton(rendered.window, getButton(rendered.container, "Cancel"));
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .toContain(RESET_ALL_OPERATION_ID);
+
+    const cleanup = rendered.cleanup;
+    cleanupRender = null;
+    await cleanup();
+    const searchDashboard = makeDashboard();
+    searchDashboard.search = {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: "member_id",
+      query: "hbm_container",
+      resultCount: 1,
+    };
+    rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: searchDashboard }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+    await vi.waitFor(() => {
+      expect(getButton(rendered.container, "Resume runtime recovery")).not
+        .toBeNull();
+    });
+    expect(rendered.container.textContent).not.toContain(
+      "Population reset complete; runtime recovery remains",
+    );
+    expect(getButton(rendered.container, "Search").disabled).toBe(false);
+    expect(getButton(rendered.container, "Reset").disabled).toBe(false);
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Clear"),
+    );
+    expect(routerPush).toHaveBeenCalledWith("/ops/usage");
+    await rendered.rerender(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    await vi.waitFor(() => {
+      expect(getButton(rendered.container, "Resume runtime recovery")).not
+        .toBeNull();
+    });
+    expect(rendered.container.textContent).not.toContain(
+      "Population reset complete; runtime recovery remains",
+    );
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume runtime recovery"),
+    );
+    expect(rendered.container.textContent).toContain(
+      "Population reset complete; runtime recovery remains",
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Retry pending runtime wakes"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "recover_reset_all_wakes",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  });
+
+  test("starts only one reset-everyone loop for rapid repeated confirmation", async () => {
+    let resolveBatch!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => {
+      resolveBatch = resolve;
+    }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset everyone"),
+    );
+    await setInputValue(
+      rendered.window,
+      getInput(rendered.container, "ops-usage-reset-all-confirmation"),
+      HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+    );
+    const confirmButton = getButtonByAriaLabel(
+      rendered.container,
+      "Confirm reset everyone",
+    );
+    await act(async () => {
+      confirmButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+        cancelable: true,
+      }));
+      confirmButton.dispatchEvent(new rendered.window.Event("click", {
+        bubbles: true,
+        cancelable: true,
+      }));
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveBatch(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone complete",
+      );
+    });
+  });
+
+  test("pauses after the current batch and resumes the same population walk", async () => {
+    let resolveFirstBatch!: (response: Response) => void;
+    fetchMock
+      .mockReturnValueOnce(new Promise<Response>((resolve) => {
+        resolveFirstBatch = resolve;
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 10,
+          reset: 4,
+          skipped: 2,
+          unchanged: 4,
+        },
+        done: false,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_020",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 5,
+          reset: 2,
+          skipped: 1,
+          unchanged: 2,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_025",
+      }));
+    const dashboard = makeDashboard();
+    dashboard.summary.members = 24;
+    const sessionStorage = createMemoryStorage();
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    expect(readMetric(rendered.container, "Starting population")).toBe("25");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Pause after current batch"),
+    );
+    expect(getButton(rendered.container, "Finishing current batch").disabled)
+      .toBe(true);
+
+    await act(async () => {
+      resolveFirstBatch(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 10,
+          reset: 4,
+          skipped: 1,
+          unchanged: 5,
+        },
+        done: false,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_010",
+      }));
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Paused after the last acknowledged batch",
+      );
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(readMetric(rendered.container, "Processed")).toBe("10");
+    expect(rendered.container.textContent).toContain(
+      "Last acknowledged cursor: hbm_reset_010",
+    );
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .toContain('"startingPopulationCount":25');
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .toContain(RESET_ALL_OPERATION_ID);
+
+    await clickButton(rendered.window, getButton(rendered.container, "Resume"));
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: "hbm_reset_010",
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Processed")).toBe("25");
+    expect(readMetric(rendered.container, "Starting population")).toBe("25");
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("restores an interrupted in-flight operation with the same ID", async () => {
+    let resolveBatch!: (response: Response) => void;
+    fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => {
+      resolveBatch = resolve;
+    })).mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    }));
+    const sessionStorage = createMemoryStorage();
+    let rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .toContain(RESET_ALL_OPERATION_ID);
+
+    const cleanup = rendered.cleanup;
+    cleanupRender = null;
+    await cleanup();
+    rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+    expect(rendered.container.textContent).toContain(
+      "This page was interrupted while a batch may have committed.",
+    );
+    expect(readMetric(rendered.container, "Processed")).toBe("0");
+
+    resolveBatch(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: false,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("pauses on a member failure and retries from the last acknowledged cursor", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 1,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: false,
+        failure: {
+          code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+          memberId: "hbm_reset_002",
+          message:
+            "A usage-limit notice is currently being sent. Retry from the last acknowledged member after that dispatch settles.",
+          retryable: true,
+        },
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 2,
+          reset: 1,
+          skipped: 0,
+          unchanged: 1,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_003",
+      }));
+    const sessionStorage = createMemoryStorage();
+    let rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone paused",
+      );
+    });
+
+    const cleanup = rendered.cleanup;
+    cleanupRender = null;
+    await cleanup();
+    rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "The unacknowledged member is hbm_reset_002.",
+    );
+    expect(readMetric(rendered.container, "Processed")).toBe("1");
+    expect(readMetric(rendered.container, "Failed")).toBe("1");
+    expect(getButton(rendered.container, "Resume").disabled).toBe(false);
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Hide for now"),
+    );
+    expect(rendered.container.textContent).not.toContain("Reset everyone paused");
+    expect(getButton(rendered.container, "Reset").disabled).toBe(true);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume reset operation"),
+    );
+    expect(rendered.container.textContent).toContain("Reset everyone paused");
+    expect(readMetric(rendered.container, "Processed")).toBe("1");
+    expect(readMetric(rendered.container, "Failed")).toBe("1");
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone complete",
+      );
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: "hbm_reset_001",
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Processed")).toBe("3");
+    expect(readMetric(rendered.container, "Failed")).toBe("0");
+  });
+
+  test("requires an explicit warning before abandoning a paused operation", async () => {
+    randomUuidMock
+      .mockReturnValueOnce(RESET_ALL_OPERATION_ID)
+      .mockReturnValueOnce(SECOND_RESET_ALL_OPERATION_ID);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 1,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: false,
+        failure: {
+          code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+          memberId: "hbm_reset_002",
+          message: "Retry after the notice dispatch settles.",
+          retryable: true,
+        },
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }));
+    const sessionStorage = createMemoryStorage();
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+    expect(sessionStorage.length).toBe(1);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+
+    expect(rendered.container.textContent).toContain("Abandon reset operation?");
+    expect(rendered.container.textContent).toContain(
+      "Already committed member resets will remain.",
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Keep operation"),
+    );
+    expect(rendered.container.textContent).toContain("Reset everyone paused");
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Abandon operation"),
+    );
+    expect(rendered.container.textContent).not.toContain("Abandon reset operation?");
+    expect(sessionStorage.length).toBe(0);
+
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Reset everyone"),
+    );
+    await setInputValue(
+      rendered.window,
+      getInput(rendered.container, "ops-usage-reset-all-confirmation"),
+      HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+    );
+    await clickButton(
+      rendered.window,
+      getButtonByAriaLabel(rendered.container, "Confirm reset everyone"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: SECOND_RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  });
+
+  test("does not issue the first batch when tab-session progress cannot persist", async () => {
+    const sessionStorage = createMemoryStorage();
+    sessionStorage.setItem = () => {
+      throw new Error("Storage unavailable");
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "This browser could not preserve the latest reset progress",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps an ambiguous outcome visible when its pause cannot persist", async () => {
+    const sessionStorage = createMemoryStorage();
+    fetchMock.mockImplementationOnce(async () => {
+      sessionStorage.setItem = () => {
+        throw new Error("Storage unavailable");
+      };
+      throw new Error("Connection closed");
+    });
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+
+    expect(rendered.container.textContent).toContain("Connection closed");
+    expect(rendered.container.textContent).toContain(
+      "This browser could not preserve the latest reset progress",
+    );
+    expect(rendered.container.textContent).toContain(
+      "No unacknowledged outcome was added to the totals below.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not restore a saved operation for a different operator", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 1,
+        pendingWake: 0,
+        processed: 0,
+        reset: 0,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: false,
+      failure: {
+        code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+        memberId: "hbm_reset_001",
+        message: "Retry after the notice dispatch settles.",
+        retryable: true,
+      },
+      lastAcknowledgedCursor: null,
+    }));
+    const sessionStorage = createMemoryStorage();
+    const rendered = await renderClientComponent(
+      createElement(ProductionMemberUsageClient, {
+        dashboard: makeDashboard(),
+        operatorMemberId: TEST_OPERATOR_MEMBER_ID,
+      }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent)
+        .toContain("Reset everyone paused");
+    });
+    expect(sessionStorage.length).toBe(1);
+
+    await rendered.rerender(
+      createElement(ProductionMemberUsageClient, {
+        dashboard: makeDashboard(),
+        operatorMemberId: "hbm_other_ops_operator",
+      }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(rendered.container.textContent)
+      .not.toContain("Reset everyone paused");
+    expect(getButton(rendered.container, "Reset everyone").disabled)
+      .toBe(false);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  test("resumes the same operation after an ambiguous batch response", async () => {
+    fetchMock
+      .mockRejectedValueOnce(new Error("Connection closed"))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 1,
+          reset: 0,
+          skipped: 0,
+          unchanged: 1,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_001",
+      }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone paused",
+      );
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "No unacknowledged outcome was added to the totals below.",
+    );
+    expect(readMetric(rendered.container, "Processed")).toBe("0");
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone complete",
+      );
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Processed")).toBe("1");
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not count a batch without a forward acknowledged cursor", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: null,
+    }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone paused",
+      );
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "The server did not acknowledge forward progress.",
+    );
+    expect(readMetric(rendered.container, "Processed")).toBe("0");
+    expect(readMetric(rendered.container, "Reset")).toBe("0");
+    expect(routerRefresh).not.toHaveBeenCalled();
+  });
+
+  test("accepts server-ordered cursors without assuming JavaScript collation", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 1,
+          reset: 1,
+          skipped: 0,
+          unchanged: 0,
+        },
+        done: false,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_z",
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        counts: {
+          failed: 0,
+          pendingWake: 0,
+          processed: 1,
+          reset: 0,
+          skipped: 0,
+          unchanged: 1,
+        },
+        done: true,
+        failure: null,
+        lastAcknowledgedCursor: "hbm_reset_a",
+      }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone complete",
+      );
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: "hbm_reset_z",
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(readMetric(rendered.container, "Processed")).toBe("2");
+  });
+
+  test("rejects inconsistent reset-everyone outcome totals", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 1,
+        processed: 1,
+        reset: 0,
+        skipped: 1,
+        unchanged: 0,
+      },
+      done: false,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
+    }));
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain(
+        "Reset everyone paused",
+      );
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "Reset everyone returned an invalid response.",
+    );
+    expect(readMetric(rendered.container, "Processed")).toBe("0");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("labels a row without a current period without calling it available", async () => {
@@ -635,13 +1890,67 @@ function makeDashboard(): HostedOpsMemberUsageDashboard {
       runtimeRecheckAvailable: false,
       suspended: false,
     }],
+    search: {
+      cap: 100,
+      capped: false,
+      error: null,
+      kind: null,
+      query: null,
+      resultCount: 1,
+    },
     summary: {
       activeEntitiesLast7Days: 1,
       groupContainers: 1,
-      members: 0,
+      members: 2,
       totalAllTimeUsageUsdMicros: "7250000",
     },
   };
+}
+
+async function openAndConfirmResetEveryone(rendered: {
+  container: HTMLElement;
+  window: Window & typeof globalThis;
+}): Promise<void> {
+  await clickButton(
+    rendered.window,
+    getButton(rendered.container, "Reset everyone"),
+  );
+  await setInputValue(
+    rendered.window,
+    getInput(rendered.container, "ops-usage-reset-all-confirmation"),
+    HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+  );
+  await clickButton(
+    rendered.window,
+    getButtonByAriaLabel(rendered.container, "Confirm reset everyone"),
+  );
+}
+
+function getInput(container: HTMLElement, id: string): HTMLInputElement {
+  const input = container.querySelector<HTMLInputElement>(`#${id}`);
+  if (!input) {
+    throw new Error(`Input not found: ${id}`);
+  }
+  return input;
+}
+
+function getButtonByAriaLabel(
+  container: HTMLElement,
+  label: string,
+): HTMLButtonElement {
+  const button = container.querySelector<HTMLButtonElement>(
+    `button[aria-label="${label}"]`,
+  );
+  if (!button) {
+    throw new Error(`Button not found by aria-label: ${label}`);
+  }
+  return button;
+}
+
+function readMetric(container: HTMLElement, label: string): string | null {
+  const term = [...container.querySelectorAll("dt")]
+    .find((candidate) => candidate.textContent?.trim() === label);
+  return term?.parentElement?.querySelector("dd")?.textContent?.trim() ?? null;
 }
 
 function getButton(container: HTMLElement, label: string): HTMLButtonElement {
@@ -661,6 +1970,44 @@ async function clickButton(
     const event = window.document.createEvent("Event");
     event.initEvent("click", true, true);
     button.dispatchEvent(event);
+    await Promise.resolve();
+  });
+}
+
+async function setInputValue(
+  window: Window & typeof globalThis,
+  input: HTMLInputElement,
+  value: string,
+): Promise<void> {
+  await act(async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    );
+    if (descriptor?.set) {
+      descriptor.set.call(input, value);
+    } else {
+      input.value = value;
+    }
+    input.dispatchEvent(new window.Event("input", { bubbles: true }));
+    input.dispatchEvent(new window.Event("change", { bubbles: true }));
+    await Promise.resolve();
+  });
+}
+
+async function submitForm(
+  window: Window & typeof globalThis,
+  form: HTMLFormElement | null,
+): Promise<void> {
+  if (!form) {
+    throw new Error("Form not found.");
+  }
+  await act(async () => {
+    form.dispatchEvent(new window.Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }));
+    await Promise.resolve();
   });
 }
 

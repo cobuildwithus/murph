@@ -1,8 +1,8 @@
 # Group funding success receipt redesign
 
-Status: active
+Status: completed
 Created: 2026-08-19
-Updated: 2026-08-19
+Updated: 2026-08-20
 
 ## Goal
 
@@ -18,6 +18,8 @@ Updated: 2026-08-19
   the existing `sms:` destination and accessible success announcement intact.
 - The heading, supporting copy, and action fit without overflow at desktop and
   narrow-phone widths and preserve keyboard focus and close behavior.
+- The compact success mark stands on its own without a redundant congratulatory
+  label competing with the receipt headline.
 - Focused component tests, Web typecheck, rendered browser proof, the applicable
   preliminary ReviewGPT lenses, exact-head CI, and parent final review pass.
 
@@ -25,7 +27,7 @@ Updated: 2026-08-19
 
 - In scope: the fulfilled group presentation in
   `HostedUsageTopUpDialog`, its focused tests, the matching design-system
-  guidance, a public changelog item, and the task-owned Frog entry.
+  guidance, a public changelog item, and the existing Frog registry review.
 - Out of scope: Stripe/payment state, purchase polling, sponsorship selection,
   billing authority, group deep-link capability, and non-group success states.
 
@@ -73,12 +75,52 @@ Updated: 2026-08-19
 - Do not add illustration or celebratory motion. The success mark, type
   hierarchy, and tighter composition are sufficient and match Murph's explicit
   anti-gamification rules.
+- Keep the confirmation mark but remove its visible kicker. The headline already
+  communicates the success outcome, while the mark retains the visual and
+  accessible status signal.
+- Let each responsive surface own alignment: the fulfilled drawer header
+  centers the mark and headline at every drawer width, while the desktop dialog
+  retains its left-aligned hierarchy. Do not couple this boundary to a smaller
+  unrelated Tailwind breakpoint.
+- The initial redesign landed in PR #2034. Follow-up PR #2046 owns the final
+  hierarchy polish and preserves both source PRs in the existing changelog item.
 
 ## Verification
 
 - Commands to run: the focused hosted-usage dialog Vitest file, Web typecheck,
-  `git diff --check`, and in-app Browser walkthroughs at desktop and narrow
-  phone widths; exact-head required GitHub checks after push.
+  `git diff --check`, and Playwright walkthroughs at desktop and narrow phone
+  widths; exact-head required GitHub checks after push.
 - Expected outcomes: unchanged payment behavior, one accessible success status,
   a semantic `sms:` continuation link, no duplicate desktop dismissal action,
   no overflow or clipped action on phone, and all routed review/CI gates green.
+
+## Product UX walkthrough
+
+- Desktop contributor: the production receipt study rendered a 512×346 dialog
+  with one compact confirmation mark, one headline, one explanatory sentence,
+  and the full-width Messages action. The standard close control remained the
+  only separate exit.
+- Phone contributor: the same study rendered a content-height 390×361 drawer.
+  The mark centered with the phone headline, the chooser instruction wrapped
+  without clipping, and the Messages action remained fully visible.
+- Intermediate-width contributor: a 700×900 Playwright viewport still selected
+  the drawer and directly proved that the mark and headline content share the
+  same horizontal center.
+- Direct proof: the fulfilled state retained one live status announcement and
+  the semantic `sms:` link. Web typecheck, focused ESLint, Playwright responsive
+  capture, and diff hygiene passed.
+- Preliminary ReviewGPT returned two accepted findings: the mark crossed to
+  left alignment before the drawer ended, and the icon-only status semantics
+  were under-asserted. The drawer now owns centering throughout its range, the
+  success title drops obsolete close-button padding, and the focused test pins
+  the exact label, polite live region, hidden icon, and one-status invariant.
+- Remediation proof: 108 focused component and changelog tests, Web typecheck,
+  focused ESLint, diff hygiene, and Playwright captures at 1440×900, 700×900,
+  and 390×844 passed.
+- Shipping proof: the preview reached Ready and its authenticated design-study
+  route returned HTTP 200. All required checks passed on the exact code head;
+  the parent review found no remaining product issue, and the current-base
+  merge-tree was clean.
+- Result: Complete. The follow-up removes repeated success copy without
+  changing payment, routing, dismissal, or recovery behavior.
+Completed: 2026-08-20
