@@ -11,6 +11,7 @@ import {
 } from "./native-ios-hosted-e2e-support.mjs";
 
 const APPLE_HEALTH_PROVIDER = "apple_health_kit";
+const HEALTH_CONNECT_PROVIDER = "health_connect";
 const CLOCK_SKEW_MS = 2 * 60_000;
 const DB_CONNECTION_TIMEOUT_MS = 5_000;
 const DB_OWNER_CONNECTION_OPTION = "-c role=postgres";
@@ -166,21 +167,55 @@ export function inspectFreshPrivyPrincipal(raw, { observedAtMs, startedAtMs }) {
   return { createdAtMs, id };
 }
 
-export function inspectJunctionAppleHealthConnection(raw) {
+function inspectJunctionProviderConnection(raw, providerSlug, providerLabel) {
   assertRecord(raw, "Junction provider connections");
   if (!Array.isArray(raw.providers)) throw new Error("Junction provider connections response was invalid.");
   const connected = raw.providers.some((provider) => isRecord(provider)
-    && provider.slug === APPLE_HEALTH_PROVIDER
+    && provider.slug === providerSlug
     && String(provider.status ?? "").toLowerCase() === "connected");
-  if (!connected) throw new Error("Junction Apple Health connection was not established.");
+  if (!connected) throw new Error(`Junction ${providerLabel} connection was not established.`);
   return true;
 }
 
+export function inspectJunctionAppleHealthConnection(raw) {
+  return inspectJunctionProviderConnection(raw, APPLE_HEALTH_PROVIDER, "Apple Health");
+}
+
+export function inspectJunctionHealthConnectConnection(raw) {
+  return inspectJunctionProviderConnection(raw, HEALTH_CONNECT_PROVIDER, "Health Connect");
+}
+
 export async function proveRunPostconditions(startedAtMs, junctionClientUserIdNamespace) {
+  return proveRunPostconditionsForProvider({
+    inspectConnection: inspectJunctionAppleHealthConnection,
+    junctionClientUserIdNamespace,
+    lane: "native-ios-e2e",
+    providerStage: "junction_apple_health_postcondition",
+    startedAtMs,
+  });
+}
+
+export async function proveAndroidRunPostconditions(startedAtMs, junctionClientUserIdNamespace) {
+  return proveRunPostconditionsForProvider({
+    inspectConnection: inspectJunctionHealthConnectConnection,
+    junctionClientUserIdNamespace,
+    lane: "native-android-e2e",
+    providerStage: "junction_health_connect_postcondition",
+    startedAtMs,
+  });
+}
+
+async function proveRunPostconditionsForProvider({
+  inspectConnection,
+  junctionClientUserIdNamespace,
+  lane,
+  providerStage,
+  startedAtMs,
+}) {
   const privy = await findPrivyTestUser();
   if (!privy) throw new Error("Privy E2E principal was not created by the native journey.");
   inspectFreshPrivyPrincipal(privy, { observedAtMs: Date.now(), startedAtMs });
-  console.log("::notice::native-ios-e2e stage=privy_postcondition result=success");
+  console.log(`::notice::${lane} stage=privy_postcondition result=success`);
 
   const config = e2eIdentityConfig(junctionClientUserIdNamespace);
   const rawMember = await readDedicatedMemberRecord(config);
@@ -188,8 +223,8 @@ export async function proveRunPostconditions(startedAtMs, junctionClientUserIdNa
   const member = inspectDedicatedMemberIdentity(rawMember, { testPhone: config.testPhone });
   const junction = await resolveJunctionUser(member.memberId, config);
   if (!junction) throw new Error("Native E2E journey did not create the dedicated Junction user.");
-  inspectJunctionAppleHealthConnection(await readJunctionProviders(junction.userId, config.junctionApiKey));
-  console.log("::notice::native-ios-e2e stage=junction_apple_health_postcondition result=success");
+  inspectConnection(await readJunctionProviders(junction.userId, config.junctionApiKey));
+  console.log(`::notice::${lane} stage=${providerStage} result=success`);
 }
 
 export async function cleanupE2e(junctionClientUserIdNamespace) {
@@ -345,11 +380,16 @@ async function deleteJunctionUser(userId, apiKey) {
   await response.body?.cancel().catch(() => undefined);
 }
 
-async function resetDedicatedDatabase(directDatabaseUrl) {
-  const childEnv = { ...process.env };
+export function withoutNativeE2ECredentials(environment) {
+  const childEnv = { ...environment };
   for (const name of Object.keys(childEnv)) {
-    if (name.startsWith("NATIVE_IOS_E2E_")) delete childEnv[name];
+    if (/^NATIVE_(?:IOS|ANDROID)_E2E_/u.test(name)) delete childEnv[name];
   }
+  return childEnv;
+}
+
+async function resetDedicatedDatabase(directDatabaseUrl) {
+  const childEnv = withoutNativeE2ECredentials(process.env);
   const ownerDatabaseUrl = withDedicatedDatabaseOwner(directDatabaseUrl);
   childEnv.DATABASE_URL = ownerDatabaseUrl;
   childEnv.DIRECT_DATABASE_URL = ownerDatabaseUrl;

@@ -9,12 +9,14 @@ import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
+import { normalizeHostedEmailReplyAliasLookupKey } from "@murphai/hosted-execution/hosted-email";
 
 import {
   createHostedEmailLookupKey,
   createHostedEmailLookupKeyReadCandidates,
 } from "./contact-privacy";
-import { hostedOnboardingError } from "./errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
 import { activeHostedMemberAccessWhere } from "./member-access";
 import {
   decryptHostedWebNullableString,
@@ -45,6 +47,7 @@ import {
   upsertHostedMemberReplyAliasLookupKeyTx,
 } from "./hosted-member-routing-store";
 import {
+  HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
 } from "./shared";
@@ -192,9 +195,16 @@ export interface HostedMemberVerifiedEmailSyncInput {
   address: string;
   memberId: string;
   preparedControlRoot?: PreparedHostedDomainRootForWeb;
+  preparedReplyAlias?: HostedMemberVerifiedEmailReplyAliasPreparation;
   prisma?: Prisma.TransactionClient | HostedOnboardingReadClient;
-  replyAliasLookupKey?: string | null;
   verifiedAt: Date;
+}
+
+export interface HostedMemberVerifiedEmailReplyAliasPreparation {
+  generation: number;
+  lookupKey: string | null;
+  memberId: string;
+  verifiedEmailLookupKeys: string[];
 }
 
 /**
@@ -702,28 +712,99 @@ export async function syncHostedMemberVerifiedEmailAuthorization(
 ): Promise<HostedMemberEmailAuthorizationState> {
   const prismaClient = input.prisma;
 
-  if (prismaClient && "$transaction" in prismaClient && typeof prismaClient.$transaction === "function") {
-    return prismaClient.$transaction((tx: Prisma.TransactionClient) => {
-      const write = () => runWithHostedDomainRootUnwrapCache(() =>
-        upsertHostedMemberVerifiedEmailAuthorizationTx({
-          ...input,
-          prisma: tx,
-        })
-      );
-      return input.preparedControlRoot
-        ? runWithHostedDomainRootProviderCallsDisabled(write)
-        : write();
-    });
+  if (
+    !input.preparedReplyAlias
+    && prismaClient
+    && "$transaction" in prismaClient
+    && typeof prismaClient.$transaction === "function"
+  ) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const preparedReplyAlias = await prepareHostedMemberVerifiedEmailReplyAlias({
+        address: input.address,
+        memberId: input.memberId,
+        prisma: prismaClient,
+      });
+      try {
+        return await prismaClient.$transaction((tx: Prisma.TransactionClient) => {
+          const write = () => runWithHostedDomainRootUnwrapCache(() =>
+            upsertHostedMemberVerifiedEmailAuthorizationTx({
+              ...input,
+              preparedReplyAlias,
+              prisma: tx,
+            })
+          );
+          return input.preparedControlRoot
+            ? runWithHostedDomainRootProviderCallsDisabled(write)
+            : write();
+        }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+      } catch (error) {
+        if (
+          attempt === 0
+          && isHostedOnboardingError(error)
+          && error.code === "HOSTED_EMAIL_REPLY_ALIAS_STALE"
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error("Hosted member reply alias preparation retry was exhausted.");
   }
 
   return upsertHostedMemberVerifiedEmailAuthorizationTx({
     memberId: input.memberId,
     preparedControlRoot: input.preparedControlRoot,
+    preparedReplyAlias: input.preparedReplyAlias,
     prisma: input.prisma as Prisma.TransactionClient,
-    replyAliasLookupKey: input.replyAliasLookupKey,
     address: input.address,
     verifiedAt: input.verifiedAt,
   });
+}
+
+export async function prepareHostedMemberVerifiedEmailReplyAlias(input: {
+  address: string;
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberVerifiedEmailReplyAliasPreparation> {
+  const [currentAuthorization, currentRouting] = await Promise.all([
+    input.prisma.hostedMemberEmailAuthorization.findUnique({
+      where: { memberId: input.memberId },
+      select: {
+        verifiedEmailLookupKey: true,
+        verifiedEmailVerifiedAt: true,
+      },
+    }),
+    input.prisma.hostedMemberRouting.findUnique({
+      where: { memberId: input.memberId },
+      select: { replyAliasGeneration: true },
+    }),
+  ]);
+  const currentGeneration = requireHostedMemberReplyAliasGeneration(
+    currentRouting?.replyAliasGeneration ?? 0,
+  );
+  const verifiedEmailLookupKeys = createHostedEmailLookupKeyReadCandidates(
+    input.address,
+  );
+  const sameVerifiedAddress = Boolean(
+    currentAuthorization?.verifiedEmailVerifiedAt
+    && currentAuthorization.verifiedEmailLookupKey
+    && verifiedEmailLookupKeys.includes(currentAuthorization.verifiedEmailLookupKey),
+  );
+  const generation = currentAuthorization?.verifiedEmailVerifiedAt
+    && !sameVerifiedAddress
+    ? incrementHostedMemberReplyAliasGeneration(currentGeneration)
+    : currentGeneration;
+  const route = await createHostedMemberReplyAliasRoute({
+    generation,
+    memberId: input.memberId,
+  });
+
+  return {
+    generation,
+    lookupKey: route?.replyAliasLookupKey ?? null,
+    memberId: input.memberId,
+    verifiedEmailLookupKeys,
+  };
 }
 
 async function upsertHostedMemberVerifiedEmailAuthorizationTx(
@@ -731,6 +812,59 @@ async function upsertHostedMemberVerifiedEmailAuthorizationTx(
     prisma: Prisma.TransactionClient;
   },
 ): Promise<HostedMemberEmailAuthorizationState> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
+
+  const currentAuthorization = await input.prisma.hostedMemberEmailAuthorization.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      verifiedEmailLookupKey: true,
+      verifiedEmailVerifiedAt: true,
+    },
+  });
+  const currentRouting = await input.prisma.hostedMemberRouting.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      replyAliasGeneration: true,
+      replyAliasLookupKey: true,
+    },
+  });
+  const currentVerifiedLookupKey = currentAuthorization?.verifiedEmailLookupKey ?? null;
+  const sameVerifiedAddress = Boolean(
+    currentAuthorization?.verifiedEmailVerifiedAt
+    && currentVerifiedLookupKey
+    && input.preparedReplyAlias?.verifiedEmailLookupKeys
+      .includes(currentVerifiedLookupKey),
+  );
+  const shouldRotateReplyAlias = Boolean(
+    currentAuthorization?.verifiedEmailVerifiedAt && !sameVerifiedAddress,
+  );
+  const currentReplyAliasLookupKey = normalizeHostedEmailReplyAliasLookupKey(
+    currentRouting?.replyAliasLookupKey,
+  );
+  const currentReplyAliasGeneration = requireHostedMemberReplyAliasGeneration(
+    currentRouting?.replyAliasGeneration ?? 0,
+  );
+  const replyAliasGeneration = shouldRotateReplyAlias
+    ? incrementHostedMemberReplyAliasGeneration(currentReplyAliasGeneration)
+    : currentReplyAliasGeneration;
+  const preparedReplyAliasLookupKey = normalizeHostedEmailReplyAliasLookupKey(
+    input.preparedReplyAlias?.lookupKey,
+  );
+  if (
+    input.preparedReplyAlias?.memberId !== input.memberId
+    || input.preparedReplyAlias.generation !== replyAliasGeneration
+  ) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EMAIL_REPLY_ALIAS_STALE",
+      message: "Hosted email reply alias changed and must be re-resolved.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+  const replyAliasLookupKey = !shouldRotateReplyAlias
+    ? currentReplyAliasLookupKey ?? preparedReplyAliasLookupKey
+    : preparedReplyAliasLookupKey;
+
   const authorization = await upsertHostedMemberEmailAuthorization({
     directPublicSender: {
       address: input.address,
@@ -745,15 +879,31 @@ async function upsertHostedMemberVerifiedEmailAuthorizationTx(
     },
   });
 
-  if (input.replyAliasLookupKey) {
-    await upsertHostedMemberReplyAliasLookupKeyTx({
-      memberId: input.memberId,
-      prisma: input.prisma,
-      replyAliasLookupKey: input.replyAliasLookupKey,
-    });
-  }
+  // The verified-email update and bearer-capability rotation share the member
+  // lock and transaction. An old alias therefore stops resolving before any
+  // later Worker can persist its raw message or append a mailbox wake.
+  await upsertHostedMemberReplyAliasLookupKeyTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyAliasGeneration,
+    replyAliasLookupKey,
+  });
 
   return authorization;
+}
+
+function requireHostedMemberReplyAliasGeneration(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
+    throw new TypeError("Hosted member reply alias generation is invalid.");
+  }
+  return value;
+}
+
+function incrementHostedMemberReplyAliasGeneration(value: number): number {
+  if (value === 2_147_483_647) {
+    throw new RangeError("Hosted member reply alias generation is exhausted.");
+  }
+  return value + 1;
 }
 
 export async function readHostedMemberSnapshot(input: {

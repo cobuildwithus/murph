@@ -33,8 +33,11 @@ drain/batch service seam in `packages/device-syncd/src/service.ts`.
    provenance resolution, then reread admission immediately before each
    durable summary or timeseries import and remove records for disconnected
    sources. While any source is pending admission, unresolved source-reference
-   identities fail closed. A provider with no source row remains admitted for
-   legacy accounts.
+   identities fail closed. Outside hosted Web, a provider with no source row
+   remains admitted for legacy accounts. Hosted Web instead defers an
+   authenticated, source-attributed Junction event to the existing source
+   owner, which may create only a disconnected candidate before live provider
+   proof and final locked admission.
 
 2. **Push delivers early; pull guarantees eventually; neither disables the
    other.** A webhook that carries a parseable payload imports inline (early,

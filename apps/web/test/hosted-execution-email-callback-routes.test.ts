@@ -13,6 +13,8 @@ import {
 } from "@murphai/hosted-execution/contracts";
 import {
   HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
@@ -25,8 +27,10 @@ const mocks = vi.hoisted(() => ({
   readHostedMemberEmailAuthorization: vi.fn(),
   readHostedMemberIdByAuthorizedDirectPublicSenderAddress: vi.fn(),
   readHostedMemberIdByReplyAliasLookupKey: vi.fn(),
+  readHostedMemberReplyAliasState: vi.fn(),
   readHostedGroupEmailRecipients: vi.fn(),
-  upsertHostedMemberReplyAliasLookupKeyTx: vi.fn(),
+  resolveHostedMemberReplyAliasRegistrationTx: vi.fn(),
+  sendHostedEmailPublicBootstrapChallenge: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -55,7 +59,9 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", async () => {
   return {
     ...actual,
     readHostedMemberIdByReplyAliasLookupKey: mocks.readHostedMemberIdByReplyAliasLookupKey,
-    upsertHostedMemberReplyAliasLookupKeyTx: mocks.upsertHostedMemberReplyAliasLookupKeyTx,
+    readHostedMemberReplyAliasState: mocks.readHostedMemberReplyAliasState,
+    resolveHostedMemberReplyAliasRegistrationTx:
+      mocks.resolveHostedMemberReplyAliasRegistrationTx,
   };
 });
 
@@ -64,8 +70,16 @@ vi.mock("@/src/lib/hosted-groups/group-email", () => ({
     mocks.readHostedGroupEmailRecipients,
 }));
 
+vi.mock("@/src/lib/hosted-onboarding/hosted-email-public-bootstrap", () => ({
+  sendHostedEmailPublicBootstrapChallenge:
+    mocks.sendHostedEmailPublicBootstrapChallenge,
+}));
+
 type GroupRecipientsRouteModule = typeof import(
   "../app/api/internal/hosted-execution/email/group-recipients/route"
+);
+type PublicBootstrapRouteModule = typeof import(
+  "../app/api/internal/hosted-execution/email/bootstrap/route"
 );
 
 type RegisterReplyAliasRouteModule = typeof import(
@@ -78,6 +92,7 @@ type ResolveRouteModule = typeof import(
 type MockPrismaClient = ReturnType<typeof createPrismaMock>;
 
 let groupRecipientsRoute: GroupRecipientsRouteModule;
+let publicBootstrapRoute: PublicBootstrapRouteModule;
 let registerReplyAliasRoute: RegisterReplyAliasRouteModule;
 let resolveRoute: ResolveRouteModule;
 let currentPrivateJwkJson = "";
@@ -86,6 +101,9 @@ let prismaClient: MockPrismaClient;
 const originalKeyId = process.env.HOSTED_WEB_CALLBACK_SIGNING_KEY_ID;
 const originalPublicJwk = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
 const originalPublicKeyring = process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON;
+const originalHostedEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+const originalHostedEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+const originalHostedEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
 const AUTHENTICATED_SENDER = {
   dkimAligned: false,
   dmarcPass: true,
@@ -97,6 +115,9 @@ describe("hosted execution email callback routes", () => {
   beforeAll(async () => {
     groupRecipientsRoute = await import(
       "../app/api/internal/hosted-execution/email/group-recipients/route"
+    );
+    publicBootstrapRoute = await import(
+      "../app/api/internal/hosted-execution/email/bootstrap/route"
     );
     registerReplyAliasRoute = await import(
       "../app/api/internal/hosted-execution/email/register-reply-alias/route"
@@ -118,7 +139,19 @@ describe("hosted execution email callback routes", () => {
       recipients: [],
       status: "ok",
     });
-    mocks.upsertHostedMemberReplyAliasLookupKeyTx.mockResolvedValue(undefined);
+    mocks.sendHostedEmailPublicBootstrapChallenge.mockResolvedValue({
+      reason: "member_not_found",
+      status: "suppressed",
+    });
+    mocks.resolveHostedMemberReplyAliasRegistrationTx.mockResolvedValue({
+      generation: 0,
+      lookupKey: VALID_REPLY_ALIAS_KEY,
+    });
+    mocks.readHostedMemberReplyAliasState.mockResolvedValue(null);
+
+    process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+    process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+    process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-reply-alias-signing-secret";
 
     const keyPair = await crypto.subtle.generateKey(
       {
@@ -146,6 +179,9 @@ describe("hosted execution email callback routes", () => {
       "HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON",
       originalPublicKeyring,
     );
+    restoreEnv("HOSTED_EMAIL_DOMAIN", originalHostedEmailDomain);
+    restoreEnv("HOSTED_EMAIL_LOCAL_PART", originalHostedEmailLocalPart);
+    restoreEnv("HOSTED_EMAIL_SIGNING_SECRET", originalHostedEmailSigningSecret);
   });
 
   it("returns gone when a signed group-recipient callback names a deleted group", async () => {
@@ -261,10 +297,10 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
-  it("accepts a signed reply-alias registration callback for the bound member", async () => {
+  it("returns the Web-owned current alias for a signed registration callback", async () => {
     const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
       body: JSON.stringify({
-        aliasKey: VALID_REPLY_ALIAS_KEY,
+        aliasKey: null,
       }),
       path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
@@ -272,32 +308,40 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).toHaveBeenCalledWith({
+    expect(mocks.resolveHostedMemberReplyAliasRegistrationTx).toHaveBeenCalledWith({
+      candidateLookupKey: null,
+      fallbackGeneration: 0,
+      fallbackLookupKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
       memberId: "member_123",
       prisma: prismaClient.transactionClient,
-      replyAliasLookupKey: VALID_REPLY_ALIAS_KEY,
     });
     await expect(response.json()).resolves.toEqual({
+      address: expect.stringMatching(/^assistant\+[A-Za-z0-9_-]+@mail\.example\.test$/u),
+      aliasKey: VALID_REPLY_ALIAS_KEY,
       ok: true,
     });
   });
 
-  it("rejects reply-alias registration callbacks without a non-empty alias key", async () => {
+  it("accepts a matching alias candidate while preserving Web ownership", async () => {
     const response = await registerReplyAliasRoute.POST(await createSignedCallbackRequest({
-      body: JSON.stringify({}),
+      body: JSON.stringify({ aliasKey: VALID_REPLY_ALIAS_KEY }),
       path: HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
       privateJwkJson: currentPrivateJwkJson,
       userId: "member_123",
     }));
 
-    expect(response.status).toBe(400);
-    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.resolveHostedMemberReplyAliasRegistrationTx).toHaveBeenCalledWith({
+      candidateLookupKey: VALID_REPLY_ALIAS_KEY,
+      fallbackGeneration: 0,
+      fallbackLookupKey: expect.stringMatching(/^[0-9a-f]{32}$/u),
+      memberId: "member_123",
+      prisma: prismaClient.transactionClient,
+    });
     await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "HOSTED_EMAIL_REPLY_ALIAS_INVALID",
-        message: "Hosted email reply alias registration requires a current-format alias key.",
-        retryable: false,
-      },
+      address: expect.stringMatching(/^assistant\+[A-Za-z0-9_-]+@mail\.example\.test$/u),
+      aliasKey: VALID_REPLY_ALIAS_KEY,
+      ok: true,
     });
   });
 
@@ -312,7 +356,7 @@ describe("hosted execution email callback routes", () => {
     }));
 
     expect(response.status).toBe(400);
-    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberReplyAliasRegistrationTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_EMAIL_REPLY_ALIAS_INVALID",
@@ -338,7 +382,7 @@ describe("hosted execution email callback routes", () => {
 
     expect(response.status).toBe(413);
     expect(prismaClient.$queryRaw).not.toHaveBeenCalled();
-    expect(mocks.upsertHostedMemberReplyAliasLookupKeyTx).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberReplyAliasRegistrationTx).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_EMAIL_REPLY_ALIAS_BODY_TOO_LARGE",
@@ -845,6 +889,61 @@ describe("hosted execution email callback routes", () => {
     expect(response.status).toBe(401);
     expect(mocks.readHostedMemberIdByAuthorizedDirectPublicSenderAddress).not.toHaveBeenCalled();
     expect(mocks.readHostedMemberIdByReplyAliasLookupKey).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+        message: "Hosted Cloudflare callback is not authorized.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("accepts a signed public-bootstrap callback without disclosing the lookup outcome", async () => {
+    const response = await publicBootstrapRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ candidateAddress: "member@example.com" }),
+      path: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendHostedEmailPublicBootstrapChallenge).toHaveBeenCalledWith({
+      candidateAddress: "member@example.com",
+    });
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
+  it("keeps a valid public-bootstrap callback non-diagnostic when delivery fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.sendHostedEmailPublicBootstrapChallenge.mockRejectedValueOnce(
+      new Error("private provider failure"),
+    );
+
+    const response = await publicBootstrapRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ candidateAddress: "member@example.com" }),
+      path: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true });
+    expect(warn).toHaveBeenCalledWith(
+      "Hosted public email bootstrap callback failed.",
+      { errorName: "Error" },
+    );
+  });
+
+  it("rejects public-bootstrap callbacks from a member binding", async () => {
+    const response = await publicBootstrapRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ candidateAddress: "member@example.com" }),
+      path: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(mocks.sendHostedEmailPublicBootstrapChallenge).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",

@@ -19,6 +19,7 @@ import {
   normalizeHostedEmailSubject,
   parseHostedEmailThreadTarget,
   resolveHostedEmailAuthorizedSenderAddresses,
+  resolveHostedEmailBootstrapCandidateAddress,
   resolveHostedEmailDirectSenderLookupAddress,
   resolveHostedEmailInboundSenderAddress,
   serializeHostedEmailThreadTarget,
@@ -45,6 +46,26 @@ test("hosted email sender helpers reject mismatched sender identities and normal
     }),
     ["owner@example.test"],
   );
+});
+
+test("public email bootstrap accepts only one matching envelope and header sender hint", () => {
+  assert.equal(resolveHostedEmailBootstrapCandidateAddress({
+    envelopeFrom: "Member@Example.Test",
+    headerFrom: "Member <member@example.test>",
+  }), "member@example.test");
+  assert.equal(resolveHostedEmailBootstrapCandidateAddress({
+    envelopeFrom: "attacker@example.test",
+    headerFrom: "member@example.test",
+  }), null);
+  assert.equal(resolveHostedEmailBootstrapCandidateAddress({
+    envelopeFrom: "member@example.test",
+    hasRepeatedHeaderFrom: true,
+    headerFrom: "member@example.test",
+  }), null);
+  assert.equal(resolveHostedEmailBootstrapCandidateAddress({
+    envelopeFrom: "member@example.test",
+    headerFrom: "Member <member@example.test>, Attacker <attacker@example.test>",
+  }), null);
 });
 
 test("hosted email thread targets serialize, normalize, and parse deterministically", () => {
