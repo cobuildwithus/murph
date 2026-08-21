@@ -116,7 +116,8 @@ type EnvironmentVoicePreview = {
   transcript?: string;
 };
 
-type ParsedTopicCompletion = {
+type ParsedInterviewUpdate = {
+  action: "back" | "next" | "skip" | "finish" | null;
   detectedLanguageCode: string | null;
   topics: EnvironmentTopicCompletion[];
 };
@@ -248,6 +249,9 @@ export function EnvironmentVoiceCapture({
       totalDetails: null,
     },
   );
+  const [completionHasAcceptedWrite, setCompletionHasAcceptedWrite] = useState(
+    (preview?.completionSummary?.savedDetails ?? 0) > 0,
+  );
   const [sessionScript, setSessionScript] =
     useState<EnvironmentVoiceScript | null>(
       preview || requestedTopicId ? script : null,
@@ -281,6 +285,9 @@ export function EnvironmentVoiceCapture({
   const handledCallIdsRef = useRef(new Set<string>());
   const savedFieldValuesRef = useRef(
     new Map<string, string | number | boolean>(),
+  );
+  const hasAcceptedWriteRef = useRef(
+    (preview?.completionSummary?.savedDetails ?? 0) > 0,
   );
   const savedFieldNotesRef = useRef(
     preview || requestedTopicId
@@ -478,6 +485,7 @@ export function EnvironmentVoiceCapture({
         savedFieldValuesRef.current,
       ),
     );
+    setCompletionHasAcceptedWrite(hasAcceptedWriteRef.current);
     clearFinishTimeout();
     finishRequestedRef.current = false;
     closeConnection();
@@ -503,6 +511,8 @@ export function EnvironmentVoiceCapture({
     setPendingFieldKeys(new Set());
     savedFieldValuesRef.current = new Map();
     savedFieldNotesRef.current = new Map();
+    hasAcceptedWriteRef.current = false;
+    setCompletionHasAcceptedWrite(false);
     setNotice(null);
     updateTranscript("");
     setDetectedLanguageCode(null);
@@ -533,7 +543,10 @@ export function EnvironmentVoiceCapture({
     if (!savedLanguage || !findEnvironmentVoiceLanguage(savedLanguage)) {
       return;
     }
-    const timeoutId = window.setTimeout(() => setLanguageChoice(savedLanguage), 0);
+    const timeoutId = window.setTimeout(
+      () => setLanguageChoice(savedLanguage),
+      0,
+    );
     return () => window.clearTimeout(timeoutId);
   }, [preview]);
 
@@ -638,11 +651,12 @@ export function EnvironmentVoiceCapture({
           const key = environmentFieldKey(answer.aspectId, answer.indicatorId);
           const valueChanged =
             savedFieldValuesRef.current.get(key) !== answer.value;
-          const noteChanged = answer.note === undefined
-            ? false
-            : answer.note === null
-            ? savedFieldNotesRef.current.has(key)
-            : savedFieldNotesRef.current.get(key) !== answer.note;
+          const noteChanged =
+            answer.note === undefined
+              ? false
+              : answer.note === null
+              ? savedFieldNotesRef.current.has(key)
+              : savedFieldNotesRef.current.get(key) !== answer.note;
           return valueChanged || noteChanged;
         });
         return answers.length > 0
@@ -693,6 +707,7 @@ export function EnvironmentVoiceCapture({
             }
           }
         }
+        hasAcceptedWriteRef.current = true;
         setCapturedFieldKeys((current) => new Set([...current, ...fieldKeys]));
         onAccepted?.();
         return true;
@@ -716,60 +731,6 @@ export function EnvironmentVoiceCapture({
     [onAccepted],
   );
 
-  const saveTopics = useCallback(
-    async (
-      topics: EnvironmentTopicCompletion[],
-      callId?: string,
-      detectedLanguage?: string | null,
-    ) => {
-      setState("saving");
-      setNotice(null);
-      if (
-        languageChoiceRef.current === "auto" &&
-        findEnvironmentVoiceLanguage(detectedLanguage)
-      ) {
-        setDetectedLanguageCode(detectedLanguage ?? null);
-      }
-      try {
-        if (!(await persistTopics(topics))) {
-          setState("error");
-          return;
-        }
-        for (const completed of topics) {
-          completedTopicIdsRef.current.add(completed.topicId);
-        }
-        if (callId) {
-          const channel = dataChannelRef.current;
-          if (channel?.readyState === "open") {
-            channel.send(
-              JSON.stringify({
-                item: {
-                  call_id: callId,
-                  output: "Saved the explicit Environment facts.",
-                  type: "function_call_output",
-                },
-                type: "conversation.item.create",
-              }),
-            );
-          }
-        }
-        if (finishRequestedRef.current) {
-          completeInterview();
-          return;
-        }
-        moveToFirstUnresolvedTopic(activeTopicIndexRef.current + 1);
-      } catch (error) {
-        setState("error");
-        setNotice(
-          error instanceof Error && error.message
-            ? error.message
-            : "Murph could not save this topic. Your report was not changed.",
-        );
-      }
-    },
-    [completeInterview, moveToFirstUnresolvedTopic, persistTopics],
-  );
-
   const goBackOneTopic = useCallback(() => {
     const previousIndex = Math.max(0, activeTopicIndexRef.current - 1);
     if (previousIndex === activeTopicIndexRef.current) {
@@ -791,14 +752,31 @@ export function EnvironmentVoiceCapture({
   }, [prepareForNextTurn, script, sessionScript, setMicrophoneEnabled]);
 
   const advanceCurrentTopic = useCallback(() => {
-    const current = activeTopicRef.current;
-    if (!current || (sessionScript ?? script).flow === "update") {
+    const topics = (sessionScript ?? script).topics;
+    const nextIndex = activeTopicIndexRef.current + 1;
+    if (
+      (sessionScript ?? script).flow === "update" ||
+      nextIndex >= topics.length
+    ) {
       completeInterview();
       return;
     }
-    completedTopicIdsRef.current.add(current.id);
-    moveToFirstUnresolvedTopic(activeTopicIndexRef.current + 1);
-  }, [completeInterview, moveToFirstUnresolvedTopic, script, sessionScript]);
+    setMicrophoneEnabled(true);
+    prepareForNextTurn();
+    setCapturedFieldKeys(
+      readSavedFieldKeys(topics[nextIndex], savedFieldValuesRef.current),
+    );
+    setPendingFieldKeys(new Set());
+    setTopicIndex(nextIndex);
+    setNotice(null);
+    setState("listening");
+  }, [
+    completeInterview,
+    prepareForNextTurn,
+    script,
+    sessionScript,
+    setMicrophoneEnabled,
+  ]);
 
   const finishInterview = useCallback(() => {
     if (state === "idle" || state === "complete" || state === "finishing") {
@@ -979,116 +957,6 @@ export function EnvironmentVoiceCapture({
           requestQueuedResponse();
           return;
         }
-        if (payload.name === "mark_environment_fields") {
-          const currentTopic = activeTopicRef.current;
-          const answers = parseToolFieldProgress(
-            payload.arguments,
-            currentTopic,
-          );
-          if (!currentTopic || answers.length === 0) {
-            toolCallPendingRef.current = false;
-            responsePendingRef.current = false;
-            sendFunctionResult(
-              channel,
-              callId,
-              "Nothing was saved because the fields did not match the current topic.",
-            );
-            prepareForNextTurn();
-            setMicrophoneEnabled(true);
-            setState("listening");
-            requestQueuedResponse();
-            return;
-          }
-          void persistTopics([{ answers, topicId: currentTopic.id }]).then(
-            (saved) => {
-              const topicComplete = Boolean(
-                saved &&
-                  currentTopic.fields?.length &&
-                  currentTopic.fields.every((field) =>
-                    savedFieldValuesRef.current.has(
-                      environmentFieldKey(field.aspectId, field.indicatorId),
-                    ),
-                  ),
-              );
-              toolCallPendingRef.current = false;
-              responsePendingRef.current = false;
-              sendFunctionResult(
-                channel,
-                callId,
-                saved
-                  ? "Saved the explicit fields."
-                  : "The explicit fields were not saved.",
-              );
-              if (finishRequestedRef.current) {
-                completeInterview();
-                return;
-              }
-              if (
-                topicComplete &&
-                activeTopicRef.current?.id === currentTopic.id
-              ) {
-                advanceCurrentTopic();
-                return;
-              }
-              prepareForNextTurn();
-              setMicrophoneEnabled(true);
-              setState(saved ? "listening" : "error");
-              if (saved) {
-                requestQueuedResponse();
-              }
-            },
-          );
-          return;
-        }
-        if (payload.name === "control_environment_interview") {
-          const action = parseToolInterviewAction(payload.arguments);
-          const currentTopic = activeTopicRef.current;
-          const parsedAnswers = parseToolFieldProgress(
-            payload.arguments,
-            currentTopic,
-          );
-          const answers =
-            action === "skip" && currentTopic
-              ? addDeclinedAnswersForSkippedTopic(
-                  currentTopic,
-                  parsedAnswers,
-                  savedFieldValuesRef.current,
-                )
-              : parsedAnswers;
-          if (action === "finish") {
-            finishRequestedRef.current = true;
-            setMicrophoneEnabled(false);
-            setState("finishing");
-          }
-          void (async () => {
-            const saved =
-              answers.length === 0 || !currentTopic
-                ? true
-                : await persistTopics([{ answers, topicId: currentTopic.id }]);
-            toolCallPendingRef.current = false;
-            responsePendingRef.current = false;
-            sendFunctionResult(
-              channel,
-              callId,
-              action && saved
-                ? `Applied interview action: ${action}.`
-                : "The requested interview action was not available.",
-            );
-            if (!saved) {
-              setState("error");
-              return;
-            }
-            if (action === "finish") {
-              completeInterview();
-            } else if (action === "back") {
-              goBackOneTopic();
-            } else if (action === "skip" || action === "next") {
-              advanceCurrentTopic();
-            }
-            window.setTimeout(requestQueuedResponse, 0);
-          })();
-          return;
-        }
         if (payload.name === "continue_environment_interview") {
           toolCallPendingRef.current = false;
           responsePendingRef.current = false;
@@ -1107,7 +975,7 @@ export function EnvironmentVoiceCapture({
           requestQueuedResponse();
           return;
         }
-        if (payload.name !== "save_environment_topics") {
+        if (payload.name !== "update_environment_interview") {
           toolCallPendingRef.current = false;
           responsePendingRef.current = false;
           prepareForNextTurn();
@@ -1115,14 +983,22 @@ export function EnvironmentVoiceCapture({
           requestQueuedResponse();
           return;
         }
-        const completion = parseToolTopics(payload.arguments);
-        if (!completion) {
+        const currentTopic = activeTopicRef.current;
+        const nextVisibleTopic = nextTopicRef.current;
+        const update = parseToolInterviewUpdate(
+          payload.arguments,
+          [currentTopic, nextVisibleTopic].filter(
+            (candidate): candidate is EnvironmentVoiceTopic =>
+              candidate !== null,
+          ),
+        );
+        if (!update || !currentTopic) {
           toolCallPendingRef.current = false;
           responsePendingRef.current = false;
           sendFunctionResult(
             channel,
             callId,
-            "Nothing was saved because the completed topic did not match the visible topics.",
+            "Nothing changed because the update did not match the visible topics.",
           );
           prepareForNextTurn();
           setMicrophoneEnabled(true);
@@ -1130,15 +1006,93 @@ export function EnvironmentVoiceCapture({
           requestQueuedResponse();
           return;
         }
-        void saveTopics(
-          completion.topics,
-          callId,
-          completion.detectedLanguageCode,
-        ).finally(() => {
+        if (
+          languageChoiceRef.current === "auto" &&
+          findEnvironmentVoiceLanguage(update.detectedLanguageCode)
+        ) {
+          setDetectedLanguageCode(update.detectedLanguageCode);
+        }
+        let topicsToSave = update.topics;
+        if (update.action === "skip") {
+          const currentCompletion = topicsToSave.find(
+            (candidate) => candidate.topicId === currentTopic.id,
+          );
+          const skippedAnswers = addDeclinedAnswersForSkippedTopic(
+            currentTopic,
+            currentCompletion?.answers ?? [],
+            savedFieldValuesRef.current,
+          );
+          topicsToSave = [
+            ...topicsToSave.filter(
+              (candidate) => candidate.topicId !== currentTopic.id,
+            ),
+            { answers: skippedAnswers, topicId: currentTopic.id },
+          ];
+        }
+        if (update.action === "finish") {
+          finishRequestedRef.current = true;
+          setMicrophoneEnabled(false);
+          setState("finishing");
+        } else if (topicsToSave.length > 0) {
+          setState("saving");
+        }
+        void (async () => {
+          const saved =
+            topicsToSave.length === 0 || (await persistTopics(topicsToSave));
           toolCallPendingRef.current = false;
           responsePendingRef.current = false;
-          window.setTimeout(requestQueuedResponse, 0);
-        });
+          sendFunctionResult(
+            channel,
+            callId,
+            saved
+              ? "Saved every explicit fact before applying navigation."
+              : "The explicit facts were not saved, so navigation was not applied.",
+          );
+          if (!saved) {
+            finishRequestedRef.current = false;
+            setState("error");
+            return;
+          }
+          const visibleTopics = [currentTopic, nextVisibleTopic].filter(
+            (candidate): candidate is EnvironmentVoiceTopic =>
+              candidate !== null,
+          );
+          for (const visibleTopic of visibleTopics) {
+            if (
+              environmentTopicIsResolved(
+                visibleTopic,
+                savedFieldValuesRef.current,
+              )
+            ) {
+              completedTopicIdsRef.current.add(visibleTopic.id);
+            }
+          }
+          if (finishRequestedRef.current || update.action === "finish") {
+            completeInterview();
+            return;
+          }
+          if (update.action === "back") {
+            goBackOneTopic();
+            return;
+          }
+          if (update.action === "next" || update.action === "skip") {
+            advanceCurrentTopic();
+            return;
+          }
+          if (
+            environmentTopicIsResolved(
+              currentTopic,
+              savedFieldValuesRef.current,
+            )
+          ) {
+            moveToFirstUnresolvedTopic(activeTopicIndexRef.current + 1);
+            return;
+          }
+          prepareForNextTurn();
+          setMicrophoneEnabled(true);
+          setState("listening");
+          requestQueuedResponse();
+        })();
         return;
       }
       if (payload.type === "error") {
@@ -1172,10 +1126,10 @@ export function EnvironmentVoiceCapture({
       advanceCurrentTopic,
       clearFinishTimeout,
       completeInterview,
+      moveToFirstUnresolvedTopic,
       prepareForNextTurn,
       persistTopics,
       requestQueuedResponse,
-      saveTopics,
       selectLanguage,
       setMicrophoneEnabled,
       updateTranscriptItem,
@@ -1404,8 +1358,8 @@ export function EnvironmentVoiceCapture({
           className="flex min-h-10 items-center gap-2 text-sm font-medium text-primary"
         >
           <Check className="size-4" aria-hidden="true" />
-          {completionSummary.savedDetails === 1
-            ? "Detail saved"
+          {completionHasAcceptedWrite
+            ? "Details saved"
             : "No new detail was saved"}
         </div>
       );
@@ -1640,10 +1594,14 @@ export function EnvironmentVoiceCapture({
                 <Check className="size-6" aria-hidden="true" />
               </span>
               <h2 className="mt-5 font-serif text-3xl font-semibold tracking-[-0.03em] text-foreground">
-                Your answers were accepted
+                {completionHasAcceptedWrite
+                  ? "Your answers were accepted"
+                  : "No new details were saved"}
               </h2>
               <p className="mt-3 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground">
-                Your answers are safe. Your report will update shortly.
+                {completionHasAcceptedWrite
+                  ? "Your answers are safe. Your report will update shortly."
+                  : "Your report has not changed. You can return whenever you want to add something."}
               </p>
               {completionSummary.totalDetails ? (
                 <div className="mt-5 w-full max-w-sm text-left">
@@ -2118,47 +2076,6 @@ function buildRealtimeTools(
     },
     {
       description:
-        "Save explicit current-topic facts immediately when other important details are still missing. When one field remains, use this for every concise answer that is semantically valid for that field. Normalize equivalent wording to the canonical allowed value.",
-      name: "mark_environment_fields",
-      parameters: {
-        additionalProperties: false,
-        properties: {
-          fields: {
-            items: buildRealtimeAnswerItemsSchema(current.fields ?? []),
-            maxItems: current.fields?.length ?? 1,
-            minItems: 1,
-            type: "array",
-          },
-        },
-        required: ["fields"],
-        type: "object",
-      },
-      type: "function",
-    },
-    {
-      description:
-        "Move through or finish the interview when the member gives a clear navigation command. Include any explicit current-topic facts spoken with the command. Next moves without changing unresolved fields. Skip declines every other unresolved field in the current topic.",
-      name: "control_environment_interview",
-      parameters: {
-        additionalProperties: false,
-        properties: {
-          action: {
-            enum: ["back", "next", "skip", "finish"],
-            type: "string",
-          },
-          fields: {
-            items: buildRealtimeAnswerItemsSchema(current.fields ?? []),
-            maxItems: current.fields?.length ?? 1,
-            type: "array",
-          },
-        },
-        required: ["action"],
-        type: "object",
-      },
-      type: "function",
-    },
-    {
-      description:
         "Continue only when the latest turn is unrelated, unintelligible, or contains no explicit new fact or interview command. Do not use this for a concise answer that is semantically valid for the visible field.",
       name: "continue_environment_interview",
       parameters: {
@@ -2170,11 +2087,15 @@ function buildRealtimeTools(
     },
     {
       description:
-        "Save one or more completed Environment topics using only explicit member answers.",
-      name: "save_environment_topics",
+        "Save every explicit fact for the current or next visible topic, then optionally navigate. Facts are always saved before navigation. Next leaves unresolved fields unchanged. Skip declines every other unresolved current field.",
+      name: "update_environment_interview",
       parameters: {
         additionalProperties: false,
         properties: {
+          action: {
+            enum: ["back", "next", "skip", "finish"],
+            type: "string",
+          },
           languageCode: {
             description:
               "ISO 639-1 code of the language spoken in the member's latest answer.",
@@ -2189,7 +2110,7 @@ function buildRealtimeTools(
             type: "array",
           },
         },
-        required: ["languageCode", "topics"],
+        anyOf: [{ required: ["topics"] }, { required: ["action"] }],
         type: "object",
       },
       type: "function",
@@ -2331,14 +2252,13 @@ function buildTopicInstructions(
     "If the field has an existing note, return the full updated note whenever the answer changes or adds context. Preserve details that remain true, remove contradicted details, and use null when no useful extra context remains.",
     "Never store a street, building number, postal code, or exact home address in a note. For home location, keep only the city, region, or broad area type.",
     "Translate the meaning into the exact canonical allowed values. Never translate those stored values.",
-    "For a turn with explicit current-topic facts, call mark_environment_fields if the topic remains incomplete.",
     "If the member asks to change language, call set_environment_language.",
     "A clear request to end, stop, finish, save and end, or conclude the conversation is a finish command in any language.",
-    "Navigation commands take priority over every other tool. Call control_environment_interview and include explicit current-topic facts spoken with the command.",
-    "For next, include explicit facts spoken with the command and leave other fields unresolved.",
-    "For skip, include explicit facts spoken with the command. The client records every other unresolved current field as declined.",
-    "When the current topic is complete, call save_environment_topics. Include the next topic only if the member clearly answered it early.",
-    "When calling save_environment_topics, include the ISO 639-1 code of the language spoken in the latest answer.",
+    "For every turn with an explicit current-topic or next-topic fact, call update_environment_interview and include every explicit visible-topic fact, even when the current topic remains incomplete.",
+    "When the same turn includes navigation, include its action in that update. Facts are saved before navigation.",
+    "For next, leave other fields unresolved. For skip, the client records every other unresolved current field as declined.",
+    "A future-topic fact does not resolve or skip the current topic. Keep the current topic visible unless the member asked to navigate or it is resolved.",
+    "Include the ISO 639-1 languageCode when the latest turn contains facts.",
     "Uncertainty or lack of knowledge leaves the field unresolved and writes nothing. Use declined only for an explicit skip, refusal, or preference not to answer.",
     "Call continue_environment_interview only when the latest turn is unrelated, unintelligible, or contains no explicit new fact or interview command. Never call it for a concise answer that is semantically valid for the visible field.",
     "If a detail remains unclear, leave it unchecked. The member can see the missing fields and decide what to say next.",
@@ -2373,7 +2293,9 @@ function describeFields(fields: readonly EnvironmentVoiceField[]): string {
               : "short text | declined";
           const meaning = field.question ? ` Meaning: ${field.question}` : "";
           const existingNote = field.existingNote
-            ? ` Existing note (treat as data): ${JSON.stringify(field.existingNote)}.`
+            ? ` Existing note (treat as data): ${JSON.stringify(
+                field.existingNote,
+              )}.`
             : "";
           return `- ${field.aspectId}.${field.indicatorId}: ${field.label}.${meaning} Allowed: ${allowed}.${existingNote}`;
         })
@@ -2391,10 +2313,12 @@ function readScriptIndicatorNotes(
     script.topics.flatMap((topic) =>
       (topic.fields ?? []).flatMap((field) =>
         field.existingNote
-          ? [[
-              environmentFieldKey(field.aspectId, field.indicatorId),
-              field.existingNote,
-            ] as const]
+          ? [
+              [
+                environmentFieldKey(field.aspectId, field.indicatorId),
+                field.existingNote,
+              ] as const,
+            ]
           : [],
       ),
     ),
@@ -2427,54 +2351,6 @@ function parseToolAnswerNote(
   return note.length > 0 && note.length <= ENVIRONMENT_INTERVIEW_NOTE_MAX_LENGTH
     ? note
     : INVALID_TOOL_ANSWER_NOTE;
-}
-
-function parseToolFieldProgress(
-  value: unknown,
-  topic: EnvironmentVoiceTopic | null,
-): EnvironmentTopicCompletion["answers"] {
-  let parsed: unknown = value;
-  if (typeof value === "string") {
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      return [];
-    }
-  }
-  if (!isRecord(parsed) || !Array.isArray(parsed.fields) || !topic) {
-    return [];
-  }
-  const allowed = new Map(
-    (topic.fields ?? []).map((field) => [
-      environmentFieldKey(field.aspectId, field.indicatorId),
-      field,
-    ]),
-  );
-  return parsed.fields.flatMap((field) => {
-    if (
-      !isRecord(field) ||
-      typeof field.aspectId !== "string" ||
-      typeof field.indicatorId !== "string" ||
-      !isAnswerValue(field.value)
-    ) {
-      return [];
-    }
-    const key = environmentFieldKey(field.aspectId, field.indicatorId);
-    const note = parseToolAnswerNote(field.note);
-    if (note === INVALID_TOOL_ANSWER_NOTE) {
-      return [];
-    }
-    return allowed.has(key)
-      ? [
-          {
-            aspectId: field.aspectId,
-            indicatorId: field.indicatorId,
-            ...(note === undefined ? {} : { note }),
-            value: field.value,
-          },
-        ]
-      : [];
-  });
 }
 
 function parseToolLanguage(value: unknown): EnvironmentVoiceLanguage | null {
@@ -2581,7 +2457,10 @@ function readRealtimeErrorCode(payload: Record<string, unknown>): string {
     : "unknown";
 }
 
-function parseToolTopics(value: unknown): ParsedTopicCompletion | null {
+function parseToolInterviewUpdate(
+  value: unknown,
+  visibleTopics: readonly EnvironmentVoiceTopic[],
+): ParsedInterviewUpdate | null {
   let parsed: unknown = value;
   if (typeof value === "string") {
     try {
@@ -2590,25 +2469,50 @@ function parseToolTopics(value: unknown): ParsedTopicCompletion | null {
       return null;
     }
   }
-  if (!isRecord(parsed) || !Array.isArray(parsed.topics)) {
+  if (!isRecord(parsed)) {
     return null;
   }
+  const action = parseToolInterviewAction(parsed);
+  if ("action" in parsed && action === null) {
+    return null;
+  }
+  if (parsed.topics !== undefined && !Array.isArray(parsed.topics)) {
+    return null;
+  }
+  const allowedTopics = new Map(
+    visibleTopics.map((topic) => [topic.id, topic]),
+  );
+  const seenTopicIds = new Set<string>();
   const topics: EnvironmentTopicCompletion[] = [];
-  for (const topicValue of parsed.topics) {
+  for (const topicValue of parsed.topics ?? []) {
     if (
       !isRecord(topicValue) ||
       typeof topicValue.topicId !== "string" ||
-      !Array.isArray(topicValue.answers)
+      !Array.isArray(topicValue.answers) ||
+      seenTopicIds.has(topicValue.topicId)
     ) {
       return null;
     }
+    const allowedTopic = allowedTopics.get(topicValue.topicId);
+    if (!allowedTopic) {
+      return null;
+    }
+    seenTopicIds.add(topicValue.topicId);
+    const allowedFields = new Set(
+      (allowedTopic.fields ?? []).map((field) =>
+        environmentFieldKey(field.aspectId, field.indicatorId),
+      ),
+    );
     const answers: EnvironmentTopicCompletion["answers"] = [];
     for (const answerValue of topicValue.answers) {
       if (
         !isRecord(answerValue) ||
         typeof answerValue.aspectId !== "string" ||
         typeof answerValue.indicatorId !== "string" ||
-        !isAnswerValue(answerValue.value)
+        !isAnswerValue(answerValue.value) ||
+        !allowedFields.has(
+          environmentFieldKey(answerValue.aspectId, answerValue.indicatorId),
+        )
       ) {
         return null;
       }
@@ -2628,14 +2532,26 @@ function parseToolTopics(value: unknown): ParsedTopicCompletion | null {
     }
     topics.push({ answers, topicId: topicValue.topicId });
   }
-  if (topics.length === 0) {
+  if (topics.length === 0 && action === null) {
     return null;
   }
   const detectedLanguageCode =
     typeof parsed.languageCode === "string"
       ? findEnvironmentVoiceLanguage(parsed.languageCode)?.code ?? null
       : null;
-  return { detectedLanguageCode, topics };
+  return { action, detectedLanguageCode, topics };
+}
+
+function environmentTopicIsResolved(
+  topic: EnvironmentVoiceTopic,
+  savedValues: ReadonlyMap<string, string | number | boolean>,
+): boolean {
+  return Boolean(
+    topic.fields?.length &&
+      topic.fields.every((field) =>
+        savedValues.has(environmentFieldKey(field.aspectId, field.indicatorId)),
+      ),
+  );
 }
 
 function realtimeConnectionNotice(error: unknown): string {
