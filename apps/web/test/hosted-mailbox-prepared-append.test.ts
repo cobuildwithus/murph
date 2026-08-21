@@ -1,6 +1,9 @@
 import { Buffer } from "node:buffer";
 
-import { buildHostedExecutionMemberActivatedWake } from "@murphai/hosted-execution";
+import {
+  buildHostedExecutionMealPhotoCapturedWake,
+  buildHostedExecutionMemberActivatedWake,
+} from "@murphai/hosted-execution";
 import {
   HOSTED_MAILBOX_ITEM_PAYLOAD_SCHEMA,
   HOSTED_MAILBOX_PAYLOAD_SCHEMA,
@@ -50,14 +53,19 @@ vi.mock("../src/lib/hosted-mailbox/encryption", () => ({
 }));
 
 import {
+  areHostedDomainRootProviderCallsDisabled,
   getHostedDomainRootUnwrapCache,
+  runWithHostedDomainRootProviderCallsDisabled,
   runWithHostedDomainRootUnwrapCache,
 } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hashHostedMailboxStoredPayload } from "../src/lib/hosted-mailbox/fingerprint";
 import {
   appendHostedMailboxItem,
   appendHostedMailboxEnvelopeWithPreparedCryptoTx,
+  appendHostedMealPhotoMailboxEnvelopeTx,
   prepareHostedMailboxItemAppendCrypto,
+  readHostedMailboxWakeByDedupeKey,
+  runWithPreparedHostedMailboxItemAppendCrypto,
   type HostedMailboxItemRow,
 } from "../src/lib/hosted-mailbox/store";
 
@@ -147,29 +155,35 @@ function installPreparedRootSequence(input: {
   return cachedRootKeys;
 }
 
+interface MailboxFixtureTx {
+  $executeRaw: ReturnType<typeof vi.fn>;
+  $queryRaw: ReturnType<typeof vi.fn>;
+  hostedMailboxItem: {
+    findUnique: ReturnType<typeof vi.fn>;
+  };
+  hostedMailboxPayload: {
+    create: ReturnType<typeof vi.fn>;
+  };
+  hostedWorkspace: {
+    upsert: ReturnType<typeof vi.fn>;
+  };
+}
+
+type MailboxFixtureTransaction = <T>(
+  run: (transactionClient: MailboxFixtureTx) => Promise<T>,
+) => Promise<T>;
+
 interface MailboxFixture {
   events: string[];
   hostedMailboxPayloadCreate: ReturnType<typeof vi.fn>;
   prisma: {
-    $transaction: ReturnType<typeof vi.fn>;
+    $transaction: ReturnType<typeof vi.fn<MailboxFixtureTransaction>>;
     hostedMailboxItem: {
       findUnique: ReturnType<typeof vi.fn>;
     };
   };
   rollbacks: { count: number };
-  tx: {
-    $executeRaw: ReturnType<typeof vi.fn>;
-    $queryRaw: ReturnType<typeof vi.fn>;
-    hostedMailboxItem: {
-      findUnique: ReturnType<typeof vi.fn>;
-    };
-    hostedMailboxPayload: {
-      create: ReturnType<typeof vi.fn>;
-    };
-    hostedWorkspace: {
-      upsert: ReturnType<typeof vi.fn>;
-    };
-  };
+  tx: MailboxFixtureTx;
 }
 
 function buildMailboxRow(overrides: Partial<HostedMailboxItemRow> = {}): HostedMailboxItemRow {
@@ -206,7 +220,15 @@ function createMailboxFixture(input: {
   const rootFindUnique = vi.fn(async () =>
     input.existingBeforePreparation ?? null
   );
-  const txFindUnique = vi.fn(async () => null);
+  const rows: HostedMailboxItemRow[] = input.existingBeforePreparation
+    ? [input.existingBeforePreparation]
+    : [];
+  const txFindUnique = vi.fn(async (args: {
+    where: { userId_dedupeKey: { dedupeKey: string; userId: string } };
+  }) => rows.find((row) => (
+    row.dedupeKey === args.where.userId_dedupeKey.dedupeKey
+    && row.userId === args.where.userId_dedupeKey.userId
+  )) ?? null);
   const hostedMailboxPayloadCreate = vi.fn(async () => undefined);
   const executeRaw = vi.fn(async () => {
     events.push("mailbox-lock");
@@ -237,6 +259,7 @@ function createMailboxFixture(input: {
           sourceMessageLookupKey: values[3] as string | null,
           userId: String(values[1]),
         });
+        rows.push(row);
         return [row];
       }
       throw new Error(`Unexpected prepared mailbox query: ${sql}`);
@@ -249,9 +272,9 @@ function createMailboxFixture(input: {
     hostedMailboxPayload: { create: hostedMailboxPayloadCreate },
     hostedWorkspace: { upsert: vi.fn(async () => undefined) },
   };
-  const transaction = vi.fn(async (
-    run: (transactionClient: MailboxFixture["tx"]) => Promise<unknown>,
-  ) => {
+  const transaction = vi.fn(async <T>(
+    run: (transactionClient: MailboxFixtureTx) => Promise<T>,
+  ): Promise<T> => {
     events.push("transaction-start");
     try {
       input.beforeTransactionRun?.();
@@ -337,6 +360,11 @@ beforeEach(() => {
   mailboxEncryptionMocks.encryptHostedMailboxPayloadString.mockRejectedValue(
     new Error("Legacy mailbox encryption must not run from the prepared owner."),
   );
+  mailboxEncryptionMocks.decryptHostedMailboxPayloadString.mockImplementation(
+    async (input: { value?: string | null }) => input.value?.startsWith("cipher:")
+      ? input.value.slice("cipher:".length)
+      : input.value ?? null,
+  );
   mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
     .mockImplementation(async (input: { payloadStorage: string }) =>
       `cipher:${input.payloadStorage}`
@@ -399,6 +427,59 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     }));
   });
 
+  it("prepares a retained ciphertext root before opening the append transaction", async () => {
+    const fixture = createMailboxFixture();
+    const retainedRootGate = createDeferred<void>();
+    installPreparedRootSequence({ rootKeyIds: ["root-active-after-rotation"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-active-after-rotation");
+    const envelope = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:retained-root-prepared",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: false,
+      },
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      signupWelcome: null,
+    });
+
+    const pending = runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction(
+        (tx) => appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope,
+          prepared,
+          tx: tx as never,
+        }),
+      ),
+      prepareExisting: async () => {
+        fixture.events.push("retained-root-prepare-start");
+        await retainedRootGate.promise;
+        fixture.events.push("retained-root-prepare-settled");
+      },
+      prisma: fixture.prisma as never,
+      userId: USER_ID,
+    });
+
+    await vi.waitFor(() => {
+      expect(fixture.events).toContain("retained-root-prepare-start");
+    });
+    expect(fixture.prisma.$transaction).not.toHaveBeenCalled();
+
+    retainedRootGate.resolve();
+    await expect(pending).resolves.toMatchObject({
+      duplicate: false,
+      inserted: true,
+    });
+
+    expect(fixture.events.indexOf("retained-root-prepare-settled")).toBeLessThan(
+      fixture.events.indexOf("transaction-start"),
+    );
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadString)
+      .not.toHaveBeenCalled();
+  });
+
   it("keeps envelope projection on the transaction-local prepared path", async () => {
     const fixture = createMailboxFixture();
     installPreparedRootSequence({ rootKeyIds: ["root-prepared-envelope"] });
@@ -449,6 +530,228 @@ describe("appendHostedMailboxItem prepared crypto owner", () => {
     expect(fixture.tx.$queryRaw.mock.calls.some(
       (call) => call[4] === "hbidx:linq-message:v2:prepared",
     )).toBe(true);
+  });
+
+  it("keeps the first staged object for an exact duplicate meal photo", async () => {
+    const fixture = createMailboxFixture();
+    mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
+      .mockImplementation(async (input: { value?: string | null }) =>
+        input.value ? `cipher:${input.value}` : null
+      );
+    installPreparedRootSequence({ rootKeyIds: ["root-prepared-meal"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-prepared-meal");
+    const firstEnvelope = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 128,
+      captureId: "a".repeat(64),
+      capturedAt: FIXED_NOW.toISOString(),
+      directRoute: { channel: "linq", threadId: "linq_home_thread" },
+      eventId: "meal-photo:prepared-duplicate",
+      mealPhotoKey: "meal-photo-attempt-a",
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      sha256: "b".repeat(64),
+    });
+
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedMailboxItemAppendCrypto({
+        prisma: fixture.prisma as never,
+        userId: USER_ID,
+      });
+      const first = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: firstEnvelope,
+        prepared,
+        tx: fixture.tx as never,
+      });
+      const duplicate = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: {
+          ...firstEnvelope,
+          directRoute: {
+            channel: "telegram",
+            threadId: "telegram_home_thread",
+          },
+          mealPhoto: {
+            ...firstEnvelope.mealPhoto,
+            mealPhotoKey: "meal-photo-attempt-b",
+          },
+        },
+        prepared,
+        tx: fixture.tx as never,
+      });
+
+      expect(first).toMatchObject({
+        claimedMealPhotoKey: "meal-photo-attempt-a",
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+      });
+      expect(duplicate).toMatchObject({
+        claimedMealPhotoKey: "meal-photo-attempt-a",
+        dedupeConflict: false,
+        duplicate: true,
+        inserted: false,
+      });
+    });
+
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadString)
+      .not.toHaveBeenCalled();
+    expect(mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot)
+      .toHaveBeenCalledOnce();
+  });
+
+  it("replays a decrypt-only-root meal photo with provider work before the lock", async () => {
+    const firstEnvelope = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 128,
+      captureId: "a".repeat(64),
+      capturedAt: FIXED_NOW.toISOString(),
+      directRoute: { channel: "linq", threadId: "linq_home_thread" },
+      eventId: "meal-photo:decrypt-only-root-replay",
+      mealPhotoKey: "meal-photo-attempt-first",
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      sha256: "b".repeat(64),
+    });
+    const serializedFirst = JSON.stringify(firstEnvelope);
+    const retainedRootKeyId = "root-decrypt-only-retained";
+    const existing = buildMailboxRow({
+      dedupeKey: firstEnvelope.eventId,
+      kind: "meal-photo.captured",
+      lane: "system",
+      payloadBytes: Buffer.byteLength(serializedFirst, "utf8"),
+      payloadHash: hashHostedMailboxStoredPayload({
+        serialized: serializedFirst,
+        userId: USER_ID,
+      }),
+      payloadInlineCiphertext: `${retainedRootKeyId}:${serializedFirst}`,
+    });
+    const fixture = createMailboxFixture({ existingBeforePreparation: existing });
+    installPreparedRootSequence({ rootKeyIds: ["root-active-after-rotation"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-active-after-rotation");
+    let retainedRootProviderCalls = 0;
+    mailboxEncryptionMocks.decryptHostedMailboxPayloadString.mockImplementation(
+      async (input: { value?: string | null }) => {
+        const value = input.value ?? "";
+        const separator = value.indexOf(":");
+        const rootKeyId = value.slice(0, separator);
+        const cache = getHostedDomainRootUnwrapCache();
+        if (!cache) {
+          throw new Error("Expected request-scoped root cache for retained wake.");
+        }
+        const cacheKey = `${USER_ID}|ingress|${rootKeyId}`;
+        if (!cache.has(cacheKey)) {
+          if (areHostedDomainRootProviderCallsDisabled()) {
+            throw new domainRootMocks.PreparationMismatchError();
+          }
+          retainedRootProviderCalls += 1;
+          fixture.events.push("retained-root-provider");
+          cache.set(cacheKey, Promise.resolve({
+            envelope: buildRootEnvelope({ rootKeyId, userId: USER_ID }),
+            rootKey: new Uint8Array(32).fill(9),
+          }));
+        } else {
+          fixture.events.push("retained-root-local");
+        }
+        return value.slice(separator + 1);
+      },
+    );
+    const retryEnvelope = {
+      ...firstEnvelope,
+      directRoute: {
+        channel: "telegram" as const,
+        threadId: "telegram_home_thread",
+      },
+      mealPhoto: {
+        ...firstEnvelope.mealPhoto,
+        mealPhotoKey: "meal-photo-attempt-retry",
+      },
+    };
+
+    const duplicate = await runWithPreparedHostedMailboxItemAppendCrypto({
+      append: (prepared) => fixture.prisma.$transaction(
+        (tx) => runWithHostedDomainRootProviderCallsDisabled(
+          async () => await appendHostedMealPhotoMailboxEnvelopeTx({
+            envelope: retryEnvelope,
+            prepared,
+            tx: tx as never,
+          }),
+        ),
+      ),
+      prepareExisting: async () => {
+        await readHostedMailboxWakeByDedupeKey({
+          dedupeKey: firstEnvelope.eventId,
+          prisma: fixture.prisma as never,
+          userId: USER_ID,
+        });
+      },
+      prisma: fixture.prisma as never,
+      userId: USER_ID,
+    });
+
+    expect(duplicate).toMatchObject({
+      claimedMealPhotoKey: "meal-photo-attempt-first",
+      dedupeConflict: false,
+      duplicate: true,
+      inserted: false,
+    });
+    expect(retainedRootProviderCalls).toBe(1);
+    expect(fixture.events.indexOf("retained-root-provider")).toBeLessThan(
+      fixture.events.indexOf("transaction-start"),
+    );
+    expect(fixture.events).toContain("retained-root-local");
+  });
+
+  it("rejects conflicting reuse through the prepared meal-photo append", async () => {
+    const fixture = createMailboxFixture();
+    mailboxEncryptionMocks.encryptHostedMailboxPayloadStringFromPreparedRoot
+      .mockImplementation(async (input: { value?: string | null }) =>
+        input.value ? `cipher:${input.value}` : null
+      );
+    installPreparedRootSequence({ rootKeyIds: ["root-prepared-meal-conflict"] });
+    domainRootMocks.lockAndReadActiveHostedDomainRootKeyIdTx
+      .mockResolvedValue("root-prepared-meal-conflict");
+    const firstEnvelope = buildHostedExecutionMealPhotoCapturedWake({
+      byteLength: 128,
+      captureId: "a".repeat(64),
+      capturedAt: FIXED_NOW.toISOString(),
+      directRoute: { channel: "linq", threadId: "linq_home_thread" },
+      eventId: "meal-photo:prepared-conflict",
+      mealPhotoKey: "meal-photo-attempt-a",
+      memberId: USER_ID,
+      occurredAt: FIXED_NOW.toISOString(),
+      sha256: "b".repeat(64),
+    });
+
+    await runWithHostedDomainRootUnwrapCache(async () => {
+      const prepared = await prepareHostedMailboxItemAppendCrypto({
+        prisma: fixture.prisma as never,
+        userId: USER_ID,
+      });
+      await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: firstEnvelope,
+        prepared,
+        tx: fixture.tx as never,
+      });
+      const conflict = await appendHostedMealPhotoMailboxEnvelopeTx({
+        envelope: {
+          ...firstEnvelope,
+          mealPhoto: {
+            ...firstEnvelope.mealPhoto,
+            mealPhotoKey: "meal-photo-attempt-b",
+            sha256: "c".repeat(64),
+          },
+        },
+        prepared,
+        tx: fixture.tx as never,
+      });
+
+      expect(conflict).toMatchObject({
+        claimedMealPhotoKey: "meal-photo-attempt-b",
+        dedupeConflict: true,
+        duplicate: true,
+        inserted: false,
+      });
+    });
   });
 
   it("rejects a same-key cache replacement before taking mailbox locks", async () => {
