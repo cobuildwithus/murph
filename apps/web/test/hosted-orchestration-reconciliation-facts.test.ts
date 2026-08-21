@@ -1651,7 +1651,11 @@ describe("hosted orchestration reconciliation facts", () => {
     );
     const facts = await response.json();
 
-    expect(facts).not.toHaveProperty("environmentInterviewPending");
+    expect(Object.keys(facts).sort()).toEqual([
+      "blocked",
+      "mailboxLag",
+      "workspace",
+    ]);
   });
 
   it("blocks inactive members while preserving workspace facts", async () => {
