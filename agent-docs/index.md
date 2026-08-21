@@ -333,6 +333,13 @@ confirmation-failure ownership, and provider-no-replay recovery, are jointly
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Silent member-memory consolidation reuses the shared restricted one-shot turn,
+grants the exact built-in automation its canonical host-owned memory state tool,
+suppresses native effects at the host boundary, and has no dedicated permission
+profile or provider-catalog inventory contract. This boundary and its focused
+proof are jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, and `agent-docs/references/testing-ci-map.md`.
+
 Independent partial PlanetScale metric normalization, sparse connection-error
 port acceptance without false monitoring pages, continued evaluation of
 available database signals, per-port baseline advancement with new/reset

@@ -17,10 +17,8 @@ import {
 } from '@murphai/runtime-state/node'
 import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import type {
@@ -2043,12 +2041,6 @@ text(result.output);
 
   it.each([
     {
-      label: 'member-memory',
-      permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
-      profileLines:
-        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    },
-    {
       label: 'onboarding read-only',
       permissionProfile: MURPH_MEMBER_READ_PERMISSION_PROFILE,
       profileLines: buildMurphMemberReadPermissionProfileTomlLines(),
@@ -2107,10 +2099,7 @@ text(result.output);
   })
 
   it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
-    const scenario = await prepareScriptedTurnScenario({
-      additionalTomlLines:
-        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    })
+    const scenario = await prepareScriptedTurnScenario()
     const vaultRoot = scenario.turnInput.workingDirectory
     const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
     await writeFile(
@@ -2157,11 +2146,10 @@ text(JSON.stringify(result));
       dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
       ephemeral: true,
       memberMemoryMaintenanceAuthorized: true,
-      permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
       prompt: 'Show memory, save the scripted preference, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
       runtimeWorkspaceRoots: [vaultRoot],
-      sandbox: undefined,
+      sandbox: 'danger-full-access',
       threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG,
       vaultRoot,
     })
