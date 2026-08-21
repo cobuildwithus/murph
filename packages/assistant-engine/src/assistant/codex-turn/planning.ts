@@ -1381,10 +1381,13 @@ function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
   messages: AssistantProviderConversationMessage[],
 ): number {
   const firstUserIndex = messages.findIndex((message) => message.role === 'user')
-  if (firstUserIndex <= 0) {
+  if (firstUserIndex === 0) {
     return 0
   }
-  const removed = messages.splice(0, firstUserIndex)
+  const removed = messages.splice(
+    0,
+    firstUserIndex < 0 ? messages.length : firstUserIndex,
+  )
   return removed.reduce((total, message) => (
     typeof message.content === 'string'
       ? total + assistantConversationHistoryUtf8Bytes(message.content)

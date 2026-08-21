@@ -5169,6 +5169,126 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
+  it('does not replay retained assistant output after automation transition history expires', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-expired-automation-transition-',
+    ))
+    const route = createRoute()
+    const routeFingerprint = route.routeFingerprint ?? route.routeId
+    const executionProfile: AssistantCodexTurnResolvedExecutionProfile = {
+      promptProfile: 'conversation',
+      threadScope: 'session-thread',
+      toolProfile: 'provider-turn',
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext(),
+      automationTool: { request: vi.fn() },
+    }
+    const baseSession = createSession({ turnCount: 1 })
+    const buildPlan = async (session: AssistantSession) =>
+      await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        hostedToolContext,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Use the automation decision from my earlier message.',
+          vault,
+        },
+        profile: executionProfile,
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'America/Chicago',
+        },
+        route,
+        session,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, baseSession.sessionId, [
+        {
+          contentReceivedAt: '2026-07-01T10:00:00.000Z',
+          createdAt: '2026-07-01T10:00:00.000Z',
+          kind: 'user',
+          text: 'Keep the existing automation schedule.',
+        },
+        {
+          createdAt: '2026-07-01T10:01:00.000Z',
+          kind: 'assistant',
+          text: 'I will keep that automation schedule.',
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-08-21T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const currentPlan = await buildPlan(baseSession)
+      expect(currentPlan.dynamicTools).toContainEqual(MURPH_AUTOMATION_TOOL)
+      const oldDynamicTools = currentPlan.dynamicTools.map((tool) =>
+        tool.name === MURPH_AUTOMATION_TOOL.name
+          ? {
+              ...tool,
+              inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+            }
+          : tool)
+      const oldContractFingerprint = buildAssistantCodexContractFingerprint({
+        developerInstructions: currentPlan.developerInstructions,
+        dynamicTools: oldDynamicTools,
+        routeFingerprint,
+      })
+      const transitionSession = createSession({
+        resumeState: {
+          assistantContractFingerprint: oldContractFingerprint,
+          routeFingerprint,
+          threadId: 'thread-expired-full-automation-schema',
+        },
+        turnCount: 1,
+      })
+
+      const transitionPlan = await buildPlan(transitionSession)
+      expect(transitionPlan.resume).toBeNull()
+      expect(transitionPlan.assistantContractFingerprint)
+        .not.toBe(oldContractFingerprint)
+      expect(transitionPlan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+      ])
+
+      const transitionedSession =
+        await applyAssistantSessionCodexResumeStateAction({
+          action: 'persist-from-provider-turn',
+          assistantContractFingerprint:
+            transitionPlan.assistantContractFingerprint,
+          codexRolloutRelativePath: null,
+          codexThreadId: 'thread-expired-compact-automation-schema',
+          routeFingerprint,
+          session: transitionSession,
+          vault,
+        })
+      const resumedPlan = await buildPlan(transitionedSession)
+      expect(resumedPlan.resume?.codexThreadId)
+        .toBe('thread-expired-compact-automation-schema')
+      expect(resumedPlan.conversationHistoryMessages).toBeUndefined()
+      expect(resumedPlan.assistantContractFingerprint)
+        .toBe(transitionPlan.assistantContractFingerprint)
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
   it('reads current assistant context snapshot on sensitive native resume', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValueOnce(
@@ -5602,7 +5722,6 @@ describe('assistant Codex turn planning', () => {
             content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
             role: 'assistant',
           },
-          { content: cadenceQuestion, role: 'assistant' },
         ],
       })
       await expect(buildPlan(unansweredSession)).resolves.toMatchObject({
@@ -5615,7 +5734,7 @@ describe('assistant Codex turn planning', () => {
     }
   })
 
-  it('marks cold conversation history incomplete when the message-count bound omits details', async () => {
+  it('drops an assistant-only suffix when marker reservation removes the sole member message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
     planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
@@ -5656,23 +5775,28 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(
         vault,
         countBoundSession.sessionId,
-        Array.from({ length: 30 }, (_, index) => ({
-          kind: 'assistant' as const,
-          text: `Committed message ${index + 1}`,
-        })),
+        [
+          {
+            kind: 'assistant' as const,
+            text: 'Omitted earlier assistant message',
+          },
+          {
+            kind: 'user' as const,
+            text: 'Sole retained member message',
+          },
+          ...Array.from({ length: 23 }, (_, index) => ({
+            kind: 'assistant' as const,
+            text: `Retained assistant suffix ${index + 1}`,
+          })),
+        ],
       )
 
       const countBoundPlan = await buildPlan(countBoundSession)
-      expect(countBoundPlan.conversationHistoryMessages).toHaveLength(24)
       expect(countBoundPlan.conversationHistoryMessages).toEqual([
         {
           content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
           role: 'assistant',
         },
-        ...Array.from({ length: 23 }, (_, index) => ({
-          content: `Committed message ${index + 8}`,
-          role: 'assistant' as const,
-        })),
       ])
     } finally {
       await rm(vault, { force: true, recursive: true })
@@ -5818,6 +5942,10 @@ describe('assistant Codex turn planning', () => {
     try {
       await appendAssistantTranscriptEntries(vault, session.sessionId, [
         {
+          kind: 'user',
+          text: 'Show me the generated image.',
+        },
+        {
           kind: 'assistant',
           text: `${imagePresence}\n\n${'x'.repeat(6_000)}`,
         },
@@ -5849,13 +5977,17 @@ describe('assistant Codex turn planning', () => {
           role: 'assistant',
         },
         {
+          content: 'Show me the generated image.',
+          role: 'user',
+        },
+        {
           content: expect.stringMatching(
             /^\[This response included an image attachment\.\]/u,
           ),
           role: 'assistant',
         },
       ])
-      const content = plan.conversationHistoryMessages?.[1]?.content
+      const content = plan.conversationHistoryMessages?.[2]?.content
       const contentBytes =
         typeof content === 'string' ? Buffer.byteLength(content, 'utf8') : 0
       expect(contentBytes).toBeLessThanOrEqual(4_000)
