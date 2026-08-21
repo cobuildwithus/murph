@@ -3403,11 +3403,21 @@ through the existing period, ledger-version, notice-claim, and member-lock
 checks. One browser-generated operation UUID is reused across continue,
 ambiguous population recovery, and wake-only recovery requests. Hiding a
 paused browser dialog preserves that UUID, cursor, and progress while keeping
-conflicting row mutations locked; discarding them requires a separate explicit
-abandonment warning because a later confirmation creates a new operation. Once
-the population walk is complete, wake recovery pages only that operation's
-existing wake-required receipts in the same fixed ID-ordered batches; it never
-reads the current hosted-member population or re-enters a reset transaction.
+conflicting row mutations locked. One operator-bound, validated
+`sessionStorage` locator keeps the same operation and acknowledged progress
+through component remounts, same-tab navigation, reload, and browser-provided
+restoration of that tab session. An operator identity mismatch discards the
+locator, and this continuity is deliberately not shared with another tab or a
+new or closed tab session. The client writes the locator synchronously before
+issuing the first or next mutation and pauses without issuing that request when
+storage is unavailable. Discarding the locator
+requires a separate explicit abandonment warning because a later confirmation
+creates a new operation. The locator is browser recovery state, not an effect
+authority or server campaign; the receipt remains the sole per-member replay
+owner. Once the population walk is complete, wake recovery pages only that
+operation's existing wake-required receipts in the same fixed ID-ordered
+batches; it never reads the current hosted-member population or re-enters a
+reset transaction.
 The canonical per-member reset transaction writes one
 append-only receipt keyed by that UUID and member ID; the receipt freezes every
 stable outcome so replay cannot clear included usage that accrued after the

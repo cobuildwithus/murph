@@ -399,14 +399,22 @@ transactions overlap, and runtime recheck happens only after that member's reset
 transaction commits.
 
 The response reports processed, reset, unchanged, skipped, pending-wake, and
-failed outcomes plus the last acknowledged member ID. While the page remains
-open, the client may issue the next bounded request. It pauses on a known or
-ambiguous failure and can resume strictly after the last acknowledged cursor.
-Hiding a paused dialog preserves the same in-memory operation UUID, cursor,
-counts, and failure while keeping conflicting row and search mutations locked.
-The operator must pass a separate warning to abandon that operation; starting
-again after abandonment creates a new UUID and may process previously committed
-members from their then-current state.
+failed outcomes plus the last acknowledged member ID. The client issues only
+one bounded request at a time. It pauses on a known or ambiguous failure and
+can resume strictly after the last acknowledged cursor. Hiding a paused dialog
+preserves the operation while keeping conflicting row and search mutations
+locked. A validated, operator-bound `sessionStorage` locator preserves the
+browser-created UUID, cursor, counts, failure, and recovery phase for one
+authenticated browser-tab session, including component remounts, same-tab
+navigation, reload, and browser-provided restoration of that tab session. An
+operator identity mismatch discards it, and it deliberately does not promise
+recovery in another tab or a new or closed tab session. The client synchronously
+writes this locator before the first or any next mutation; if that write fails,
+it pauses without sending the request. The operator must pass a separate warning
+that clears the locator before starting another operation. The locator is not
+reset authority; immutable per-member receipts remain the sole effect and replay
+owner. Starting again after abandonment creates a new UUID and may process
+previously committed members from their then-current state.
 When a population response is unknown, recovery may rewalk from the beginning
 with the same browser-created operation UUID. After the population is fully
 acknowledged, runtime-wake recovery has a narrower owner: it pages only that
@@ -417,7 +425,8 @@ typed confirmation cannot be admitted to that operation. The dialog does not
 claim completion until a full receipt-owned wake pass reports no pending wake.
 Terminal non-retryable inactive-runtime results count as no longer applicable;
 retryable runtime and transport failures remain pending.
-The walk owns no campaign row, queue, scheduler, or second usage projection.
+The walk owns no campaign row, queue, scheduler, or second usage projection;
+its tab-session locator is non-authoritative browser recovery state.
 
 Every reset-everyone member outcome has one append-only receipt keyed by the
 operation UUID and member ID. The first serializable member transaction inserts

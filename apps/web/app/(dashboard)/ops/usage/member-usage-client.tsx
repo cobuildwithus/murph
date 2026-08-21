@@ -47,6 +47,7 @@ import {
   type HostedOpsMemberUsageResetAllBatchResponse,
   type HostedOpsMemberUsageResetAllCounts,
   type HostedOpsMemberUsageResetAllWakeBatchResponse,
+  isHostedOpsUsageResetAllOperationId,
 } from "@/src/lib/hosted-ops/member-usage-contract";
 
 interface UsageResetMessage {
@@ -102,6 +103,12 @@ interface UsageResetAllState {
     | "running";
 }
 
+interface UsageResetAllSessionOperation {
+  operationId: string;
+  operatorMemberId: string;
+  state: UsageResetAllState;
+}
+
 type UsageResetAllRunMode = "recover_wakes" | "resume" | "start";
 
 const EMPTY_RESET_ALL_COUNTS: HostedOpsMemberUsageResetAllCounts = {
@@ -112,6 +119,10 @@ const EMPTY_RESET_ALL_COUNTS: HostedOpsMemberUsageResetAllCounts = {
   skipped: 0,
   unchanged: 0,
 };
+const RESET_ALL_SESSION_STORAGE_KEY = "murph.ops.usage.reset-all.v1";
+const RESET_ALL_MEMBER_ID_PATTERN = /^hbm_[A-Za-z0-9_-]+$/u;
+const RESET_ALL_MAX_MEMBER_ID_LENGTH = 128;
+const RESET_ALL_MAX_FAILURE_MESSAGE_LENGTH = 2_000;
 
 class UsageResetRequestError extends Error {
   constructor(
@@ -127,6 +138,7 @@ interface MemberUsageClientProps {
   dashboard: HostedOpsMemberUsageDashboard;
   designResetAllInline?: boolean;
   designState?: MemberUsageClientDesignState;
+  operatorMemberId: string | null;
 }
 
 export function MemberUsageClient(props: MemberUsageClientProps) {
@@ -142,6 +154,7 @@ function MemberUsageClientSurface({
   dashboard,
   designResetAllInline = false,
   designState,
+  operatorMemberId,
 }: MemberUsageClientProps) {
   const router = useRouter();
   const resetAllAcknowledgedCursors = useRef<Set<string>>(new Set());
@@ -177,7 +190,7 @@ function MemberUsageClientSurface({
       ? HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
       : "",
   );
-  const [resetAllState, setResetAllState] = useState(initialResetAllState);
+  const [resetAllState, setResetAllStateValue] = useState(initialResetAllState);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
       ?? null,
@@ -203,6 +216,66 @@ function MemberUsageClientSurface({
       resetAllPageActive.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (designState || !operatorMemberId) {
+      return;
+    }
+    const restoredOperation = readResetAllSessionOperation(operatorMemberId);
+    if (!restoredOperation) {
+      return;
+    }
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) {
+        return;
+      }
+      resetAllOperationId.current = restoredOperation.operationId;
+      resetAllAcknowledgedCursors.current.clear();
+      if (restoredOperation.state.lastAcknowledgedCursor) {
+        resetAllAcknowledgedCursors.current.add(
+          restoredOperation.state.lastAcknowledgedCursor,
+        );
+      }
+      setResetAllConfirmation(HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION);
+      setResetAllStateValue(
+        restoreInterruptedResetAllState(restoredOperation.state),
+      );
+      setResetAllOpen(true);
+    });
+    return () => {
+      active = false;
+    };
+  }, [designState, operatorMemberId]);
+
+  function setResetAllState(nextState: UsageResetAllState): boolean {
+    const operationId = resetAllOperationId.current;
+    if (
+      operationId
+      && (
+        !operatorMemberId
+        || !writeResetAllSessionOperation(
+          operationId,
+          operatorMemberId,
+          nextState,
+        )
+      )
+    ) {
+      setResetAllStateValue({
+        ...nextState,
+        failure: {
+          ambiguous: false,
+          memberId: null,
+          message:
+            "This browser could not preserve the latest reset progress, so no further batch was started. Keep this tab open and retry, or abandon the operation explicitly.",
+        },
+        phase: "paused",
+      });
+      return false;
+    }
+    setResetAllStateValue(nextState);
+    return true;
+  }
 
   function openPage(
     direction: "after" | "before",
@@ -266,7 +339,9 @@ function MemberUsageClientSurface({
         || resetAllState.phase === "abandoning"
       )
     ) {
-      setResetAllState({ ...resetAllState, phase: "paused" });
+      if (!setResetAllState({ ...resetAllState, phase: "paused" })) {
+        return;
+      }
       setResetAllOpen(false);
       return;
     }
@@ -274,11 +349,28 @@ function MemberUsageClientSurface({
   }
 
   function clearResetAllOperation(): void {
+    if (
+      resetAllOperationId.current
+      && !removeResetAllSessionOperation()
+    ) {
+      setResetAllOpen(true);
+      setResetAllStateValue({
+        ...resetAllState,
+        failure: {
+          ambiguous: false,
+          memberId: null,
+          message:
+            "This browser could not forget the saved reset operation. Keep it and retry, or close this browser tab to end its session before starting another operation.",
+        },
+        phase: "paused",
+      });
+      return;
+    }
     setResetAllOpen(false);
     resetAllAcknowledgedCursors.current.clear();
     resetAllOperationId.current = null;
     setResetAllConfirmation("");
-    setResetAllState(createInitialResetAllState(undefined));
+    setResetAllStateValue(createInitialResetAllState(undefined));
   }
 
   function requestResetAllAbandonment(): void {
@@ -355,12 +447,14 @@ function MemberUsageClientSurface({
           return;
         }
       }
-      setResetAllState({
+      if (!setResetAllState({
         counts,
         failure: null,
         lastAcknowledgedCursor,
         phase: "running",
-      });
+      })) {
+        return;
+      }
 
       while (resetAllPageActive.current) {
         const previousCursor = lastAcknowledgedCursor;
@@ -457,12 +551,14 @@ function MemberUsageClientSurface({
           router.refresh();
           return;
         }
-        setResetAllState({
+        if (!setResetAllState({
           counts,
           failure: null,
           lastAcknowledgedCursor,
           phase: "running",
-        });
+        })) {
+          return;
+        }
       }
     } finally {
       resetAllRunInFlight.current = false;
@@ -477,12 +573,14 @@ function MemberUsageClientSurface({
       failed: 0,
       pendingWake: 0,
     };
-    setResetAllState({
+    if (!setResetAllState({
       counts,
       failure: null,
       lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
       phase: "recovering_wakes",
-    });
+    })) {
+      return;
+    }
 
     while (resetAllPageActive.current) {
       const previousWakeCursor = wakeCursor;
@@ -562,12 +660,14 @@ function MemberUsageClientSurface({
         router.refresh();
         return;
       }
-      setResetAllState({
+      if (!setResetAllState({
         counts,
         failure: null,
         lastAcknowledgedCursor: resetAllState.lastAcknowledgedCursor,
         phase: "recovering_wakes",
-      });
+      })) {
+        return;
+      }
     }
   }
 
@@ -1498,6 +1598,204 @@ function addResetAllCounts(
     skipped: left.skipped + right.skipped,
     unchanged: left.unchanged + right.unchanged,
   };
+}
+
+function readResetAllSessionOperation(
+  operatorMemberId: string,
+): UsageResetAllSessionOperation | null {
+  try {
+    const storedValue = window.sessionStorage.getItem(
+      RESET_ALL_SESSION_STORAGE_KEY,
+    );
+    if (!storedValue) {
+      return null;
+    }
+    const parsedValue: unknown = JSON.parse(storedValue);
+    const operation = parseResetAllSessionOperation(
+      parsedValue,
+      operatorMemberId,
+    );
+    if (!operation) {
+      window.sessionStorage.removeItem(RESET_ALL_SESSION_STORAGE_KEY);
+    }
+    return operation;
+  } catch {
+    return null;
+  }
+}
+
+function writeResetAllSessionOperation(
+  operationId: string,
+  operatorMemberId: string,
+  state: UsageResetAllState,
+): boolean {
+  try {
+    window.sessionStorage.setItem(
+      RESET_ALL_SESSION_STORAGE_KEY,
+      JSON.stringify({ operationId, operatorMemberId, state }),
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeResetAllSessionOperation(): boolean {
+  try {
+    window.sessionStorage.removeItem(RESET_ALL_SESSION_STORAGE_KEY);
+    return window.sessionStorage.getItem(RESET_ALL_SESSION_STORAGE_KEY) === null;
+  } catch {
+    return false;
+  }
+}
+
+function parseResetAllSessionOperation(
+  value: unknown,
+  expectedOperatorMemberId: string,
+): UsageResetAllSessionOperation | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const operationId = Reflect.get(value, "operationId");
+  const operatorMemberId = Reflect.get(value, "operatorMemberId");
+  const state = parseResetAllSessionState(Reflect.get(value, "state"));
+  if (
+    !isHostedOpsUsageResetAllOperationId(operationId)
+    || operatorMemberId !== expectedOperatorMemberId
+    || !state
+  ) {
+    return null;
+  }
+  return { operationId, operatorMemberId, state };
+}
+
+function parseResetAllSessionState(value: unknown): UsageResetAllState | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const counts = Reflect.get(value, "counts");
+  if (!counts || typeof counts !== "object") {
+    return null;
+  }
+  const failed = Reflect.get(counts, "failed");
+  const pendingWake = Reflect.get(counts, "pendingWake");
+  const processed = Reflect.get(counts, "processed");
+  const reset = Reflect.get(counts, "reset");
+  const skipped = Reflect.get(counts, "skipped");
+  const unchanged = Reflect.get(counts, "unchanged");
+  if (
+    !isNonNegativeInteger(failed)
+    || !isNonNegativeInteger(pendingWake)
+    || !isNonNegativeInteger(processed)
+    || !isNonNegativeInteger(reset)
+    || !isNonNegativeInteger(skipped)
+    || !isNonNegativeInteger(unchanged)
+    || processed !== reset + skipped + unchanged
+    || pendingWake > reset + unchanged
+  ) {
+    return null;
+  }
+  const failure = parseResetAllSessionFailure(Reflect.get(value, "failure"));
+  if (failure === undefined) {
+    return null;
+  }
+  const lastAcknowledgedCursor = Reflect.get(
+    value,
+    "lastAcknowledgedCursor",
+  );
+  if (!isResetAllSessionMemberId(lastAcknowledgedCursor)) {
+    return null;
+  }
+  const phase = Reflect.get(value, "phase");
+  if (!isResetAllPersistedPhase(phase)) {
+    return null;
+  }
+  return {
+    counts: {
+      failed,
+      pendingWake,
+      processed,
+      reset,
+      skipped,
+      unchanged,
+    },
+    failure,
+    lastAcknowledgedCursor,
+    phase,
+  };
+}
+
+function parseResetAllSessionFailure(
+  value: unknown,
+): UsageResetAllFailureState | null | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const ambiguous = Reflect.get(value, "ambiguous");
+  const memberId = Reflect.get(value, "memberId");
+  const message = Reflect.get(value, "message");
+  if (
+    typeof ambiguous !== "boolean"
+    || !isResetAllSessionMemberId(memberId)
+    || typeof message !== "string"
+    || message.length === 0
+    || message.length > RESET_ALL_MAX_FAILURE_MESSAGE_LENGTH
+  ) {
+    return undefined;
+  }
+  return { ambiguous, memberId, message };
+}
+
+function isResetAllSessionMemberId(value: unknown): value is string | null {
+  return value === null
+    || (
+      typeof value === "string"
+      && value.length <= RESET_ALL_MAX_MEMBER_ID_LENGTH
+      && RESET_ALL_MEMBER_ID_PATTERN.test(value)
+    );
+}
+
+function isResetAllPersistedPhase(
+  value: unknown,
+): value is "abandoning" | "complete" | "paused" | "recovering_wakes" | "running" {
+  return value === "abandoning"
+    || value === "complete"
+    || value === "paused"
+    || value === "recovering_wakes"
+    || value === "running";
+}
+
+function restoreInterruptedResetAllState(
+  state: UsageResetAllState,
+): UsageResetAllState {
+  if (state.phase === "running") {
+    return {
+      ...state,
+      failure: {
+        ambiguous: true,
+        memberId: null,
+        message:
+          "This page was interrupted while a batch may have committed. Resume with the same operation from the last acknowledged cursor.",
+      },
+      phase: "paused",
+    };
+  }
+  if (state.phase === "abandoning") {
+    return {
+      ...state,
+      failure: {
+        ambiguous: false,
+        memberId: null,
+        message:
+          "This page was interrupted before abandonment was confirmed. The saved reset operation is still available.",
+      },
+      phase: "paused",
+    };
+  }
+  return state;
 }
 
 function readEmptyUsageMessage(

@@ -66,9 +66,15 @@ through a final reset, skipped, pending-wake, and failed summary.
 - Interrupted operator: each request handles a fixed small batch. Retrying from
   the last acknowledged cursor, or recovering from the beginning after an
   ambiguous response with the same operation UUID, reuses immutable member
-  receipts rather than applying a second reset. Hiding a paused dialog preserves
-  that operation and keeps conflicting mutations locked; a separate warned
-  abandonment is required before a later confirmation can create a new UUID.
+  receipts rather than applying a second reset. A validated, operator-bound
+  browser-tab session locator preserves that UUID, cursor, counts, and recovery
+  phase across component remount, same-tab navigation, reload, and
+  browser-provided tab restoration. An operator mismatch discards it, and it is
+  not shared across tabs or a new or closed tab session. The client refuses to
+  start the next mutation if it cannot first persist the locator. Hiding
+  preserves the operation and keeps conflicting mutations locked; a separate
+  warned abandonment clears it before a later confirmation can create a new
+  UUID.
 - Member whose hosted runtime becomes terminally inactive after commit: reset
   remains committed and wake recovery advances because no runtime remains
   applicable. Retryable runtime or transport failures remain visibly pending.
@@ -84,8 +90,10 @@ through a final reset, skipped, pending-wake, and failed summary.
 - Reset-all is not atomic across the whole population and does not pause new
   usage while later members are processed.
 - No new queue, scheduler, persisted campaign, or duplicate usage read model;
-  the only new persisted authority is the per-member immutable effect receipt
-  required to make retry safe after later included usage or grant consumption.
+  the only new server-persisted authority is the per-member immutable effect
+  receipt required to make retry safe after later included usage or grant
+  consumption. The browser-tab session locator is recovery state, not effect
+  authority.
 
 ### Done when
 
@@ -115,8 +123,9 @@ through a final reset, skipped, pending-wake, and failed summary.
    population work completes, recover pending wakes from the operation's
    receipt set without re-reading live members or re-entering reset work.
 4. Add a prominent destructive control, typed confirmation, progress and final
-   outcome UI. Preserve a hidden paused operation, warn before abandoning it,
-   and disable conflicting row mutations while it runs or remains paused.
+   outcome UI. Preserve a hidden or same-tab restored operation with a validated
+   browser-session locator written before each request, warn before abandoning
+   it, and disable conflicting row mutations while it runs or remains paused.
 5. Add focused regression coverage and update the owning hosted usage contract,
    Web documentation, reliability/load notes, and existing design study only as
    required by the final behavior.

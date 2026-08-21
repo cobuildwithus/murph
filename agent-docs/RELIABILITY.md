@@ -379,9 +379,17 @@ Last verified: 2026-08-20
   queue, scheduler, or persisted campaign. A known failure resumes strictly
   after the acknowledged cursor, while an ambiguous population response may
   rewalk from the beginning with the same UUID. Hiding a paused dialog keeps
-  that UUID and cursor in memory and keeps conflicting mutations locked;
-  abandoning them requires a separate warned action. After population
-  completion,
+  that UUID and cursor and keeps conflicting mutations locked. One validated,
+  operator-bound same-tab `sessionStorage` locator also restores the UUID, last
+  acknowledged cursor, counts, and recovery phase after a component remount,
+  same-tab navigation, reload, or browser-provided restoration of that tab
+  session. An operator identity mismatch discards it; it does not provide
+  cross-tab, new-tab, or closed-session recovery. The client must synchronously
+  persist that locator before the first or any next mutation request; storage
+  failure pauses without issuing the request. Explicit warned abandonment
+  removes the locator before another UUID can start. This browser record is not
+  a campaign or replay authority; the immutable member receipt below remains
+  the sole effect owner. After population completion,
   committed wake recovery instead pages at most 11 existing wake-required
   receipts for that UUID, admits 10, and invokes only sequential bounded runtime
   rechecks. It never reads current hosted-member rows or enters the reset

@@ -80,18 +80,33 @@ vi.mock("@/src/components/ui/table", () => ({
   TableRow: (props: ComponentProps<"tr">) => createElement("tr", props),
 }));
 
-import { MemberUsageClient } from "../app/(dashboard)/ops/usage/member-usage-client";
+import {
+  MemberUsageClient as ProductionMemberUsageClient,
+} from "../app/(dashboard)/ops/usage/member-usage-client";
 import type { HostedOpsMemberUsageDashboard } from "../src/lib/hosted-ops/member-usage";
 import {
   HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
 } from "../src/lib/hosted-ops/member-usage-contract";
-import { renderClientComponent } from "./render-client-component";
+import {
+  createMemoryStorage,
+  renderClientComponent,
+} from "./render-client-component";
 
 const fetchMock = vi.fn<typeof fetch>();
+const TEST_OPERATOR_MEMBER_ID = "hbm_ops_operator";
 const RESET_ALL_OPERATION_ID = "12345678-1234-4abc-8def-1234567890ab";
 const SECOND_RESET_ALL_OPERATION_ID = "abcdefab-1234-4abc-8def-1234567890ab";
 const randomUuidMock = vi.fn(() => RESET_ALL_OPERATION_ID);
 let cleanupRender: (() => Promise<void>) | null = null;
+
+function MemberUsageClient(
+  props: Omit<ComponentProps<typeof ProductionMemberUsageClient>, "operatorMemberId">,
+) {
+  return createElement(ProductionMemberUsageClient, {
+    ...props,
+    operatorMemberId: TEST_OPERATOR_MEMBER_ID,
+  });
+}
 
 beforeEach(() => {
   fetchMock.mockReset();
@@ -453,22 +468,51 @@ describe("MemberUsageClient", () => {
     });
   });
 
-  test("stops issuing batches after the page closes", async () => {
+  test("restores an interrupted in-flight operation with the same ID", async () => {
     let resolveBatch!: (response: Response) => void;
     fetchMock.mockReturnValueOnce(new Promise<Response>((resolve) => {
       resolveBatch = resolve;
+    })).mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 1,
+        reset: 1,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_001",
     }));
-    const rendered = await renderClientComponent(
+    const sessionStorage = createMemoryStorage();
+    let rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
     );
     cleanupRender = rendered.cleanup;
 
     await openAndConfirmResetEveryone(rendered);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem("murph.ops.usage.reset-all.v1"))
+      .toContain(RESET_ALL_OPERATION_ID);
 
     const cleanup = rendered.cleanup;
     cleanupRender = null;
     await cleanup();
+    rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+    expect(rendered.container.textContent).toContain(
+      "This page was interrupted while a batch may have committed.",
+    );
+    expect(readMetric(rendered.container, "Processed")).toBe("0");
+
     resolveBatch(jsonResponse({
       counts: {
         failed: 0,
@@ -488,6 +532,26 @@ describe("MemberUsageClient", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    await clickButton(
+      rendered.window,
+      getButton(rendered.container, "Resume"),
+    );
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone complete");
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/ops/usage-reset", {
+      body: JSON.stringify({
+        afterMemberId: null,
+        confirmation: HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
+        operation: "reset_all_batch",
+        operationId: RESET_ALL_OPERATION_ID,
+      }),
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
   });
 
   test("pauses on a member failure and retries from the last acknowledged cursor", async () => {
@@ -524,8 +588,10 @@ describe("MemberUsageClient", () => {
         failure: null,
         lastAcknowledgedCursor: "hbm_reset_003",
       }));
-    const rendered = await renderClientComponent(
+    const sessionStorage = createMemoryStorage();
+    let rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
     );
     cleanupRender = rendered.cleanup;
 
@@ -534,6 +600,18 @@ describe("MemberUsageClient", () => {
       expect(rendered.container.textContent).toContain(
         "Reset everyone paused",
       );
+    });
+
+    const cleanup = rendered.cleanup;
+    cleanupRender = null;
+    await cleanup();
+    rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
     });
 
     expect(rendered.container.textContent).toContain(
@@ -619,8 +697,10 @@ describe("MemberUsageClient", () => {
         failure: null,
         lastAcknowledgedCursor: "hbm_reset_001",
       }));
+    const sessionStorage = createMemoryStorage();
     const rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
     );
     cleanupRender = rendered.cleanup;
 
@@ -628,6 +708,7 @@ describe("MemberUsageClient", () => {
     await vi.waitFor(() => {
       expect(rendered.container.textContent).toContain("Reset everyone paused");
     });
+    expect(sessionStorage.length).toBe(1);
     await clickButton(
       rendered.window,
       getButton(rendered.container, "Abandon operation"),
@@ -651,6 +732,7 @@ describe("MemberUsageClient", () => {
       getButton(rendered.container, "Abandon operation"),
     );
     expect(rendered.container.textContent).not.toContain("Abandon reset operation?");
+    expect(sessionStorage.length).toBe(0);
 
     await clickButton(
       rendered.window,
@@ -681,6 +763,81 @@ describe("MemberUsageClient", () => {
       headers: { "content-type": "application/json" },
       method: "POST",
     });
+  });
+
+  test("does not issue the first batch when tab-session progress cannot persist", async () => {
+    const sessionStorage = createMemoryStorage();
+    sessionStorage.setItem = () => {
+      throw new Error("Storage unavailable");
+    };
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+
+    expect(rendered.container.textContent).toContain(
+      "This browser could not preserve the latest reset progress",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(randomUuidMock).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not restore a saved operation for a different operator", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      counts: {
+        failed: 1,
+        pendingWake: 0,
+        processed: 0,
+        reset: 0,
+        skipped: 0,
+        unchanged: 0,
+      },
+      done: false,
+      failure: {
+        code: "HOSTED_OPS_USAGE_RESET_NOTICE_IN_FLIGHT",
+        memberId: "hbm_reset_001",
+        message: "Retry after the notice dispatch settles.",
+        retryable: true,
+      },
+      lastAcknowledgedCursor: null,
+    }));
+    const sessionStorage = createMemoryStorage();
+    const originalRender = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+
+    await openAndConfirmResetEveryone(originalRender);
+    await vi.waitFor(() => {
+      expect(originalRender.container.textContent)
+        .toContain("Reset everyone paused");
+    });
+    expect(sessionStorage.length).toBe(1);
+    await originalRender.cleanup();
+
+    const nextOperatorRender = await renderClientComponent(
+      createElement(ProductionMemberUsageClient, {
+        dashboard: makeDashboard(),
+        operatorMemberId: "hbm_other_ops_operator",
+      }),
+      { sessionStorage },
+    );
+    cleanupRender = nextOperatorRender.cleanup;
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(nextOperatorRender.container.textContent)
+      .not.toContain("Reset everyone paused");
+    expect(getButton(nextOperatorRender.container, "Reset everyone").disabled)
+      .toBe(false);
+    expect(sessionStorage.length).toBe(0);
   });
 
   test("resumes the same operation after an ambiguous batch response", async () => {

@@ -193,25 +193,32 @@ export function OpsUsageStudy() {
         <MemberUsageClient
           dashboard={DESIGN_OPS_USAGE_DASHBOARD}
           designState="search_loading"
+          operatorMemberId={null}
         />
       </StudyFrame>
       <StudyFrame title="Capped search">
-        <MemberUsageClient dashboard={DESIGN_OPS_USAGE_SEARCH_DASHBOARD} />
+        <MemberUsageClient
+          dashboard={DESIGN_OPS_USAGE_SEARCH_DASHBOARD}
+          operatorMemberId={null}
+        />
       </StudyFrame>
       <StudyFrame title="Empty search">
         <MemberUsageClient
           dashboard={DESIGN_OPS_USAGE_EMPTY_SEARCH_DASHBOARD}
+          operatorMemberId={null}
         />
       </StudyFrame>
       <StudyFrame title="Invalid search">
         <MemberUsageClient
           dashboard={DESIGN_OPS_USAGE_ERROR_SEARCH_DASHBOARD}
+          operatorMemberId={null}
         />
       </StudyFrame>
       <StudyFrame title="Stale row error and recovery">
         <MemberUsageClient
           dashboard={DESIGN_OPS_USAGE_DASHBOARD}
           designState="row_stale_error"
+          operatorMemberId={null}
         />
       </StudyFrame>
       {RESET_STATES.map(({ state, title }) => (
@@ -220,6 +227,7 @@ export function OpsUsageStudy() {
             dashboard={DESIGN_OPS_USAGE_DASHBOARD}
             designResetAllInline
             designState={state}
+            operatorMemberId={null}
           />
         </StudyFrame>
       ))}

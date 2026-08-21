@@ -28,7 +28,7 @@ export default async function HostedOpsUsagePage({
   }>;
 }) {
   await getHostedDashboardPageAuthSnapshot();
-  await requireHostedOpsPageAccess();
+  const operatorSession = await requireHostedOpsPageAccess();
   const resolvedSearchParams = await searchParams;
   const after = readFirstSearchParam(resolvedSearchParams.after);
   const before = readFirstSearchParam(resolvedSearchParams.before);
@@ -37,6 +37,7 @@ export default async function HostedOpsUsagePage({
   return (
     <MemberUsageClient
       dashboard={await readHostedOpsMemberUsage({ after, before, search })}
+      operatorMemberId={operatorSession.member.id}
     />
   );
 }
