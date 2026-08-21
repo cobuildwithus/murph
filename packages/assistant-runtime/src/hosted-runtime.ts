@@ -256,6 +256,7 @@ import {
   collectHostedAssistantDeliverySideEffects,
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
+  resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "./hosted-runtime/callbacks.ts";
@@ -2914,10 +2915,25 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               preparationWake ? [preparationWake] : [],
             );
           }
-          if (!assistantExecutionBlocked && projectedWake.assistantCronDueNow) {
-            return { preempted: true, prepared: preparation !== null };
-          }
-          if (hostAbortObserved || consumeForegroundWake()) {
+          const preemptBeforeExactDelivery =
+            (!assistantExecutionBlocked && projectedWake.assistantCronDueNow)
+            || hostAbortObserved
+            || consumeForegroundWake();
+          if (preemptBeforeExactDelivery) {
+            if (
+              exactDeliveryEffects.length > 0
+              && (exactDeliveryPreparation?.preparedDispatches.length ?? 0) > 0
+            ) {
+              await resetHostedPreparedAssistantDeliveryEffects({
+                effects: exactDeliveryEffects,
+                preparedDispatches:
+                  exactDeliveryPreparation?.preparedDispatches ?? null,
+                vaultRoot: restored.vaultRoot,
+              });
+              await checkpointSystemMailboxMode(
+                `${inputItem.stagePrefix}.checkpoint.release_prepared_delivery`,
+              );
+            }
             return { preempted: true, prepared: preparation !== null };
           }
           const recordItem = exactDeliveryRecordItem
