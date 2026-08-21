@@ -9,6 +9,9 @@ import {
 import * as coreRuntime from '@murphai/core'
 import { createConfiguredDeviceSyncProvidersFromConfigs } from '@murphai/device-syncd/config'
 import type {
+  JunctionDeviceSyncProviderConfig,
+} from '@murphai/device-syncd/providers/junction-config'
+import type {
   DeviceSyncAccount,
   DeviceSyncJobRecord,
   ProviderJobContext,
@@ -127,7 +130,7 @@ test('Junction body data composes from provider jobs through canonical vault rea
       vaultRoot,
     })
 
-    const junctionConfig = {
+    const junctionConfig: JunctionDeviceSyncProviderConfig = {
       apiKey: 'sk_us_test_123',
       clientUserIdSecret: 'junction-test-client-secret',
       environment: 'sandbox',
