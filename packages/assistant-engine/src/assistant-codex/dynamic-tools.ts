@@ -788,6 +788,89 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
 ])
 
+type GroupArguments = z.infer<typeof groupArgumentsSchema>
+
+const GROUP_TOOL_FAMILY_ACTIONS = {
+  group_consult: [
+    'ask',
+    'handoff',
+    'ask_current_sender',
+    'clarify_current_sender',
+    'continue_current_sender_in_group',
+    'continue_current_sender_privately',
+    'ask_member',
+  ],
+  group_data: [
+    'record_current_sender_daily_metric',
+    'post_disclosure_request',
+    'revoke_disclosure_grant',
+    'read_shared',
+    'offer_access',
+    'revoke_own_email_share',
+  ],
+  group_membership: [
+    'read_current',
+    'prepare_next_group',
+    'read_next_group',
+    'cancel_next_group',
+    'list_memberships',
+    'leave_membership',
+  ],
+  group_usage: [
+    'read_usage',
+    'read_usage_referral',
+    'arm_usage_referral',
+    'cancel_usage_referral',
+    'create_signup_referral_link',
+  ],
+  group_chat: [
+    'read_chat_name',
+    'update_display_name',
+    'read_chat_participants',
+    'set_chat_avatar',
+    'share_contact_card',
+  ],
+  group_email: ['send_email'],
+} as const satisfies Record<string, readonly GroupArguments['action'][]>
+
+type GroupToolFamilyName = keyof typeof GROUP_TOOL_FAMILY_ACTIONS
+type GroupParserToolName = typeof MURPH_GROUP_TOOL.name | GroupToolFamilyName
+
+function buildGroupFamilyArgumentsSchema(
+  actions: readonly GroupArguments['action'][],
+) {
+  const acceptedActions = new Set<string>(actions)
+  return groupArgumentsSchema.refine(
+    (request) => acceptedActions.has(request.action),
+    {
+      message: 'Action is not accepted by this group tool family.',
+      path: ['action'],
+    },
+  )
+}
+
+const groupArgumentsSchemaByToolName = {
+  [MURPH_GROUP_TOOL.name]: groupArgumentsSchema,
+  group_consult: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_consult,
+  ),
+  group_data: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_data,
+  ),
+  group_membership: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_membership,
+  ),
+  group_usage: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_usage,
+  ),
+  group_chat: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_chat,
+  ),
+  group_email: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_email,
+  ),
+} as const satisfies Record<GroupParserToolName, unknown>
+
 const sendVaultFileArgumentsSchema = z
   .object({
     ref: z.string().trim().min(1).max(1024),
@@ -1901,8 +1984,14 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_GROUP_TOOL.name: {
-      const parsed = parseGroupArguments(request.arguments)
+    case MURPH_GROUP_TOOL.name:
+    case 'group_consult':
+    case 'group_data':
+    case 'group_membership':
+    case 'group_usage':
+    case 'group_chat':
+    case 'group_email': {
+      const parsed = parseGroupArguments(request.arguments, request.tool)
       if (!parsed.ok) {
         return {
           kind: 'invalid-group-arguments',
@@ -6984,22 +7073,24 @@ function parseAssistantConfigurationArguments(
 
 function parseGroupArguments(
   value: unknown,
+  toolName: GroupParserToolName,
 ):
   | {
       request: MurphGroupToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = groupArgumentsSchema.safeParse(value)
+  const qualifiedToolName = `murph.${toolName}`
+  const parsed = groupArgumentsSchemaByToolName[toolName].safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: value,
-        schemaName: 'murph.group.input',
+        schemaName: `${qualifiedToolName}.input`,
         schemaRootKeys: ['action', 'message_ref'],
-        toolName: 'murph.group',
+        toolName: qualifiedToolName,
       }),
     }
   }
@@ -7229,7 +7320,23 @@ function parseGroupArguments(
       },
     }
   }
-  return { ok: true, request: { action: 'read_current' } }
+  if (parsed.data.action === 'read_current') {
+    return { ok: true, request: { action: 'read_current' } }
+  }
+  return {
+    ok: false,
+    validationDigest: buildDynamicToolValidationDigest({
+      error: new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Group action has no explicit normalization path.',
+        path: ['action'],
+      }]),
+      rawInput: value,
+      schemaName: `${qualifiedToolName}.input`,
+      schemaRootKeys: ['action', 'message_ref'],
+      toolName: qualifiedToolName,
+    }),
+  }
 }
 
 function readCurrentSenderToolDecision(action:
