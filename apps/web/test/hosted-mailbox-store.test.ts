@@ -2640,6 +2640,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       prisma,
       userId: "member_mailbox_1",
     })).resolves.toEqual({
+      dedupeKey: "dedupe_1",
       kind: "assistant.ask.completed",
       laneSeq: "5",
     });
@@ -2648,6 +2649,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       select: {
+        dedupeKey: true,
         kind: true,
         laneSeq: true,
       },
