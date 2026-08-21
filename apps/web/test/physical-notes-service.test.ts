@@ -1889,6 +1889,12 @@ describe("recoverHostedPhysicalNote", () => {
         kind: "accepted",
         providerLetterId,
       }]);
+      const acceptedResponse = {
+        remainingUnresolved: true,
+        retryAfter: null,
+        settledUsageCostUsdMicros: null,
+        status: "accepted" as const,
+      };
 
       await expect(recoverHostedPhysicalNote({
         memberId: MEMBER_ID,
@@ -1896,17 +1902,20 @@ describe("recoverHostedPhysicalNote", () => {
         prisma: store.prisma,
         runtime: provider.runtime,
         targetOriginAssistantInputId: targetOrigin,
-      })).resolves.toEqual({
-        remainingUnresolved: true,
-        retryAfter: null,
-        settledUsageCostUsdMicros: null,
-        status: "accepted",
-      });
+      })).resolves.toEqual(acceptedResponse);
+      await expect(recoverHostedPhysicalNote({
+        memberId: MEMBER_ID,
+        originAssistantInputId: recoveryOrigin(sequence + 3),
+        prisma: store.prisma,
+        runtime: provider.runtime,
+        targetOriginAssistantInputId: targetOrigin,
+      })).resolves.toEqual(acceptedResponse);
 
       expect(provider.findLetterByNoteId).toHaveBeenCalledWith({
         noteId: blockedId,
         signal: undefined,
       });
+      expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
       expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
         failureReason: null,
         providerLetterId: null,
@@ -1918,6 +1927,127 @@ describe("recoverHostedPhysicalNote", () => {
       });
     },
   );
+
+  it("classifies a terminalized targeted pending paid recovery with settled cost", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const sendProvider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_terminalized_target_free_seed" },
+      { kind: "ambiguous_failure" },
+    ]);
+    await createHostedPhysicalNote({
+      ...buildRequest(250),
+      prisma: store.prisma,
+      runtime: sendProvider.runtime,
+    });
+    const pending = await createHostedPhysicalNote({
+      ...buildRequest(251),
+      prisma: store.prisma,
+      runtime: sendProvider.runtime,
+    });
+    const pendingId = pending.physicalNoteId!;
+    const targetOrigin = recoveryOrigin(250);
+    await store.prisma.hostedPhysicalNoteRecovery.create({
+      data: {
+        memberId: MEMBER_ID,
+        originAssistantInputId: targetOrigin,
+        physicalNoteId: pendingId,
+        remainingUnresolved: true,
+        resultStatus: "pending",
+        retryAfter: new Date(Date.now() - 1_000),
+      },
+    });
+    const provider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_terminalized_target_paid",
+    }]);
+    const acceptedResponse = {
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: COST_USD_MICROS.toString(),
+      status: "accepted" as const,
+    };
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(251),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+      targetOriginAssistantInputId: targetOrigin,
+    })).resolves.toEqual(acceptedResponse);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(252),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+      targetOriginAssistantInputId: targetOrigin,
+    })).resolves.toEqual(acceptedResponse);
+
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
+    expect(store.allRecoveries()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        originAssistantInputId: recoveryOrigin(251),
+        resultStatus: "accepted",
+        settledUsageCostUsdMicros: COST_USD_MICROS,
+      }),
+      expect.objectContaining({
+        originAssistantInputId: recoveryOrigin(252),
+        resultStatus: "accepted",
+        settledUsageCostUsdMicros: COST_USD_MICROS,
+      }),
+    ]));
+  });
+
+  it("classifies a terminalized targeted pending recovery as clear", async () => {
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(254);
+    store.setCreatedAt(
+      guardId,
+      new Date(Date.now() - REPLAY_WINDOW_MS - 60_000),
+    );
+    const targetOrigin = recoveryOrigin(254);
+    await store.prisma.hostedPhysicalNoteRecovery.create({
+      data: {
+        memberId: MEMBER_ID,
+        originAssistantInputId: targetOrigin,
+        physicalNoteId: guardId,
+        remainingUnresolved: true,
+        resultStatus: "pending",
+        retryAfter: new Date(Date.now() - 1_000),
+      },
+    });
+    const provider = createPhysicalNoteRuntime([], [{ kind: "absent" }]);
+    const clearResponse = {
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: "clear" as const,
+    };
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(255),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+      targetOriginAssistantInputId: targetOrigin,
+    })).resolves.toEqual(clearResponse);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(256),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+      targetOriginAssistantInputId: targetOrigin,
+    })).resolves.toEqual(clearResponse);
+
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: "unknown",
+      providerLetterId: null,
+      status: "failed",
+    });
+  });
 
   it.each([
     {

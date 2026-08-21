@@ -1125,6 +1125,23 @@ describe.skipIf(!runPostgresProof)(
         settledUsageCostUsdMicros: null,
         status: "accepted",
       });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: buildRequest(30, beneficiary).originAssistantInputId,
+        prisma: observer,
+        runtime: {
+          async create() {
+            throw new Error("Recovery must not create a physical note.");
+          },
+          findLetterByNoteId: findProviderLetter,
+        },
+        targetOriginAssistantInputId: targetOrigin,
+      })).resolves.toEqual({
+        remainingUnresolved: true,
+        retryAfter: null,
+        settledUsageCostUsdMicros: null,
+        status: "accepted",
+      });
 
       expect(findProviderLetter).toHaveBeenCalledOnce();
       await expect(observer.hostedPhysicalNote.findUnique({

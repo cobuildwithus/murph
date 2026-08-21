@@ -429,13 +429,13 @@ async function claimHostedPhysicalNoteRecovery(input: {
           response,
         };
       }
-      const existingGuard = await findRecoveryPhysicalNoteTarget({
+      const existingTarget = await findRecoveryPhysicalNoteTarget({
         memberId: input.memberId,
         physicalNoteId: existing.physicalNoteId,
         tx,
       });
-      if (existingGuard) {
-        return { guard: existingGuard, kind: "claimed" as const };
+      if (existingTarget && isPhysicalNoteEffectGuard(existingTarget)) {
+        return { guard: existingTarget, kind: "claimed" as const };
       }
       throw new Error("Hosted physical-note recovery result is unconfirmed.");
     }
@@ -509,20 +509,28 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
       });
       return { kind: "replay" as const, response };
     }
-    const targetGuard = await findRecoveryPhysicalNoteTarget({
+    const targetNote = await findRecoveryPhysicalNoteTarget({
       memberId: input.memberId,
       physicalNoteId: targetRecovery.physicalNoteId,
       tx: input.tx,
     });
-    if (targetGuard) {
+    if (targetNote && isPhysicalNoteEffectGuard(targetNote)) {
       await input.tx.hostedPhysicalNoteRecovery.create({
         data: {
           memberId: input.memberId,
           originAssistantInputId: input.originAssistantInputId,
-          physicalNoteId: targetGuard.id,
+          physicalNoteId: targetNote.id,
         },
       });
-      return { guard: targetGuard, kind: "claimed" as const };
+      return { guard: targetNote, kind: "claimed" as const };
+    }
+    if (targetNote) {
+      return await createTerminalPhysicalNoteRecoveryTargetClaim({
+        memberId: input.memberId,
+        originAssistantInputId: input.originAssistantInputId,
+        targetNote,
+        tx: input.tx,
+      });
     }
     return await createUnconfirmedPhysicalNoteRecoveryClaim(input);
   }
@@ -551,23 +559,12 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
     return { guard: targetNote, kind: "claimed" as const };
   }
 
-  const remainingGuard = await findPhysicalNoteEffectGuard({
-    memberId: input.memberId,
-    prisma: input.tx,
-  });
-  const response = physicalNoteRecoveryResponse(
-    targetNote.status === "accepted" ? "accepted" : "clear",
-    remainingGuard !== null,
-    readSettledUsageCostForAcceptedRecoveryTarget(targetNote),
-  );
-  await createCompletedPhysicalNoteRecovery({
+  return await createTerminalPhysicalNoteRecoveryTargetClaim({
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
-    physicalNoteId: targetNote.id,
-    response,
+    targetNote,
     tx: input.tx,
   });
-  return { kind: "replay" as const, response };
 }
 
 async function createUnconfirmedPhysicalNoteRecoveryClaim(input: {
@@ -609,7 +606,7 @@ async function findRecoveryPhysicalNoteTarget(input: {
     where: { id: input.physicalNoteId },
   });
   if (!target || target.memberId !== input.memberId) return null;
-  return isPhysicalNoteEffectGuard(target) ? target : null;
+  return target;
 }
 
 function isPhysicalNoteEffectGuard(
@@ -636,6 +633,31 @@ function readSettledUsageCostForAcceptedRecoveryTarget(
     return null;
   }
   return note.providerCostUsdMicros.toString();
+}
+
+async function createTerminalPhysicalNoteRecoveryTargetClaim(input: {
+  memberId: string;
+  originAssistantInputId: string;
+  targetNote: HostedPhysicalNote;
+  tx: Prisma.TransactionClient;
+}): Promise<PhysicalNoteRecoveryClaim> {
+  const remainingGuard = await findPhysicalNoteEffectGuard({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const response = physicalNoteRecoveryResponse(
+    input.targetNote.status === "accepted" ? "accepted" : "clear",
+    remainingGuard !== null,
+    readSettledUsageCostForAcceptedRecoveryTarget(input.targetNote),
+  );
+  await createCompletedPhysicalNoteRecovery({
+    memberId: input.memberId,
+    originAssistantInputId: input.originAssistantInputId,
+    physicalNoteId: input.targetNote.id,
+    response,
+    tx: input.tx,
+  });
+  return { kind: "replay" as const, response };
 }
 
 async function createCompletedPhysicalNoteRecovery(input: {
