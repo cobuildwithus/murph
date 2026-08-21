@@ -148,11 +148,15 @@ export async function planHostedOnboardingTelegramWebhook(input: {
     let familyStripeEffectPending = false;
     let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromTelegramTx>> = null;
     let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+    let familySignupNotificationMemberId: string | null = null;
     let familyTelegramBindingMemberId: string | null = null;
     try {
       familyAcceptance = await acceptHostedFamilyInviteFromTelegramTx({
         now: new Date(summary.occurredAt),
         onAcceptedMemberActivated: (activation) => {
+          if (activation.activated) {
+            familySignupNotificationMemberId = activation.memberId;
+          }
           if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
             familyActivationWake = {
               eventId: activation.hostedExecutionEventId,
@@ -217,6 +221,13 @@ export async function planHostedOnboardingTelegramWebhook(input: {
         desiredSideEffects: [],
         postCommitGroupJoinConfirmationMemberIds: [familyAcceptance.memberId],
         postCommitPhoneCallResultRecoveryMemberIds: [familyAcceptance.memberId],
+        ...(familySignupNotificationMemberId
+          ? {
+              postCommitSignupNotificationMemberIds: [
+                familySignupNotificationMemberId,
+              ],
+            }
+          : {}),
         response: {
           ok: true,
           reason: "family-invite-accepted",

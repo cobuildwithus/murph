@@ -1196,6 +1196,9 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
       .slice(index + 1)
       .map(toHostedDeviceSyncStagedDirtyAck);
     const response = await port.ackDirtyStateProcessed({
+      ...(record.completedImports
+        ? { completedImports: record.completedImports }
+        : {}),
       connectionId: record.connectionId,
       ...(record.processedDirtyPayloadIds
         ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }

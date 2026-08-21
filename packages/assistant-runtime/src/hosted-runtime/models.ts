@@ -2,6 +2,9 @@ import type {
   ConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
 import type {
+  HostedExecutionDeviceSyncCompletedImport,
+} from "@murphai/device-syncd/hosted-runtime";
+import type {
   HostedExecutionDeviceSyncWake,
   HostedExecutionWake,
   HostedExecutionRedactedLogEntry,
@@ -147,6 +150,7 @@ export interface HostedMailboxEffect {
 }
 
 export interface HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
+  completedImports?: HostedExecutionDeviceSyncCompletedImport[];
   connectionId: string;
   nextWakeAt?: string | null;
   processedDirtyPayloadIds?: string[];

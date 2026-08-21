@@ -20,6 +20,9 @@ import {
   withHostedMemberStripeMutationLock,
 } from "./hosted-member-billing-store";
 import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -74,6 +77,12 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     prisma,
     session,
   });
+  if (activationOutcome.newlyActivatedMemberIds.length > 0) {
+    scheduleHostedSignupNotificationEmails({
+      memberIds: activationOutcome.newlyActivatedMemberIds,
+      prisma,
+    });
+  }
   if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {
     await cleanupHostedFamilySponsoredDirectSubscription({
       memberId: invite.memberId,
@@ -120,7 +129,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     memberId: activationOutcome.welcomeEmailMemberId,
     prisma,
   });
-
   return getHostedInviteStatus({
     authenticatedMember: input.member,
     inviteCode: input.inviteCode,
@@ -141,6 +149,7 @@ type HostedCheckoutSessionSuccessOutcome = {
   cleanupFamilySponsoredStripeSubscriptionId?: string | null;
   cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
+  newlyActivatedMemberIds: string[];
   welcomeEmailMemberId: string | null;
 };
 
@@ -171,6 +180,7 @@ async function applyHostedCheckoutSessionSuccessWithinUnwrapCache(
   let activationOutcome: HostedCheckoutSessionSuccessOutcome = {
     activatedMemberId: null,
     hostedExecutionEventId: null,
+    newlyActivatedMemberIds: [],
     welcomeEmailMemberId: null,
   };
 

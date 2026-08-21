@@ -108,7 +108,7 @@ import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
-  sendHostedSignupNotificationEmailForMemberBestEffort,
+  scheduleHostedSignupNotificationEmails,
 } from "./signup-notification-email";
 import {
   sendHostedSubscriptionCancellationEmailForMember,
@@ -405,6 +405,7 @@ async function processHostedStripeEventRecord(
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -931,6 +932,14 @@ async function processClaimedHostedStripeEvent(
           preflightProcessingContext,
         );
     const { memberId: processingMemberId, result } = processing;
+    if (result.newlyActivatedMemberIds.length > 0) {
+      scheduleHostedSignupNotificationEmails({
+        memberIds: result.newlyActivatedMemberIds,
+        prisma,
+        sourceEventId: claimed.eventId,
+        sourceEventType: claimed.type,
+      });
+    }
     if (result.cleanupPulseTrialStripeSubscriptionId && !processingMemberId) {
       throw new Error("Pulse Trial cleanup requires a direct billing member.");
     }
@@ -1018,12 +1027,6 @@ async function processClaimedHostedStripeEvent(
       await sendHostedSignupWelcomeEmailForMemberBestEffort({
         memberId: result.welcomeEmailMemberId,
         prisma,
-      });
-      await sendHostedSignupNotificationEmailForMemberBestEffort({
-        memberId: result.welcomeEmailMemberId,
-        prisma,
-        sourceEventId: claimed.eventId,
-        sourceEventType: claimed.type,
       });
     }
     if (result.subscriptionCancellationEmail) {
@@ -1763,6 +1766,7 @@ function mapHostedStripeActivationOutcome(
     cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId: string | null;
     hostedExecutionMailboxItemId?: string | null;
+    newlyActivatedMemberIds: string[];
     runtimeRecheckMemberIds?: string[];
     welcomeEmailMemberId?: string | null;
   },
@@ -1775,6 +1779,7 @@ function mapHostedStripeActivationOutcome(
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1792,6 +1797,7 @@ function mapHostedStripeActivationOutcome(
     hostedExecutionEventId: outcome.hostedExecutionEventId,
     hostedExecutionMailboxItemId:
       outcome.hostedExecutionMailboxItemId ?? null,
+    newlyActivatedMemberIds: outcome.newlyActivatedMemberIds,
     runtimeRecheckMemberIds: outcome.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: outcome.welcomeEmailMemberId ?? null,
@@ -1850,6 +1856,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     cleanupStandardCheckout?: HostedStripeCheckoutCleanup | null;
     hostedExecutionEventId?: string | null;
     hostedExecutionMailboxItemId?: string | null;
+    newlyActivatedMemberIds?: string[];
     runtimeRecheckMemberIds?: string[];
     subscriptionCancellationEmail?: HostedSubscriptionCancellationEmailCandidate | null;
     welcomeEmailMemberId?: string | null;
@@ -1863,6 +1870,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1880,6 +1888,7 @@ function mapHostedStripeSubscriptionUpdateOutcome(
     hostedExecutionEventId: outcome?.hostedExecutionEventId ?? null,
     hostedExecutionMailboxItemId:
       outcome?.hostedExecutionMailboxItemId ?? null,
+    newlyActivatedMemberIds: outcome?.newlyActivatedMemberIds ?? [],
     runtimeRecheckMemberIds: outcome?.runtimeRecheckMemberIds ?? [],
     subscriptionCancellationEmail:
       outcome?.subscriptionCancellationEmail ?? null,
@@ -1896,6 +1905,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
   cleanupStandardCheckout: HostedStripeCheckoutCleanup | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  newlyActivatedMemberIds: string[];
   runtimeRecheckMemberIds: string[];
   subscriptionCancellationEmail: HostedSubscriptionCancellationEmailCandidate | null;
   welcomeEmailMemberId: string | null;
@@ -1909,6 +1919,7 @@ function buildEmptyHostedStripeEventProcessingResult(): {
     cleanupStandardCheckout: null,
     hostedExecutionEventId: null,
     hostedExecutionMailboxItemId: null,
+    newlyActivatedMemberIds: [],
     runtimeRecheckMemberIds: [],
     subscriptionCancellationEmail: null,
     welcomeEmailMemberId: null,

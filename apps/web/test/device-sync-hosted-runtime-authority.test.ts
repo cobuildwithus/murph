@@ -819,6 +819,12 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
     const response = await ackHostedDeviceSyncDirtyStateProcessed({
       request: new Request("https://example.test/device-sync/runtime/dirty-ack", {
         body: JSON.stringify({
+          completedImports: [{
+            dirtyPayloadId: "dsp_payload_1",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "conn_dirty_first",
           processedDirtyPayloadIds: ["dsp_payload_1"],
           processedRevision: "3",
@@ -830,6 +836,12 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
     });
 
     expect(markDirtyConnectionProcessed).toHaveBeenCalledWith({
+      completedImports: [{
+        dirtyPayloadId: "dsp_payload_1",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "steps",
+        sourceProviderSlug: "apple_health_kit",
+      }],
       connectionId: "conn_dirty_first",
       processedDirtyPayloadIds: ["dsp_payload_1"],
       processedRevision: 3n,
