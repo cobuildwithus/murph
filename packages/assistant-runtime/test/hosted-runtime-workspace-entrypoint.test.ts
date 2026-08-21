@@ -10495,6 +10495,279 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("blocked system mailbox mode delivers one exact group-join confirmation without draining a generic notification", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const exactText = "You are now part of the synthetic group.";
+    const deliveryBodies: unknown[] = [];
+    const exactDeliveryKey = "group-join:membership_blocked_exact";
+    const exactDedupeKey =
+      `assistant.notification.requested:${exactDeliveryKey}`;
+    const genericDeliveryKey = "generic:blocked_after_group_join";
+    const genericDedupeKey =
+      `assistant.notification.requested:${genericDeliveryKey}`;
+    const exactItem = createMailboxItem({
+      dedupeKey: exactDedupeKey,
+      id: "mailbox_item_group_join_blocked_exact",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const genericItem = createMailboxItem({
+      dedupeKey: genericDedupeKey,
+      id: "mailbox_item_group_join_later_generic",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const buildResolvedNotificationItem = (
+      item: HostedMailboxItem,
+    ): HostedMailboxResolvedImportItem => ({
+      item,
+      payload: {
+        payloadCiphertext: "ciphertext",
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        requestId: `request_${item.id}`,
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "dispatch-assistant-notification",
+        advanceProgress: true,
+        itemRef: {
+          id: item.id,
+          kind: item.kind,
+          lane: item.lane,
+          laneSeq: item.laneSeq,
+        },
+        state: "route",
+      },
+    });
+    const buildNotificationWake = (input: {
+      deliveryKey: string;
+      eventId: string;
+      text: string;
+    }) =>
+      buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId: input.eventId,
+        memberId: TEST_USER_ID,
+        notification: {
+          deliveryDispatchMode: "queue-only",
+          deliveryDedupeToken: input.deliveryKey,
+          deliveryIdempotencyKey: input.deliveryKey,
+          instructions: "Send the exact private confirmation text.",
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: input.text,
+          },
+          route: {
+            actorId: null,
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "linq_private_group_join_thread",
+            },
+            identityId: "hbidx:phone:v1:group-join-test",
+            threadId: "hbidx:thread:v1:group-join-test",
+            threadIsDirect: true,
+          },
+        },
+        occurredAt: TEST_NOW,
+      });
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const method =
+        init?.method
+        ?? (request instanceof Request ? request.method : "GET");
+      const url = request instanceof Request ? request.url : String(request);
+      if (method === "POST" && url.includes("/messages")) {
+        deliveryBodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({
+          message: { id: "provider_group_join_confirmation" },
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.runAssistantAutomationPass.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: buildResolvedNotificationItem(exactItem),
+        vaultRoot,
+        wake: buildNotificationWake({
+          deliveryKey: exactDeliveryKey,
+          eventId: exactDedupeKey,
+          text: exactText,
+        }),
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: buildResolvedNotificationItem(genericItem),
+        vaultRoot,
+        wake: buildNotificationWake({
+          deliveryKey: genericDeliveryKey,
+          eventId: genericDedupeKey,
+          text: "Generic automatic message.",
+        }),
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-group-join-before.bundle.json",
+        vaultRoot,
+      });
+      const completedResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          platformEnv: {
+            TELEGRAM_BOT_TOKEN: "",
+          },
+          forwardedEnv: {
+            LINQ_API_TOKEN: "synthetic-linq-token",
+          },
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId: "attempt_synthetic_blocked_group_join_exact",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: false,
+              telegramBotConfigured: false,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [{
+              capabilityReady: true,
+              channel: "linq",
+              memberChannel: "linq",
+            }],
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/blocked-group-join.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported notifications must not import a new row.");
+          },
+          platform: {
+            ...createPlatform({
+              artifactBytesByHash: new Map([
+                [restoredWorkspace.hash, restoredWorkspace.bytes],
+              ]),
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
+              }),
+            }),
+            effectsPort: {
+              async assertLinqRecentInboundEngagement(request) {
+                assert.equal(request.target, "linq_private_group_join_thread");
+                return {
+                  providerDispatchClaimed: true,
+                  resolvedRoute: {
+                    conversationThreadId: null,
+                    directRecipientPhoneNumber: null,
+                    fromPhoneNumber: null,
+                    target: "linq_private_group_join_thread",
+                    targetKind: "thread",
+                    threadIsDirect: true,
+                  },
+                };
+              },
+              async readRawEmailMessage() {
+                return null;
+              },
+              async recordLinqDeliveryOutcome(request) {
+                events.push(
+                  `provider.record:${request.providerMessageId ?? "missing"}`,
+                );
+              },
+              async sendEmail() {},
+            },
+            providerFetch,
+          },
+          async runAssistantPhase() {
+            throw new Error("Blocked exact notification must not enter assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      const pendingAfter = await readHostedSystemMailboxState(vaultRoot);
+      const outboxAfter = await listAssistantOutboxIntents(vaultRoot);
+      assert.equal(deliveryBodies.length, 1, JSON.stringify({
+        events,
+        outbox: outboxAfter.map((intent) => ({
+          deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+          status: intent.status,
+        })),
+        pending: pendingAfter.pending.map((item) => ({
+          itemId: item.itemId,
+          mailboxDedupeKey: item.mailboxDedupeKey,
+          status: item.status,
+        })),
+        result: completedResult,
+      }));
+      expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
+      assert.deepEqual(
+        outboxAfter.map((intent) => ({
+          deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+          status: intent.status,
+        })),
+        [{
+          deliveryIdempotencyKey: exactDeliveryKey,
+          status: "sent",
+        }],
+      );
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus
+          ?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      assert.deepEqual(
+        pendingAfter.pending.map((item) => ({
+          itemId: item.itemId,
+          mailboxDedupeKey: item.mailboxDedupeKey,
+          mailboxLaneSeq: item.mailboxLaneSeq,
+        })),
+        [{
+          itemId: genericItem.id,
+          mailboxDedupeKey: genericDedupeKey,
+          mailboxLaneSeq: "2",
+        }],
+      );
+      assert.equal(completedResult.status, "idle", JSON.stringify(completedResult));
+      assert.equal(completedResult.nextWakeAt, null);
+      assert.equal(completedResult.nextWakeReason ?? null, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox mode hands ready approvals to the foreground owner before device-sync", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -11362,6 +11635,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let snapshotOrdinal = 0;
     let activeAttemptId = "unassigned";
     let failRecordCheckpoint = true;
+    let failRetryFenceCheckpoint = false;
     const refreshImplementation =
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
 
@@ -11448,6 +11722,13 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointAttempt += 1;
       checkpointRequests.push(request);
       events.push(`checkpoint.attempt:${activeAttemptId}:${checkpointAttempt}`);
+      if (
+        failRetryFenceCheckpoint
+        && request.reason === "canonical_runtime_commit"
+      ) {
+        events.push(`checkpoint.fail:${activeAttemptId}:${checkpointAttempt}`);
+        throw new Error("synthetic retry-fence checkpoint transport fault");
+      }
       if (
         failRecordCheckpoint
         && activeAttemptId === "attempt_device_sync_closed_loop_initial"
@@ -11787,6 +12068,52 @@ describe("hosted workspace runtime entrypoint", () => {
       }
       assert.equal(committedInputItem.wake.eventId, scheduleEventId);
       observedScheduleEventIds.add(committedInputItem.wake.eventId);
+      const committedInputWorkspace = currentWorkspace;
+      assert.ok(committedInputWorkspace);
+
+      failRetryFenceCheckpoint = true;
+      const rejectedRetryFenceResult = await runSystemPass({
+        attemptId:
+          "attempt_device_sync_closed_loop_retry_fence_rejected",
+        vaultRoot: warmVaultRoot,
+      });
+      assert.equal(checkpointAttempt, 2);
+      assert.equal(checkpointRequests.length, 2);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.reason),
+        ["canonical_runtime_commit", "idle_shutdown"],
+      );
+      assert.equal(providerRequestClasses.length, 0);
+      assert.equal(cadencePublications.length, 0);
+      assert.equal(
+        events.filter((event) => event.startsWith("provider.request:")).length,
+        0,
+      );
+      assert.equal(
+        events.filter((event) => event.startsWith("artifact.put:")).length,
+        0,
+      );
+      assert.ok(currentWorkspace);
+      assert.equal(currentWorkspace.version, "2");
+      assert.equal(currentWorkspace.nextWakeReason, "device-sync.reconcile");
+      assert.ok(currentWorkspace.nextWakeAt);
+      assert.equal(
+        currentWorkspace.redactedStatus
+          ?.hostedMailboxSystemHandledThroughSeq
+          ?? "0",
+        "0",
+      );
+      assert.equal(rejectedRetryFenceResult.status, "scheduled");
+      assert.equal(
+        rejectedRetryFenceResult.nextWakeReason,
+        "device-sync.reconcile",
+      );
+      assert.ok(rejectedRetryFenceResult.nextWakeAt);
+      currentWorkspace = committedInputWorkspace;
+      failRetryFenceCheckpoint = false;
+      checkpointAttempt = 0;
+      checkpointRequests.length = 0;
+      events.length = 0;
 
       await assert.rejects(
         runSystemPass({
