@@ -2115,7 +2115,11 @@ Current hosted billing assumptions:
   per-member receipt is written atomically with the first reset outcome; replay
   returns that outcome without clearing later included usage or duplicating a
   consumed Starter grant, and can repeat only a required post-commit runtime
-  wake. The dialog claims completion only after a pass has no pending wake. It
+  wake. The same locked transaction reads the live gate and exact period: a
+  valid included allowance with no materialized zero-usage row commits a skip
+  and advances, while accounting that commits first leaves a period for the
+  reset to observe. The dialog claims completion only after a pass has no
+  pending wake. It
   does not snapshot the population, pause usage, overlap interactive
   transactions, or add a campaign, queue, scheduler, or duplicate usage read
   model.

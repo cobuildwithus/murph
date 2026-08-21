@@ -157,7 +157,6 @@ export interface HostedOpsMemberUsageResetInput {
   memberId: string;
   now?: Date;
   periodStart: Date;
-  resetAllOperationId?: string;
 }
 
 export interface HostedOpsMemberUsageResetResult {
@@ -201,15 +200,6 @@ export class HostedOpsMemberUsageResetNoticeInFlightError extends Error {
   }
 }
 
-class HostedOpsMemberUsageResetAllReplayError extends Error {
-  constructor(
-    readonly result: HostedOpsMemberUsageResetAllReceiptResult,
-  ) {
-    super("Hosted ops reset-everyone member operation already completed.");
-    this.name = "HostedOpsMemberUsageResetAllReplayError";
-  }
-}
-
 interface HostedOpsMemberUsageSearchPlan {
   emailLookupKeys: string[];
   error: string | null;
@@ -228,6 +218,17 @@ interface HostedOpsMemberUsageResetAllReceiptResult
   previousSpentUsdMicros: bigint | null;
   updatedAt: Date | null;
   usageCreditGrantedUsdMicros: bigint;
+}
+
+interface HostedOpsMemberUsageResetTransactionInput {
+  expected: {
+    periodUpdatedAt: Date;
+    periodStart: Date;
+    usageCreditLedgerVersion: bigint;
+  } | null;
+  memberId: string;
+  now: Date;
+  operationId: string | null;
 }
 
 function normalizeHostedOpsMemberUsageSearch(
@@ -766,75 +767,14 @@ export async function resetHostedOpsMemberUsageForResetAll(
     attempt += 1
   ) {
     try {
-      const replay = await readHostedOpsMemberUsageResetAllReceipt({
+      const result = await resetHostedOpsMemberUsageTransaction({
+        expected: null,
         memberId: input.memberId,
         operationId: input.operationId,
-        prisma,
-      });
-      if (replay) {
-        return toHostedOpsMemberUsageResetAllResult(replay);
-      }
-
-      const snapshots = await readHostedAiUsageGateSnapshots({
-        memberIds: [input.memberId],
         now,
-        prisma,
-      });
-      const snapshot = snapshots.get(input.memberId) ?? null;
-      const decision = snapshot?.decision ?? null;
-      const resettableDecision = decision !== null && (
-        decision.allowed || decision.reason === "ai_usage_limit_exceeded"
-      );
-      if (!snapshot?.periodPersistedAt || !decision || !resettableDecision) {
-        return toHostedOpsMemberUsageResetAllResult(
-          await recordHostedOpsMemberUsageResetAllNoop({
-            memberId: input.memberId,
-            now,
-            operationId: input.operationId,
-            prisma,
-          }),
-        );
-      }
-
-      if (decision.allowanceSource === "direct_starter") {
-        const operationGrantExists =
-          await hasHostedOpsResetAllStarterGrant({
-            memberId: input.memberId,
-            operationId: input.operationId,
-            prisma,
-          });
-        if (operationGrantExists || decision.allowed) {
-          return toHostedOpsMemberUsageResetAllResult(
-            await recordHostedOpsMemberUsageResetAllNoop({
-              memberId: input.memberId,
-              now,
-              operationId: input.operationId,
-              prisma,
-            }),
-          );
-        }
-      }
-
-      const result = await resetHostedOpsMemberUsage({
-        expectedPeriodUpdatedAt: snapshot.periodPersistedAt,
-        expectedUsageCreditLedgerVersion:
-          decision.usageCreditLedgerVersion,
-        memberId: input.memberId,
-        now,
-        periodStart: decision.periodStart,
-        resetAllOperationId: input.operationId,
       }, prisma);
-      return {
-        memberId: result.memberId,
-        outcome: result.outcome,
-        resetMode: result.resetMode,
-        runtimeRecheckRequired: true,
-        timestamp: result.resetAt,
-      };
+      return toHostedOpsMemberUsageResetAllResult(result);
     } catch (error) {
-      if (error instanceof HostedOpsMemberUsageResetAllReplayError) {
-        return toHostedOpsMemberUsageResetAllResult(error.result);
-      }
       if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
         return {
           memberId: input.memberId,
@@ -899,84 +839,6 @@ async function readHostedOpsMemberUsageResetAllReceipt(input: {
     updatedAt: receipt.updatedAt,
     usageCreditGrantedUsdMicros: receipt.usageCreditGrantedUsdMicros,
   };
-}
-
-async function recordHostedOpsMemberUsageResetAllNoop(input: {
-  memberId: string;
-  now: Date;
-  operationId: string;
-  prisma: PrismaClient;
-}): Promise<HostedOpsMemberUsageResetAllReceiptResult> {
-  return input.prisma.$transaction(async (tx) => {
-    const memberRows = await tx.$queryRaw<Array<{ id: string }>>`
-      SELECT "id"
-      FROM "hosted_member"
-      WHERE "id" = ${input.memberId}
-      FOR UPDATE
-    `;
-    if (!memberRows[0]) {
-      return createHostedOpsMemberUsageResetAllNoopResult({
-        memberId: input.memberId,
-        now: input.now,
-        outcome: "skipped",
-        resetMode: null,
-        runtimeRecheckRequired: false,
-      });
-    }
-    const replay = await readHostedOpsMemberUsageResetAllReceipt({
-      memberId: input.memberId,
-      operationId: input.operationId,
-      prisma: tx,
-    });
-    if (replay) {
-      return replay;
-    }
-
-    const decision = await readHostedAiUsageGate({
-      memberId: input.memberId,
-      now: input.now,
-      prisma: tx,
-    });
-    const operationGrantExists = decision.allowanceSource === "direct_starter"
-      && await hasHostedOpsResetAllStarterGrant({
-        memberId: input.memberId,
-        operationId: input.operationId,
-        prisma: tx,
-      });
-    const requiresReset = decision.allowed
-      ? decision.allowanceSource !== "direct_starter"
-      : decision.reason === "ai_usage_limit_exceeded";
-    if (!operationGrantExists && requiresReset) {
-      throw new HostedOpsMemberUsageResetStaleError();
-    }
-    const runtimeRecheckRequired = decision.allowanceSource === "direct_starter"
-      && (operationGrantExists || decision.allowed)
-      ? await hasHostedOpsStarterResetRuntimeRecovery({
-          memberId: input.memberId,
-          prisma: tx,
-        })
-      : false;
-    const result = createHostedOpsMemberUsageResetAllNoopResult({
-      memberId: input.memberId,
-      now: input.now,
-      outcome: operationGrantExists || runtimeRecheckRequired
-        ? "unchanged"
-        : "skipped",
-      resetMode: operationGrantExists || runtimeRecheckRequired
-        ? "starter_allowance"
-        : null,
-      runtimeRecheckRequired,
-    });
-    await createHostedOpsMemberUsageResetAllReceipt({
-      operationId: input.operationId,
-      result,
-      tx,
-    });
-    return result;
-  }, {
-    ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-  });
 }
 
 function createHostedOpsMemberUsageResetAllNoopResult(input: {
@@ -1113,13 +975,25 @@ export async function resetHostedOpsMemberUsage(
   if (input.expectedUsageCreditLedgerVersion < 0n) {
     throw new TypeError("Hosted ops usage reset ledger version is invalid.");
   }
-  if (
-    input.resetAllOperationId !== undefined
-    && !isHostedOpsUsageResetAllOperationId(input.resetAllOperationId)
-  ) {
-    throw new TypeError("Hosted ops usage reset-all operation ID is invalid.");
-  }
 
+  return toHostedOpsMemberUsageResetResult(
+    await resetHostedOpsMemberUsageTransaction({
+      expected: {
+        periodStart: input.periodStart,
+        periodUpdatedAt: input.expectedPeriodUpdatedAt,
+        usageCreditLedgerVersion: input.expectedUsageCreditLedgerVersion,
+      },
+      memberId: input.memberId,
+      now,
+      operationId: null,
+    }, prisma),
+  );
+}
+
+async function resetHostedOpsMemberUsageTransaction(
+  input: HostedOpsMemberUsageResetTransactionInput,
+  prisma: PrismaClient,
+): Promise<HostedOpsMemberUsageResetAllReceiptResult> {
   return prisma.$transaction(async (tx) => {
     const memberRows = await tx.$queryRaw<Array<{
       hasActiveUsageCreditGrant: boolean;
@@ -1143,14 +1017,14 @@ export async function resetHostedOpsMemberUsage(
     if (!member) {
       throw new HostedOpsMemberUsageResetNotFoundError();
     }
-    if (input.resetAllOperationId) {
+    if (input.operationId) {
       const replay = await readHostedOpsMemberUsageResetAllReceipt({
         memberId: input.memberId,
-        operationId: input.resetAllOperationId,
+        operationId: input.operationId,
         prisma: tx,
       });
       if (replay) {
-        throw new HostedOpsMemberUsageResetAllReplayError(replay);
+        return replay;
       }
     }
     const usageCreditLedgerVersion = normalizeNonNegativeBigInt(
@@ -1159,28 +1033,91 @@ export async function resetHostedOpsMemberUsage(
     const usageCreditBalanceUsdMicros = normalizeNonNegativeBigInt(
       member.usageCreditBalanceUsdMicros,
     );
+
+    const canonicalGate = await readHostedAiUsageGate({
+      memberId: input.memberId,
+      now: input.now,
+      prisma: tx,
+    });
     if (
-      usageCreditLedgerVersion !== input.expectedUsageCreditLedgerVersion
+      canonicalGate.usageCreditBalanceUsdMicros
+        !== usageCreditBalanceUsdMicros
+      || canonicalGate.usageCreditLedgerVersion
+        !== usageCreditLedgerVersion
+    ) {
+      throw new HostedOpsMemberUsageResetStaleError();
+    }
+    if (
+      input.expected
+      && (
+        (!canonicalGate.allowed
+          && canonicalGate.reason !== "ai_usage_limit_exceeded")
+        || canonicalGate.periodStart.getTime()
+          !== input.expected.periodStart.getTime()
+        || usageCreditLedgerVersion
+          !== input.expected.usageCreditLedgerVersion
+      )
     ) {
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
-    const canonicalGate = await readHostedAiUsageGate({
-      memberId: input.memberId,
-      now,
-      prisma: tx,
-    });
+    const operationGrantExists = input.operationId
+      && canonicalGate.allowanceSource === "direct_starter"
+      ? await hasHostedOpsResetAllStarterGrant({
+          memberId: input.memberId,
+          operationId: input.operationId,
+          prisma: tx,
+        })
+      : false;
     if (
-      (!canonicalGate.allowed
-        && canonicalGate.reason !== "ai_usage_limit_exceeded")
-      || canonicalGate.periodStart.getTime() !== input.periodStart.getTime()
-      || canonicalGate.usageCreditBalanceUsdMicros
-        !== usageCreditBalanceUsdMicros
-      || canonicalGate.usageCreditLedgerVersion
-        !== input.expectedUsageCreditLedgerVersion
+      input.operationId
+      && canonicalGate.allowanceSource === "direct_starter"
+      && (operationGrantExists || canonicalGate.allowed)
     ) {
-      throw new HostedOpsMemberUsageResetStaleError();
+      const runtimeRecheckRequired =
+        await hasHostedOpsStarterResetRuntimeRecovery({
+          memberId: input.memberId,
+          prisma: tx,
+        });
+      const result = createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: operationGrantExists || runtimeRecheckRequired
+          ? "unchanged"
+          : "skipped",
+        resetMode: operationGrantExists || runtimeRecheckRequired
+          ? "starter_allowance"
+          : null,
+        runtimeRecheckRequired,
+      });
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+      return result;
     }
+
+    const resettableDecision = canonicalGate.allowed
+      || canonicalGate.reason === "ai_usage_limit_exceeded";
+    if (input.operationId && !resettableDecision) {
+      const result = createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+      });
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+      return result;
+    }
+
+    const periodStart = input.expected?.periodStart
+      ?? canonicalGate.periodStart;
     const resetMode: HostedOpsMemberUsageResetMode =
       canonicalGate.allowanceSource === "direct_starter"
         ? "starter_allowance"
@@ -1217,22 +1154,39 @@ export async function resetHostedOpsMemberUsage(
         "updated_at" AS "updatedAt"
       FROM "hosted_ai_usage_period"
       WHERE "member_id" = ${input.memberId}
-        AND "period_start" = ${input.periodStart}
+        AND "period_start" = ${periodStart}
       FOR UPDATE
     `;
     const period = periodRows[0];
     if (!period) {
-      throw new HostedOpsMemberUsageResetNotFoundError();
+      if (!input.operationId) {
+        throw new HostedOpsMemberUsageResetNotFoundError();
+      }
+      const result = createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+      });
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+      return result;
     }
     if (
-      period.updatedAt.getTime() !== input.expectedPeriodUpdatedAt.getTime()
+      input.expected
+      && period.updatedAt.getTime()
+        !== input.expected.periodUpdatedAt.getTime()
     ) {
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
     const noticeLookupKey = buildHostedUsageNoticeLookupKey({
       memberId: input.memberId,
-      periodStart: input.periodStart,
+      periodStart,
       planResetAt: canonicalGate.planResetAt,
       usageCreditLedgerVersion,
     });
@@ -1264,7 +1218,10 @@ export async function resetHostedOpsMemberUsage(
         `
       : [];
     const delivery = deliveryRows[0] ?? null;
-    if (delivery && isHostedUsageNoticeDispatchInFlight({ delivery, now })) {
+    if (
+      delivery
+      && isHostedUsageNoticeDispatchInFlight({ delivery, now: input.now })
+    ) {
       throw new HostedOpsMemberUsageResetNoticeInFlightError(
         new Date(
           delivery.attemptedAt.getTime()
@@ -1289,17 +1246,17 @@ export async function resetHostedOpsMemberUsage(
     let usageCreditGrantedUsdMicros = 0n;
     if (resetMode === "starter_allowance") {
       const grant = await appendHostedUsageCreditGrantTx({
-        effectiveAt: now,
+        effectiveAt: input.now,
         grantUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
         lockedBeneficiary: {
           balanceUsdMicros: usageCreditBalanceUsdMicros,
           beneficiaryMemberId: input.memberId,
           ledgerVersion: usageCreditLedgerVersion,
         },
-        semanticSourceKey: input.resetAllOperationId
+        semanticSourceKey: input.operationId
           ? buildHostedOpsStarterResetAllSemanticSourceKey({
               memberId: input.memberId,
-              operationId: input.resetAllOperationId,
+              operationId: input.operationId,
             })
           : buildHostedOpsStarterResetSemanticSourceKey({
               memberId: input.memberId,
@@ -1324,11 +1281,11 @@ export async function resetHostedOpsMemberUsage(
         data: {
           blockedAt: null,
           spentUsdMicros: 0n,
-          updatedAt: now,
+          updatedAt: input.now,
         },
         where: {
           memberId: input.memberId,
-          periodStart: input.periodStart,
+          periodStart,
           ...(resetMode === "included_usage"
             ? { updatedAt: period.updatedAt }
             : {}),
@@ -1343,30 +1300,18 @@ export async function resetHostedOpsMemberUsage(
       memberId: input.memberId,
       noticeClaimReleased: delivery !== null,
       outcome,
-      periodStart: input.periodStart.toISOString(),
-      previousSpentUsdMicros: period.spentUsdMicros.toString(),
-      resetAt: now.toISOString(),
+      periodStart,
+      previousSpentUsdMicros: period.spentUsdMicros,
       resetMode,
-      updatedAt: outcome === "reset"
-        ? now.toISOString()
-        : period.updatedAt.toISOString(),
-      usageCreditGrantedUsdMicros: usageCreditGrantedUsdMicros.toString(),
-    } satisfies HostedOpsMemberUsageResetResult;
-    if (input.resetAllOperationId) {
+      runtimeRecheckRequired: true,
+      timestamp: input.now.toISOString(),
+      updatedAt: outcome === "reset" ? input.now : period.updatedAt,
+      usageCreditGrantedUsdMicros,
+    } satisfies HostedOpsMemberUsageResetAllReceiptResult;
+    if (input.operationId) {
       await createHostedOpsMemberUsageResetAllReceipt({
-        operationId: input.resetAllOperationId,
-        result: {
-          memberId: result.memberId,
-          noticeClaimReleased: result.noticeClaimReleased,
-          outcome: result.outcome,
-          periodStart: input.periodStart,
-          previousSpentUsdMicros: period.spentUsdMicros,
-          resetMode: result.resetMode,
-          runtimeRecheckRequired: true,
-          timestamp: result.resetAt,
-          updatedAt: outcome === "reset" ? now : period.updatedAt,
-          usageCreditGrantedUsdMicros,
-        },
+        operationId: input.operationId,
+        result,
         tx,
       });
     }
@@ -1375,6 +1320,32 @@ export async function resetHostedOpsMemberUsage(
     ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
+}
+
+function toHostedOpsMemberUsageResetResult(
+  result: HostedOpsMemberUsageResetAllReceiptResult,
+): HostedOpsMemberUsageResetResult {
+  if (
+    result.outcome === "skipped"
+    || result.periodStart === null
+    || result.previousSpentUsdMicros === null
+    || result.resetMode === null
+    || result.updatedAt === null
+  ) {
+    throw new TypeError("Hosted ops row reset returned an invalid result.");
+  }
+  return {
+    memberId: result.memberId,
+    noticeClaimReleased: result.noticeClaimReleased,
+    outcome: result.outcome,
+    periodStart: result.periodStart.toISOString(),
+    previousSpentUsdMicros: result.previousSpentUsdMicros.toString(),
+    resetAt: result.timestamp,
+    resetMode: result.resetMode,
+    updatedAt: result.updatedAt.toISOString(),
+    usageCreditGrantedUsdMicros:
+      result.usageCreditGrantedUsdMicros.toString(),
+  };
 }
 
 async function createHostedOpsMemberUsageResetAllReceipt(input: {

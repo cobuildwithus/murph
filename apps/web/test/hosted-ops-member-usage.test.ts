@@ -307,12 +307,6 @@ describe("hosted ops member usage", () => {
           usageCreditBalanceUsdMicros: 4_500_000n,
           usageCreditLedgerVersion: 44n,
         });
-    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValueOnce(
-      new Map([["hbm_starter", {
-        decision,
-        periodPersistedAt: PERIOD_UPDATED_AT,
-      }]]),
-    );
     usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(decision);
     const findOperationGrant = vi.fn(async () => null);
     const findResetGrants = vi.fn(async () => [{
@@ -322,7 +316,11 @@ describe("hosted ops member usage", () => {
       userId: "hbm_starter",
     }]);
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "hbm_starter" }]),
+      $queryRaw: vi.fn(async () => [{
+        hasActiveUsageCreditGrant: true,
+        usageCreditBalanceUsdMicros: 4_500_000n,
+        usageCreditLedgerVersion: 44n,
+      }]),
       hostedMailboxItem: { findMany: findStalledMailboxItems },
       hostedOpsUsageResetReceipt: {
         create: vi.fn(async ({ data }) => data),
@@ -402,12 +400,6 @@ describe("hosted ops member usage", () => {
           usageCreditBalanceUsdMicros: 0n,
           usageCreditLedgerVersion: 45n,
         });
-    usageAllowanceMocks.readHostedAiUsageGateSnapshots.mockResolvedValueOnce(
-      new Map([["hbm_starter", {
-        decision,
-        periodPersistedAt: PERIOD_UPDATED_AT,
-      }]]),
-    );
     usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(decision);
     const findOperationGrant = vi.fn(async () => ({
       amountUsdMicros: 4_500_000n,
@@ -426,7 +418,11 @@ describe("hosted ops member usage", () => {
     }));
     const findResetGrants = vi.fn(async () => []);
     const tx = {
-      $queryRaw: vi.fn(async () => [{ id: "hbm_starter" }]),
+      $queryRaw: vi.fn(async () => [{
+        hasActiveUsageCreditGrant: false,
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 45n,
+      }]),
       hostedMailboxItem: { findMany: vi.fn(async () => []) },
       hostedOpsUsageResetReceipt: {
         create: vi.fn(async ({ data }) => data),
@@ -475,7 +471,6 @@ describe("hosted ops member usage", () => {
   });
 
   test("replays one included-usage receipt without re-reading mutable allowance", async () => {
-    const transaction = vi.fn();
     const findReceipt = vi.fn(async () => ({
       createdAt: NOW,
       memberId: "hbm_container",
@@ -490,12 +485,22 @@ describe("hosted ops member usage", () => {
       updatedAt: NOW,
       usageCreditGrantedUsdMicros: 0n,
     }));
-    const prisma = asPrismaClientForHostedOpsTest({
-      $transaction: transaction,
+    const tx = {
+      $queryRaw: vi.fn(async () => [{
+        hasActiveUsageCreditGrant: false,
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 4n,
+      }]),
       hostedOpsUsageResetReceipt: {
         create: vi.fn(),
         findUnique: findReceipt,
       },
+    };
+    const transaction = vi.fn(async (
+      run: (client: typeof tx) => Promise<unknown>,
+    ) => run(tx));
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: transaction,
     });
 
     await expect(resetHostedOpsMemberUsageForResetAll({
@@ -517,9 +522,52 @@ describe("hosted ops member usage", () => {
         },
       },
     });
-    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+    expect(usageAllowanceMocks.readHostedAiUsageGate)
       .not.toHaveBeenCalled();
-    expect(transaction).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  test("records an allowed included member with no persisted period as skipped", async () => {
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+      makeUsageGateDecision({
+        allowed: true,
+        reason: null,
+        remainingUsdMicros: 4_500_000n,
+        spentUsdMicros: 0n,
+        usageCreditBalanceUsdMicros: 0n,
+        usageCreditLedgerVersion: 4n,
+        userNotice: null,
+      }),
+    );
+    const tx = createResetTransactionFixture({ periodExists: false });
+    const transaction = vi.fn(async (
+      run: (client: typeof tx) => Promise<unknown>,
+    ) => run(tx));
+    const prisma = asPrismaClientForHostedOpsTest({
+      $transaction: transaction,
+    });
+
+    await expect(resetHostedOpsMemberUsageForResetAll({
+      memberId: "hbm_container",
+      now: NOW,
+      operationId: RESET_ALL_OPERATION_ID,
+    }, prisma)).resolves.toEqual({
+      memberId: "hbm_container",
+      outcome: "skipped",
+      resetMode: null,
+      runtimeRecheckRequired: false,
+      timestamp: NOW.toISOString(),
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(usageAllowanceMocks.readHostedAiUsageGate).toHaveBeenCalledTimes(1);
+    expect(tx.hostedOpsUsageResetReceipt.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        memberId: "hbm_container",
+        operationId: RESET_ALL_OPERATION_ID,
+        outcome: "skipped",
+      }),
+    });
+    expect(tx.hostedAiUsagePeriod.updateMany).not.toHaveBeenCalled();
   });
 
   test("reports members and containers from canonical retained and immutable rows", async () => {
@@ -1230,29 +1278,14 @@ describe("hosted ops member usage", () => {
     const refreshedPeriodUpdatedAt = new Date(
       PERIOD_UPDATED_AT.getTime() + 1_000,
     );
-    usageAllowanceMocks.readHostedAiUsageGateSnapshots
-      .mockResolvedValueOnce(new Map([["hbm_container", {
-        decision: makeUsageGateDecision({
-          usageCreditBalanceUsdMicros: 0n,
-          usageCreditLedgerVersion: 4n,
-        }),
-        periodPersistedAt: PERIOD_UPDATED_AT,
-      }]]))
-      .mockResolvedValueOnce(new Map([["hbm_container", {
-        decision: makeUsageGateDecision({
-          usageCreditBalanceUsdMicros: 0n,
-          usageCreditLedgerVersion: 5n,
-        }),
-        periodPersistedAt: refreshedPeriodUpdatedAt,
-      }]]));
-    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValueOnce(
+    usageAllowanceMocks.readHostedAiUsageGate.mockResolvedValue(
       makeUsageGateDecision({
         usageCreditBalanceUsdMicros: 0n,
         usageCreditLedgerVersion: 5n,
       }),
     );
     const staleTx = createResetTransactionFixture({
-      usageCreditLedgerVersion: 5n,
+      usageCreditLedgerVersion: 4n,
     });
     const refreshedTx = createResetTransactionFixture({
       periodUpdatedAt: refreshedPeriodUpdatedAt,
@@ -1281,7 +1314,7 @@ describe("hosted ops member usage", () => {
       resetMode: "included_usage",
       runtimeRecheckRequired: true,
     });
-    expect(usageAllowanceMocks.readHostedAiUsageGateSnapshots)
+    expect(usageAllowanceMocks.readHostedAiUsageGate)
       .toHaveBeenCalledTimes(2);
     expect(transaction).toHaveBeenCalledTimes(2);
     expect(staleTx.hostedLinqDelivery.update).not.toHaveBeenCalled();
@@ -1433,13 +1466,10 @@ describe("hosted ops member usage", () => {
         run(tx)),
     });
 
-    await resetHostedOpsMemberUsage({
-      expectedPeriodUpdatedAt: PERIOD_UPDATED_AT,
-      expectedUsageCreditLedgerVersion: 4n,
+    await resetHostedOpsMemberUsageForResetAll({
       memberId: "hbm_container",
       now: NOW,
-      periodStart: PERIOD_START,
-      resetAllOperationId: RESET_ALL_OPERATION_ID,
+      operationId: RESET_ALL_OPERATION_ID,
     }, prisma);
 
     expect(usageCreditGrantMocks.appendHostedUsageCreditGrantTx)
@@ -1728,6 +1758,7 @@ function createResetTransactionFixture(input: {
   blockedAt?: Date | null;
   delivery?: ReturnType<typeof makeDelivery> | null;
   memberExists?: boolean;
+  periodExists?: boolean;
   periodUpdatedAt?: Date;
   spentUsdMicros?: bigint;
   usageCreditBalanceUsdMicros?: bigint;
@@ -1742,14 +1773,16 @@ function createResetTransactionFixture(input: {
             input.usageCreditBalanceUsdMicros ?? 0n,
           usageCreditLedgerVersion: input.usageCreditLedgerVersion ?? 4n,
         }],
-    [{
-      blockedAt: input.blockedAt === undefined
-        ? new Date("2026-07-22T17:25:30.000Z")
-        : input.blockedAt,
-      periodEnd: PERIOD_END,
-      spentUsdMicros: input.spentUsdMicros ?? 4_522_964n,
-      updatedAt: input.periodUpdatedAt ?? PERIOD_UPDATED_AT,
-    }],
+    input.periodExists === false
+      ? []
+      : [{
+          blockedAt: input.blockedAt === undefined
+            ? new Date("2026-07-22T17:25:30.000Z")
+            : input.blockedAt,
+          periodEnd: PERIOD_END,
+          spentUsdMicros: input.spentUsdMicros ?? 4_522_964n,
+          updatedAt: input.periodUpdatedAt ?? PERIOD_UPDATED_AT,
+        }],
     input.delivery === null ? [] : [input.delivery ?? makeDelivery()],
   ];
   return {
@@ -1763,8 +1796,15 @@ function createResetTransactionFixture(input: {
     hostedLinqDelivery: {
       update: vi.fn(async () => ({ id: "delivery_1" })),
     },
+    hostedMailboxItem: {
+      findMany: vi.fn(async () => []),
+    },
     hostedOpsUsageResetReceipt: {
       create: vi.fn(async ({ data }) => data),
+      findUnique: vi.fn(async () => null),
+    },
+    hostedUsageCreditEntry: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => null),
     },
   };

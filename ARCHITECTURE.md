@@ -3405,6 +3405,11 @@ recovery requests. The canonical per-member reset transaction writes one
 append-only receipt keyed by that UUID and member ID; the receipt freezes every
 stable outcome so replay cannot clear included usage that accrued after the
 first reset or append another Starter grant after the first was consumed.
+The same member-locked serializable owner resolves the live gate and exact
+period existence before choosing that outcome. A valid included allowance with
+no materialized zero-usage period records a skipped receipt and advances the
+walk without manufacturing a period; canonical accounting that wins the lock
+first instead leaves a real period for the reset to observe and clear.
 Starter grants retain the same immutable semantic source key. This adds no
 campaign, queue, scheduler, population snapshot, or second usage projection. A
 replayed receipt may repeat only the post-commit runtime recheck when its frozen

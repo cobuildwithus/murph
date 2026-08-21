@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-20
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -60,6 +60,9 @@ through a final reset, skipped, pending-wake, and failed summary.
 - Member with concurrent usage or an in-flight notice: stale or temporarily
   unsafe work fails closed for that member and remains visible in the final
   batch result instead of making the global action look fully successful.
+- Member with valid included allowance but no materialized zero-usage period:
+  the member-locked owner records a stable skip without creating a period and
+  the batch advances; later accounting remains later usage on replay.
 - Interrupted operator: each request handles a fixed small batch. Retrying from
   the last acknowledged cursor, or recovering from the beginning after an
   ambiguous response with the same operation UUID, reuses immutable member

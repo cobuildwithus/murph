@@ -370,6 +370,51 @@ describe("hosted ops usage reset route", () => {
     }
   });
 
+  test("acknowledges a stable no-period skip and advances to the next member", async () => {
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds: ["hbm_reset_001", "hbm_reset_002"],
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_001",
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+        timestamp: NOW.toISOString(),
+      })
+      .mockResolvedValueOnce({
+        memberId: "hbm_reset_002",
+        outcome: "reset",
+        resetMode: "included_usage",
+        runtimeRecheckRequired: false,
+        timestamp: NOW.toISOString(),
+      });
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 2,
+        reset: 1,
+        skipped: 1,
+        unchanged: 0,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_002",
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll)
+      .toHaveBeenNthCalledWith(2, {
+        memberId: "hbm_reset_002",
+        operationId: RESET_ALL_OPERATION_ID,
+      });
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
+  });
+
   test("stops at a failed member and returns the last acknowledged cursor", async () => {
     mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
       hasMore: true,

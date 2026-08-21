@@ -420,6 +420,15 @@ in their immutable semantic source key. A concurrent same-operation request
 that loses the receipt race receives one bounded serialization retry. Receipts
 contain no decrypted contact value and are deleted with their member.
 
+That transaction is also the sole outcome authority: after the member lock and
+receipt check it reads the live gate and the exact current-period row. An
+allowed paid, Family-sponsored, or group-container member whose zero-usage
+period has not been materialized records a stable skipped receipt without
+creating a usage row, so the population walk acknowledges that member and
+continues. If canonical accounting commits the period first, the same locked
+owner observes and resets it; if the skip commits first, later accounting is
+new usage and same-operation replay preserves it.
+
 The server locks the member and period in the same order as usage accounting
 and verifies the period timestamp and usage-credit ledger version shown to the
 operator. In the same serializable transaction it releases only the matching

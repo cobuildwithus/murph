@@ -403,6 +403,268 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("records stable skips for paid, Family, and group allowances without a materialized period", async () => {
+      const fixtureId = randomUUID();
+      const ownerMemberId = `hbm_ops_no_period_owner_${fixtureId}`;
+      const directMemberId = `hbm_ops_no_period_direct_${fixtureId}`;
+      const familyMemberId = `hbm_ops_no_period_family_${fixtureId}`;
+      const containerMemberId = `hbm_ops_no_period_container_${fixtureId}`;
+      const groupId = `hbag_ops_no_period_${fixtureId}`;
+      const periodStart = new Date("2026-08-01T00:00:00.000Z");
+      const periodEnd = new Date("2026-09-01T00:00:00.000Z");
+      const resetAt = new Date("2026-08-20T16:00:00.000Z");
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const operationIds = new Map([
+        [directMemberId, randomUUID()],
+        [familyMemberId, randomUUID()],
+        [containerMemberId, randomUUID()],
+      ]);
+
+      try {
+        await prisma.hostedMember.create({
+          data: {
+            billingStatus: HostedBillingStatus.active,
+            id: ownerMemberId,
+          },
+        });
+        await prisma.hostedMember.create({
+          data: {
+            billingRef: {
+              create: {
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+              },
+            },
+            billingStatus: HostedBillingStatus.active,
+            id: directMemberId,
+          },
+        });
+        await prisma.hostedMember.createMany({
+          data: [
+            { id: familyMemberId },
+            { id: containerMemberId },
+          ],
+        });
+        await prisma.hostedAccountGroup.create({
+          data: {
+            billingRef: {
+              create: {
+                billedSeatCount: 2,
+                currentBillingPhase: "paid",
+                currentBillingPlanCode: "launch_family_monthly",
+                currentPeriodEnd: periodEnd,
+                currentPeriodStart: periodStart,
+              },
+            },
+            billingStatus: HostedBillingStatus.active,
+            id: groupId,
+            memberships: {
+              create: [{
+                id: `hbagm_ops_no_period_${fixtureId}`,
+                joinedAt: periodStart,
+                memberId: familyMemberId,
+                planCode: "pulse",
+                role: "member",
+                status: "active",
+              }],
+            },
+            ownerMemberId,
+            planCapacities: {
+              create: {
+                billedQuantity: 2,
+                planCode: "pulse",
+              },
+            },
+          },
+        });
+        await prisma.hostedThreadContainer.create({
+          data: {
+            memberId: containerMemberId,
+            monthlyUsageLimitUsdMicros: 7_500_000n,
+            ownerMemberId,
+          },
+        });
+
+        await expect(readHostedAiUsageGate({
+          memberId: directMemberId,
+          now: resetAt,
+          prisma,
+        })).resolves.toMatchObject({
+          allowed: true,
+          allowanceSource: "direct_paid_member_plan",
+        });
+        await expect(readHostedAiUsageGate({
+          memberId: familyMemberId,
+          now: resetAt,
+          prisma,
+        })).resolves.toMatchObject({
+          allowed: true,
+          allowanceSource: "family_sponsored_plan",
+        });
+        await expect(readHostedAiUsageGate({
+          memberId: containerMemberId,
+          now: resetAt,
+          prisma,
+        })).resolves.toMatchObject({
+          allowed: true,
+          allowanceSource: "thread_container",
+        });
+
+        for (const [memberId, operationId] of operationIds) {
+          await expect(resetHostedOpsMemberUsageForResetAll({
+            memberId,
+            now: resetAt,
+            operationId,
+          }, prisma)).resolves.toMatchObject({
+            memberId,
+            outcome: "skipped",
+            resetMode: null,
+            runtimeRecheckRequired: false,
+          });
+        }
+
+        await expect(prisma.hostedAiUsagePeriod.count({
+          where: { memberId: { in: [...operationIds.keys()] } },
+        })).resolves.toBe(0);
+        await expect(prisma.hostedOpsUsageResetReceipt.count({
+          where: { memberId: { in: [...operationIds.keys()] } },
+        })).resolves.toBe(3);
+      } finally {
+        await prisma.hostedAccountGroup.deleteMany({ where: { id: groupId } });
+        await prisma.hostedMember.deleteMany({
+          where: { id: containerMemberId },
+        });
+        await prisma.hostedMember.deleteMany({
+          where: {
+            id: {
+              in: [directMemberId, familyMemberId, ownerMemberId],
+            },
+          },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
+    it("preserves both locked orderings between a no-period reset and canonical accounting", async () => {
+      const fixtureId = randomUUID();
+      const resetFirstMemberId = `hbm_ops_reset_first_${fixtureId}`;
+      const accountingFirstMemberId = `hbm_ops_account_first_${fixtureId}`;
+      const resetFirstOperationId = randomUUID();
+      const accountingFirstOperationId = randomUUID();
+      const periodStart = new Date("2026-08-01T00:00:00.000Z");
+      const periodEnd = new Date("2026-09-01T00:00:00.000Z");
+      const resetAt = new Date("2026-08-20T16:30:00.000Z");
+      const usageAt = new Date(resetAt.getTime() + 1_000);
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
+      const resetFirstRecord = makeIncludedUsageRecord({
+        fixtureId: `reset_first_${fixtureId}`,
+        memberId: resetFirstMemberId,
+        occurredAt: usageAt,
+        usageId: `usage_ops_reset_first_${fixtureId}`,
+      });
+      const accountingFirstRecord = makeIncludedUsageRecord({
+        fixtureId: `account_first_${fixtureId}`,
+        memberId: accountingFirstMemberId,
+        occurredAt: usageAt,
+        usageId: `usage_ops_account_first_${fixtureId}`,
+      });
+
+      try {
+        for (const memberId of [resetFirstMemberId, accountingFirstMemberId]) {
+          await prisma.hostedMember.create({
+            data: {
+              billingRef: {
+                create: {
+                  currentBillingPhase: "paid",
+                  currentBillingPlanCode: "launch_monthly",
+                  currentPeriodEnd: periodEnd,
+                  currentPeriodStart: periodStart,
+                },
+              },
+              billingStatus: HostedBillingStatus.active,
+              id: memberId,
+            },
+          });
+        }
+
+        await expect(resetHostedOpsMemberUsageForResetAll({
+          memberId: resetFirstMemberId,
+          now: resetAt,
+          operationId: resetFirstOperationId,
+        }, prisma)).resolves.toMatchObject({ outcome: "skipped" });
+        await insertIncludedUsageRecord({ prisma, record: resetFirstRecord });
+        await prisma.$transaction(async (tx) => {
+          await accountHostedAiUsageForAllowanceTx({
+            memberId: resetFirstMemberId,
+            now: usageAt,
+            record: resetFirstRecord,
+            tx,
+          });
+        });
+        const resetFirstPeriod =
+          await prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+            select: { spentUsdMicros: true },
+            where: {
+              memberId_periodStart: {
+                memberId: resetFirstMemberId,
+                periodStart,
+              },
+            },
+          });
+        expect(resetFirstPeriod.spentUsdMicros).toBeGreaterThan(0n);
+        await expect(resetHostedOpsMemberUsageForResetAll({
+          memberId: resetFirstMemberId,
+          now: new Date(usageAt.getTime() + 1_000),
+          operationId: resetFirstOperationId,
+        }, prisma)).resolves.toMatchObject({ outcome: "skipped" });
+        await expect(prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+          select: { spentUsdMicros: true },
+          where: {
+            memberId_periodStart: {
+              memberId: resetFirstMemberId,
+              periodStart,
+            },
+          },
+        })).resolves.toEqual(resetFirstPeriod);
+
+        await insertIncludedUsageRecord({
+          prisma,
+          record: accountingFirstRecord,
+        });
+        await prisma.$transaction(async (tx) => {
+          await accountHostedAiUsageForAllowanceTx({
+            memberId: accountingFirstMemberId,
+            now: usageAt,
+            record: accountingFirstRecord,
+            tx,
+          });
+        });
+        await expect(resetHostedOpsMemberUsageForResetAll({
+          memberId: accountingFirstMemberId,
+          now: new Date(usageAt.getTime() + 2_000),
+          operationId: accountingFirstOperationId,
+        }, prisma)).resolves.toMatchObject({ outcome: "reset" });
+        await expect(prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+          select: { spentUsdMicros: true },
+          where: {
+            memberId_periodStart: {
+              memberId: accountingFirstMemberId,
+              periodStart,
+            },
+          },
+        })).resolves.toEqual({ spentUsdMicros: 0n });
+      } finally {
+        await prisma.hostedMember.deleteMany({
+          where: {
+            id: { in: [resetFirstMemberId, accountingFirstMemberId] },
+          },
+        });
+        await prisma.$disconnect();
+      }
+    });
+
     it("restores exhausted Starter capacity without rewriting prior credit history", async () => {
       const fixtureId = randomUUID();
       const memberId = `hbm_ops_starter_reset_${fixtureId}`;
