@@ -1575,7 +1575,7 @@ describe("completeHostedPrivyVerification", () => {
         timeout: 5_000,
       },
     );
-    expect(lockQuery).toHaveBeenCalledTimes(3);
+    expect(lockQuery).toHaveBeenCalledTimes(4);
     expect(prisma.hostedMemberEmailAuthorization.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({

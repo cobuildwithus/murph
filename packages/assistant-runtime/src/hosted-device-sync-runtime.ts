@@ -150,11 +150,6 @@ interface HostedDirtyDeviceSyncAdmissionResult {
   pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
 }
 
-interface HostedDeviceSyncWakeHintApplyResult {
-  pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[];
-  superseded: boolean;
-}
-
 type HostedRuntimeDeviceSyncStore = ReturnType<typeof requireHostedRuntimeDeviceSyncStore>;
 type HostedAccountHydrationInput = Parameters<HostedRuntimeDeviceSyncStore["hydrateHostedAccount"]>[0];
 type HostedDeviceSyncRuntimeClient = HostedRuntimeDeviceSyncPort | null;
@@ -406,20 +401,15 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
   }
 
   if (input.wake.kind === "device-sync.wake") {
-    const wakeHintResult = await applyHostedDeviceSyncWakeHint({
+    const superseded = await applyHostedDeviceSyncWakeHint({
       wake: input.wake,
       hostedToLocalAccountIds: state.hostedToLocalAccountIds,
       service: input.service,
     });
-    if (wakeHintResult.superseded) {
+    if (superseded) {
       state.wakeSuperseded = true;
       return state;
     }
-    state.pendingDirtyPayloadJobs = wakeHintResult.pendingDirtyPayloadJobs;
-    state.pendingDirtyAcks = buildHostedRetainedDirtyPayloadAcks(
-      wakeHintResult.pendingDirtyPayloadJobs,
-      null,
-    );
   }
   if (
     input.skipDirtyPendingFetch !== true
@@ -431,7 +421,6 @@ export async function syncHostedDeviceSyncControlPlaneState(input: {
       signal: input.signal ?? null,
       service: input.service,
       stagedDirtyAcks: input.stagedDirtyAcks ?? null,
-      retainedDirtyPayloadJobs: state.pendingDirtyPayloadJobs,
       wake: input.wake,
     });
     state.pendingDirtyAcks = dirtyState.acks;
@@ -459,7 +448,6 @@ export async function applyHostedPendingDirtyDeviceSyncStateForWake(input: {
     signal: input.signal ?? null,
     service: input.service,
     stagedDirtyAcks: input.stagedDirtyAcks ?? null,
-    retainedDirtyPayloadJobs: input.state.pendingDirtyPayloadJobs,
     wake: input.wake,
   });
   input.state.pendingDirtyAcks = dirtyState.acks;
@@ -767,9 +755,9 @@ async function applyHostedDeviceSyncWakeHint(input: {
   wake: HostedRuntimeEvent;
   hostedToLocalAccountIds: Map<string, string>;
   service: DeviceSyncService;
-}): Promise<HostedDeviceSyncWakeHintApplyResult> {
+}): Promise<boolean> {
   if (input.wake.kind !== "device-sync.wake") {
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   const wake = resolveHostedDeviceSyncWakeContext(input.wake);
@@ -777,13 +765,13 @@ async function applyHostedDeviceSyncWakeHint(input: {
   const store = requireHostedRuntimeDeviceSyncStore(input.service);
 
   if (!localAccountId) {
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   const account = store.getAccountById(localAccountId);
 
   if (!account) {
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   // Missing epochs remain readable during deploy skew, but have no authority.
@@ -791,7 +779,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     wake.expectedConnectedAt === null
     || wake.expectedConnectedAt !== account.connectedAt
   ) {
-    return { pendingDirtyPayloadJobs: [], superseded: true };
+    return true;
   }
 
   const terminalStatus = readHostedTerminalDeviceSyncStatus(account);
@@ -802,7 +790,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       status: terminalStatus,
       store,
     });
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   if (input.wake.reason === "disconnected") {
@@ -813,7 +801,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_DISCONNECTED",
       "Hosted device-sync wake marked the connection as disconnected.",
     );
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   if (input.wake.reason === "reauthorization_required") {
@@ -827,7 +815,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
       "HOSTED_DEVICE_SYNC_REAUTHORIZATION_REQUIRED",
       "Hosted device-sync wake marked the connection as requiring reconnection.",
     );
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   const jobHints = normalizeHostedDeviceSyncJobHints(wake.hint);
@@ -840,7 +828,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     && jobHints.length === 0
   ) {
     input.service.queueManualReconcile(localAccountId);
-    return { pendingDirtyPayloadJobs: [], superseded: false };
+    return false;
   }
 
   for (const [index, hint] of jobHints.entries()) {
@@ -872,7 +860,7 @@ async function applyHostedDeviceSyncWakeHint(input: {
     store.patchAccount(localAccountId, wakePatch);
   }
 
-  return { pendingDirtyPayloadJobs: [], superseded: false };
+  return false;
 }
 
 export function resolveHostedDeviceSyncWakeLocalAccountId(input: {
@@ -1041,7 +1029,6 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
   signal?: AbortSignal | null;
   service: DeviceSyncService;
   stagedDirtyAcks?: readonly HostedExecutionDeviceSyncStagedDirtyAck[] | null;
-  retainedDirtyPayloadJobs?: readonly HostedDeviceSyncRuntimeDirtyPayloadJob[];
   wake: HostedRuntimeEvent;
 }): Promise<{
   acks: HostedDeviceSyncRuntimeDirtyAck[];
@@ -1062,58 +1049,16 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
       ? { stagedDirtyAcks: [...input.stagedDirtyAcks] }
       : {}),
   });
-  const retainedDirtyPayloadJobs = (input.retainedDirtyPayloadJobs ?? []).map((pendingJob) => ({
-    ...pendingJob,
-  }));
-  const retainedDirtyPayloadIds = new Set(
-    retainedDirtyPayloadJobs.flatMap((pendingJob) =>
-      pendingJob.dirtyPayloadId ? [pendingJob.dirtyPayloadId] : []
-    ),
-  );
   const acks: HostedDeviceSyncRuntimeDirtyAck[] = [];
-  const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [
-    ...retainedDirtyPayloadJobs,
-  ];
-  const unmatchedRetainedJobIndexes = new Set(
-    retainedDirtyPayloadJobs.map((_pendingJob, index) => index),
-  );
+  const pendingDirtyPayloadJobs: HostedDeviceSyncRuntimeDirtyPayloadJob[] = [];
   let hasMoreForWake = pending.hasMore;
 
   for (const dirtyState of pending.items) {
     if (!wakeConnectionId || dirtyState.connectionId !== wakeConnectionId) {
       continue;
     }
-    const unretainedDirtyResources = dirtyState.dirtyResources.filter((resource) =>
-      !resource.dirtyPayloadId || !retainedDirtyPayloadIds.has(resource.dirtyPayloadId)
-    );
-    const matchedRetainedJobIndexes = retainedDirtyPayloadJobs.flatMap((pendingJob, index) =>
-      pendingJob.dirtyPayloadId
-        && dirtyState.dirtyResources.some(
-          (resource) => resource.dirtyPayloadId === pendingJob.dirtyPayloadId,
-        )
-        ? [index]
-        : []
-    );
-    if (unretainedDirtyResources.length === 0 && dirtyState.dirtyResources.length > 0) {
-      for (const index of matchedRetainedJobIndexes) {
-        const retained = retainedDirtyPayloadJobs[index];
-        if (!retained) {
-          continue;
-        }
-        retained.processedRevision = dirtyState.dirtyRevision;
-        unmatchedRetainedJobIndexes.delete(index);
-        mergeHostedDeviceSyncRuntimeDirtyAck(acks, {
-          connectionId: retained.connectionId,
-          nextWakeAt: pending.nextWakeAt,
-          processedRevision: retained.processedRevision,
-        });
-      }
-      continue;
-    }
     const applied = applyHostedDirtyDeviceSyncState({
-      dirtyState: unretainedDirtyResources.length === dirtyState.dirtyResources.length
-        ? dirtyState
-        : { ...dirtyState, dirtyResources: unretainedDirtyResources },
+      dirtyState,
       hostedToLocalAccountIds: input.hostedToLocalAccountIds,
       nextWakeAt: pending.nextWakeAt,
       service: input.service,
@@ -1121,71 +1066,13 @@ async function applyHostedPendingDirtyDeviceSyncState(input: {
     });
 
     if (applied) {
-      for (const index of matchedRetainedJobIndexes) {
-        const retained = retainedDirtyPayloadJobs[index];
-        if (!retained) {
-          continue;
-        }
-        retained.processedRevision = applied.ack.processedRevision;
-        unmatchedRetainedJobIndexes.delete(index);
-      }
-      mergeHostedDeviceSyncRuntimeDirtyAck(acks, applied.ack);
+      acks.push(applied.ack);
       pendingDirtyPayloadJobs.push(...applied.pendingDirtyPayloadJobs);
       hasMoreForWake = hasMoreForWake || applied.deferredJobCount > 0;
     }
   }
 
-  for (const index of unmatchedRetainedJobIndexes) {
-    const retained = retainedDirtyPayloadJobs[index];
-    if (!retained) {
-      continue;
-    }
-    mergeHostedDeviceSyncRuntimeDirtyAck(acks, {
-      connectionId: retained.connectionId,
-      nextWakeAt: pending.nextWakeAt,
-      processedRevision: retained.processedRevision,
-    });
-  }
-
   return { acks, hasMoreForWake, pendingDirtyPayloadJobs };
-}
-
-function buildHostedRetainedDirtyPayloadAcks(
-  pendingJobs: readonly HostedDeviceSyncRuntimeDirtyPayloadJob[],
-  nextWakeAt: string | null,
-): HostedDeviceSyncRuntimeDirtyAck[] {
-  const acks: HostedDeviceSyncRuntimeDirtyAck[] = [];
-  for (const pending of pendingJobs) {
-    mergeHostedDeviceSyncRuntimeDirtyAck(acks, {
-      connectionId: pending.connectionId,
-      nextWakeAt,
-      processedRevision: pending.processedRevision,
-    });
-  }
-  return acks;
-}
-
-function mergeHostedDeviceSyncRuntimeDirtyAck(
-  acks: HostedDeviceSyncRuntimeDirtyAck[],
-  incoming: HostedDeviceSyncRuntimeDirtyAck,
-): void {
-  const existing = acks.find((ack) =>
-    ack.connectionId === incoming.connectionId
-    && ack.processedRevision === incoming.processedRevision
-  );
-  if (!existing) {
-    acks.push(incoming);
-    return;
-  }
-  existing.nextWakeAt = minOptionalIso(existing.nextWakeAt, incoming.nextWakeAt);
-  if (incoming.processedDirtyPayloadIds) {
-    existing.processedDirtyPayloadIds = [
-      ...new Set([
-        ...(existing.processedDirtyPayloadIds ?? []),
-        ...incoming.processedDirtyPayloadIds,
-      ]),
-    ];
-  }
 }
 
 function applyHostedDirtyDeviceSyncState(input: {
