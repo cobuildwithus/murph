@@ -113,6 +113,24 @@ or concise fallback.
   into its existing clause. The walkthrough is `Ready`; it adds no audience,
   state owner, or delivery path.
 
+## ReviewGPT Round 2 Retrospective
+
+- Trigger: the same compatibility-at-one-layer failure repeated when target
+  authority accepted the legacy calorie owner but later attachment still
+  restated a canonical-only eligibility rule.
+- Requirement decision: a resolved compatible legacy `calories`/`kcal` owner
+  authorizes every normal daily-card attachment path, including a later request
+  after managed macro and fiber proposal activation supplies the missing slots.
+- Shape decision: target-authority is the single eligibility owner. Proposal
+  activation and later card attachment consume its resolved complete bundle
+  directly instead of rechecking accepted metric keys downstream.
+- Complexity disposition: delete duplicated eligibility policy; do not add a
+  new exception, prompt overlay, state owner, lifecycle, or Goal repair path.
+- Proof: prompt-contract tests assert the stale canonical-only gates are absent,
+  and scripted runtime coverage exercises legacy calorie plus managed macro and
+  fiber activation, later card delivery, conflict rejection, and no legacy Goal
+  mutation.
+
 ## Provider Input Measurement
 
 - A pinned real Codex App Server and local scripted Responses endpoint captured

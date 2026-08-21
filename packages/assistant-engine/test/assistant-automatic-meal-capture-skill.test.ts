@@ -183,7 +183,7 @@ describe('assistant automatic meal capture skill', () => {
       'Then run the shared gate\'s bounded body-measurement read, separate `pregnancy-test` measurement read, and bounded canonical test-event list plus every required test detail read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-evidence read uses the same failure behavior.',
     )
     expect(compactSkill).toContain(
-      'Only when all five qualifying exact point targets resolve from active canonical Goals',
+      'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
     )
     expect(compactSkill).toContain(
       'New authoring uses `dietary-calories`. For the card\'s calorie slot only, an existing applicable active exact-point `calories` target in `kcal` is a read-only legacy alias when no `dietary-calories` owner exists.',
@@ -268,6 +268,12 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(compactSkill).toContain(
       'If numeric presentation is suppressed, or the active target bundle is ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
+    )
+    expect(compactSkill).toContain(
+      'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
+    )
+    expect(compactSkill).not.toContain(
+      'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).not.toContain(
       'follow it exactly. Resolve all five targets from active canonical Goals.',

@@ -169,6 +169,9 @@ describe('assistant food journal skill', () => {
       'target-authority and complete active-Goal discovery contract',
     )
     expect(skill).toContain(
+      'before deciding that the accepted active bundle is complete for the card',
+    )
+    expect(skill).not.toContain(
       'before deciding that the five canonical daily goals are complete',
     )
     expect(skill).toContain(

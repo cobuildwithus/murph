@@ -281,11 +281,13 @@ Use the existing canonical Goal owner; add no new state surface.
    in that acceptance response when the pending
    request is still unambiguous and the card alone completes it. A
    target-setting-only request, correction, decline, ambiguous acceptance, or
-   compound request remains ordinary text with no card. Otherwise, only a later
-   eligible response with five exact point values in the exact canonical
-   metric/unit pairs resolved from active canonical goals may attach the card.
-   On an interactive card request, explain an existing paused proposal again
-   unless the member is accepting or changing it.
+   compound request remains ordinary text with no card. Otherwise, a later
+   eligible response may attach the card only when the target-authority read
+   above resolves one complete, unambiguous card-authorizing bundle. Consume
+   that resolved bundle directly; do not restate accepted metric keys or require
+   a second `dietary-calories` owner after calorie resolution. On an interactive
+   card request, explain an existing paused proposal again unless the member is
+   accepting or changing it.
 
 ## Evidence register
 

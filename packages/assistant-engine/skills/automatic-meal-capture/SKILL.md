@@ -280,8 +280,8 @@ On a scheduled run:
    derive from its bound, and never create, replace, or remove a managed target
    around it. On a scheduled occurrence, ask no question, perform no Goal or
    measurement mutation, and use ordinary closeout text without a card.
-7. Only when all five qualifying exact point targets resolve from active
-   canonical Goals, run the exact canonical
+7. Only when the complete target-authority read in step 6 resolves one
+   unambiguous card-authorizing bundle, run the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
    range immediately before any response-card attachment; do not reuse an
    earlier total or calculate nutrition independently. When the run covers

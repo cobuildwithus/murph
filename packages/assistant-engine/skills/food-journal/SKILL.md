@@ -91,7 +91,7 @@ mandatory before deriving, saving, or surfacing a proposal and again before
 activating one. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-before deciding that the five canonical daily goals are complete. Use its
+before deciding that the accepted active bundle is complete for the card. Use its
 proposal workflow only if a target is genuinely missing after that read and the
 member made an explicit numeric-card or target-setting request. Default meal-card
 intent never invokes it.

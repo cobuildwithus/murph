@@ -397,6 +397,15 @@ describe('assistant nutrition strategy skill', () => {
       'A target-setting-only request, correction, decline, ambiguous acceptance, or compound request remains ordinary text with no card.',
     )
     expect(compactGoals).toContain(
+      'Otherwise, a later eligible response may attach the card only when the target-authority read above resolves one complete, unambiguous card-authorizing bundle.',
+    )
+    expect(compactGoals).toContain(
+      'Consume that resolved bundle directly; do not restate accepted metric keys or require a second `dietary-calories` owner after calorie resolution.',
+    )
+    expect(compactGoals).not.toContain(
+      'five-value bundle from active canonical Goals',
+    )
+    expect(compactGoals).toContain(
       'A member- or clinician-chosen active target always wins for its metric.',
     )
     expect(compactGoals).toContain(
@@ -428,6 +437,9 @@ describe('assistant nutrition strategy skill', () => {
     )
     expect(compactGoals).toContain(
       'Do not extend this alias to another workflow or author new `calories` targets.',
+    )
+    expect(compactGoals).not.toContain(
+      'five exact point values in the exact canonical metric/unit pairs resolved from active canonical goals',
     )
     expect(compactGoals).toContain(
       'This fixed-unit workflow accepts the resolved calorie owner above in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
