@@ -11,6 +11,7 @@ export * from "./experiment-storage.ts";
 export * from "./frontmatter.ts";
 export * from "./habitat-catalog.ts";
 export * from "./habitat-coverage.ts";
+export * from "./environment-interview.ts";
 export * from "./health-entities.ts";
 export * from "./health-commons.ts";
 export * from "./ids.ts";

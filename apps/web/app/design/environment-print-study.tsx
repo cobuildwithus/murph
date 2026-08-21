@@ -4,6 +4,7 @@ import {
   EnvironmentPrintReport,
 } from "../(dashboard)/environment/environment-print-report";
 import {
+  type HabitatIndicatorNotes,
   type HabitatValues,
   resolveEnvironmentCoverage,
   resolveHabitatScene,
@@ -15,12 +16,17 @@ const DESIGN_VALUES: HabitatValues = {
     location: "Warsaw",
   },
   "home-air": {
+    air_purifier: "hepa",
+    air_quality_meter: "combined",
     damp_or_mold: "none",
     smoke_sources: "none",
     ventilation: "mechanical",
   },
+  "health-devices": {
+    bp_cuff: true,
+  },
   lighting: {
-    daytime_light: "by_window",
+    daytime_light: "dim",
     evening_light: "warm_dim",
     morning_light_access: "outdoor_routine",
   },
@@ -29,7 +35,7 @@ const DESIGN_VALUES: HabitatValues = {
     darkness: "blackout",
     mattress_satisfaction: "good",
     night_noise: "quiet",
-    night_temp_c: 20,
+    night_temp_c: 24,
     phone_by_bed: false,
     tv_in_bedroom: false,
   },
@@ -41,10 +47,20 @@ const DESIGN_VALUES: HabitatValues = {
   },
 };
 
+const DESIGN_NOTES: HabitatIndicatorNotes = {
+  "sleep-environment": {
+    night_temp_c: "Usually 19°C, with the window closed and AC available.",
+  },
+  workspace: {
+    screen_setup:
+      "Large external display. Eyes line up with the middle of the screen.",
+  },
+};
+
 export function EnvironmentPrintStudy() {
   const scene = resolveHabitatScene(DESIGN_VALUES);
   const notes = scene.categories.map((category) =>
-    deriveCategoryNote(category, DESIGN_VALUES),
+    deriveCategoryNote(category, DESIGN_VALUES, DESIGN_NOTES),
   );
 
   return (
@@ -69,7 +85,7 @@ export function EnvironmentPrintStudy() {
             context={{ areaType: "urban center", location: "Warsaw" }}
             coverage={resolveEnvironmentCoverage(scene)}
             generatedOn="July 31, 2026"
-            grade={overallGrade(notes)}
+            grade={overallGrade(notes, DESIGN_VALUES)}
             notes={notes}
           />
         </div>

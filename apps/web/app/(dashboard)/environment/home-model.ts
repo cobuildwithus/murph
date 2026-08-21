@@ -12,6 +12,8 @@ export type HabitatValues = Record<
   Record<string, HabitatIndicatorValue>
 >;
 
+export type HabitatIndicatorNotes = Record<string, Record<string, string>>;
+
 export interface ObjectSprite {
   src: string;
   w: number;

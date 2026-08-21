@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 300,
+  "item": {
+    "id": "realtime-environment-interview",
+    "kind": "feature",
+    "priority": 5,
+    "title": "Talk through your Environment report",
+    "summary": "You can now complete your Environment report in one live voice session while Murph marks clear details as you speak.",
+    "details": "Move through short topics with your voice or the on-screen controls. Murph saves confirmed details as you go, while the live transcript stays out of your report.",
+    "relevanceTags": ["environment", "voice", "reports", "web"],
+    "sourcePullRequests": [2100],
+    "tryIt": {
+      "href": "/environment",
+      "label": "Open your Environment report"
+    }
+  }
+}

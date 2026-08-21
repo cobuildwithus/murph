@@ -442,7 +442,13 @@ export class RuntimeProcessingController {
       activeFence.processingMode === "system_mailbox"
       && requestedProcessingMode === "default";
     if (activeFence.processingMode !== requestedProcessingMode) {
-      if (activeFence.processingMode === "inbox_media_retention") {
+      if (
+        activeFence.processingMode === "inbox_media_retention"
+        || (
+          activeFence.processingMode === "system_mailbox"
+          && requestedProcessingMode === "environment_interview"
+        )
+      ) {
         return await this.preemptActiveBackgroundRuntimeForPriorityProcessing({
           activeFence,
           commandBudget: input.commandBudget,
@@ -1476,7 +1482,9 @@ class HostedRuntimeHealthDataConsentStopError extends Error {
 function normalizeRuntimeProcessingMode(
   value: RuntimeProcessingInput["processingMode"],
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" || value === "system_mailbox"
+  return value === "environment_interview"
+      || value === "inbox_media_retention"
+      || value === "system_mailbox"
     ? value
     : "default";
 }

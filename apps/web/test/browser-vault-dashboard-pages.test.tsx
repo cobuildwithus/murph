@@ -433,9 +433,9 @@ test("EnvironmentPage gives zero-data members one clear start and previews the r
   const markup = renderToStaticMarkup(await EnvironmentPage());
 
   assert.match(markup, /See how your home supports your sleep, air and focus/);
-  assert.match(markup, /Start the 2-minute walkthrough/);
+  assert.match(markup, /Start report/);
   assert.match(markup, /Prefer typing\? Use chat/);
-  assert.match(markup, /Murph will turn the clear details/);
+  assert.match(markup, /Murph saves each clear answer before moving on/);
   assert.match(markup, /Your report will cover/);
   assert.match(markup, /class="flex w-full flex-col gap-10"/);
   assert.doesNotMatch(
