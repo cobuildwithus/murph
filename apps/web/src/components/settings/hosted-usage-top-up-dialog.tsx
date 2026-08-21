@@ -283,20 +283,12 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
   const confirmationIndicator =
     showGroupMessagesAction && statusContent ? (
       <div
-        className="flex items-center gap-2.5"
+        className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
         role="status"
         aria-live="polite"
         aria-label={`${statusContent.title}. ${statusContent.message}`}
       >
-        <span
-          className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <CheckIcon className="size-4 stroke-[2.5]" />
-        </span>
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-primary">
-          Nice one
-        </span>
+        <CheckIcon aria-hidden="true" className="size-4 stroke-[2.5]" />
       </div>
     ) : null;
   const screenContent = (
@@ -679,7 +671,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
           <DrawerHeader
             className={cn(
               "relative items-start gap-2 px-6 pb-2 pt-2 text-left",
-              showGroupMessagesAction && "gap-3",
+              showGroupMessagesAction && "items-center gap-3",
             )}
           >
             {confirmationIndicator}
@@ -689,7 +681,7 @@ function HostedUsageTopUpDialog(props: HostedUsageTopUpDialogProps) {
               className={cn(
                 "pr-10 font-serif text-3xl font-semibold leading-[1.1] tracking-tight text-foreground outline-none",
                 showGroupMessagesAction &&
-                  "max-w-md text-4xl leading-[1.05] tracking-[-0.03em]",
+                  "max-w-md pr-0 text-4xl leading-[1.05] tracking-[-0.03em]",
               )}
             >
               {headerTitle}
