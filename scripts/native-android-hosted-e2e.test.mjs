@@ -553,7 +553,7 @@ test("trusted workflow is pinned, protected, source-bound, and shares the destru
   assert.match(workflow, /previous_filename/u);
   assert.match(workflow, /context='Native Android hosted E2E'/u);
   assert.match(workflow, /github\.run_attempt == 1/u);
-  assert.match(workflow, /environment: native-android-hosted-e2e/u);
+  assert.match(workflow, /environment: native-ios-hosted-e2e/u);
   assert.match(workflow, /timeout-minutes: 150/u);
   assert.match(workflow, /timeout-minutes: 110/u);
   assert.match(workflow, /environment: native-android-production-canary/u);
@@ -564,6 +564,12 @@ test("trusted workflow is pinned, protected, source-bound, and shares the destru
   assert.match(workflow, /NATIVE_ANDROID_E2E_ANDROID_REF/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_ANDROID_WORKFLOW/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY/u);
+  assert.match(workflow, /secrets\.NATIVE_IOS_E2E_DATABASE_URL/u);
+  assert.match(workflow, /secrets\.NATIVE_IOS_E2E_PRIVY_TEST_PHONE/u);
+  assert.match(workflow, /secrets\.NATIVE_IOS_E2E_VERCEL_TOKEN/u);
+  assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_DATABASE_URL/u);
+  assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_PRIVY_TEST_PHONE/u);
+  assert.doesNotMatch(workflow, /secrets\.NATIVE_ANDROID_E2E_VERCEL_TOKEN/u);
   assert.doesNotMatch(workflow, /create-github-app-token|NATIVE_ANDROID_E2E_GITHUB_TOKEN/u);
   assert.doesNotMatch(workflow, /upload-artifact|download-artifact/u);
   for (const line of workflow.split("\n").filter((value) => /^\s*uses:/u.test(value))) {
