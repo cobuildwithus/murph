@@ -109,6 +109,7 @@ export default function EnvironmentPageClient({
   const voiceRecheckRequestedAtRef = useRef(0);
   const voiceVaultRefreshRequestedRef = useRef(false);
   const voiceAcceptanceGenerationRef = useRef(0);
+  const voiceRefreshMountedRef = useRef(true);
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -156,6 +157,10 @@ export default function EnvironmentPageClient({
       status: "processing",
     });
   }, [dataVersion, valuesSignature]);
+
+  useEffect(() => () => {
+    voiceRefreshMountedRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (status === "loading" || checkedInitialVoiceProcessingRef.current) {
@@ -239,23 +244,22 @@ export default function EnvironmentPageClient({
                     selectEnvironmentHabitatIndicatorNotes(nextClient),
                   values: selectEnvironmentHabitatValues(nextClient),
                 }) !== refreshBaseline;
+              if (
+                voiceRefreshMountedRef.current &&
+                voiceAcceptanceGenerationRef.current === acceptanceGeneration &&
+                observedUpdatedReplica
+              ) {
+                voiceVaultRefreshRequestedRef.current = false;
+                setVoiceRefreshState({
+                  baselineValues: refreshBaseline,
+                  status: "completed",
+                });
+              }
               return observedUpdatedReplica;
             },
           }).catch(() => {
             voiceVaultRefreshRequestedRef.current = false;
           });
-          if (
-            !cancelled &&
-            voiceAcceptanceGenerationRef.current === acceptanceGeneration &&
-            observedUpdatedReplica
-          ) {
-            voiceVaultRefreshRequestedRef.current = false;
-            setVoiceRefreshState({
-              baselineValues: refreshBaseline,
-              status: "completed",
-            });
-            return;
-          }
         }
         if (!cancelled) {
           timeoutId = setTimeout(
