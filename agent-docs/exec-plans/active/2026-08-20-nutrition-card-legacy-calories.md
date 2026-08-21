@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-20
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -29,8 +29,10 @@ card's safety gate.
 
 Members with an older accepted calorie target can receive the same daily
 nutrition card as members with a newly authored canonical target. A routine
-card request resolves end to end before Murph replies instead of narrating the
-internal preflight.
+fast card request resolves end to end in one response. If the same bounded
+workflow is genuinely delayed, Murph may send one brief outcome-oriented
+acknowledgement without narrating the internal preflight, then returns one card
+or concise fallback.
 
 ### Reaches
 
@@ -50,8 +52,9 @@ internal preflight.
 - A mapping regression proves a legacy calorie target produces the canonical
   calorie card snapshot while incompatible units and comparators remain
   rejected.
-- Prompt-contract coverage proves routine daily-card fulfillment skips
-  progress messages while preserving the final truthful fallback.
+- Prompt-contract coverage proves fast daily-card fulfillment skips progress,
+  while a delayed production-shaped pass sends one non-technical update before
+  30 seconds and preserves the final card or truthful fallback.
 
 ## Constraints
 
@@ -69,8 +72,9 @@ internal preflight.
 
 1. Update the nutrition-card goal, safety, meal-closeout, food-journal, and
    response-card tool contracts with one consistent legacy-alias rule.
-2. Keep routine card fulfillment silent until its card or concise fallback is
-   ready.
+2. Keep fast card fulfillment to one final response and allow at most one
+   outcome-oriented acknowledgement only when the bounded pass will keep the
+   member waiting.
 3. Add focused regression coverage for legacy mapping and prompt behavior.
 4. Add a member-facing changelog item, run focused verification and typecheck,
    then complete the exact-head review, CI, commit, and PR workflow.
@@ -95,15 +99,19 @@ internal preflight.
   no card.
 - Routine interactive request: the card workflow completes its meal estimate,
   totals, safety, and target checks before the final response. Food-journal and
-  response-card contract tests prohibit a progress message for those internal
-  steps and require one card or concise fallback.
+  response-card contracts prohibit narrating those mechanics. The fast-path
+  production case sends no progress; a controlled delayed pass with six benign
+  conditions and six benign regimens accepts one outcome-oriented update before
+  30 seconds, then reaches the card in the same turn.
 - Safety or data failure: one exact generic-read fallback may recover a failed
   or truncated condition or regimen detail. An incomplete or ambiguous
   fallback remains fail-closed; no fields or records are omitted.
-- Difference from plan: none. The walkthrough is `Ready`; it restores the
-  existing card promise without adding an audience, state owner, or delivery
-  path. The unchanged card attachment and message-delivery owners remain
-  covered by their existing runtime tests.
+- Difference from plan: final ReviewGPT round 1 found that absolute progress
+  suppression could leave a delayed request silent and that the resident tool
+  description duplicated its compatibility rules. The remediation reuses the
+  existing direct-turn progress owner only for delayed work and folds each rule
+  into its existing clause. The walkthrough is `Ready`; it adds no audience,
+  state owner, or delivery path.
 
 ## Provider Input Measurement
 
@@ -113,9 +121,10 @@ internal preflight.
   removing only the new compatibility fragment, keeping the fixture and every
   other serialized field identical.
 - With `gpt-tokenizer` 3.4.0 `o200k_harmony`, the private request changes from
-  15,879 tokens / 71,241 UTF-8 bytes to 16,094 / 72,380 (+215 tokens,
-  +1.3540%; +1,139 bytes). The group request remains 14,187 tokens / 61,593
-  bytes. Captured fields were `include`, `input`, `instructions`,
+  15,879 tokens / 71,241 UTF-8 bytes to 16,049 / 72,106 (+170 tokens,
+  +1.0706%; +865 bytes). This is 45 tokens / 274 bytes smaller than the first
+  reviewed version. The group request remains 14,187 tokens / 61,593 bytes.
+  Captured fields were `include`, `input`, `instructions`,
   `parallel_tool_calls`, `text`, `tool_choice`, and `tools` when present;
   model selection, reasoning, storage, streaming, service tier, cache/client
   metadata, and transport headers were excluded identically. Temporary paths

@@ -891,20 +891,50 @@ describe('murph.attach_response_card', () => {
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'do not call murph.send_progress_update merely to announce safety, totals, estimation, or target-resolution checks',
+      'Skip progress within ordinary latency',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'the calorie slot accepts one applicable active exact-point legacy calories target in kcal when no dietary-calories owner exists',
+      'use the direct-turn progress owner once before slow work',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'If a canonical owner exists, use it only when every applicable legacy alias is an identical compatible point; a different value, incompatible alias, or multiple legacy-only owners is a conflict.',
+      'Keep it outcome-oriented; never narrate safety, totals, estimation, or target resolution.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Never rename or mutate a Goal merely to repair the legacy key.',
+      'resolve calories from dietary-calories or read-only legacy calories in kcal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'retry a failed, explicitly truncated, or unreadable family-specific show exactly once through vault-cli show <same-id> --format json',
+      'Without it, accept one compatible legacy owner',
     )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'with it, ignore only identical compatible legacy aliases',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Never mutate a Goal to repair its key.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'retry the same id once with vault-cli show <same-id> --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Continue only from one complete unambiguous canonical record; otherwise fail closed.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
+    )
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('resolve calories from').length - 1,
+    ).toBe(1)
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('retry the same id once').length - 1,
+    ).toBe(1)
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('Author only dietary-calories').length - 1,
+    ).toBe(1)
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'V2 adds fiber and nullable goal snapshots',
     )
@@ -924,7 +954,7 @@ describe('murph.attach_response_card', () => {
       'Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
+      'plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active canonical Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Each target must use selected-value comparator between with identical numeric value and highValue',
@@ -1030,9 +1060,6 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'never select by title, substance, severity, context-snapshot visibility, or the default list prefix',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window',

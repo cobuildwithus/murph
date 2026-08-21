@@ -178,10 +178,16 @@ describe('assistant food journal skill', () => {
       'Treat a routine daily-card request, including a requested meal estimate needed\nfor that card, as one fulfillment workflow.',
     )
     expect(skill).toContain(
-      'Do not call\n`murph.send_progress_update` merely to announce safety, totals, estimation, or\ntarget-resolution checks.',
+      'Skip progress when the pass will\nfinish within ordinary conversational latency',
     )
     expect(skill).toContain(
-      'reply once with the card or one concise truthful fallback',
+      'reply once with the card or\none concise truthful fallback',
+    )
+    expect(skill).toContain(
+      'reuse the existing direct-turn progress owner for one brief, outcome-oriented\nacknowledgement before the first slow phase',
+    )
+    expect(skill).toContain(
+      'Never narrate individual safety,\ntotals, estimation, or target-resolution mechanics.',
     )
     expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',

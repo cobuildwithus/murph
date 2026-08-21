@@ -62,6 +62,7 @@ import {
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import type {
   VoiceMemoToolRuntime,
@@ -7718,10 +7719,13 @@ if (!tool) {
 
     const runCase = async (input: {
       card?: Record<string, unknown>
+      commandDelaySeconds?: number
       commandOutputs: readonly (readonly [string, unknown])[]
       expectedCommands: readonly string[]
       failedCommands?: readonly string[]
       finalMessage: string
+      progressAvailable?: boolean
+      progressText?: string
       prompt: string
       scheduled: boolean
       snapshotPrompt?: string
@@ -7763,6 +7767,9 @@ if (!tool) {
         [
           '#!/bin/sh',
           'set -eu',
+          ...(input.commandDelaySeconds
+            ? [`sleep ${input.commandDelaySeconds}`]
+            : []),
           ...input.expectedCommands.map(
             (command) =>
               `printf '%s\\n' ${quotePosixShellLiteral(command)} >> ${quotePosixShellLiteral(commandLog)}`,
@@ -7773,6 +7780,18 @@ if (!tool) {
       )
 
       const responses: ScriptedResponse[] = []
+      if (input.progressText) {
+        if (!input.progressAvailable) {
+          throw new Error('A scripted progress update requires progress delivery.')
+        }
+        responses.push({
+          functionCall: {
+            arguments: { text: input.progressText },
+            name: 'send_progress_update',
+            namespace: 'murph',
+          },
+        })
+      }
       if (input.expectedCommands.length > 0) {
         responses.push({
           customToolCall: {
@@ -7812,6 +7831,8 @@ text(result.output);
       scenario.stub.queue(...responses)
 
       try {
+        const progressUpdates: Array<{ elapsedMs: number; text: string }> = []
+        const turnStartedAt = Date.now()
         const result = await executeCodexAppServerTurn({
           ...scenario.turnInput,
           baseInstructions: buildScriptedHostedSystemPrompt(
@@ -7820,18 +7841,43 @@ text(result.output);
             input.scheduled ? '2026-07-30T21:00:00.000-04:00' : undefined,
             input.snapshotPrompt,
           ),
-          dynamicTools: [MURPH_ATTACH_RESPONSE_CARD_TOOL],
+          dynamicTools: [
+            MURPH_ATTACH_RESPONSE_CARD_TOOL,
+            ...(input.progressAvailable
+              ? [MURPH_SEND_PROGRESS_UPDATE_TOOL]
+              : []),
+          ],
           env: {
             ...scenario.turnInput.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
           },
           groupConversation: false,
+          progressDelivery: input.progressAvailable
+            ? {
+                send: async (text) => {
+                  progressUpdates.push({
+                    elapsedMs: Date.now() - turnStartedAt,
+                    text,
+                  })
+                  return { kind: 'sent', source: 'model' }
+                },
+              }
+            : undefined,
           prompt: input.prompt,
           sandbox: 'danger-full-access',
         })
         const commandLogText = (await readFile(commandLog, 'utf8')).trim()
         const commands = commandLogText === '' ? [] : commandLogText.split('\n')
         expect(commands).toEqual(input.expectedCommands)
+        expect(progressUpdates.map(({ text }) => text)).toEqual(
+          input.progressText ? [input.progressText] : [],
+        )
+        for (const update of progressUpdates) {
+          expect(update.elapsedMs).toBeLessThan(30_000)
+          expect(update.text).not.toMatch(
+            /safety|totals|estimat|target-resolution/i,
+          )
+        }
         expect(result.responseCard).toEqual(input.card ?? null)
         if (input.card) {
           expect(result.finalMessage).toContain(
@@ -7955,6 +8001,7 @@ text(result.output);
         skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
       },
       {
+        progressAvailable: true,
         prompt: 'Show my eligible daily nutrition card for 2026-07-30.',
         scheduled: false,
         skillReadCommands: interactiveSkillReads,
@@ -9203,6 +9250,7 @@ text(result.output);
 
     await runCase({
       card: eligibleCard,
+      commandDelaySeconds: 2,
       commandOutputs: [
         [activeListCommand, completeList],
         [visibleGoalShowCommand, visibleGoal],
@@ -9228,6 +9276,8 @@ text(result.output);
         totalsCommand,
       ],
       finalMessage: 'CARD_ATTACHED_AFTER_COMPLETE_SAFETY_READ',
+      progressAvailable: true,
+      progressText: 'I’m getting today’s full card ready now.',
       prompt: 'Show my eligible daily nutrition card after checking all six benign active conditions and regimens.',
       scheduled: false,
       skillReadCommands: interactiveSkillReads,
