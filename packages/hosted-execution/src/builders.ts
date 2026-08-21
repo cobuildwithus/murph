@@ -561,6 +561,9 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.groupContextHandoff === undefined
+      ? {}
+      : { groupContextHandoff: { ...value.groupContextHandoff } }),
     ...(value.privateAssistantAskCompletion === undefined
       ? {}
       : {

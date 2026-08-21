@@ -1,0 +1,311 @@
+name: Native Android Hosted E2E
+
+on:
+  workflow_run:
+    workflows:
+      - Repo Hygiene
+    types:
+      - completed
+  deployment_status:
+
+# Secret-bearing jobs execute only this trusted default-branch workflow. PR code
+# is deployed by exact SHA to the dedicated hosted-native Vercel environment;
+# it is never checked out on a runner holding E2E credentials.
+permissions:
+  contents: read
+
+concurrency:
+  group: native-android-hosted-e2e-${{ github.event.workflow_run.pull_requests[0].number || github.event.deployment.sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  select-pr:
+    name: Select native Android hosted E2E
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      head_ref: ${{ steps.select.outputs.head_ref }}
+      head_sha: ${{ steps.select.outputs.head_sha }}
+      selected: ${{ steps.select.outputs.selected }}
+      trusted: ${{ steps.select.outputs.trusted }}
+    steps:
+      - name: Resolve exact PR head and relevant owners
+        id: select
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          head_sha="$(jq -r '.head.sha' <<<"${pr}")"
+          head_ref="$(jq -r '.head.ref' <<<"${pr}")"
+          head_repo="$(jq -r '.head.repo.full_name // ""' <<<"${pr}")"
+          author_type="$(jq -r '.user.type // ""' <<<"${pr}")"
+
+          if [[ "${head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then
+            echo "::error::PR head changed after Repo Hygiene; rerun against the current head."
+            exit 1
+          fi
+
+          trusted=false
+          if [[ "${head_repo}" == "${GITHUB_REPOSITORY}" && "${author_type}" == User ]]; then
+            trusted=true
+          fi
+
+          changed_files="$(jq -r '.changed_files' <<<"${pr}")"
+          [[ "${changed_files}" =~ ^[0-9]+$ ]] || { echo "::error::PR changed-file count was invalid."; exit 1; }
+
+          selected=false
+          if (( changed_files > 3000 )); then
+            selected=true
+          else
+            while IFS= read -r file; do
+              case "${file}" in
+                apps/web/*|\
+                packages/assistant-runtime/*|packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|\
+                packages/device-syncd/*|packages/gateway-core/*|packages/health-commons/*|packages/health-metrics/*|\
+                packages/hosted-execution/*|packages/importers/*|packages/inboxd/*|packages/messaging-ingress/*|packages/parsers/*|packages/query/*|packages/runtime-state/*|\
+                prisma/*|scripts/native-ios-hosted-e2e*|scripts/native-android-hosted-e2e*|\
+                .github/workflows/native-ios-hosted-e2e.yml|.github/workflows/native-android-hosted-e2e.yml|.github/workflows/repo-hygiene.yml|\
+                agent-docs/operations/native-android-hosted-e2e.md|\
+                config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json)
+                  selected=true
+                  break
+                  ;;
+              esac
+            done < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" --jq '.[] | .filename, (.previous_filename // empty)')
+          fi
+
+          {
+            echo "head_ref=${head_ref}"
+            echo "head_sha=${head_sha}"
+            echo "selected=${selected}"
+            echo "trusted=${trusted}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Mark required status pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_SHA: ${{ steps.select.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
+            -f state=pending \
+            -f context='Native Android hosted E2E' \
+            -f description='This controller run has not recorded passing hosted-native Android proof yet.' \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            >/dev/null
+
+  pr-live:
+    name: Candidate deployment, protected identity, and private Android
+    needs: select-pr
+    if: ${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    environment: native-android-hosted-e2e
+    runs-on: ubuntu-24.04
+    # Must exceed pre-run cleanup, the bounded 25-minute deployment, the
+    # 85-minute private-run fence, and both fail-closed cleanup passes.
+    timeout-minutes: 150
+    concurrency:
+      # Android and iOS own the same destructive test identity and dedicated
+      # Vercel target, so both native lanes share one repo-wide live lock.
+      group: native-ios-hosted-e2e-live
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Revalidate exact PR head before runner setup
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          [[ "${current}" == "${EXPECTED_HEAD_SHA}" ]] || { echo "::error::PR head changed before live E2E setup."; exit 1; }
+
+      - name: Checkout trusted default-branch control code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install trusted control dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Android dispatcher contracts
+        run: node --test scripts/native-android-hosted-e2e.test.mjs
+
+      - name: Run exact candidate lifecycle and private Android journey
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA }}
+          NATIVE_ANDROID_E2E_ANDROID_REF: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REF }}
+          NATIVE_ANDROID_E2E_ANDROID_REPOSITORY: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}/${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
+          NATIVE_ANDROID_E2E_ANDROID_WORKFLOW: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_WORKFLOW }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
+          NATIVE_ANDROID_E2E_WEB_GITHUB_TOKEN: ${{ github.token }}
+          # The existing hosted-native deployment and identity modules remain
+          # the single owner. Android maps its protected values into that
+          # historical internal namespace instead of creating another lifecycle.
+          NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_ANDROID_E2E_DATABASE_URL }}
+          NATIVE_IOS_E2E_DIRECT_DATABASE_URL: ${{ secrets.NATIVE_ANDROID_E2E_DIRECT_DATABASE_URL }}
+          NATIVE_IOS_E2E_JUNCTION_API_KEY: ${{ secrets.NATIVE_ANDROID_E2E_JUNCTION_API_KEY }}
+          NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.NATIVE_ANDROID_E2E_JUNCTION_CLIENT_USER_ID_SECRET }}
+          NATIVE_IOS_E2E_JUNCTION_TEAM_ID: ${{ vars.NATIVE_ANDROID_E2E_JUNCTION_TEAM_ID }}
+          NATIVE_IOS_E2E_PRIVY_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_PRIVY_APP_ID }}
+          NATIVE_IOS_E2E_PRIVY_APP_SECRET: ${{ secrets.NATIVE_ANDROID_E2E_PRIVY_APP_SECRET }}
+          NATIVE_IOS_E2E_PRIVY_TEST_PHONE: ${{ secrets.NATIVE_ANDROID_E2E_PRIVY_TEST_PHONE }}
+          NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID }}
+          NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID }}
+          NATIVE_IOS_E2E_VERCEL_PROJECT_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_PROJECT_ID }}
+          NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_PROJECT_NAME }}
+          NATIVE_IOS_E2E_VERCEL_TEAM_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_TEAM_ID }}
+          NATIVE_IOS_E2E_VERCEL_TOKEN: ${{ secrets.NATIVE_ANDROID_E2E_VERCEL_TOKEN }}
+          PR_HEAD_REF: ${{ needs.select-pr.outputs.head_ref }}
+          PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/native-android-hosted-e2e.mjs pr \
+            --sha "${PR_HEAD_SHA}" \
+            --ref "${PR_HEAD_REF}" \
+            --pr-number "${PR_NUMBER}" \
+            --correlation-id "murph-pr-${PR_HEAD_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
+  pr-required:
+    name: Publish native Android hosted E2E commit status
+    needs:
+      - select-pr
+      - pr-live
+    if: ${{ always() && github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    permissions:
+      contents: read
+      statuses: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Publish stable commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_RESULT: ${{ needs.pr-live.result }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          SELECT_RESULT: ${{ needs.select-pr.result }}
+          SELECTED: ${{ needs.select-pr.outputs.selected }}
+          SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
+          STATUS_SHA: ${{ needs.select-pr.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha }}
+          TRUSTED: ${{ needs.select-pr.outputs.trusted }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Hosted-native Android selection failed; no passing proof was recorded.'
+          if [[ "${RUN_ATTEMPT}" != 1 ]]; then
+            description="Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER}; native reruns do not enter the live queue."
+          elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
+            description='Repo Hygiene did not pass; hosted-native Android was not run.'
+          elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
+            state=success
+            description='Path filter did not select hosted-native Android for this exact commit.'
+          elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
+            description='A trusted same-repository human head is required for live Android credentials.'
+          elif [[ "${SELECT_RESULT}" == success && "${LIVE_RESULT}" == success ]]; then
+            state=success
+            description='Real hosted-native Android E2E passed for the exact commit.'
+          elif [[ "${SELECT_RESULT}" == success ]]; then
+            description='No passing terminal hosted-native Android proof was recorded.'
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
+            -f state="${state}" \
+            -f context='Native Android hosted E2E' \
+            -f description="${description}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            >/dev/null
+          [[ "${state}" == success ]]
+
+  production-canary:
+    name: Non-destructive production native Android canary
+    if: ${{ github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success' && github.event.deployment_status.description == 'Deployment has completed' && contains(fromJSON('["Production","production"]'), github.event.deployment.environment) && (github.event.deployment_status.creator.login == 'vercel[bot]' || github.event.deployment.creator.login == 'vercel[bot]') }}
+    permissions:
+      contents: read
+    environment: native-android-production-canary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    concurrency:
+      group: native-android-production-canary-live
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.14.1
+          cache: pnpm
+
+      - name: Install trusted control dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify Android dispatcher contracts
+        run: node --test scripts/native-android-hosted-e2e.test.mjs
+
+      - name: Verify deployed SHA is protected-main history
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -euo pipefail
+          [[ "${DEPLOYED_SHA}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Production deployment must identify an exact Git SHA."; exit 1; }
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main || { echo "::error::Production canary refuses a deployment outside main history."; exit 1; }
+
+      - name: Verify production alias and dispatch non-destructive canary
+        env:
+          DEPLOYED_SHA: ${{ github.event.deployment.sha }}
+          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
+          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
+          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
+          NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA }}
+          NATIVE_ANDROID_E2E_ANDROID_REF: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REF }}
+          NATIVE_ANDROID_E2E_ANDROID_REPOSITORY: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}/${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
+          NATIVE_ANDROID_E2E_ANDROID_WORKFLOW: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_WORKFLOW }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
+          PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/native-android-hosted-e2e.mjs canary \
+            --web-sha "${DEPLOYED_SHA}" \
+            --web-base-url "${PRODUCTION_BASE_URL}" \
+            --correlation-id "murph-production-${DEPLOYED_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

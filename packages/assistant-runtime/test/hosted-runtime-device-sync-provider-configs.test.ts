@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import {
+  createConfiguredDeviceSyncProvidersFromConfigs,
+  JUNCTION_PRODUCTION_TIMESERIES_RESOURCES,
+} from "@murphai/device-syncd/config";
 import { resolveHostedRuntimeDeviceSyncProviderConfigs } from "../src/hosted-runtime/device-sync-provider-configs.ts";
 
 const staticProviderConfigs = {
@@ -60,7 +64,7 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
     });
   });
 
-  it("keeps hosted Junction resources omitted until curated defaults are normalized", () => {
+  it("preserves all 48 code-owned Junction production resources for hosted members", () => {
     const resolved = resolveHostedRuntimeDeviceSyncProviderConfigs(
       {
         junction: {
@@ -85,6 +89,12 @@ describe("resolveHostedRuntimeDeviceSyncProviderConfigs", () => {
       pushSourceRecoveryEnabled: true,
       region: "us",
     });
-    expect(resolved.junction).not.toHaveProperty("timeseriesResources");
+    expect(JUNCTION_PRODUCTION_TIMESERIES_RESOURCES).toHaveLength(48);
+    expect(new Set(JUNCTION_PRODUCTION_TIMESERIES_RESOURCES).size).toBe(48);
+    expect(resolved.junction?.timeseriesResources)
+      .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
+    expect(createConfiguredDeviceSyncProvidersFromConfigs(resolved)
+      .map((provider) => provider.provider))
+      .toEqual(["junction"]);
   });
 });

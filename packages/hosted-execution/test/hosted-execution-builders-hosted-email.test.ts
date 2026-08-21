@@ -18,7 +18,10 @@ import {
   buildHostedExecutionDeviceSyncWake,
 } from "../src/builders.ts";
 import {
+  HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS,
   HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH,
+  HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
@@ -27,9 +30,12 @@ import {
   createHostedEmailUserReplyAliasRoute,
   isHostedEmailReplyAliasLookupKey,
   normalizeHostedEmailReplyAliasLookupKey,
+  parseHostedEmailPublicBootstrapCallbackRequest,
+  parseHostedEmailPublicBootstrapCallbackResponse,
   parseHostedEmailGroupRecipientsCallbackRequest,
   parseHostedEmailGroupRecipientsCallbackResponse,
   parseHostedEmailReplyAliasRegistrationCallbackRequest,
+  parseHostedEmailReplyAliasRegistrationCallbackResponse,
   parseHostedEmailRouteResolutionCallbackRequest,
   parseHostedEmailRouteResolutionCallbackResponse,
   readHostedEmailCapabilities,
@@ -828,6 +834,23 @@ describe("hosted email helpers", () => {
     expect(route.token).toMatch(/^u2-[0-9a-z]{25}-[0-9a-z]{25}$/u);
     expect(route.address).toBe(`murph+${route.token}@mail.example.test`);
     expect(derivedAgain).toEqual(route);
+
+    const rotated = await createHostedEmailUserReplyAliasRoute({
+      domain: "mail.example.test",
+      generation: 1,
+      localPart: "murph",
+      signingSecret: "test-email-signing-secret",
+      userId: "member_123",
+    });
+    const rotatedAgain = await createHostedEmailUserReplyAliasRoute({
+      domain: "mail.example.test",
+      generation: 1,
+      localPart: "murph",
+      signingSecret: "test-email-signing-secret",
+      userId: "member_123",
+    });
+    expect(rotated).toEqual(rotatedAgain);
+    expect(rotated.aliasKey).not.toBe(route.aliasKey);
   });
 
   it("creates compact signed reply alias routes for hosted groups without lengthening the local part", async () => {
@@ -927,6 +950,13 @@ describe("hosted email helpers", () => {
   });
 
   it("exposes the hosted email callback contract from one shared surface", () => {
+    expect(HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS).toBe("mail@mail.withmurph.ai");
+    expect(HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID).toBe(
+      "hosted-email-public-bootstrap",
+    );
+    expect(HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_PATH).toBe(
+      "/api/internal/hosted-execution/email/bootstrap",
+    );
     expect(HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID).toBe(
       "hosted-email-route-resolution",
     );
@@ -939,10 +969,29 @@ describe("hosted email helpers", () => {
     expect(HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH).toBe(
       "/api/internal/hosted-execution/email/group-recipients",
     );
+    expect(parseHostedEmailPublicBootstrapCallbackRequest({
+      candidateAddress: " Member@Example.Test ",
+    })).toEqual({ candidateAddress: "member@example.test" });
+    expect(() => parseHostedEmailPublicBootstrapCallbackRequest({
+      candidateAddress: "not-an-address",
+    })).toThrow(/valid candidateAddress/u);
+    expect(parseHostedEmailPublicBootstrapCallbackResponse({ ok: true })).toEqual({
+      ok: true,
+    });
+    expect(() => parseHostedEmailPublicBootstrapCallbackResponse({ ok: false })).toThrow(
+      /ok=true/u,
+    );
     expect(parseHostedEmailReplyAliasRegistrationCallbackRequest({
       aliasKey: " replyalias1234 ",
     })).toEqual({
       aliasKey: "replyalias1234",
+    });
+    expect(parseHostedEmailReplyAliasRegistrationCallbackResponse({
+      address: " Murph+token@Example.Test ",
+      aliasKey: "0123456789ABCDEF0123456789ABCDEF",
+    })).toEqual({
+      address: "murph+token@example.test",
+      aliasKey: "0123456789abcdef0123456789abcdef",
     });
     expect(parseHostedEmailRouteResolutionCallbackRequest({
       aliasKey: " replyalias1234 ",

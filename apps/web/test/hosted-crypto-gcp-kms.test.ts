@@ -384,6 +384,28 @@ describe("hosted crypto Google KMS integrity transport", () => {
     expectAllZero(responseSignature);
   });
 
+  it("reports the provider digest size rather than the unhashed Sign message size", async () => {
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      asymmetricSign: async () => {
+        throw { code: "PERMISSION_DENIED" };
+      },
+    })).client;
+
+    await expect(client.asymmetricSign({
+      keyVersionName: SIGN_KEY_VERSION_NAME,
+      message: new Uint8Array(1_024),
+    })).rejects.toMatchObject({ providerReason: "PERMISSION_DENIED" });
+
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        operation: "asymmetricSign",
+        providerPayloadBytes: 32,
+      }),
+    );
+  });
+
   it("requires an exact 32-byte MAC with matching data and response CRCs", async () => {
     const responseMac = new Uint8Array(32).fill(7);
     const captured: { request?: HostedGcpKmsSdkMacSignRequest } = {};
@@ -559,9 +581,18 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
     expect(warning).toHaveBeenCalledWith(
       "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
       expect.objectContaining({
+        additionalAuthenticatedDataBytes: Buffer.byteLength("domain=control"),
+        aggregateTimeoutMs: HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS,
         attempt: 1,
-        failureStage: "credential_or_rpc",
+        attemptTimeoutMs: HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+        failureStage: "kms_rpc",
+        kmsRpcElapsedMs: expect.any(Number),
+        maxAttempts: 2,
+        operation: "decrypt",
+        operationElapsedMs: expect.any(Number),
+        providerPayloadBytes: 3,
         providerReason: reason,
+        workloadIdentityRefreshObserved: false,
       }),
     );
     expectAllZero(requests[0]!.ciphertext);
@@ -665,6 +696,49 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
       name: "AbortError",
     });
     expect(calls).toBe(1);
+  });
+
+  it("logs aggregate deadline expiry during Decrypt retry backoff", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const aggregateDeadline = new AbortController();
+    const attemptDeadline = new AbortController();
+    const deadlineSignals = [aggregateDeadline.signal, attemptDeadline.signal];
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const signal = deadlineSignals.shift();
+      if (!signal) {
+        throw new Error("Unexpected Google KMS deadline allocation.");
+      }
+      return signal;
+    });
+    let calls = 0;
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => {
+        calls += 1;
+        throw { code: 14 };
+      },
+    })).client;
+    const operation = client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    });
+
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
+    aggregateDeadline.abort();
+
+    await expect(operation).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(calls).toBe(1);
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        failureStage: "retry_backoff",
+        outcome: "failed",
+        providerReason: "DEADLINE_EXCEEDED",
+        retryBackoffElapsedMs: expect.any(Number),
+      }),
+    );
   });
 
   it("honors caller abort without retrying or exposing the caller reason", async () => {

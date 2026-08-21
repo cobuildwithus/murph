@@ -237,13 +237,6 @@ async function readQueueMetrics(
   ) {
     throw new Error(`Invalid ${queueName} Queue oldest-message timestamp.`);
   }
-  if (
-    queueName === "main"
-    && metrics.backlogCount > 0
-    && oldestMessageAtMs === null
-  ) {
-    throw new Error("Main Queue backlog is missing its oldest-message timestamp.");
-  }
   return {
     backlogBytes: metrics.backlogBytes,
     backlogCount: metrics.backlogCount,
@@ -266,6 +259,9 @@ function buildObservation(input: {
     });
   }
   const oldestMainMessageAtMs = input.main?.oldestMessageAtMs ?? null;
+  const mainQueueHealthIncomplete = input.main !== null
+    && input.main.backlogCount > 0
+    && oldestMainMessageAtMs === null;
   if (oldestMainMessageAtMs !== null) {
     const ageMs = Math.max(0, input.observedAtMs - oldestMainMessageAtMs);
     if (ageMs >= DEVICE_WEBHOOK_QUEUE_STALL_AGE_MS) {
@@ -294,7 +290,7 @@ function buildObservation(input: {
     main: input.main,
     observedAtMs: input.observedAtMs,
     status: input.failedQueues.length === 0
-      ? "ok"
+      ? mainQueueHealthIncomplete ? "partial" : "ok"
       : input.failedQueues.length === 2
       ? "failed"
       : "partial",

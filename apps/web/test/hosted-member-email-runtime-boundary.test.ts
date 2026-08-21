@@ -59,6 +59,7 @@ const HOSTED_MEMBER_RELATION_TYPES = new Set([
   "HostedMember",
   "HostedMemberBillingRef",
   "HostedMemberEmailAuthorization",
+  "HostedEmailPublicBootstrapAttempt",
   "HostedMemberIdentity",
   "HostedMemberRouting",
 ]);

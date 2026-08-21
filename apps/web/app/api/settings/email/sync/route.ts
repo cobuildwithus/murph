@@ -4,14 +4,11 @@ import {
 } from "@/src/lib/hosted-orchestration/signal-runtime";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
 import {
+  prepareHostedMemberVerifiedEmailReplyAlias,
   readHostedMemberEmailAuthorization,
-  upsertHostedMemberEmailAuthorization,
+  syncHostedMemberVerifiedEmailAuthorization,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
-import {
-  upsertHostedMemberReplyAliasLookupKeyTx,
-} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import { jsonOk, withJsonError, readOptionalJsonObject } from "@/src/lib/hosted-onboarding/http";
 import { enqueueHostedMemberChannelsUpdatedTx } from "@/src/lib/hosted-onboarding/member-channel-sync";
 import {
@@ -51,8 +48,10 @@ export const POST = withJsonError(async (request: Request) => {
   const prisma = getPrisma();
   const verifiedAtDate = new Date(verifiedAt);
   const occurredAt = new Date().toISOString();
-  const replyAlias = await createHostedMemberReplyAliasRoute({
+  const preparedReplyAlias = await prepareHostedMemberVerifiedEmailReplyAlias({
+    address: verifiedEmail.address,
     memberId: auth.member.id,
+    prisma,
   });
   const channelSyncDispatch = await prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, auth.member.id);
@@ -67,28 +66,13 @@ export const POST = withJsonError(async (request: Request) => {
       verifiedAt: verifiedAtDate,
     });
 
-    if (!emailAuthorizationMatches) {
-      await upsertHostedMemberEmailAuthorization({
-        directPublicSender: {
-          address: verifiedEmail.address,
-          authorizedAt: verifiedAtDate,
-        },
-        memberId: auth.member.id,
-        prisma: tx,
-        verifiedEmail: {
-          address: verifiedEmail.address,
-          verifiedAt: verifiedAtDate,
-        },
-      });
-    }
-
-    if (replyAlias) {
-      await upsertHostedMemberReplyAliasLookupKeyTx({
-        memberId: auth.member.id,
-        prisma: tx,
-        replyAliasLookupKey: replyAlias.replyAliasLookupKey,
-      });
-    }
+    await syncHostedMemberVerifiedEmailAuthorization({
+      address: verifiedEmail.address,
+      memberId: auth.member.id,
+      preparedReplyAlias,
+      prisma: tx,
+      verifiedAt: verifiedAtDate,
+    });
 
     if (emailAuthorizationMatches) {
       return null;

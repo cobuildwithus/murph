@@ -46,6 +46,7 @@ import type {
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationPromptProfile,
+  HostedExecutionGroupContextHandoffNotification,
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   HostedExecutionPrivateAssistantAskCompletionNotification,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
@@ -78,6 +79,7 @@ import type {
 } from "./contracts.ts";
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskOriginInputId,
   parseHostedExecutionAssistantAskRequestedPayload,
   parseHostedExecutionAssistantAskTimestamp,
 } from "./assistant-ask-payload.ts";
@@ -1621,6 +1623,15 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.firstContact`,
               ),
         }),
+    ...(record.groupContextHandoff === undefined
+      ? {}
+      : {
+          groupContextHandoff:
+            parseHostedExecutionGroupContextHandoffNotification(
+              record.groupContextHandoff,
+              `${label}.groupContextHandoff`,
+            ),
+        }),
     instructions: requireString(record.instructions, `${label}.instructions`),
     ...(record.notificationPromptProfile === undefined
       ? {}
@@ -1652,6 +1663,36 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionGroupContextHandoffNotification(
+  value: unknown,
+  label: string,
+): HostedExecutionGroupContextHandoffNotification {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(
+    record,
+    ["membershipId", "originAssistantInputId"],
+    label,
+  );
+  const membershipId = requireString(
+    record.membershipId,
+    `${label}.membershipId`,
+  );
+  if (
+    membershipId.trim() !== membershipId
+    || !membershipId
+    || [...membershipId].length > 256
+  ) {
+    throw new TypeError(`${label}.membershipId is invalid.`);
+  }
+  return {
+    membershipId,
+    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+      record.originAssistantInputId,
+      `${label}.originAssistantInputId`,
+    ),
   };
 }
 
