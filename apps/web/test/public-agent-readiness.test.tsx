@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { describe, it } from "vitest";
 
 import { GET as getLlmsText } from "../app/llms.txt/route";
+import { SiteFooter } from "../src/components/homepage/site-footer";
 import { PublicTrustPageContent } from "../src/components/public/public-trust-page";
 import {
   acceptsMarkdown,
@@ -118,5 +119,12 @@ describe("public trust pages", () => {
     assert.equal((markup.match(/<h1\b/gu) ?? []).length, 1);
     assert.equal((markup.match(/<h2\b/gu) ?? []).length, content.sections.length);
     assert.ok(readableText.length > 500);
+  });
+
+  it("links About and Contact from the shared public footer", () => {
+    const markup = renderToStaticMarkup(createElement(SiteFooter));
+
+    assert.match(markup, /href="\/about"/u);
+    assert.match(markup, /href="\/contact"/u);
   });
 });

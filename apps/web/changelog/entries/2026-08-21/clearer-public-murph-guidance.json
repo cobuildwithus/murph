@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-21",
+  "order": 200,
+  "item": {
+    "id": "clearer-public-murph-guidance",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Clearer ways to learn about Murph",
+    "summary": "New About and Contact pages make it easier to understand what Murph does, who it is for, and where to get help.",
+    "details": "Product support is now clearly separated from privacy and legal requests, and missing pages point people to useful public guides instead of leaving them at a dead end.",
+    "relevanceTags": ["web", "support", "privacy"],
+    "sourcePullRequests": [2120]
+  }
+}
