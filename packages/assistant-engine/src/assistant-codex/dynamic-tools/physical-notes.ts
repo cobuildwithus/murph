@@ -23,6 +23,7 @@ const PHYSICAL_NOTE_ARGUMENT_ROOT_KEYS = [
 ] as const
 const PHYSICAL_NOTE_RECOVERY_ARGUMENT_ROOT_KEYS = [
   'message_ref',
+  'target_kind',
   'target_message_ref',
 ] as const
 const ACCEPTED_INPUT_ID_PATTERN = /^ain_[0-9a-f]{32}$/u
@@ -65,12 +66,21 @@ const physicalNoteArgumentsSchema = z.object({
 
 const physicalNoteRecoveryArgumentsSchema = z.object({
   message_ref: z.string().trim().regex(ACCEPTED_INPUT_ID_PATTERN),
+  target_kind: z.enum(['recovery', 'send']).optional(),
   target_message_ref: z
     .string()
     .trim()
     .regex(ACCEPTED_INPUT_ID_PATTERN)
     .optional(),
-}).strict()
+}).strict().superRefine((value, context) => {
+  if ((value.target_kind === undefined) !== (value.target_message_ref === undefined)) {
+    context.addIssue({
+      code: 'custom',
+      message: 'target_kind and target_message_ref must be supplied together.',
+      path: value.target_kind === undefined ? ['target_kind'] : ['target_message_ref'],
+    })
+  }
+})
 
 export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
   namespace: 'murph',
@@ -80,7 +90,7 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
     'Read $MURPH_ASSISTANT_SKILLS_ROOT/physical-notes/SKILL.md before using this tool.',
     'Call exactly once only when a person explicitly asks to check, clear, resolve, or cancel an earlier unresolved physical-note submission.',
     'Supply the exact current Message ref that authorizes the check.',
-    'When the earlier unresolved send or prior recovery is known from conversation or tool results, also supply its exact earlier Message ref as target_message_ref.',
+    'When the earlier unresolved send or prior recovery is known from conversation or tool results, also supply its exact earlier Message ref as target_message_ref and identify it with target_kind send or recovery.',
     'This checks provider records and may safely clear a blocker; it never sends a new note or recalls an accepted one.',
     'Report the checked accepted, clear, pending, permission_denied, or unavailable status and the independent remainingUnresolved fact literally. Never retry automatically.',
   ].join(' '),
@@ -99,6 +109,12 @@ export const MURPH_RESOLVE_PHYSICAL_NOTE_TOOL = {
         pattern: '^ain_[0-9a-f]{32}$',
         description:
           'Optional exact earlier Message ref for the unresolved send or prior recovery result being checked. It identifies the target only; it does not authorize the action.',
+      },
+      target_kind: {
+        type: 'string',
+        enum: ['send', 'recovery'],
+        description:
+          'Required with target_message_ref. Use send for an original physical-note send; use recovery for a prior murph.resolve_physical_note result.',
       },
     },
     required: ['message_ref'],
@@ -164,12 +180,22 @@ export const MURPH_SEND_PHYSICAL_NOTE_TOOL = {
   },
 } as const
 
-export type PhysicalNoteDynamicToolRequest =
+type PhysicalNoteRecoveryDynamicToolRequest =
   | {
       kind: 'resolve-physical-note'
       messageRef: string
-      targetMessageRef?: string
+      targetKind: 'recovery' | 'send'
+      targetMessageRef: string
     }
+  | {
+      kind: 'resolve-physical-note'
+      messageRef: string
+      targetKind?: undefined
+      targetMessageRef?: undefined
+    }
+
+export type PhysicalNoteDynamicToolRequest =
+  | PhysicalNoteRecoveryDynamicToolRequest
   | {
       imageRef?: string
       imageSha256?: string
@@ -193,18 +219,24 @@ export function readPhysicalNoteDynamicToolRequest(input: {
       toolName: 'murph.resolve_physical_note',
       value: input.arguments,
     })
-    return parsed.ok
-      ? {
-          kind: 'resolve-physical-note',
-          messageRef: parsed.args.message_ref,
-          ...(parsed.args.target_message_ref
-            ? { targetMessageRef: parsed.args.target_message_ref }
-            : {}),
-        }
-      : {
-          kind: 'invalid-physical-note-arguments',
-          validationDigest: parsed.validationDigest,
-        }
+    if (!parsed.ok) {
+      return {
+        kind: 'invalid-physical-note-arguments',
+        validationDigest: parsed.validationDigest,
+      }
+    }
+    if (parsed.args.target_message_ref) {
+      return {
+        kind: 'resolve-physical-note',
+        messageRef: parsed.args.message_ref,
+        targetKind: parsed.args.target_kind!,
+        targetMessageRef: parsed.args.target_message_ref,
+      }
+    }
+    return {
+      kind: 'resolve-physical-note',
+      messageRef: parsed.args.message_ref,
+    }
   }
   if (input.tool !== MURPH_SEND_PHYSICAL_NOTE_TOOL.name) {
     return null

@@ -48,9 +48,11 @@ describe("hosted physical-note contracts", () => {
 
     expect(hostedPhysicalNoteRecoveryRequestSchema.parse({
       originAssistantInputId,
+      targetKind: "send",
       targetOriginAssistantInputId,
     })).toEqual({
       originAssistantInputId,
+      targetKind: "send",
       targetOriginAssistantInputId,
     });
     expect(hostedPhysicalNoteRecoveryRequestSchema.parse({
@@ -59,6 +61,14 @@ describe("hosted physical-note contracts", () => {
     expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
       originAssistantInputId,
       targetOriginAssistantInputId: "not-a-message-ref",
+    })).toThrow();
+    expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetOriginAssistantInputId,
+    })).toThrow();
+    expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetKind: "recovery",
     })).toThrow();
   });
 

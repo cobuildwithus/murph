@@ -60,6 +60,7 @@ const REQUEST = {
 
 const RECOVERY_REQUEST = {
   originAssistantInputId: `ain_${"c".repeat(32)}`,
+  targetKind: "recovery",
   targetOriginAssistantInputId: `ain_${"d".repeat(32)}`,
 } satisfies HostedPhysicalNoteRecoveryRequest;
 

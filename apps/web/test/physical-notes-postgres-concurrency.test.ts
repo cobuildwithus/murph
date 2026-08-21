@@ -478,6 +478,7 @@ describe.skipIf(!runPostgresProof)(
           },
           findLetterByNoteId: findProviderLetter,
         },
+        targetKind: "send",
         targetOriginAssistantInputId: targetRequest.originAssistantInputId,
       })).resolves.toEqual({
         remainingUnresolved: false,
@@ -491,6 +492,98 @@ describe.skipIf(!runPostgresProof)(
         status: "accepted",
       });
       expect(createProviderLetter).toHaveBeenCalledOnce();
+      expect(findProviderLetter).not.toHaveBeenCalled();
+      expect(mocks.recordUsage).toHaveBeenCalledOnce();
+    });
+
+    it("uses target kind when a recovery and send share one accepted input", async () => {
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const { createHostedPhysicalNote, recoverHostedPhysicalNote } =
+        await import("@/src/lib/physical-notes/service");
+      const freeSeedRequest = buildRequest(31, beneficiary);
+      const targetRequest = buildRequest(32, beneficiary);
+      const targetOrigin = targetRequest.originAssistantInputId;
+      let providerLetterSequence = 0;
+      const createProviderLetter = vi.fn(async () => {
+        providerLetterSequence += 1;
+        return {
+          kind: "accepted" as const,
+          providerLetterId: `ltr_colliding_target_send_${providerLetterSequence}`,
+        };
+      });
+      const findProviderLetter = vi.fn(async () => {
+        throw new Error("Colliding targeted recovery must not read Lob.");
+      });
+      await createHostedPhysicalNote({
+        ...freeSeedRequest,
+        prisma: observer,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      });
+      const sent = await createHostedPhysicalNote({
+        ...targetRequest,
+        originAssistantInputId: targetOrigin,
+        requestKey: createHostedPhysicalNoteRequestKey({
+          originAssistantInputId: targetOrigin,
+        }),
+        prisma: observer,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      });
+      await observer.hostedPhysicalNoteRecovery.create({
+        data: {
+          memberId: beneficiary,
+          originAssistantInputId: targetOrigin,
+          remainingUnresolved: false,
+          resultStatus: "clear",
+        },
+      });
+      const runtime = {
+        async create() {
+          throw new Error("Recovery must not create a physical note.");
+        },
+        findLetterByNoteId: findProviderLetter,
+      };
+
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: buildRequest(33, beneficiary)
+          .originAssistantInputId,
+        prisma: observer,
+        runtime,
+        targetKind: "send",
+        targetOriginAssistantInputId: targetOrigin,
+      })).resolves.toEqual({
+        remainingUnresolved: false,
+        retryAfter: null,
+        settledUsageCostUsdMicros: "250000",
+        status: "accepted",
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: buildRequest(34, beneficiary)
+          .originAssistantInputId,
+        prisma: observer,
+        runtime,
+        targetKind: "recovery",
+        targetOriginAssistantInputId: targetOrigin,
+      })).resolves.toEqual({
+        remainingUnresolved: false,
+        retryAfter: null,
+        settledUsageCostUsdMicros: null,
+        status: "clear",
+      });
+
+      expect(sent).toMatchObject({
+        complimentary: false,
+        status: "accepted",
+      });
+      expect(createProviderLetter).toHaveBeenCalledTimes(2);
       expect(findProviderLetter).not.toHaveBeenCalled();
       expect(mocks.recordUsage).toHaveBeenCalledOnce();
     });
@@ -1024,6 +1117,7 @@ describe.skipIf(!runPostgresProof)(
           },
           findLetterByNoteId: findProviderLetter,
         },
+        targetKind: "recovery",
         targetOriginAssistantInputId: targetOrigin,
       })).resolves.toEqual({
         remainingUnresolved: true,
@@ -1118,6 +1212,7 @@ describe.skipIf(!runPostgresProof)(
           },
           findLetterByNoteId: findProviderLetter,
         },
+        targetKind: "recovery",
         targetOriginAssistantInputId: targetOrigin,
       })).resolves.toEqual({
         remainingUnresolved: true,
@@ -1135,6 +1230,7 @@ describe.skipIf(!runPostgresProof)(
           },
           findLetterByNoteId: findProviderLetter,
         },
+        targetKind: "recovery",
         targetOriginAssistantInputId: targetOrigin,
       })).resolves.toEqual({
         remainingUnresolved: true,
@@ -1336,6 +1432,7 @@ describe.skipIf(!runPostgresProof)(
         originAssistantInputId: targetedReplayOrigin,
         prisma: recoveryClient,
         runtime,
+        targetKind: "recovery",
         targetOriginAssistantInputId: failedOrigin,
       })).resolves.toEqual(accepted);
       expect(findProviderLetter).toHaveBeenCalledTimes(2);

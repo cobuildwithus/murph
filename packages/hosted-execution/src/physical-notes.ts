@@ -65,13 +65,28 @@ export const hostedPhysicalNoteSendResponseSchema = z
 export const hostedPhysicalNoteRecoveryRequestSchema = z
   .object({
     originAssistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+    targetKind: z.enum(["recovery", "send"]).nullable().optional(),
     targetOriginAssistantInputId: z
       .string()
       .regex(/^ain_[0-9a-f]{32}$/u)
       .nullable()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const hasTargetKind = value.targetKind !== undefined
+      && value.targetKind !== null;
+    const hasTargetOrigin = value.targetOriginAssistantInputId !== undefined
+      && value.targetOriginAssistantInputId !== null;
+    if (hasTargetKind !== hasTargetOrigin) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "targetKind and targetOriginAssistantInputId must be supplied together.",
+        path: hasTargetKind ? ["targetOriginAssistantInputId"] : ["targetKind"],
+      });
+    }
+  });
 
 export const hostedPhysicalNoteRecoveryResponseSchema = z
   .object({

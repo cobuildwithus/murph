@@ -15,9 +15,12 @@ unresolved physical-note submission, call `murph.resolve_physical_note` exactly
 once with the exact current authorizing `message_ref`. When the earlier
 unresolved send or prior recovery result is known from the conversation or a
 tool result, also pass that earlier accepted Message ref as `target_message_ref`;
-it identifies the checked effect only and does not authorize the action. This
-is a foreground reconciliation, not a send request: do not generate artwork,
-collect an address, or call `murph.send_physical_note` as part of recovery.
+pair it with `target_kind: "send"` for an original physical-note send or
+`target_kind: "recovery"` for a prior `murph.resolve_physical_note` result. The
+target pair identifies the checked effect only and does not authorize the
+action. This is a foreground reconciliation, not a send request: do not generate
+artwork, collect an address, or call `murph.send_physical_note` as part of
+recovery.
 
 Treat its result literally:
 
@@ -31,9 +34,9 @@ Treat its result literally:
   sent nothing; a future note still needs a separate explicit send request.
 - `pending` means the outcome still cannot be safely resolved. If
   `retryAfter` is present, state that Murph can check again after that time only
-  if the person explicitly asks. If the result includes a `targetMessageRef`,
-  preserve it for any later explicit recovery request about the same
-  submission. Never promise or schedule an automatic check.
+  if the person explicitly asks. If the result includes `targetMessageRef` and
+  `targetKind`, preserve both for any later explicit recovery request about the
+  same submission. Never promise or schedule an automatic check.
 - `permission_denied` means the action was not authorized and nothing changed.
   State the bounded reason and do not retry automatically.
 - For `unavailable`, follow the result's bounded explanation. A returned
@@ -41,8 +44,8 @@ Treat its result literally:
   while a lost or invalid response leaves the final state unconfirmed. Never
   infer a state change or no-change from the status alone. Say nothing new was
   sent, say no automatic retry is running, preserve any returned
-  `targetMessageRef` for a later explicit recovery request about the same
-  submission, and do not retry automatically.
+  `targetMessageRef` and `targetKind` for a later explicit recovery request
+  about the same submission, and do not retry automatically.
 
 For `accepted` or `clear`, `remainingUnresolved: true` is an independent
 member-wide blocker fact. Report it even though the checked submission reached

@@ -329,6 +329,7 @@ export async function recoverHostedPhysicalNote(
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
     prisma,
+    targetKind: input.targetKind ?? null,
     targetOriginAssistantInputId: input.targetOriginAssistantInputId ?? null,
   });
   if (claim.kind === "replay") {
@@ -411,6 +412,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
   memberId: string;
   originAssistantInputId: string;
   prisma: PrismaClient;
+  targetKind: "recovery" | "send" | null;
   targetOriginAssistantInputId: string | null;
 }): Promise<PhysicalNoteRecoveryClaim> {
   return await input.prisma.$transaction(async (tx) => {
@@ -440,14 +442,28 @@ async function claimHostedPhysicalNoteRecovery(input: {
       throw new Error("Hosted physical-note recovery result is unconfirmed.");
     }
 
-    if (input.targetOriginAssistantInputId) {
-      const targeted = await claimTargetedHostedPhysicalNoteRecovery({
-        memberId: input.memberId,
-        originAssistantInputId: input.originAssistantInputId,
-        targetOriginAssistantInputId: input.targetOriginAssistantInputId,
-        tx,
-      });
-      if (targeted) return targeted;
+    if (input.targetOriginAssistantInputId || input.targetKind) {
+      if (!input.targetOriginAssistantInputId || !input.targetKind) {
+        return await createUnconfirmedPhysicalNoteRecoveryClaim({
+          memberId: input.memberId,
+          originAssistantInputId: input.originAssistantInputId,
+          tx,
+        });
+      }
+      const targeted = input.targetKind === "recovery"
+        ? await claimTargetedHostedPhysicalNoteRecovery({
+            memberId: input.memberId,
+            originAssistantInputId: input.originAssistantInputId,
+            targetOriginAssistantInputId: input.targetOriginAssistantInputId,
+            tx,
+          })
+        : await claimTargetedHostedPhysicalNoteSendRecovery({
+            memberId: input.memberId,
+            originAssistantInputId: input.originAssistantInputId,
+            targetOriginAssistantInputId: input.targetOriginAssistantInputId,
+            tx,
+          });
+      return targeted;
     }
 
     const guard = await findPhysicalNoteEffectGuard({
@@ -486,7 +502,7 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
   originAssistantInputId: string;
   targetOriginAssistantInputId: string;
   tx: Prisma.TransactionClient;
-}): Promise<PhysicalNoteRecoveryClaim | null> {
+}): Promise<PhysicalNoteRecoveryClaim> {
   const targetRecovery = await input.tx.hostedPhysicalNoteRecovery.findUnique({
     where: { originAssistantInputId: input.targetOriginAssistantInputId },
   });
@@ -535,6 +551,15 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
     return await createUnconfirmedPhysicalNoteRecoveryClaim(input);
   }
 
+  return await createUnconfirmedPhysicalNoteRecoveryClaim(input);
+}
+
+async function claimTargetedHostedPhysicalNoteSendRecovery(input: {
+  memberId: string;
+  originAssistantInputId: string;
+  targetOriginAssistantInputId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<PhysicalNoteRecoveryClaim> {
   const targetNote = await input.tx.hostedPhysicalNote.findUnique({
     where: {
       memberId_requestKey: {

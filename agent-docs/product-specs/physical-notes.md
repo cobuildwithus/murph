@@ -45,9 +45,10 @@ An independent `murph.resolve_physical_note` action handles a current accepted
 message that explicitly asks to check, clear, resolve, or cancel an earlier
 uncertain submission. When the conversation or prior tool result identifies a
 specific earlier send or recovery, the call also carries an opaque
-`target_message_ref`. That target selects only the checked operation; it does
-not grant authority. The current accepted direct or authenticated-group message
-remains the sole authority for the check. Recovery performs one foreground
+`target_message_ref` plus a required `target_kind` of `send` or `recovery`.
+That target pair selects only the checked operation; it does not grant
+authority. The current accepted direct or authenticated-group message remains
+the sole authority for the check. Recovery performs one foreground
 reconciliation through Web and returns in the same turn. It does not generate
 artwork, publish an image, create a provider effect, recall accepted mail,
 schedule work, or authorize a later send. The low-frequency action uses the
@@ -108,17 +109,19 @@ Standalone recovery reuses that same row and the same guard transitions. A
 narrow Web-owned `HostedPhysicalNoteRecovery` row binds the exact current
 accepted assistant input to the checked operation and, after reconciliation, its
 bounded response. The current input authorizes the check. An optional target
-identifies only the checked operation: an earlier completed recovery, or an
-original send through the send request key derived from that earlier accepted
-assistant input. A targeted completed recovery replays its stored response. A
-targeted original send locates the exact same-member `HostedPhysicalNote`. A
-targeted incomplete recovery retries its stored `physicalNoteId` while that note
-is still an unresolved same-member guard, rather than advancing to a different
-guard. Unknown, deleted, cross-member, unauthorized, or unidentified targets
-store and return an unconfirmed pending result, never a row-specific `clear`,
-and call no provider. With no target, legacy unresolved records still use the
-oldest-first fallback; if no guard can be identified, recovery returns
-unconfirmed pending rather than `clear`.
+identifies only the checked operation by pairing an earlier accepted assistant
+input with a required operation kind. A `recovery` target queries only
+`HostedPhysicalNoteRecovery` and replays its stored response or stored note
+pointer. A `send` target derives the send request key from that earlier
+accepted assistant input and queries only the same-member `HostedPhysicalNote`.
+Web never infers the operation by probing both target namespaces. A targeted
+incomplete recovery retries its stored `physicalNoteId` while that note is
+still an unresolved same-member guard, rather than advancing to a different
+guard. Unknown, deleted, cross-member, unauthorized, or unidentified targets in
+the selected namespace store and return an unconfirmed pending result, never a
+row-specific `clear`, and call no provider. With no target, legacy unresolved
+records still use the oldest-first fallback; if no guard can be identified,
+recovery returns unconfirmed pending rather than `clear`.
 
 The binding is created under the member lock before any provider read. A
 completed replay returns the stored response without selecting another guard,
@@ -167,11 +170,11 @@ evidence can finalize the original row after local commit failure. Recent absent
 or indeterminate evidence remains pending; only aged proven absence uses the
 existing unknown transition. Every other unresolved row keeps its independent
 admission authority, so new effects remain blocked until all such rows are
-terminal. A targeted recovery checks the named operation; without a target, one
-legacy recovery request still checks only the oldest unresolved row. It reports
-the checked outcome and the independently derived remaining-blocker fact instead
-of turning the latter into a false claim that the checked provider result stayed
-indeterminate. A distinct request
+terminal. A targeted recovery checks the named operation kind and historical
+ref; without a target, one legacy recovery request still checks only the oldest
+unresolved row. It reports the checked outcome and the independently derived
+remaining-blocker fact instead of turning the latter into a false claim that the
+checked provider result stayed indeterminate. A distinct request
 is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
 explicit request may, after the 23-hour provider window, reconcile the guarded
 row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps

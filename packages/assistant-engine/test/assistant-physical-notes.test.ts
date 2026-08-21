@@ -100,12 +100,14 @@ describe('assistant physical notes', () => {
     expect(readPhysicalNoteDynamicToolRequest({
       arguments: {
         message_ref: APPROVAL_INPUT_ID,
+        target_kind: 'send',
         target_message_ref: TARGET_INPUT_ID,
       },
       tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
     })).toEqual({
       kind: 'resolve-physical-note',
       messageRef: APPROVAL_INPUT_ID,
+      targetKind: 'send',
       targetMessageRef: TARGET_INPUT_ID,
     })
     expect(readPhysicalNoteDynamicToolRequest({
@@ -115,7 +117,22 @@ describe('assistant physical notes', () => {
     expect(readPhysicalNoteDynamicToolRequest({
       arguments: {
         message_ref: APPROVAL_INPUT_ID,
+        target_kind: 'send',
         target_message_ref: 'not-an-accepted-input',
+      },
+      tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
+    })).toMatchObject({ kind: 'invalid-physical-note-arguments' })
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: {
+        message_ref: APPROVAL_INPUT_ID,
+        target_message_ref: TARGET_INPUT_ID,
+      },
+      tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
+    })).toMatchObject({ kind: 'invalid-physical-note-arguments' })
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: {
+        message_ref: APPROVAL_INPUT_ID,
+        target_kind: 'recovery',
       },
       tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
     })).toMatchObject({ kind: 'invalid-physical-note-arguments' })
@@ -171,12 +188,14 @@ describe('assistant physical notes', () => {
       request: {
         kind: 'resolve-physical-note',
         messageRef: APPROVAL_INPUT_ID,
+        targetKind: 'send',
         targetMessageRef: TARGET_INPUT_ID,
       },
     })
 
     expect(resolve).toHaveBeenCalledWith({
       originAssistantInputId: APPROVAL_INPUT_ID,
+      targetKind: 'send',
       targetOriginAssistantInputId: TARGET_INPUT_ID,
     }, { signal: null })
     expect(authorizer).toHaveBeenCalledOnce()
@@ -186,6 +205,9 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult).toMatchObject({ success: true })
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       `\"targetMessageRef\":\"${TARGET_INPUT_ID}\"`,
+    )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      '\"targetKind\":\"send\"',
     )
   })
 
@@ -358,6 +380,7 @@ describe('assistant physical notes', () => {
       request: {
         kind: 'resolve-physical-note',
         messageRef: APPROVAL_INPUT_ID,
+        targetKind: 'recovery',
         targetMessageRef: TARGET_INPUT_ID,
       },
     })
@@ -365,11 +388,13 @@ describe('assistant physical notes', () => {
     const text = result.rpcResult.contentItems[0]?.text ?? ''
     expect(resolve).toHaveBeenCalledWith({
       originAssistantInputId: APPROVAL_INPUT_ID,
+      targetKind: 'recovery',
       targetOriginAssistantInputId: TARGET_INPUT_ID,
     }, { signal: null })
     expect(result.rpcResult).toMatchObject({ success: false })
     expect(text).toContain('final state is unconfirmed')
     expect(text).toContain(`\"targetMessageRef\":\"${TARGET_INPUT_ID}\"`)
+    expect(text).toContain('\"targetKind\":\"recovery\"')
     expect(text).toContain('Nothing new was sent')
     expect(text).toContain('no automatic retry is running')
     expect(text).not.toContain('was not cleared')
@@ -392,7 +417,8 @@ describe('assistant physical notes', () => {
       /call `murph\.resolve_physical_note` exactly\s+once with the exact current authorizing `message_ref`/u,
     )
     expect(skill).toContain('target_message_ref')
-    expect(skill).toContain('does not authorize the action')
+    expect(skill).toContain('target_kind')
+    expect(skill).toMatch(/does not authorize the\s+action/u)
     expect(skill).toContain('never sends a new note or recalls an accepted one')
   })
 

@@ -2560,7 +2560,10 @@ export async function executeMurphDynamicToolRequest(input: {
         const result = await resolvePhysicalNote({
           originAssistantInputId,
           ...(input.request.targetMessageRef
-            ? { targetOriginAssistantInputId: input.request.targetMessageRef }
+            ? {
+                targetKind: input.request.targetKind,
+                targetOriginAssistantInputId: input.request.targetMessageRef,
+              }
             : {}),
         }, {
           signal: input.abortSignal ?? null,
@@ -2579,6 +2582,7 @@ export async function executeMurphDynamicToolRequest(input: {
               null,
               result.settledUsageCostUsdMicros,
               input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
             )
           case 'clear':
             return physicalNoteRecoveryToolResult(
@@ -2591,6 +2595,7 @@ export async function executeMurphDynamicToolRequest(input: {
               null,
               null,
               input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
             )
           case 'pending':
             return physicalNoteRecoveryToolResult(
@@ -2601,6 +2606,7 @@ export async function executeMurphDynamicToolRequest(input: {
               result.retryAfter,
               null,
               input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
             )
           case 'permission_denied':
             return physicalNoteRecoveryToolResult(
@@ -2611,6 +2617,7 @@ export async function executeMurphDynamicToolRequest(input: {
               null,
               null,
               input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
             )
           case 'unavailable':
             return physicalNoteRecoveryToolResult(
@@ -2621,6 +2628,7 @@ export async function executeMurphDynamicToolRequest(input: {
               null,
               null,
               input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
             )
         }
       } catch {
@@ -2632,6 +2640,7 @@ export async function executeMurphDynamicToolRequest(input: {
           null,
           null,
           input.request.targetMessageRef ?? null,
+          input.request.targetKind ?? null,
         )
       }
     }
@@ -6627,6 +6636,7 @@ function physicalNoteRecoveryToolResult(
   retryAfter: string | null = null,
   settledUsageCostUsdMicros: string | null = null,
   targetMessageRef: string | null = null,
+  targetKind: 'recovery' | 'send' | null = null,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     success,
@@ -6637,6 +6647,7 @@ function physicalNoteRecoveryToolResult(
       settledUsageCostUsdMicros,
       status,
       ...(targetMessageRef ? { targetMessageRef } : {}),
+      ...(targetKind ? { targetKind } : {}),
     }),
   )
 }
