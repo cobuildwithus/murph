@@ -205,8 +205,12 @@ On a scheduled run:
    condition and `vault-cli regimen show <regimen-id> --format json` for every
    returned regimen before applying the safety gate. Never use the five-record
    context projection, a title, substance, severity, or the default list prefix
-   to select the safety set. If any required detail read fails or is unreadable,
-   use the same ordinary-text, no-write, no-question, no-card failure behavior.
+   to select the safety set. If any required detail read fails, is explicitly
+   truncated, or is unreadable, retry that exact id once through `vault-cli show
+   <same-id> --format json`. Continue only when the fallback returns one complete,
+   unambiguous canonical record; otherwise use the same ordinary-text, no-write,
+   no-question, no-card failure behavior. Never omit fields, shrink the safety
+   set, or retry indefinitely.
    Also run `vault-cli event list --kind procedure --limit 200 --format json`
    and follow the shared gate's procedure-item inspection and conditional detail
    reads. A completed bariatric procedure uses the same non-numeric,
@@ -256,8 +260,14 @@ On a scheduled run:
    out-of-window target for current authority and conflict resolution; never
    copy, expose, derive from, or mutate a Goal because of it. If fewer than five
    applicable targets remain, ask no question and use ordinary closeout text.
-   A card-qualifying target must use the exact canonical metric/unit pair:
-   `dietary-calories` with `kcal`, and
+   New authoring uses `dietary-calories`. For the card's calorie slot only, an
+   existing applicable active exact-point `calories` target in `kcal` is a
+   read-only legacy alias when no `dietary-calories` owner exists. Require one
+   legacy owner. When the canonical owner also exists, use it only if every
+   legacy alias is an identical compatible point; any different value,
+   incompatible alias, or multiple legacy-only owners is a conflict. Never
+   rename or mutate a Goal just to repair this key. The other card-qualifying
+   targets must use the exact canonical metric/unit pairs:
    `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.
    A target in another unit remains authoritative, but never compare, convert,
    or copy its raw value into this fixed-unit card; on a scheduled occurrence,

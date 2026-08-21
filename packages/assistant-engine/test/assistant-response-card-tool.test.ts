@@ -890,6 +890,21 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
     )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'do not call murph.send_progress_update merely to announce safety, totals, estimation, or target-resolution checks',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'the calorie slot accepts one applicable active exact-point legacy calories target in kcal when no dietary-calories owner exists',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'If a canonical owner exists, use it only when every applicable legacy alias is an identical compatible point; a different value, incompatible alias, or multiple legacy-only owners is a conflict.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Never rename or mutate a Goal merely to repair the legacy key.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'retry a failed, explicitly truncated, or unreadable family-specific show exactly once through vault-cli show <same-id> --format json',
+    )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'V2 adds fiber and nullable goal snapshots',
     )

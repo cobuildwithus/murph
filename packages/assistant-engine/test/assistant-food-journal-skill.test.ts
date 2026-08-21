@@ -175,6 +175,15 @@ describe('assistant food journal skill', () => {
       'Use its\nproposal workflow only if a target is genuinely missing after that read and the\nmember made an explicit numeric-card or target-setting request. Default meal-card\nintent never invokes it.',
     )
     expect(skill).toContain(
+      'Treat a routine daily-card request, including a requested meal estimate needed\nfor that card, as one fulfillment workflow.',
+    )
+    expect(skill).toContain(
+      'Do not call\n`murph.send_progress_update` merely to announce safety, totals, estimation, or\ntarget-resolution checks.',
+    )
+    expect(skill).toContain(
+      'reply once with the card or one concise truthful fallback',
+    )
+    expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',
     )
     expect(skill).toContain('does not attach a goal-less card')

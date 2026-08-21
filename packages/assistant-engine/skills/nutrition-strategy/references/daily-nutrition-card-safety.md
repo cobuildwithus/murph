@@ -38,9 +38,13 @@ context.
   every returned active regimen. Inspect the complete detail sets before applying
   the exclusions below; never select records by title, substance, severity,
   context-snapshot visibility, or the default list prefix. If any required detail
-  read fails or is unreadable, use the same fail-closed behavior. A scheduled
-  occurrence asks no question when this read is unavailable or suppresses numeric
-  output.
+  read fails, is explicitly truncated, or is unreadable, retry that exact id
+  once through `vault-cli show <same-id> --format json`. Continue only when the
+  fallback returns one complete, unambiguous canonical record; otherwise use
+  the same fail-closed behavior. This read-only fallback does not authorize
+  omitting fields, selecting a smaller safety set, or retrying indefinitely. A
+  scheduled occurrence asks no question when this read is unavailable or
+  suppresses numeric output.
 - Also run `vault-cli event list --kind procedure --limit 200 --format json`
   and inspect every returned canonical procedure item before numeric setup,
   proposal presentation, Goal mutation or activation, and every card. Reuse an
@@ -175,13 +179,15 @@ context.
   significant heart disease, relevant endocrine disease, post-bariatric care,
   a therapeutic diet, or another clinician-managed nutrition context.
 - Treat a calorie target below 1,200 kcal/day as outside this product's
-  self-directed numeric-card boundary. This applies both to an active canonical
+  self-directed numeric-card boundary. This applies both to the active resolved
   target at card time and to an adjusted or rounded derived result before any
   Goal write. For an existing target, first require that the containing Goal
   window and target-level dates include the exact card `localDate`; an
   out-of-window target must neither trigger nor satisfy this gate. Evaluate the
-  boundary only for an exact point `dietary-calories` target in canonical
-  `kcal`: its selected-value comparator must be `between` with identical
+  boundary only for the exact point calorie target resolved under
+  `daily-nutrition-card-goals.md`: canonical `dietary-calories` or its narrow
+  read-only legacy `calories` alias, in `kcal`. Its selected-value comparator
+  must be `between` with identical
   numeric `value` and `highValue`. A one-sided threshold, non-identical range,
   or calorie target in any other unit makes the point-target card bundle
   incompatible. Never compare a threshold bound or incompatible raw number

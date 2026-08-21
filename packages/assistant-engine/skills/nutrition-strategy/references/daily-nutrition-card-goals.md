@@ -71,9 +71,24 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   question without mutation; a scheduled closeout asks nothing and sends no
   card. Apply this rule before any low-energy check or derivation. Multiple
   active explicit owners are also ambiguous.
+- Calorie metric compatibility has one narrow read-only exception for existing
+  Goals. New authoring uses `dietary-calories`. When resolving the card's
+  calorie slot, an applicable active `calories` target in `kcal` is a legacy
+  alias only when it is an exact point under the comparator rule above. If no
+  applicable `dietary-calories` owner exists, require exactly one compatible
+  legacy owner and use its value without renaming or mutating the Goal. If a
+  canonical owner exists, prefer it only when every applicable legacy alias is
+  also a compatible exact point with the identical value; ignore those
+  identical aliases for card resolution. A different legacy value, an
+  incompatible legacy unit or comparator, or multiple legacy-only owners is a
+  conflict: attach no card and perform no managed Goal mutation. Apply the
+  1,200-kcal boundary and residual-energy calculations to the one resolved
+  calorie value exactly as if it came from `dietary-calories`. Do not extend
+  this alias to another workflow or author new `calories` targets.
 - Unit compatibility is part of target authority. This fixed-unit workflow
-  accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`,
-  `fat-grams`, and `fiber-grams` in `g`. An explicit target in another unit
+  accepts the resolved calorie owner above in `kcal`, and `protein-grams`,
+  `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`. An explicit target in
+  another unit
   remains authoritative and must not be overwritten, but its raw value must not
   be compared with the 1,200 kcal boundary, copied into a card, or used by the
   residual-energy or fiber calculations. Do not invent a card-specific

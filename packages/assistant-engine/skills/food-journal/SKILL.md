@@ -95,6 +95,11 @@ before deciding that the five canonical daily goals are complete. Use its
 proposal workflow only if a target is genuinely missing after that read and the
 member made an explicit numeric-card or target-setting request. Default meal-card
 intent never invokes it.
+Treat a routine daily-card request, including a requested meal estimate needed
+for that card, as one fulfillment workflow. Do not call
+`murph.send_progress_update` merely to announce safety, totals, estimation, or
+target-resolution checks. Complete the authorized meal mutation and bounded
+reads first, then reply once with the card or one concise truthful fallback.
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
 pending explicit card request in that next response after the complete safety

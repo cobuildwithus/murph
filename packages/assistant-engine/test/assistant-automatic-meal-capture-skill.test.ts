@@ -162,7 +162,10 @@ describe('assistant automatic meal capture skill', () => {
       'Never use the five-record context projection, a title, substance, severity, or the default list prefix to select the safety set.',
     )
     expect(compactSkill).toContain(
-      'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
+      'If any required detail read fails, is explicitly truncated, or is unreadable, retry that exact id once through `vault-cli show <same-id> --format json`.',
+    )
+    expect(compactSkill).toContain(
+      'Never omit fields, shrink the safety set, or retry indefinitely.',
     )
     expect(compactSkill).toContain(
       'Also run `vault-cli event list --kind procedure --limit 200 --format json` and follow the shared gate\'s procedure-item inspection and conditional detail reads.',
@@ -183,7 +186,16 @@ describe('assistant automatic meal capture skill', () => {
       'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).toContain(
-      'A card-qualifying target must use the exact canonical metric/unit pair: `dietary-calories` with `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
+      'New authoring uses `dietary-calories`. For the card\'s calorie slot only, an existing applicable active exact-point `calories` target in `kcal` is a read-only legacy alias when no `dietary-calories` owner exists.',
+    )
+    expect(compactSkill).toContain(
+      'When the canonical owner also exists, use it only if every legacy alias is an identical compatible point; any different value, incompatible alias, or multiple legacy-only owners is a conflict.',
+    )
+    expect(compactSkill).toContain(
+      'Never rename or mutate a Goal just to repair this key.',
+    )
+    expect(compactSkill).toContain(
+      'The other card-qualifying targets must use the exact canonical metric/unit pairs: `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
     )
     expect(compactSkill).toContain(
       'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
@@ -322,9 +334,9 @@ describe('assistant automatic meal capture skill', () => {
       'Never ask a scheduled occurrence for these measurements and never mutate measurement records during this check.',
     )
     expect(compactSafety).toContain('below 1,200 kcal/day')
-    expect(compactSafety).toContain('active canonical target at card time')
+    expect(compactSafety).toContain('active resolved target at card time')
     expect(compactSafety).toContain(
-      'Evaluate the boundary only for an exact point `dietary-calories` target in canonical `kcal`: its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories` or its narrow read-only legacy `calories` alias, in `kcal`.',
     )
     expect(compactSafety).toContain(
       'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
@@ -387,7 +399,7 @@ describe('assistant automatic meal capture skill', () => {
     )
   })
 
-  it('maps applicable canonical point targets and rejects incompatible units or comparators', () => {
+  it('maps canonical and legacy calorie point targets and rejects ambiguous or incompatible owners', () => {
     const canonicalTotals = {
       mealCount: 4,
       totals: {
@@ -428,15 +440,45 @@ describe('assistant automatic meal capture skill', () => {
       unit: string,
       targets: readonly CandidateTarget[] = canonicalTargets,
     ): number => {
-      const matches = targets.filter(
-        (target) =>
-          target.metricKey === metricKey &&
-          target.unit === unit &&
-          target.comparator === 'between' &&
-          target.highValue === target.value,
+      const metricKeys = metricKey === 'dietary-calories'
+        ? ['dietary-calories', 'calories']
+        : [metricKey]
+      const candidates = targets.filter((target) =>
+        metricKeys.includes(target.metricKey),
       )
-      expect(matches).toHaveLength(1)
-      return matches[0]!.value
+      const isCompatible = (target: CandidateTarget) =>
+        target.unit === unit &&
+        target.comparator === 'between' &&
+        target.highValue === target.value
+
+      if (candidates.some((target) => !isCompatible(target))) {
+        throw new Error('incompatible target')
+      }
+
+      if (metricKey !== 'dietary-calories') {
+        expect(candidates).toHaveLength(1)
+        return candidates[0]!.value
+      }
+
+      const canonical = candidates.filter((target) =>
+        target.metricKey === 'dietary-calories',
+      )
+      const legacy = candidates.filter((target) =>
+        target.metricKey === 'calories',
+      )
+      if (canonical.length > 1) {
+        throw new Error('ambiguous canonical targets')
+      }
+      if (canonical.length === 1) {
+        if (legacy.some((target) => target.value !== canonical[0]!.value)) {
+          throw new Error('conflicting legacy target')
+        }
+        return canonical[0]!.value
+      }
+      if (legacy.length !== 1) {
+        throw new Error('ambiguous legacy targets')
+      }
+      return legacy[0]!.value
     }
     const expectedArgument = {
       card: {
@@ -483,6 +525,44 @@ describe('assistant automatic meal capture skill', () => {
     expect(expectedArgument.card.totals.fiberGrams).toBe(
       canonicalTotals.totals.fiberGrams,
     )
+
+    const legacyCalories = canonicalTargets.map((target) =>
+      target.metricKey === 'dietary-calories'
+        ? { ...target, metricKey: 'calories' }
+        : target
+    )
+    expect(resolveTarget(
+      'dietary-calories',
+      'kcal',
+      legacyCalories,
+    )).toBe(2_400)
+
+    expect(resolveTarget(
+      'dietary-calories',
+      'kcal',
+      [
+        ...canonicalTargets,
+        pointTarget('calories', 'kcal', 2_400),
+      ],
+    )).toBe(2_400)
+
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      [
+        ...canonicalTargets,
+        pointTarget('calories', 'kcal', 2_200),
+      ],
+    )).toThrow('conflicting legacy target')
+
+    expect(() => resolveTarget(
+      'dietary-calories',
+      'kcal',
+      [
+        ...legacyCalories,
+        pointTarget('calories', 'kcal', 2_200),
+      ],
+    )).toThrow('ambiguous legacy targets')
 
     const kilojouleCalories = canonicalTargets.map((target) =>
       target.metricKey === 'dietary-calories'

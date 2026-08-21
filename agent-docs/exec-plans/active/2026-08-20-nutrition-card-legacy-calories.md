@@ -1,0 +1,122 @@
+# Nutrition Card Legacy Calorie Compatibility
+
+Status: active
+Created: 2026-08-20
+Updated: 2026-08-20
+
+## Goal
+
+Let an existing accepted daily calorie target stored under the legacy
+`calories` metric qualify for the same nutrition card as the canonical
+`dietary-calories` metric, without rewriting member state or weakening the
+card's safety gate.
+
+## Production Evidence
+
+- An explicit daily-card request had complete same-day meal totals after one
+  requested estimate was saved.
+- The accepted active goal contained exact calorie, macro, and fiber targets,
+  but its calorie target used the older `calories` metric key.
+- Current card instructions accept only `dietary-calories`, so the otherwise
+  complete target bundle was rejected.
+- The interactive evidence pass sent an interim status message and produced a
+  large tool-output payload before the final eligibility decision, creating a
+  fragmented and frustrating conversation.
+
+## Product UX Patch
+
+### Outcome
+
+Members with an older accepted calorie target can receive the same daily
+nutrition card as members with a newly authored canonical target. A routine
+card request resolves end to end before Murph replies instead of narrating the
+internal preflight.
+
+### Reaches
+
+- Existing members whose active point calorie target is stored as `calories`
+  in `kcal`.
+- Members whose equivalent target is already stored as
+  `dietary-calories`.
+- Interactive card requests and managed meal closeouts.
+- Members whose safety evidence or target bundle is incomplete, conflicting,
+  out of window, or incompatible; these paths must remain text-only and
+  fail-closed.
+
+### Proof
+
+- Skill and tool-contract tests prove the narrow legacy alias, canonical
+  preference, conflict handling, and future canonical authoring.
+- A mapping regression proves a legacy calorie target produces the canonical
+  calorie card snapshot while incompatible units and comparators remain
+  rejected.
+- Prompt-contract coverage proves routine daily-card fulfillment skips
+  progress messages while preserving the final truthful fallback.
+
+## Constraints
+
+- Add no new state owner and do not mutate or duplicate an existing Goal only
+  to repair its metric key.
+- Treat `calories` as a read-only compatibility alias only for the daily-card
+  calorie slot. New target authoring remains `dietary-calories`.
+- Prefer the canonical target when both aliases represent the same exact point.
+  Treat differing applicable values as a conflict and attach no card.
+- Keep every current safety read and suppression boundary fail-closed.
+- Do not copy private conversation wording or identifying evidence into tests,
+  docs, changelog content, or review artifacts.
+
+## Tasks
+
+1. Update the nutrition-card goal, safety, meal-closeout, food-journal, and
+   response-card tool contracts with one consistent legacy-alias rule.
+2. Keep routine card fulfillment silent until its card or concise fallback is
+   ready.
+3. Add focused regression coverage for legacy mapping and prompt behavior.
+4. Add a member-facing changelog item, run focused verification and typecheck,
+   then complete the exact-head review, CI, commit, and PR workflow.
+
+## Verification
+
+- Focused assistant-engine Vitest files for nutrition strategy, automatic meal
+  capture, food journal, response-card tool descriptions, and scripted runtime.
+- Assistant-engine typecheck and `git diff --check`.
+- Required exact-head preliminary specialist review and GitHub checks.
+
+## Product UX Walkthrough
+
+- Existing legacy target: a member with one applicable exact-point `calories`
+  target in `kcal` and the four canonical gram targets reaches the existing
+  nutrition card without target repair. The mapping regression resolves the
+  legacy value into the calorie card snapshot, and the prompt contract keeps
+  new authoring canonical.
+- Canonical target: a member with `dietary-calories` keeps that owner. An
+  identical legacy alias is ignored; a different value, incompatible alias,
+  or multiple legacy-only owners remains a conflict with no Goal mutation and
+  no card.
+- Routine interactive request: the card workflow completes its meal estimate,
+  totals, safety, and target checks before the final response. Food-journal and
+  response-card contract tests prohibit a progress message for those internal
+  steps and require one card or concise fallback.
+- Safety or data failure: one exact generic-read fallback may recover a failed
+  or truncated condition or regimen detail. An incomplete or ambiguous
+  fallback remains fail-closed; no fields or records are omitted.
+- Difference from plan: none. The walkthrough is `Ready`; it restores the
+  existing card promise without adding an audience, state owner, or delivery
+  path. The unchanged card attachment and message-delivery owners remain
+  covered by their existing runtime tests.
+
+## Provider Input Measurement
+
+- A pinned real Codex App Server and local scripted Responses endpoint captured
+  normalized complete first provider-visible inputs for synthetic private and
+  group card turns. The base was derived from each captured head request by
+  removing only the new compatibility fragment, keeping the fixture and every
+  other serialized field identical.
+- With `gpt-tokenizer` 3.4.0 `o200k_harmony`, the private request changes from
+  15,879 tokens / 71,241 UTF-8 bytes to 16,094 / 72,380 (+215 tokens,
+  +1.3540%; +1,139 bytes). The group request remains 14,187 tokens / 61,593
+  bytes. Captured fields were `include`, `input`, `instructions`,
+  `parallel_tool_calls`, `text`, `tool_choice`, and `tools` when present;
+  model selection, reasoning, storage, streaming, service tier, cache/client
+  metadata, and transport headers were excluded identically. Temporary paths
+  and generated UUIDs were normalized.

@@ -418,7 +418,19 @@ describe('assistant nutrition strategy skill', () => {
       'Unit compatibility is part of target authority.',
     )
     expect(compactGoals).toContain(
-      'This fixed-unit workflow accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
+      'Calorie metric compatibility has one narrow read-only exception for existing Goals.',
+    )
+    expect(compactGoals).toContain(
+      'When resolving the card\'s calorie slot, an applicable active `calories` target in `kcal` is a legacy alias only when it is an exact point',
+    )
+    expect(compactGoals).toContain(
+      'If a canonical owner exists, prefer it only when every applicable legacy alias is also a compatible exact point with the identical value',
+    )
+    expect(compactGoals).toContain(
+      'Do not extend this alias to another workflow or author new `calories` targets.',
+    )
+    expect(compactGoals).toContain(
+      'This fixed-unit workflow accepts the resolved calorie owner above in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
     )
     expect(compactGoals).toContain(
       'its raw value must not be compared with the 1,200 kcal boundary, copied into a card, or used by the residual-energy or fiber calculations.',
@@ -482,7 +494,10 @@ describe('assistant nutrition strategy skill', () => {
       '`vault-cli condition show <condition-id> --format json` for every returned active condition and `vault-cli regimen show <regimen-id> --format json` for every returned active regimen.',
     )
     expect(compactSafety).toContain(
-      'If any required detail read fails or is unreadable, use the same fail-closed behavior.',
+      'If any required detail read fails, is explicitly truncated, or is unreadable, retry that exact id once through `vault-cli show <same-id> --format json`.',
+    )
+    expect(compactSafety).toContain(
+      'This read-only fallback does not authorize omitting fields, selecting a smaller safety set, or retrying indefinitely.',
     )
     expect(compactSafety).toContain(
       '`vault-cli event list --kind procedure --limit 200 --format json`',
@@ -578,6 +593,9 @@ describe('assistant nutrition strategy skill', () => {
       'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
     )
     expect(compactSafety).toContain(
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories` or its narrow read-only legacy `calories` alias, in `kcal`.',
+    )
+    expect(compactSafety).toContain(
       'A scheduled occurrence never gains authority to ask safety-profile questions, solicit target inputs, activate a proposal, or attach a card from provisional targets.',
     )
     expect(compactSafety).toContain(
@@ -625,10 +643,10 @@ describe('assistant nutrition strategy skill', () => {
       "Treat a calorie target below 1,200 kcal/day as outside this product's self-directed numeric-card boundary.",
     )
     expect(compactSafety).toContain(
-      'This applies both to an active canonical target at card time and to an adjusted or rounded derived result before any Goal write.',
+      'This applies both to the active resolved target at card time and to an adjusted or rounded derived result before any Goal write.',
     )
     expect(compactSafety).toContain(
-      'its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+      'Its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
     )
     expect(compactSafety).toContain(
       'Do not raise a compatible low point target to the boundary and continue',
