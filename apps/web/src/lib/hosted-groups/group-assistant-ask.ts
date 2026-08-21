@@ -427,7 +427,8 @@ export async function requestHostedGroupContextHandoff(input: {
     } as const;
   });
   if ("result" in preparedSelection) {
-    return preparedSelection.result;
+    return preparedSelection.result
+      ?? unavailableAdmission("membership_unavailable");
   }
 
   let boundDestination: ReturnType<
