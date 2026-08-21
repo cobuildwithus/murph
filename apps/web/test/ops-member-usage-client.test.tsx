@@ -4,6 +4,7 @@ import {
   type ComponentProps,
   type InputHTMLAttributes,
 } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const routerRefresh = vi.fn();
@@ -127,6 +128,24 @@ afterEach(async () => {
 });
 
 describe("MemberUsageClient", () => {
+  test("renders mutation controls fail-closed before tab-session restoration", () => {
+    const markup = renderToStaticMarkup(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    );
+
+    expect(markup).toContain('aria-busy="true"');
+    expect(markup).toContain('data-reset-all-session-ready="false"');
+    expect(markup).toMatch(
+      /<input[^>]*disabled=""[^>]*id="ops-usage-search"/u,
+    );
+    expect(markup).toMatch(
+      /<button[^>]*disabled=""[^>]*type="submit"[^>]*>Search<\/button>/u,
+    );
+    expect(markup).toMatch(
+      /<button[^>]*disabled=""[^>]*type="button"[^>]*>[\s\S]*?Reset everyone<\/button>/u,
+    );
+  });
+
   test("shows members, containers, retained-message scope, and usage totals", async () => {
     const rendered = await renderClientComponent(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),

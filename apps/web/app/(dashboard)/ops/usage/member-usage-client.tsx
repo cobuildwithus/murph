@@ -181,6 +181,8 @@ function MemberUsageClientSurface({
   const [searchNavigationPending, setSearchNavigationPending] = useState(
     designState === "search_loading",
   );
+  const [resetAllSessionCheckComplete, setResetAllSessionCheckComplete] =
+    useState(designState !== undefined || operatorMemberId === null);
   const [resetAllOpen, setResetAllOpen] = useState(
     initialResetAllState.phase !== "idle",
   );
@@ -205,7 +207,8 @@ function MemberUsageClientSurface({
       || resetAllState.phase === "recovering_wakes"
     )
     && resetAllOperationId.current !== null;
-  const globalResetActive = resetAllState.phase === "confirming"
+  const globalResetActive = !resetAllSessionCheckComplete
+    || resetAllState.phase === "confirming"
     || resetAllState.phase === "paused"
     || resetAllState.phase === "running";
   const contactSearchRequiresExactLookup =
@@ -232,27 +235,27 @@ function MemberUsageClientSurface({
       return;
     }
     const restoredOperation = readResetAllSessionOperation(operatorMemberId);
-    if (!restoredOperation) {
-      return;
-    }
     let active = true;
     queueMicrotask(() => {
       if (!active) {
         return;
       }
-      resetAllOperationId.current = restoredOperation.operationId;
-      resetAllAcknowledgedCursors.current.clear();
-      if (restoredOperation.state.lastAcknowledgedCursor) {
-        resetAllAcknowledgedCursors.current.add(
-          restoredOperation.state.lastAcknowledgedCursor,
+      if (restoredOperation) {
+        resetAllOperationId.current = restoredOperation.operationId;
+        resetAllAcknowledgedCursors.current.clear();
+        if (restoredOperation.state.lastAcknowledgedCursor) {
+          resetAllAcknowledgedCursors.current.add(
+            restoredOperation.state.lastAcknowledgedCursor,
+          );
+        }
+        setResetAllConfirmation(HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION);
+        setResetAllAbandonmentOpen(false);
+        setResetAllStateValue(
+          restoreInterruptedResetAllState(restoredOperation.state),
         );
+        setResetAllOpen(true);
       }
-      setResetAllConfirmation(HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION);
-      setResetAllAbandonmentOpen(false);
-      setResetAllStateValue(
-        restoreInterruptedResetAllState(restoredOperation.state),
-      );
-      setResetAllOpen(true);
+      setResetAllSessionCheckComplete(true);
     });
     return () => {
       active = false;
@@ -324,7 +327,7 @@ function MemberUsageClientSurface({
   }
 
   function openResetAllDialog(): void {
-    if (isResetting) {
+    if (isResetting || !resetAllSessionCheckComplete) {
       return;
     }
     setSelectedMemberId(null);
@@ -810,7 +813,11 @@ function MemberUsageClientSurface({
   }
 
   return (
-    <div className="flex flex-col gap-8">
+    <div
+      aria-busy={!resetAllSessionCheckComplete}
+      className="flex flex-col gap-8"
+      data-reset-all-session-ready={resetAllSessionCheckComplete}
+    >
       <header className="border-b border-border/70 pb-6">
         <div className="max-w-3xl">
           <span className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-chart-5">
@@ -918,7 +925,10 @@ function MemberUsageClientSurface({
           <Button
             className="mt-3 w-full sm:w-auto lg:w-full"
             disabled={
-              isResetting || resetAllOpen || searchNavigationPending
+              isResetting
+              || !resetAllSessionCheckComplete
+              || resetAllOpen
+              || searchNavigationPending
             }
             onClick={openResetAllDialog}
             type="button"

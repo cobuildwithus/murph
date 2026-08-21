@@ -73,10 +73,11 @@ through a final reset, skipped, pending-wake, and failed summary.
   phase across component remount, same-tab navigation, reload, and
   browser-provided tab restoration. An operator mismatch discards it, and it is
   not shared across tabs or a new or closed tab session. The client refuses to
-  start the next mutation if it cannot first persist the locator. Hiding
-  preserves the operation and keeps conflicting mutations locked; a separate
-  warned abandonment clears it before a later confirmation can create a new
-  UUID.
+  expose mutation-capable controls until that tab-session check completes and
+  refuses to start the next mutation if it cannot first persist the locator.
+  Hiding preserves the operation and keeps conflicting mutations locked; a
+  separate warned abandonment clears it before a later confirmation can create
+  a new UUID.
 - Member whose hosted runtime becomes terminally inactive after commit: reset
   remains committed and wake recovery advances because no runtime remains
   applicable. Retryable runtime or transport failures remain visibly pending.
