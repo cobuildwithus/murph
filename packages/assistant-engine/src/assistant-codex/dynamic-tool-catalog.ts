@@ -387,14 +387,11 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   },
 } as const
 
-export const MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE =
-  'Before classifying a Murph path as missing or filing missing-capability feedback, use the provided deferred-tool discovery surface; absence from eager tools is not proof.'
-
 export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. ${MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE} When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
+    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
