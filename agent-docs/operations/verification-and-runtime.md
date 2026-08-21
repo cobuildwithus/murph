@@ -67,8 +67,9 @@ narrow injected boundaries and prove acquisition ordering, success, relevant
 failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
-Native companion auth/control/device-sync PRs additionally use the
-`Native iOS hosted E2E` status described in `agent-docs/references/testing-ci-map.md`.
+Native companion auth/control/device-sync PRs additionally use the applicable
+`Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
+`agent-docs/references/testing-ci-map.md`.
 A canceled native workflow must not be rerun directly because the rerun retains
 its original queue identity. From an authenticated operator checkout, use
 `node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
@@ -76,13 +77,14 @@ open same-repository human-authored PR and exact current head before rerunning a
 successful exact-head Repo Hygiene owner, whose completion creates a fresh
 native waiter without widening the protected environment or secret boundary.
 A status description that records a real pass is production-shaped evidence:
-exact hosted PR Web deployment plus real Privy/Junction/HealthKit native flow.
+exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
+Connect native flow.
 Path-filtered informational success explicitly records that no real journey ran
 and must not become a required-check substitute. UI completion is not enough;
 trusted orchestration must also prove the exact candidate is anonymously reachable,
 a freshly created fixed Privy principal exists, and a connected real Junction
-`apple_health_kit` provider exists before cleanup. Local mocked or hosted-local
-tests do not replace it. Runtime credentials stay in the dedicated Vercel
+`apple_health_kit` or `health_connect` provider exists before cleanup. Local
+mocked or hosted-local tests do not replace it. Runtime credentials stay in the dedicated Vercel
 custom environment; the cleanup/dispatch credentials stay only in protected
 Actions environments. Junction cleanup completely enumerates the configured
 sandbox team, validates every returned team id, and deletes at most one user in
@@ -94,6 +96,13 @@ data.
 PR reset ownership is `orchestrator_owned_reset`, while production canary mode
 is non-destructive and receives none of that authority. Controller child
 commands and direct PostgreSQL reads are explicitly time-bounded.
+The Android controller additionally binds the exact private Android commit to
+an immutable lightweight tag and a short dispatch lease. If a dispatched run
+cannot be proven terminal after cancellation, cleanup remains fenced through
+the lease, the private job timeout, and a terminal grace window. Raw Android
+instrumentation output and provider prose are never uploaded or published;
+only the private workflow's closed allowlisted stage summary may reach Actions
+output. See `agent-docs/operations/native-android-hosted-e2e.md`.
 
 ## Expensive And Stochastic Proof Order
 

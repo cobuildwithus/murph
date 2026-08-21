@@ -231,6 +231,18 @@ Last verified: 2026-08-20
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
+- Protected native Android hosted E2E treats private workflow dispatch as an
+  uncertain external effect. The controller binds the returned run id to the
+  reviewed Android SHA, polls only that run, and accepts success only from its
+  terminal `workflow_dispatch` result. A poll failure or bounded-wait expiry
+  requests ordinary cancellation, then force-cancellation, and proves the same
+  run terminal before shared identity or deployment cleanup. If cancellation
+  or status cannot be attested, the controller keeps the destructive native
+  live lock and all cleanup authority fenced until the dispatch lease, private
+  job timeout, and terminal grace window prove no admitted run can remain
+  executable. PR and production jobs are separately non-canceling; production
+  uses a non-destructive identity lifecycle. See
+  `agent-docs/operations/native-android-hosted-e2e.md`.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing
