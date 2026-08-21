@@ -286,6 +286,7 @@ function selectAssistantGroupProviderResult(
           ?? providerResult.responseDeliveryContextOrdinal,
         ]
       : [],
+    precedingResponseSegments: [],
     reactions: noReplySelected
       ? providerResult.reactions?.slice(-1)
       : [],

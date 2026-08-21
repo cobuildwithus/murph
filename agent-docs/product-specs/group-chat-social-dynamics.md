@@ -164,6 +164,18 @@ later input remains pending for the next ordinary turn. Completed tools,
 progress messages, and other real-world effects are not provisional and must
 not be repeated by reconsideration.
 
+Completed conversational response segments are provisional under this feature,
+including an answer superseded by already-started live steering inside request
+1. Only that request's latest terminal response is selected, so neither request
+0 nor request 1 can turn an intermediate answer into an extra outbound bubble.
+Request 1 still accepts live steering until its first completed response; after
+that cutoff, new input belongs to the next turn.
+
+Returning the prior text again means keep. Request 1 owns any selected card,
+media, reaction, or native-reply target; it does not implicitly reuse rich
+output from request 0. Exact rich-draft preservation is intentionally deferred
+until a concrete journey justifies a dedicated selection meaning.
+
 Murph takes one terminal action for the beat: one text reply, one reaction, or
 silence. It never answers each accepted message separately or recaps the burst
 point by point. Human-owned and otherwise silent beats remain ordinary

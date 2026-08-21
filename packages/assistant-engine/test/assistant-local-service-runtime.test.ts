@@ -6254,19 +6254,12 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     expect(
       mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
     ).toMatchObject({
-      precedingResponseSegments: [{
-        deliveryContextOrdinal: 1,
-        response: 'Selected completed segment.',
-      }],
+      precedingResponseSegments: [],
       response: scenario.finalResponse,
       responseDeliveryContextOrdinal: scenario.liveSteer ? 2 : 1,
     })
     expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
-      expect.objectContaining({
-        segments: [expect.objectContaining({
-          response: 'Selected completed segment.',
-        })],
-      }),
+      expect.objectContaining({ segments: [] }),
     )
     expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
     expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
@@ -6366,21 +6359,10 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
   expect(
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
   ).toMatchObject({
-    precedingResponseSegments: [{
-      deliveryContextOrdinal: 0,
-      media: [{ url: 'https://cdn.example.test/selected-quiet.png' }],
-      response: 'Selected quiet segment.',
-    }],
+    precedingResponseSegments: [],
   })
   expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
-    expect.objectContaining({
-      segments: [expect.objectContaining({
-        media: [expect.objectContaining({
-          url: 'https://cdn.example.test/selected-quiet.png',
-        })],
-        response: 'Selected quiet segment.',
-      })],
-    }),
+    expect.objectContaining({ segments: [] }),
   )
   expect(mocks.dispatchAssistantReply).toHaveBeenCalledOnce()
 
@@ -6455,7 +6437,7 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
   ).toMatchObject({
     acceptedNoReplyDeliveryContextOrdinals: [1],
-    precedingResponseSegments: undefined,
+    precedingResponseSegments: [],
     reactions: [{ deliveryContextOrdinal: 1, reaction: 'thumbs_up' }],
     response: '',
     responseDeliveryContextOrdinal: 1,
@@ -6463,88 +6445,6 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     transcriptResponse: null,
   })
   expect(mocks.deliverAssistantReaction).toHaveBeenCalledOnce()
-  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
-
-  resetScenario()
-  const segmentedSilenceDraftReady = createDeferred<void>()
-  const segmentedNoReplyAccepted = vi.fn(async () => undefined)
-  addFirstDraft(
-    segmentedSilenceDraftReady,
-    'provider-thread-group-segmented-silence',
-  )
-  mocks.executeCodexTurnWithRecovery.mockImplementationOnce(
-    async (providerInput) => {
-      await providerInput.onProviderRequestPlanned?.({
-        providerAttemptId: 'attempt-1',
-        codexContinuation: { kind: 'explicit-structured-history' },
-      })
-      await providerInput.onFinishWithoutReplyAccepted?.({
-        deliveryContextOrdinal: 0,
-        messageReactionPending: false,
-      })
-      return {
-        kind: 'succeeded',
-        providerTurn: {
-          acceptedNoReplyDeliveryContextOrdinals: [0],
-          onboardingGuidanceInjected: true,
-          codexContinuation: { kind: 'explicit-structured-history' },
-          codexThreadId: 'provider-thread-group-segmented-silence',
-          finalAction: { kind: 'none' },
-          precedingResponseSegments: [{
-            deliveryContextOrdinal: 0,
-            media: [{
-              alt: 'Selected reconsideration segment image',
-              kind: 'image',
-              source: null,
-              url: 'https://cdn.example.test/selected-reconsideration.png',
-            }],
-            response: 'Selected completed response before silence.',
-          }],
-          response: '',
-          responseDeliveryContextOrdinal: 0,
-          route: { routeId: 'route-group-review' },
-          session,
-          transcriptResponse: null,
-        },
-      }
-    },
-  )
-  const segmentedSilenceTurn = await startHeldTurn({
-    firstDraftReady: segmentedSilenceDraftReady,
-    latePrompt: 'One last fact before the response.',
-    onFinishWithoutReplyAccepted: segmentedNoReplyAccepted,
-  })
-  const segmentedSilenceOutcomes = await Promise.all([
-    segmentedSilenceTurn.initial,
-    segmentedSilenceTurn.late,
-  ])
-  expect(
-    segmentedSilenceOutcomes.every(
-      (outcome) => outcome.status === 'fulfilled',
-    ),
-  ).toBe(true)
-  expect(segmentedNoReplyAccepted).toHaveBeenCalledOnce()
-  expect(
-    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
-  ).toMatchObject({
-    acceptedNoReplyDeliveryContextOrdinals: [1],
-    precedingResponseSegments: [{
-      deliveryContextOrdinal: 1,
-      media: [{
-        url: 'https://cdn.example.test/selected-reconsideration.png',
-      }],
-      response: 'Selected completed response before silence.',
-    }],
-    response: '',
-    responseDeliveryContextOrdinal: 1,
-  })
-  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
-    expect.objectContaining({
-      segments: [expect.objectContaining({
-        response: 'Selected completed response before silence.',
-      })],
-    }),
-  )
   expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
 
   resetScenario()

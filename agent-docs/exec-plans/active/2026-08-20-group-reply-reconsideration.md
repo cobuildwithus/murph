@@ -21,8 +21,9 @@ Updated: 2026-08-20
 - Same-room input accepted during the held-draft window creates provider request
   ordinal 1 in the same Codex thread with the engine-owned reconsideration
   instruction; request 1 is the hard cap.
-- Keep, edit, reaction-only, and silence outcomes make only the selected request
-  canonical; provisional text/media/reactions/no-reply evidence never leak.
+- Keep, edit, reaction-only, and silence outcomes make only the latest selected
+  terminal response canonical; provisional response segments, text, media,
+  reactions, and no-reply evidence never leak or create another bubble.
 - Request 1 failure never sends request 0's stale draft and leaves every accepted
   input on the existing retry path.
 - The controller cutoff classifies racing input once as reconsidered now or
@@ -150,15 +151,19 @@ Updated: 2026-08-20
   covered. The proposed host-side urgency/silence classifier was rejected because
   it conflicts with the explicit all-results-provisional invariant and would add
   a second policy engine while reintroducing premature no-reply commitment.
-- Final ReviewGPT round 1 found and the candidate now corrects three concrete
-  seams: usage records allocate turn-local monotonic ordinals independently from
-  logical request ordinals; only the losing request's segments are discarded,
-  while the selected request's rebased completed segments remain canonical; and
-  request-1 targeted progress resolves accepted IDs through its absolute delivery
-  context. Direct proof covers image/subagent/tool usage uniqueness, request-1
-  local target ordinals zero and one, quiet rich segments, selected segments
-  followed by silence, and lossless request-0 supersession.
-- Remaining: corrected pushed-head ReviewGPT round 2 and CI, parent
+- Final ReviewGPT round 1's usage and request-1 progress findings remain accepted:
+  usage records allocate turn-local monotonic ordinals independently from logical
+  request ordinals, and targeted progress resolves accepted IDs through request
+  1's absolute delivery context. Direct proof covers image/subagent/tool usage
+  uniqueness and request-1 local target ordinals zero and one.
+- Round 2 triggered the required selected-result retrospective. The original
+  contract resolves it without a new mechanism: request 1 retains live steering
+  until its first completed response, every pre-commit conversational segment is
+  provisional, only the latest terminal response reaches the room, and keep is
+  textual equivalence while exact rich-output reuse remains deliberately deferred.
+  The round-1 segment-preservation correction and its incompatible expectations
+  are reverted, restoring one selection owner and deleting behavior and proof.
+- Remaining: corrected pushed-head ReviewGPT round 3 and CI, parent
   final review, plan closure, and merge-tree proof. The PR remains unmerged.
 
 ## Product UX walkthrough
