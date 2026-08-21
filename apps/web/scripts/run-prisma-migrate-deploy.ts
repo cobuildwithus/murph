@@ -371,11 +371,13 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
 
     const sqlPath = path.join(migrationsDir, entry.name, "migration.sql");
     const sql = stripSqlComments(await readFile(sqlPath, "utf8"));
+    const statements = splitSqlStatements(sql);
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(
       ({ label, pattern }) =>
-        pattern.test(sql) && !compatibleReasons?.has(label),
+        statements.some((statement) => pattern.test(statement)) &&
+        !compatibleReasons?.has(label),
     );
 
     if (destructivePattern !== undefined) {
@@ -419,6 +421,72 @@ function nonEmptyEnv(value: string | undefined): string | undefined {
 
 function stripSqlComments(sql: string): string {
   return sql.replace(/--.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "");
+}
+
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let statementStart = 0;
+  let quote: "single" | "double" | undefined;
+  let dollarQuote: string | undefined;
+
+  for (let index = 0; index < sql.length; index += 1) {
+    if (dollarQuote !== undefined) {
+      if (sql.startsWith(dollarQuote, index)) {
+        index += dollarQuote.length - 1;
+        dollarQuote = undefined;
+      }
+      continue;
+    }
+
+    const character = sql[index];
+
+    if (quote === "single") {
+      if (character === "'" && sql[index + 1] === "'") {
+        index += 1;
+      } else if (character === "'") {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (quote === "double") {
+      if (character === '"' && sql[index + 1] === '"') {
+        index += 1;
+      } else if (character === '"') {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (character === "'") {
+      quote = "single";
+      continue;
+    }
+
+    if (character === '"') {
+      quote = "double";
+      continue;
+    }
+
+    if (character === "$") {
+      const delimiter = sql
+        .slice(index)
+        .match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/u)?.[0];
+      if (delimiter !== undefined) {
+        dollarQuote = delimiter;
+        index += delimiter.length - 1;
+        continue;
+      }
+    }
+
+    if (character === ";") {
+      statements.push(sql.slice(statementStart, index));
+      statementStart = index + 1;
+    }
+  }
+
+  statements.push(sql.slice(statementStart));
+  return statements;
 }
 
 function runCommandInherited(

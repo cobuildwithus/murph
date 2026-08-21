@@ -110,7 +110,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    environment: native-android-hosted-e2e
+    # Android and iOS mutate the same dedicated hosted-native deployment,
+    # database, Junction namespace, and Privy identity. Keep those credentials
+    # in their existing single protected environment instead of duplicating
+    # non-exportable secrets across platform-named environments.
+    environment: native-ios-hosted-e2e
     runs-on: ubuntu-24.04
     # Must exceed pre-run cleanup, the bounded 25-minute deployment, the
     # 85-minute private-run fence, and both fail-closed cleanup passes.
@@ -167,20 +171,20 @@ jobs:
           # The existing hosted-native deployment and identity modules remain
           # the single owner. Android maps its protected values into that
           # historical internal namespace instead of creating another lifecycle.
-          NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_ANDROID_E2E_DATABASE_URL }}
-          NATIVE_IOS_E2E_DIRECT_DATABASE_URL: ${{ secrets.NATIVE_ANDROID_E2E_DIRECT_DATABASE_URL }}
-          NATIVE_IOS_E2E_JUNCTION_API_KEY: ${{ secrets.NATIVE_ANDROID_E2E_JUNCTION_API_KEY }}
-          NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.NATIVE_ANDROID_E2E_JUNCTION_CLIENT_USER_ID_SECRET }}
-          NATIVE_IOS_E2E_JUNCTION_TEAM_ID: ${{ vars.NATIVE_ANDROID_E2E_JUNCTION_TEAM_ID }}
-          NATIVE_IOS_E2E_PRIVY_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_PRIVY_APP_ID }}
-          NATIVE_IOS_E2E_PRIVY_APP_SECRET: ${{ secrets.NATIVE_ANDROID_E2E_PRIVY_APP_SECRET }}
-          NATIVE_IOS_E2E_PRIVY_TEST_PHONE: ${{ secrets.NATIVE_ANDROID_E2E_PRIVY_TEST_PHONE }}
-          NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID }}
-          NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID }}
-          NATIVE_IOS_E2E_VERCEL_PROJECT_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_PROJECT_ID }}
-          NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_PROJECT_NAME }}
-          NATIVE_IOS_E2E_VERCEL_TEAM_ID: ${{ vars.NATIVE_ANDROID_E2E_VERCEL_TEAM_ID }}
-          NATIVE_IOS_E2E_VERCEL_TOKEN: ${{ secrets.NATIVE_ANDROID_E2E_VERCEL_TOKEN }}
+          NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}
+          NATIVE_IOS_E2E_DIRECT_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DIRECT_DATABASE_URL }}
+          NATIVE_IOS_E2E_JUNCTION_API_KEY: ${{ secrets.NATIVE_IOS_E2E_JUNCTION_API_KEY }}
+          NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET: ${{ secrets.NATIVE_IOS_E2E_JUNCTION_CLIENT_USER_ID_SECRET }}
+          NATIVE_IOS_E2E_JUNCTION_TEAM_ID: ${{ vars.NATIVE_IOS_E2E_JUNCTION_TEAM_ID }}
+          NATIVE_IOS_E2E_PRIVY_APP_ID: ${{ vars.NATIVE_IOS_E2E_PRIVY_APP_ID }}
+          NATIVE_IOS_E2E_PRIVY_APP_SECRET: ${{ secrets.NATIVE_IOS_E2E_PRIVY_APP_SECRET }}
+          NATIVE_IOS_E2E_PRIVY_TEST_PHONE: ${{ secrets.NATIVE_IOS_E2E_PRIVY_TEST_PHONE }}
+          NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID }}
+          NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID }}
+          NATIVE_IOS_E2E_VERCEL_PROJECT_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_PROJECT_ID }}
+          NATIVE_IOS_E2E_VERCEL_PROJECT_NAME: ${{ vars.NATIVE_IOS_E2E_VERCEL_PROJECT_NAME }}
+          NATIVE_IOS_E2E_VERCEL_TEAM_ID: ${{ vars.NATIVE_IOS_E2E_VERCEL_TEAM_ID }}
+          NATIVE_IOS_E2E_VERCEL_TOKEN: ${{ secrets.NATIVE_IOS_E2E_VERCEL_TOKEN }}
           PR_HEAD_REF: ${{ needs.select-pr.outputs.head_ref }}
           PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}

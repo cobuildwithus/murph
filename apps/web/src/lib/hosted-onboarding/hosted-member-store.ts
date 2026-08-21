@@ -47,6 +47,12 @@ import {
   upsertHostedMemberReplyAliasLookupKeyTx,
 } from "./hosted-member-routing-store";
 import {
+  encodeHostedSignupNotificationContext,
+  HOSTED_SIGNUP_NOTIFICATION_CONTEXT_RETENTION_MS,
+  parseHostedSignupNotificationContext,
+  type HostedSignupNotificationContextV1,
+} from "./signup-notification-context";
+import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
   type HostedOnboardingReadClient,
@@ -59,6 +65,8 @@ const HOSTED_MEMBER_EMAIL_AUTH_DIRECT_PUBLIC_SENDER_FIELD =
   "hosted-member-email-authorization.direct-public-sender";
 const HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD =
   "hosted-member-email-authorization.stripe-checkout-email";
+const HOSTED_MEMBER_SIGNUP_NOTIFICATION_CONTEXT_FIELD =
+  "hosted-member.signup-notification-context";
 
 // Assistant tone/voice are cosmetic preferences owned by `member-preferences.ts`.
 // They stay out of core state so billing, auth, and routing paths never carry them.
@@ -142,6 +150,11 @@ export interface HostedMemberDirectPublicSenderAuthorizationFact {
 export interface HostedMemberStripeCheckoutEmailFact {
   address: string;
   collectedAt: Date;
+}
+
+export interface HostedMemberSignupNotificationContextSnapshot {
+  context: HostedSignupNotificationContextV1 | null;
+  createdAt: Date;
 }
 
 export interface PreparedHostedMemberStripeCheckoutEmail {
@@ -466,6 +479,99 @@ export async function claimHostedMemberSignupNotificationEmailAttempt(input: {
   return result.count === 1;
 }
 
+export async function readHostedMemberSignupNotificationContext(input: {
+  memberId: string;
+  now: Date;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberSignupNotificationContextSnapshot | null> {
+  const record = await input.prisma.hostedMember.findUnique({
+    select: {
+      createdAt: true,
+      id: true,
+      signupNotificationContextEncrypted: true,
+      signupNotificationContextExpiresAt: true,
+    },
+    where: {
+      id: input.memberId,
+    },
+  });
+  if (!record) {
+    return null;
+  }
+
+  const contextIsLive = record.signupNotificationContextExpiresAt
+    ? record.signupNotificationContextExpiresAt.getTime() > input.now.getTime()
+    : false;
+
+  const plaintext = contextIsLive
+    ? await decryptHostedWebNullableString({
+        field: HOSTED_MEMBER_SIGNUP_NOTIFICATION_CONTEXT_FIELD,
+        memberId: record.id,
+        prisma: input.prisma,
+        value: record.signupNotificationContextEncrypted,
+      })
+    : null;
+  return {
+    context: parseHostedSignupNotificationContextOrNull(plaintext),
+    createdAt: record.createdAt,
+  };
+}
+
+export async function writeHostedMemberSignupNotificationContextIfPendingTx(
+  input: {
+    context: HostedSignupNotificationContextV1;
+    memberId: string;
+    preparedControlRoot: PreparedHostedDomainRootForWeb;
+    prisma: Prisma.TransactionClient;
+  },
+): Promise<boolean> {
+  const prepared = await revalidateHostedMemberPreparedRootTx({
+    memberId: input.memberId,
+    prepared: input.preparedControlRoot,
+    tx: input.prisma,
+  });
+  const encrypted = await encryptHostedWebNullableStringFromPreparedRoot({
+    field: HOSTED_MEMBER_SIGNUP_NOTIFICATION_CONTEXT_FIELD,
+    memberId: input.memberId,
+    prepared,
+    value: encodeHostedSignupNotificationContext(input.context),
+  });
+  if (!encrypted) {
+    throw new TypeError("Hosted signup notification context encryption failed.");
+  }
+
+  const result = await input.prisma.hostedMember.updateMany({
+    data: {
+      signupNotificationContextEncrypted: encrypted,
+      signupNotificationContextExpiresAt: new Date(
+        new Date(input.context.occurredAt).getTime()
+          + HOSTED_SIGNUP_NOTIFICATION_CONTEXT_RETENTION_MS,
+      ),
+    },
+    where: {
+      NOT: activeHostedMemberAccessWhere(),
+      id: input.memberId,
+      signupNotificationContextEncrypted: null,
+      signupNotificationEmailAttemptedAt: null,
+    },
+  });
+  return result.count === 1;
+}
+
+function parseHostedSignupNotificationContextOrNull(
+  plaintext: string | null,
+): HostedSignupNotificationContextV1 | null {
+  if (!plaintext) {
+    return null;
+  }
+
+  try {
+    return parseHostedSignupNotificationContext(plaintext);
+  } catch {
+    return null;
+  }
+}
+
 export async function readHostedMemberActivationCoreState(input: {
   memberId: string;
   prisma: HostedOnboardingReadClient;
@@ -656,7 +762,7 @@ export async function upsertHostedMemberEmailAuthorization(
   }
 
   const preparedRoot = input.preparedControlRoot
-    ? await revalidateHostedMemberEmailPreparedRootTx({
+    ? await revalidateHostedMemberPreparedRootTx({
         memberId: input.memberId,
         prepared: input.preparedControlRoot,
         tx: input.prisma,
@@ -1507,13 +1613,13 @@ async function buildHostedMemberEmailFactColumns(input: {
   };
 }
 
-async function revalidateHostedMemberEmailPreparedRootTx(input: {
+async function revalidateHostedMemberPreparedRootTx(input: {
   memberId: string;
   prepared: PreparedHostedDomainRootForWeb;
   tx: Prisma.TransactionClient;
 }): Promise<PreparedHostedWebEncryptionRoot> {
   if (input.prepared.domain !== "control" || input.prepared.userId !== input.memberId) {
-    throw new TypeError("Prepared hosted member email root does not match the member.");
+    throw new TypeError("Prepared hosted member root does not match the member.");
   }
   const prepared = await revalidatePreparedHostedDomainRootForWebTx({
     prepared: input.prepared,
