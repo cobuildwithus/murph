@@ -75,7 +75,8 @@
     "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
-    "jose": "^6.2.3"
+    "jose": "^6.2.3",
+    "openai": "6.45.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.3",

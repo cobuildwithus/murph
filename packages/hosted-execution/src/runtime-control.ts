@@ -164,6 +164,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -3532,6 +3533,7 @@ export interface HostedWorkspaceInvocationBudget {
 
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
+  "environment_interview",
   "inbox_media_retention",
   "system_mailbox",
 ] as const;

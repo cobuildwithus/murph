@@ -169,7 +169,7 @@ declare module 'incur' {
       'habitat catalog': { args: { aspect?: string }; options: {} }
       'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
       'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
-      'habitat save': { args: { aspect: string }; options: { indicator?: string[]; recordedAt?: string; note?: string; body?: string } }
+      'habitat save': { args: { aspect: string }; options: { indicator?: string[]; indicatorNote?: string[]; recordedAt?: string; note?: string; body?: string } }
       'habitat show': { args: { lookup: string }; options: {} }
       'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
       'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
