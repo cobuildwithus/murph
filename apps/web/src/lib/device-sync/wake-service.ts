@@ -3342,12 +3342,11 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       currentSource = source;
     } else {
       if (!source) {
-        throw deviceSyncError({
-          code: "WEBHOOK_SOURCE_NOT_READY",
-          message: "Device source setup is not visible yet. Retry shortly.",
-          retryable: true,
-          httpStatus: 503,
-        });
+        // Pending setup already left above, and starting a source connect
+        // writes its row first, so this connection never admitted this source.
+        // Retrying cannot change that, and the event carries no admissible data.
+        await completeHostedWebhookTraceTx(input, tx);
+        return { kind: "completed" };
       }
 
       if (source.status !== "connected" || isHostedSourceDisconnectFenced(source)) {
@@ -3433,9 +3432,16 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         tx,
       });
   if (!dataSource) {
-    throw webhookSourceNotReadyError(
-      "Device data source setup is not visible yet. Retry shortly.",
-    );
+    if (setupPending) {
+      throw webhookSourceNotReadyError(
+        "Device data source setup is not visible yet. Retry shortly.",
+      );
+    }
+    // Same rule as the event source above: a confirmed connection with no row
+    // never admitted this data source, and an admitted row that is merely
+    // unusable already completes below.
+    await completeHostedWebhookTraceTx(input, tx);
+    return { kind: "completed" };
   }
   const observedSourceWillBeAdmitted = Boolean(
     input.sourceObservation?.sourceAccessActive
