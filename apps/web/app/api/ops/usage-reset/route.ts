@@ -209,9 +209,9 @@ async function recoverResetEveryoneWakes(input: {
     pendingWake,
   } satisfies HostedOpsMemberUsageResetAllWakeBatchResponse;
   console.info("Hosted ops reset-everyone wake batch completed.", {
-    attempted: response.attempted,
-    done: response.done,
-    pendingWake: response.pendingWake,
+    attempted: batch.receipts.length,
+    done: !batch.hasMore,
+    pendingWake,
   });
   return response;
 }
