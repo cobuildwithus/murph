@@ -358,6 +358,7 @@ describe("murph.group dynamic tool", () => {
       .toContain("Host binds member/group/route/input/occurrence");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("read_shared partial=incomplete");
+    expect(MURPH_GROUP_TOOL.description).toContain("ask returns privately");
     expect(MURPH_GROUP_TOOL.description).toContain("asks are async");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("Scheduled ask_member exact replay");
