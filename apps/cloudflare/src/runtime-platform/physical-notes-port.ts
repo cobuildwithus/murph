@@ -46,6 +46,7 @@ export function createHostedWebPhysicalNotePort(input: {
           return {
             remainingUnresolved: null,
             retryAfter: null,
+            settledUsageCostUsdMicros: null,
             status: error.status === 403
               ? "permission_denied" as const
               : "unavailable" as const,

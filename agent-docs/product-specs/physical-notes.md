@@ -125,9 +125,12 @@ already-clear member stores and returns `clear` with `remainingUnresolved:
 false` without a provider read. When a checked guard reaches `accepted` or
 `clear` but another guard remains, the response preserves that checked outcome
 with `remainingUnresolved: true`; the member learns that one reconciliation
-succeeded and that another explicit request is required. Recovery never calls
-provider create, and there is no transport replay, model retry, notification,
-or automatic follow-up.
+succeeded and that another explicit request is required. When recovery first
+proves acceptance for a current paid note, the stored replay response also
+returns the frozen settled Murph-time amount. Complimentary acceptance, legacy
+accepted restoration, and every non-accepted recovery result return that
+settlement field as null. Recovery never calls provider create, and there is
+no transport replay, model retry, notification, or automatic follow-up.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed

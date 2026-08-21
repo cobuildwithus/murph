@@ -9592,6 +9592,7 @@ text(result.output);
           return {
             remainingUnresolved: false,
             retryAfter: null,
+            settledUsageCostUsdMicros: null,
             status: 'clear',
           }
         },

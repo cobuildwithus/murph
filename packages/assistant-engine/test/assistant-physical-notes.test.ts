@@ -141,6 +141,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: false,
         retryAfter: null,
+        settledUsageCostUsdMicros: '250000',
         status: 'accepted' as const,
       },
       success: true,
@@ -150,6 +151,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: false,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: 'clear' as const,
       },
       success: true,
@@ -159,6 +161,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: true,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: 'accepted' as const,
       },
       success: true,
@@ -168,6 +171,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: true,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: 'clear' as const,
       },
       success: true,
@@ -177,6 +181,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: true,
         retryAfter: '2026-08-21T18:00:00.000Z',
+        settledUsageCostUsdMicros: null,
         status: 'pending' as const,
       },
       success: true,
@@ -186,6 +191,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: null,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: 'permission_denied' as const,
       },
       success: false,
@@ -195,6 +201,7 @@ describe('assistant physical notes', () => {
       response: {
         remainingUnresolved: true,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: 'unavailable' as const,
       },
       success: false,
@@ -233,6 +240,22 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       `\"remainingUnresolved\":${String(response.remainingUnresolved)}`,
     )
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      `\"settledUsageCostUsdMicros\":${response.settledUsageCostUsdMicros === null
+        ? 'null'
+        : `\"${response.settledUsageCostUsdMicros}\"`}`,
+    )
+    if (response.settledUsageCostUsdMicros !== null) {
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        `used ${response.settledUsageCostUsdMicros} USD micros of Murph time`,
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'added no separate fee',
+      )
+      expect(result.rpcResult.contentItems[0]?.text).toContain(
+        'sent nothing new',
+      )
+    }
     if (response.remainingUnresolved && response.status === 'clear') {
       expect(result.rpcResult.contentItems[0]?.text).not.toContain(
         'No unresolved physical-note submission remains',

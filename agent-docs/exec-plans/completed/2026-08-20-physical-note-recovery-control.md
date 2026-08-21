@@ -224,6 +224,25 @@ not Web presentation.
   a new accepted input then reconciles the same guard, commits one result, and
   replays without another provider read or usage settlement. The final
   corrected-head ReviewGPT round and exact-head CI remain open.
+- Final ReviewGPT round 6 verified every earlier correction and found a
+  separate member-feedback omission: when standalone recovery is the operation
+  that first proves a paid note was accepted, Web settles the already-authorized
+  usage but the recovered result does not disclose that usage. The earlier
+  design treated recovery as a status-only response, and its paid-replay test
+  proved one settlement while asserting the same incomplete response shape.
+  Deriving the fact from the note later is unsafe because the replay relation
+  intentionally uses `ON DELETE SET NULL`; deriving it from current pricing is
+  also incorrect because pricing can change. The accepted correction is one
+  nullable `settledUsageCostUsdMicros` scalar on the existing recovery result
+  row and response. The current paid acceptance path populates it from the
+  frozen note cost only after the ordinary usage write succeeds in the existing
+  member-locked transaction. Complimentary acceptance, legacy restored
+  acceptance with erased billing evidence, and every non-accepted result keep
+  it null. Assistant copy will disclose that the earlier accepted note used the
+  returned Murph-time amount while making clear that recovery sent nothing and
+  added no separate fee. This adds no table, query, provider call, owner, queue,
+  retry, or lifecycle.
 
-Status: active
-Updated: 2026-08-20
+Status: completed
+Updated: 2026-08-21
+Completed: 2026-08-21

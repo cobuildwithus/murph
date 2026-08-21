@@ -963,6 +963,7 @@ model HostedPhysicalNoteRecovery {
   resultStatus           String?             @map("result_status")
   remainingUnresolved    Boolean?            @map("remaining_unresolved")
   retryAfter             DateTime?           @map("retry_after")
+  settledUsageCostUsdMicros BigInt?          @map("settled_usage_cost_usd_micros")
   createdAt              DateTime            @default(now()) @map("created_at")
   updatedAt              DateTime            @updatedAt @map("updated_at")
   member                 HostedMember        @relation(fields: [memberId], references: [id], onDelete: Cascade)

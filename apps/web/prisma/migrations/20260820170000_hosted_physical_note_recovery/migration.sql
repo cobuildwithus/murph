@@ -5,6 +5,7 @@ CREATE TABLE "hosted_physical_note_recovery" (
   "result_status" TEXT,
   "remaining_unresolved" BOOLEAN,
   "retry_after" TIMESTAMP(3),
+  "settled_usage_cost_usd_micros" BIGINT,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -16,12 +17,20 @@ CREATE TABLE "hosted_physical_note_recovery" (
         "result_status" IS NULL
         AND "remaining_unresolved" IS NULL
         AND "retry_after" IS NULL
+        AND "settled_usage_cost_usd_micros" IS NULL
       )
       OR
       (
         "result_status" IN ('accepted', 'clear', 'pending', 'unavailable')
         AND "remaining_unresolved" IS NOT NULL
         AND ("result_status" = 'pending' OR "retry_after" IS NULL)
+        AND (
+          "settled_usage_cost_usd_micros" IS NULL
+          OR (
+            "result_status" = 'accepted'
+            AND "settled_usage_cost_usd_micros" >= 0
+          )
+        )
       )
     ),
   CONSTRAINT "hosted_physical_note_recovery_member_fkey"

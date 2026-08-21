@@ -2568,9 +2568,13 @@ export async function executeMurphDynamicToolRequest(input: {
               true,
               result.status,
               result.remainingUnresolved
-                ? 'The checked earlier note was accepted for printing, not delivered, and cannot be treated as canceled. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing new.'
-                : 'The earlier note was accepted for printing, not delivered, and cannot be treated as canceled. This recovery sent nothing new.',
+                ? `${physicalNoteRecoveryAcceptedCopy(result.settledUsageCostUsdMicros)} A different unresolved submission remains and needs another explicit recovery request.`
+                : physicalNoteRecoveryAcceptedCopy(
+                    result.settledUsageCostUsdMicros,
+                  ),
               result.remainingUnresolved,
+              null,
+              result.settledUsageCostUsdMicros,
             )
           case 'clear':
             return physicalNoteRecoveryToolResult(
@@ -6603,11 +6607,27 @@ function physicalNoteRecoveryToolResult(
   note: string,
   remainingUnresolved: boolean | null,
   retryAfter: string | null = null,
+  settledUsageCostUsdMicros: string | null = null,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     success,
-    JSON.stringify({ note, remainingUnresolved, retryAfter, status }),
+    JSON.stringify({
+      note,
+      remainingUnresolved,
+      retryAfter,
+      settledUsageCostUsdMicros,
+      status,
+    }),
   )
+}
+
+function physicalNoteRecoveryAcceptedCopy(
+  settledUsageCostUsdMicros: string | null,
+): string {
+  const usage = settledUsageCostUsdMicros === null
+    ? ''
+    : ` The earlier accepted note used ${settledUsageCostUsdMicros} USD micros of Murph time. Recovery itself added no separate fee.`
+  return `The earlier note was accepted for printing, not delivered, and cannot be treated as canceled.${usage} This recovery sent nothing new.`
 }
 
 function invalidDynamicToolArgumentsResult(

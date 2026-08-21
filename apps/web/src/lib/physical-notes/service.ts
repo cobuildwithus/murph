@@ -381,6 +381,7 @@ export async function recoverHostedPhysicalNote(
       retryAfter: retryAfterMs > Date.now()
         ? new Date(retryAfterMs).toISOString()
         : null,
+      settledUsageCostUsdMicros: null,
       status: "pending",
     };
   } else {
@@ -437,6 +438,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
           remainingUnresolved: response.remainingUnresolved,
           resultStatus: response.status,
           retryAfter: null,
+          settledUsageCostUsdMicros: null,
         },
       });
       return { kind: "replay" as const, response };
@@ -480,11 +482,31 @@ async function persistHostedPhysicalNoteRecoveryResult(input: {
   if (retryAfter !== null && Number.isNaN(retryAfter.getTime())) {
     throw new Error("Hosted physical-note recovery retry time is invalid.");
   }
+  if (
+    input.response.status !== "accepted"
+    && input.response.settledUsageCostUsdMicros !== null
+  ) {
+    throw new Error("Hosted physical-note recovery usage result is invalid.");
+  }
+  if (
+    input.response.settledUsageCostUsdMicros !== null
+    && !/^\d+$/u.test(input.response.settledUsageCostUsdMicros)
+  ) {
+    throw new Error("Hosted physical-note recovery usage result is invalid.");
+  }
+  const settledUsageCostUsdMicros =
+    input.response.settledUsageCostUsdMicros === null
+      ? null
+      : BigInt(input.response.settledUsageCostUsdMicros);
+  if (settledUsageCostUsdMicros !== null && settledUsageCostUsdMicros < 0n) {
+    throw new Error("Hosted physical-note recovery usage result is invalid.");
+  }
   await input.prisma.hostedPhysicalNoteRecovery.updateMany({
     data: {
       remainingUnresolved: input.response.remainingUnresolved,
       resultStatus: input.response.status,
       retryAfter,
+      settledUsageCostUsdMicros,
     },
     where: {
       memberId: input.memberId,
@@ -507,7 +529,10 @@ async function persistHostedPhysicalNoteRecoveryResult(input: {
 function toPhysicalNoteRecoveryResponse(
   recovery: Pick<
     HostedPhysicalNoteRecovery,
-    "remainingUnresolved" | "resultStatus" | "retryAfter"
+    | "remainingUnresolved"
+    | "resultStatus"
+    | "retryAfter"
+    | "settledUsageCostUsdMicros"
   >,
 ): HostedPhysicalNoteRecoveryResponse {
   if (
@@ -520,6 +545,8 @@ function toPhysicalNoteRecoveryResponse(
   return {
     remainingUnresolved: recovery.remainingUnresolved,
     retryAfter: recovery.retryAfter?.toISOString() ?? null,
+    settledUsageCostUsdMicros:
+      recovery.settledUsageCostUsdMicros?.toString() ?? null,
     status,
   };
 }
@@ -941,7 +968,10 @@ async function finalizeHostedPhysicalNoteAcceptance(input: {
     ) {
       throw new Error("Hosted physical-note acceptance invariant failed.");
     }
-    await recordPaidPhysicalNoteUsageTx({ note, tx });
+    const settledUsageCostUsdMicros = await recordPaidPhysicalNoteUsageTx({
+      note,
+      tx,
+    });
     if (guard?.id === input.noteId) {
       await tx.hostedPhysicalNote.updateMany({
         data: { failureReason: "prior_note_accepted" },
@@ -958,6 +988,7 @@ async function finalizeHostedPhysicalNoteAcceptance(input: {
           memberId: input.memberId,
           noteId: input.noteId,
           originAssistantInputId: input.originAssistantInputId,
+          settledUsageCostUsdMicros,
           status: "accepted",
           tx,
         })
@@ -970,6 +1001,7 @@ async function persistTerminalPhysicalNoteRecoveryResult(input: {
   memberId: string;
   noteId: string;
   originAssistantInputId: string;
+  settledUsageCostUsdMicros?: string | null;
   status: "accepted" | "clear";
   tx: Prisma.TransactionClient;
 }): Promise<HostedPhysicalNoteRecoveryResponse> {
@@ -985,6 +1017,7 @@ async function persistTerminalPhysicalNoteRecoveryResult(input: {
     response: physicalNoteRecoveryResponse(
       input.status,
       remainingGuard !== null,
+      input.settledUsageCostUsdMicros ?? null,
     ),
   });
 }
@@ -992,8 +1025,8 @@ async function persistTerminalPhysicalNoteRecoveryResult(input: {
 async function recordPaidPhysicalNoteUsageTx(input: {
   note: HostedPhysicalNote;
   tx: Prisma.TransactionClient;
-}): Promise<void> {
-  if (input.note.complimentaryOfferCode !== null) return;
+}): Promise<string | null> {
+  if (input.note.complimentaryOfferCode !== null) return null;
   const providerLetterId = requireProviderLetterId(input.note);
   if (!input.note.acceptedAt) {
     throw new Error("Accepted physical-note usage evidence is incomplete.");
@@ -1017,6 +1050,7 @@ async function recordPaidPhysicalNoteUsageTx(input: {
       providerPricingVersion: input.note.pricingVersion,
     })],
   });
+  return input.note.providerCostUsdMicros.toString();
 }
 
 async function markHostedPhysicalNoteFailed(input: {
@@ -1190,6 +1224,12 @@ function unavailableResponse(): HostedPhysicalNoteSendResponse {
 function physicalNoteRecoveryResponse(
   status: HostedPhysicalNoteRecoveryResponse["status"],
   remainingUnresolved: boolean,
+  settledUsageCostUsdMicros: string | null = null,
 ): HostedPhysicalNoteRecoveryResponse {
-  return { remainingUnresolved, retryAfter: null, status };
+  return {
+    remainingUnresolved,
+    retryAfter: null,
+    settledUsageCostUsdMicros,
+    status,
+  };
 }

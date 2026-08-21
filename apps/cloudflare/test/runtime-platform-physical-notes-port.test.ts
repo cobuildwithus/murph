@@ -98,11 +98,12 @@ describe("createHostedWebPhysicalNotePort", () => {
     }).allowed).toBe(false);
   });
 
-  it("forwards and parses one physical-note recovery check", async () => {
+  it("forwards and strictly parses one paid physical-note recovery check", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
       remainingUnresolved: false,
       retryAfter: null,
-      status: "clear",
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
     }));
     const port = createHostedWebPhysicalNotePort({
       boundUserId: "member_physical_note",
@@ -114,7 +115,8 @@ describe("createHostedWebPhysicalNotePort", () => {
     await expect(port.resolve!(RECOVERY_REQUEST)).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
-      status: "clear",
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
     const requestInfo = fetchImpl.mock.calls[0]![0];
@@ -128,6 +130,22 @@ describe("createHostedWebPhysicalNotePort", () => {
       body: JSON.stringify(RECOVERY_REQUEST),
       method: "POST",
     });
+  });
+
+  it("rejects a recovery response that omits the settlement field", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    }));
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.resolve!(RECOVERY_REQUEST)).rejects.toThrow();
   });
 
   it("does not replay recovery after a lost response", async () => {
@@ -160,6 +178,7 @@ describe("createHostedWebPhysicalNotePort", () => {
       await expect(port.resolve!(RECOVERY_REQUEST)).resolves.toEqual({
         remainingUnresolved: null,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: expectedStatus,
       });
     },

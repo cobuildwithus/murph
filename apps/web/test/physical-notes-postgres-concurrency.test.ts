@@ -743,6 +743,7 @@ describe.skipIf(!runPostgresProof)(
       })).resolves.toEqual({
         remainingUnresolved: true,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: "pending",
       });
       expect(findProviderLetter).toHaveBeenCalledWith({
@@ -842,6 +843,7 @@ describe.skipIf(!runPostgresProof)(
       expect(first).toEqual({
         remainingUnresolved: true,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: "accepted",
       });
       expect(replay).toEqual(first);
@@ -859,6 +861,7 @@ describe.skipIf(!runPostgresProof)(
       })).resolves.toMatchObject({
         physicalNoteId: null,
         resultStatus: "accepted",
+        settledUsageCostUsdMicros: null,
       });
       await expect(recoverHostedPhysicalNote({
         memberId: beneficiary,
@@ -877,6 +880,7 @@ describe.skipIf(!runPostgresProof)(
       })).resolves.toEqual({
         remainingUnresolved: false,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: "accepted",
       });
       expect(findProviderLetter).toHaveBeenCalledTimes(2);
@@ -996,6 +1000,7 @@ describe.skipIf(!runPostgresProof)(
       })).resolves.toMatchObject({
         physicalNoteId: noteId,
         resultStatus: null,
+        settledUsageCostUsdMicros: null,
       });
       await expect(recoverHostedPhysicalNote({
         memberId: beneficiary,
@@ -1019,6 +1024,7 @@ describe.skipIf(!runPostgresProof)(
       expect(accepted).toEqual({
         remainingUnresolved: false,
         retryAfter: null,
+        settledUsageCostUsdMicros: "250000",
         status: "accepted",
       });
       expect(findProviderLetter).toHaveBeenCalledTimes(2);
@@ -1044,6 +1050,7 @@ describe.skipIf(!runPostgresProof)(
         physicalNoteId: noteId,
         remainingUnresolved: false,
         resultStatus: "accepted",
+        settledUsageCostUsdMicros: 250_000n,
       });
     });
 
@@ -1130,6 +1137,7 @@ describe.skipIf(!runPostgresProof)(
       })).resolves.toMatchObject({
         physicalNoteId: noteId,
         resultStatus: null,
+        settledUsageCostUsdMicros: null,
       });
 
       const cleared = await recoverHostedPhysicalNote({
@@ -1147,6 +1155,7 @@ describe.skipIf(!runPostgresProof)(
       expect(cleared).toEqual({
         remainingUnresolved: false,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         status: "clear",
       });
       expect(findProviderLetter).toHaveBeenCalledTimes(2);
@@ -1162,6 +1171,7 @@ describe.skipIf(!runPostgresProof)(
         physicalNoteId: noteId,
         remainingUnresolved: false,
         resultStatus: "clear",
+        settledUsageCostUsdMicros: null,
       });
     });
 

@@ -70,6 +70,7 @@ export const hostedPhysicalNoteRecoveryResponseSchema = z
   .object({
     remainingUnresolved: z.boolean().nullable(),
     retryAfter: z.string().datetime({ offset: true }).nullable(),
+    settledUsageCostUsdMicros: z.string().regex(/^\d+$/u).nullable(),
     status: z.enum([
       "accepted",
       "clear",
@@ -78,7 +79,19 @@ export const hostedPhysicalNoteRecoveryResponseSchema = z
       "unavailable",
     ]),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.status !== "accepted"
+      && value.settledUsageCostUsdMicros !== null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Only accepted recovery can report settled usage.",
+        path: ["settledUsageCostUsdMicros"],
+      });
+    }
+  });
 
 export type HostedPhysicalNoteRecipient = z.infer<
   typeof hostedPhysicalNoteRecipientSchema

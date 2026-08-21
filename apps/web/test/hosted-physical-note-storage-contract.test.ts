@@ -27,6 +27,7 @@ const APPROVED_RECOVERY_FIELDS = [
   "remainingUnresolved",
   "resultStatus",
   "retryAfter",
+  "settledUsageCostUsdMicros",
   "updatedAt",
 ].sort();
 
@@ -116,6 +117,8 @@ describe("HostedPhysicalNote storage contract", () => {
     expect(migration).toContain(
       '"result_status" IN (\'accepted\', \'clear\', \'pending\', \'unavailable\')',
     );
+    expect(migration).toContain('"settled_usage_cost_usd_micros" BIGINT');
+    expect(migration).toContain('"settled_usage_cost_usd_micros" >= 0');
     expect(migration).toContain("ON DELETE SET NULL");
     expect(migration).not.toMatch(
       /address|recipient|artwork|image_url|file_url|message|note_text/iu,

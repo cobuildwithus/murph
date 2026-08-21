@@ -118,11 +118,15 @@ type PhysicalNoteRecoveryCreateData = Pick<
   | "remainingUnresolved"
   | "resultStatus"
   | "retryAfter"
+  | "settledUsageCostUsdMicros"
 >>;
 
 type PhysicalNoteRecoveryUpdateData = Partial<Pick<
   HostedPhysicalNoteRecovery,
-  "remainingUnresolved" | "resultStatus" | "retryAfter"
+  | "remainingUnresolved"
+  | "resultStatus"
+  | "retryAfter"
+  | "settledUsageCostUsdMicros"
 >>;
 
 type PhysicalNoteRecoveryWhere = Partial<Pick<
@@ -1298,6 +1302,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "clear",
     });
     expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
@@ -1322,6 +1327,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "clear",
     });
     expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
@@ -1366,6 +1372,7 @@ describe("recoverHostedPhysicalNote", () => {
     expect(first).toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "accepted",
     });
     expect(replay).toEqual(first);
@@ -1395,6 +1402,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "accepted",
     });
     expect(secondProvider.findLetterByNoteId).toHaveBeenCalledOnce();
@@ -1455,6 +1463,7 @@ describe("recoverHostedPhysicalNote", () => {
         originAssistantInputId,
         physicalNoteId: guardId,
         resultStatus: null,
+        settledUsageCostUsdMicros: null,
       }),
     ]);
 
@@ -1470,6 +1479,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "accepted",
     });
     expect(retryProvider.findLetterByNoteId).toHaveBeenCalledWith({
@@ -1537,6 +1547,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "clear",
     });
     expect(store.allRows()).toEqual(expect.arrayContaining([
@@ -1561,6 +1572,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "accepted",
     });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
@@ -1569,6 +1581,53 @@ describe("recoverHostedPhysicalNote", () => {
       status: "accepted",
     });
     expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps complimentary accepted recovery usage-free on replay", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const sendProvider = createPhysicalNoteRuntime([{ kind: "ambiguous_failure" }]);
+    const pending = await createHostedPhysicalNote({
+      ...buildRequest(220),
+      prisma: store.prisma,
+      runtime: sendProvider.runtime,
+    });
+    expect(pending).toMatchObject({ complimentary: true, status: "pending" });
+    const originAssistantInputId = recoveryOrigin(220);
+    const recoveryProvider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_recovery_complimentary_acceptance",
+    }]);
+
+    const recovered = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: recoveryProvider.runtime,
+    });
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: recoveryProvider.runtime,
+    })).resolves.toEqual(recovered);
+
+    expect(recovered).toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: "accepted",
+    });
+    expect(store.allRecoveries()).toEqual([
+      expect.objectContaining({
+        originAssistantInputId,
+        resultStatus: "accepted",
+        settledUsageCostUsdMicros: null,
+      }),
+    ]);
+    expect(recoveryProvider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
   });
 
   it("replays a paid accepted recovery without settling usage twice", async () => {
@@ -1612,9 +1671,17 @@ describe("recoverHostedPhysicalNote", () => {
     expect(recovered).toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: COST_USD_MICROS.toString(),
       status: "accepted",
     });
     expect(replay).toEqual(recovered);
+    expect(store.allRecoveries()).toEqual([
+      expect.objectContaining({
+        originAssistantInputId,
+        resultStatus: "accepted",
+        settledUsageCostUsdMicros: COST_USD_MICROS,
+      }),
+    ]);
     expect(recoveryProvider.findLetterByNoteId).toHaveBeenCalledOnce();
     expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
@@ -1646,6 +1713,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "accepted",
     });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
@@ -1677,6 +1745,7 @@ describe("recoverHostedPhysicalNote", () => {
     expect(response).toEqual({
       remainingUnresolved: true,
       retryAfter: expect.stringMatching(/Z$/u),
+      settledUsageCostUsdMicros: null,
       status: "pending",
     });
     expect(new Date(response.retryAfter!).getTime()).toBeGreaterThan(Date.now());
@@ -1712,6 +1781,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "pending",
     });
     expect(provider.findLetterByNoteId).toHaveBeenCalledWith({
@@ -1748,6 +1818,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: false,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "clear",
     });
     expect(blocked).toMatchObject({
@@ -1796,6 +1867,7 @@ describe("recoverHostedPhysicalNote", () => {
     expect(response).toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "clear",
     });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
@@ -1827,6 +1899,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "pending",
     });
     expect(provider.create).not.toHaveBeenCalled();
@@ -1876,6 +1949,7 @@ describe("recoverHostedPhysicalNote", () => {
     })).resolves.toEqual({
       remainingUnresolved: true,
       retryAfter: null,
+      settledUsageCostUsdMicros: null,
       status: "unavailable",
     });
     expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
@@ -2097,6 +2171,7 @@ function createPhysicalNoteStore(
         remainingUnresolved: null,
         resultStatus: null,
         retryAfter: null,
+        settledUsageCostUsdMicros: null,
         updatedAt: now,
         ...input.data,
       };

@@ -7,7 +7,7 @@
     "priority": 4,
     "title": "Physical notes can recover safely",
     "summary": "When an earlier physical-note attempt has an uncertain printer outcome, you can now ask Murph to check it without trying to send another note.",
-    "details": "Murph clears the blocker only when the printer evidence makes that safe, reports accepted notes without pretending to cancel them, and never retries or sends a new note during the check.",
+    "details": "Murph clears the blocker only when the printer evidence makes that safe, reports accepted notes without pretending to cancel them, names any settled Murph-time use from that earlier paid note, and never retries or sends a new note during the check.",
     "relevanceTags": ["assistant", "physical-notes", "reliability"],
     "sourcePullRequests": [2099]
   }

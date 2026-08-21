@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  hostedPhysicalNoteRecoveryResponseSchema,
   hostedPhysicalNoteSendRequestSchema,
   hostedPhysicalNoteSendResponseSchema,
   normalizeHostedPhysicalNoteRecipient,
@@ -8,6 +9,37 @@ import {
 } from "../src/physical-notes.ts";
 
 describe("hosted physical-note contracts", () => {
+  it("requires a bounded settled-usage fact on recovery results", () => {
+    expect(hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
+    })).toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
+    });
+    expect(hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: "accepted",
+    })).toMatchObject({ settledUsageCostUsdMicros: null });
+    expect(() => hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    })).toThrow();
+    expect(() => hostedPhysicalNoteRecoveryResponseSchema.parse({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "clear",
+    })).toThrow();
+  });
+
   it("normalizes one bounded US recipient", () => {
     const recipient = normalizeHostedPhysicalNoteRecipient({
       addressLine1: " 123 Main St ",
