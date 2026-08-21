@@ -370,6 +370,9 @@ the first 100 are complete. A verified-email or phone-derived result is
 actionable only when that uncapped candidate set resolves to exactly one member;
 otherwise every row mutation stays locked until the operator searches by exact
 hosted ID. Whole-population summary totals stay unfiltered.
+Submitting or clearing a search closes any open row confirmation and locks the
+old result set's row controls and mutation handler until the new server render
+arrives.
 
 Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
 the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
@@ -403,14 +406,21 @@ transaction commits.
 
 The response reports processed, reset, unchanged, skipped, pending-wake, and
 failed outcomes plus the last acknowledged member ID. The client issues only
-one bounded request at a time. It pauses on a known or ambiguous failure and
-can resume strictly after the last acknowledged cursor. Hiding a paused dialog
+one bounded request at a time. Confirmation records the current unfiltered
+member-plus-container count as a starting reference while explaining that the
+live population can change. The operator may pause after the current request;
+the client waits for that request's acknowledgment, saves its cursor and
+counts, and resumes the same operation strictly after that cursor. It also
+pauses on a known or ambiguous failure. Hiding a paused dialog
 preserves the operation while keeping conflicting row and search mutations
 locked. Once population mutation is fully acknowledged, wake-only recovery can
 instead be hidden without locking ordinary search or single-row recovery; the
-saved Reset-everyone entry reopens that same receipt-only operation. A validated,
-operator-bound `sessionStorage` locator preserves the
-browser-created UUID, cursor, counts, failure, and recovery phase for one
+saved Reset-everyone entry reopens that same receipt-only operation. Hidden
+wake-only recovery stays hidden across remounts and search navigation until the
+operator explicitly reopens it. A validated, operator-bound `sessionStorage`
+locator preserves the
+browser-created UUID, starting population count, cursor, counts, failure, and
+recovery phase for one
 authenticated browser-tab session, including component remounts, same-tab
 navigation, reload, and browser-provided restoration of that tab session. An
 operator identity mismatch discards it, and it deliberately does not promise

@@ -370,6 +370,9 @@ Last verified: 2026-08-20
   gate sequentially in one short repeatable-read transaction per displayed
   member. No transaction spans members, no off-page member reaches the gate,
   and peak added transactional connection ownership is one.
+  Starting any URL-backed search closes an open row confirmation and locks all
+  row mutation entrypoints until the new server render replaces the old result
+  set, so a stale row cannot be reset during navigation.
 - One authenticated same-origin reset-everyone request reads at most 11
   ascending hosted-member IDs, admits 10, and invokes the existing canonical
   per-member serializable reset sequentially. It performs at most one stale
@@ -378,15 +381,17 @@ Last verified: 2026-08-20
   All runtime rechecks in that request share one five-second deadline; after it
   expires, later latency hints become pending without another provider call,
   while the remaining canonical member transactions continue sequentially.
-  The browser issues at most one batch request at a time and carries the last
+  The browser issues at most one batch request at a time, offers a pause that
+  takes effect only after the current acknowledged batch, and carries the last
   acknowledged ID plus one operation UUID created at destructive confirmation;
   there is no population snapshot, concurrent interactive transaction fanout,
   queue, scheduler, or persisted campaign. A known failure resumes strictly
   after the acknowledged cursor, while an ambiguous population response may
   rewalk from the beginning with the same UUID. Hiding a paused dialog keeps
   that UUID and cursor and keeps conflicting mutations locked. One validated,
-  operator-bound same-tab `sessionStorage` locator also restores the UUID, last
-  acknowledged cursor, counts, and recovery phase after a component remount,
+  operator-bound same-tab `sessionStorage` locator also restores the UUID, the
+  unfiltered starting population count, last acknowledged cursor, counts, and
+  recovery phase after a component remount,
   same-tab navigation, reload, or browser-provided restoration of that tab
   session. An operator identity mismatch discards it; it does not provide
   cross-tab, new-tab, or closed-session recovery. The client must synchronously
@@ -400,9 +405,10 @@ Last verified: 2026-08-20
   rechecks under one five-second request deadline. It never reads current
   hosted-member rows or enters the reset transaction, so a member created after
   confirmation cannot join the old operation. That receipt-only phase may be
-  hidden without locking ordinary
-  search or row recovery, reopened under the same UUID, or cleared only after a
-  transient warned abandonment; the abandonment presentation is not persisted.
+  hidden without locking ordinary search or row recovery, stays hidden across
+  remounts and search navigation until the operator explicitly resumes it,
+  reopens under the same UUID, or clears only after a transient warned
+  abandonment; the abandonment presentation is not persisted.
   Each population member first reads the append-only
   `(operation_id, member_id)` reset receipt;
   the initial serializable member transaction writes that receipt atomically

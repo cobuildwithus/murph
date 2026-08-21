@@ -105,6 +105,7 @@ interface UsageResetAllState {
 interface UsageResetAllSessionOperation {
   operationId: string;
   operatorMemberId: string;
+  startingPopulationCount: number;
   state: UsageResetAllState;
 }
 
@@ -135,6 +136,7 @@ class UsageResetRequestError extends Error {
 
 interface MemberUsageClientProps {
   dashboard: HostedOpsMemberUsageDashboard;
+  designResetAllDialogInert?: boolean;
   designResetAllInline?: boolean;
   designState?: MemberUsageClientDesignState;
   operatorMemberId: string | null;
@@ -151,6 +153,7 @@ export function MemberUsageClient(props: MemberUsageClientProps) {
 
 function MemberUsageClientSurface({
   dashboard,
+  designResetAllDialogInert = false,
   designResetAllInline = false,
   designState,
   operatorMemberId,
@@ -159,7 +162,12 @@ function MemberUsageClientSurface({
   const resetAllAcknowledgedCursors = useRef<Set<string>>(new Set());
   const resetAllOperationId = useRef<string | null>(null);
   const resetAllPageActive = useRef(true);
+  const resetAllPauseRequested = useRef(false);
   const resetAllRunInFlight = useRef(false);
+  const resetAllTrigger = useRef<HTMLButtonElement | null>(null);
+  const resetAllStartingPopulationCount = useRef(
+    readResetAllStartingPopulationCount(dashboard),
+  );
   const initialResetAllState = createInitialResetAllState(designState);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [resettingMemberId, setResettingMemberId] = useState<string | null>(
@@ -194,6 +202,7 @@ function MemberUsageClientSurface({
       ? HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION
       : "",
   );
+  const [resetAllPausePending, setResetAllPausePending] = useState(false);
   const [resetAllState, setResetAllStateValue] = useState(initialResetAllState);
   const selectedRow = useMemo(
     () => dashboard.rows.find((row) => row.memberId === selectedMemberId)
@@ -242,6 +251,8 @@ function MemberUsageClientSurface({
       }
       if (restoredOperation) {
         resetAllOperationId.current = restoredOperation.operationId;
+        resetAllStartingPopulationCount.current =
+          restoredOperation.startingPopulationCount;
         resetAllAcknowledgedCursors.current.clear();
         if (restoredOperation.state.lastAcknowledgedCursor) {
           resetAllAcknowledgedCursors.current.add(
@@ -250,10 +261,11 @@ function MemberUsageClientSurface({
         }
         setResetAllConfirmation(HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION);
         setResetAllAbandonmentOpen(false);
-        setResetAllStateValue(
-          restoreInterruptedResetAllState(restoredOperation.state),
+        const restoredState = restoreInterruptedResetAllState(
+          restoredOperation.state,
         );
-        setResetAllOpen(true);
+        setResetAllStateValue(restoredState);
+        setResetAllOpen(restoredState.phase !== "recovering_wakes");
       }
       setResetAllSessionCheckComplete(true);
     });
@@ -271,6 +283,7 @@ function MemberUsageClientSurface({
         || !writeResetAllSessionOperation(
           operationId,
           operatorMemberId,
+          resetAllStartingPopulationCount.current,
           nextState,
         )
       )
@@ -320,10 +333,19 @@ function MemberUsageClientSurface({
       return;
     }
     const targetQuery = query.length > 0 ? query : null;
-    setSearchNavigationPending(true);
-    router.push(targetQuery
+    startSearchNavigation(targetQuery
       ? `/ops/usage?${new URLSearchParams({ q: targetQuery }).toString()}`
       : "/ops/usage");
+  }
+
+  function startSearchNavigation(target: string): void {
+    if (searchNavigationPending || globalResetActive) {
+      return;
+    }
+    setSelectedMemberId(null);
+    setMessage(null);
+    setSearchNavigationPending(true);
+    router.push(target);
   }
 
   function openResetAllDialog(): void {
@@ -345,6 +367,8 @@ function MemberUsageClientSurface({
     }
     resetAllAcknowledgedCursors.current.clear();
     resetAllOperationId.current = null;
+    resetAllStartingPopulationCount.current =
+      readResetAllStartingPopulationCount(dashboard);
     setResetAllAbandonmentOpen(false);
     setResetAllConfirmation("");
     setResetAllState(createInitialResetAllState("reset_all_confirmation"));
@@ -396,6 +420,8 @@ function MemberUsageClientSurface({
     setResetAllOpen(false);
     resetAllAcknowledgedCursors.current.clear();
     resetAllOperationId.current = null;
+    resetAllStartingPopulationCount.current =
+      readResetAllStartingPopulationCount(dashboard);
     setResetAllConfirmation("");
     setResetAllStateValue(createInitialResetAllState(undefined));
   }
@@ -416,10 +442,24 @@ function MemberUsageClientSurface({
     setResetAllAbandonmentOpen(false);
   }
 
+  function requestResetAllPause(): void {
+    if (
+      resetAllState.phase !== "running"
+      || !resetAllRunInFlight.current
+      || resetAllPauseRequested.current
+    ) {
+      return;
+    }
+    resetAllPauseRequested.current = true;
+    setResetAllPausePending(true);
+  }
+
   async function runResetAll(input: { mode: UsageResetAllRunMode }): Promise<void> {
     if (resetAllRunInFlight.current) {
       return;
     }
+    resetAllPauseRequested.current = false;
+    setResetAllPausePending(false);
     resetAllRunInFlight.current = true;
     try {
       if (input.mode === "recover_wakes") {
@@ -582,6 +622,15 @@ function MemberUsageClientSurface({
           router.refresh();
           return;
         }
+        if (resetAllPauseRequested.current) {
+          setResetAllState({
+            counts,
+            failure: null,
+            lastAcknowledgedCursor,
+            phase: "paused",
+          });
+          return;
+        }
         if (!setResetAllState({
           counts,
           failure: null,
@@ -593,6 +642,10 @@ function MemberUsageClientSurface({
       }
     } finally {
       resetAllRunInFlight.current = false;
+      resetAllPauseRequested.current = false;
+      if (resetAllPageActive.current) {
+        setResetAllPausePending(false);
+      }
     }
   }
 
@@ -707,6 +760,7 @@ function MemberUsageClientSurface({
       !row.currentPeriod
       || isResetting
       || globalResetActive
+      || searchNavigationPending
       || contactSearchRequiresExactLookup
     ) {
       return;
@@ -901,8 +955,7 @@ function MemberUsageClientSurface({
                     disabled={searchNavigationPending || globalResetActive}
                     onClick={() => {
                       setSearchQuery("");
-                      setSearchNavigationPending(true);
-                      router.push("/ops/usage");
+                      startSearchNavigation("/ops/usage");
                     }}
                     type="button"
                     variant="ghost"
@@ -931,6 +984,7 @@ function MemberUsageClientSurface({
               || searchNavigationPending
             }
             onClick={openResetAllDialog}
+            ref={resetAllTrigger}
             type="button"
             variant="destructive"
           >
@@ -1006,6 +1060,7 @@ function MemberUsageClientSurface({
                 disabled={
                   isResetting
                   || globalResetActive
+                  || searchNavigationPending
                   || contactSearchRequiresExactLookup
                 }
                 key={row.memberId}
@@ -1063,6 +1118,7 @@ function MemberUsageClientSurface({
                     disabled={
                       isResetting
                       || globalResetActive
+                      || searchNavigationPending
                       || contactSearchRequiresExactLookup
                     }
                     key={row.memberId}
@@ -1178,7 +1234,11 @@ function MemberUsageClientSurface({
           ) : null}
           <DialogFooter>
             <Button
-              disabled={isResetting || globalResetActive}
+              disabled={
+                isResetting
+                || globalResetActive
+                || searchNavigationPending
+              }
               onClick={() => {
                 setSelectedMemberId(null);
               }}
@@ -1197,6 +1257,8 @@ function MemberUsageClientSurface({
                   && !selectedRuntimeRecheck
                 )
                 || isResetting
+                || globalResetActive
+                || searchNavigationPending
                 || contactSearchRequiresExactLookup
               }
               onClick={() => {
@@ -1232,6 +1294,7 @@ function MemberUsageClientSurface({
             confirmation={resetAllConfirmation}
             dashboard={dashboard}
             inline
+            onRequestPause={requestResetAllPause}
             onAbandon={clearResetAllOperation}
             onClose={closeResetAllDialog}
             onConfirmationChange={setResetAllConfirmation}
@@ -1240,6 +1303,8 @@ function MemberUsageClientSurface({
             onRun={(mode) => {
               void runResetAll({ mode });
             }}
+            pausePending={resetAllPausePending}
+            startingPopulationCount={resetAllStartingPopulationCount.current}
             state={resetAllState}
           />
         </div>
@@ -1252,10 +1317,17 @@ function MemberUsageClientSurface({
               closeResetAllDialog();
             }
           }}
+          onOpenChangeComplete={(open) => {
+            if (!open) {
+              resetAllTrigger.current?.focus();
+            }
+          }}
           open={resetAllOpen}
         >
           <DialogContent
             className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+            finalFocus={resetAllTrigger}
+            inert={designResetAllDialogInert ? true : undefined}
             showCloseButton={resetAllState.phase !== "running"}
           >
             <UsageResetAllSurface
@@ -1267,9 +1339,14 @@ function MemberUsageClientSurface({
               onConfirmationChange={setResetAllConfirmation}
               onKeep={keepResetAllOperation}
               onRequestAbandon={requestResetAllAbandonment}
+              onRequestPause={requestResetAllPause}
               onRun={(mode) => {
                 void runResetAll({ mode });
               }}
+              pausePending={resetAllPausePending}
+              startingPopulationCount={
+                resetAllStartingPopulationCount.current
+              }
               state={resetAllState}
             />
           </DialogContent>
@@ -1289,7 +1366,10 @@ function UsageResetAllSurface(input: {
   onConfirmationChange: (value: string) => void;
   onKeep: () => void;
   onRequestAbandon: () => void;
+  onRequestPause: () => void;
   onRun: (mode: UsageResetAllRunMode) => void;
+  pausePending: boolean;
+  startingPopulationCount: number;
   state: UsageResetAllState;
 }) {
   const state = input.state;
@@ -1309,7 +1389,9 @@ function UsageResetAllSurface(input: {
       This operation ignores the active search filter and walks the hosted
       population in fixed, small ID-ordered batches. It is not atomic, does not
       capture a population snapshot, and does not pause ongoing usage. Each
-      member commits independently before any runtime recheck.
+      member commits independently before any runtime recheck. The starting
+      population was {formatInteger(input.startingPopulationCount)}; the live
+      total may change while the walk runs.
     </>
   );
   return (
@@ -1338,7 +1420,13 @@ function UsageResetAllSurface(input: {
               Paid, Family-sponsored, and group-container rows clear current
               included spend and blocking. Exhausted direct Starter rows get the
               existing one-policy allowance recovery. Immutable usage history,
-              purchased credits, and referral credits remain unchanged. {input.dashboard.search.query !== null
+              purchased credits, and referral credits remain unchanged. The
+              server processes up to 10 members serially per request. At the
+              starting count, that is about {formatInteger(Math.ceil(
+                input.startingPopulationCount / 10,
+              ))} requests; each can spend up to five seconds on runtime wakes,
+              plus database work. Keep this tab open, or pause after the current
+              request once work starts. {input.dashboard.search.query !== null
                 ? "The active search filter will be ignored."
                 : "No search filter is active."}
             </AlertDescription>
@@ -1367,13 +1455,19 @@ function UsageResetAllSurface(input: {
               those members again from their then-current state.
             </AlertDescription>
           </Alert>
-          <UsageResetAllProgress state={state} />
+          <UsageResetAllProgress
+            startingPopulationCount={input.startingPopulationCount}
+            state={state}
+          />
         </div>
       ) : (
-        <UsageResetAllProgress state={state} />
+        <UsageResetAllProgress
+          startingPopulationCount={input.startingPopulationCount}
+          state={state}
+        />
       )}
 
-      <DialogFooter>
+      <DialogFooter className="sm:flex-wrap">
         {input.abandonmentOpen ? (
           <>
             <Button onClick={input.onKeep} type="button" variant="outline">
@@ -1408,9 +1502,16 @@ function UsageResetAllSurface(input: {
             </Button>
           </>
         ) : state.phase === "running" ? (
-          <Button disabled type="button" variant="destructive">
-            <Spinner data-icon="inline-start" />
-            Processing bounded batches
+          <Button
+            disabled={input.pausePending}
+            onClick={input.onRequestPause}
+            type="button"
+            variant="outline"
+          >
+            {input.pausePending ? <Spinner data-icon="inline-start" /> : null}
+            {input.pausePending
+              ? "Finishing current batch"
+              : "Pause after current batch"}
           </Button>
         ) : state.phase === "paused" ? (
           <>
@@ -1466,7 +1567,10 @@ function UsageResetAllSurface(input: {
   );
 }
 
-function UsageResetAllProgress(input: { state: UsageResetAllState }) {
+function UsageResetAllProgress(input: {
+  startingPopulationCount: number;
+  state: UsageResetAllState;
+}) {
   const state = input.state;
   return (
     <div aria-live="polite" className="grid gap-4">
@@ -1502,13 +1606,26 @@ function UsageResetAllProgress(input: { state: UsageResetAllState }) {
           </AlertDescription>
         </Alert>
       ) : null}
+      {state.phase === "paused" && !state.failure ? (
+        <Alert>
+          <AlertDescription>
+            Paused after the last acknowledged batch. Resume under the same
+            operation to continue from the saved cursor.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {state.phase === "running" ? (
         <p className="text-sm leading-6 text-muted-foreground">
-          The page is continuing one bounded request at a time. Per-row reset
-          controls remain disabled until this operation stops or completes.
+          The page is continuing one bounded request at a time. A pause request
+          takes effect after the current request returns. Per-row reset controls
+          remain disabled until this operation stops or completes.
         </p>
       ) : null}
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <UsageResetAllMetric
+          label="Starting population"
+          value={input.startingPopulationCount}
+        />
         <UsageResetAllMetric label="Processed" value={state.counts.processed} />
         <UsageResetAllMetric label="Reset" value={state.counts.reset} />
         <UsageResetAllMetric label="Unchanged" value={state.counts.unchanged} />
@@ -1686,12 +1803,18 @@ function readResetAllSessionOperation(
 function writeResetAllSessionOperation(
   operationId: string,
   operatorMemberId: string,
+  startingPopulationCount: number,
   state: UsageResetAllState,
 ): boolean {
   try {
     window.sessionStorage.setItem(
       RESET_ALL_SESSION_STORAGE_KEY,
-      JSON.stringify({ operationId, operatorMemberId, state }),
+      JSON.stringify({
+        operationId,
+        operatorMemberId,
+        startingPopulationCount,
+        state,
+      }),
     );
     return true;
   } catch {
@@ -1717,15 +1840,25 @@ function parseResetAllSessionOperation(
   }
   const operationId = Reflect.get(value, "operationId");
   const operatorMemberId = Reflect.get(value, "operatorMemberId");
+  const startingPopulationCount = Reflect.get(
+    value,
+    "startingPopulationCount",
+  );
   const state = parseResetAllSessionState(Reflect.get(value, "state"));
   if (
     !isHostedOpsUsageResetAllOperationId(operationId)
     || operatorMemberId !== expectedOperatorMemberId
+    || !isNonNegativeInteger(startingPopulationCount)
     || !state
   ) {
     return null;
   }
-  return { operationId, operatorMemberId, state };
+  return {
+    operationId,
+    operatorMemberId,
+    startingPopulationCount,
+    state,
+  };
 }
 
 function parseResetAllSessionState(value: unknown): UsageResetAllState | null {
@@ -1842,6 +1975,12 @@ function restoreInterruptedResetAllState(
     };
   }
   return state;
+}
+
+function readResetAllStartingPopulationCount(
+  dashboard: HostedOpsMemberUsageDashboard,
+): number {
+  return dashboard.summary.members + dashboard.summary.groupContainers;
 }
 
 function readEmptyUsageMessage(

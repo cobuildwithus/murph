@@ -158,6 +158,32 @@ const DESIGN_OPS_USAGE_ERROR_SEARCH_DASHBOARD: HostedOpsMemberUsageDashboard = {
   },
 };
 
+const DESIGN_OPS_USAGE_RESET_DASHBOARD: HostedOpsMemberUsageDashboard = {
+  ...DESIGN_OPS_USAGE_DASHBOARD,
+  summary: {
+    ...DESIGN_OPS_USAGE_DASHBOARD.summary,
+    groupContainers: 1,
+    members: 46,
+  },
+};
+
+export const OPS_USAGE_DIALOG_STATES = [
+  "abandonment",
+  "progress",
+  "partial-failure",
+] as const;
+
+export type OpsUsageDialogState = (typeof OPS_USAGE_DIALOG_STATES)[number];
+
+const OPS_USAGE_DIALOG_DESIGN_STATES: Record<
+  OpsUsageDialogState,
+  MemberUsageClientDesignState
+> = {
+  abandonment: "reset_all_abandonment",
+  "partial-failure": "reset_all_partial_failure",
+  progress: "reset_all_progress",
+};
+
 const RESET_STATES: Array<{
   state: MemberUsageClientDesignState;
   title: string;
@@ -224,13 +250,28 @@ export function OpsUsageStudy() {
       {RESET_STATES.map(({ state, title }) => (
         <StudyFrame key={state} title={title}>
           <MemberUsageClient
-            dashboard={DESIGN_OPS_USAGE_DASHBOARD}
+            dashboard={DESIGN_OPS_USAGE_RESET_DASHBOARD}
             designResetAllInline
             designState={state}
             operatorMemberId={null}
           />
         </StudyFrame>
       ))}
+    </div>
+  );
+}
+
+export function OpsUsageDialogStudy(input: {
+  state: OpsUsageDialogState;
+}) {
+  return (
+    <div inert>
+      <MemberUsageClient
+        dashboard={DESIGN_OPS_USAGE_RESET_DASHBOARD}
+        designResetAllDialogInert
+        designState={OPS_USAGE_DIALOG_DESIGN_STATES[input.state]}
+        operatorMemberId={null}
+      />
     </div>
   );
 }

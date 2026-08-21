@@ -447,6 +447,94 @@ describe("hosted ops usage reset route", () => {
     }
   });
 
+  test("keeps a healthy maximum reset batch fully serial through every wake", async () => {
+    const memberIds = Array.from(
+      { length: 10 },
+      (_, index) => `hbm_reset_${String(index + 1).padStart(3, "0")}`,
+    );
+    const events: string[] = [];
+    let activeResetTransactions = 0;
+    let activeRuntimeWakes = 0;
+    let maximumActiveResetTransactions = 0;
+    let maximumActiveRuntimeWakes = 0;
+    mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
+      hasMore: false,
+      memberIds,
+    });
+    mocks.resetHostedOpsMemberUsageForResetAll.mockImplementation(
+      async ({ memberId }: { memberId: string }) => {
+        events.push(`reset:start:${memberId}`);
+        activeResetTransactions += 1;
+        maximumActiveResetTransactions = Math.max(
+          maximumActiveResetTransactions,
+          activeResetTransactions,
+        );
+        await Promise.resolve();
+        activeResetTransactions -= 1;
+        events.push(`reset:end:${memberId}`);
+        return {
+          memberId,
+          outcome: "unchanged",
+          resetMode: "included_usage",
+          runtimeRecheckRequired: true,
+          timestamp: NOW.toISOString(),
+        } as const;
+      },
+    );
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        events.push(`wake:start:${userId}`);
+        activeRuntimeWakes += 1;
+        maximumActiveRuntimeWakes = Math.max(
+          maximumActiveRuntimeWakes,
+          activeRuntimeWakes,
+        );
+        await Promise.resolve();
+        activeRuntimeWakes -= 1;
+        events.push(`wake:end:${userId}`);
+        return {
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${userId}`,
+        };
+      },
+    );
+
+    const response = await route.POST(makeResetAllRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      counts: {
+        failed: 0,
+        pendingWake: 0,
+        processed: 10,
+        reset: 0,
+        skipped: 0,
+        unchanged: 10,
+      },
+      done: true,
+      failure: null,
+      lastAcknowledgedCursor: "hbm_reset_010",
+    });
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).toHaveBeenCalledTimes(10);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(10);
+    expect(maximumActiveResetTransactions).toBe(1);
+    expect(maximumActiveRuntimeWakes).toBe(1);
+    expect(activeResetTransactions).toBe(0);
+    expect(activeRuntimeWakes).toBe(0);
+    for (const [index, memberId] of memberIds.entries()) {
+      const resetEnd = events.indexOf(`reset:end:${memberId}`);
+      const wakeStart = events.indexOf(`wake:start:${memberId}`);
+      const wakeEnd = events.indexOf(`wake:end:${memberId}`);
+      expect(resetEnd).toBeLessThan(wakeStart);
+      expect(wakeStart).toBeLessThan(wakeEnd);
+      if (index < memberIds.length - 1) {
+        expect(wakeEnd).toBeLessThan(
+          events.indexOf(`reset:start:${memberIds[index + 1]}`),
+        );
+      }
+    }
+  });
+
   test("acknowledges a stable no-period skip and advances to the next member", async () => {
     mocks.readHostedOpsMemberUsageResetAllBatch.mockResolvedValueOnce({
       hasMore: false,
@@ -618,6 +706,53 @@ describe("hosted ops usage reset route", () => {
     } finally {
       consoleErrorSpy.mockRestore();
     }
+  });
+
+  test("attempts every healthy wake in a maximum receipt-only batch serially", async () => {
+    const receipts = Array.from({ length: 10 }, (_, index) => ({
+      memberId: `hbm_reset_${String(index + 1).padStart(3, "0")}`,
+      timestamp: NOW.toISOString(),
+    }));
+    const awakenedMemberIds: string[] = [];
+    let activeRuntimeWakes = 0;
+    let maximumActiveRuntimeWakes = 0;
+    mocks.readHostedOpsMemberUsageResetAllWakeBatch.mockResolvedValueOnce({
+      hasMore: false,
+      receipts,
+    });
+    mocks.signalHostedRuntimeRecheckRuntime.mockImplementation(
+      async ({ userId }: { userId: string }) => {
+        activeRuntimeWakes += 1;
+        maximumActiveRuntimeWakes = Math.max(
+          maximumActiveRuntimeWakes,
+          activeRuntimeWakes,
+        );
+        awakenedMemberIds.push(userId);
+        await Promise.resolve();
+        activeRuntimeWakes -= 1;
+        return {
+          signalAccepted: true,
+          workflowId: `hosted-user-runtime:${userId}`,
+        };
+      },
+    );
+
+    const response = await route.POST(makeWakeRecoveryRequest());
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      attempted: 10,
+      done: true,
+      lastAcknowledgedCursor: "hbm_reset_010",
+      pendingWake: 0,
+    });
+    expect(awakenedMemberIds).toEqual(
+      receipts.map((receipt) => receipt.memberId),
+    );
+    expect(maximumActiveRuntimeWakes).toBe(1);
+    expect(activeRuntimeWakes).toBe(0);
+    expect(mocks.resetHostedOpsMemberUsageForResetAll).not.toHaveBeenCalled();
+    expect(mocks.resetHostedOpsMemberUsage).not.toHaveBeenCalled();
   });
 
   test("advances wake recovery past terminally inactive runtime access", async () => {

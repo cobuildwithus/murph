@@ -43,8 +43,10 @@ silently changing historical usage and credit truth.
 The operator enters through `/ops/usage`. Search returns one non-paginated,
 bounded matching set. A row reset keeps the existing confirmation and recovery
 path. `Reset everyone` ignores any filter, explains its whole-population scope,
-requires the operator to type the confirmation phrase, and shows batch progress
-through a final reset, skipped, pending-wake, and failed summary.
+requires the operator to type the confirmation phrase, records the unfiltered
+starting population as a reference, supports pausing after the current batch,
+and shows progress through a final reset, skipped, pending-wake, and failed
+summary.
 
 ### Affected people and recovery
 
@@ -83,7 +85,8 @@ through a final reset, skipped, pending-wake, and failed summary.
   applicable. Retryable runtime or transport failures remain visibly pending.
   Because only latency recovery remains, the operator can hide it and continue
   ordinary search or row recovery, reopen it under the same UUID, or clear the
-  saved locator through a transient warned abandonment.
+  saved locator through a transient warned abandonment. Hidden wake recovery
+  stays hidden through search navigation and remount until explicitly reopened.
 - Member created after the confirmed population walk: wake recovery pages only
   the operation's existing wake-required receipts, so the later member cannot
   be reset or granted capacity under the old confirmation.
@@ -121,7 +124,8 @@ through a final reset, skipped, pending-wake, and failed summary.
    search.
 2. Add the URL-backed search form, clear/recovery states, result count/cap copy,
    and query-preserving ordinary pagination. Reuse installed base-UI/shadcn
-   primitives and the existing Ops usage design study.
+   primitives and the existing Ops usage design study. Close and lock stale row
+   confirmations during search navigation.
 3. Add one authenticated same-origin reset-all operation that reads and applies
    a fixed small ID-ordered batch through the canonical per-member reset owner,
    atomically records its stable outcome in one per-member receipt, then
@@ -130,8 +134,9 @@ through a final reset, skipped, pending-wake, and failed summary.
    completes, recover pending wakes from the operation's receipt set without
    re-reading live members or re-entering reset work, using the same bounded
    request-level wake budget.
-4. Add a prominent destructive control, typed confirmation, progress and final
-   outcome UI. Preserve a hidden or same-tab restored operation with a validated
+4. Add a prominent destructive control, typed confirmation, starting-population
+   reference, pause-after-current-batch control, progress, and final outcome UI.
+   Preserve a hidden or same-tab restored operation with a validated
    browser-session locator written before each request, warn before abandoning
    it, and disable conflicting row mutations while it runs or remains paused.
 5. Add focused regression coverage and update the owning hosted usage contract,
@@ -146,9 +151,10 @@ through a final reset, skipped, pending-wake, and failed summary.
   ambiguous retry safety, and responsive interaction states.
 - Run the Web app typecheck and focused lint/static proof selected by the testing
   map, plus `git diff --check` and a secret/identifier scan of the final diff.
-- Render the real production component from the existing Ops usage design study
-  and inspect desktop and phone states for search, confirmation, progress, and
-  partial completion.
+- Render the real portal-backed production dialog from stable synthetic
+  `/screenshots/ops-dialog/*` routes and use Playwright to inspect desktop and
+  phone abandonment, progress, and partial-failure states plus focus trap,
+  Escape close, and trigger-focus return behavior.
 - Push the candidate, run preliminary Product UX/frontend/coverage ReviewGPT and
   the sensitive final ReviewGPT gate concurrently with exact-head CI, resolve
   accepted findings, and complete the parent final review before merge.
