@@ -823,12 +823,23 @@ export async function appendHostedMailboxEnvelopeTx(input: {
  */
 export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
   envelope: HostedMailboxProducerEnvelope;
+  expiresAt?: Date | string | null;
+  itemId?: string;
   prepared: PreparedHostedMailboxItemAppendCrypto;
   sourceMessageLookupKey?: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
+  const itemId = input.itemId === undefined
+    ? undefined
+    : requireHostedMailboxItemId(input.itemId);
+  if (itemId !== undefined && itemId !== input.envelope.eventId) {
+    throw new TypeError(
+      "Hosted mailbox item identity must equal the envelope event id.",
+    );
+  }
   return appendHostedMailboxEnvelopeInternalTx({
     ...input,
+    ...(itemId === undefined ? {} : { itemId }),
     encryption: {
       mode: "prepared-root",
       prepared: input.prepared,
