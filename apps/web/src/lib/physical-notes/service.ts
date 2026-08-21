@@ -496,7 +496,10 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
     }
     const response =
       readPhysicalNoteRecoveryResponseIfConfirmed(targetRecovery);
-    if (response) {
+    if (
+      response
+      && (response.status === "accepted" || response.status === "clear")
+    ) {
       await createCompletedPhysicalNoteRecovery({
         memberId: input.memberId,
         originAssistantInputId: input.originAssistantInputId,
