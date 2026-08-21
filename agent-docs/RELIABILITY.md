@@ -2348,6 +2348,29 @@ planner therefore continues to omit `send_progress_update` while exposing the
 durable/final-result tools. Accepted-input personalization retains its existing
 message and route checks.
 
+## Public email bootstrap
+
+The canonical public mailbox owns no private message work. Cloudflare reads at
+most a bounded header prefix, accepts-and-drops malformed or spoofable input,
+and invokes Web asynchronously with only a normalized candidate address. Web
+serializes admission with a nonblocking global advisory lock and the member row
+lock. A colliding global claim is silently suppressed instead of waiting and
+occupying the shared Web database pool. The winner rechecks active access and
+current verified-email authority before provider entry and terminalizes
+provider ambiguity without an automatic resend. A confirmed provider no-send
+result admits a fresh public email only after a one-minute backoff; sent,
+ambiguous, claimed, and sending outcomes retain the 15-minute cooldown. Every
+admitted try still counts toward the three-attempt member daily and 100-attempt
+global hourly limits. A provider idempotency key and two-day attempt retention
+further bound abuse and replay. Authenticated Web actions that already hold the
+current signed alias send their prepared intent there directly, so Start
+Experiment and device-recovery mail can remain a one-step assistant turn.
+Verified-email authentication prepares alias rotation from the freshly read
+Privy identity, then changes the personal alias generation with the email in
+the same member transaction, so an old reply capability cannot be
+re-registered. Deploy the database migration and Web contract before
+Cloudflare; roll back Cloudflare first.
+
 ## Deterministic member action delivery
 
 Direct editors reuse the existing encrypted system mailbox rather than adding a

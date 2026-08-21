@@ -103,6 +103,7 @@ describe("StartExperimentButton", () => {
           telegram: true,
           text: true,
         },
+        murphEmailAddress: "assistant+private@mail.example.test",
         murphPhoneNumber: "+15550100001",
         protocolDays: 14,
         protocolTitle: "Finnish Dry Sauna",
@@ -123,9 +124,20 @@ describe("StartExperimentButton", () => {
 
     const anchors = Array.from(container.querySelectorAll("a"));
     const links = anchors.map((anchor) => (anchor as HTMLAnchorElement).href);
+    const emailHref = links.find((href) =>
+      href.startsWith("mailto:assistant+private@mail.example.test"),
+    ) ?? "";
     expect(links.some((href) => href.startsWith("sms:+15550100001?body="))).toBe(true);
     expect(links.some((href) => href.startsWith(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`))).toBe(true);
-    expect(links.some((href) => href.startsWith("mailto:murph@mail.withmurph.ai"))).toBe(true);
+    expect(links.some((href) =>
+      href.startsWith("mailto:assistant+private@mail.example.test"),
+    )).toBe(true);
+    expect(decodeURIComponent(emailHref)).toContain(
+      "I want to start the Finnish Dry Sauna experiment.",
+    );
+    expect(decodeURIComponent(emailHref)).not.toContain(
+      "Please send me a private Murph reply.",
+    );
     expect(decodeURIComponent(decodeURIComponent(links.join("\n"))))
       .toContain("I want to start the Finnish Dry Sauna experiment.");
     expect(links.join("\n")).not.toContain("sha256");
@@ -234,8 +246,15 @@ describe("StartExperimentButton", () => {
     expect(container.textContent).not.toContain("member@example.test");
     expect(links).toEqual([
       expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`),
-      expect.stringMatching(/^mailto:murph@mail\.withmurph\.ai/u),
+      expect.stringMatching(/^mailto:mail@mail\.withmurph\.ai/u),
     ]);
+    const emailHref = links.find((href) => href.startsWith("mailto:")) ?? "";
+    expect(decodeURIComponent(emailHref)).toContain(
+      "Please send me a private Murph reply.",
+    );
+    expect(decodeURIComponent(emailHref)).not.toContain(
+      "I want to start the Finnish Dry Sauna experiment.",
+    );
   });
 
   it("inherits layout contact defaults when rendered without explicit channel props", async () => {

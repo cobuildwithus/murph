@@ -50,6 +50,7 @@ describe("hosted Resend plain-text email sender", () => {
       });
       expect(JSON.parse(String(init?.body))).toEqual({
         from: "Murph <founder@example.com>",
+        reply_to: "assistant+private@mail.example.test",
         subject: "Subject",
         text: "Plain text only.",
         to: ["member@example.com"],
@@ -68,6 +69,7 @@ describe("hosted Resend plain-text email sender", () => {
       },
       fetchImpl: fetchMock,
       idempotencyKey: "message/idempotency-key",
+      replyTo: "assistant+private@mail.example.test",
       subject: "Subject",
       text: "Plain text only.",
       to: ["member@example.com"],
@@ -97,6 +99,25 @@ describe("hosted Resend plain-text email sender", () => {
       text: "Plain text only.",
       to: ["member@example.com"],
     });
+  });
+
+  it("rejects a reply-to value containing header injection", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+
+    await expect(sendHostedResendPlainTextEmail({
+      config: {
+        apiKey: "re_test",
+        from: "Murph <founder@example.com>",
+        timeoutMs: 1_000,
+      },
+      fetchImpl: fetchMock,
+      idempotencyKey: "message/idempotency-key",
+      replyTo: "member@example.com\r\nBcc: attacker@example.com",
+      subject: "Subject",
+      text: "Plain text only.",
+      to: ["member@example.com"],
+    })).rejects.toThrow("Hosted Resend reply-to address is invalid.");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps fixed SDK transport defaults despite ambient overrides", async () => {
