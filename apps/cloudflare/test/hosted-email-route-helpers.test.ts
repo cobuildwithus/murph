@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
   formatHostedEmailAddress,
+  isHostedEmailPublicBootstrapAddress,
   isHostedEmailPublicSenderAddress,
   parseHostedEmailRouteCandidate,
 } from "../src/hosted-email/route-addressing.ts";
@@ -17,6 +18,7 @@ const hostedEmailConfig: HostedEmailConfig = {
   domain: "example.com",
   fromAddress: "assistant@example.com",
   localPart: "assistant",
+  publicAddress: "mail@mail.withmurph.ai",
   signingSecret: "top-secret",
 };
 
@@ -24,6 +26,17 @@ describe("hosted email route addressing", () => {
   it("treats the configured public sender as a dedicated identity", () => {
     expect(isHostedEmailPublicSenderAddress("assistant@example.com", hostedEmailConfig)).toBe(true);
     expect(isHostedEmailPublicSenderAddress("assistant+alias@example.com", hostedEmailConfig)).toBe(false);
+  });
+
+  it("keeps the unauthenticated bootstrap recipient separate from the sender identity", () => {
+    expect(isHostedEmailPublicBootstrapAddress(
+      "MAIL@mail.withmurph.ai",
+      hostedEmailConfig,
+    )).toBe(true);
+    expect(isHostedEmailPublicBootstrapAddress(
+      "assistant@example.com",
+      hostedEmailConfig,
+    )).toBe(false);
   });
 
   it("parses both explicit alias addresses and bare route details", () => {

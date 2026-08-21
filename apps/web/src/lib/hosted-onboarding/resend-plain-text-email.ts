@@ -67,6 +67,7 @@ export async function sendHostedResendPlainTextEmail(input: {
   config: HostedResendPlainTextEmailConfig;
   fetchImpl?: typeof fetch;
   idempotencyKey: string;
+  replyTo?: string | null;
   signal?: AbortSignal;
   subject: string;
   text: string;
@@ -83,8 +84,10 @@ export async function sendHostedResendPlainTextEmail(input: {
     fetchImpl: input.fetchImpl,
     requestSignal,
   });
+  const replyTo = normalizeHostedResendReplyTo(input.replyTo);
   const email: CreateEmailOptions = {
     from: input.config.from,
+    ...(replyTo ? { replyTo } : {}),
     subject: input.subject,
     text: input.text,
     to: input.to,
@@ -152,6 +155,17 @@ export async function sendHostedResendPlainTextEmailBatch(input: {
   return {
     providerMessageIds: readResendBatchMessageIds(response.data),
   };
+}
+
+function normalizeHostedResendReplyTo(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.length > 254 || /[\r\n]/u.test(normalized)) {
+    throw new TypeError("Hosted Resend reply-to address is invalid.");
+  }
+  return normalized;
 }
 
 function readHostedResendPlainTextEmailTimeoutMs(

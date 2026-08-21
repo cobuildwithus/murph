@@ -231,6 +231,23 @@ Last verified: 2026-08-20
   missing verifier before database authority or SQL, and recovery must roll
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
+- Protected native Android hosted E2E treats private workflow dispatch as an
+  uncertain external effect. A timeout, network failure, ambiguous HTTP
+  response, malformed successful response, or missing run id after the request
+  may have been transmitted holds the live fence for the full admitted window.
+  A valid receipt binds the returned run id to the reviewed Android SHA, polls
+  only that run, and accepts success only from its terminal `workflow_dispatch`
+  result. The protected controller refreshes its repository-scoped GitHub App
+  installation token before expiry without releasing the existing lifecycle
+  owner. A poll failure or bounded-wait expiry
+  requests ordinary cancellation, then force-cancellation, and proves the same
+  run terminal before shared identity or deployment cleanup. If cancellation
+  or status cannot be attested, the controller keeps the destructive native
+  live lock and all cleanup authority fenced until the dispatch lease, private
+  job timeout, and terminal grace window prove no admitted run can remain
+  executable. PR and production jobs are separately non-canceling; production
+  uses a non-destructive identity lifecycle. See
+  `agent-docs/operations/native-android-hosted-e2e.md`.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing
@@ -1065,11 +1082,14 @@ Last verified: 2026-08-20
   permission/authentication, quota, input, and integrity failures remain
   single-attempt and fail closed; the official SDK's broad default retry budget
   stays disabled.
-- Hosted artifact uploads are content-addressed and replay-safe. Transport failures
-  plus HTTP 408, 429, and 5xx responses carry typed retryability into the existing
-  device-sync job owner, which requeues with its normal bounded backoff. Write-fence
-  and authority failures, other HTTP responses, malformed data, and unclassified
-  errors remain terminal; the runtime must not create a second artifact retry queue.
+- Hosted artifact reads and uploads are content-addressed and replay-safe. Transport
+  failures plus HTTP 408, 429, and 5xx responses carry typed retryability into the
+  existing device-sync job owner, which requeues with its normal bounded backoff.
+  A canonical device-sync checkpoint becomes retryable only after its existing
+  exact-successor reconciliation also fails for a proven timeout or transient
+  transport/status reason. Write-fence, lease, authority, deterministic 4xx,
+  malformed-data, parser, and unclassified failures remain terminal; the runtime
+  must not create a second artifact or checkpoint retry queue.
 - Hosted device-sync provider cadence and local job continuation are separate
   wake domains. Web's canonical `nextReconcileAt` carries only the provider
   schedule consumed by the global due-reconcile sweep. The first durable
@@ -1296,6 +1316,12 @@ Last verified: 2026-08-20
   results retain only that encrypted message for retry and DLQ recovery.
   Current provider registration, connection epoch/status, consent, source
   lifecycle, and provider-application authority are revalidated at admission.
+  When an authenticated canonical Junction source attribution targets an active
+  shared connection whose exact source row is absent, Web creates only the
+  existing owner's disconnected candidate at the frozen receipt instant under
+  the health-data admission lock. It then follows the ordinary provider read
+  and final locked authority recheck; inactive or ambiguous provider state
+  leaves the candidate disconnected and the encrypted message retryable.
   Apple Health source-registration observation first captures an ephemeral
   exact authority proof under the existing member-plus-connection admission
   lock, releases the transaction before provider I/O, then re-enters the same
@@ -2344,6 +2370,29 @@ reader and an ephemeral update could arrive after the final outbox reply. The
 planner therefore continues to omit `send_progress_update` while exposing the
 durable/final-result tools. Accepted-input personalization retains its existing
 message and route checks.
+
+## Public email bootstrap
+
+The canonical public mailbox owns no private message work. Cloudflare reads at
+most a bounded header prefix, accepts-and-drops malformed or spoofable input,
+and invokes Web asynchronously with only a normalized candidate address. Web
+serializes admission with a nonblocking global advisory lock and the member row
+lock. A colliding global claim is silently suppressed instead of waiting and
+occupying the shared Web database pool. The winner rechecks active access and
+current verified-email authority before provider entry and terminalizes
+provider ambiguity without an automatic resend. A confirmed provider no-send
+result admits a fresh public email only after a one-minute backoff; sent,
+ambiguous, claimed, and sending outcomes retain the 15-minute cooldown. Every
+admitted try still counts toward the three-attempt member daily and 100-attempt
+global hourly limits. A provider idempotency key and two-day attempt retention
+further bound abuse and replay. Authenticated Web actions that already hold the
+current signed alias send their prepared intent there directly, so Start
+Experiment and device-recovery mail can remain a one-step assistant turn.
+Verified-email authentication prepares alias rotation from the freshly read
+Privy identity, then changes the personal alias generation with the email in
+the same member transaction, so an old reply capability cannot be
+re-registered. Deploy the database migration and Web contract before
+Cloudflare; roll back Cloudflare first.
 
 ## Deterministic member action delivery
 

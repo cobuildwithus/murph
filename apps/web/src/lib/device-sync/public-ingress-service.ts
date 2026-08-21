@@ -4,7 +4,6 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import {
   canonicalizeJunctionProviderSlug,
-  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
   JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
@@ -13,7 +12,6 @@ import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   DEVICE_SYNC_HISTORICAL_RESET_REVOKE_FAILED_ERROR_CODE,
   isEstablishedDeviceSyncConnection,
-  isDeviceSyncSourceDisconnectFenced,
 } from "@murphai/device-syncd/public-account";
 import {
   DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
@@ -52,6 +50,7 @@ import {
   acceptHostedCompanionHrvRmssdObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
+  buildHostedJunctionSourceEstablishmentWork,
   captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
@@ -59,6 +58,7 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
+  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
 import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
@@ -131,42 +131,25 @@ export class HostedDeviceSyncPublicIngressService {
             });
           }
 
-          let connectionWork = connection;
-          if (
+          const isGoogleHealthSource =
             account.provider === "junction"
             && normalizeJunctionProviderSlug(sourceProviderSlug)
-              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-          ) {
-            const legacy = (await this.context.store.listConnectionSources(account.id))
-              .find((source) =>
-                normalizeJunctionProviderSlug(source.sourceProviderSlug)
-                  === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-                && source.status !== "disconnected"
-                && !isDeviceSyncSourceDisconnectFenced(source)
-              );
-            const legacyWork = legacy
-              ? provider.connectionHandler?.buildSourceConnectionWork?.({
-                  historicalProofAuthorization: {
-                    firstSeenAt: now,
-                    sourceProviderSlug: JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
-                  },
-                  now,
-                  sourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
-                })
-              : null;
-            const legacyBackfillJobs = legacyWork?.initialJobs?.filter(
-              (job) => job.kind === "backfill",
-            ) ?? [];
-            if (legacyBackfillJobs.length > 0) {
-              connectionWork = {
-                ...connection,
-                initialJobs: [
-                  ...(connection.initialJobs ?? []),
-                  ...legacyBackfillJobs,
-                ],
-              };
-            }
-          }
+              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
+          const legacySources = isGoogleHealthSource
+            ? await this.context.store.listConnectionSources(account.id)
+            : [];
+          const buildSourceConnectionWork =
+            provider.connectionHandler?.buildSourceConnectionWork;
+          const connectionWork = isGoogleHealthSource && buildSourceConnectionWork
+            ? buildHostedJunctionSourceEstablishmentWork({
+                buildSourceConnectionWork,
+                connectionWork: connection,
+                hasAuthorizedLegacyFitbitBackfillSource:
+                  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(legacySources),
+                now,
+                sourceProviderSlug,
+              })
+            : connection;
 
           await handleHostedDeviceSyncConnectionEstablished({
             account,

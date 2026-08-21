@@ -4,13 +4,17 @@
  * rest of the hosted email lifecycle.
  */
 
-import { resolveHostedEmailSenderIdentity } from "@murphai/hosted-execution/hosted-email";
+import {
+  HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS,
+  resolveHostedEmailSenderIdentity,
+} from "@murphai/hosted-execution/hosted-email";
 
 export interface HostedEmailConfig {
   defaultSubject: string;
   domain: string | null;
   fromAddress: string | null;
   localPart: string;
+  publicAddress?: string;
   signingSecret: string | null;
 }
 
@@ -27,6 +31,7 @@ export function readHostedEmailConfig(
     domain,
     fromAddress,
     localPart,
+    publicAddress: HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS,
     signingSecret: normalizeOptionalString(source.HOSTED_EMAIL_SIGNING_SECRET),
   };
 }

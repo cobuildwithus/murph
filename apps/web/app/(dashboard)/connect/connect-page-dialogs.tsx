@@ -278,6 +278,7 @@ export function ConnectIntentRecoveryDialog({
 }) {
   const resolvedContactAction =
     contactAction ?? buildConnectIntentRecoveryFallbackContactAction();
+  const usesPublicBootstrap = contactAction === null;
   const contactLabel = resolveConnectIntentRecoveryContactLabel(
     resolvedContactAction,
   );
@@ -302,6 +303,9 @@ export function ConnectIntentRecoveryDialog({
             <DialogDescription className="text-sm leading-6 text-muted-foreground">
               {request?.message ??
                 "This connection link is no longer available."}
+              {usesPublicBootstrap
+                ? " Email Murph to receive a private reply, then ask for a fresh connection link. If it does not arrive within a few minutes, resend the email."
+                : null}
             </DialogDescription>
           </div>
         </DialogHeader>
@@ -342,8 +346,8 @@ export function ConnectIntentRecoveryDialog({
 function buildConnectIntentRecoveryFallbackContactAction(): MurphContactOption {
   return {
     href: buildMurphEmailHref({
-      body: "Can you send me a fresh device connection link?",
-      subject: "Fresh device connection link",
+      body: "Please send me a private Murph reply.",
+      subject: "Start a private Murph conversation",
     }),
     kind: "email",
     label: "Email",
