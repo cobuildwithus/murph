@@ -5164,6 +5164,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected hosted automation operation scope.");
       }
 
+      const emailHandoffResult = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [emailInputId],
+        operation: async (executionContext) =>
+          executionContext.hosted?.groupTool?.request({
+            action: "handoff",
+            context: "Email cannot hand off private context.",
+            originAssistantInputId: emailInputId,
+          }),
+        turnEnvironment: null,
+      });
+      expect(emailHandoffResult).toEqual({
+        action: "handoff",
+        result: {
+          status: "unavailable",
+          unavailableReason: "authenticated_sender_required",
+        },
+      });
+
       const emailResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: [emailInputId],
