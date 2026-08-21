@@ -1019,7 +1019,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
         analyzeVideoAvailable:
-          (privateInteractiveProviderTurn || authenticatedGroupChatRuntime) &&
+          privateInteractiveProviderTurn &&
           userActionAcceptedInputIds.length > 0 &&
           normalizeNullableString(
             input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],

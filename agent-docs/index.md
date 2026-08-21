@@ -130,11 +130,15 @@ specified by `agent-docs/SECURITY.md`,
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
 
 On-demand hosted video analysis is one turn-scoped Gemini 3.7 Flash call over
-an exact accepted-message attachment authority. Murph freezes attachment
-metadata before Codex can act on each initial or live-steered input, verifies
-the exact bytes before cross-provider egress, pins 1 FPS and bounded output,
-and keeps credentials at the Worker boundary. The architecture, security,
-deployment order, and verification owners are `ARCHITECTURE.md`,
+an exact accepted-message attachment authority. The tool is offered only on
+private-direct turns with accepted user-action input and a configured Worker
+credential; group turns omit it. It may be present before that input has video
+authority because provider tools freeze at turn start and the first video may
+arrive through live steering. Murph freezes attachment metadata before Codex
+can act on each initial or live-steered input, verifies the exact bytes before
+cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
+the Worker boundary. The architecture, security, deployment order, and
+verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
 `agent-docs/references/testing-ci-map.md`.
 

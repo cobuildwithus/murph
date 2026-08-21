@@ -215,6 +215,7 @@ describe("hosted-local harness", () => {
       "snapshot-publication-fallback",
     );
     for (const name of [
+      "analyze-video-roundtrip",
       "canonical-receipt-lost-ack-recovery",
       "computer-handoff-linq-roundtrip",
       "retell-call-result-roundtrip",
@@ -242,6 +243,10 @@ describe("hosted-local harness", () => {
       listHostedLocalE2eScenarios().map((scenario) => [scenario.name, scenario]),
     );
 
+    expect(scenarios.get("analyze-video-roundtrip")).toMatchObject({
+      requiresParserToolchain: true,
+      testControls: true,
+    });
     expect(scenarios.get("linq-webhook-audio")).toMatchObject({
       requiresParserToolchain: true,
       testControls: true,

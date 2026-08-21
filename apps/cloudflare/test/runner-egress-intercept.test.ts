@@ -5,6 +5,7 @@ import {
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
 import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
   HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION,
 } from "@murphai/hosted-execution/assistant-capabilities";
 
@@ -2028,9 +2029,12 @@ describe("hostedRunnerIntercept", () => {
         totalTokenCount: 345,
       },
     };
-    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+    const fetchMock = vi.fn<typeof fetch>(async (target, init) => {
       if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
-        return Response.json({ recorded: true, usageId: "usage_1" });
+        const usage = (JSON.parse(String(init?.body)) as {
+          usage: { usageId: string };
+        }).usage;
+        return Response.json({ recorded: true, usageId: usage.usageId });
       }
       return Response.json(upstreamPayload, {
         headers: { "x-goog-request-id": "gemini-req-1" },
@@ -2080,6 +2084,7 @@ describe("hostedRunnerIntercept", () => {
     expect(await forwardedRequest.clone().json()).toEqual(requestBody);
     expect(await response.clone().json()).toEqual(upstreamPayload);
 
+    expect(waitUntilPromises).toHaveLength(0);
     await Promise.all(waitUntilPromises);
     const usageCall = findFetchCall(fetchMock, "web.example.test");
     expect(usageCall).toBeDefined();
@@ -2103,6 +2108,127 @@ describe("hostedRunnerIntercept", () => {
       usageExtractionSourcePath: "gemini.generateContent.usageMetadata",
       usageExtractionVersion: "gemini-video-analysis-v1",
     });
+  });
+
+  it("withholds a successful Gemini response when durable usage recording fails", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return Response.json({ recorded: false, usageId: "usage_rejected" });
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: RUNNER_CONTAINER_NAME,
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toBe("Hosted Gemini usage recording failed.");
+    expect(waitUntilPromises).toHaveLength(0);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeDefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({ providerKind: "gemini" }),
+        level: "warn",
+        message: "Hosted Gemini video usage recording failed; response withheld.",
+      }),
+    );
+  });
+
+  it("rejects an oversized Gemini response without widening the delivery buffer", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: {
+          parts: [{
+            text: "x".repeat(HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES),
+          }],
+          role: "model",
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(upstreamPayload));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: RUNNER_CONTAINER_NAME,
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toBe("Hosted Gemini response too large.");
+    expect(waitUntilPromises).toHaveLength(0);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          providerKind: "gemini",
+          responseStatus: 200,
+        },
+        level: "warn",
+        message: "Hosted Gemini response exceeded the delivery body limit; no usage recorded.",
+      }),
+    );
   });
 
   it("does not follow Gemini redirects with the injected credential", async () => {

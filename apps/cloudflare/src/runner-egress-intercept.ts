@@ -766,6 +766,7 @@ export async function handleHostedRunnerGeminiOutbound(
   request: Request,
   env: RunnerOutboundEnvironmentSource,
   ctx: HostedRunnerOutboundContext,
+  upstreamFetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
   const url = new URL(request.url);
   return await requireHandledProviderEgress(
@@ -773,6 +774,7 @@ export async function handleHostedRunnerGeminiOutbound(
       ctx,
       env,
       request,
+      upstreamFetchImpl,
       url,
       userId: readHostedRunnerBoundUserId(request),
     }),
@@ -2174,6 +2176,7 @@ async function maybeHandleGeminiRequest(input: {
   ctx?: HostedRunnerOutboundContext;
   env: RunnerOutboundEnvironmentSource;
   request: Request;
+  upstreamFetchImpl?: typeof fetch;
   url: URL;
   userId: string | null;
 }): Promise<Response | null> {
@@ -2245,6 +2248,7 @@ async function maybeHandleGeminiRequest(input: {
     request: input.request,
     startedAt,
     upstreamRequest,
+    upstreamFetchImpl: input.upstreamFetchImpl,
     url: input.url,
   });
   if (!response.ok) {
@@ -2256,22 +2260,41 @@ async function maybeHandleGeminiRequest(input: {
     HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
   );
   if (responseBody === null) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        providerKind: "gemini",
+        responseStatus: response.status,
+      },
+      level: "warn",
+      message: "Hosted Gemini response exceeded the delivery body limit; no usage recorded.",
+      phase: "wake.running",
+    });
     return new Response("Hosted Gemini response too large.", { status: 502 });
   }
-  const usageRecording = recordHostedGeminiVideoAnalysisUsage({
-    env: input.env,
-    memberId: authorization.userId,
-    model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
-    occurredAt: new Date(providerRequestStartedAt).toISOString(),
-    providerRequestId:
-      response.headers.get("x-goog-request-id")
-      ?? response.headers.get("x-request-id"),
-    usage: readHostedGeminiVideoAnalysisUsageMetadata(responseBody),
-  });
-  if (typeof input.ctx?.waitUntil === "function") {
-    input.ctx.waitUntil(usageRecording);
-  } else {
-    void usageRecording;
+  try {
+    await recordHostedGeminiVideoAnalysisUsage({
+      env: input.env,
+      memberId: authorization.userId,
+      model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+      occurredAt: new Date(providerRequestStartedAt).toISOString(),
+      providerRequestId:
+        response.headers.get("x-goog-request-id")
+        ?? response.headers.get("x-request-id"),
+      usage: readHostedGeminiVideoAnalysisUsageMetadata(responseBody),
+    });
+  } catch (error) {
+    emitHostedExecutionStructuredLog({
+      component: "runner",
+      details: {
+        ...buildHostedExecutionSafeErrorDetails(error),
+        providerKind: "gemini",
+      },
+      level: "warn",
+      message: "Hosted Gemini video usage recording failed; response withheld.",
+      phase: "wake.running",
+    });
+    return new Response("Hosted Gemini usage recording failed.", { status: 502 });
   }
   const responseHeaders = new Headers(response.headers);
   responseHeaders.delete("content-encoding");
@@ -2283,7 +2306,7 @@ async function maybeHandleGeminiRequest(input: {
   });
 }
 
-function recordHostedGeminiVideoAnalysisUsage(input: {
+async function recordHostedGeminiVideoAnalysisUsage(input: {
   env: RunnerOutboundEnvironmentSource;
   memberId: string | null;
   model: string;
@@ -2291,44 +2314,34 @@ function recordHostedGeminiVideoAnalysisUsage(input: {
   providerRequestId: string | null;
   usage: Record<string, unknown> | null;
 }): Promise<void> {
-  return (async () => {
-    if (!input.memberId) {
-      throw new TypeError("Hosted Gemini video usage recording requires a member id.");
-    }
-    const environment = readHostedExecutionEnvironment(
-      asWorkerStringEnvironment(input.env),
-    );
-    const record = buildHostedGeminiVideoAnalysisUsageRecord({
-      memberId: input.memberId,
-      model: input.model,
-      occurredAt: input.occurredAt,
-      providerRequestId: input.providerRequestId,
-      usage: input.usage,
-    });
-    await recordHostedRuntimeUsageRecord({
-      boundUserId: input.memberId,
-      fetchImpl: fetch,
-      record,
-      timeoutMs: environment.webControlTimeoutMs,
-      transport: {
-        callbackSigning: environment.webCallbackSigning,
-        mode: "direct",
-        webControlBaseUrl: environment.hostedWebBaseUrl,
-        workspaceCheckpointBridge: null,
-      },
-    });
-  })().catch((error: unknown) => {
-    emitHostedExecutionStructuredLog({
-      component: "runner",
-      details: {
-        ...buildHostedExecutionSafeErrorDetails(error),
-        providerKind: "gemini",
-      },
-      level: "warn",
-      message: "Hosted Gemini video usage recording failed; response delivery unaffected.",
-      phase: "wake.running",
-    });
+  if (!input.memberId) {
+    throw new TypeError("Hosted Gemini video usage recording requires a member id.");
+  }
+  const environment = readHostedExecutionEnvironment(
+    asWorkerStringEnvironment(input.env),
+  );
+  const record = buildHostedGeminiVideoAnalysisUsageRecord({
+    memberId: input.memberId,
+    model: input.model,
+    occurredAt: input.occurredAt,
+    providerRequestId: input.providerRequestId,
+    usage: input.usage,
   });
+  const result = await recordHostedRuntimeUsageRecord({
+    boundUserId: input.memberId,
+    fetchImpl: fetch,
+    record,
+    timeoutMs: environment.webControlTimeoutMs,
+    transport: {
+      callbackSigning: environment.webCallbackSigning,
+      mode: "direct",
+      webControlBaseUrl: environment.hostedWebBaseUrl,
+      workspaceCheckpointBridge: null,
+    },
+  });
+  if (!result.recorded || result.usageId !== record.usageId) {
+    throw new Error("Hosted Gemini video usage was not durably accepted.");
+  }
 }
 
 async function maybeHandleXaiRequest(input: {

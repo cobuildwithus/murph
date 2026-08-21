@@ -3232,6 +3232,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
@@ -3344,6 +3345,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
 
@@ -4734,6 +4736,11 @@ async function runCodexAppServerTurnOnProcess(
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
       }
+      if (dynamicToolRequest.kind === 'analyze-video') {
+        requiredFinalResponseFallback = normalizeNullableString(
+          result.requiredFinalResponseFallback,
+        )
+      }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
       }
@@ -5908,6 +5915,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const requiredSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage) ??
+    requiredFinalResponseFallback ??
+    semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -5916,22 +5927,25 @@ async function runCodexAppServerTurnOnProcess(
       : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
     appendRequiredAutomationLocalAtClarification(
-      semanticFinalMessage,
+      requiredSemanticFinalMessage,
       requiredAutomationLocalAtClarificationsInOrder,
     ),
     requiredVaultFileApprovalUrls,
   )
+  const semanticTranscriptMessage = finalResponseCard
+    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
+      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      : renderAssistantResponseCardText(finalResponseCard)
+    : finalResponseCardTextFallback
+      ? renderAssistantWorkoutResponseCardTranscriptText(
+          finalResponseCardTextFallback,
+        )
+      : normalizeNullableString(modelFinalMessage) ??
+        (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    finalResponseCard
-      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-        : renderAssistantResponseCardText(finalResponseCard)
-      : finalResponseCardTextFallback
-        ? renderAssistantWorkoutResponseCardTranscriptText(
-            finalResponseCardTextFallback,
-          )
-        : normalizeNullableString(modelFinalMessage) ??
-          (finalResponseMedia.length > 0 ? '' : null),
+    normalizeNullableString(semanticTranscriptMessage) ??
+      requiredFinalResponseFallback ??
+      semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (

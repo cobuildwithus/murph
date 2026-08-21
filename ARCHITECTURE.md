@@ -3677,7 +3677,14 @@ cards already in transcripts remain readable but cannot open the direct editor.
 ## On-demand Gemini video analysis
 
 `murph.analyze_video` is an explicit, turn-scoped assistant capability for one
-video attached to an accepted message. Before Codex can act on the initial
+video attached to an accepted message. The first release offers it only in a
+private direct turn with accepted user-action input when the Worker-held
+credential is configured; group runtimes do not receive it. A direct turn may
+receive the schema before its accepted input has video authority because the
+provider tool set freezes at turn start. Keeping the tool available lets the
+first live-steered video be drained, frozen, and authorized by the
+`beforeToolExecution` boundary in that same turn; the consumed steer is not
+carried forward as next-turn authority. Before Codex can act on the initial
 input, the turn owner snapshots each eligible attachment's normalized raw path,
 byte count, SHA-256 digest, MIME type, message ref, and ordinal into process
 memory. For active steering it freezes new attachments in the accepted-input
@@ -3696,6 +3703,20 @@ no Gemini Files API object, upload lifecycle, queue, cache, or database owner.
 The byte cap and one-call ceiling bound transport and memory; video duration
 and provider-token consumption remain bounded by Gemini's fixed model/request
 limits rather than a local duration probe.
+
+The ceiling is per host turn, not an exactly-once receipt across a rare outer
+hosted retry. If execution fails after Gemini accepts the request but before
+Murph commits terminal delivery evidence, replaying the same accepted member
+request may send the same clip to Gemini once more. The endpoint exposes no
+Murph-usable idempotency key. V1 accepts that bounded at-least-once residual
+instead of persisting provider prose or adding an analysis-effect state
+machine; exact-once recovery would require a durable pre-egress receipt plus
+cached-result or explicit recovery semantics and a separate retention review.
+For completed turns, a trusted tool-failure fallback defeats explicit no-reply
+and fills blank model output without replacing non-empty model/card wording. If
+the primary provider transport itself fails after the tool result but before
+final assembly, the ordinary outer turn retry remains the owner; v1 does not
+promote the fallback through failed-attempt delivery state.
 
 Hosted execution carries only the Gemini sentinel in the runner. The exact
 Google host, model path, method, JSON shape, MIME set, FPS, thinking level,

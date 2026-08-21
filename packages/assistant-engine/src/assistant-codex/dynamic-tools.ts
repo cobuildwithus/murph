@@ -1078,6 +1078,11 @@ export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
+  /**
+   * Trusted runtime-owned text that must be delivered when the model supplies
+   * no response text or card. Currently reserved for analyze-video failures.
+   */
+  requiredFinalResponseFallback?: string
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
@@ -3352,9 +3357,15 @@ export async function executeMurphDynamicToolRequest(input: {
     case 'analyze-video': {
       const userActionScope =
         input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (userActionScope?.conversationScope !== 'direct') {
+        return toolTextResult(
+          false,
+          'video analysis requires a verified private direct conversation',
+        )
+      }
       return await executeAnalyzeVideoDynamicTool({
         abortSignal: input.abortSignal ?? null,
-        acceptedInputIds: userActionScope?.acceptedInputIds ?? [],
+        acceptedInputIds: userActionScope.acceptedInputIds,
         attachmentAuthorities:
           input.hostedToolContext
             ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? null,

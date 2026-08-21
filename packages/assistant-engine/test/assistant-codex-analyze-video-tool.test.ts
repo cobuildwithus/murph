@@ -300,6 +300,44 @@ describe('executeAnalyzeVideoTool', () => {
     expect(result.rpcText).toContain('analysis below was cut short')
   })
 
+  it.each([
+    {
+      expected:
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      status: 429,
+    },
+    {
+      expected:
+        'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+      status: 503,
+    },
+    {
+      expected:
+        'Video analysis returned no usable answer. Please try again later.',
+      status: 200,
+    },
+  ])(
+    'returns an actionable provider failure for HTTP $status',
+    async ({ expected, status }) => {
+      const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+      const fetchImpl = vi.fn<typeof fetch>(async () =>
+        status === 200
+          ? Response.json({ candidates: [] })
+          : new Response(JSON.stringify({ error: 'provider failure' }), { status }),
+      )
+
+      const result = await executeAnalyzeVideoTool({
+        acceptedInputIds: [fixture.inputId],
+        attachmentAuthorities: fixture.attachmentAuthorities,
+        args: { messageRef: fixture.inputId, question: 'What happens?' },
+        runtime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      expect(result).toEqual({ rpcSuccess: false, rpcText: expected })
+    },
+  )
+
   it('marks every non-STOP finish reason as partial', async () => {
     const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
@@ -564,6 +602,93 @@ describe('executeAnalyzeVideoTool', () => {
       runtime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
       vaultRoot: fixture.vaultRoot,
     })).resolves.toMatchObject({ rpcSuccess: false })
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('executes a valid video request through the dynamic-tool boundary', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      answerResponse('One person completes eight push-ups.'),
+    )
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
+      getConversationScope: () => 'direct',
+      getUserActionAcceptedInputIds: () => [fixture.inputId],
+      messageInput: { channel: 'linq' } as never,
+      session: {
+        binding: { channel: 'linq' },
+        sessionId: 'session_analyze_video_dispatch',
+      } as never,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      analyzeVideoTurnState: createAnalyzeVideoTurnState(),
+      env: {},
+      fetchImpl,
+      hostedToolContext,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'What happens?',
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('eight push-ups'),
+        type: 'inputText',
+      }],
+      success: true,
+    })
+    expect(result.requiredFinalResponseFallback).toBeUndefined()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects group dispatch before reading or sending video bytes', async () => {
+    const fixture = await createVideoFixture([{ ordinal: 1, mime: 'video/mp4' }])
+    const fetchImpl = vi.fn<typeof fetch>()
+    const materializeWorkspaceArtifacts = vi.fn(async () => ({
+      materializedArtifactPaths: new Set<string>(),
+      missingArtifactPaths: new Set<string>(),
+    }))
+    const hostedToolContext = createAssistantHostedToolContext({
+      getAnalyzeVideoAttachmentAuthorities: () => fixture.attachmentAuthorities,
+      getConversationScope: () => 'group',
+      getUserActionAcceptedInputIds: () => [fixture.inputId],
+      messageInput: { channel: 'telegram' } as never,
+      session: {
+        binding: { channel: 'telegram' },
+        sessionId: 'session_analyze_video_group_dispatch',
+      } as never,
+    })
+
+    const result = await executeMurphDynamicToolRequest({
+      analyzeVideoRuntime: createRuntime({ GEMINI_API_KEY: 'sentinel' }, fetchImpl),
+      analyzeVideoTurnState: createAnalyzeVideoTurnState(),
+      env: {},
+      fetchImpl,
+      hostedToolContext,
+      materializeWorkspaceArtifacts,
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: readAnalyzeVideoCall({
+        message_ref: fixture.inputId,
+        question: 'What happens?',
+      })!,
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    expect(result.rpcResult).toMatchObject({
+      contentItems: [{
+        text: expect.stringContaining('private direct conversation'),
+        type: 'inputText',
+      }],
+      success: false,
+    })
+    expect(materializeWorkspaceArtifacts).not.toHaveBeenCalled()
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 

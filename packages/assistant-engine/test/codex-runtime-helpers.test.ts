@@ -378,6 +378,9 @@ describe('Codex assistant registry helpers', () => {
     expect(preparationInput?.signal).toBe(signal)
     expect(preparationInput?.env).not.toHaveProperty('GEMINI_API_KEY')
     expect(turnInput?.env).not.toHaveProperty('GEMINI_API_KEY')
+    expect(turnInput?.analyzeVideoRuntime).toMatchObject({
+      apiKey: 'worker-owned-sentinel',
+    })
     expect(preparationInput).not.toHaveProperty('prompt')
     expect(preparationInput).not.toHaveProperty('resumeSessionId')
     expect(preparationInput).not.toHaveProperty('dynamicTools')

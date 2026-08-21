@@ -182,6 +182,7 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   attachmentDescriptorCount?: number;
+  hasVideoAttachmentCandidate?: boolean;
   inputId: string;
   recordAttachmentEvidence?(
     attachmentEvidence: AssistantInputAttachmentEvidence,
@@ -392,6 +393,19 @@ export async function importHostedConversationMailboxItem(input: {
     pendingReplyEligible && input.item.durablyConsumed !== true
       ? stagedInput.inputId
       : null;
+  const deferActiveTurnNotificationUntilProjection =
+    foregroundAssistantInputId !== null
+    && stagedInput.hasVideoAttachmentCandidate === true;
+  const notifyActiveTurnInputAvailable = async (): Promise<void> => {
+    if (!foregroundAssistantInputId) {
+      return;
+    }
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [foregroundAssistantInputId],
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vaultRoot,
+    });
+  };
   if (input.item.durablyConsumed !== true) {
     const latencyMilestones = withHostedConversationImportLatencyMilestones({
       autoReplyPreparedAtEpochMs,
@@ -424,12 +438,11 @@ export async function importHostedConversationMailboxItem(input: {
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       wake: decoded.wake,
     });
-    if (foregroundAssistantInputId) {
-      await notifyAssistantActiveTurnInputAvailableForInputIds({
-        inputIds: [foregroundAssistantInputId],
-        ...(input.signal ? { signal: input.signal } : {}),
-        vault: input.vaultRoot,
-      });
+    if (
+      foregroundAssistantInputId
+      && !deferActiveTurnNotificationUntilProjection
+    ) {
+      await notifyActiveTurnInputAvailable();
     }
   }
 
@@ -439,6 +452,9 @@ export async function importHostedConversationMailboxItem(input: {
     attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
     wake: decoded.wake,
   })) {
+    if (deferActiveTurnNotificationUntilProjection) {
+      await notifyActiveTurnInputAvailable();
+    }
     return {
       ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
       captureId: null,
@@ -464,6 +480,9 @@ export async function importHostedConversationMailboxItem(input: {
       retryable: true,
       status: "blocked",
     };
+  }
+  if (deferActiveTurnNotificationUntilProjection) {
+    await notifyActiveTurnInputAvailable();
   }
   return {
     ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
@@ -981,6 +1000,10 @@ async function stageHostedConversationAssistantInputEvent(input: {
 
   return {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+    hasVideoAttachmentCandidate:
+      event.content.attachmentDescriptors.some(
+        isHostedConversationVideoAttachmentDescriptor,
+      ),
     inputId: event.inputId,
     async recordAttachmentEvidence(attachmentEvidence) {
       if (attachmentEvidence.status === "failed") {
@@ -1816,6 +1839,23 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
   }
 
   return [];
+}
+
+function isHostedConversationVideoAttachmentDescriptor(
+  descriptor: AssistantInputAttachmentDescriptor,
+): boolean {
+  const contentType = descriptor.contentType?.trim().toLowerCase() ?? "";
+  if (contentType.startsWith("video/")) {
+    return true;
+  }
+
+  const kind = descriptor.kind?.trim().toLowerCase() ?? "";
+  if (kind === "video" || kind === "video_note" || kind === "animation") {
+    return true;
+  }
+
+  const extension = path.extname(descriptor.fileName ?? "").toLowerCase();
+  return extension === ".mp4" || extension === ".mov" || extension === ".webm";
 }
 
 async function recordHostedConversationProjectionBestEffort(

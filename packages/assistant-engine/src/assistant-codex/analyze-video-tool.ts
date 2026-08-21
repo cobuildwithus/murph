@@ -263,24 +263,32 @@ export async function executeAnalyzeVideoTool(input: {
       },
     )
     if (response.status === 429) {
-      return failure('Video analysis was rate-limited; no analysis was retrieved')
+      return failure(
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.',
+      )
     }
     if (!response.ok) {
-      return failure('Video analysis is unavailable right now; no analysis was retrieved')
+      return failure(
+        'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+      )
     }
     payload = await readBoundedJsonResponse(response)
   } catch (error) {
     if (input.abortSignal?.aborted) {
       throw error
     }
-    return failure('Video analysis is unavailable right now; no analysis was retrieved')
+    return failure(
+      'Video analysis is unavailable right now; no analysis was retrieved. Please try again later.',
+    )
   } finally {
     timeout.cleanup()
   }
 
   const answer = readGeminiAnswer(payload)
   if (!answer.text) {
-    return failure('Video analysis returned no usable answer')
+    return failure(
+      'Video analysis returned no usable answer. Please try again later.',
+    )
   }
   const framing = answer.truncated
     ? `${ANALYZE_VIDEO_PARTIAL_STATUS}\n\n${ANALYZE_VIDEO_PROVENANCE}`

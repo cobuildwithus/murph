@@ -6,8 +6,32 @@ Murph can inspect one user-supplied video attachment through a new
 `murph.analyze_video` dynamic tool. The tool samples visual content at exactly
 1 FPS, sends one bounded request to Gemini 3.7 Flash, and returns a compact,
 explicitly untrusted analysis to the assistant. Hosted credentials remain
-Worker-owned and completed provider calls enter the existing hosted usage
-accounting path.
+Worker-owned and protocol-valid successful provider calls enter the existing
+hosted usage accounting path before their response is released.
+
+## Product UX plan
+
+- Outcome: in a private direct conversation, a member can explicitly ask Murph
+  about one supported video they supplied and receive a bounded, cautious
+  observation in that same conversation.
+- Entry and promise: the member attaches or refers to an accepted video and asks
+  a focused question. Murph makes at most one analysis call per host turn,
+  waits for the bounded same-turn provider request and usage acceptance, and
+  replies in the originating private conversation. If the attachment is
+  unavailable, changed, unsupported, or too large, or Gemini or usage recording
+  fails, Murph must say that no analysis completed and leave the member with a
+  clear retry path rather than a silent stall or invented result.
+- Authority and audience: the first release is private-direct only. Group use is
+  excluded until the requester/uploader authority rule is explicitly approved
+  and covered through final group delivery; sharing a clip in a group alone is
+  not sufficient authority for this release.
+- Deliberate exclusions: no automatic analysis, background continuation,
+  provider-side upload lifecycle, larger-video flow, injury diagnosis, or claim
+  that a visual observation proves causation.
+- Ready proof: exercise the ordinary private hosted route from accepted video
+  and natural-language request through tool selection, provider-shaped Gemini
+  response, final Murph wording, and delivery. Exercise one representative
+  provider failure through that same route and prove a clear recoverable reply.
 
 ## Success criteria
 
@@ -51,10 +75,11 @@ accounting path.
   catalog registration, planning availability, and per-turn call state.
 - Hosted-execution usage record construction.
 - Cloudflare Worker contracts, secret/env policy, egress interception, and
-  post-hoc usage recording.
+  synchronous Web usage acceptance before successful response release.
 - Web hosted allowance pricing for Gemini 3.7 Flash.
 - Provider-boundary registration, environment example, architecture/security/
-  deployment/testing documentation, changelog, and focused tests.
+  deployment/testing documentation, deferred post-activation changelog, and
+  focused tests.
 - Exact dependency and lockfile changes only when required by the chosen SDK.
 
 ## Risks and rollback
@@ -65,6 +90,17 @@ accounting path.
   body limits and test both the raw and encoded boundaries.
 - Provider pricing or usage metadata may change. Pin a versioned pricing rule
   and fail usage pricing closed when required token fields are absent.
+- The one-call ceiling is per turn. A rare outer hosted replay after provider
+  acceptance but before terminal delivery evidence may resend the same
+  explicitly requested clip because the endpoint exposes no usable idempotency
+  key. V1 accepts this bounded at-least-once residual; exact-once recovery would
+  require a durable receipt and cached-result/recovery retention design outside
+  this minimal release.
+- A completed turn cannot silently suppress an analyze-video failure: trusted
+  fallback text fills blank/no-reply output while model/card wording still wins.
+  If the primary provider transport itself fails after the tool result, the
+  ordinary outer-turn retry owns recovery; v1 does not add a separate failed-
+  attempt delivery path for that narrow window.
 - Rollback is removal of Cloudflare tool exposure/secret injection after Web
   pricing support has shipped; absent `GEMINI_API_KEY` is the safe skew state.
 
@@ -75,7 +111,11 @@ accounting path.
 - [x] Implement the smallest accepted design with focused tests.
 - [x] Add security, architecture, deployment, testing-map, and environment
       documentation.
-- [x] Add the member-visible changelog entry after the new PR number exists.
+- [x] Remove the pre-activation changelog entry so the Web-first pricing deploy
+      does not advertise an unavailable tool.
+- [ ] Publish a separate member-visible changelog item only after the production
+      key, Worker, runner, pricing path, and consented private-direct smoke have
+      passed.
 - [x] Run focused tests/typechecks, dependency policy checks, diff audit, and
       privacy scan.
 - [ ] Commit and push a review candidate, open a new PR, then run preliminary
@@ -99,8 +139,15 @@ accounting path.
 ## Deployment order
 
 1. Web usage-record acceptance and Gemini pricing.
-2. Cloudflare egress policy, hosted credential, and dynamic tool availability.
-3. Configure `GEMINI_API_KEY`; without it the tool remains absent.
+2. Complete vendor approval and verify that the exact Gemini project behind
+   `GEMINI_API_KEY` has the applicable paid/no-training controls, then configure
+   the key through the private secret path; the old runtime still omits the
+   tool. Key presence alone is not that proof.
+3. Deploy the Cloudflare Worker and runner together with immediate convergence;
+   without the key the tool remains absent.
+4. Prove one consented private-direct request reaches a bounded final reply and
+   a priced usage record, then publish the changelog item in a follow-up Web
+   release.
 
 Status: active
 Updated: 2026-08-20

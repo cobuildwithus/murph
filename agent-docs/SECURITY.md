@@ -588,6 +588,12 @@ Last verified: 2026-08-20
   `pnpm --dir apps/web stripe:contract:resume` probe accepts only a dedicated
   test-mode key and a synthetic missing Subscription.
 - Gemini video analysis is explicit cross-provider private-media egress. It may
+  be offered only for a private direct turn with accepted user-action input and
+  the Worker-held credential; group runtimes omit the tool. The schema may be
+  present before that input has video authority because provider tools freeze
+  at turn start and the first video may arrive through live steering. Group
+  sharing alone is not requester/uploader authorization and remains outside the
+  first release. The tool may
   select only an accepted-message video whose path, size, digest, MIME, message
   ref, and ordinal were snapshotted in turn-owned memory before Codex could act
   on that input. Freeze initial inputs before provider start and active-steered
@@ -600,10 +606,26 @@ Last verified: 2026-08-20
   pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
   cap, a 90-second timeout, and a bounded response. The Worker must revalidate
   the exact request and use manual redirects before replacing the runner
-  sentinel with `GEMINI_API_KEY`. Do not persist or log video bytes, prompts,
+  sentinel with `GEMINI_API_KEY`. A protocol-valid successful response must be
+  withheld until Web durably accepts its exact usage record; callback rejection
+  fails the tool closed. An upstream response above the 1 MiB delivery cap is a
+  protocol violation: reject it without widening the buffer, let Murph absorb
+  that unaccountable provider cost, and log only bounded status metadata. Do not
+  persist or log video bytes, prompts,
   paths, or Gemini prose outside the authorized assistant transcript; usage may
   retain only allowlisted token counters and provider metadata. Treat every
   byte and every returned character as untrusted content, not instructions.
+  The one-call ceiling is turn-scoped. A rare outer hosted replay after Gemini
+  acceptance but before terminal delivery evidence may resend the same
+  explicitly requested clip to the same provider; the endpoint supplies no
+  usable idempotency key. Treat this as a bounded v1 at-least-once residual,
+  not permission to retry within a turn. Do not add durable video/result state
+  without a separate retention and recovery design.
+  Completed turns use trusted failure text when the model returns blank or
+  selects no reply, while non-empty model/card wording wins. A terminal primary
+  provider failure after the tool result remains under ordinary outer-turn
+  retry ownership; the failed attempt does not independently deliver that
+  fallback.
 - Direct-plan upgrades use Stripe Customer Portal's `subscription_update_confirm`
   flow for the authenticated member's exact current Customer, Subscription,
   Subscription Item, and server-selected target Price. The browser chooses no

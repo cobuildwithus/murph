@@ -196,7 +196,24 @@ test("Subprocessor register separates connected services and powers the public p
   );
 
   assert.match(register, /# Murph Subprocessors, Model Providers, and Connected Services/u);
-  assert.match(register, /\*\*Last Updated:\*\* August 12, 2026/u);
+  assert.match(register, /\*\*Last Updated:\*\* August 20, 2026/u);
+  assert.match(
+    register,
+    /\| Google \(Gemini API\) \| On-demand analysis of one user-requested video attachment for the requested assistant response\./u,
+  );
+  assert.match(register, /including any embedded audio and personal or health information it contains/u);
+  assert.match(
+    register,
+    /Video is sent inline for the request; Murph creates no Gemini Files API object\./u,
+  );
+  assert.match(
+    register,
+    /No model training or unrelated secondary use authorized by Murph; hosted activation requires applicable no-training controls\./u,
+  );
+  assert.match(
+    register,
+    /Provider-side processing and retention follow applicable Google terms and project controls\./u,
+  );
   assert.match(
     register,
     /\| incident\.io \| Public status-page hosting and the browser-readable incident summary used by Murph's footer availability indicator\./u,
