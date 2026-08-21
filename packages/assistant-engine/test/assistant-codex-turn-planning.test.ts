@@ -3196,6 +3196,58 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
+  it('plans murph.analyze_video only when the trusted turn env carries the Gemini key', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const planToolNamesFor = async (
+      env: NodeJS.ProcessEnv,
+      acceptedInputItems: NonNullable<
+        AssistantMessageInput['acceptedTurnInput']
+      >['initialInputs'] = [],
+    ) => {
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems,
+        executionContext: null,
+        input: createMessageInput(),
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-20',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env,
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    expect(await planToolNamesFor({})).not.toContain('analyze_video')
+    expect(await planToolNamesFor({ GEMINI_API_KEY: '   ' }))
+      .not.toContain('analyze_video')
+    expect(await planToolNamesFor({ GEMINI_API_KEY: 'gemini-sentinel-key' }))
+      .not.toContain('analyze_video')
+    expect(await planToolNamesFor(
+      { GEMINI_API_KEY: 'gemini-sentinel-key' },
+      [{ id: 'ain_11111111111111111111111111111111', source: 'assistant-input' }],
+    ))
+      .toContain('analyze_video')
+  })
+
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

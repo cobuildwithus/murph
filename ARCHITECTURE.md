@@ -3674,6 +3674,42 @@ card kinds remain local presentation. This adds no mutable card state, card
 database, background synchronization owner, queue, or model turn. V4 workout
 cards already in transcripts remain readable but cannot open the direct editor.
 
+## On-demand Gemini video analysis
+
+`murph.analyze_video` is an explicit, turn-scoped assistant capability for one
+video attached to an accepted message. Before Codex can act on the initial
+input, the turn owner snapshots each eligible attachment's normalized raw path,
+byte count, SHA-256 digest, MIME type, message ref, and ordinal into process
+memory. For active steering it freezes new attachments in the accepted-input
+validator before forwarding the steer to Codex. Existing keys are never
+refreshed from model-writable runtime files, and the tool sees only snapshots
+whose message refs remain in the current user-action scope. At invocation,
+Murph materializes the exact path, opens it without following the final
+symlink, reads exactly the snapshotted byte count with an EOF probe, verifies
+the digest and MP4/QuickTime/WebM signature, and only then permits external
+egress.
+
+The first version makes one inline legacy `generateContent` request to the
+fixed `gemini-3.7-flash` model with explicit `videoMetadata.fps = 1`, low
+thinking, a 14 MiB raw-video cap, a 90-second timeout, and no retry. It creates
+no Gemini Files API object, upload lifecycle, queue, cache, or database owner.
+The byte cap and one-call ceiling bound transport and memory; video duration
+and provider-token consumption remain bounded by Gemini's fixed model/request
+limits rather than a local duration probe.
+
+Hosted execution carries only the Gemini sentinel in the runner. The exact
+Google host, model path, method, JSON shape, MIME set, FPS, thinking level,
+request/response limits, and manual redirect posture are revalidated by the
+Cloudflare egress interceptor before the Worker substitutes its credential.
+The narrow raw HTTP owner is intentional: the Google SDK does not expose the
+request-scoped fetch injection required by Murph's identity-bound provider
+boundary, while the current Interactions API cannot explicitly set video FPS.
+Successful upstream calls record only bounded token counters and provider
+metadata through the existing usage ledger. Video bytes, prompts, paths, and
+Gemini response text never enter operational logs, usage rows, diagnostics, or
+derived vault artifacts. The bounded, one-way-framed tool result may enter the
+authorized assistant transcript like other tool output.
+
 ## Scheduled assistant tool authority
 
 Ordinary canonical `automation-cron` turns reuse the hosted invocation authority

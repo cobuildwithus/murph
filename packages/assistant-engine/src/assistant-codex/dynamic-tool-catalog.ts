@@ -114,6 +114,9 @@ import {
 import {
   MURPH_ASK_GROK_TOOL,
 } from './dynamic-tools/ask-grok.js'
+import {
+  MURPH_ANALYZE_VIDEO_TOOL,
+} from './dynamic-tools/analyze-video.js'
 export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
 export type {
   AssistantStyleTurnSettingsOverlay,
@@ -135,6 +138,7 @@ export {
 } from './dynamic-tools/clinical-records.js'
 export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
 export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
+export { MURPH_ANALYZE_VIDEO_TOOL } from './dynamic-tools/analyze-video.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 export const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -1506,6 +1510,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GROUP_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GENERATE_SONG_TOOL,
+  MURPH_ANALYZE_VIDEO_TOOL,
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -1581,6 +1586,7 @@ export interface MurphDynamicToolAvailability {
   voiceMemoGenerationAvailable?: boolean | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
+  analyzeVideoAvailable?: boolean | null
   askGrokAvailable?: boolean | null
 }
 
@@ -1627,6 +1633,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_IMAGE_TOOL, defaultOn((a) => a.imageGenerationAvailable)],
+    [MURPH_ANALYZE_VIDEO_TOOL, defaultOff((a) => a.analyzeVideoAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],

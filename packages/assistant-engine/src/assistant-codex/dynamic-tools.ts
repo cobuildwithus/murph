@@ -278,11 +278,21 @@ import {
   MURPH_ASK_GROK_TOOL,
   parseAskGrokArguments,
 } from './dynamic-tools/ask-grok.js'
+import {
+  executeAnalyzeVideoDynamicTool,
+  MURPH_ANALYZE_VIDEO_TOOL,
+  parseAnalyzeVideoArguments,
+} from './dynamic-tools/analyze-video.js'
 import type {
   AskGrokToolArgs,
   AskGrokToolRuntime,
   AskGrokTurnState,
 } from './ask-grok-tool.js'
+import type {
+  AnalyzeVideoToolArgs,
+  AnalyzeVideoToolRuntime,
+  AnalyzeVideoTurnState,
+} from './analyze-video-tool.js'
 export * from './dynamic-tool-catalog.js'
 import {
   asRecord,
@@ -1247,6 +1257,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'analyze-video'
+      args: AnalyzeVideoToolArgs
+    }
+  | {
       kind: 'ask-grok'
       args: AskGrokToolArgs
     }
@@ -1297,6 +1311,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-analyze-video-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1715,6 +1733,20 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
+    case MURPH_ANALYZE_VIDEO_TOOL.name: {
+      const parsed = parseAnalyzeVideoArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-analyze-video-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'analyze-video',
+        args: parsed.args,
+      }
+    }
     case MURPH_ASK_GROK_TOOL.name: {
       const parsed = parseAskGrokArguments(request.arguments)
       if (!parsed.ok) {
@@ -2067,6 +2099,8 @@ export async function executeMurphDynamicToolRequest(input: {
   vaultRoot?: string | null
   voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
@@ -2159,6 +2193,8 @@ export async function executeMurphDynamicToolRequest(input: {
       )
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
+    case 'invalid-analyze-video-arguments':
+      return toolTextResult(false, 'invalid analyze_video arguments')
     case 'invalid-ask-grok-arguments':
       return toolTextResult(false, 'invalid ask_grok arguments')
     case 'invalid-progress-arguments':
@@ -3311,6 +3347,23 @@ export async function executeMurphDynamicToolRequest(input: {
         recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
+    case 'analyze-video': {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      return await executeAnalyzeVideoDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        acceptedInputIds: userActionScope?.acceptedInputIds ?? [],
+        attachmentAuthorities:
+          input.hostedToolContext
+            ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? null,
+        args: input.request.args,
+        materializeWorkspaceArtifacts:
+          input.materializeWorkspaceArtifacts ?? null,
+        runtime: input.analyzeVideoRuntime ?? null,
+        turnState: input.analyzeVideoTurnState ?? null,
+        vaultRoot: input.vaultRoot ?? null,
       })
     }
     case 'ask-grok': {
