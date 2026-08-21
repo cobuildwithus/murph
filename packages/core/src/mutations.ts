@@ -4399,6 +4399,21 @@ async function reconcileDeviceEventEntriesByExternalRef(
       aliasRepairByEntryIndex.set(entryIndex, aliasRepair);
     }
   }
+  const aliasRepairOwnerIds = new Set<string>();
+  for (const aliasRepair of aliasRepairByEntryIndex.values()) {
+    for (const ownerId of [
+      aliasRepair.providerSurvivor.id,
+      aliasRepair.loserTombstone.id,
+    ]) {
+      if (aliasRepairOwnerIds.has(ownerId)) {
+        throw new VaultError(
+          "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+          "Junction daily aggregate alias repair plans cannot share persisted owners.",
+        );
+      }
+      aliasRepairOwnerIds.add(ownerId);
+    }
+  }
   for (const [entryIndex, aliasRepair] of aliasRepairByEntryIndex) {
     const entry = entries[entryIndex]!;
     appendEntries.push(
