@@ -143,6 +143,16 @@ Updated: 2026-08-21
   dedicated follow-up PR from current `main` and run that PR's ordinary
   specialist/final ReviewGPT and CI gates with a new immutable baseline.
 
+## Follow-up PR round-one finding
+
+- The first corrective full audit proved the context fallback was incomplete:
+  the following optional email-authorization projection uses the same control
+  root and could still throw before the attempt claim.
+- Accept the finding and extend the existing sender-boundary omit behavior to
+  email enrichment. If that projection is unreadable, use `customerEmail: null`
+  and continue through the same claim and context-free provider path. Required
+  access, member, claim, and provider failures remain unchanged.
+
 ## Verification
 
 - Commands to run: focused Vitest slices for request context, member store,

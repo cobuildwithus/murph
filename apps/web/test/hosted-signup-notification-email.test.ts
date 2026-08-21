@@ -351,6 +351,43 @@ describe("hosted signup notification email", () => {
     expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
   });
 
+  it("claims and sends the fallback when optional email authorization is unreadable", async () => {
+    mocks.readHostedMemberSignupNotificationContext.mockResolvedValue({
+      context: null,
+      createdAt: new Date("2026-05-01T00:00:00.000Z"),
+    });
+    mocks.readHostedMemberEmailAuthorization.mockRejectedValue(
+      new Error("synthetic email authorization decrypt failure"),
+    );
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(payload.text).toBe([
+        "New Murph signup.",
+        "",
+        "Signed up: May 1, 2026, 12:00 AM (UTC)",
+        "Activated via: Telegram",
+      ].join("\n"));
+      expect(payload.text).not.toContain("Email:");
+
+      return new Response(JSON.stringify({ id: "resend_email_123" }), {
+        status: 200,
+      });
+    });
+
+    await expect(sendHostedSignupNotificationEmailForMember({
+      activationSurface: "telegram",
+      env: {
+        HOSTED_SIGNUP_NOTIFICATION_EMAILS: "founder@example.com",
+        HOSTED_SIGNUP_WELCOME_EMAIL_FROM: "Murph <welcome@example.com>",
+        RESEND_API_KEY: "re_test",
+      },
+      fetchImpl: fetchMock,
+      memberId: "member_123",
+    })).resolves.toMatchObject({ status: "sent" });
+    expect(mocks.claimHostedMemberSignupNotificationEmailAttempt).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("includes verified email when available", async () => {
     const fetchMock: typeof fetch = async (_input, init) => {
       const payload = JSON.parse(String(init?.body));
