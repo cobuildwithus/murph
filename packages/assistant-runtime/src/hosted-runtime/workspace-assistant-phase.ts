@@ -217,6 +217,7 @@ import {
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import { assertNever } from "./utils.ts";
 
 const HOSTED_DEVICE_SYNC_DIRTY_ACK_FAILURE_RETRY_DELAY_MS = 60_000;
 const HOSTED_OUTBOX_DELIVERY_ERROR_LOG_LIMIT = 16;
@@ -752,6 +753,7 @@ function buildHostedGroupEmailRestrictedActionUnavailable(
         },
       };
   }
+  return assertNever(request);
 }
 
 /**
