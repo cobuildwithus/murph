@@ -43,12 +43,17 @@ The assistant composes two existing-style primitives:
 
 An independent `murph.resolve_physical_note` action handles a current accepted
 message that explicitly asks to check, clear, resolve, or cancel an earlier
-uncertain submission. It performs one foreground reconciliation through Web and
-returns in the same turn. It does not generate artwork, publish an image, create
-a provider effect, recall accepted mail, schedule work, or authorize a later
-send. The low-frequency action uses the existing deferred-tool discovery path:
-ordinary eligible turns carry only its compact discovery record, while an
-explicit recovery request discovers the full schema before calling it.
+uncertain submission. When the conversation or prior tool result identifies a
+specific earlier send or recovery, the call also carries an opaque
+`target_message_ref`. That target selects only the checked operation; it does
+not grant authority. The current accepted direct or authenticated-group message
+remains the sole authority for the check. Recovery performs one foreground
+reconciliation through Web and returns in the same turn. It does not generate
+artwork, publish an image, create a provider effect, recall accepted mail,
+schedule work, or authorize a later send. The low-frequency action uses the
+existing deferred-tool discovery path: ordinary eligible turns carry only its
+compact discovery record, while an explicit recovery request discovers the full
+schema before calling it.
 
 On the immediate completion turn the send tool infers the trusted image only
 when its completion carries that exact accepted origin. When Murph showed the
@@ -99,38 +104,52 @@ to recipient address, artwork, service availability, invalid Murph request,
 prior-note unresolved or accepted state, or unknown. It never stores the postal
 address, image URL, artwork, prompt, note text, or Lob's freeform error message.
 
-Standalone recovery reuses that same row and the same oldest-first guard
-transitions. A narrow Web-owned `HostedPhysicalNoteRecovery` row binds the exact
-accepted assistant input to the selected guard and, after reconciliation, its
-bounded response. The binding is created under the member lock before any
-provider read. A completed replay returns the stored response without selecting
-another guard, calling the provider, or settling usage again. An interrupted
-pre-terminal binding has no stored result; its replay fails closed as
-unconfirmed and cannot touch another guard. Terminal acceptance or aged-absence
-reconciliation commits the checked-note transition, blocker settlement, any
-paid usage, the remaining-guard fact, and the stored response in one
-member-locked transaction. If result persistence fails, those terminal writes
-all roll back and a newly accepted explicit input can rediscover the same guard.
-A newly accepted explicit input is required to try again.
-The binding remains even if its optional note pointer is later removed.
+Standalone recovery reuses that same row and the same guard transitions. A
+narrow Web-owned `HostedPhysicalNoteRecovery` row binds the exact current
+accepted assistant input to the checked operation and, after reconciliation, its
+bounded response. The current input authorizes the check. An optional target
+identifies only the checked operation: an earlier completed recovery, or an
+original send through the send request key derived from that earlier accepted
+assistant input. A targeted completed recovery replays its stored response. A
+targeted original send locates the exact same-member `HostedPhysicalNote`. A
+targeted incomplete recovery retries its stored `physicalNoteId` while that note
+is still an unresolved same-member guard, rather than advancing to a different
+guard. Unknown, deleted, cross-member, unauthorized, or unidentified targets
+store and return an unconfirmed pending result, never a row-specific `clear`,
+and call no provider. With no target, legacy unresolved records still use the
+oldest-first fallback; if no guard can be identified, recovery returns
+unconfirmed pending rather than `clear`.
+
+The binding is created under the member lock before any provider read. A
+completed replay returns the stored response without selecting another guard,
+calling the provider, or settling usage again, even if its optional note pointer
+is later removed. An interrupted pre-terminal binding with a live unresolved
+note retries that same note; if the pointer is gone or terminal without a stored
+response, replay fails closed as unconfirmed and cannot touch another guard.
+Terminal acceptance or aged-absence reconciliation commits the checked-note
+transition, blocker settlement, any paid usage, the remaining-guard fact, and
+the stored response in one member-locked transaction. If result persistence
+fails, those terminal writes all roll back and the same accepted input can retry
+the same stored note while it remains unresolved. A newly accepted explicit
+input is required to try again after an unconfirmed response.
 
 The current accepted direct or authenticated-group message authorizes one
-provider metadata lookup. Provider acceptance settles the guarded row as
-accepted. Proven absence clears it only after the existing 23-hour safety
-window. A recent absence or an indeterminate lookup leaves the guard unchanged
-and returns `pending`, with the end of the safety window when it is still in the
-future. The response `status` describes that checked oldest guard, while
-`remainingUnresolved` is derived from the existing remaining-guard read. An
-already-clear member stores and returns `clear` with `remainingUnresolved:
-false` without a provider read. When a checked guard reaches `accepted` or
-`clear` but another guard remains, the response preserves that checked outcome
-with `remainingUnresolved: true`; the member learns that one reconciliation
-succeeded and that another explicit request is required. When recovery first
-proves acceptance for a current paid note, the stored replay response also
-returns the frozen settled Murph-time amount. Complimentary acceptance, legacy
-accepted restoration, and every non-accepted recovery result return that
-settlement field as null. Recovery never calls provider create, and there is
-no transport replay, model retry, notification, or automatic follow-up.
+provider metadata lookup for an identified same-member unresolved target or
+legacy oldest guard. Provider acceptance settles the checked row as accepted.
+Proven absence clears it only after the existing 23-hour safety window. A recent
+absence or an indeterminate lookup leaves the guard unchanged and returns
+`pending`, with the end of the safety window when it is still in the future. The
+response `status` describes the checked target or guard, while
+`remainingUnresolved` is derived from the existing remaining-guard read. When a
+checked guard reaches `accepted` or `clear` but another guard remains, the
+response preserves that checked outcome with `remainingUnresolved: true`; the
+member learns that one reconciliation succeeded and that another explicit
+request is required. When recovery first proves acceptance for a current paid
+note, the stored replay response also returns the frozen settled Murph-time
+amount. Complimentary acceptance, legacy accepted restoration, and every
+non-accepted recovery result return that settlement field as null. Recovery
+never calls provider create, and there is no transport replay, model retry,
+notification, or automatic follow-up.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -148,9 +167,10 @@ evidence can finalize the original row after local commit failure. Recent absent
 or indeterminate evidence remains pending; only aged proven absence uses the
 existing unknown transition. Every other unresolved row keeps its independent
 admission authority, so new effects remain blocked until all such rows are
-terminal. One recovery request still checks only the oldest row: it reports the
-checked outcome and the independently derived remaining-blocker fact instead of
-turning the latter into a false claim that the checked provider result stayed
+terminal. A targeted recovery checks the named operation; without a target, one
+legacy recovery request still checks only the oldest unresolved row. It reports
+the checked outcome and the independently derived remaining-blocker fact instead
+of turning the latter into a false claim that the checked provider result stayed
 indeterminate. A distinct request
 is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
 explicit request may, after the 23-hour provider window, reconcile the guarded

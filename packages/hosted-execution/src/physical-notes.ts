@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_PHYSICAL_NOTES_PATH = "/api/internal/physical-notes" as const;
@@ -63,6 +65,11 @@ export const hostedPhysicalNoteSendResponseSchema = z
 export const hostedPhysicalNoteRecoveryRequestSchema = z
   .object({
     originAssistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+    targetOriginAssistantInputId: z
+      .string()
+      .regex(/^ain_[0-9a-f]{32}$/u)
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -137,6 +144,18 @@ export function parseHostedPhysicalNoteRecoveryResponse(
   value: unknown,
 ): HostedPhysicalNoteRecoveryResponse {
   return hostedPhysicalNoteRecoveryResponseSchema.parse(value);
+}
+
+export function createHostedPhysicalNoteRequestKey(input: {
+  originAssistantInputId: string;
+}): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify({
+      originAssistantInputId: input.originAssistantInputId,
+      schema: "murph.send-physical-note.request-key.v2",
+    }))
+    .digest("hex");
+  return `physical_note_${digest}`;
 }
 
 export function normalizeHostedPhysicalNoteRecipient(

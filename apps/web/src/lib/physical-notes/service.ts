@@ -16,6 +16,7 @@ import type {
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
 import {
+  createHostedPhysicalNoteRequestKey,
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
 } from "@murphai/hosted-execution/physical-notes";
@@ -328,6 +329,7 @@ export async function recoverHostedPhysicalNote(
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
     prisma,
+    targetOriginAssistantInputId: input.targetOriginAssistantInputId ?? null,
   });
   if (claim.kind === "replay") {
     return claim.response;
@@ -409,6 +411,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
   memberId: string;
   originAssistantInputId: string;
   prisma: PrismaClient;
+  targetOriginAssistantInputId: string | null;
 }): Promise<PhysicalNoteRecoveryClaim> {
   return await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
@@ -419,10 +422,32 @@ async function claimHostedPhysicalNoteRecovery(input: {
       if (existing.memberId !== input.memberId) {
         throw new Error("Hosted physical-note recovery identity collision.");
       }
-      return {
-        kind: "replay" as const,
-        response: toPhysicalNoteRecoveryResponse(existing),
-      };
+      const response = readPhysicalNoteRecoveryResponseIfConfirmed(existing);
+      if (response) {
+        return {
+          kind: "replay" as const,
+          response,
+        };
+      }
+      const existingGuard = await findRecoveryPhysicalNoteTarget({
+        memberId: input.memberId,
+        physicalNoteId: existing.physicalNoteId,
+        tx,
+      });
+      if (existingGuard) {
+        return { guard: existingGuard, kind: "claimed" as const };
+      }
+      throw new Error("Hosted physical-note recovery result is unconfirmed.");
+    }
+
+    if (input.targetOriginAssistantInputId) {
+      const targeted = await claimTargetedHostedPhysicalNoteRecovery({
+        memberId: input.memberId,
+        originAssistantInputId: input.originAssistantInputId,
+        targetOriginAssistantInputId: input.targetOriginAssistantInputId,
+        tx,
+      });
+      if (targeted) return targeted;
     }
 
     const guard = await findPhysicalNoteEffectGuard({
@@ -430,18 +455,20 @@ async function claimHostedPhysicalNoteRecovery(input: {
       prisma: tx,
     });
     if (!guard) {
-      const response = physicalNoteRecoveryResponse("clear", false);
-      await tx.hostedPhysicalNoteRecovery.create({
-        data: {
-          memberId: input.memberId,
-          originAssistantInputId: input.originAssistantInputId,
-          remainingUnresolved: response.remainingUnresolved,
-          resultStatus: response.status,
-          retryAfter: null,
-          settledUsageCostUsdMicros: null,
-        },
+      const response = await buildUnconfirmedPhysicalNoteRecoveryResponse({
+        memberId: input.memberId,
+        tx,
       });
-      return { kind: "replay" as const, response };
+      await createCompletedPhysicalNoteRecovery({
+        memberId: input.memberId,
+        originAssistantInputId: input.originAssistantInputId,
+        response,
+        tx,
+      });
+      return {
+        kind: "replay" as const,
+        response,
+      };
     }
     await tx.hostedPhysicalNoteRecovery.create({
       data: {
@@ -452,6 +479,181 @@ async function claimHostedPhysicalNoteRecovery(input: {
     });
     return { guard, kind: "claimed" as const };
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+}
+
+async function claimTargetedHostedPhysicalNoteRecovery(input: {
+  memberId: string;
+  originAssistantInputId: string;
+  targetOriginAssistantInputId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<PhysicalNoteRecoveryClaim | null> {
+  const targetRecovery = await input.tx.hostedPhysicalNoteRecovery.findUnique({
+    where: { originAssistantInputId: input.targetOriginAssistantInputId },
+  });
+  if (targetRecovery) {
+    if (targetRecovery.memberId !== input.memberId) {
+      return await createUnconfirmedPhysicalNoteRecoveryClaim(input);
+    }
+    const response =
+      readPhysicalNoteRecoveryResponseIfConfirmed(targetRecovery);
+    if (response) {
+      await createCompletedPhysicalNoteRecovery({
+        memberId: input.memberId,
+        originAssistantInputId: input.originAssistantInputId,
+        physicalNoteId: targetRecovery.physicalNoteId ?? undefined,
+        response,
+        tx: input.tx,
+      });
+      return { kind: "replay" as const, response };
+    }
+    const targetGuard = await findRecoveryPhysicalNoteTarget({
+      memberId: input.memberId,
+      physicalNoteId: targetRecovery.physicalNoteId,
+      tx: input.tx,
+    });
+    if (targetGuard) {
+      await input.tx.hostedPhysicalNoteRecovery.create({
+        data: {
+          memberId: input.memberId,
+          originAssistantInputId: input.originAssistantInputId,
+          physicalNoteId: targetGuard.id,
+        },
+      });
+      return { guard: targetGuard, kind: "claimed" as const };
+    }
+    return await createUnconfirmedPhysicalNoteRecoveryClaim(input);
+  }
+
+  const targetNote = await input.tx.hostedPhysicalNote.findUnique({
+    where: {
+      memberId_requestKey: {
+        memberId: input.memberId,
+        requestKey: createHostedPhysicalNoteRequestKey({
+          originAssistantInputId: input.targetOriginAssistantInputId,
+        }),
+      },
+    },
+  });
+  if (!targetNote) {
+    return await createUnconfirmedPhysicalNoteRecoveryClaim(input);
+  }
+  if (isPhysicalNoteEffectGuard(targetNote)) {
+    await input.tx.hostedPhysicalNoteRecovery.create({
+      data: {
+        memberId: input.memberId,
+        originAssistantInputId: input.originAssistantInputId,
+        physicalNoteId: targetNote.id,
+      },
+    });
+    return { guard: targetNote, kind: "claimed" as const };
+  }
+
+  const remainingGuard = await findPhysicalNoteEffectGuard({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const response = physicalNoteRecoveryResponse(
+    targetNote.status === "accepted" ? "accepted" : "clear",
+    remainingGuard !== null,
+    readSettledUsageCostForAcceptedRecoveryTarget(targetNote),
+  );
+  await createCompletedPhysicalNoteRecovery({
+    memberId: input.memberId,
+    originAssistantInputId: input.originAssistantInputId,
+    physicalNoteId: targetNote.id,
+    response,
+    tx: input.tx,
+  });
+  return { kind: "replay" as const, response };
+}
+
+async function createUnconfirmedPhysicalNoteRecoveryClaim(input: {
+  memberId: string;
+  originAssistantInputId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<PhysicalNoteRecoveryClaim> {
+  const response = await buildUnconfirmedPhysicalNoteRecoveryResponse({
+    memberId: input.memberId,
+    tx: input.tx,
+  });
+  await createCompletedPhysicalNoteRecovery({
+    memberId: input.memberId,
+    originAssistantInputId: input.originAssistantInputId,
+    response,
+    tx: input.tx,
+  });
+  return { kind: "replay" as const, response };
+}
+
+async function buildUnconfirmedPhysicalNoteRecoveryResponse(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedPhysicalNoteRecoveryResponse> {
+  const remainingGuard = await findPhysicalNoteEffectGuard({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  return physicalNoteRecoveryResponse("pending", remainingGuard !== null);
+}
+
+async function findRecoveryPhysicalNoteTarget(input: {
+  memberId: string;
+  physicalNoteId: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedPhysicalNote | null> {
+  if (!input.physicalNoteId) return null;
+  const target = await input.tx.hostedPhysicalNote.findUnique({
+    where: { id: input.physicalNoteId },
+  });
+  if (!target || target.memberId !== input.memberId) return null;
+  return isPhysicalNoteEffectGuard(target) ? target : null;
+}
+
+function isPhysicalNoteEffectGuard(
+  note: Pick<HostedPhysicalNote, "failureReason" | "status">,
+): boolean {
+  return note.status === "starting"
+    || (note.status === "failed" && note.failureReason === null);
+}
+
+function readSettledUsageCostForAcceptedRecoveryTarget(
+  note: Pick<
+    HostedPhysicalNote,
+    | "complimentaryOfferCode"
+    | "failureReason"
+    | "providerCostUsdMicros"
+    | "status"
+  >,
+): string | null {
+  if (
+    note.status !== "accepted"
+    || note.failureReason === "prior_note_accepted"
+    || note.complimentaryOfferCode !== null
+  ) {
+    return null;
+  }
+  return note.providerCostUsdMicros.toString();
+}
+
+async function createCompletedPhysicalNoteRecovery(input: {
+  memberId: string;
+  originAssistantInputId: string;
+  physicalNoteId?: string;
+  response: HostedPhysicalNoteRecoveryResponse;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const stored = serializeHostedPhysicalNoteRecoveryResult(input.response);
+  await input.tx.hostedPhysicalNoteRecovery.create({
+    data: {
+      memberId: input.memberId,
+      originAssistantInputId: input.originAssistantInputId,
+      ...(input.physicalNoteId ? { physicalNoteId: input.physicalNoteId } : {}),
+      remainingUnresolved: input.response.remainingUnresolved,
+      resultStatus: input.response.status,
+      retryAfter: stored.retryAfter,
+      settledUsageCostUsdMicros: stored.settledUsageCostUsdMicros,
+    },
+  });
 }
 
 async function completeHostedPhysicalNoteRecovery(input: {
@@ -470,43 +672,13 @@ async function persistHostedPhysicalNoteRecoveryResult(input: {
   prisma: PrismaClient | Prisma.TransactionClient;
   response: HostedPhysicalNoteRecoveryResponse;
 }): Promise<HostedPhysicalNoteRecoveryResponse> {
-  if (
-    input.response.status === "permission_denied"
-    || input.response.remainingUnresolved === null
-  ) {
-    throw new Error("Hosted physical-note recovery result cannot be stored.");
-  }
-  const retryAfter = input.response.retryAfter === null
-    ? null
-    : new Date(input.response.retryAfter);
-  if (retryAfter !== null && Number.isNaN(retryAfter.getTime())) {
-    throw new Error("Hosted physical-note recovery retry time is invalid.");
-  }
-  if (
-    input.response.status !== "accepted"
-    && input.response.settledUsageCostUsdMicros !== null
-  ) {
-    throw new Error("Hosted physical-note recovery usage result is invalid.");
-  }
-  if (
-    input.response.settledUsageCostUsdMicros !== null
-    && !/^\d+$/u.test(input.response.settledUsageCostUsdMicros)
-  ) {
-    throw new Error("Hosted physical-note recovery usage result is invalid.");
-  }
-  const settledUsageCostUsdMicros =
-    input.response.settledUsageCostUsdMicros === null
-      ? null
-      : BigInt(input.response.settledUsageCostUsdMicros);
-  if (settledUsageCostUsdMicros !== null && settledUsageCostUsdMicros < 0n) {
-    throw new Error("Hosted physical-note recovery usage result is invalid.");
-  }
+  const stored = serializeHostedPhysicalNoteRecoveryResult(input.response);
   await input.prisma.hostedPhysicalNoteRecovery.updateMany({
     data: {
       remainingUnresolved: input.response.remainingUnresolved,
       resultStatus: input.response.status,
-      retryAfter,
-      settledUsageCostUsdMicros,
+      retryAfter: stored.retryAfter,
+      settledUsageCostUsdMicros: stored.settledUsageCostUsdMicros,
     },
     where: {
       memberId: input.memberId,
@@ -524,6 +696,64 @@ async function persistHostedPhysicalNoteRecoveryResult(input: {
     throw new Error("Hosted physical-note recovery identity collision.");
   }
   return toPhysicalNoteRecoveryResponse(completed);
+}
+
+function serializeHostedPhysicalNoteRecoveryResult(
+  response: HostedPhysicalNoteRecoveryResponse,
+): {
+  retryAfter: Date | null;
+  settledUsageCostUsdMicros: bigint | null;
+} {
+  if (
+    response.status === "permission_denied"
+    || response.remainingUnresolved === null
+  ) {
+    throw new Error("Hosted physical-note recovery result cannot be stored.");
+  }
+  const retryAfter = response.retryAfter === null
+    ? null
+    : new Date(response.retryAfter);
+  if (retryAfter !== null && Number.isNaN(retryAfter.getTime())) {
+    throw new Error("Hosted physical-note recovery retry time is invalid.");
+  }
+  if (
+    response.status !== "accepted"
+    && response.settledUsageCostUsdMicros !== null
+  ) {
+    throw new Error("Hosted physical-note recovery usage result is invalid.");
+  }
+  if (
+    response.settledUsageCostUsdMicros !== null
+    && !/^\d+$/u.test(response.settledUsageCostUsdMicros)
+  ) {
+    throw new Error("Hosted physical-note recovery usage result is invalid.");
+  }
+  const settledUsageCostUsdMicros =
+    response.settledUsageCostUsdMicros === null
+      ? null
+      : BigInt(response.settledUsageCostUsdMicros);
+  if (settledUsageCostUsdMicros !== null && settledUsageCostUsdMicros < 0n) {
+    throw new Error("Hosted physical-note recovery usage result is invalid.");
+  }
+  return { retryAfter, settledUsageCostUsdMicros };
+}
+
+function readPhysicalNoteRecoveryResponseIfConfirmed(
+  recovery: Pick<
+    HostedPhysicalNoteRecovery,
+    | "remainingUnresolved"
+    | "resultStatus"
+    | "retryAfter"
+    | "settledUsageCostUsdMicros"
+  >,
+): HostedPhysicalNoteRecoveryResponse | null {
+  if (
+    recovery.resultStatus === null
+    || recovery.remainingUnresolved === null
+  ) {
+    return null;
+  }
+  return toPhysicalNoteRecoveryResponse(recovery);
 }
 
 function toPhysicalNoteRecoveryResponse(

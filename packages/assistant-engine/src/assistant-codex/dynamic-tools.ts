@@ -2549,16 +2549,33 @@ export async function executeMurphDynamicToolRequest(input: {
             messageRef: explicitOriginCandidate,
           })
         : null
+      const targetOriginAssistantInputId =
+        input.request.targetMessageRef && userActionScope
+          ? resolvePhysicalNoteExplicitOriginInputId({
+              acceptedInputIds: userActionScope.acceptedInputIds,
+              conversationScope: userActionScope.conversationScope,
+              messageRef: input.request.targetMessageRef,
+            })
+          : null
       if (!resolvePhysicalNote || !originAssistantInputId) {
         return toolTextResult(
           false,
           'physical-note recovery requires the exact current authorizing Message ref and hosted recovery transport',
         )
       }
+      if (input.request.targetMessageRef && !targetOriginAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note recovery target_message_ref must identify an accepted earlier Message ref in this conversation',
+        )
+      }
 
       try {
         const result = await resolvePhysicalNote({
           originAssistantInputId,
+          ...(targetOriginAssistantInputId
+            ? { targetOriginAssistantInputId }
+            : {}),
         }, {
           signal: input.abortSignal ?? null,
         })
@@ -2575,6 +2592,7 @@ export async function executeMurphDynamicToolRequest(input: {
               result.remainingUnresolved,
               null,
               result.settledUsageCostUsdMicros,
+              input.request.targetMessageRef ?? null,
             )
           case 'clear':
             return physicalNoteRecoveryToolResult(
@@ -2582,16 +2600,21 @@ export async function executeMurphDynamicToolRequest(input: {
               result.status,
               result.remainingUnresolved
                 ? 'The checked earlier submission was cleared. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing.'
-                : 'No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
+                : 'The checked earlier submission was cleared. No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
               result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
             )
           case 'pending':
             return physicalNoteRecoveryToolResult(
               true,
               result.status,
-              'The earlier outcome is unresolved and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
+              'The earlier outcome is still unconfirmed and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
               result.remainingUnresolved,
               result.retryAfter,
+              null,
+              input.request.targetMessageRef ?? null,
             )
           case 'permission_denied':
             return physicalNoteRecoveryToolResult(
@@ -2599,6 +2622,9 @@ export async function executeMurphDynamicToolRequest(input: {
               result.status,
               'The earlier submission was not changed because recovery is not available to the current participant.',
               result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
             )
           case 'unavailable':
             return physicalNoteRecoveryToolResult(
@@ -2606,6 +2632,9 @@ export async function executeMurphDynamicToolRequest(input: {
               result.status,
               'Physical-note recovery is currently unavailable. The earlier submission was not cleared; nothing new was sent and no automatic retry is running.',
               result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
             )
         }
       } catch {
@@ -2614,6 +2643,9 @@ export async function executeMurphDynamicToolRequest(input: {
           'unavailable',
           'The recovery response was lost, so the earlier submission\'s final state is unconfirmed. Do not claim it cleared or was accepted. Nothing new was sent and no automatic retry is running.',
           null,
+          null,
+          null,
+          input.request.targetMessageRef ?? null,
         )
       }
     }
@@ -6608,6 +6640,7 @@ function physicalNoteRecoveryToolResult(
   remainingUnresolved: boolean | null,
   retryAfter: string | null = null,
   settledUsageCostUsdMicros: string | null = null,
+  targetMessageRef: string | null = null,
 ): MurphDynamicToolExecutionResult {
   return toolTextResult(
     success,
@@ -6617,6 +6650,7 @@ function physicalNoteRecoveryToolResult(
       retryAfter,
       settledUsageCostUsdMicros,
       status,
+      ...(targetMessageRef ? { targetMessageRef } : {}),
     }),
   )
 }

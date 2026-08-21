@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createHostedPhysicalNoteRequestKey,
+  hostedPhysicalNoteRecoveryRequestSchema,
   hostedPhysicalNoteRecoveryResponseSchema,
   hostedPhysicalNoteSendRequestSchema,
   hostedPhysicalNoteSendResponseSchema,
@@ -37,6 +39,26 @@ describe("hosted physical-note contracts", () => {
       retryAfter: null,
       settledUsageCostUsdMicros: "250000",
       status: "clear",
+    })).toThrow();
+  });
+
+  it("accepts an optional bounded target on recovery requests", () => {
+    const originAssistantInputId = `ain_${"b".repeat(32)}`;
+    const targetOriginAssistantInputId = `ain_${"c".repeat(32)}`;
+
+    expect(hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetOriginAssistantInputId,
+    })).toEqual({
+      originAssistantInputId,
+      targetOriginAssistantInputId,
+    });
+    expect(hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+    })).toEqual({ originAssistantInputId });
+    expect(() => hostedPhysicalNoteRecoveryRequestSchema.parse({
+      originAssistantInputId,
+      targetOriginAssistantInputId: "not-a-message-ref",
     })).toThrow();
   });
 
@@ -80,6 +102,21 @@ describe("hosted physical-note contracts", () => {
     })).toMatchObject({
       recipient: { state: "GA" },
     });
+  });
+
+  it("derives the hosted physical-note request key from the accepted input", () => {
+    const originAssistantInputId = `ain_${"d".repeat(32)}`;
+    const first = createHostedPhysicalNoteRequestKey({
+      originAssistantInputId,
+    });
+
+    expect(first).toMatch(/^physical_note_[0-9a-f]{64}$/u);
+    expect(createHostedPhysicalNoteRequestKey({
+      originAssistantInputId,
+    })).toBe(first);
+    expect(createHostedPhysicalNoteRequestKey({
+      originAssistantInputId: `ain_${"e".repeat(32)}`,
+    })).not.toBe(first);
   });
 
   it("rejects recipient fields that Lob cannot accept", () => {

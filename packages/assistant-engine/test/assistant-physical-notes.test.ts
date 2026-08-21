@@ -29,6 +29,7 @@ import type {
 
 const APPROVAL_INPUT_ID = `ain_${'c'.repeat(32)}`
 const OTHER_INPUT_ID = `ain_${'d'.repeat(32)}`
+const TARGET_INPUT_ID = `ain_${'e'.repeat(32)}`
 const IMAGE_REF = 'raw/captures/physical-note.png'
 const IMAGE_BYTES = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
@@ -97,14 +98,25 @@ describe('assistant physical notes', () => {
 
   it('parses recovery only with an exact accepted-input-shaped message ref', () => {
     expect(readPhysicalNoteDynamicToolRequest({
-      arguments: { message_ref: APPROVAL_INPUT_ID },
+      arguments: {
+        message_ref: APPROVAL_INPUT_ID,
+        target_message_ref: TARGET_INPUT_ID,
+      },
       tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
     })).toEqual({
       kind: 'resolve-physical-note',
       messageRef: APPROVAL_INPUT_ID,
+      targetMessageRef: TARGET_INPUT_ID,
     })
     expect(readPhysicalNoteDynamicToolRequest({
       arguments: { message_ref: 'not-an-accepted-input' },
+      tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
+    })).toMatchObject({ kind: 'invalid-physical-note-arguments' })
+    expect(readPhysicalNoteDynamicToolRequest({
+      arguments: {
+        message_ref: APPROVAL_INPUT_ID,
+        target_message_ref: 'not-an-accepted-input',
+      },
       tool: MURPH_RESOLVE_PHYSICAL_NOTE_TOOL.name,
     })).toMatchObject({ kind: 'invalid-physical-note-arguments' })
   })
@@ -117,6 +129,7 @@ describe('assistant physical notes', () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [TARGET_INPUT_ID, APPROVAL_INPUT_ID],
         physicalNotes: { resolve, send: vi.fn() },
         privateImageUrlPublisher: unavailablePrivateImagePublisher(),
       }),
@@ -132,6 +145,75 @@ describe('assistant physical notes', () => {
     expect(result.rpcResult).toMatchObject({ success: false })
     expect(result.rpcResult.contentItems[0]?.text).toContain(
       'exact current authorizing Message ref',
+    )
+  })
+
+  it('passes an accepted earlier target ref without treating it as authority', async () => {
+    const resolve = vi.fn(async () => ({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: 'pending' as const,
+    }))
+    const authorizer = vi.fn(authorizeApprovalInput)
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizer,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [TARGET_INPUT_ID, APPROVAL_INPUT_ID],
+        physicalNotes: { resolve, send: vi.fn() },
+        privateImageUrlPublisher: unavailablePrivateImagePublisher(),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'resolve-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        targetMessageRef: TARGET_INPUT_ID,
+      },
+    })
+
+    expect(resolve).toHaveBeenCalledWith({
+      originAssistantInputId: APPROVAL_INPUT_ID,
+      targetOriginAssistantInputId: TARGET_INPUT_ID,
+    }, { signal: null })
+    expect(authorizer).toHaveBeenCalledOnce()
+    expect(authorizer).toHaveBeenCalledWith(expect.objectContaining({
+      messageRef: APPROVAL_INPUT_ID,
+    }))
+    expect(result.rpcResult).toMatchObject({ success: true })
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      `\"targetMessageRef\":\"${TARGET_INPUT_ID}\"`,
+    )
+  })
+
+  it('rejects a recovery target ref that is not in the accepted conversation inputs', async () => {
+    const resolve = vi.fn()
+    const result = await executeMurphDynamicToolRequest({
+      authorizeAcceptedMessageTarget: authorizeApprovalInput,
+      deliveryContextOrdinal: 0,
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [APPROVAL_INPUT_ID],
+        physicalNotes: { resolve, send: vi.fn() },
+        privateImageUrlPublisher: unavailablePrivateImagePublisher(),
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request: {
+        kind: 'resolve-physical-note',
+        messageRef: APPROVAL_INPUT_ID,
+        targetMessageRef: TARGET_INPUT_ID,
+      },
+    })
+
+    expect(resolve).not.toHaveBeenCalled()
+    expect(result.rpcResult).toMatchObject({ success: false })
+    expect(result.rpcResult.contentItems[0]?.text).toContain(
+      'target_message_ref',
     )
   })
 
@@ -218,6 +300,7 @@ describe('assistant physical notes', () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [TARGET_INPUT_ID, APPROVAL_INPUT_ID],
         physicalNotes: { resolve, send: vi.fn() },
         privateImageUrlPublisher: unavailablePrivateImagePublisher(),
       }),
@@ -294,6 +377,7 @@ describe('assistant physical notes', () => {
       env: {},
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
+        acceptedInputIds: [TARGET_INPUT_ID, APPROVAL_INPUT_ID],
         physicalNotes: { resolve, send: vi.fn() },
         privateImageUrlPublisher: unavailablePrivateImagePublisher(),
       }),
@@ -302,13 +386,18 @@ describe('assistant physical notes', () => {
       request: {
         kind: 'resolve-physical-note',
         messageRef: APPROVAL_INPUT_ID,
+        targetMessageRef: TARGET_INPUT_ID,
       },
     })
 
     const text = result.rpcResult.contentItems[0]?.text ?? ''
-    expect(resolve).toHaveBeenCalledOnce()
+    expect(resolve).toHaveBeenCalledWith({
+      originAssistantInputId: APPROVAL_INPUT_ID,
+      targetOriginAssistantInputId: TARGET_INPUT_ID,
+    }, { signal: null })
     expect(result.rpcResult).toMatchObject({ success: false })
     expect(text).toContain('final state is unconfirmed')
+    expect(text).toContain(`\"targetMessageRef\":\"${TARGET_INPUT_ID}\"`)
     expect(text).toContain('Nothing new was sent')
     expect(text).toContain('no automatic retry is running')
     expect(text).not.toContain('was not cleared')
@@ -330,6 +419,8 @@ describe('assistant physical notes', () => {
     expect(skill).toMatch(
       /call `murph\.resolve_physical_note` exactly\s+once with the exact current authorizing `message_ref`/u,
     )
+    expect(skill).toContain('target_message_ref')
+    expect(skill).toContain('does not authorize the action')
     expect(skill).toContain('never sends a new note or recalls an accepted one')
   })
 
@@ -904,6 +995,7 @@ async function createPhysicalNoteVault(): Promise<string> {
 }
 
 function createHostedToolContext(input: {
+  acceptedInputIds?: readonly string[]
   physicalNotes: NonNullable<AssistantHostedToolContext['physicalNotes']>
   privateImageUrlPublisher:
     NonNullable<AssistantHostedToolContext['privateImageUrlPublisher']>
@@ -913,7 +1005,7 @@ function createHostedToolContext(input: {
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     currentUserActionScope: () => ({
-      acceptedInputIds: [APPROVAL_INPUT_ID],
+      acceptedInputIds: [...(input.acceptedInputIds ?? [APPROVAL_INPUT_ID])],
       conversationId: 'conversation_physical_note',
       conversationScope: 'direct',
       inboundMailboxItemIds: ['mailbox_physical_note'],

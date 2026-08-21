@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
+  createHostedPhysicalNoteRequestKey,
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
 } from "@murphai/hosted-execution/physical-notes";
@@ -423,6 +424,75 @@ describe.skipIf(!runPostgresProof)(
         providerLetterId: "ltr_before_local_rollback",
         status: "accepted",
       });
+    });
+
+    it("reports a targeted accepted send after the original response is lost", async () => {
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const { createHostedPhysicalNote, recoverHostedPhysicalNote } =
+        await import("@/src/lib/physical-notes/service");
+      const complimentaryId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      await observer.hostedPhysicalNote.create({
+        data: {
+          acceptedAt: new Date(),
+          complimentaryOfferCode: "physical-note-v1",
+          failureReason: null,
+          id: complimentaryId,
+          memberId: beneficiary,
+          pricingVersion: "lob-test-v1",
+          provider: "lob",
+          providerCostUsdMicros: 250_000n,
+          providerLetterId: `ltr_${complimentaryId}`,
+          requestFingerprint: `fingerprint_${complimentaryId}`,
+          requestKey: `request_${complimentaryId}`,
+          status: "accepted",
+        },
+      });
+      const targetRequest = buildRequest(24, beneficiary);
+      const createProviderLetter = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: "ltr_original_send_response_lost",
+      }));
+      const findProviderLetter = vi.fn(async () => {
+        throw new Error("Targeted accepted send recovery must not read Lob.");
+      });
+
+      const sent = await createHostedPhysicalNote({
+        ...targetRequest,
+        requestKey: createHostedPhysicalNoteRequestKey({
+          originAssistantInputId: targetRequest.originAssistantInputId,
+        }),
+        prisma: observer,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: buildRequest(25, beneficiary).originAssistantInputId,
+        prisma: observer,
+        runtime: {
+          async create() {
+            throw new Error("Recovery must not create a physical note.");
+          },
+          findLetterByNoteId: findProviderLetter,
+        },
+        targetOriginAssistantInputId: targetRequest.originAssistantInputId,
+      })).resolves.toEqual({
+        remainingUnresolved: false,
+        retryAfter: null,
+        settledUsageCostUsdMicros: "250000",
+        status: "accepted",
+      });
+
+      expect(sent).toMatchObject({
+        complimentary: false,
+        status: "accepted",
+      });
+      expect(createProviderLetter).toHaveBeenCalledOnce();
+      expect(findProviderLetter).not.toHaveBeenCalled();
+      expect(mocks.recordUsage).toHaveBeenCalledOnce();
     });
 
     it("recovers a newer accepted exact replay behind an older unresolved row", async () => {
@@ -888,6 +958,97 @@ describe.skipIf(!runPostgresProof)(
         .toEqual([firstId, secondId]);
     });
 
+    it("targets an incomplete prior recovery without advancing the oldest guard", async () => {
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const createdAt = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+      const firstId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const secondId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const targetOrigin = buildRequest(26, beneficiary).originAssistantInputId;
+      const { recoverHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      await observer.hostedPhysicalNote.createMany({
+        data: [
+          {
+            complimentaryOfferCode: null,
+            createdAt,
+            failureReason: null,
+            id: firstId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `targeted-incomplete-first-${firstId}`,
+            requestKey: `targeted-incomplete-first-${firstId}`,
+            status: "failed",
+          },
+          {
+            complimentaryOfferCode: "physical-note-v1",
+            createdAt: new Date(createdAt.getTime() + 1),
+            id: secondId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `targeted-incomplete-second-${secondId}`,
+            requestKey: `targeted-incomplete-second-${secondId}`,
+            status: "starting",
+          },
+        ],
+      });
+      await observer.hostedPhysicalNoteRecovery.create({
+        data: {
+          memberId: beneficiary,
+          originAssistantInputId: targetOrigin,
+          physicalNoteId: secondId,
+        },
+      });
+      const findProviderLetter = vi.fn(async (input: { noteId: string }) => {
+        if (input.noteId !== secondId) {
+          throw new Error("Targeted recovery looked up the wrong note.");
+        }
+        return {
+          kind: "accepted" as const,
+          providerLetterId: "ltr_targeted_incomplete_recovery",
+        };
+      });
+
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: buildRequest(27, beneficiary).originAssistantInputId,
+        prisma: observer,
+        runtime: {
+          async create() {
+            throw new Error("Recovery must not create a physical note.");
+          },
+          findLetterByNoteId: findProviderLetter,
+        },
+        targetOriginAssistantInputId: targetOrigin,
+      })).resolves.toEqual({
+        remainingUnresolved: true,
+        retryAfter: null,
+        settledUsageCostUsdMicros: null,
+        status: "accepted",
+      });
+
+      expect(findProviderLetter).toHaveBeenCalledOnce();
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: firstId },
+      })).resolves.toMatchObject({
+        failureReason: null,
+        providerLetterId: null,
+        status: "failed",
+      });
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: secondId },
+      })).resolves.toMatchObject({
+        providerLetterId: "ltr_targeted_incomplete_recovery",
+        status: "accepted",
+      });
+      expect(mocks.recordUsage).not.toHaveBeenCalled();
+    });
+
     it("commits accepted recovery state, usage, blockers, and replay result atomically", async () => {
       const observer = requirePrisma(observerClient);
       const beneficiary = requireMemberId(memberId);
@@ -896,7 +1057,8 @@ describe.skipIf(!runPostgresProof)(
       const usageId = `usage_${randomUUID().replaceAll("-", "")}`;
       const usageTurnId = `turn_${randomUUID().replaceAll("-", "")}`;
       const failedOrigin = buildRequest(14, beneficiary).originAssistantInputId;
-      const retryOrigin = buildRequest(15, beneficiary).originAssistantInputId;
+      const targetedReplayOrigin =
+        buildRequest(15, beneficiary).originAssistantInputId;
       const { recoverHostedPhysicalNote } = await import(
         "@/src/lib/physical-notes/service"
       );
@@ -1002,22 +1164,15 @@ describe.skipIf(!runPostgresProof)(
         resultStatus: null,
         settledUsageCostUsdMicros: null,
       });
-      await expect(recoverHostedPhysicalNote({
-        memberId: beneficiary,
-        originAssistantInputId: failedOrigin,
-        prisma: recoveryClient,
-        runtime,
-      })).rejects.toThrow("recovery result is unconfirmed");
-
       const accepted = await recoverHostedPhysicalNote({
         memberId: beneficiary,
-        originAssistantInputId: retryOrigin,
+        originAssistantInputId: failedOrigin,
         prisma: recoveryClient,
         runtime,
       });
       await expect(recoverHostedPhysicalNote({
         memberId: beneficiary,
-        originAssistantInputId: retryOrigin,
+        originAssistantInputId: failedOrigin,
         prisma: recoveryClient,
         runtime,
       })).resolves.toEqual(accepted);
@@ -1045,7 +1200,7 @@ describe.skipIf(!runPostgresProof)(
         where: { id: usageId },
       })).resolves.toBe(1);
       await expect(observer.hostedPhysicalNoteRecovery.findUnique({
-        where: { originAssistantInputId: retryOrigin },
+        where: { originAssistantInputId: failedOrigin },
       })).resolves.toMatchObject({
         physicalNoteId: noteId,
         remainingUnresolved: false,
@@ -1054,16 +1209,23 @@ describe.skipIf(!runPostgresProof)(
       });
       await observer.hostedPhysicalNote.delete({ where: { id: noteId } });
       await expect(observer.hostedPhysicalNoteRecovery.findUnique({
-        where: { originAssistantInputId: retryOrigin },
+        where: { originAssistantInputId: failedOrigin },
       })).resolves.toMatchObject({
         physicalNoteId: null,
         settledUsageCostUsdMicros: 250_000n,
       });
       await expect(recoverHostedPhysicalNote({
         memberId: beneficiary,
-        originAssistantInputId: retryOrigin,
+        originAssistantInputId: failedOrigin,
         prisma: recoveryClient,
         runtime,
+      })).resolves.toEqual(accepted);
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: targetedReplayOrigin,
+        prisma: recoveryClient,
+        runtime,
+        targetOriginAssistantInputId: failedOrigin,
       })).resolves.toEqual(accepted);
       expect(findProviderLetter).toHaveBeenCalledTimes(2);
       expect(mocks.recordUsage).toHaveBeenCalledTimes(2);
