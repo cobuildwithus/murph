@@ -85,6 +85,9 @@ follow-up.
 - After merging the current base, its new private-to-group `handoff` action was
   added to the existing unauthenticated-email boundary as an explicit
   fail-closed case. The assistant-runtime package build, focused boundary test,
-  and hosted-execution suite pass with the complete action union.
+  and hosted-execution suite pass with the complete action union. The same base
+  also needed a fail-closed Web selection fallback and two tests moved onto
+  already-declared workspace entrypoints; Web typecheck, 39 handoff tests, both
+  affected package tests, and the workspace-boundary verifier pass.
 - Remaining work is the corrected exact-head CI run, final ReviewGPT round,
   parent review, and plan closure.
