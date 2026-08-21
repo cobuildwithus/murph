@@ -1,6 +1,6 @@
 # Add protected native Android hosted E2E
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-20
 
@@ -110,3 +110,16 @@ Updated: 2026-08-20
 - The protected live journey remains explicitly deferred until its GitHub
   Environments and immutable Android tag are configured after both repository
   patches land.
+- Preliminary ReviewGPT returned two accepted findings and no patch artifact;
+  final round 1 returned three accepted findings. The corrected full snapshot
+  received `ROUND_OUTCOME: PASS` in substantive round 2 with zero unresolved
+  accepted or actionable findings.
+- One behavior-preserving rebase onto the then-current `main` was required by
+  the exact-base bundle-budget guard. Merge-tree proof was clean, the two
+  authored patch ids were unchanged across the rebase, the intervening base
+  change touched only unrelated Cloudflare queue metrics, and every focused
+  command above passed again afterward.
+- Required GitHub Actions on the final plan-closure head remain the merge gate;
+  this completed snapshot records implementation and review completion, not a
+  substitute for those exact-head checks.
+Completed: 2026-08-20
