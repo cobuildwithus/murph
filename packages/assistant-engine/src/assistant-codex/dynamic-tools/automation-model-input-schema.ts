@@ -1,107 +1,11 @@
 type JsonSchemaObject = Record<string, unknown>
 
-type ResolveResult =
-  | { ok: true; value: unknown }
-  | { ok: false }
-
 function isJsonSchemaObject(value: unknown): value is JsonSchemaObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
-}
-
-function decodeJsonPointerToken(token: string): string {
-  return token.replaceAll('~1', '/').replaceAll('~0', '~')
-}
-
-function resolveJsonPointer(root: unknown, ref: string): unknown {
-  if (!ref.startsWith('#/')) {
-    return undefined
-  }
-
-  let current: unknown = root
-  for (const rawToken of ref.slice(2).split('/')) {
-    const token = decodeJsonPointerToken(rawToken)
-    if (Array.isArray(current)) {
-      if (!/^\d+$/u.test(token)) {
-        return undefined
-      }
-      current = current[Number.parseInt(token, 10)]
-      continue
-    }
-    if (!isJsonSchemaObject(current) || !Object.hasOwn(current, token)) {
-      return undefined
-    }
-    current = current[token]
-  }
-  return current
-}
-
-function resolveLocalReferences(
-  value: unknown,
-  root: JsonSchemaObject,
-  activeRefs: ReadonlySet<string>,
-): ResolveResult {
-  if (Array.isArray(value)) {
-    const resolved: unknown[] = []
-    for (const item of value) {
-      const result = resolveLocalReferences(item, root, activeRefs)
-      if (!result.ok) {
-        return result
-      }
-      resolved.push(result.value)
-    }
-    return { ok: true, value: resolved }
-  }
-
-  if (!isJsonSchemaObject(value)) {
-    return { ok: true, value }
-  }
-
-  if (Object.hasOwn(value, '$ref')) {
-    const ref = value.$ref
-    if (typeof ref !== 'string' || activeRefs.has(ref)) {
-      return { ok: false }
-    }
-    const target = resolveJsonPointer(root, ref)
-    if (target === undefined) {
-      return { ok: false }
-    }
-    const nextRefs = new Set(activeRefs)
-    nextRefs.add(ref)
-    const resolvedTarget = resolveLocalReferences(target, root, nextRefs)
-    if (!resolvedTarget.ok || !isJsonSchemaObject(resolvedTarget.value)) {
-      return { ok: false }
-    }
-
-    const siblings: JsonSchemaObject = {}
-    for (const [key, item] of Object.entries(value)) {
-      if (key === '$ref') {
-        continue
-      }
-      const result = resolveLocalReferences(item, root, activeRefs)
-      if (!result.ok || Object.hasOwn(resolvedTarget.value, key)) {
-        return { ok: false }
-      }
-      siblings[key] = result.value
-    }
-    return {
-      ok: true,
-      value: { ...resolvedTarget.value, ...siblings },
-    }
-  }
-
-  const resolved: JsonSchemaObject = {}
-  for (const [key, item] of Object.entries(value)) {
-    const result = resolveLocalReferences(item, root, activeRefs)
-    if (!result.ok) {
-      return result
-    }
-    resolved[key] = result.value
-  }
-  return { ok: true, value: resolved }
 }
 
 function withoutTopLevelDescription(schema: JsonSchemaObject): JsonSchemaObject {
@@ -182,12 +86,11 @@ function containsReference(value: unknown): boolean {
 export function deriveAutomationModelInputSchema(
   canonicalSchema: JsonSchemaObject,
 ): JsonSchemaObject {
-  const resolved = resolveLocalReferences(canonicalSchema, canonicalSchema, new Set())
-  if (!resolved.ok || !isJsonSchemaObject(resolved.value)) {
+  if (containsReference(canonicalSchema)) {
     return canonicalSchema
   }
 
-  const branches = resolved.value.oneOf
+  const branches = canonicalSchema.oneOf
   if (!Array.isArray(branches) || branches.length === 0) {
     return canonicalSchema
   }

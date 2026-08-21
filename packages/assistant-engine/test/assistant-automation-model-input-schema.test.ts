@@ -215,7 +215,7 @@ describe('automation model input schema', () => {
       .toEqual({})
   })
 
-  it('resolves local references before building the inline model schema', () => {
+  it('returns the full schema instead of adding reference expansion machinery', () => {
     const canonical = {
       $defs: {
         title: { type: 'string', minLength: 1 },
@@ -243,12 +243,7 @@ describe('automation model input schema', () => {
     }
 
     const model = deriveAutomationModelInputSchema(canonical)
-    expect(model).not.toBe(canonical)
-    expect(collectKeys(model, '$ref')).toEqual([])
-    expect(asObject(asObject(model.properties).title)).toEqual({
-      type: 'string',
-      minLength: 1,
-    })
+    expect(model).toBe(canonical)
   })
 
   it('retains action-specific value schemas when variants differ', () => {
