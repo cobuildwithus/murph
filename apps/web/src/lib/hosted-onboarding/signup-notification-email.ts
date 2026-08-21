@@ -150,7 +150,7 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
   const emailAuthorization = await readHostedMemberEmailAuthorization({
     memberId: input.memberId,
     prisma,
-  });
+  }).catch(() => null);
   const customerEmail = emailAuthorization?.verifiedEmail?.address
     ?? emailAuthorization?.stripeCheckoutEmail?.address
     ?? null;
