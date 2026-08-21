@@ -74,6 +74,21 @@ Updated: 2026-08-20
   contract.
 - Android and iOS share reset helpers rather than introducing a second Privy
   identity implementation.
+- ReviewGPT round 1 found that a transmitted dispatch could lose its receipt
+  before entering the known-run fence. The correction widens the existing
+  fence to unreceipted possible dispatches; it adds no discovery loop, queue,
+  or durable dispatch owner.
+- ReviewGPT round 1 also proved that one installation token could expire inside
+  the admitted deployment plus private-run window. The existing protected
+  controller now owns an ephemeral repository-scoped token supplier, removes
+  App credentials from its child environment, and refreshes before expiry.
+- The non-destructive production canaries do not share reset authority, so the
+  unnecessary Android-to-iOS production concurrency edge was deleted. The
+  destructive PR jobs retain their required shared lock.
+- The preliminary specialist findings were accepted: executable Android tests
+  now call the dispatcher and workflow shell boundaries, and both native lanes
+  advertise the existing exact-head Repo Hygiene retry helper as the one
+  recovery owner.
 
 ## Verification
 
@@ -87,7 +102,11 @@ Updated: 2026-08-20
   `pnpm docs:gardening` passed; the gardening report contained zero issues.
 - `git diff --check` passed.
 - Remaining completion proof: exact-head required GitHub Actions plus the
-  preliminary coverage and final sensitive ReviewGPT gates.
+  final sensitive ReviewGPT remediation round. Preliminary specialists returned
+  findings with no patch artifact; every accepted finding has focused proof.
+- Post-remediation focused proof: combined Android/iOS controller suite 65/65,
+  Android workflow/cache trust-boundary guard 5/5, provider request guard,
+  JavaScript syntax checks, workflow YAML parsing, and `git diff --check` pass.
 - The protected live journey remains explicitly deferred until its GitHub
   Environments and immutable Android tag are configured after both repository
   patches land.

@@ -232,9 +232,14 @@ Last verified: 2026-08-20
   forward to the floor or newer rather than re-running an older base-domain-only
   workflow.
 - Protected native Android hosted E2E treats private workflow dispatch as an
-  uncertain external effect. The controller binds the returned run id to the
-  reviewed Android SHA, polls only that run, and accepts success only from its
-  terminal `workflow_dispatch` result. A poll failure or bounded-wait expiry
+  uncertain external effect. A timeout, network failure, ambiguous HTTP
+  response, malformed successful response, or missing run id after the request
+  may have been transmitted holds the live fence for the full admitted window.
+  A valid receipt binds the returned run id to the reviewed Android SHA, polls
+  only that run, and accepts success only from its terminal `workflow_dispatch`
+  result. The protected controller refreshes its repository-scoped GitHub App
+  installation token before expiry without releasing the existing lifecycle
+  owner. A poll failure or bounded-wait expiry
   requests ordinary cancellation, then force-cancellation, and proves the same
   run terminal before shared identity or deployment cleanup. If cancellation
   or status cannot be attested, the controller keeps the destructive native

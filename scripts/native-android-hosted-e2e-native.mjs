@@ -1,3 +1,5 @@
+import { createPrivateKey, sign } from "node:crypto";
+
 import {
   HTTP_TIMEOUT_MS,
   POLL_MS,
@@ -24,6 +26,7 @@ const PRODUCTION_ALIAS_TIMEOUT_MS = 2 * 60_000;
 const PRIVATE_RUN_CANCEL_GRACE_MS = 30_000;
 const PRIVATE_RUN_FORCE_CANCEL_TIMEOUT_MS = 2 * 60_000;
 const PRODUCTION_ALIAS_MAX_OUTPUT_CHARS = 200;
+const TOKEN_REFRESH_SKEW_MS = 2 * 60_000;
 
 export function buildDispatchInputs({
   androidSha,
@@ -127,16 +130,26 @@ export async function dispatchAndWait({
   prHead = null,
   webBaseUrl,
   webSha,
-}) {
-  const token = requiredEnv("NATIVE_ANDROID_E2E_GITHUB_TOKEN");
+}, {
+  fetchImpl = fetch,
+  fetchJsonImpl = fetchJson,
+  now = Date.now,
+  sleepImpl = sleep,
+  tokenSupplier: suppliedTokenSupplier = null,
+} = {}) {
   const repository = safeRepository(requiredEnv("NATIVE_ANDROID_E2E_ANDROID_REPOSITORY"));
   const workflow = safeWorkflow(requiredEnv("NATIVE_ANDROID_E2E_ANDROID_WORKFLOW"));
   const ref = safeTag(requiredEnv("NATIVE_ANDROID_E2E_ANDROID_REF"));
   const encodedRepository = repository.split("/").map(encodeURIComponent).join("/");
+  const tokenSupplier = suppliedTokenSupplier ?? createGitHubAppTokenSupplierFromEnv({
+    fetchJsonImpl,
+    now,
+    repository,
+  });
 
-  const tag = await fetchJson(
+  const tag = await fetchJsonImpl(
     `https://api.github.com/repos/${encodedRepository}/git/ref/tags/${ref.split("/").map(encodeURIComponent).join("/")}`,
-    { headers: githubHeaders(token) },
+    { headers: githubHeaders(await tokenSupplier()) },
     "private Android tag lookup",
   );
   const expectedSha = inspectPrivateDispatchTag(tag, {
@@ -146,45 +159,40 @@ export async function dispatchAndWait({
   if (mode === "production_canary") await proveCurrentProductionAlias(webSha);
   if (mode === "pr") {
     if (!isRecord(prHead)) throw new Error("PR head revalidation inputs are required.");
-    await revalidateExactPrHead({ ...prHead, expectedSha: webSha });
+    await revalidateExactPrHead({ ...prHead, expectedSha: webSha }, fetchJsonImpl);
   }
 
   const dispatchExpiresAt =
-    Math.floor(Date.now() / 1000) + PRIVATE_ANDROID_DISPATCH_TTL_SECONDS;
-  const receipt = await fetchJson(
-    `https://api.github.com/repos/${encodedRepository}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,
-    {
-      body: JSON.stringify({
-        inputs: buildDispatchInputs({
-          androidSha: expectedSha,
-          androidTag: ref,
-          correlationId,
-          dispatchExpiresAt,
-          mode,
-          webBaseUrl,
-          webSha,
-        }),
-        ref,
+    Math.floor(now() / 1000) + PRIVATE_ANDROID_DISPATCH_TTL_SECONDS;
+  const runId = await requestPrivateDispatch({
+    body: JSON.stringify({
+      inputs: buildDispatchInputs({
+        androidSha: expectedSha,
+        androidTag: ref,
+        correlationId,
+        dispatchExpiresAt,
+        mode,
+        webBaseUrl,
+        webSha,
       }),
-      headers: { ...githubHeaders(token), "content-type": "application/json" },
-      method: "POST",
-    },
-    "private Android workflow dispatch",
-  );
-  assertRecord(receipt, "workflow dispatch receipt");
-  const runId = receipt.workflow_run_id;
-  if (!Number.isSafeInteger(runId) || runId <= 0) {
-    throw new Error("Private Android dispatch did not return workflow_run_id.");
-  }
+      ref,
+    }),
+    deadlineMs: privateRunExecutionFenceDeadlineMs(dispatchExpiresAt),
+    fetchImpl,
+    now,
+    sleepImpl,
+    tokenSupplier,
+    url: `https://api.github.com/repos/${encodedRepository}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`,
+  });
 
   const runUrl = `https://api.github.com/repos/${encodedRepository}/actions/runs/${runId}`;
   let terminal = false;
   try {
-    const deadline = Date.now() + ANDROID_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      const run = inspectPrivateRun(await fetchJson(
+    const deadline = now() + ANDROID_TIMEOUT_MS;
+    while (now() < deadline) {
+      const run = inspectPrivateRun(await fetchJsonImpl(
         runUrl,
-        { headers: githubHeaders(token) },
+        { headers: githubHeaders(await tokenSupplier()) },
         "private Android workflow status",
       ), { runId, sha: expectedSha });
       if (run.complete) {
@@ -197,7 +205,7 @@ export async function dispatchAndWait({
         console.log(`::notice::native-android-e2e stage=android_${mode} result=success`);
         return;
       }
-      await sleep(POLL_MS);
+      await sleepImpl(POLL_MS);
     }
     throw new Error("Private Android E2E timed out.");
   } catch (primaryError) {
@@ -206,17 +214,24 @@ export async function dispatchAndWait({
         await cancelAndWaitForPrivateRun({
           encodedRepository,
           expectedSha,
+          fetchImpl,
+          fetchJsonImpl,
+          now,
           runId,
           runUrl,
-          token,
+          sleepImpl,
+          tokenSupplier,
         });
       } catch (cancellationError) {
         await holdPrivateRunExecutionFence({
           deadlineMs: privateRunExecutionFenceDeadlineMs(dispatchExpiresAt),
           expectedSha,
+          fetchJsonImpl,
+          now,
           runId,
           runUrl,
-          token,
+          sleepImpl,
+          tokenSupplier,
         });
         throw new AggregateError(
           [primaryError, cancellationError],
@@ -225,6 +240,160 @@ export async function dispatchAndWait({
       }
     }
     throw primaryError;
+  }
+}
+
+export function createGitHubAppTokenSupplier({
+  appId,
+  createJwt = createGitHubAppJwt,
+  fetchJsonImpl = fetchJson,
+  now = Date.now,
+  privateKey,
+  repository,
+}) {
+  if (!/^[1-9][0-9]*$/u.test(appId)) {
+    throw new Error("GitHub App id must be a positive integer.");
+  }
+  if (
+    typeof privateKey !== "string"
+    || privateKey.length < 256
+    || privateKey.length > 20_000
+    || privateKey.includes("\0")
+  ) {
+    throw new Error("GitHub App private key was invalid.");
+  }
+  const safePrivateRepository = safeRepository(repository);
+  const [owner, name] = safePrivateRepository.split("/");
+  let installationId = null;
+  let token = null;
+  let expiresAtMs = 0;
+
+  return async () => {
+    if (token && expiresAtMs - now() > TOKEN_REFRESH_SKEW_MS) return token;
+    const jwt = createJwt({ appId, now, privateKey });
+    if (installationId === null) {
+      const installation = await fetchJsonImpl(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/installation`,
+        { headers: githubAppHeaders(jwt) },
+        "private Android GitHub App installation lookup",
+      );
+      assertRecord(installation, "private Android GitHub App installation");
+      if (!Number.isSafeInteger(installation.id) || installation.id <= 0) {
+        throw new Error("Private Android GitHub App installation id was invalid.");
+      }
+      installationId = installation.id;
+    }
+    const credential = await fetchJsonImpl(
+      `https://api.github.com/app/installations/${installationId}/access_tokens`,
+      {
+        body: JSON.stringify({
+          permissions: { actions: "write", contents: "read" },
+          repositories: [name],
+        }),
+        headers: { ...githubAppHeaders(jwt), "content-type": "application/json" },
+        method: "POST",
+      },
+      "private Android GitHub App token mint",
+    );
+    assertRecord(credential, "private Android GitHub App token");
+    token = requiredString(credential.token, "private Android GitHub App token");
+    expiresAtMs = Date.parse(credential.expires_at);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs - now() <= TOKEN_REFRESH_SKEW_MS) {
+      token = null;
+      throw new Error("Private Android GitHub App token expiry was invalid.");
+    }
+    return token;
+  };
+}
+
+export function createGitHubAppJwt({ appId, now = Date.now, privateKey }) {
+  if (!/^[1-9][0-9]*$/u.test(appId)) {
+    throw new Error("GitHub App id must be a positive integer.");
+  }
+  const issuedAt = Math.floor(now() / 1000) - 60;
+  const header = base64UrlJson({ alg: "RS256", typ: "JWT" });
+  const payload = base64UrlJson({ exp: issuedAt + 9 * 60, iat: issuedAt, iss: appId });
+  const unsigned = `${header}.${payload}`;
+  const signature = sign("RSA-SHA256", Buffer.from(unsigned), createPrivateKey(privateKey));
+  return `${unsigned}.${signature.toString("base64url")}`;
+}
+
+function createGitHubAppTokenSupplierFromEnv({ fetchJsonImpl, now, repository }) {
+  const appId = requiredEnv("NATIVE_ANDROID_E2E_GITHUB_APP_ID");
+  const privateKey = requiredEnv("NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY");
+  delete process.env.NATIVE_ANDROID_E2E_GITHUB_APP_ID;
+  delete process.env.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY;
+  return createGitHubAppTokenSupplier({
+    appId,
+    fetchJsonImpl,
+    now,
+    privateKey,
+    repository,
+  });
+}
+
+async function requestPrivateDispatch({
+  body,
+  deadlineMs,
+  fetchImpl,
+  now,
+  sleepImpl,
+  tokenSupplier,
+  url,
+}) {
+  const token = await tokenSupplier();
+  let response;
+  try {
+    response = await fetchImpl(url, {
+      body,
+      headers: { ...githubHeaders(token), "content-type": "application/json" },
+      method: "POST",
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+    });
+  } catch (error) {
+    return fenceUnreceiptedDispatch({ cause: error, deadlineMs, now, sleepImpl });
+  }
+  if (!response.ok) {
+    const status = response.status;
+    await response.body?.cancel().catch(() => undefined);
+    if (status >= 400 && status < 500 && ![408, 425, 429].includes(status)) {
+      throw new Error(`Private Android workflow dispatch failed with HTTP ${status}.`);
+    }
+    return fenceUnreceiptedDispatch({
+      cause: new Error(`Private Android workflow dispatch returned ambiguous HTTP ${status}.`),
+      deadlineMs,
+      now,
+      sleepImpl,
+    });
+  }
+  let receipt;
+  try {
+    receipt = await response.json();
+  } catch (error) {
+    return fenceUnreceiptedDispatch({ cause: error, deadlineMs, now, sleepImpl });
+  }
+  if (!isRecord(receipt) || !Number.isSafeInteger(receipt.workflow_run_id) || receipt.workflow_run_id <= 0) {
+    return fenceUnreceiptedDispatch({
+      cause: new Error("Private Android dispatch did not return workflow_run_id."),
+      deadlineMs,
+      now,
+      sleepImpl,
+    });
+  }
+  return receipt.workflow_run_id;
+}
+
+async function fenceUnreceiptedDispatch({ cause, deadlineMs, now, sleepImpl }) {
+  await holdUnreceiptedDispatchFence({ deadlineMs, now, sleepImpl });
+  throw new Error(
+    "Private Android dispatch receipt was uncertain; hosted cleanup remained fenced through the dispatch lease and private job timeout.",
+    { cause },
+  );
+}
+
+export async function holdUnreceiptedDispatchFence({ deadlineMs, now = Date.now, sleepImpl = sleep }) {
+  while (now() < deadlineMs) {
+    await sleepImpl(Math.min(POLL_MS, deadlineMs - now()));
   }
 }
 
@@ -250,44 +419,56 @@ export function inspectPrivateRunActionStatus(status, label) {
 async function cancelAndWaitForPrivateRun({
   encodedRepository,
   expectedSha,
+  fetchImpl,
+  fetchJsonImpl,
+  now,
   runId,
   runUrl,
-  token,
+  sleepImpl,
+  tokenSupplier,
 }) {
   await requestPrivateRunAction({
+    fetchImpl,
     label: "private Android workflow cancellation",
-    token,
+    tokenSupplier,
     url: `https://api.github.com/repos/${encodedRepository}/actions/runs/${runId}/cancel`,
   });
   if (await waitForPrivateRunTerminal({
-    deadlineMs: Date.now() + PRIVATE_RUN_CANCEL_GRACE_MS,
+    deadlineMs: now() + PRIVATE_RUN_CANCEL_GRACE_MS,
     expectedSha,
+    fetchJsonImpl,
+    now,
     runId,
     runUrl,
-    token,
+    sleepImpl,
+    tokenSupplier,
   })) {
     return;
   }
 
   await requestPrivateRunAction({
+    fetchImpl,
     label: "private Android workflow force-cancellation",
-    token,
+    tokenSupplier,
     url: `https://api.github.com/repos/${encodedRepository}/actions/runs/${runId}/force-cancel`,
   });
   if (!await waitForPrivateRunTerminal({
-    deadlineMs: Date.now() + PRIVATE_RUN_FORCE_CANCEL_TIMEOUT_MS,
+    deadlineMs: now() + PRIVATE_RUN_FORCE_CANCEL_TIMEOUT_MS,
     expectedSha,
+    fetchJsonImpl,
+    now,
     runId,
     runUrl,
-    token,
+    sleepImpl,
+    tokenSupplier,
   })) {
     throw new Error("Private Android workflow did not become terminal after force-cancellation.");
   }
 }
 
-async function requestPrivateRunAction({ label, token, url }) {
-  const response = await fetch(url, {
-    headers: githubHeaders(token),
+async function requestPrivateRunAction({ fetchImpl, label, tokenSupplier, url }) {
+  const response = await fetchImpl(url, {
+    headers: githubHeaders(await tokenSupplier()),
     method: "POST",
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
@@ -301,18 +482,21 @@ async function requestPrivateRunAction({ label, token, url }) {
 async function waitForPrivateRunTerminal({
   deadlineMs,
   expectedSha,
+  fetchJsonImpl,
+  now,
   runId,
   runUrl,
-  token,
+  sleepImpl,
+  tokenSupplier,
 }) {
-  while (Date.now() < deadlineMs) {
-    const run = inspectPrivateRun(await fetchJson(
+  while (now() < deadlineMs) {
+    const run = inspectPrivateRun(await fetchJsonImpl(
       runUrl,
-      { headers: githubHeaders(token) },
+      { headers: githubHeaders(await tokenSupplier()) },
       "private Android workflow cancellation status",
     ), { runId, sha: expectedSha });
     if (run.complete) return true;
-    await sleep(POLL_MS);
+    await sleepImpl(POLL_MS);
   }
   return false;
 }
@@ -320,15 +504,18 @@ async function waitForPrivateRunTerminal({
 async function holdPrivateRunExecutionFence({
   deadlineMs,
   expectedSha,
+  fetchJsonImpl,
+  now,
   runId,
   runUrl,
-  token,
+  sleepImpl,
+  tokenSupplier,
 }) {
-  while (Date.now() < deadlineMs) {
+  while (now() < deadlineMs) {
     try {
-      const run = inspectPrivateRun(await fetchJson(
+      const run = inspectPrivateRun(await fetchJsonImpl(
         runUrl,
-        { headers: githubHeaders(token) },
+        { headers: githubHeaders(await tokenSupplier()) },
         "private Android workflow fallback fence status",
       ), { runId, sha: expectedSha });
       if (run.complete) return;
@@ -337,19 +524,22 @@ async function holdPrivateRunExecutionFence({
       // Keep the shared identity/deployment lock until no run that passed the
       // dispatch lease can remain executable under the private job timeout.
     }
-    const remainingMs = deadlineMs - Date.now();
-    if (remainingMs > 0) await sleep(Math.min(POLL_MS, remainingMs));
+    const remainingMs = deadlineMs - now();
+    if (remainingMs > 0) await sleepImpl(Math.min(POLL_MS, remainingMs));
   }
 }
 
-async function revalidateExactPrHead({ expectedSha, prNumber, repository, token }) {
+async function revalidateExactPrHead(
+  { expectedSha, prNumber, repository, token },
+  fetchJsonImpl = fetchJson,
+) {
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
     throw new Error("PR number must be a positive integer.");
   }
   const safeWebRepository = safeRepository(repository);
   requiredString(token, "Web GitHub token");
   const encodedRepository = safeWebRepository.split("/").map(encodeURIComponent).join("/");
-  inspectExactPrHead(await fetchJson(
+  inspectExactPrHead(await fetchJsonImpl(
     `https://api.github.com/repos/${encodedRepository}/pulls/${prNumber}`,
     { headers: githubHeaders(token) },
     "Web PR head revalidation",
@@ -359,6 +549,8 @@ async function revalidateExactPrHead({ expectedSha, prNumber, repository, token 
 
 async function proveCurrentProductionAlias(expectedSha) {
   const childEnv = { ...process.env };
+  delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_ID;
+  delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY;
   delete childEnv.NATIVE_ANDROID_E2E_GITHUB_TOKEN;
   const currentSha = (await runBoundedCommand({
     argv: [
@@ -385,6 +577,19 @@ function githubHeaders(token) {
     "user-agent": "murph-native-android-hosted-e2e",
     "x-github-api-version": GITHUB_API_VERSION,
   };
+}
+
+function githubAppHeaders(jwt) {
+  return {
+    accept: "application/vnd.github+json",
+    authorization: `Bearer ${jwt}`,
+    "user-agent": "murph-native-android-hosted-e2e",
+    "x-github-api-version": GITHUB_API_VERSION,
+  };
+}
+
+function base64UrlJson(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
 function safeRepository(value) {

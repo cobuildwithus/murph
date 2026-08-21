@@ -1451,9 +1451,11 @@ Last verified: 2026-08-20
   Android dispatch accepts only a separately configured reviewed commit behind
   an immutable lightweight private-repository tag, an exact hosted Web SHA and
   origin, and a short-lived lease. The public controller may hold only Actions
-  write and Contents read in that private repository; it never receives the
-  fixed OTP, reads private job logs or artifacts, or executes candidate code
-  with credentials. The private workflow keeps raw instrumentation/provider
+  write and Contents read in that private repository. Its existing protected
+  process mints repository-scoped installation tokens just in time, refreshes
+  them before expiry, and removes the App private key from the environment
+  before child commands; it never receives the fixed OTP, reads private job
+  logs or artifacts, or executes candidate code with credentials. The private workflow keeps raw instrumentation/provider
   output in runner-temporary storage, publishes only one closed allowlisted
   stage summary, and removes all raw output before completion. Its production
   canary owns no database, Privy, or Junction reset authority.

@@ -75,7 +75,8 @@ its original queue identity. From an authenticated operator checkout, use
 `node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
 open same-repository human-authored PR and exact current head before rerunning a
 successful exact-head Repo Hygiene owner, whose completion creates a fresh
-native waiter without widening the protected environment or secret boundary.
+applicable iOS and Android waiter without widening the protected environment or
+secret boundary.
 A status description that records a real pass is production-shaped evidence:
 exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
 Connect native flow.
@@ -97,9 +98,13 @@ PR reset ownership is `orchestrator_owned_reset`, while production canary mode
 is non-destructive and receives none of that authority. Controller child
 commands and direct PostgreSQL reads are explicitly time-bounded.
 The Android controller additionally binds the exact private Android commit to
-an immutable lightweight tag and a short dispatch lease. If a dispatched run
-cannot be proven terminal after cancellation, cleanup remains fenced through
-the lease, the private job timeout, and a terminal grace window. Raw Android
+an immutable lightweight tag and a short dispatch lease. It mints short-lived
+GitHub App installation credentials inside the existing protected controller
+owner and refreshes them before expiry; the App private key is removed from the
+process environment before any child command. If a dispatch receipt is
+uncertain, or a known run cannot be proven terminal after cancellation, cleanup
+remains fenced through the lease, the private job timeout, and a terminal grace
+window. Raw Android
 instrumentation output and provider prose are never uploaded or published;
 only the private workflow's closed allowlisted stage summary may reach Actions
 output. See `agent-docs/operations/native-android-hosted-e2e.md`.

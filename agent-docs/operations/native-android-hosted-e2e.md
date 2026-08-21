@@ -84,7 +84,12 @@ Required secrets:
 - `NATIVE_ANDROID_E2E_VERCEL_TOKEN`
 
 The GitHub App installation must be limited to the private Android repository
-and grant only Actions write and Contents read. The protected phone must be the
+and grant only Actions write and Contents read. The trusted controller mints
+and refreshes repository-scoped installation tokens itself so the documented
+dispatch lease and private-run timeout cannot outlive a credential minted
+before deployment. It removes the App id and private key from its process
+environment immediately after constructing that ephemeral supplier; child
+commands and summaries never receive either value. The protected phone must be the
 same reusable E.164 identity configured in the Android repository's protected
 workflow environment. `NATIVE_ANDROID_E2E_PRIVY_APP_ID` must identify the same
 Privy application as the private Android environment's public app id, and that

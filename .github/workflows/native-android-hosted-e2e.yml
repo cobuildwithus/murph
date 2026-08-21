@@ -154,17 +154,6 @@ jobs:
       - name: Verify Android dispatcher contracts
         run: node --test scripts/native-android-hosted-e2e.test.mjs
 
-      - name: Mint private Android workflow token
-        id: android-app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
-          private-key: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}
-          repositories: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
-          permission-actions: write
-          permission-contents: read
-
       - name: Run exact candidate lifecycle and private Android journey
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -172,7 +161,8 @@ jobs:
           NATIVE_ANDROID_E2E_ANDROID_REF: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REF }}
           NATIVE_ANDROID_E2E_ANDROID_REPOSITORY: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}/${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
           NATIVE_ANDROID_E2E_ANDROID_WORKFLOW: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_WORKFLOW }}
-          NATIVE_ANDROID_E2E_GITHUB_TOKEN: ${{ steps.android-app-token.outputs.token }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
           NATIVE_ANDROID_E2E_WEB_GITHUB_TOKEN: ${{ github.token }}
           # The existing hosted-native deployment and identity modules remain
           # the single owner. Android maps its protected values into that
@@ -219,6 +209,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           LIVE_RESULT: ${{ needs.pr-live.result }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           SELECT_RESULT: ${{ needs.select-pr.result }}
           SELECTED: ${{ needs.select-pr.outputs.selected }}
@@ -231,7 +222,7 @@ jobs:
           state=failure
           description='Hosted-native Android selection failed; no passing proof was recorded.'
           if [[ "${RUN_ATTEMPT}" != 1 ]]; then
-            description='Rerun the upstream Repo Hygiene run; controller reruns do not enter the destructive live queue.'
+            description="Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER}; native reruns do not enter the live queue."
           elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
             description='Repo Hygiene did not pass; hosted-native Android was not run.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
@@ -262,7 +253,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 110
     concurrency:
-      group: native-ios-production-canary-live
+      group: native-android-production-canary-live
       queue: max
       cancel-in-progress: false
     steps:
@@ -297,17 +288,6 @@ jobs:
           git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
           git merge-base --is-ancestor "${DEPLOYED_SHA}" origin/main || { echo "::error::Production canary refuses a deployment outside main history."; exit 1; }
 
-      - name: Mint private Android workflow token
-        id: android-app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
-          private-key: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
-          owner: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}
-          repositories: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
-          permission-actions: write
-          permission-contents: read
-
       - name: Verify production alias and dispatch non-destructive canary
         env:
           DEPLOYED_SHA: ${{ github.event.deployment.sha }}
@@ -319,7 +299,8 @@ jobs:
           NATIVE_ANDROID_E2E_ANDROID_REF: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REF }}
           NATIVE_ANDROID_E2E_ANDROID_REPOSITORY: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}/${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
           NATIVE_ANDROID_E2E_ANDROID_WORKFLOW: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_WORKFLOW }}
-          NATIVE_ANDROID_E2E_GITHUB_TOKEN: ${{ steps.android-app-token.outputs.token }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
           PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
         shell: bash
         run: |

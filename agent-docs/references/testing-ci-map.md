@@ -968,13 +968,17 @@ keep the one-second presentation-only deadline and late-result rejection.
   Junction namespace, and Vercel target. Its public-to-private contract v1 adds
   the exact Android SHA, immutable lightweight tag, and short dispatch expiry
   to the exact Web SHA/origin, mode, correlation id, and identity lifecycle.
-  The returned private run id must stay bound to that tag's commit. Uncertain
-  cancellation fences cleanup until no leased 55-minute private job can remain
-  executable. Native success is necessary but not sufficient: PR orchestration
+  The returned private run id must stay bound to that tag's commit. An
+  unreceipted possible dispatch and uncertain cancellation both fence cleanup
+  until no leased 55-minute private job can remain executable. The controller
+  mints repository-scoped GitHub App installation tokens just in time and
+  refreshes them before the documented run window can outlive one credential.
+  Native success is necessary but not sufficient: PR orchestration
   also requires a fresh Privy principal, the exact hosted member, and a real
   connected Junction `health_connect` provider before cleanup. Production
-  canary dispatch is non-destructive and first proves the production alias
-  still resolves to the deployment SHA. The protected configuration, rotation,
+  canary dispatch is non-destructive, uses its own lane concurrency because it
+  has no shared reset authority, and first proves the production alias still
+  resolves to the deployment SHA. The protected configuration, rotation,
   privacy, and physical-device boundaries are owned by
   `agent-docs/operations/native-android-hosted-e2e.md`.
 - PR mode is real and hosted. Trusted default-branch orchestration first enumerates active deployments in the dedicated E2E Vercel project, rejects any production/foreign deployment, retires only lane-marked deployments, then completely enumerates the configured Junction sandbox team. It validates every returned team id, ignores unrelated client-user-id namespaces, rejects more than one user in the explicit E2E namespace, deletes only the sole namespace-owned user, and proves that namespace empty without treating the shared team as a cleanup target. It then resets the explicitly E2E-named isolated Postgres database through Prisma and deletes the fixed user in the dedicated Privy app. The exact PR SHA deploys to Vercel custom environment `native-ios-e2e`; that target applies the PR's real Prisma migrations before the normal minified Web build and consumes its runtime configuration directly from the dedicated Vercel custom environment. Before native dispatch, a bounded request to the exact generated origin must succeed anonymously without redirects or a Vercel protection bypass.
