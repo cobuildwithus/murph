@@ -261,14 +261,20 @@ function MemberUsageClientSurface({
         )
       )
     ) {
+      const storageFailureMessage =
+        "This browser could not preserve the latest reset progress, so no further batch was started. Keep this tab open and retry, or abandon the operation explicitly.";
       setResetAllStateValue({
         ...nextState,
-        failure: {
-          ambiguous: false,
-          memberId: null,
-          message:
-            "This browser could not preserve the latest reset progress, so no further batch was started. Keep this tab open and retry, or abandon the operation explicitly.",
-        },
+        failure: nextState.failure
+          ? {
+              ...nextState.failure,
+              message: `${nextState.failure.message} ${storageFailureMessage}`,
+            }
+          : {
+              ambiguous: false,
+              memberId: null,
+              message: storageFailureMessage,
+            },
         phase: "paused",
       });
       return false;

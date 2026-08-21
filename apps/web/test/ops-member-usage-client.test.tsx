@@ -788,6 +788,35 @@ describe("MemberUsageClient", () => {
     expect(randomUuidMock).toHaveBeenCalledTimes(1);
   });
 
+  test("keeps an ambiguous outcome visible when its pause cannot persist", async () => {
+    const sessionStorage = createMemoryStorage();
+    fetchMock.mockImplementationOnce(async () => {
+      sessionStorage.setItem = () => {
+        throw new Error("Storage unavailable");
+      };
+      throw new Error("Connection closed");
+    });
+    const rendered = await renderClientComponent(
+      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+      { sessionStorage },
+    );
+    cleanupRender = rendered.cleanup;
+
+    await openAndConfirmResetEveryone(rendered);
+    await vi.waitFor(() => {
+      expect(rendered.container.textContent).toContain("Reset everyone paused");
+    });
+
+    expect(rendered.container.textContent).toContain("Connection closed");
+    expect(rendered.container.textContent).toContain(
+      "This browser could not preserve the latest reset progress",
+    );
+    expect(rendered.container.textContent).toContain(
+      "No unacknowledged outcome was added to the totals below.",
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   test("does not restore a saved operation for a different operator", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       counts: {
