@@ -286,7 +286,6 @@ function selectAssistantGroupProviderResult(
           ?? providerResult.responseDeliveryContextOrdinal,
         ]
       : [],
-    precedingResponseSegments: [],
     reactions: noReplySelected
       ? providerResult.reactions?.slice(-1)
       : [],
@@ -842,6 +841,9 @@ export async function sendAssistantMessageLocal(
               deliver: async (progressInput) => {
                 const deliveryContextOrdinal =
                   progressInput.deliveryContextOrdinal ?? 0
+                const absoluteDeliveryContextOrdinal =
+                  providerRequestDeliveryContextBaseOrdinal +
+                  deliveryContextOrdinal
                 const { targetInputId, ...untargetedProgressInput } = progressInput
                 if (targetInputId) {
                   await beforeHostedToolExecution(deliveryContextOrdinal)
@@ -853,7 +855,7 @@ export async function sendAssistantMessageLocal(
                         await applyAssistantAcceptedMessageTargetToDeliveryInput({
                           acceptedInputIds:
                             resolveAcceptedInputIdsThroughDeliveryContextOrdinal(
-                              deliveryContextOrdinal,
+                              absoluteDeliveryContextOrdinal,
                             ),
                           action: 'native-reply',
                           input: progressInput.input,
@@ -1106,6 +1108,7 @@ export async function sendAssistantMessageLocal(
         let userPromptPersistedToTranscript = currentUserTurn.userPersisted
         let providerRequestOrdinal = 0
         let providerRequestDeliveryContextBaseOrdinal = 0
+        let nextUsageRecordOrdinal = 0
         const persistInitialUserPromptToTranscriptIfNeeded = async (persistInput: {
           detail: string
           prompt: string
@@ -1679,13 +1682,15 @@ export async function sendAssistantMessageLocal(
               })
             }
             const usageRecordStartedAt = Date.now()
+            const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
+            nextUsageRecordOrdinal += 1
             await recordAssistantUsageEvent({
               executionContext,
               ...(providerRequestStartedAtMs === null
                 ? {}
                 : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
               providerRequestAcceptedInputIds,
-              providerRequestOrdinal,
+              providerRequestOrdinal: primaryUsageRecordOrdinal,
               providerRequestOutcome: providerOutcome.providerRequestOutcome,
               providerResult: failedProviderResult,
               turnId: currentUserTurn.turnId,
@@ -1699,8 +1704,14 @@ export async function sendAssistantMessageLocal(
               stage: 'usage-recorded',
               stepElapsedMs: elapsedSince(usageRecordStartedAt),
             })
+            const additionalUsages = providerOutcome.additionalUsages?.map(
+              (usageDraft) => ({
+                ...usageDraft,
+                providerRequestOrdinal: nextUsageRecordOrdinal++,
+              }),
+            )
             await recordAdditionalAssistantUsageEvents({
-              additionalUsages: providerOutcome.additionalUsages,
+              additionalUsages,
               effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
               executionContext,
               providerRequestAcceptedInputIds,
@@ -1930,13 +1941,15 @@ export async function sendAssistantMessageLocal(
             })
           }
           const usageRecordStartedAt = Date.now()
+          const primaryUsageRecordOrdinal = nextUsageRecordOrdinal
+          nextUsageRecordOrdinal += 1
           await recordAssistantUsageEvent({
             executionContext,
             ...(providerRequestStartedAtMs === null
               ? {}
               : { occurredAt: new Date(providerRequestStartedAtMs).toISOString() }),
             providerRequestAcceptedInputIds,
-            providerRequestOrdinal,
+            providerRequestOrdinal: primaryUsageRecordOrdinal,
             providerResult: currentProviderResult,
             turnId: currentUserTurn.turnId,
           })
@@ -1949,8 +1962,14 @@ export async function sendAssistantMessageLocal(
             stage: 'usage-recorded',
             stepElapsedMs: elapsedSince(usageRecordStartedAt),
           })
+          const additionalUsages = currentProviderResult.additionalUsages?.map(
+            (usageDraft) => ({
+              ...usageDraft,
+              providerRequestOrdinal: nextUsageRecordOrdinal++,
+            }),
+          )
           await recordAdditionalAssistantUsageEvents({
-            additionalUsages: currentProviderResult.additionalUsages,
+            additionalUsages,
             effectiveEnv: currentInput.turnEnvironment?.env ?? process.env,
             executionContext,
             providerRequestAcceptedInputIds,

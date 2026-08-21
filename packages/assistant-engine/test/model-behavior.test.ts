@@ -243,8 +243,8 @@ describe('assistant execution prompt contract', () => {
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Floor follows authority, not punctuation.',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Apply this gate before any group reply-cadence pause',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'reply-cadence pause',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
@@ -253,10 +253,7 @@ describe('assistant execution prompt contract', () => {
       'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without text or reaction immediately. Do not sleep on that terminal human-private branch.',
-    )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'The cadence pause applies only after this gate says a text reply is warranted; a human-owned or otherwise silent beat still finishes immediately without sleeping.',
+      'finish without text or reaction.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
@@ -265,10 +262,10 @@ describe('assistant execution prompt contract', () => {
       'say plainly that you do not know; do not speculate or turn the limit into a bit.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without a reply or reaction immediately',
+      'finish without a reply or reaction',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Do not sleep or watch for a follow-up',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'sleep',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'A complaint that Murph inserted itself into a human-owned beat is a participation boundary, not a new comedic premise.',

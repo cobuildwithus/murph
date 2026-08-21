@@ -132,7 +132,11 @@ Updated: 2026-08-20
   keep, edit, silence, request-1 live steering, the two-request cap, and
   request-1 failure without stale-draft delivery.
 - Passed the Assistant Engine typecheck, the six highest-risk reconsideration
-  tests, and a 294-test focused controller/prompt/planning/runtime regression set.
+  cases, and a 375-test focused controller/prompt/planning/runtime regression set
+  with the package's CI memory ceiling.
+- Consolidated the new local-service scenarios into one module load; the exact
+  CI-like 6 GB coverage invocation now completes all 104 tests in the large
+  runtime file instead of exhausting the worker while rebuilding the same graph.
 - Added and validated the `group-replies-follow-current-beat` changelog item for
   PR #2107; 57 focused changelog tests and the Web typecheck pass.
 - Pinned real Codex App Server capture with identical synthetic direct/group
@@ -141,7 +145,20 @@ Updated: 2026-08-20
   22,966 / 105,932 to 22,733 / 104,688 (-233 tokens / -1,244 bytes), entirely
   from removing the obsolete group cadence prompt. The temporary capture hook,
   captures, tokenizer install, and detached base worktree were removed.
-- Remaining: exact pushed-head ReviewGPT and CI, finding remediation, parent
+- The preliminary ReviewGPT findings are triaged: the obsolete product matrix
+  and prompt cadence language are removed, and reaction-only reconsideration is
+  covered. The proposed host-side urgency/silence classifier was rejected because
+  it conflicts with the explicit all-results-provisional invariant and would add
+  a second policy engine while reintroducing premature no-reply commitment.
+- Final ReviewGPT round 1 found and the candidate now corrects three concrete
+  seams: usage records allocate turn-local monotonic ordinals independently from
+  logical request ordinals; only the losing request's segments are discarded,
+  while the selected request's rebased completed segments remain canonical; and
+  request-1 targeted progress resolves accepted IDs through its absolute delivery
+  context. Direct proof covers image/subagent/tool usage uniqueness, request-1
+  local target ordinals zero and one, quiet rich segments, selected segments
+  followed by silence, and lossless request-0 supersession.
+- Remaining: corrected pushed-head ReviewGPT round 2 and CI, parent
   final review, plan closure, and merge-tree proof. The PR remains unmerged.
 
 ## Product UX walkthrough
@@ -163,6 +180,11 @@ Updated: 2026-08-20
 - Failure and silence: request-1 failure rejects the joined turn without draft
   transcript, terminal evidence, or dispatch; selected silence commits one
   no-reply outcome and clears contradictory provisional response artifacts.
+- Initial safety and silence: the host deliberately does not invent a second
+  urgency or floor classifier. Request 0's text, reaction, or no-reply result is
+  held under the same fixed four-second bound so late accepted context can be
+  reconsidered once; a request-0 failure after provisional no-reply remains
+  retryable rather than terminalizing an unselected decision.
 - Excluded direct, email, scheduled, notification, and non-auto-reply journeys
   retain their existing eligibility path. No frontend presentation changes, so
   screenshots would not add evidence beyond the production-shaped timing and

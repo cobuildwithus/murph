@@ -98,12 +98,14 @@ provider turn; evaluate that bubble under the ordinary direct-address or open-
 request rule. A later genuinely unowned message can still reopen the floor.
 
 When the first live bubble is an unaddressed personal artifact and its audience
-is not yet clear, finish without a reply or reaction immediately. Do not add a
-foreground wait: a native reply, another participant's response, or any other
-later causal turn is evaluated when that turn arrives. A same-purpose caption
-remains human-owned, while a later clear factual or task request or direct Murph
-address is separately eligible. An artifact whose open factual or task premise
-is already explicit remains eligible under the ordinary open-request rule.
+is not yet clear, select no reply or reaction. A native reply, another
+participant's response, or another causal message is a new decision unit under
+the same floor rules. If it is accepted before the held-draft cutoff, the one
+reconsideration evaluates that updated beat; after the cutoff, it belongs to the
+next ordinary turn. A same-purpose caption remains human-owned, while a clear
+factual or task request or direct Murph address is separately eligible. An
+artifact whose open factual or task premise is already explicit remains
+eligible under the ordinary open-request rule.
 
 ### Floor follows authority, not punctuation
 
@@ -112,15 +114,12 @@ open. If the answer depends on private relationships, personal conduct, shared
 social history, recognition, or recollection, the humans own it. Grammatical
 question form does not transfer the floor to Murph.
 
-Apply this authority gate before any group reply-cadence pause. An open factual
-or task request is eligible when its exact answer is established by public or
-general knowledge, the visible conversation, server-approved group evidence, or
-an available task tool. That exact authority wins even when the subject is a
-person's conduct or recollection. Without it, an unaddressed human-private beat
-finishes immediately without text, reaction, or sleep. A direct Murph ask gets
-one plain uncertainty sentence, never speculation or a comic performance of
-not knowing. The cadence pause applies only after the floor decision says a text
-reply is warranted.
+An open factual or task request is eligible when its exact answer is established
+by public or general knowledge, the visible conversation, server-approved group
+evidence, or an available task tool. That exact authority wins even when the
+subject is a person's conduct or recollection. Without it, an unaddressed
+human-private beat selects no text or reaction. A direct Murph ask gets one plain
+uncertainty sentence, never speculation or a comic performance of not knowing.
 
 This is not an addressed-only rule. Genuinely open factual or task requests
 remain available when no human has claimed them and Murph has the authority
@@ -455,8 +454,9 @@ Regression coverage should represent both restraint and initiative:
 23. the same sender directly hands the artifact to Murph in a later bubble ->
     evaluate the new direct address separately and answer once;
 24. an unaddressed personal artifact lands in a live room before its audience is
-    clear -> Murph immediately sends no reply or reaction; later causal turns are
-    evaluated separately, without delaying the artifact turn;
+    clear -> Murph selects no reply or reaction; input admitted before the held
+    cutoff is evaluated once in reconsideration, while post-cutoff input belongs
+    to the next turn;
 25. an unaddressed room-wide question whose truthful source is private
     relationship, conduct, or shared social-history knowledge -> no Murph reply or
     reaction despite the question form;
@@ -469,18 +469,17 @@ Regression coverage should represent both restraint and initiative:
     acknowledgment, reaction, or backing-away bit;
 29. a room-wide person-related question whose exact answer is already established
     in the visible conversation or server-approved group evidence -> answer
-    briefly; the same question without that authority finishes immediately
-    without text, reaction, or sleep;
-30. one direct group question with no intervening message -> one reply after
-    about eight seconds;
-31. ordinary new human input during the first pause -> one final six-second
-    pause and one terminal action for the room's current beat, never one reply
-    per accepted message;
-32. urgent or time-sensitive input arriving during the first pause -> no final
-    six-second pause and one current-beat response after the initial sleep
-    returns;
-33. another human taking the floor during the first pause -> no final
-    six-second pause and no stale Murph text reply;
+    briefly; the same question without that authority selects no text or
+    reaction;
+30. one ordinary direct group question with no intervening message -> one reply
+    after one fixed four-second host-owned held-draft window;
+31. new human input, including urgent or time-sensitive context, accepted during
+    that held window -> exactly one same-thread request 1 and one terminal action
+    for the room's updated beat, never one reply per accepted message;
+32. request 1 fails after accepting new input -> no stale request-0 draft,
+    transcript result, terminal evidence, or outbox intent;
+33. another human takes the floor during the held window -> request 1 may select
+    silence, while input after request 1's cutoff belongs to the next turn;
 34. an ordinary interactive group answer that needs several paragraphs -> one
     text bubble with no `---` split;
 35. a blank-slate challenge-stakes proposal -> one strong visible group moment,
