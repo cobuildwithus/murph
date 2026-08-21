@@ -71,15 +71,19 @@ There is no automatic retry, notification, or background follow-up.
 - Recovery does not claim to recall or cancel a mailpiece already accepted by
   the print provider.
 - Recovery does not clear a recent or provider-indeterminate outcome.
-- Recovery adds no scheduler, queue, persisted recovery state, provider id, or
-  user-visible history store.
+- Recovery adds no scheduler, queue, provider id, retry lifecycle, or
+  user-visible history store. It does add one minimal accepted-input claim and
+  result row because assistant-turn replay otherwise could advance a second
+  guard with the same explicit request.
 
 ## Implementation
 
 1. Add a bounded recovery request/response and additive Web-control route to the
    hosted-execution contract.
 2. Reuse the existing Web-owned oldest-guard lookup and reconciliation
-   transitions behind current member or group-participant authority.
+   transitions behind current member or group-participant authority, with one
+   durable accepted-input binding that prevents a replay from selecting a
+   different guard.
 3. Add a `murph.resolve_physical_note` dynamic tool that requires the exact
    current accepted message and reports literal provider-backed outcomes.
 4. Update the physical-note product/skill contracts and add the member-visible
@@ -92,7 +96,7 @@ There is no automatic retry, notification, or background follow-up.
 
 ## Deployment
 
-Deploy Web's additive route and response producer first. Then deploy the
+Deploy Web's additive recovery table, route, and response producer first. Then deploy the
 Cloudflare allowlist/port and runner bundle with immediate container convergence
 and fingerprint proof. An older runner never calls the new route; a new runner
 against old Web would receive a route failure and cannot provide recovery.
@@ -119,6 +123,10 @@ Result: Ready.
   entry and again immediately before the provider read.
 - Already clear or unavailable: no provider read occurs for an already-clear
   member, and missing provider configuration leaves an existing guard intact.
+- Turn replay: a completed accepted input returns its stored checked-guard
+  response with zero additional provider reads, while an interrupted result
+  remains unconfirmed and cannot advance a second guard. A new accepted input
+  is required to check the next guard.
 
 The walkthrough uses the production-shaped Web owner, Cloudflare control port,
 and Assistant Engine tool-result tests. A rendered image adds no material proof
@@ -167,8 +175,20 @@ not Web presentation.
   guard and `remainingUnresolved` derives from the remaining-guard read already
   on the path. No state owner, query, provider call, retry, or lifecycle was
   added.
-- Corrected-head focused proof passes: 32 Web service tests, 16 Cloudflare port
-  tests, 32 Assistant physical-note tests, the pinned deferred provider-boundary
+- Final ReviewGPT round 3 found an equal-timestamp guard-selection ambiguity.
+  Checked-row status now derives only from the exact reloaded checked row, and
+  guard selection uses the total `(createdAt, id)` order with fake-store and
+  real-PostgreSQL proof.
+- Final ReviewGPT round 4 verified every earlier correction and required a
+  second retrospective: an enclosing assistant-turn replay could reuse one
+  accepted input after the first guard terminalized and select a second guard.
+  The retrospective revised the earlier no-state decision and chose one narrow
+  Web-owned accepted-input claim/result row. Completed replay returns the
+  stored response with no provider call; interrupted replay remains unconfirmed;
+  only a new accepted input may advance the next guard.
+- Corrected-head focused proof passes: 36 Web service tests, 5 storage-contract
+  tests, 10 real-PostgreSQL admission/replay tests, 16 Cloudflare port tests,
+  36 Assistant physical-note tests, 6 hosted-contract tests, the pinned deferred provider-boundary
   scenario, and all affected Web, Cloudflare, hosted-execution, Assistant
   Engine, and Assistant Runtime typechecks. The production runner bundle is
   9,390,194 bytes against a 9,397,704-byte ceiling, leaving 7,510 bytes of
@@ -180,6 +200,13 @@ not Web presentation.
 - Candidate is published as PR #2099; the next final ReviewGPT round, canonical
   corrected-head verification, and exact-head CI remain open before plan
   closure.
+- Round-4 remediation proof additionally applies all hosted Web migrations to
+  an isolated local PostgreSQL database, preserves the replay fence after the
+  checked note pointer is deleted, returns the same completed response with
+  zero additional provider reads or usage settlements, leaves an interrupted
+  claim unconfirmed after restart, and permits only a new accepted input to
+  advance the next guard. Focused Web lint/typecheck, Prisma validation and
+  generation, documentation drift, and documentation gardening pass.
 
 Status: active
 Updated: 2026-08-20

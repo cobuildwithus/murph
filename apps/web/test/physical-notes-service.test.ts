@@ -1,5 +1,6 @@
 import type {
   HostedPhysicalNote,
+  HostedPhysicalNoteRecovery,
   Prisma,
   PrismaClient,
 } from "@prisma/client";
@@ -108,8 +109,31 @@ type PhysicalNoteUpdateData = Partial<Pick<
   | "status"
 >>;
 
+type PhysicalNoteRecoveryCreateData = Pick<
+  HostedPhysicalNoteRecovery,
+  "memberId" | "originAssistantInputId"
+> & Partial<Pick<
+  HostedPhysicalNoteRecovery,
+  | "physicalNoteId"
+  | "remainingUnresolved"
+  | "resultStatus"
+  | "retryAfter"
+>>;
+
+type PhysicalNoteRecoveryUpdateData = Partial<Pick<
+  HostedPhysicalNoteRecovery,
+  "remainingUnresolved" | "resultStatus" | "retryAfter"
+>>;
+
+type PhysicalNoteRecoveryWhere = Partial<Pick<
+  HostedPhysicalNoteRecovery,
+  "memberId" | "originAssistantInputId" | "resultStatus"
+>>;
+
 interface PhysicalNoteStore {
+  allRecoveries(): HostedPhysicalNoteRecovery[];
   allRows(): HostedPhysicalNote[];
+  failNextRecoveryCompletion(): void;
   prisma: PrismaClient;
   queueFindFirstRowIds(...ids: string[]): void;
   setCreatedAt(id: string, createdAt: Date): void;
@@ -1260,13 +1284,15 @@ describe("createHostedPhysicalNote", () => {
 
 describe("recoverHostedPhysicalNote", () => {
   it("returns clear without a provider read when no unresolved guard exists", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
     const store = createPhysicalNoteStore();
     const provider = createPhysicalNoteRuntime([]);
+    const originAssistantInputId = recoveryOrigin(200);
 
     await expect(recoverHostedPhysicalNote({
       memberId: MEMBER_ID,
-      originAssistantInputId: buildRequest(1).originAssistantInputId,
+      originAssistantInputId,
       prisma: store.prisma,
       runtime: provider.runtime,
     })).resolves.toEqual({
@@ -1276,6 +1302,156 @@ describe("recoverHostedPhysicalNote", () => {
     });
     expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
     expect(provider.create).not.toHaveBeenCalled();
+
+    const laterFailure = createPhysicalNoteRuntime([{
+      kind: "definite_failure",
+      reason: "unknown",
+      status: 422,
+    }]);
+    const later = await createHostedPhysicalNote({
+      ...buildRequest(200),
+      prisma: store.prisma,
+      runtime: laterFailure.runtime,
+    });
+    store.setFailureReason(later.physicalNoteId!, null);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    });
+    expect(provider.findLetterByNoteId).not.toHaveBeenCalled();
+    expect(store.allRows().find((row) => row.id === later.physicalNoteId))
+      .toMatchObject({ failureReason: null, status: "failed" });
+  });
+
+  it("replays one accepted recovery input without advancing another guard", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(214);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(215),
+      prisma: store.prisma,
+      runtime: createPhysicalNoteRuntime([]).runtime,
+    });
+    const blockedId = blocked.physicalNoteId!;
+    store.setFailureReason(blockedId, null);
+    store.setCreatedAt(
+      guardId,
+      new Date(store.allRows().find((row) => row.id === blockedId)!.createdAt.getTime() - 1),
+    );
+    const firstOrigin = recoveryOrigin(214);
+    const firstProvider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_replay_first_guard",
+    }]);
+
+    const first = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: firstOrigin,
+      prisma: store.prisma,
+      runtime: firstProvider.runtime,
+    });
+    const replay = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: firstOrigin,
+      prisma: store.prisma,
+      runtime: firstProvider.runtime,
+    });
+
+    expect(first).toEqual({
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "accepted",
+    });
+    expect(replay).toEqual(first);
+    expect(firstProvider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
+      failureReason: null,
+      providerLetterId: null,
+      status: "failed",
+    });
+    expect(store.allRecoveries()).toEqual([
+      expect.objectContaining({
+        originAssistantInputId: firstOrigin,
+        physicalNoteId: guardId,
+        resultStatus: "accepted",
+      }),
+    ]);
+
+    const secondProvider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_new_input_second_guard",
+    }]);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: recoveryOrigin(215),
+      prisma: store.prisma,
+      runtime: secondProvider.runtime,
+    })).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "accepted",
+    });
+    expect(secondProvider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
+      providerLetterId: "ltr_new_input_second_guard",
+      status: "accepted",
+    });
+  });
+
+  it("leaves an interrupted recovery replay unconfirmed without advancing another guard", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(216);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(217),
+      prisma: store.prisma,
+      runtime: createPhysicalNoteRuntime([]).runtime,
+    });
+    const blockedId = blocked.physicalNoteId!;
+    store.setFailureReason(blockedId, null);
+    store.setCreatedAt(
+      guardId,
+      new Date(store.allRows().find((row) => row.id === blockedId)!.createdAt.getTime() - 1),
+    );
+    const originAssistantInputId = recoveryOrigin(216);
+    const provider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_interrupted_first_guard",
+    }]);
+    store.failNextRecoveryCompletion();
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).rejects.toThrow("simulated recovery result persistence failure");
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).rejects.toThrow("recovery result is unconfirmed");
+
+    expect(provider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(store.allRows().find((row) => row.id === blockedId)).toMatchObject({
+      failureReason: null,
+      providerLetterId: null,
+      status: "failed",
+    });
+    expect(store.allRecoveries()).toEqual([
+      expect.objectContaining({
+        originAssistantInputId,
+        physicalNoteId: guardId,
+        resultStatus: null,
+      }),
+    ]);
   });
 
   it("restores accepted provider evidence without sending another note", async () => {
@@ -1302,6 +1478,54 @@ describe("recoverHostedPhysicalNote", () => {
       status: "accepted",
     });
     expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("replays a paid accepted recovery without settling usage twice", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const sendProvider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_recovery_free_seed" },
+      { kind: "ambiguous_failure" },
+    ]);
+    await createHostedPhysicalNote({
+      ...buildRequest(218),
+      prisma: store.prisma,
+      runtime: sendProvider.runtime,
+    });
+    const pending = await createHostedPhysicalNote({
+      ...buildRequest(219),
+      prisma: store.prisma,
+      runtime: sendProvider.runtime,
+    });
+    expect(pending).toMatchObject({ complimentary: false, status: "pending" });
+    const originAssistantInputId = recoveryOrigin(219);
+    const recoveryProvider = createPhysicalNoteRuntime([], [{
+      kind: "accepted",
+      providerLetterId: "ltr_recovery_paid_acceptance",
+    }]);
+
+    const recovered = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: recoveryProvider.runtime,
+    });
+    const replay = await recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId,
+      prisma: store.prisma,
+      runtime: recoveryProvider.runtime,
+    });
+
+    expect(recovered).toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "accepted",
+    });
+    expect(replay).toEqual(recovered);
+    expect(recoveryProvider.findLetterByNoteId).toHaveBeenCalledOnce();
+    expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
 
   it("reports accepted evidence separately when another guard remains", async () => {
@@ -1628,6 +1852,10 @@ function buildRequest(sequence: number): HostedPhysicalNoteSendRequest & {
   };
 }
 
+function recoveryOrigin(sequence: number): string {
+  return `ain_${sequence.toString(16).padStart(32, "0")}`;
+}
+
 function createPhysicalNoteRuntime(
   results: readonly LobPhysicalNoteCreateResult[],
   lookupResults: readonly LobPhysicalNoteLookupResult[] = [],
@@ -1663,7 +1891,9 @@ function createPhysicalNoteStore(
   const rows = new Map(
     initialRows.map((row) => [row.id, cloneRow(row)]),
   );
+  const recoveryRows = new Map<string, HostedPhysicalNoteRecovery>();
   const queuedFindFirstRowIds: string[] = [];
+  let failNextRecoveryCompletion = false;
 
   const hostedPhysicalNote = {
     async create(input: {
@@ -1762,6 +1992,68 @@ function createPhysicalNoteStore(
     },
   };
 
+  const hostedPhysicalNoteRecovery = {
+    async create(input: {
+      data: PhysicalNoteRecoveryCreateData;
+    }): Promise<HostedPhysicalNoteRecovery> {
+      if (recoveryRows.has(input.data.originAssistantInputId)) {
+        throw new Error("duplicate physical-note recovery identity");
+      }
+      const now = new Date();
+      const row: HostedPhysicalNoteRecovery = {
+        createdAt: now,
+        physicalNoteId: null,
+        remainingUnresolved: null,
+        resultStatus: null,
+        retryAfter: null,
+        updatedAt: now,
+        ...input.data,
+      };
+      recoveryRows.set(row.originAssistantInputId, row);
+      return cloneRecoveryRow(row);
+    },
+
+    async findUnique(input: {
+      where: { originAssistantInputId: string };
+    }): Promise<HostedPhysicalNoteRecovery | null> {
+      const row = recoveryRows.get(input.where.originAssistantInputId);
+      return row ? cloneRecoveryRow(row) : null;
+    },
+
+    async findUniqueOrThrow(input: {
+      where: { originAssistantInputId: string };
+    }): Promise<HostedPhysicalNoteRecovery> {
+      const row = recoveryRows.get(input.where.originAssistantInputId);
+      if (!row) {
+        throw new Error(
+          `missing physical-note recovery ${input.where.originAssistantInputId}`,
+        );
+      }
+      return cloneRecoveryRow(row);
+    },
+
+    async updateMany(input: {
+      data: PhysicalNoteRecoveryUpdateData;
+      where: PhysicalNoteRecoveryWhere;
+    }): Promise<{ count: number }> {
+      if (failNextRecoveryCompletion) {
+        failNextRecoveryCompletion = false;
+        throw new Error("simulated recovery result persistence failure");
+      }
+      let count = 0;
+      for (const [originAssistantInputId, row] of recoveryRows) {
+        if (!matchesRecoveryWhere(row, input.where)) continue;
+        recoveryRows.set(originAssistantInputId, {
+          ...row,
+          ...input.data,
+          updatedAt: new Date(),
+        });
+        count += 1;
+      }
+      return { count };
+    },
+  };
+
   const prismaLike = {
     async $transaction<T>(
       callback: (tx: Prisma.TransactionClient) => Promise<T>,
@@ -1769,11 +2061,16 @@ function createPhysicalNoteStore(
       return await callback(asPhysicalNoteTransactionClient(prisma));
     },
     hostedPhysicalNote,
+    hostedPhysicalNoteRecovery,
   };
   const prisma = asPhysicalNotePrismaClient(prismaLike);
 
   return {
+    allRecoveries: () => [...recoveryRows.values()].map(cloneRecoveryRow),
     allRows: () => [...rows.values()].map(cloneRow),
+    failNextRecoveryCompletion() {
+      failNextRecoveryCompletion = true;
+    },
     prisma,
     queueFindFirstRowIds(...ids) {
       queuedFindFirstRowIds.push(...ids);
@@ -1832,11 +2129,35 @@ function matchesWhere(
   );
 }
 
+function matchesRecoveryWhere(
+  row: HostedPhysicalNoteRecovery,
+  where: PhysicalNoteRecoveryWhere,
+): boolean {
+  return (
+    (where.memberId === undefined || row.memberId === where.memberId)
+    && (where.originAssistantInputId === undefined
+      || row.originAssistantInputId === where.originAssistantInputId)
+    && (where.resultStatus === undefined
+      || row.resultStatus === where.resultStatus)
+  );
+}
+
 function cloneRow(row: HostedPhysicalNote): HostedPhysicalNote {
   return {
     ...row,
     acceptedAt: row.acceptedAt ? new Date(row.acceptedAt) : null,
     createdAt: new Date(row.createdAt),
+    updatedAt: new Date(row.updatedAt),
+  };
+}
+
+function cloneRecoveryRow(
+  row: HostedPhysicalNoteRecovery,
+): HostedPhysicalNoteRecovery {
+  return {
+    ...row,
+    createdAt: new Date(row.createdAt),
+    retryAfter: row.retryAfter ? new Date(row.retryAfter) : null,
     updatedAt: new Date(row.updatedAt),
   };
 }

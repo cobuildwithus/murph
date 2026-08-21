@@ -656,6 +656,7 @@ model HostedMember {
   computerHandoffs               HostedComputerHandoff[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
+  physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
   productFeedback                HostedProductFeedback[]
   sensitiveActionChallenges      HostedSensitiveActionChallenge[]
   threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
@@ -947,11 +948,29 @@ model HostedPhysicalNote {
   createdAt                DateTime                 @default(now()) @map("created_at")
   updatedAt                DateTime                 @updatedAt @map("updated_at")
   member                   HostedMember             @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  recoveries               HostedPhysicalNoteRecovery[] @relation("HostedPhysicalNoteRecoveryNote")
 
   @@unique([memberId, requestKey])
   @@unique([memberId, complimentaryOfferCode])
   @@index([memberId, status, failureReason, createdAt])
   @@map("hosted_physical_note")
+}
+
+model HostedPhysicalNoteRecovery {
+  originAssistantInputId String              @id @map("origin_assistant_input_id")
+  memberId               String              @map("member_id")
+  physicalNoteId         String?             @map("physical_note_id")
+  resultStatus           String?             @map("result_status")
+  remainingUnresolved    Boolean?            @map("remaining_unresolved")
+  retryAfter             DateTime?           @map("retry_after")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
+  member                 HostedMember        @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  physicalNote           HostedPhysicalNote? @relation("HostedPhysicalNoteRecoveryNote", fields: [physicalNoteId], references: [id], onDelete: SetNull)
+
+  @@index([memberId, createdAt])
+  @@index([physicalNoteId])
+  @@map("hosted_physical_note_recovery")
 }
 
 model HostedMemberIdentity {

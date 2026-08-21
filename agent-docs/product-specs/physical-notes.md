@@ -91,7 +91,7 @@ note.
 
 ## Ownership and persistence
 
-Web owns the sole durable `HostedPhysicalNote` row. It stores only operational
+Web owns the durable `HostedPhysicalNote` effect row. It stores only operational
 facts: beneficiary, request identity and fingerprint, provider id, status,
 complimentary offer code, configured provider cost, pricing version, one
 provider-neutral failure reason, and timestamps. The failure reason is limited
@@ -100,20 +100,29 @@ prior-note unresolved or accepted state, or unknown. It never stores the postal
 address, image URL, artwork, prompt, note text, or Lob's freeform error message.
 
 Standalone recovery reuses that same row and the same oldest-first guard
-transitions; it adds no recovery row or alternate state owner. The current
-accepted direct or authenticated-group message authorizes one provider metadata
-lookup. Provider acceptance settles the guarded row as accepted. Proven absence
-clears it only after the existing 23-hour safety window. A recent absence or an
-indeterminate lookup leaves the guard unchanged and returns `pending`, with the
-end of the safety window when it is still in the future. The response `status`
-describes that checked oldest guard, while `remainingUnresolved` is derived from
-the existing remaining-guard read. An already-clear member returns `clear` with
-`remainingUnresolved: false` without a provider read. When a checked guard
-reaches `accepted` or `clear` but another guard remains, the response preserves
-that checked outcome with `remainingUnresolved: true`; the member learns that
-one reconciliation succeeded and that another explicit request is required.
-Recovery never calls provider create, and there is no transport replay, model
-retry, notification, or automatic follow-up.
+transitions. A narrow Web-owned `HostedPhysicalNoteRecovery` row binds the exact
+accepted assistant input to the selected guard and, after reconciliation, its
+bounded response. The binding is created under the member lock before any
+provider read. A completed replay returns the stored response without selecting
+another guard, calling the provider, or settling usage again. An interrupted
+binding has no stored result; its replay fails closed as unconfirmed and cannot
+touch another guard. A newly accepted explicit input is required to try again.
+The binding remains even if its optional note pointer is later removed.
+
+The current accepted direct or authenticated-group message authorizes one
+provider metadata lookup. Provider acceptance settles the guarded row as
+accepted. Proven absence clears it only after the existing 23-hour safety
+window. A recent absence or an indeterminate lookup leaves the guard unchanged
+and returns `pending`, with the end of the safety window when it is still in the
+future. The response `status` describes that checked oldest guard, while
+`remainingUnresolved` is derived from the existing remaining-guard read. An
+already-clear member stores and returns `clear` with `remainingUnresolved:
+false` without a provider read. When a checked guard reaches `accepted` or
+`clear` but another guard remains, the response preserves that checked outcome
+with `remainingUnresolved: true`; the member learns that one reconciliation
+succeeded and that another explicit request is required. Recovery never calls
+provider create, and there is no transport replay, model retry, notification,
+or automatic follow-up.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -270,8 +279,8 @@ and postal-service retention remain governed by those providers.
 
 ## Deployment
 
-For standalone recovery, deploy Web's additive recovery route and response
-producer first. Then deploy the Cloudflare Web-control allowlist and port plus
+For standalone recovery, deploy Web's additive recovery table, route, and
+response producer first. Then deploy the Cloudflare Web-control allowlist and port plus
 the runner bundle, and require immediate container convergence and fingerprint
 proof. The recovery request is not replayed after transport loss: provider
 metadata reads are safe, but a lost response may hide a durable reconciliation,

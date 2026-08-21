@@ -3713,6 +3713,12 @@ group-avatar path.
 A separately exposed physical-note recovery action is accepted-message-only and
 does not depend on image completion. It authorizes one Web-owned provider metadata
 reconciliation for the oldest unresolved guard, never a provider create or recall.
+Web first claims the exact accepted assistant input in a durable recovery row
+under the member lock and binds it to that selected guard. A completed replay
+returns the stored bounded response without another provider read or transition;
+an interrupted claim remains unconfirmed and fails closed. Thus a restarted
+assistant turn cannot use one accepted request to advance a second guard, and a
+new accepted input is required for each additional reconciliation.
 Direct and authenticated-group authority is rechecked at the Web boundary; recent
 absence and indeterminate evidence remain pending, while only aged proven absence
 can clear the guard. Web returns the checked guard's outcome separately from a
