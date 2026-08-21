@@ -97,13 +97,14 @@ export default function EnvironmentPageClient({
 }: {
   contactOptions: readonly MurphContactOption[];
 }) {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, dataVersion, error, refresh, status } = useBrowserVault();
   const [voiceRefreshState, setVoiceRefreshState] = useState<VoiceRefreshState>(
     { status: "idle" },
   );
   const checkedInitialVoiceProcessingRef = useRef(false);
   const initialVoiceProcessingCheckRef = useRef(0);
   const voiceRefreshBaselineRef = useRef<string | null>(null);
+  const voiceRefreshBaselineDataVersionRef = useRef<string | null>(null);
   const voiceRefreshStartedAtRef = useRef<number | null>(null);
   const voiceRecheckRequestedAtRef = useRef(0);
   const voiceVaultRefreshRequestedRef = useRef(false);
@@ -144,6 +145,7 @@ export default function EnvironmentPageClient({
     displayedVoiceRefreshState.status === "delayed";
   const onVoiceAccepted = useCallback(() => {
     voiceRefreshBaselineRef.current = valuesSignature;
+    voiceRefreshBaselineDataVersionRef.current = dataVersion;
     voiceRefreshStartedAtRef.current = Date.now();
     voiceRecheckRequestedAtRef.current = Date.now();
     voiceVaultRefreshRequestedRef.current = false;
@@ -151,7 +153,7 @@ export default function EnvironmentPageClient({
       baselineValues: valuesSignature,
       status: "processing",
     });
-  }, [valuesSignature]);
+  }, [dataVersion, valuesSignature]);
 
   useEffect(() => {
     if (status === "loading" || checkedInitialVoiceProcessingRef.current) {
@@ -168,6 +170,7 @@ export default function EnvironmentPageClient({
         voiceRecheckRequestedAtRef.current = Date.now();
         void requestEnvironmentVoiceProcessingRecheck().catch(() => undefined);
         voiceRefreshBaselineRef.current = valuesSignature;
+        voiceRefreshBaselineDataVersionRef.current = dataVersion;
         voiceRefreshStartedAtRef.current = Date.now();
         setVoiceRefreshState((current) =>
           current.status === "idle"
@@ -184,7 +187,7 @@ export default function EnvironmentPageClient({
         initialVoiceProcessingCheckRef.current += 1;
       }
     };
-  }, [status, valuesSignature]);
+  }, [dataVersion, status, valuesSignature]);
 
   useEffect(() => {
     if (
@@ -197,7 +200,12 @@ export default function EnvironmentPageClient({
       voiceRefreshState.status === "processing"
         ? voiceRefreshState.baselineValues
         : voiceRefreshBaselineRef.current;
-    if (baseline && valuesSignature !== baseline) {
+    if (
+      baseline &&
+      (valuesSignature !== baseline ||
+        (voiceRefreshBaselineDataVersionRef.current !== null &&
+          dataVersion !== voiceRefreshBaselineDataVersionRef.current))
+    ) {
       voiceVaultRefreshRequestedRef.current = false;
       setVoiceRefreshState({
         baselineValues: baseline,
@@ -228,9 +236,12 @@ export default function EnvironmentPageClient({
         if (!voiceVaultRefreshRequestedRef.current) {
           voiceVaultRefreshRequestedRef.current = true;
           const refreshBaseline = baseline ?? valuesSignature;
+          const refreshBaselineDataVersion =
+            voiceRefreshBaselineDataVersionRef.current;
           await refresh({
             background: true,
-            requestRuntimeRefreshUntil: (nextClient) =>
+            requestRuntimeRefreshUntil: (nextClient, nextRef) =>
+              nextRef.dataVersion !== refreshBaselineDataVersion ||
               JSON.stringify({
                 indicatorNotes:
                   selectEnvironmentHabitatIndicatorNotes(nextClient),
@@ -277,7 +288,7 @@ export default function EnvironmentPageClient({
         clearTimeout(timeoutId);
       }
     };
-  }, [refresh, valuesSignature, voiceRefreshState]);
+  }, [dataVersion, refresh, valuesSignature, voiceRefreshState]);
 
   if (status === "loading") {
     return (
@@ -333,6 +344,7 @@ export default function EnvironmentPageClient({
         state={displayedVoiceRefreshState}
         onCheckAgain={() => {
           voiceRefreshBaselineRef.current = valuesSignature;
+          voiceRefreshBaselineDataVersionRef.current = dataVersion;
           voiceRefreshStartedAtRef.current = Date.now();
           voiceRecheckRequestedAtRef.current = Date.now();
           voiceVaultRefreshRequestedRef.current = false;
@@ -341,7 +353,9 @@ export default function EnvironmentPageClient({
             status: "processing",
           });
           void requestEnvironmentVoiceProcessingRecheck().finally(() =>
-            refresh({ background: true }).catch(() => undefined),
+            refresh({ retryRuntimeRefreshAfterRequest: true }).catch(
+              () => undefined,
+            ),
           );
         }}
       />

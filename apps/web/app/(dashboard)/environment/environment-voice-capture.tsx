@@ -62,18 +62,21 @@ type CompletionSummary = {
   totalDetails: number | null;
 };
 
+type EnvironmentTopicAnswer = {
+  aspectId: string;
+  indicatorId: string;
+  note?: string | null;
+  value: string | number | boolean;
+};
+
 type EnvironmentTopicCompletion = {
-  answers: Array<{
-    aspectId: string;
-    indicatorId: string;
-    note?: string | null;
-    value: string | number | boolean;
-  }>;
+  answers: EnvironmentTopicAnswer[];
   topicId: string;
 };
 
 type EnvironmentVoicePreview = {
   capturedFieldKeys?: readonly string[];
+  completionSummary?: CompletionSummary;
   detectedLanguageCode?: string;
   speaking?: boolean;
   state: RealtimeState;
@@ -84,6 +87,29 @@ type ParsedTopicCompletion = {
   detectedLanguageCode: string | null;
   topics: EnvironmentTopicCompletion[];
 };
+
+export function addDeclinedAnswersForSkippedTopic(
+  topic: EnvironmentVoiceTopic,
+  explicitAnswers: readonly EnvironmentTopicAnswer[],
+  savedValues: ReadonlyMap<string, string | number | boolean>,
+): EnvironmentTopicAnswer[] {
+  const answeredKeys = new Set(
+    explicitAnswers.map((answer) =>
+      environmentFieldKey(answer.aspectId, answer.indicatorId),
+    ),
+  );
+  const declinedAnswers = (topic.fields ?? [])
+    .filter((field) => {
+      const key = environmentFieldKey(field.aspectId, field.indicatorId);
+      return !answeredKeys.has(key) && !savedValues.has(key);
+    })
+    .map((field) => ({
+      aspectId: field.aspectId,
+      indicatorId: field.indicatorId,
+      value: "declined",
+    }));
+  return [...explicitAnswers, ...declinedAnswers];
+}
 
 const LANGUAGE_STORAGE_KEY = "murph.environmentVoiceLanguage";
 const AUTO_LANGUAGE: EnvironmentVoiceLanguage = {
@@ -182,7 +208,7 @@ export function EnvironmentVoiceCapture({
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
   const [languageNeedsAttention, setLanguageNeedsAttention] = useState(false);
   const [completionSummary, setCompletionSummary] = useState<CompletionSummary>(
-    {
+    preview?.completionSummary ?? {
       coveredDetails: 0,
       remainingDetails: null,
       savedDetails: 0,
@@ -194,6 +220,7 @@ export function EnvironmentVoiceCapture({
       preview || requestedTopicId ? script : null,
     );
   const completedTopicIdsRef = useRef(new Set<string>());
+  const acceptedRefreshStartedRef = useRef(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const microphoneStreamRef = useRef<MediaStream | null>(null);
@@ -441,15 +468,13 @@ export function EnvironmentVoiceCapture({
     finishRequestedRef.current = false;
     closeConnection();
     setState("complete");
-    if (savedDetails > 0) {
-      onAccepted?.();
-    }
-  }, [clearFinishTimeout, closeConnection, onAccepted, script, sessionScript]);
+  }, [clearFinishTimeout, closeConnection, script, sessionScript]);
 
   const reset = useCallback(() => {
     clearFinishTimeout();
     closeConnection();
     completedTopicIdsRef.current = new Set();
+    acceptedRefreshStartedRef.current = false;
     handledCallIdsRef.current = new Set();
     hasTurnAudioRef.current = false;
     heardAudioRef.current = false;
@@ -656,6 +681,10 @@ export function EnvironmentVoiceCapture({
           }
         }
         setCapturedFieldKeys((current) => new Set([...current, ...fieldKeys]));
+        if (!acceptedRefreshStartedRef.current) {
+          acceptedRefreshStartedRef.current = true;
+          onAccepted?.();
+        }
         return true;
       } catch (error) {
         setNotice(
@@ -674,7 +703,7 @@ export function EnvironmentVoiceCapture({
         });
       }
     },
-    [],
+    [onAccepted],
   );
 
   const saveTopics = useCallback(
@@ -765,6 +794,15 @@ export function EnvironmentVoiceCapture({
     if (state === "idle" || state === "complete" || state === "finishing") {
       return;
     }
+    if (
+      !speechActiveRef.current &&
+      !responsePendingRef.current &&
+      !toolCallPendingRef.current &&
+      !hasTurnAudioRef.current
+    ) {
+      completeInterview();
+      return;
+    }
     finishRequestedRef.current = true;
     setMicrophoneEnabled(false);
     setAudioLevel(0);
@@ -777,7 +815,13 @@ export function EnvironmentVoiceCapture({
 
     clearFinishTimeout();
     finishTimeoutRef.current = window.setTimeout(() => {
-      completeInterview();
+      finishRequestedRef.current = false;
+      responsePendingRef.current = false;
+      toolCallPendingRef.current = false;
+      setState("error");
+      setNotice(
+        "Murph could not confirm your last words. Try again or close this report; earlier accepted details are safe.",
+      );
     }, 6_000);
   }, [
     clearFinishTimeout,
@@ -989,10 +1033,18 @@ export function EnvironmentVoiceCapture({
         if (payload.name === "control_environment_interview") {
           const action = parseToolInterviewAction(payload.arguments);
           const currentTopic = activeTopicRef.current;
-          const answers = parseToolFieldProgress(
+          const parsedAnswers = parseToolFieldProgress(
             payload.arguments,
             currentTopic,
           );
+          const answers =
+            action === "skip" && currentTopic
+              ? addDeclinedAnswersForSkippedTopic(
+                  currentTopic,
+                  parsedAnswers,
+                  savedFieldValuesRef.current,
+                )
+              : parsedAnswers;
           if (action === "finish") {
             finishRequestedRef.current = true;
             setMicrophoneEnabled(false);
@@ -1090,7 +1142,12 @@ export function EnvironmentVoiceCapture({
         toolCallPendingRef.current = false;
         manualTurnRef.current = false;
         if (finishRequestedRef.current) {
-          completeInterview();
+          finishRequestedRef.current = false;
+          clearFinishTimeout();
+          setState("error");
+          setNotice(
+            "Murph could not confirm your last words. Try again or close this report; earlier accepted details are safe.",
+          );
           return;
         }
         prepareForNextTurn();
@@ -1103,6 +1160,7 @@ export function EnvironmentVoiceCapture({
     [
       goBackOneTopic,
       advanceCurrentTopic,
+      clearFinishTimeout,
       completeInterview,
       prepareForNextTurn,
       persistTopics,
@@ -1281,6 +1339,9 @@ export function EnvironmentVoiceCapture({
   };
 
   const onOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && (state === "saving" || state === "finishing")) {
+      return;
+    }
     setOpen(nextOpen);
     if (!nextOpen) {
       reset();
@@ -1344,7 +1405,6 @@ export function EnvironmentVoiceCapture({
       <div className="w-full space-y-3">
         {transcript ? (
           <div
-            aria-live="polite"
             className="max-h-20 overflow-y-auto border-l border-primary/40 pl-3"
             ref={transcriptViewportRef}
           >
@@ -1376,7 +1436,11 @@ export function EnvironmentVoiceCapture({
           ) : (
             <Button
               className="ml-auto shrink-0"
-              disabled={state === "connecting" || state === "finishing"}
+              disabled={
+                state === "connecting" ||
+                state === "saving" ||
+                state === "finishing"
+              }
               onClick={finishInterview}
               size="sm"
               variant="outline"
@@ -1479,6 +1543,7 @@ export function EnvironmentVoiceCapture({
                     <Button
                       aria-label="Close"
                       className="size-11 shrink-0"
+                      disabled={state === "saving" || state === "finishing"}
                       size="icon"
                       type="button"
                       variant="ghost"
@@ -1565,12 +1630,12 @@ export function EnvironmentVoiceCapture({
                 <Check className="size-6" aria-hidden="true" />
               </span>
               <h2 className="mt-5 font-serif text-3xl font-semibold tracking-[-0.03em] text-foreground">
-                Your report was updated
+                Your answers were accepted
               </h2>
               <p className="mt-3 max-w-md text-pretty text-sm leading-relaxed text-muted-foreground">
-                Murph saved {completionSummary.savedDetails} clear{" "}
+                Murph accepted {completionSummary.savedDetails} clear{" "}
                 {completionSummary.savedDetails === 1 ? "detail" : "details"}{" "}
-                from this conversation.
+                from this conversation. Your report will update shortly.
               </p>
               {completionSummary.totalDetails ? (
                 <div className="mt-5 w-full max-w-sm text-left">
@@ -1614,7 +1679,7 @@ export function EnvironmentVoiceCapture({
                   </Button>
                 ) : null}
                 <Button size="lg" onClick={() => onOpenChange(false)}>
-                  See updated report
+                  View report
                 </Button>
               </div>
             </div>
@@ -1661,7 +1726,16 @@ export function EnvironmentVoiceCapture({
                               <span className="size-2.5 rounded-full border border-primary/60" />
                             )}
                           </span>
-                          <span className="min-w-0 text-pretty">{item}</span>
+                          <span className="min-w-0 text-pretty">
+                            <span className="sr-only">
+                              {pending
+                                ? "Saving: "
+                                : captured
+                                ? "Saved: "
+                                : "Not saved: "}
+                            </span>
+                            {item}
+                          </span>
                         </li>
                       );
                     })}
@@ -1671,7 +1745,6 @@ export function EnvironmentVoiceCapture({
 
               <div className="shrink-0 pt-5">
                 <div
-                  aria-live="polite"
                   className="mb-3 h-24 overflow-y-auto overscroll-contain pr-2"
                   ref={transcriptViewportRef}
                 >
@@ -1696,7 +1769,11 @@ export function EnvironmentVoiceCapture({
                   {state !== "error" ? (
                     <Button
                       className="ml-auto shrink-0"
-                      disabled={state === "connecting" || state === "finishing"}
+                      disabled={
+                        state === "connecting" ||
+                        state === "saving" ||
+                        state === "finishing"
+                      }
                       onClick={finishInterview}
                       size="sm"
                       variant="outline"
@@ -1737,6 +1814,7 @@ export function EnvironmentVoiceCapture({
                   disabled={
                     activeTopicIndex === 0 ||
                     state === "connecting" ||
+                    state === "saving" ||
                     state === "finishing"
                   }
                   onClick={() => {
@@ -1748,7 +1826,11 @@ export function EnvironmentVoiceCapture({
                   Back
                 </Button>
                 <Button
-                  disabled={state === "connecting" || state === "finishing"}
+                  disabled={
+                    state === "connecting" ||
+                    state === "saving" ||
+                    state === "finishing"
+                  }
                   onClick={advanceCurrentTopic}
                   variant="ghost"
                 >
@@ -2051,7 +2133,7 @@ function buildRealtimeTools(
     },
     {
       description:
-        "Move through or finish the interview when the member gives a clear navigation command. Include any explicit current-topic facts spoken with the command.",
+        "Move through or finish the interview when the member gives a clear navigation command. Include any explicit current-topic facts spoken with the command. A skip action automatically declines every other unresolved field in the current topic.",
       name: "control_environment_interview",
       parameters: {
         additionalProperties: false,
@@ -2249,6 +2331,7 @@ function buildTopicInstructions(
     "If the member asks to change language, call set_environment_language.",
     "A clear request to end, stop, finish, save and end, or conclude the conversation is a finish command in any language.",
     "Navigation commands take priority over every other tool. Call control_environment_interview and include explicit current-topic facts spoken with the command.",
+    "For skip, include explicit facts spoken with the command. The client records every other unresolved current field as declined.",
     "When the current topic is complete, call save_environment_topics. Include the next topic only if the member clearly answered it early.",
     "When calling save_environment_topics, include the ISO 639-1 code of the language spoken in the latest answer.",
     "Use declined only after an explicit skip, refusal, or stated lack of knowledge.",

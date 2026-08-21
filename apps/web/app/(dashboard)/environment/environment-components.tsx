@@ -347,7 +347,7 @@ export function ShareEnvironmentButton({
   known: number;
   total: number;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [downloaded, setDownloaded] = useState(false);
   const [failed, setFailed] = useState(false);
 
   const share = async () => {
@@ -355,7 +355,6 @@ export function ShareEnvironmentButton({
       return;
     }
     setFailed(false);
-    const url = window.location.origin + window.location.pathname;
     const title = `My Environment score is ${grade.pct}%`;
     try {
       const response = await fetch("/api/environment/share-card", {
@@ -381,17 +380,18 @@ export function ShareEnvironmentButton({
         await navigator.share({
           files: [file],
           title,
-          text: `My Environment score is ${grade.pct}%. ${url}`,
+          text: `My Environment score is ${grade.pct}%.`,
         });
         return;
       }
-      if (navigator.share) {
-        await navigator.share({ title, url });
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      const imageUrl = URL.createObjectURL(blob);
+      const download = document.createElement("a");
+      download.href = imageUrl;
+      download.download = file.name;
+      download.click();
+      URL.revokeObjectURL(imageUrl);
+      setDownloaded(true);
+      setTimeout(() => setDownloaded(false), 2000);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         return;
@@ -406,10 +406,10 @@ export function ShareEnvironmentButton({
       <Share2 className="size-3.5" aria-hidden="true" />
       Try sharing again
     </>
-  ) : copied ? (
+  ) : downloaded ? (
     <>
       <Check className="size-3.5 text-primary" aria-hidden="true" />
-      Link copied
+      Image downloaded
     </>
   ) : (
     <>
@@ -1020,7 +1020,8 @@ function FactDrawer({
                   </p>
                 ) : fact.kind === "optional" ? (
                   <p className="text-sm text-muted-foreground">
-                    Optional context. This never affects your environment grade.
+                    Optional context. When present, this can add a capability
+                    bonus. Its absence never lowers your grade.
                   </p>
                 ) : fact.kind === "skipped" ? (
                   <p className="text-sm text-muted-foreground">

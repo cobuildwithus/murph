@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-06
-Updated: 2026-08-07
+Updated: 2026-08-21
 
 ## Goal
 
@@ -11,8 +11,9 @@ Updated: 2026-08-07
 
 ## Success criteria
 
-- The phone layout fits the ordinary visible viewport without scrolling, shows one current topic, up to four concise details, and one next-topic preview.
-- The desktop layout uses the same state owner and presents the current and next topics in a presenter-style composition.
+- The phone layout fits the ordinary visible viewport without page scrolling and shows one current topic with up to four concise details.
+- The desktop layout uses the same state owner and keeps the active topic calm, without a second next-topic panel.
+- The live transcript remains visible while the member speaks, keeps recent context, and scrolls inside its bounded area instead of disappearing.
 - OpenAI Realtime audio streams through WebRTC with an ephemeral credential. No standard provider key reaches the browser.
 - Each recognized fact is durably accepted before its full check mark appears. The canonical Habitat report can refresh later without blocking the interview.
 - Useful detail beyond a catalog value is saved as a concise note on that exact
@@ -47,8 +48,8 @@ Updated: 2026-08-07
    Mitigation: accept only allowlisted topic fields, bind every write to the authenticated member and session, and persist through the canonical Habitat owner.
 3. Risk: a connection drop loses progress.
    Mitigation: checkpoint each completed topic before advancing and reconnect at the first unresolved topic.
-4. Risk: mobile UI becomes a scrolling transcript.
-   Mitigation: replace the current prompt in place, hide live transcript history, cap visible topic details at four, and keep one-line next-topic preview.
+4. Risk: transcript growth pushes the active topic off screen.
+   Mitigation: keep transcript history in a bounded internal scroll area, follow its latest lines, and cap visible topic details at four. Do not add a next-topic panel.
 5. Risk: a visual skeleton hides a real Brave loading failure.
    Mitigation: prove the root cause, add a bounded terminal error state, and keep diagnostic logs metadata-only.
 6. Risk: the foreground Environment save path runs unrelated AI, automation, or outbound delivery while the general runtime is paused.
@@ -68,7 +69,7 @@ Updated: 2026-08-07
 - Use option A now: Realtime replaces Environment file recording; `Chat instead` is the fallback.
 - Use `gpt-realtime-2.1` initially for better instruction following and function calling.
 - Show prompts as text. Do not generate Murph audio.
-- Show one topic at a time, one focused follow-up when needed, and a one-line next-topic preview.
+- Show one topic at a time. Do not show model questions or a next-topic preview. Keep the member in control with the visible checklist, transcript, and Back/Next controls.
 - Save any clear future-topic facts the member says early and advance to the first unresolved topic.
 - Keep option B as a documented contingency only: restore the file recorder as a failure fallback if measured Realtime connection, latency, recognition, or topic-transition quality is unacceptable.
 - Treat an active Environment answer as a foreground product write. AI usage and automation engagement pauses must not block that write, but inactive access and withdrawn health-data consent must block it.

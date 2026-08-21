@@ -8,8 +8,10 @@ import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 
 import { deriveCategoryNote, overallGrade } from "../category-notes";
-import { EnvironmentPrintReport } from "../environment-print-report";
-import { EnvironmentReportSkeleton } from "../environment-report-skeleton";
+import {
+  EnvironmentPrintLoading,
+  EnvironmentPrintReport,
+} from "../environment-print-report";
 import {
   selectEnvironmentHabitatIndicatorNotes,
   selectEnvironmentHabitatValues,
@@ -21,7 +23,7 @@ export function EnvironmentPrintPageClient({
 }: {
   generatedOn: string;
 }) {
-  const { client, error, refresh, status } = useBrowserVault();
+  const { client, error, status } = useBrowserVault();
   const values = useMemo(
     () => (client ? selectEnvironmentHabitatValues(client) : {}),
     [client],
@@ -42,7 +44,7 @@ export function EnvironmentPrintPageClient({
   const coverage = useMemo(() => resolveEnvironmentCoverage(scene), [scene]);
 
   if (status === "loading") {
-    return <EnvironmentReportSkeleton onRetry={() => refresh()} />;
+    return <EnvironmentPrintLoading />;
   }
 
   if (status === "error") {
