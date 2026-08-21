@@ -5164,6 +5164,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         throw new Error("Expected hosted automation operation scope.");
       }
 
+      const emailHandoffResult = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [emailInputId],
+        operation: async (executionContext) =>
+          executionContext.hosted?.groupTool?.request({
+            action: "handoff",
+            context: "Email cannot hand off private context.",
+            originAssistantInputId: emailInputId,
+          }),
+        turnEnvironment: null,
+      });
+      expect(emailHandoffResult).toEqual({
+        action: "handoff",
+        result: {
+          status: "unavailable",
+          unavailableReason: "authenticated_sender_required",
+        },
+      });
+
       const emailResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
         inputIds: [emailInputId],
@@ -5173,17 +5192,6 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           expect(executionContext.hosted?.groupSharedReader).toEqual(
             expect.objectContaining({ request: expect.any(Function) }),
           );
-          await expect(executionContext.hosted?.groupTool?.request({
-            action: "handoff",
-            context: "Private context must not cross an unauthenticated sender boundary.",
-            originAssistantInputId: emailInputId,
-          })).resolves.toEqual({
-            action: "handoff",
-            result: {
-              status: "unavailable",
-              unavailableReason: "authenticated_sender_required",
-            },
-          });
           return await executionContext.hosted?.groupTool?.request({
             action: "update_display_name",
             updateDisplayName: { displayName: "Email cannot rename" },
