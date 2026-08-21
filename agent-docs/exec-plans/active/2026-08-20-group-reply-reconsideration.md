@@ -143,3 +143,30 @@ Updated: 2026-08-20
   captures, tokenizer install, and detached base worktree were removed.
 - Remaining: exact pushed-head ReviewGPT and CI, finding remediation, parent
   final review, plan closure, and merge-tree proof. The PR remains unmerged.
+
+## Product UX walkthrough
+
+- Quiet group participants: the provider completes once, the runtime performs
+  one final source probe after the fixed hold, then one ordinary response enters
+  finalization and delivery. The quiet Linq progress-path regression proves one
+  provider request, one dispatch, and no new product state.
+- Participants who add context during the hold: the new input is admitted and
+  checkpointed through the existing path, request 1 resumes the same provider
+  thread, and keep/edit cases each dispatch exactly one selected response.
+- Participants who speak during reconsideration: the integration proof steers
+  that input into request 1 before its first response and resolves every joined
+  caller with the same final result; the provider-request count remains two.
+- Participants who speak at the cutoff: paired controller cases prove input
+  visible by the serialized final probe is reviewed, while input queued after
+  that probe is not admitted into the closing turn and remains source-owned for
+  the next turn.
+- Failure and silence: request-1 failure rejects the joined turn without draft
+  transcript, terminal evidence, or dispatch; selected silence commits one
+  no-reply outcome and clears contradictory provisional response artifacts.
+- Excluded direct, email, scheduled, notification, and non-auto-reply journeys
+  retain their existing eligibility path. No frontend presentation changes, so
+  screenshots would not add evidence beyond the production-shaped timing and
+  delivery tests.
+- Walkthrough result: **Ready**. The implementation matches the approved product
+  change with no added audience, permission, state, or recovery owner and no
+  material difference from the plan.
