@@ -4414,21 +4414,6 @@ async function reconcileDeviceEventEntriesByExternalRef(
       aliasRepairOwnerIds.add(ownerId);
     }
   }
-  if (aliasRepairOwnerIds.size > 0) {
-    for (const [entryIndex, entry] of entries.entries()) {
-      if (aliasRepairByEntryIndex.has(entryIndex)) {
-        continue;
-      }
-      const resolved = resolveDeviceEventIdentity(entry, context, { strict: true });
-      const ownerId = resolved?.latest?.id;
-      if (ownerId && aliasRepairOwnerIds.has(ownerId)) {
-        throw new VaultError(
-          "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
-          "Junction daily aggregate alias repair operations cannot share persisted owners.",
-        );
-      }
-    }
-  }
   for (const [entryIndex, aliasRepair] of aliasRepairByEntryIndex) {
     const entry = entries[entryIndex]!;
     appendEntries.push(
@@ -4486,6 +4471,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         "Device event identity unexpectedly lost its externalRef during reconciliation.",
+      );
+    }
+    if (resolved.latest && aliasRepairOwnerIds.has(resolved.latest.id)) {
+      throw new VaultError(
+        "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+        "Junction daily aggregate alias repair operations cannot share persisted owners.",
       );
     }
     const { matchedEntries, refKey } = resolved;

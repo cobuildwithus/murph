@@ -2070,10 +2070,10 @@ function junctionRepairOrdinaryOwnerOverlapSnapshot(reverse = false) {
     },
     {
       calendar_date: "2026-06-26",
-      timestamp: "2026-06-26T01:00:00.000Z",
+      timestamp: "2026-06-26T02:00:00.000Z",
       timestamp_semantics: "offset",
       timezone_offset: -14_400,
-      value: 44,
+      value: 47,
     },
   ];
   return {
@@ -2315,7 +2315,7 @@ test.each([false, true])(
 );
 
 test.each([false, true])(
-  "Junction daily aggregate alias repair refuses an ordinary entry claiming its survivor (reverse=%s)",
+  "Junction daily aggregate alias repair refuses an ordinary entry that matches its survivor only after repair (reverse=%s)",
   async (reverse) => {
     const fixture = await createJunctionDailyAliasSplit({
       ownerOccurredAt: "2026-06-26T01:00:00.000Z",

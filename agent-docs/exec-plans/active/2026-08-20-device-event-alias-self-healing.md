@@ -56,14 +56,14 @@ ambiguous histories must remain safe.
 
 ## State
 
-Active. The local implementation includes the accepted findings from seven
-ReviewGPT final-gate rounds. The round-seven ordinary-entry/repair-owner overlap
-fix is pushed and locally verified, but the retry cap was reached without a
-PASS; another round requires an explicit continuation decision. The one allowed
-base refresh was consumed, and a later `main` advance now conflicts in the two
-runner-bundle budget files, preventing GitHub from creating the latest PR merge
-ref and registering its required Actions. Keep the draft PR and worktree active
-until those two completion decisions are resolved.
+Active. The user explicitly continued after ReviewGPT round eight found that
+the round-seven ordinary-entry preflight resolved against the index before
+repairs mutated it. The focused regression now proves that an ordinary entry
+can become compatible with a repair survivor only after that mutation, and the
+local correction removes the stale preflight in favor of checking the
+production resolver's actual use-site result. Focused verification, a scoped
+push, round nine, and exact-head CI remain. The one allowed base refresh is
+still consumed; do not refresh the base again.
 
 ## Working set
 
