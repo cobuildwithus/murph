@@ -198,6 +198,18 @@ replacement, and requires fresh exact reconciliation before any later deletion.
 Other unfinished workouts remain valid and untouched. Saved-routine starts and
 exact-reference reminder flows keep their specialized precedence.
 
+A missing, interrupted, or otherwise ambiguous start result consumes that
+approval and is never retried. Murph retains the old workout and performs one
+exceptional bounded workout list on the preserved start date, then exact-reads
+every candidate other than the old event. A committed replacement is recovered
+only when exactly one candidate was recorded between approval and recovery and
+exactly matches every approved session and ordered exercise fact. Zero,
+multiple, truncated, or unreadable candidates keep every record, disclose the
+uncertainty and exact candidate ids, and require a fresh bounded member choice;
+they never trigger another creation or any deletion. This projection-backed
+reconciliation is reserved for ambiguous post-invocation recovery and is not
+part of the normal exact-command path.
+
 Historical or completed workout intent takes precedence over replacement.
 Requests naming yesterday, an older date, a completed workout, an older workout
 id, or an older card stay on the existing exact-record correction path and do

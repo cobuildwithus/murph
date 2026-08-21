@@ -272,10 +272,31 @@ describe('assistant tracked workout table skill', () => {
       "the qualifying draft's exact `--started-at`, `--type`, and, when present, `--note`",
     )
     expect(compactSkill).toContain(
-      'Only after that verified creation, run',
+      'Only after a verified creation or exactly-one recovery, run',
     )
     expect(compactSkill).toContain(
       '`vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`.',
+    )
+    expect(compactSkill).toContain(
+      'If the result is missing, interrupted, or otherwise ambiguous after invocation, treat the approval as consumed',
+    )
+    expect(compactSkill).toContain(
+      'never run `workout start` again for that approval.',
+    )
+    expect(compactSkill).toContain(
+      '`vault-cli workout list --from <old-start-local-date> --to <old-start-local-date> --limit 200 --format json`',
+    )
+    expect(compactSkill).toContain(
+      'exclude the old event id, and exact-read every remaining candidate with `workout show`.',
+    )
+    expect(compactSkill).toContain(
+      'Exactly one match recovers its canonical id and may continue to guarded deletion.',
+    )
+    expect(compactSkill).toContain(
+      'With zero matches, multiple matches, an incomplete bounded list, or any failed read, keep every record',
+    )
+    expect(compactSkill).toContain(
+      'Never retry creation or infer a candidate by recency.',
     )
   })
 

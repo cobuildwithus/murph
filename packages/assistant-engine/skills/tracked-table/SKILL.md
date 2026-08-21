@@ -84,13 +84,27 @@ After explicit approval:
    The start command must contain the complete ordered initial exercise list;
    never create an empty workout and follow it with exercise mutations.
 2. Verify the successful start result identifies the new canonical `eventId`
-   and contains the complete ordered requested workout. If creation fails, the
-   result is missing, or the created contents cannot be verified, stop. Keep the
-   old workout and do not issue its delete.
-3. Only after that verified creation, run
+   and contains the complete ordered requested workout. A verified pre-write
+   validation failure stops with the old workout unchanged. If the result is
+   missing, interrupted, or otherwise ambiguous after invocation, treat the
+   approval as consumed: keep the old workout, do not delete it, and never run
+   `workout start` again for that approval.
+3. Recover an ambiguous start before any later creation attempt. Run one bounded
+   `vault-cli workout list --from <old-start-local-date> --to
+   <old-start-local-date> --limit 200 --format json`, exclude the old event id,
+   and exact-read every remaining candidate with `workout show`. A candidate
+   matches only when its `recordedAt` falls between approval and recovery and
+   its title, activity type, session note, preserved start time, complete
+   ordered exercises, set counts, and repetition facts exactly equal the
+   approved replacement. Exactly one match recovers its canonical id and may
+   continue to guarded deletion. With zero matches, multiple matches, an
+   incomplete bounded list, or any failed read, keep every record, disclose the
+   uncertainty and exact candidate ids, and require a fresh bounded member
+   choice. Never retry creation or infer a candidate by recency.
+4. Only after a verified creation or exactly-one recovery, run
    `vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`.
    Never delete first.
-4. If the guarded delete conflicts or fails, keep both workouts.
+5. If the guarded delete conflicts or fails, keep both workouts.
    Never roll back or delete the successfully created replacement. Report the
    exact ids and failure, reconcile from fresh exact reads, and obtain new
    approval before any later deletion.
