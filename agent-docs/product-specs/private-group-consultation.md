@@ -2,7 +2,7 @@
 
 Status: Implemented
 
-Last verified: 2026-07-26
+Last verified: 2026-08-21
 
 ## Decision
 
@@ -51,16 +51,19 @@ not a result-routing mode for Assistant Ask.
 Web binds one fresh accepted private input to one exact current membership
 generation and the synthetic group runtime's current thread route. It appends
 one expiring, deterministic `assistant.notification.requested` wake to that
-group. The target group Murph receives the context as quoted untrusted data,
-uses its own committed group conversation and tone, and authors one ordinary
-group message through the existing notification and outbox owners.
+group. The target group Murph receives the context as JSON-quoted untrusted data
+with prompt-delimiter characters Unicode-escaped, uses its own committed group
+conversation and tone, and authors one ordinary group message through the
+existing notification and outbox owners.
 
 The model supplies only `context` and an optional visible `groupLabel`. It never
 supplies member, membership, runtime, thread, route, provider, callback,
 idempotency, or mailbox identifiers. Exact replay reuses one global event/item
-identity derived from the authenticated member and accepted input. Changed
-context, membership generation, target group, or route conflicts instead of
-redirecting. `accepted` proves only that the target mailbox item is durable.
+identity derived from the authenticated member and accepted input, decrypts and
+validates the stored notification, and retains its pinned membership and route
+even if the member's group count changed. Changed context, membership
+generation, target group, or route conflicts instead of redirecting. `accepted`
+proves only that the target mailbox item is durable.
 
 The target turn uses the conversation prompt with an isolated output-only
 provider thread. It has no tools, private-vault access, filesystem capability,
