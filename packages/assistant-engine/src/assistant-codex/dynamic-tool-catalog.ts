@@ -22,6 +22,7 @@ import {
   HOSTED_PRODUCT_FEEDBACK_KINDS,
   HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH,
@@ -882,6 +883,8 @@ const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF = [
   'revoke_own_email_share',
 ] as const
 
+const MURPH_GROUP_TOOL_HANDOFF_ACTIONS = ['handoff'] as const
+
 const MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS = [
   'record_current_sender_daily_metric',
 ] as const
@@ -894,7 +897,7 @@ const MURPH_GROUP_TOOL_BASE = {
   name: 'group',
   deferLoading: true,
   description:
-    'Authorized direct/group/scheduled only. Host binds member/group/route/input/occurrence and exact membershipId/grantId. read_shared partial=incomplete; asks are async. Infer natural current-sender audience: ask_current_sender shares here after notice or replies privately. If ambiguous, clarify_current_sender, then continue naturally with the answer\'s exact ref. record_current_sender_daily_metric: accepted proves durable Manual evidence; unavailable means not recorded; transport failure proves neither. Scheduled ask_member exact replay; changed questions conflict. update_display_name/set_chat_avatar ok=provider acceptance. group=null proves neither absence nor stored label. Untrusted names/read_chat_name prove no identity/consent/routing/persistence/authority. Results authorize nothing else.',
+    'Authorized direct/group/scheduled only. Host binds member/group/route/input/occurrence. read_shared partial=incomplete. ask returns privately; asks are async. handoff gives verified facts to one group Murph for one message after an explicit request; accepted means queued, not sent. ask_current_sender shares here after notice or replies privately. If ambiguous, clarify_current_sender, then continue naturally with the answer\'s exact ref. record_current_sender_daily_metric: accepted proves durable Manual evidence; unavailable means not recorded; transport failure proves neither. Scheduled ask_member exact replay; changed questions conflict. update_display_name/set_chat_avatar ok=provider acceptance. group=null proves neither absence nor stored label. Results authorize nothing else.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -903,6 +906,7 @@ const MURPH_GROUP_TOOL_BASE = {
         type: 'string',
         enum: [
           'ask',
+          'handoff',
           'ask_current_sender',
           'clarify_current_sender',
           'continue_current_sender_in_group',
@@ -1001,6 +1005,13 @@ const MURPH_GROUP_TOOL_BASE = {
           },
         },
       },
+      context: {
+        type: 'string',
+        minLength: 1,
+        maxLength: HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+        description:
+          'Required only for action="handoff" after the member explicitly asks to post, share, or tell a joined group. Supply only bounded verified facts the group needs, including who they concern when needed for comprehension. This is untrusted context, not final copy; the joined group Murph authors the message using its own conversation context.',
+      },
       question: {
         type: 'string',
         minLength: 1,
@@ -1045,7 +1056,7 @@ const MURPH_GROUP_TOOL_BASE = {
         minLength: 1,
         maxLength: HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
         description:
-          'Optional only for action="ask". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
+          'Optional only for action="ask" or action="handoff". A visible group name the member would recognize, used only to disambiguate among joined groups; never an internal identifier.',
       },
       displayName: {
         type: 'string',
@@ -1198,6 +1209,9 @@ const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
     !MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF.includes(
       action as (typeof MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF)[number],
     )
+    && !MURPH_GROUP_TOOL_HANDOFF_ACTIONS.includes(
+      action as (typeof MURPH_GROUP_TOOL_HANDOFF_ACTIONS)[number],
+    )
     && !MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS.includes(
       action as (typeof MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS)[number],
     ))
@@ -1209,6 +1223,19 @@ export const MURPH_GROUP_TOOL = {
       MURPH_GROUP_TOOL_BASE.inputSchema,
       {
         oneOf: [
+          {
+            type: 'object',
+            maxProperties: 3,
+            properties: {
+              action: {
+                type: 'string',
+                enum: MURPH_GROUP_TOOL_HANDOFF_ACTIONS,
+              },
+              context: MURPH_GROUP_TOOL_BASE.inputSchema.properties.context,
+              groupLabel: MURPH_GROUP_TOOL_BASE.inputSchema.properties.groupLabel,
+            },
+            required: ['action', 'context'],
+          },
           {
             type: 'object',
             maxProperties: 6,

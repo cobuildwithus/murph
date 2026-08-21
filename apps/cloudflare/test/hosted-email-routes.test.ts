@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import {
   createHostedEmailGroupReplyAliasRoute,
+  createHostedEmailUserReplyAliasRoute,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
 } from "@murphai/hosted-execution/hosted-email";
 
@@ -37,6 +38,26 @@ function createHostedEmailTestConfig() {
   };
 }
 
+async function createReplyAliasRegistrationResponse(input: {
+  config: ReturnType<typeof createHostedEmailTestConfig>;
+  userId: string;
+}): Promise<Response> {
+  const route = await createHostedEmailUserReplyAliasRoute({
+    domain: input.config.domain,
+    localPart: input.config.localPart,
+    signingSecret: input.config.signingSecret,
+    userId: input.userId,
+  });
+  return new Response(JSON.stringify({
+    address: route.address,
+    aliasKey: route.aliasKey,
+    ok: true,
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
+}
+
 const TEST_CALLBACK_SIGNING = {
   keyId: "v1",
   privateKeyJwkJson: "{\"kty\":\"EC\",\"crv\":\"P-256\",\"x\":\"x\",\"y\":\"y\",\"d\":\"d\"}",
@@ -56,17 +77,11 @@ describe("hosted email route callbacks", () => {
     vi.restoreAllMocks();
   });
 
-  it("registers the stable alias key in web before returning the reply address", async () => {
+  it("uses the Web-owned current alias before returning the reply address", async () => {
     const config = createHostedEmailTestConfig();
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      await createReplyAliasRegistrationResponse({ config, userId: "user-123" }),
+    );
 
     const address = await createHostedEmailUserAddress({
       config,
@@ -210,15 +225,10 @@ describe("hosted email route callbacks", () => {
     };
 
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createReplyAliasRegistrationResponse({
+        config: createConfig,
+        userId: "user-123",
+      }))
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user-123",
@@ -259,15 +269,10 @@ describe("hosted email route callbacks", () => {
   it("resolves signed reply aliases without requiring an authenticated sender verdict", async () => {
     const config = createHostedEmailTestConfig();
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createReplyAliasRegistrationResponse({
+        config,
+        userId: "user-123",
+      }))
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: "user-123",
@@ -322,15 +327,10 @@ describe("hosted email route callbacks", () => {
     const config = createHostedEmailTestConfig();
 
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(
-        JSON.stringify({ ok: true }),
-        {
-          headers: {
-            "content-type": "application/json; charset=utf-8",
-          },
-          status: 200,
-        },
-      ))
+      .mockResolvedValueOnce(await createReplyAliasRegistrationResponse({
+        config,
+        userId: "user-123",
+      }))
       .mockResolvedValueOnce(new Response(
         JSON.stringify({
           userId: null,

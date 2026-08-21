@@ -2145,6 +2145,159 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("maps a closed group context handoff into one output-only group notification", async () => {
+    const eventId =
+      `assistant.notification.requested:group-context-handoff:${"a".repeat(64)}`;
+    const externalThreadRouteAuthority = {
+      accountLookupKey: "linq-account-key",
+      channel: "linq" as const,
+      containerMemberId: "group-runtime-member",
+      threadId: "linq-group-chat",
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        externalThreadRouteAuthority,
+        groupContextHandoff: {
+          membershipId: "membership-generation-one",
+          originAssistantInputId: `ain_${"b".repeat(32)}`,
+        },
+        instructions: "Use the bounded handoff context in this group.",
+        notificationPromptProfile: "context-handoff",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-08-21T03:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext: {
+        hosted: {
+          memberId: "group-runtime-member",
+          userEnvKeys: [],
+        },
+      },
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_group_context_handoff",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        notificationPromptProfile: "context-handoff",
+        outboxExternalThreadRouteAuthority: externalThreadRouteAuthority,
+        responsePolicy: { kind: "require_send" },
+        threadIsDirect: false,
+      }),
+    );
+  });
+
+  it.each([
+    [
+      "missing proof",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          groupContextHandoff: undefined,
+        },
+      }),
+    ],
+    [
+      "direct route",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          route: {
+            ...wake.notification.route,
+            threadIsDirect: true,
+          },
+        },
+      }),
+    ],
+    [
+      "mismatched route authority",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          externalThreadRouteAuthority: {
+            ...wake.notification.externalThreadRouteAuthority!,
+            threadId: "other-thread",
+          },
+        },
+      }),
+    ],
+  ])("rejects a context handoff with %s", async (_case, mutate) => {
+    const eventId =
+      `assistant.notification.requested:group-context-handoff:${"c".repeat(64)}`;
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        externalThreadRouteAuthority: {
+          accountLookupKey: "linq-account-key",
+          channel: "linq",
+          containerMemberId: "group-runtime-member",
+          threadId: "linq-group-chat",
+        },
+        groupContextHandoff: {
+          membershipId: "membership-generation-one",
+          originAssistantInputId: `ain_${"d".repeat(32)}`,
+        },
+        instructions: "Use the bounded handoff context in this group.",
+        notificationPromptProfile: "context-handoff",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-08-21T03:00:00.000Z",
+    });
+
+    await expect(executeHostedMailboxEvent({
+      wake: mutate(wake) as never,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).rejects.toThrow(
+      "Hosted group context handoff notification proof is invalid.",
+    );
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+  });
+
   it("maps private Assistant Ask completion proof into exact notification delivery authority", async () => {
     const completionId = `aask_done_${"b".repeat(64)}`;
     const requestId = `aask_req_${"a".repeat(64)}`;
