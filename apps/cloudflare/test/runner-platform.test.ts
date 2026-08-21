@@ -2825,7 +2825,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
       expect(timeoutError).toMatchObject({
-        phase: "session_start_request_decode",
+        phase: "session_start_request",
         timeoutMs: 6_000,
       });
       expect(fetchMock).toHaveBeenCalledOnce();
@@ -2834,7 +2834,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }
   });
 
-  it("labels malformed session responses as request decoding failures", async () => {
+  it("labels malformed session responses as response decoding failures", async () => {
     const fetchMock = vi.fn(async () => new Response("{", {
       headers: { "content-type": "application/json; charset=utf-8" },
       status: 200,
@@ -2850,7 +2850,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     }).catch((error: unknown) => error);
 
     expect(failure).toMatchObject({
-      phase: "session_start_request_decode",
+      phase: "session_start_response_decode",
       timeoutMs: 6_000,
     });
   });
@@ -2900,7 +2900,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
 
       await expect(startSnapshotSession).rejects.toBe(timeoutError);
       expect(timeoutError).toMatchObject({
-        phase: "session_start_request_decode",
+        phase: "session_start_response_decode",
         timeoutMs: 6_000,
       });
       expect(fetchMock).toHaveBeenCalledOnce();

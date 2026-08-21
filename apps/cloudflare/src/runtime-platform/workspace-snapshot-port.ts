@@ -100,7 +100,8 @@ type HostedWorkspaceSnapshotFailurePhase =
   | "session_complete_response_decode"
   | "session_complete_write_fence_headers"
   | "session_start_payload_validation"
-  | "session_start_request_decode"
+  | "session_start_request"
+  | "session_start_response_decode"
   | "session_start_write_fence_headers";
 
 export function createCloudflareWorkspaceSnapshotPort(input: {
@@ -294,8 +295,9 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
         }
         const responseDecodeTimeoutMs = Math.max(0, deadlineMs - Date.now());
         try {
-          return await readHostedWorkspaceSnapshotCompleteResponsePayload({
+          return await readHostedWorkspaceSnapshotResponsePayload({
             deadlineMs,
+            description: "Hosted workspace snapshot complete",
             response,
           });
         } catch (error) {
@@ -723,11 +725,13 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
           phase: "session_start_write_fence_headers",
         });
       }
+      headers.set("content-type", "application/json; charset=utf-8");
       assertHostedWorkspaceSnapshotOperationLive(signal);
       const startTimeoutMs = Math.min(
         input.timeoutMs,
         WORKSPACE_SNAPSHOT_HANDOFF_START_TIMEOUT_MS,
       );
+      const startDeadlineMs = Date.now() + startTimeoutMs;
       const startTimeoutSignal = AbortSignal.timeout(startTimeoutMs);
       const startSignal = combineAbortSignalsWithCleanup(
         signal ?? null,
@@ -735,37 +739,73 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       );
       let payload: unknown;
       try {
-        payload = await fetchHostedJson({
-          body: request,
-          description: "Hosted workspace snapshot session start",
-          exposeResponseBodyInError: false,
-          fetchImpl: input.fetchImpl,
-          headers,
-          method: "POST",
-          signal: startSignal.signal,
-          timeoutMs: startTimeoutMs,
-          url: new URL(
-            "/workspace-snapshots/start",
-            `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
-          ),
-        });
-      } catch (error) {
-        const interruption = readHostedWorkspaceSnapshotInterruptionCausedBySignal(
-          error,
-          startSignal.signal,
-        );
-        if (
-          interruption
-          && signal?.aborted
-          && Object.is(startSignal.signal.reason, signal.reason)
-        ) {
-          throw interruption;
+        let response: Response;
+        try {
+          response = await fetchHostedResponse({
+            description: "Hosted workspace snapshot session start",
+            fetchImpl: input.fetchImpl,
+            init: {
+              body: JSON.stringify(request),
+              headers,
+              method: "POST",
+            },
+            redactedLogPath: "/workspace-snapshots/start",
+            signal: startSignal.signal,
+            timeoutMs: startTimeoutMs,
+            url: new URL(
+              "/workspace-snapshots/start",
+              `${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/`,
+            ),
+          });
+          if (!response.ok) {
+            await cancelHostedWorkspaceSnapshotResponseBody(response.body);
+          }
+          assertHostedOk(response, "Hosted workspace snapshot session start");
+        } catch (error) {
+          const interruption = readHostedWorkspaceSnapshotInterruptionCausedBySignal(
+            error,
+            startSignal.signal,
+          );
+          if (
+            interruption
+            && signal?.aborted
+            && Object.is(startSignal.signal.reason, signal.reason)
+          ) {
+            throw interruption;
+          }
+          throw annotateHostedWorkspaceSnapshotFailure({
+            error: interruption ?? error,
+            phase: "session_start_request",
+            timeoutMs: startTimeoutMs,
+          });
         }
-        throw annotateHostedWorkspaceSnapshotFailure({
-          error: interruption ?? error,
-          phase: "session_start_request_decode",
-          timeoutMs: startTimeoutMs,
-        });
+
+        const responseDecodeTimeoutMs = Math.max(0, startDeadlineMs - Date.now());
+        try {
+          payload = await readHostedWorkspaceSnapshotResponsePayload({
+            deadlineMs: startDeadlineMs,
+            description: "Hosted workspace snapshot session start",
+            response,
+            signal: startSignal.signal,
+          });
+        } catch (error) {
+          const interruption = readHostedWorkspaceSnapshotInterruptionCausedBySignal(
+            error,
+            startSignal.signal,
+          );
+          if (
+            interruption
+            && signal?.aborted
+            && Object.is(startSignal.signal.reason, signal.reason)
+          ) {
+            throw interruption;
+          }
+          throw annotateHostedWorkspaceSnapshotFailure({
+            error: interruption ?? error,
+            phase: "session_start_response_decode",
+            timeoutMs: responseDecodeTimeoutMs,
+          });
+        }
       } finally {
         startSignal.dispose();
       }
@@ -1442,9 +1482,11 @@ async function cancelHostedWorkspaceSnapshotResponseBody(
   }
 }
 
-async function readHostedWorkspaceSnapshotCompleteResponsePayload(input: {
+async function readHostedWorkspaceSnapshotResponsePayload(input: {
   deadlineMs: number;
+  description: string;
   response: Response;
+  signal?: AbortSignal | null;
 }): Promise<unknown> {
   if (!input.response.body) {
     return null;
@@ -1454,7 +1496,8 @@ async function readHostedWorkspaceSnapshotCompleteResponsePayload(input: {
   let text = "";
   for await (const chunk of readHostedRuntimeResponseBodyChunks({
     body: input.response.body,
-    description: "Hosted workspace snapshot complete",
+    description: input.description,
+    signal: input.signal ?? null,
     timeoutMs: Math.max(0, input.deadlineMs - Date.now()),
   })) {
     text += decoder.decode(chunk, { stream: true });
@@ -1467,7 +1510,7 @@ async function readHostedWorkspaceSnapshotCompleteResponsePayload(input: {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error("Hosted workspace snapshot complete returned invalid JSON.", {
+    throw new Error(`${input.description} returned invalid JSON.`, {
       cause: error,
     });
   }

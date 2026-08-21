@@ -88,7 +88,7 @@ Updated: 2026-08-20
 - Passed: `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage
   apps/web/test/hosted-crypto-gcp-kms.test.ts
   apps/web/test/hosted-crypto-gcp-kms-official.test.ts
-  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (49 tests).
+  apps/web/test/hosted-crypto-gcp-kms-real-sdk.test.ts` (50 tests).
 - Passed: `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts
   apps/cloudflare/test/runner-platform.test.ts` (195 tests).
 - Passed: `pnpm exec vitest run
@@ -127,5 +127,20 @@ Updated: 2026-08-20
   without an auth or KMS retry. Full KMS coverage passes 49/49, the installed
   SDK suite passes repeatedly, and Web typecheck, focused ESLint, and
   `git diff --check` pass on the remediation.
+- Fixed: final ReviewGPT round 5 found that a surviving waiter could retain an
+  exact inner-auth stage while logging an unhelpful `UNKNOWN` reason when only
+  the shared auth deadline fired. The diagnostic-only normalization now reports
+  `DEADLINE_EXCEEDED` for that exact case without changing the thrown provider
+  error, retry eligibility, deadlines, or cancellation.
+- Fixed: final ReviewGPT round 6 found that session start still collapsed a
+  request that never returned headers, a stalled response body, and malformed
+  JSON into one phase. Session start now mirrors completion's existing split:
+  `session_start_request` owns the response-header boundary and
+  `session_start_response_decode` owns the successful body and JSON boundary
+  under the remaining part of the same six-second deadline.
+- Passed: full KMS coverage 50/50; Cloudflare runner snapshot coverage 195/195;
+  assistant-runtime checkpoint coverage 52/52; Web, Cloudflare runner, and
+  assistant-runtime typechecks; `git diff --check`; direct-identifier review;
+  and two independent read-only subagent audits of the Round 5 KMS correction.
 - Remaining: final ReviewGPT rerun, exact-head GitHub checks, merge/deploy, and
   bounded postdeploy Vercel/runtime-log queries.

@@ -1074,8 +1074,11 @@ Last verified: 2026-08-20
   plaintext.
 - Hosted workspace checkpoint session-start and completion failures preserve
   cancellation reasons and extensible `Error` identity while adding allowlisted
-  phases for write-fence acquisition, deadline-bound request/response decode,
-  payload validation, and completion checkpoint recording. Non-extensible
+  phases for write-fence acquisition, deadline-bound request headers, response
+  body decoding, payload validation, and completion checkpoint recording.
+  Session start and completion both split the request from response decoding so
+  a no-headers timeout is distinct from a body stall or malformed JSON.
+  Non-extensible
   errors are retained as the `cause` of the annotated error. The durable
   checkpoint failure record also includes the matching phase and measured
   session-start or completion elapsed milliseconds; a phase timeout is recorded

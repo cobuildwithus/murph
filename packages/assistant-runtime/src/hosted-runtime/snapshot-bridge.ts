@@ -1151,7 +1151,8 @@ function appendHostedCheckpointSnapshotFailureDiagnostics(
 
 const HOSTED_WORKSPACE_SNAPSHOT_SESSION_START_FAILURE_PHASES = new Set([
   "session_start_payload_validation",
-  "session_start_request_decode",
+  "session_start_request",
+  "session_start_response_decode",
   "session_start_write_fence_headers",
 ]);
 const HOSTED_WORKSPACE_SNAPSHOT_SESSION_COMPLETE_FAILURE_PHASES = new Set([

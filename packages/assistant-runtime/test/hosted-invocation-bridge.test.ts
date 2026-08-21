@@ -421,7 +421,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       );
       if (expectedStage === "session") {
         Object.assign(failure, {
-          phase: "session_start_request_decode",
+          phase: "session_start_response_decode",
           timeoutMs: 6_000,
         });
       } else if (expectedStage === "checkpoint") {
@@ -472,7 +472,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
             ...(expectedStage === "session"
               ? {
                   snapshotSessionStartElapsedMs: expect.any(Number),
-                  snapshotSessionStartFailurePhase: "session_start_request_decode",
+                  snapshotSessionStartFailurePhase: "session_start_response_decode",
                   snapshotSessionStartTimeoutMs: 6_000,
                 }
               : expectedStage === "checkpoint"
