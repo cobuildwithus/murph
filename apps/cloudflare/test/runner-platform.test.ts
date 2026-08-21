@@ -37,6 +37,7 @@ import {
 import {
   HostedRuntimeArtifactReadError,
   HostedRuntimeArtifactWriteError,
+  HostedRuntimeCanonicalCheckpointError,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   HOSTED_RUNTIME_EMAIL_EGRESS_RECIPIENT_PATH,
@@ -4735,7 +4736,9 @@ describe("buildHostedExecutionRuntimePlatform", () => {
   });
 
   it.each([
+    { retryable: false, status: 401 },
     { retryable: false, status: 422 },
+    { retryable: true, status: 429 },
     { retryable: true, status: 503 },
   ])("maps artifact HTTP $status to retryable=$retryable", async ({
     retryable,
@@ -7833,6 +7836,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(input, init);
       await expect(request.clone().json()).resolves.toEqual({
+        completedImports: [{
+          dirtyPayloadId: "dsp_current",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_current",
         processedDirtyPayloadIds: ["dsp_current"],
         processedRevision: "21",
@@ -7872,6 +7881,12 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     });
 
     const ack = await platform.deviceSyncPort!.ackDirtyStateProcessed({
+      completedImports: [{
+        dirtyPayloadId: "dsp_current",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "steps",
+        sourceProviderSlug: "apple_health_kit",
+      }],
       connectionId: "dsc_current",
       processedDirtyPayloadIds: ["dsp_current"],
       processedRevision: "21",
@@ -8893,6 +8908,141 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(rejected.cause).toBe(firstFailure);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(recordCheckpoint).not.toHaveBeenCalled();
+  });
+
+  it("marks canonical checkpoint timeouts retryable only after reconciliation also times out", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    await expect(platform.workspacePort!.checkpoint({
+      attemptId: "attempt_1",
+      expectedWorkspaceVersion: "4",
+      inboxMediaRetentionWakeAt: null,
+      leaseGeneration: "9",
+      nextWakeAt: null,
+      nextWakeReason: null,
+      reason: "canonical_runtime_commit",
+      redactedStatus: {
+        hostedCanonicalWriteReceiptLogByteSize: 512,
+        hostedCanonicalWriteReceiptLogSha256: "2".repeat(64),
+      },
+      snapshotRef: null,
+    })).rejects.toMatchObject({
+      name: "HostedRuntimeCanonicalCheckpointError",
+      retryable: true,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a deterministic checkpoint rejection terminal after an ambiguous timeout", async () => {
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
+      }
+      return new Response("Unauthorized", { status: 401 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: null,
+        leaseGeneration: "9",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        reason: "canonical_runtime_commit",
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: 512,
+          hostedCanonicalWriteReceiptLogSha256: "3".repeat(64),
+        },
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toBeInstanceOf(Error);
+    expect(rejected).not.toBeInstanceOf(HostedRuntimeCanonicalCheckpointError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a deterministic checkpoint rejection terminal when its response body is lost", async () => {
+    const firstFailure = new DOMException("Synthetic checkpoint timeout.", "TimeoutError");
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) {
+        throw firstFailure;
+      }
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.error(new TypeError("Synthetic response body lost."));
+        },
+      }), { status: 401 });
+    });
+    const platform = buildTestHostedExecutionRuntimePlatform({
+      boundUserId: "member_123",
+      fetchImpl: fetchMock as typeof fetch,
+      workspaceCheckpointBridge: {
+        readCurrentLease: () => ({
+          attemptId: "attempt_1",
+          leaseGeneration: "9",
+          userId: "member_123",
+          workspaceVersion: "4",
+        }),
+      },
+    });
+
+    let rejected: unknown = null;
+    try {
+      await platform.workspacePort!.checkpoint({
+        attemptId: "attempt_1",
+        expectedWorkspaceVersion: "4",
+        inboxMediaRetentionWakeAt: null,
+        leaseGeneration: "9",
+        nextWakeAt: null,
+        nextWakeReason: null,
+        reason: "canonical_runtime_commit",
+        redactedStatus: {
+          hostedCanonicalWriteReceiptLogByteSize: 512,
+          hostedCanonicalWriteReceiptLogSha256: "4".repeat(64),
+        },
+        snapshotRef: null,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+
+    expect(rejected).toMatchObject({
+      hostedRuntimeFetchCauseKind: "timeout",
+    });
+    expect(rejected).not.toBeInstanceOf(HostedRuntimeCanonicalCheckpointError);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("does not retry a canonical checkpoint after its active lease changes", async () => {

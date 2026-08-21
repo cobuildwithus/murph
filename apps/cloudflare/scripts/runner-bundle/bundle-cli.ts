@@ -114,12 +114,20 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // with the outbox projection and pending-input hint and measured 9,272,172 B
 // in the Linux deploy lane on 2026-08-19; no package entered the graph. The
 // resolved combined graph measured 9,364,936 B in the canonical production
-// build; the static startup closure still measured 24,950 B.
+// build; the static startup closure still measured 24,950 B. The stable
+// Junction profile replay migration grew the existing lazy Core graph by
+// 7,993 B: public Linux measured 9,391,948 B, while the production-only managed
+// voice runtime overlay added 6,889 B and exposed a 1,133 B overage. Emitting
+// this Node-only artifact as UTF-8 instead of ASCII-escaping existing Unicode
+// literals removed 51,325 B without changing any input, output, entry, or
+// static-closure topology. The resulting public Linux baseline is 9,340,623 B;
+// the total cap retains 32 KiB of graph allowance plus an 8 KiB reserve for
+// the measured production overlay.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_397_704;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_381_583;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
@@ -167,6 +175,7 @@ export async function bundleInstalledVaultCliBinary(
       js: "import { createRequire as __vaultCliCreateRequire } from 'node:module'; const require = __vaultCliCreateRequire(import.meta.url);",
     },
     bundle: true,
+    charset: "utf8",
     entryPoints: [path.relative(bundleDir, entryPath)],
     external: [
       ...VAULT_CLI_BUNDLE_EXTERNALS,

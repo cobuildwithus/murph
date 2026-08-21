@@ -815,7 +815,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. Leave it unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
@@ -1265,15 +1265,20 @@ production build. Keep deployment-protection bypass secrets and share links
 out of the cutover verification path.
 
 Freeze production deploys and rollbacks for the cutover. Record the exact
-strict-v2 commit, deploy it, and prove the production alias points at that
-commit with `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the
-secure `HOSTED_WEB_VERCEL_*` operator environment. Wait the configured
+strict-v2 commit and exact ready deployment URL, deploy it, and prove every
+configured production custom domain points at that deployment with
+`pnpm --dir apps/web release:production:verify-exact-deployment`, `DEPLOYED_SHA`,
+`HOSTED_WEB_VERCEL_DEPLOYMENT_URL`, and the secure `HOSTED_WEB_VERCEL_*`
+operator environment. The verifier enumerates the project domain set, excludes
+branch/custom-environment domains, requires the configured production base host,
+and compares every remaining alias by deployment id without logging domain
+names. Wait the configured
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, then
-resolve the alias again. If it changed, select a strict-v2 commit and restart
-the full drain. A completion response from an old function can set a legacy
-cookie during this window; rejection is intentional, and the user must retry
-sign-in after the drain to receive a v2 cookie. Verify that retry, authenticated
-browser-vault access, expiry, and logout before ending the freeze.
+run the exact-deployment proof again. If it changed, select a strict-v2 commit
+and restart the full drain. A completion response from an old function can set
+a legacy cookie during this window; rejection is intentional, and the user must
+retry sign-in after the drain to receive a v2 cookie. Verify that retry,
+authenticated browser-vault access, expiry, and logout before ending the freeze.
 
 The first strict-v2 production deployment is the app-session rollback floor.
 Do not roll back to an older build: it accepts the database-forgeable legacy
@@ -1547,12 +1552,18 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, waits
+verifies it is reachable from `origin/main`, and requires the current main tip
+to be the deployment serving the configured production base domain. A stale
+current-main release fails instead of being reported as a successful no-op;
+late events for older main ancestors remain safe no-op candidates. The workflow
+then enumerates and proves every production custom domain against the event's
+exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
-function executions to drain, then verifies the configured Vercel production
-alias still points at that commit before exposing the database secret. It can
-also be manually dispatched with `deployed_sha` set to the current Vercel
-production commit; the same drain and alias proof still apply before SQL runs.
+function executions to drain, then repeats the current-commit and complete
+domain-set proof before exposing the database secret. It can also be manually
+dispatched with `deployed_sha` and `deployment_url` set to the current exact
+Vercel production deployment; the same drain and exact-domain proof apply before
+SQL runs.
 It requires
 `HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
@@ -1562,6 +1573,17 @@ does not use GitHub Actions concurrency for this lane; the final alias check and
 the contract migration advisory lock make stale or duplicate runs skip safely
 without letting stale events replace valid pending runs. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
+The public workflow is verification-only: it does not assign aliases, promote a
+deployment, or roll production back.
+Because the workflow checks out and executes the deployed revision, the first
+production Web deployment containing
+`scripts/verify-vercel-production-deployment.ts` is the postdeploy verification
+rollback floor. A manual retry against an older pre-floor deployment fails
+closed on the missing verifier before database authority or contract SQL is
+available. Incident recovery may still route traffic to an older deployment,
+but the protected postdeploy lane becomes operable again only after rolling
+forward to that floor or a newer revision; do not use an older workflow revision
+to bypass the complete-domain proof.
 The shared production migration URL resolver strips Prisma-style
 `sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
 handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.

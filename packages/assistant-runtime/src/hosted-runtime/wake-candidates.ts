@@ -1,3 +1,9 @@
+import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
+
+export { HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON };
+
 export const HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON = "device-sync.reconcile";
 export const HOSTED_ASSISTANT_WAKE_REASON = "assistant";
 
@@ -63,5 +69,19 @@ function hostedWakeCandidateWins(
 }
 
 function hostedWakeReasonPriority(reason: string | null): number {
-  return reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON ? 1 : 0;
+  if (reason === HOSTED_DEVICE_SYNC_RECONCILE_WAKE_REASON) {
+    return 2;
+  }
+  if (reason === HOSTED_ASSISTANT_WAKE_REASON || reason === null) {
+    return 1;
+  }
+  return 0;
+}
+
+export function hostedRuntimeWakeReasonUsesAssistantPhase(
+  reason: string | null,
+): boolean {
+  return reason === null
+    || reason === HOSTED_ASSISTANT_WAKE_REASON
+    || reason === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
 }

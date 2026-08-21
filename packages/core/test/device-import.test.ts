@@ -8562,7 +8562,7 @@ test("importDeviceBatch scopes no-id Junction profile predecessor claims to one 
   assert.equal(collapseEventSpines(rows).length, 2);
 });
 
-test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors atomically", async () => {
+test("importDeviceBatch rejects ambiguous equal-revision no-id Junction profiles atomically", async () => {
   const vaultRoot = await makeTempDirectory("murph-device-import-profile-predecessor-ambiguity");
   await initializeVault({ vaultRoot, createdAt: "2026-05-01T00:00:00.000Z" });
   const resourceType = "junction-oura-profile";
@@ -8607,22 +8607,25 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
       unit: "cm",
     },
   });
-  const firstUpdatedAt = "2026-05-19T09:00:00.000Z";
-  const secondUpdatedAt = "2026-05-20T09:00:00.000Z";
+  const firstCreatedAt = "2026-05-18T09:00:00.000Z";
+  const secondCreatedAt = "2026-05-19T09:00:00.000Z";
+  const providerRevision = "2026-05-20T09:00:00.000Z";
   await importDeviceBatch({
     vaultRoot,
     provider: "junction",
     importedAt: "2026-05-20T10:00:00.000Z",
     events: [
       profileEvent({
-        normalizerVersion: "junction-normalizer.v1",
-        occurredAt: firstUpdatedAt,
-        value: 179,
+        normalizerVersion: "junction-no-id-profile.v1",
+        occurredAt: firstCreatedAt,
+        value: 180,
+        version: providerRevision,
       }),
       profileEvent({
-        normalizerVersion: "junction-normalizer.v1",
-        occurredAt: secondUpdatedAt,
+        normalizerVersion: "junction-no-id-profile.v1",
+        occurredAt: secondCreatedAt,
         value: 180,
+        version: providerRevision,
       }),
     ],
   });
@@ -8637,8 +8640,8 @@ test("importDeviceBatch rejects ambiguous no-id Junction profile predecessors at
       events: [profileEvent({
         normalizerVersion: "junction-no-id-profile.v1",
         occurredAt: createdAt,
-        value: 181,
-        version: "2026-05-22T09:00:00.000Z",
+        value: 180,
+        version: providerRevision,
       })],
     }),
     (error: unknown) => error instanceof VaultError

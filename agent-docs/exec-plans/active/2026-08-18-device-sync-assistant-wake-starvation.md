@@ -1,4 +1,4 @@
-# Device Sync Production Recovery
+# Device Sync Production Recovery and Interruption Observability
 
 ## Goal
 
@@ -25,6 +25,20 @@ frontiers advance after deployment.
   importing or scheduling bounded continuation work. Cancellation releases the
   root job for retry, discarding that in-memory prefix, so slow summary calls can
   repeat indefinitely without a typed provider failure.
+- Pull request #1992 merged and shipped the bounded Junction continuation and
+  blocked-assistant recovery. A later member incident still advanced
+  `lastSyncStartedAt` without advancing completion or recording a typed failure.
+  The dirty frontier was already drained, no foreground/model/auth work ran in
+  the incident window, and the nearest production deploy completed more than two
+  hours earlier with no matching rollout or replacement event.
+- That incident's workspace wake advanced to the ordinary six-hour cadence
+  instead of the yielded 30-second retry. Service wake projection already takes
+  the earliest active reconcile or queued job, so an intact immediate Junction
+  continuation would have won. The remaining proven failure class is loss or
+  interruption after sync start but before the continuation/completion handoff
+  became durable. Existing telemetry cannot distinguish a maintenance timeout,
+  foreground yield, invocation preemption, container destruction, another outer
+  abort, or an abrupt invocation/checkpoint loss.
 
 ## Constraints
 
@@ -40,6 +54,21 @@ frontiers advance after deployment.
 - Keep provider payloads, member identifiers, and production row contents out
   of code, tests, docs, logs, and PR artifacts.
 - Preserve the exact wake/checkpoint and mailbox completion fences.
+
+## Product UX
+
+- Effort: Patch.
+- Outcome: A member's connected data keeps its existing freshness and recovery
+  behavior while operators gain exact interruption diagnostics.
+- Reaches: Existing background Apple Health/WHOOP sync passes during normal,
+  delayed, and interrupted hosted execution.
+- Proof: A deferred runtime-log transport cannot delay provider work, lane
+  return, foreground recovery, or checkpoint/retry handoff; the ordinary
+  system-mailbox entrypoint still emits correlated lifecycle records.
+- Walkthrough: A connected-data member sees no new surface or step. With a
+  degraded log endpoint, provider work and the existing retry/checkpoint path
+  continue independently. Result: Ready; the deferred-transport and ordinary
+  production-entrypoint regressions pass.
 
 ## Plan
 
@@ -59,6 +88,19 @@ frontiers advance after deployment.
    required CI, and protected deployment.
 6. Confirm both affected production frontiers and typed runtime markers advance
    after deployment; continue diagnosis if either remains stalled.
+7. Enqueue an ordered device-sync pass lifecycle pair around the hosted lane
+   without awaiting diagnostic transport. Record only attempt/lease/workspace
+   context and bounded stage/outcome/count/presence metadata, so a persisted
+   start without a finish identifies abrupt loss without exposing member,
+   account, job, payload, resource, or raw error values.
+8. Preserve the first cancellation source as a typed reason and distinguish
+   foreground yield, deadline timeout, invocation preemption, container
+   destruction, generic outer abort, and an otherwise unknown yield. Prove the
+   lifecycle pair, timeout stage, first-winner classification, and strict Web log
+   parser contract with focused tests and package typechecks.
+9. Deploy Web's event-code parser before fully recycling the Cloudflare runner,
+   then use the paired attempt markers and checkpoint/container logs to classify
+   any recurrence exactly.
 
 ## Verification
 
@@ -103,9 +145,10 @@ frontiers advance after deployment.
 - The diff-scoped verifier completed shell syntax, Node syntax, and the hosted
   stale-name guard before its local run was manually stopped during the next
   guard after 161 seconds; required CI remains the broad verification owner.
-- Corrective pull request #1992 is open. Exact-head PR review of the corrected
-  head, required CI, protected deployment, and production convergence proof
-  remain pending.
+- Corrective pull request #1992 merged and its bounded continuation/recovery
+  behavior was present before the later incident. The later incident therefore
+  does not reproduce the original non-resumable serial summary prefix; it exposes
+  the missing terminal-handoff observability described above.
 - Final ReviewGPT round one found two accepted cross-runtime gaps. A blocked
   assistant source was retained in the vault but omitted from the owner-visible
   checkpoint wake, so policy restoration had no guaranteed trigger. The
@@ -150,8 +193,29 @@ frontiers advance after deployment.
   and exact-source revocation/status, while 65 distinct logical sources still
   fail before source reads or writes. The focused six-test proof passes.
   The full device-syncd suite passes all 1,128 tests, and its typecheck is green.
+- The preliminary specialist review found three accepted gaps in the first
+  observability candidate: direct lifecycle transport could consume the lane
+  budget, the top-level system-mailbox entrypoint omitted invocation context,
+  and late failures reported zero already-processed jobs. The correction uses
+  the existing ordered runtime-log buffer, threads the existing context at the
+  missing call site, and extends the existing pass observer with the processed
+  count; it adds no state, queue, scheduler, retry owner, or schema.
+- The corrected 92-test maintenance suite proves provider work and retry-wake
+  return complete while the first lifecycle transport remains blocked, retains
+  lifecycle ordering/correlation after release, and reports a nonzero job count
+  on a later reconciliation failure. The full 338-test workspace-entrypoint
+  suite proves the ordinary `system_mailbox` path emits both markers with the
+  request attempt, lease generation, and workspace version. The assistant-
+  runtime typecheck passes.
+- The independent first-round review reported one High finding: awaited
+  lifecycle telemetry could exhaust the maintenance budget and retain the
+  foreground fence. This duplicates the accepted specialist transport finding
+  and is corrected by the same existing-buffer reuse and deferred-transport
+  regression. It reported no additional defect. The consolidated five-file
+  assistant-runtime regression run passes all 798 tests, and the package
+  typecheck remains green.
 
 ## State
 
 Status: active
-Updated: 2026-08-18
+Updated: 2026-08-20

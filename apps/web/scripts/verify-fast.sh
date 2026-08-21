@@ -24,6 +24,8 @@ hosted_web_default_hosted_key_version="v1"
 hosted_web_build_default_privy_app_id="cm_app_build_placeholder1"
 hosted_web_build_memory_guard_default=0
 hosted_web_verify_skip_typecheck="${MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK:-0}"
+hosted_web_verify_lane="${MURPH_HOSTED_WEB_VERIFY_LANE:-all}"
+hosted_web_test_shard="${MURPH_HOSTED_WEB_TEST_SHARD:-}"
 
 if [[ -n "${CI:-}" && "$(uname -s)" == "Linux" ]]; then
   hosted_web_build_memory_guard_default=1
@@ -100,6 +102,25 @@ fi
 
 if [[ "$hosted_web_verify_skip_typecheck" != "0" && "$hosted_web_verify_skip_typecheck" != "1" ]]; then
   verify_fail "MURPH_HOSTED_WEB_VERIFY_SKIP_TYPECHECK must be 0 or 1."
+fi
+
+case "$hosted_web_verify_lane" in
+  "all" | "build" | "test-shard")
+    ;;
+  *)
+    verify_fail "MURPH_HOSTED_WEB_VERIFY_LANE must be all, build, or test-shard."
+    ;;
+esac
+
+if [[ "$hosted_web_verify_lane" == "test-shard" ]]; then
+  if [[ ! "$hosted_web_test_shard" =~ ^([1-9][0-9]*)/([1-9][0-9]*)$ ]]; then
+    verify_fail "MURPH_HOSTED_WEB_TEST_SHARD must use <index>/<count> for the test-shard lane."
+  fi
+  if [[ "${BASH_REMATCH[1]}" -gt "${BASH_REMATCH[2]}" ]]; then
+    verify_fail "MURPH_HOSTED_WEB_TEST_SHARD index must not exceed its count."
+  fi
+elif [[ -n "$hosted_web_test_shard" ]]; then
+  verify_fail "MURPH_HOSTED_WEB_TEST_SHARD is only valid for the test-shard lane."
 fi
 
 if [[ "$hosted_web_build_memory_guard_default" == "1" && "$hosted_web_build_memory_guard" == "0" ]]; then
@@ -360,7 +381,22 @@ run_health_commons_generate() {
 }
 
 run_web_tests() {
+  if [[ -n "$hosted_web_test_shard" ]]; then
+    pnpm test:prepared -- --shard="$hosted_web_test_shard" --passWithNoTests=false
+    return
+  fi
+
   pnpm test:prepared
+}
+
+run_build_output_tests() {
+  # These assertions consume output produced by the measured Next build and
+  # dev smoke. Keep them in that checkout instead of letting clean test shards
+  # silently skip the output-dependent branches.
+  MURPH_REQUIRE_HEALTH_COMMONS_ROUTE_TRACES=1 \
+    pnpm test:prepared -- \
+      apps/web/test/health-commons-route-bundle-boundary.test.ts \
+      apps/web/test/instrumentation.test.ts
 }
 
 run_typescript_typecheck() {
@@ -376,17 +412,44 @@ run_timed_step "health commons generated artifacts" run_health_commons_generate
 
 run_timed_step "TypeScript 7 typecheck" run_typescript_typecheck
 
-if [[ "$verify_step_parallel" != "1" ]]; then
-  run_timed_step "test" run_web_tests
-  run_timed_step "lint" pnpm lint
-  run_timed_step "dev smoke" run_dev_smoke
-  run_timed_step "next build" run_next_build
+if [[ "$hosted_web_verify_lane" == "test-shard" ]]; then
+  run_timed_step "test shard $hosted_web_test_shard" run_web_tests
   exit 0
 fi
 
-if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
+next_build_completed=0
+smoke_completed=0
+if [[ "$hosted_web_verify_lane" == "build" ]]; then
+  # Parent acceptance previously left this ignored source artifact in the same
+  # checkout; an isolated build lane must recreate it before Next compiles.
+  run_timed_step "changelog generated artifacts" pnpm changelog:generate
+  verify_log "run next build before the trace assertion because both must observe one checkout"
+  run_timed_step "next build" run_next_build
+  next_build_completed=1
+  run_timed_step "dev smoke" run_dev_smoke
+  smoke_completed=1
+fi
+
+if [[ "$verify_step_parallel" != "1" ]]; then
+  if [[ "$hosted_web_verify_lane" == "all" ]]; then
+    run_timed_step "test" run_web_tests
+  else
+    run_timed_step "build output tests" run_build_output_tests
+  fi
+  run_timed_step "lint" pnpm lint
+  if [[ "$smoke_completed" != "1" ]]; then
+    run_timed_step "dev smoke" run_dev_smoke
+  fi
+  if [[ "$next_build_completed" != "1" ]]; then
+    run_timed_step "next build" run_next_build
+  fi
+  exit 0
+fi
+
+if [[ "$hosted_web_build_memory_guard" == "1" && "$next_build_completed" != "1" ]]; then
   verify_log "run next build serially because the memory guard owns the measured cgroup scope"
   run_timed_step "next build" run_next_build
+  next_build_completed=1
 fi
 
 trap cleanup_background_jobs EXIT
@@ -394,15 +457,23 @@ trap 'handle_termination_signal INT' INT
 trap 'handle_termination_signal TERM' TERM
 trap 'handle_termination_signal HUP' HUP
 
-if [[ "$hosted_web_build_memory_guard" != "1" ]]; then
+verification_pids=()
+if [[ "$hosted_web_build_memory_guard" != "1" && "$next_build_completed" != "1" ]]; then
   start_owned_background_job build_pid run_timed_step "next build" run_next_build
+  verification_pids+=("$build_pid")
 fi
 
-start_owned_background_job smoke_pid run_timed_step "dev smoke" run_dev_smoke
-start_owned_background_job test_pid run_timed_step "test" run_web_tests
-start_owned_background_job lint_pid run_timed_step "lint" pnpm lint
-if [[ "$hosted_web_build_memory_guard" == "1" ]]; then
-  wait_for_background_jobs "$smoke_pid" "$test_pid" "$lint_pid"
-else
-  wait_for_background_jobs "$build_pid" "$smoke_pid" "$test_pid" "$lint_pid"
+if [[ "$smoke_completed" != "1" ]]; then
+  start_owned_background_job smoke_pid run_timed_step "dev smoke" run_dev_smoke
+  verification_pids+=("$smoke_pid")
 fi
+if [[ "$hosted_web_verify_lane" == "all" ]]; then
+  start_owned_background_job test_pid run_timed_step "test" run_web_tests
+  verification_pids+=("$test_pid")
+else
+  start_owned_background_job build_output_test_pid run_timed_step "build output tests" run_build_output_tests
+  verification_pids+=("$build_output_test_pid")
+fi
+start_owned_background_job lint_pid run_timed_step "lint" pnpm lint
+verification_pids+=("$lint_pid")
+wait_for_background_jobs "${verification_pids[@]}"

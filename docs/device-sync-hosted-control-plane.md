@@ -476,9 +476,10 @@ member-isolated. After those checks, Web performs one narrow member-owned
 Junction connection read selecting only `id` and `status` with a 32+1
 saturation check, one bounded set source read for those ids with a 64+1
 unscoped authority check or a narrower 32+1 source-filtered check, and one set
-receipt-signal read. The path never selects or decrypts an external account id
-or OAuth token. It preserves the
-established active/not-disconnected predicates, source-scoped first-webhook
+receipt-signal read. That bounded ledger includes data-bearing webhook receipts
+and exact post-checkpoint canonical-import receipts. The path never selects or
+decrypts an external account id or OAuth token. It preserves the
+established active/not-disconnected predicates, source-scoped first-receipt
 behavior, disconnected-source `lastSeenAt` receipt cutoff, resource alias
 normalization, and timestamp-only response contract. Web remains the sole
 device-sync control-plane truth owner.
@@ -497,11 +498,19 @@ The current hosted runtime strategy is:
 2. A hosted job running through `apps/cloudflare` requests the current runtime snapshot from the signed internal web route only when execution needs device-sync access.
 3. The hosted runner fetches pending dirty device-sync rows from web-owned Postgres as a normal work source; webhook freshness does not depend on immutable per-webhook mailbox payloads.
 4. The hosted job sends narrow runtime updates back through the signed internal web apply route.
-5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. A verified companion overnight PRV row acknowledges only after canonical import success; canonical-owner failures and expired worker leases retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows. A structurally invalid companion payload is different: its exact terminal code promotes the hosted payload acknowledgement after one dead local job so it cannot replay into unbounded replacement rows.
+5. Dirty revisions are acknowledged through the dirty-ack route only after the dirty state has been converted into local runtime work and that local work has crossed the checkpoint boundary. Exact payload rows stay hosted while their machine-local jobs are queued so a cold restore can reconstruct them, but the checkpoint result carries the local scheduler's future wake instead of immediately replaying retained work. A source-scoped resource job carries a bounded canonical-import receipt through that same checkpoint only when the committed importer result contains that exact normalized source and resource and the job then completes; generic job success or an import for another identity is not freshness evidence. Scheduled verification, reconciliation, and broad backfill children never inherit the original payload's freshness authority. Web records the receipt only when the named payload row still exists, in the same short transaction that deletes the row, so exact callback replay cannot create duplicate freshness evidence. Generic rows acknowledge on executed local success or terminal failure. Work marked complete only because of a machine-local disconnect remains hosted until the next authoritative control-plane snapshot either restores the active account and replays it or explicitly terminally dispositions it. A verified companion overnight PRV row acknowledges only after canonical import success; canonical-owner failures and expired worker leases retain that same job beyond the ordinary attempt fence and follow the local scheduler's bounded future retry instead of creating dead replacement rows. A structurally invalid companion payload is different: its exact terminal code promotes the hosted payload acknowledgement after one dead local job so it cannot replay into unbounded replacement rows.
 6. Local-agent token export and refresh flows stay on the hosted web boundary.
 7. Cloudflare does not keep a second durable token-escrow source of truth for device sync.
 
 This keeps control-plane truth in web while still allowing hosted execution to consume the runtime state it needs during a job.
+
+The local device-sync SQLite schema is version 11. Its bounded
+`device_job.canonical_import_receipts_json` column is written atomically with
+job success from the exact normalized source/resource identities already
+derived from committed canonical events. No continuation relation or wake-hint
+ownership state exists. A Cloudflare/runtime rollback below schema v11 cannot
+open a workspace that has already advanced; recover with a forward deployment
+rather than a binary downgrade.
 
 Disconnect intent is also web-owned control-plane truth. Once the connection
 mutation lock commits `DISCONNECT_IN_PROGRESS`, the signed runtime apply route

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 200,
+  "item": {
+    "id": "personal-memory-maintenance-recovery",
+    "kind": "improvement",
+    "priority": 5,
+    "title": "Personal memory maintenance is reliable again",
+    "summary": "Murph can again refresh the private context it uses across conversations during scheduled maintenance.",
+    "details": "The maintenance stays private and silent, changes only the saved memory record, and does not send a message when it runs.",
+    "relevanceTags": ["memory", "personalization", "reliability"],
+    "sourcePullRequests": [2047]
+  }
+}

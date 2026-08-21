@@ -36,6 +36,9 @@ import {
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -112,6 +115,7 @@ type HostedStarterUsagePostCommitEffects = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  signupNotificationEmailMemberId: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -433,6 +437,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           hostedExecutionMailboxItemId: shouldWakeActivationRuntime
             ? activation?.hostedExecutionMailboxItemId ?? null
             : null,
+          signupNotificationEmailMemberId:
+            activation?.activated ? invite.member.id : null,
           welcomeEmailMemberId:
             activation?.activated && !policy.suppressSignupWelcomeEmail
               ? invite.member.id
@@ -479,6 +485,13 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       "Hosted Starter usage crypto preparation retry exhausted unexpectedly.",
     );
   })();
+
+  if (outcome.effects.signupNotificationEmailMemberId) {
+    scheduleHostedSignupNotificationEmails({
+      memberIds: [outcome.effects.signupNotificationEmailMemberId],
+      prisma,
+    });
+  }
 
   const deferredActivationWake = policy.instantStartAdmission
     ? buildHostedLinqInstantStartDeferredActivationWake(outcome.effects)

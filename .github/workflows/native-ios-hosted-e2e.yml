@@ -110,7 +110,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    if: ${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
     environment: native-ios-hosted-e2e
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -204,6 +204,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           LIVE_RESULT: ${{ needs.pr-live.result }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
           SELECT_RESULT: ${{ needs.select-pr.result }}
           SELECTED: ${{ needs.select-pr.outputs.selected }}
           SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
@@ -214,7 +216,9 @@ jobs:
           set -euo pipefail
           state=failure
           description='This controller run did not execute real native iOS hosted E2E: selection failed.'
-          if [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
+          if [[ "${RUN_ATTEMPT}" != 1 ]]; then
+            description="Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER}; native reruns do not enter the live queue."
+          elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
             description='This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
             state=success

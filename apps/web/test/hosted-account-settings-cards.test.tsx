@@ -83,7 +83,7 @@ describe("HostedAccountSettingsCards", () => {
     expect(markup).toContain("mailto:murph+u2-private-alias@mail.example.test");
     expect(markup).not.toContain("Email Murph at murph+u2-private-alias@mail.example.test");
     expect(markup).not.toContain("Email murph+u2-private-alias@mail.example.test");
-    expect(markup).not.toContain("murph@mail.withmurph.ai");
+    expect(markup).not.toContain("mail@mail.withmurph.ai");
   });
 
   test("shows a matched Telegram username instead of the raw Telegram id", () => {

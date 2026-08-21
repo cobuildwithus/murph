@@ -305,8 +305,9 @@ test("Training renders live progress, history and a continuation action for the 
   assert.match(markup, /Continue workout/);
   assert.match(
     markup,
-    /href="sms:\+15555550100\?body=Continue%20my%20active%20workout\."/,
+    /href="sms:\+15555550100\?body=Continue\+workout\+active-workout\."/,
   );
+  assert.doesNotMatch(markup, /Continue(?:%20|\+)my(?:%20|\+)active/);
   assert.doesNotMatch(
     markup,
     /href="sms:\+15555550100\?body=Start%20a%20workout%20with%20me\."/,
@@ -960,7 +961,7 @@ test("Training exposes workout actions only when vault state is known", () => {
     );
 
     assert.match(markup, /Continue workout/);
-    assert.match(markup, /body=Continue%20my%20active%20workout/);
+    assert.match(markup, /body=Continue\+workout\+active-workout\./);
     assert.doesNotMatch(markup, /body=Start%20a%20workout/);
   }
 

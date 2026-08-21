@@ -1372,6 +1372,12 @@ describe("hosted system mailbox notification execution context", () => {
       mailboxLane: "device-sync",
       nextWakeAt: null,
       postCheckpointRecord: {
+        completedImports: [{
+          dirtyPayloadId: "dsp_payload_1",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_dirty_123",
         kind: "device-sync.dirty-processed",
         nextWakeAt: null,
@@ -1434,6 +1440,12 @@ describe("hosted system mailbox notification execution context", () => {
         recorded: 1,
       });
       expect(ackDirtyStateProcessed).toHaveBeenCalledWith({
+        completedImports: [{
+          dirtyPayloadId: "dsp_payload_1",
+          importCompletedAt: "2026-08-20T09:00:00.000Z",
+          resource: "steps",
+          sourceProviderSlug: "apple_health_kit",
+        }],
         connectionId: "dsc_dirty_123",
         processedDirtyPayloadIds: ["dsp_payload_1"],
         processedRevision: "12",
@@ -3164,10 +3176,24 @@ describe("hosted system mailbox notification execution context", () => {
         now: () => FIXED_NOW,
         retainProcessedItemUntilRecorded: true,
         runtime,
+        runtimeLogContext: {
+          attemptId: "attempt_device_sync_mailbox",
+          leaseGeneration: "13",
+          workspaceVersion: "14",
+        },
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,
       });
       assert.equal(prepared?.status, "processed");
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          runtimeLogContext: {
+            attemptId: "attempt_device_sync_mailbox",
+            leaseGeneration: "13",
+            workspaceVersion: "14",
+          },
+        }),
+      );
 
       await expect(recordHostedSystemMailboxItemAfterCheckpoint({
         item: prepared.item,

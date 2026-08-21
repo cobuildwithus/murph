@@ -31,8 +31,8 @@ export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_RETENTION_BATCH_SIZE = 5_000;
 export const HOSTED_RETENTION_MAX_BATCHES = 4;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the six owners below this caps
-// one hourly pass at 12 statements and 3,000 deleted rows.
+// high-volume diagnostic drain budget. Across the seven owners below this caps
+// one hourly pass at 14 statements and 3,500 deleted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -62,6 +62,7 @@ export interface HostedRetentionCleanupResult {
   expiredDeviceConnectIntentsDeleted: number;
   expiredDeviceOauthSessionsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
+  expiredEmailPublicBootstrapAttemptsDeleted: number;
   expiredGroupCurrentSenderClarificationsDeleted: number;
   expiredIngressLatencyTracesDeleted: number;
   expiredMailboxContentRetired: number;
@@ -99,6 +100,8 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredClinicalRecordOauthSessions({ now, prisma });
   const expiredClinicalRecordConnectIntentsDeleted =
     await deleteExpiredClinicalRecordConnectIntents({ now, prisma });
+  const expiredEmailPublicBootstrapAttemptsDeleted =
+    await deleteExpiredEmailPublicBootstrapAttempts({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
@@ -153,6 +156,7 @@ export async function runHostedRetentionCleanup(input: {
     expiredDeviceConnectIntentsDeleted,
     expiredDeviceOauthSessionsDeleted,
     expiredDeviceWebhookTracesDeleted,
+    expiredEmailPublicBootstrapAttemptsDeleted,
     expiredGroupCurrentSenderClarificationsDeleted,
     expiredIngressLatencyTracesDeleted,
     expiredMailboxContentRetired: expiredMailboxItems.retired,
@@ -562,6 +566,25 @@ export async function deleteExpiredConnectedAppConnectIntents(input: {
     DELETE FROM "hosted_connected_app_connect_intent" AS intent
     USING doomed
     WHERE intent."claim_hash" = doomed."claim_hash"
+  `);
+}
+
+export async function deleteExpiredEmailPublicBootstrapAttempts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT attempt."id"
+      FROM "hosted_email_public_bootstrap_attempt" AS attempt
+      WHERE attempt."expires_at" <= ${input.now}
+      ORDER BY attempt."expires_at" ASC, attempt."id" ASC
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF attempt SKIP LOCKED
+    )
+    DELETE FROM "hosted_email_public_bootstrap_attempt" AS attempt
+    USING doomed
+    WHERE attempt."id" = doomed."id"
   `);
 }
 

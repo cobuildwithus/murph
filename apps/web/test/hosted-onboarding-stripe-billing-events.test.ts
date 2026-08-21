@@ -299,6 +299,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -350,6 +351,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -541,6 +543,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
 
@@ -571,6 +574,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -606,6 +610,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: ["member_123"],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -626,6 +631,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: ["member_123"],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -862,6 +868,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: ["member_123"],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -910,6 +917,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       hostedExecutionEventId: null,
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -966,6 +974,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       hostedExecutionEventId: null,
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1015,6 +1024,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_existing",
       hostedExecutionMailboxItemId: "mailbox_wake_existing",
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -1041,6 +1051,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: "member_123",
       hostedExecutionEventId: "wake_123",
       hostedExecutionMailboxItemId: null,
+      newlyActivatedMemberIds: ["member_123"],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: "member_123",
     });
@@ -1076,6 +1087,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
@@ -1188,6 +1200,7 @@ describe("hosted onboarding stripe billing events", () => {
         hostedExecutionMailboxItemId: "mailbox_family_existing",
       }],
       hostedExecutionEventId: "wake_family_existing",
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
@@ -1347,6 +1360,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
@@ -1390,6 +1404,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: {
         memberId: "member_123",
@@ -1424,6 +1439,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
@@ -1451,6 +1467,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
@@ -1619,6 +1636,7 @@ describe("hosted onboarding stripe billing events", () => {
       activatedMemberId: null,
       activatedMembers: [],
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       runtimeRecheckMemberIds: [],
       subscriptionCancellationEmail: null,
       welcomeEmailMemberId: null,
@@ -1878,6 +1896,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -1994,6 +2013,7 @@ describe("hosted onboarding stripe billing events", () => {
     )).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -2177,6 +2197,7 @@ describe("hosted onboarding stripe billing events", () => {
     ).resolves.toEqual({
       activatedMemberId: null,
       hostedExecutionEventId: null,
+      newlyActivatedMemberIds: [],
       welcomeEmailMemberId: null,
     });
 

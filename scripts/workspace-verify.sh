@@ -102,9 +102,11 @@ readonly node_syntax_check_scripts=(
   "scripts/run-with-host-verification-slot.mjs"
   "scripts/run-with-workspace-artifact-lock.mjs"
   "scripts/check-workspace-package-cycles.mjs"
+  "scripts/check-runner-bundle-budget-ci.mjs"
   "scripts/check-hosted-crypto-hardcut.mjs"
   "scripts/release-artifact-secret-guard.mjs"
   "scripts/release-helpers.mjs"
+  "scripts/release-verification-plan.mjs"
   "scripts/verify-release-target.mjs"
   "scripts/pack-publishables.mjs"
   "scripts/publish-publishables.mjs"
@@ -486,6 +488,7 @@ readonly acceptance_app_verify_delay_seconds="$(resolve_profile_controlled_value
 readonly acceptance_early_cloudflare_verify="$(resolve_profile_controlled_value "${MURPH_ACCEPTANCE_EARLY_CLOUDFLARE_VERIFY:-0}" "0")"
 readonly test_lane_parallel_default="$(resolve_local_parallel_default)"
 readonly test_lane_parallel="$(resolve_profile_controlled_value "${MURPH_TEST_LANES_PARALLEL:-$test_lane_parallel_default}" "$test_lane_parallel_default")"
+readonly package_coverage_shard="$(resolve_profile_controlled_value "${MURPH_PACKAGE_COVERAGE_SHARD:-all}" "all")"
 readonly package_coverage_concurrency_default="$(resolve_package_coverage_concurrency_default)"
 readonly package_coverage_concurrency_limit="$(resolve_profile_controlled_value "$(normalize_positive_integer "${MURPH_PACKAGE_COVERAGE_CONCURRENCY:-$package_coverage_concurrency_default}" "$package_coverage_concurrency_default")" "$package_coverage_concurrency_default")"
 readonly package_coverage_cli_active_concurrency_default="$(resolve_package_coverage_cli_active_concurrency_default)"
@@ -944,7 +947,14 @@ run_repo_vitest() {
   # Keep worker selection centralized in the Vitest configs so local runs use
   # the faster 75% default while CI stays at 50%, with the same env override
   # path (`MURPH_VITEST_MAX_WORKERS`) for both lanes.
-  pnpm exec vitest run --config "vitest.config.ts" "$@"
+  pnpm exec vitest run --config "vitest.config.ts" \
+    --project="!assistant-engine" "$@" || return $?
+
+  # The curated Assistant Engine project has a proven 6 GiB requirement. Keep
+  # that ceiling at this owner instead of lifting every repo test and build.
+  NODE_OPTIONS=--max-old-space-size=6144 \
+    pnpm exec vitest run --config "vitest.config.ts" \
+      --project="assistant-engine" "$@"
 }
 
 run_workspace_package_coverage() {
@@ -991,64 +1001,24 @@ mark_acceptance_cli_coverage_complete() {
 
 run_all_package_coverage() {
   local contracts_artifacts_prepared="${1:-0}"
-  local package_coverage_dirs=(
-    "packages/cli"
-    "packages/assistant-engine"
-    "packages/assistant-runtime"
-    "packages/core"
-    "packages/setup-cli"
-    "packages/assistant-cli"
-    "packages/assistantd"
-    "packages/cloudflare-hosted-control"
-    # In non-prepared coverage, the launch guard below keeps contracts out of
-    # the active CLI window because contracts artifact verification rebuilds
-    # shared dist outputs that CLI built-runtime tests import.
-    "packages/contracts"
-    "packages/clinical-records"
-    "packages/device-syncd"
-    "packages/exercise-library"
-    "packages/gateway-core"
-    "packages/health-metrics"
-    "packages/hosted-execution"
-    "packages/importers"
-    "packages/inbox-services"
-    "packages/inboxd"
-    "packages/messaging-ingress"
-    "packages/openclaw-plugin"
-    "packages/operator-config"
-    "packages/parsers"
-    "packages/query"
-    "packages/runtime-state"
-    "packages/vault-usecases"
-  )
-  local package_coverage_labels=(
-    "CLI package coverage"
-    "Assistant engine package coverage"
-    "Assistant runtime package coverage"
-    "Core owner coverage"
-    "Setup CLI package coverage"
-    "Assistant CLI package coverage"
-    "Assistantd package coverage"
-    "Cloudflare hosted control package coverage"
-    "Contracts package coverage"
-    "Clinical records package coverage"
-    "Device syncd package coverage"
-    "Exercise library package coverage"
-    "Gateway core package coverage"
-    "Health metrics package coverage"
-    "Hosted execution owner coverage"
-    "Hosted Temporal orchestrator package coverage"
-    "Importers owner coverage"
-    "Inbox services package coverage"
-    "Inboxd package coverage"
-    "Messaging ingress package coverage"
-    "OpenClaw package coverage"
-    "Operator config package coverage"
-    "Parsers package coverage"
-    "Query owner coverage"
-    "Runtime state package coverage"
-    "Vault usecases package coverage"
-  )
+  local package_coverage_plan_output
+  local package_coverage_dirs=()
+  local planned_package_dir
+
+  if ! package_coverage_plan_output="$(node scripts/release-verification-plan.mjs --package-dirs "$package_coverage_shard")"; then
+    verify_log "ERROR: unable to resolve package coverage shard '$package_coverage_shard'"
+    return 1
+  fi
+
+  while IFS= read -r planned_package_dir; do
+    [[ -n "$planned_package_dir" ]] && package_coverage_dirs+=("$planned_package_dir")
+  done <<<"$package_coverage_plan_output"
+
+  if [[ "${#package_coverage_dirs[@]}" -eq 0 ]]; then
+    verify_log "ERROR: package coverage shard '$package_coverage_shard' matched zero packages"
+    return 1
+  fi
+  verify_log "package coverage shard=${package_coverage_shard} packages=${package_coverage_dirs[*]}"
   local package_count="${#package_coverage_dirs[@]}"
   local package_coverage_concurrency="$package_coverage_concurrency_limit"
   local package_coverage_cli_active_concurrency="$package_coverage_cli_active_concurrency_limit"
@@ -1098,11 +1068,13 @@ run_all_package_coverage() {
 
   if [[ "$package_coverage_concurrency" -le 1 ]]; then
     while [[ "$package_index" -lt "$package_count" ]]; do
+      local package_dir="${package_coverage_dirs[$package_index]}"
+      local package_label="Package coverage for ${package_dir}"
       if ! run_workspace_package_coverage \
-        "${package_coverage_dirs[$package_index]}" \
-        "${package_coverage_labels[$package_index]}" \
+        "$package_dir" \
+        "$package_label" \
         "$contracts_artifacts_prepared"; then
-        record_failed_package_coverage "${package_coverage_labels[$package_index]}"
+        record_failed_package_coverage "$package_label"
       fi
       if [[ "${package_coverage_dirs[$package_index]}" == "packages/cli" ]]; then
         mark_acceptance_cli_coverage_complete
@@ -1166,7 +1138,7 @@ run_all_package_coverage() {
       local failure_file="$failure_labels_dir/$package_index"
       local status_file="$status_dir/$package_index"
       local package_dir="${package_coverage_dirs[$package_index]}"
-      local package_label="${package_coverage_labels[$package_index]}"
+      local package_label="Package coverage for ${package_dir}"
       (
         local status=0
         write_package_coverage_status() {
@@ -1816,11 +1788,16 @@ run_verify_cli_with_workspace_artifact_lock() {
 }
 
 log_acceptance_resource_plan() {
-  verify_log "resources cpus=$(detect_logical_cpu_count) memory_mib=$(detect_physical_memory_mib) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
+  verify_log "resources cpus=$(detect_logical_cpu_count) memory_mib=$(detect_physical_memory_mib) composed_parallel=${composed_acceptance_parallel} package_processes=${package_coverage_concurrency_limit} cli_package_processes=${package_coverage_cli_active_concurrency_limit} package_workers=${package_coverage_vitest_max_workers} cli_workers=${package_coverage_cli_vitest_max_workers} app_workers=${acceptance_app_vitest_max_workers} app_overlap=${acceptance_app_verify_with_coverage} profile=${verification_profile} package_shard=${package_coverage_shard} test_lanes=${test_lane_parallel} app_parallel=${app_verify_parallel}"
 }
 
 main() {
   local command="${1:-}"
+
+  if [[ "$package_coverage_shard" != "all" && "$command" != "test:packages:coverage" ]]; then
+    verify_log "ERROR: MURPH_PACKAGE_COVERAGE_SHARD is only valid with test:packages:coverage"
+    return 1
+  fi
 
   if [[ "$command" == "verify:acceptance" ]]; then
     log_acceptance_resource_plan

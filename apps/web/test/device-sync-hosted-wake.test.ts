@@ -1849,7 +1849,7 @@ describe("hosted device-sync wakes", () => {
     }
   });
 
-  it("re-signals one unchanged due tuple in the next recovery bucket without appending another mailbox item", async () => {
+  it("leaves an unchanged imported due tuple with its runtime retry owner", async () => {
     mocks.appendHostedMailboxEnvelopeTx
       .mockResolvedValueOnce({
         dedupeConflict: false,
@@ -1904,7 +1904,6 @@ describe("hosted device-sync wakes", () => {
       ),
     ).toEqual([canonicalWake.eventId, canonicalWake.eventId]);
     expect(mocks.signalHostedDeviceSyncMailboxRuntime.mock.calls).toEqual([
-      [{ mailboxItemId: "mailbox_existing" }],
       [{ mailboxItemId: "mailbox_existing" }],
     ]);
     expect(mocks.createSignal.mock.calls.map(([request]) => ({

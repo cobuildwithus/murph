@@ -14,8 +14,10 @@ import {
 import {
   buildLiveWorkoutSessionFromTemplate,
   buildLiveWorkoutCardEditor,
+  hasCompletedFiniteLiveWorkoutPlan,
+  hasFiniteLiveWorkoutPlan,
   hasLoggedWorkoutSet,
-  isActiveLiveWorkout,
+  isOpenLiveWorkout,
   LIVE_WORKOUT_SOURCE_APP,
 } from '../src/usecases/workout-live.js'
 import {
@@ -397,7 +399,7 @@ describe('live workout model', () => {
     assert.equal(workout.startedAt, '2026-08-09T18:00:00.000Z')
     assert.equal(workout.endedAt, undefined)
     assert.equal(workout.sessionNote, 'Gym session')
-    assert.equal(isActiveLiveWorkout(workout), true)
+    assert.equal(isOpenLiveWorkout(workout), true)
     assert.deepEqual(workout.exercises, [
       {
         name: 'Bench press',
@@ -405,6 +407,7 @@ describe('live workout model', () => {
         order: 3,
         mode: 'weight_reps',
         unitOverride: 'lb',
+        setPlanIsFinite: true,
         sets: [
           { order: 2, type: 'warmup' },
           { order: 4 },
@@ -433,7 +436,7 @@ describe('live workout model', () => {
       true,
     )
     assert.equal(
-      isActiveLiveWorkout({
+      isOpenLiveWorkout({
         ...workout,
         endedAt: '2026-08-09T18:45:00.000Z',
       }),
@@ -449,8 +452,62 @@ describe('live workout model', () => {
     assert.equal(workoutWithRoutineNote.sessionNote, 'Push day')
   })
 
+  test('keeps finite-plan intent and member-stated repetitions separate from actual sets', () => {
+    const workout = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      exercises: [{
+        memberRepsPerSet: 8,
+        name: 'Seated row',
+        order: 1,
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }, { order: 2 }],
+      }],
+    })
+
+    assert.equal(hasFiniteLiveWorkoutPlan(workout), true)
+    assert.equal(hasCompletedFiniteLiveWorkoutPlan(workout), false)
+    assert.deepEqual(workout.exercises[0]?.sets, [{ order: 1 }, { order: 2 }])
+    assert.equal(workout.exercises[0]?.memberRepsPerSet, 8)
+
+    const completed = structuredClone(workout)
+    completed.exercises[0]!.sets = [
+      { order: 1, reps: 8 },
+      { order: 2, reps: 8 },
+    ]
+    assert.equal(hasCompletedFiniteLiveWorkoutPlan(completed), true)
+
+    const legacyRoutine = workoutSessionSchema.parse({
+      sourceApp: LIVE_WORKOUT_SOURCE_APP,
+      startedAt: '2026-08-09T18:00:00.000Z',
+      routineId: 'wfmt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      exercises: [{
+        name: 'Legacy routine exercise',
+        order: 1,
+        sets: [{ order: 1, reps: 8 }],
+      }],
+    })
+    assert.equal(hasFiniteLiveWorkoutPlan(legacyRoutine), true)
+
+    const legacyRoutineWithTargetlessExercise = structuredClone(legacyRoutine)
+    legacyRoutineWithTargetlessExercise.exercises.push({
+      name: 'Unplanned extra exercise',
+      order: 2,
+      setPlanIsFinite: false,
+      sets: [{ order: 1, reps: 8 }],
+    })
+    assert.equal(
+      hasFiniteLiveWorkoutPlan(legacyRoutineWithTargetlessExercise),
+      false,
+    )
+  })
+
   test('validates live mutation coordinates and direct-usecase selectors', () => {
-    assert.equal(normalizeLiveWorkoutId(undefined), undefined)
+    assert.throws(
+      () => normalizeLiveWorkoutId(undefined),
+      (error: unknown) =>
+        error instanceof VaultCliError && error.code === 'invalid_option',
+    )
     assert.equal(
       normalizeLiveWorkoutId(' evt_01ARZ3NDEKTSV4RRFFQ69G5FAV '),
       'evt_01ARZ3NDEKTSV4RRFFQ69G5FAV',
