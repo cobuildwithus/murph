@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   prepareCurrentHostedMemberDirectRoute: vi.fn(),
   readHostedExecutionControlClientIfConfigured: vi.fn(),
   readHostedMailboxWakeAfterDedupeLockTx: vi.fn(),
+  readHostedMailboxWakeByDedupeKey: vi.fn(),
   requireActiveMealPhotoCaptureEnrollment: vi.fn(),
   requireActivePrivyMemberAuthFromBearerToken: vi.fn(),
   requireMealPhotoCaptureScopedToken: vi.fn(),
@@ -34,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   revokeMealPhotoCaptureEnrollmentForMember: vi.fn(),
   revokeMealPhotoCaptureEnrollmentForScopedToken: vi.fn(),
   runWithHostedDomainRootProviderCallsDisabled: vi.fn(),
+  runWithFreshHostedDomainRootUnwrapCache: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
   signalHostedMailboxAppendRuntime: vi.fn(),
   stageMealPhoto: vi.fn(),
@@ -95,6 +97,8 @@ vi.mock("@/src/lib/hosted-execution/control", () => ({
 vi.mock("@/src/lib/hosted-crypto/domain-root-unwrap-cache", () => ({
   runWithHostedDomainRootProviderCallsDisabled:
     mocks.runWithHostedDomainRootProviderCallsDisabled,
+  runWithFreshHostedDomainRootUnwrapCache:
+    mocks.runWithFreshHostedDomainRootUnwrapCache,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
@@ -102,6 +106,8 @@ vi.mock("@/src/lib/hosted-mailbox/store", () => ({
     mocks.appendHostedMealPhotoMailboxEnvelopeTx,
   readHostedMailboxWakeAfterDedupeLockTx:
     mocks.readHostedMailboxWakeAfterDedupeLockTx,
+  readHostedMailboxWakeByDedupeKey:
+    mocks.readHostedMailboxWakeByDedupeKey,
   runWithPreparedHostedMailboxItemAppendCrypto:
     mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
@@ -158,10 +164,18 @@ describe("meal photo companion routes", () => {
       async (operation: (tx: { label: string }) => unknown) => operation({ label: "tx" }),
     );
     mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
-      async (input: { append: (prepared: { label: string }) => unknown }) =>
-        input.append({ label: "prepared-mailbox-crypto" }),
+      async (input: {
+        append: (prepared: { label: string }) => unknown;
+        prepareExisting?: () => unknown;
+      }) => {
+        await input.prepareExisting?.();
+        return input.append({ label: "prepared-mailbox-crypto" });
+      },
     );
     mocks.runWithHostedDomainRootProviderCallsDisabled.mockImplementation(
+      async (operation: () => unknown) => operation(),
+    );
+    mocks.runWithFreshHostedDomainRootUnwrapCache.mockImplementation(
       async (operation: () => unknown) => operation(),
     );
     mocks.requireActivePrivyMemberAuthFromBearerToken.mockResolvedValue({
@@ -242,6 +256,7 @@ describe("meal photo companion routes", () => {
       item: { id: "mailbox_1" },
     });
     mocks.readHostedMailboxWakeAfterDedupeLockTx.mockResolvedValue(null);
+    mocks.readHostedMailboxWakeByDedupeKey.mockResolvedValue(null);
     mocks.signalHostedMailboxAppendRuntime.mockResolvedValue(undefined);
   });
 
@@ -518,9 +533,18 @@ describe("meal photo companion routes", () => {
     });
     expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).toHaveBeenCalledWith({
       append: expect.any(Function),
+      prepareExisting: expect.any(Function),
       prisma: { $transaction: mocks.transaction },
       userId: MEMBER_ID,
     });
+    expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenCalledWith({
+      dedupeKey: EVENT_ID,
+      prisma: { $transaction: mocks.transaction },
+      userId: MEMBER_ID,
+    });
+    expect(
+      mocks.readHostedMailboxWakeByDedupeKey.mock.invocationCallOrder[0],
+    ).toBeLessThan(mocks.transaction.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER);
     expect(
       mocks.runWithPreparedHostedMailboxItemAppendCrypto.mock.invocationCallOrder[0],
     ).toBeLessThan(
@@ -696,6 +720,15 @@ describe("meal photo companion routes", () => {
     expect(mocks.appendHostedMealPhotoMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(mocks.deleteMealPhoto).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+    expect(mocks.runWithFreshHostedDomainRootUnwrapCache).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMailboxWakeByDedupeKey).toHaveBeenCalledTimes(2);
+    expect(mocks.runWithHostedDomainRootProviderCallsDisabled).toHaveBeenCalledTimes(2);
+    expect(
+      mocks.runWithHostedDomainRootProviderCallsDisabled.mock.invocationCallOrder[1],
+    ).toBeLessThan(
+      mocks.readHostedMailboxWakeAfterDedupeLockTx.mock.invocationCallOrder[0]
+        ?? Number.MAX_SAFE_INTEGER,
+    );
   });
 
   it("requires a current private route again before accepting an upload", async () => {

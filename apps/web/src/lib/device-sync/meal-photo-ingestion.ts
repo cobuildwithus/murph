@@ -8,11 +8,13 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type { ValidatedMealPhotoUpload } from "./meal-photo-capture";
 import {
   runWithHostedDomainRootProviderCallsDisabled,
+  runWithFreshHostedDomainRootUnwrapCache,
 } from "../hosted-crypto/domain-root-unwrap-cache";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import {
   appendHostedMealPhotoMailboxEnvelopeTx,
   readHostedMailboxWakeAfterDedupeLockTx,
+  readHostedMailboxWakeByDedupeKey,
   runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
@@ -80,6 +82,13 @@ export async function ingestCompanionMealPhoto(input: {
   let appended: Awaited<ReturnType<typeof appendHostedMealPhotoMailboxEnvelopeTx>>;
   try {
     appended = await runWithPreparedHostedMailboxItemAppendCrypto({
+      prepareExisting: async () => {
+        await readHostedMailboxWakeByDedupeKey({
+          dedupeKey: input.eventId,
+          prisma: input.prisma,
+          userId: input.memberId,
+        });
+      },
       append: (prepared) => input.prisma.$transaction(
         (tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
           await input.assertCurrentAuthorityTx(tx);
@@ -148,14 +157,23 @@ async function deleteUnclaimedStaging(input: {
   userId: string;
 }): Promise<void> {
   try {
-    const claimed = await input.prisma.$transaction(
-      async (tx) => await readHostedMailboxWakeAfterDedupeLockTx({
+    const claimed = await runWithFreshHostedDomainRootUnwrapCache(async () => {
+      await readHostedMailboxWakeByDedupeKey({
         dedupeKey: input.eventId,
-        tx,
+        prisma: input.prisma,
         userId: input.userId,
-      }),
-      HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
-    );
+      });
+      return input.prisma.$transaction(
+        (tx) => runWithHostedDomainRootProviderCallsDisabled(
+          async () => await readHostedMailboxWakeAfterDedupeLockTx({
+            dedupeKey: input.eventId,
+            tx,
+            userId: input.userId,
+          }),
+        ),
+        HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
+      );
+    });
     if (
       claimed?.kind === "meal-photo.captured"
       && claimed.mealPhoto.mealPhotoKey === input.mealPhotoKey

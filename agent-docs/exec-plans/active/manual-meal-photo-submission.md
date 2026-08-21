@@ -42,7 +42,11 @@ change to automatic-capture enrollment.
   Both paths also compare the exact raw routing and verified-email state used
   to build the envelope under the owning row locks immediately before append.
   Privy ownership uses its blind-index core projection, and mailbox payload
-  crypto is prepared before the database-only final transaction begins.
+  crypto is prepared before the database-only final transaction begins. The
+  exact existing dedupe wake is also read into the same request-scoped root
+  cache, so a replay encrypted under a decrypt-only retained root never reaches
+  KMS while holding the mailbox lock. Ambiguous cleanup prewarms that same
+  exact claim before its provider-disabled reconciliation transaction.
 - Store no JPEG bytes or new manual-upload records in Postgres. Ambiguous append
   cleanup continues to reconcile the existing mailbox claim before deletion.
 
@@ -61,6 +65,9 @@ change to automatic-capture enrollment.
 
 - Focused Vitest for meal-photo validation and companion routes.
 - Web TypeScript typecheck for the changed route/lib graph.
+- Retained-root replay proof plus the broader eight-file meal-photo/mailbox
+  suite: 266 focused tests passing, including zero provider calls under the
+  final append and cleanup transactions.
 - Exact-head required GitHub checks, specialist ReviewGPT, final ReviewGPT, and
   current-base merge-tree proof.
 - Native counterpart independently runs XcodeGen, SwiftFormat lint, focused

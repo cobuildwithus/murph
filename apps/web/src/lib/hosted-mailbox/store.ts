@@ -377,15 +377,16 @@ export async function prepareHostedMailboxItemAppendCrypto(input: {
 
 /**
  * Owns the bounded preparation lifecycle for transaction-local mailbox
- * appends. Provider-capable work finishes before `append` opens its owner
- * transaction; exact root drift retries the whole preparation once with a
- * fresh request cache.
+ * appends. Provider-capable active-root work and any exact retained-root read
+ * finish before `append` opens its owner transaction; exact root drift retries
+ * the whole preparation once with a fresh request cache.
  */
 export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
   input: {
     append: (
       prepared: PreparedHostedMailboxItemAppendCrypto,
     ) => Promise<TResult>;
+    prepareExisting?: () => Promise<void>;
     prisma: PrismaClient;
     userId: string;
   },
@@ -401,6 +402,7 @@ export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
         prisma: input.prisma,
         userId,
       });
+      await input.prepareExisting?.();
       return input.append(prepared);
     };
 
