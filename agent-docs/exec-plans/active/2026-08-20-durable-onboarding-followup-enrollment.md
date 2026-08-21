@@ -81,5 +81,10 @@ follow-up.
   exact-head integration CI owns that remaining environment proof.
 - Focused remediation proof passes: 109 assistant-runtime tests, 45
   assistant-engine tests, and typechecks for assistant-runtime,
-  assistant-engine, and Cloudflare. Remaining work is the corrected exact-head
-  CI run, final ReviewGPT round, parent review, and plan closure.
+  assistant-engine, and Cloudflare.
+- After merging the current base, its new private-to-group `handoff` action was
+  added to the existing unauthenticated-email boundary as an explicit
+  fail-closed case. The assistant-runtime package build, focused boundary test,
+  and hosted-execution suite pass with the complete action union.
+- Remaining work is the corrected exact-head CI run, final ReviewGPT round,
+  parent review, and plan closure.
