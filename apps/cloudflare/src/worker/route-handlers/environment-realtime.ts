@@ -2,6 +2,7 @@ import {
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath,
 } from "@murphai/cloudflare-hosted-control/routes";
+import { ENVIRONMENT_REALTIME_TOOL_NAMES } from "@murphai/contracts";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import OpenAI from "openai";
 
@@ -135,10 +136,9 @@ function buildEnvironmentRealtimeSession() {
       "Translate meaning into the exact canonical allowed values without translating those stored values.",
       "Never return user-visible text or audio. Never ask a question. Choose exactly one tool for every response.",
       "For every turn with explicit current-topic facts, call a tool before returning.",
-      "When the member asks to change language, call set_environment_language.",
+      `When the member asks to change language, call ${ENVIRONMENT_REALTIME_TOOL_NAMES.setLanguage}.`,
       "A clear request to end, stop, finish, save and end, or conclude the conversation is a finish command in any language.",
-      "Navigation commands take priority over every other tool. Call control_environment_interview and include explicit current-topic facts spoken with the command.",
-      "When the current topic has enough clear answers, call save_environment_topics.",
+      `Save facts and navigation together with ${ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview}.`,
       "A topic can also be completed when the member explicitly declines its remaining fields.",
       "Uncertainty or lack of knowledge leaves the field unresolved and writes nothing. Use the string declined only for an explicit skip, refusal, or preference not to answer.",
       "If the member clearly answers the next visible topic early, include that topic too.",
@@ -153,7 +153,7 @@ function buildEnvironmentRealtimeSession() {
       {
         description:
           "Change the visible interview language when the member asks for a specific language.",
-        name: "set_environment_language",
+        name: ENVIRONMENT_REALTIME_TOOL_NAMES.setLanguage,
         parameters: {
           additionalProperties: false,
           properties: {
@@ -169,91 +169,8 @@ function buildEnvironmentRealtimeSession() {
       },
       {
         description:
-          "Save explicit current-topic facts immediately when other important details are still missing. When one field remains, use this for every concise answer that is semantically valid for that field. Normalize equivalent wording to the canonical allowed value.",
-        name: "mark_environment_fields",
-        parameters: {
-          additionalProperties: false,
-          properties: {
-            fields: {
-              items: {
-                additionalProperties: false,
-                properties: {
-                  aspectId: { type: "string" },
-                  indicatorId: { type: "string" },
-                  note: {
-                    anyOf: [
-                      { maxLength: 400, minLength: 1, type: "string" },
-                      { type: "null" },
-                    ],
-                  },
-                  value: {
-                    anyOf: [
-                      { type: "string" },
-                      { type: "number" },
-                      { type: "boolean" },
-                    ],
-                  },
-                },
-                required: ["aspectId", "indicatorId", "value"],
-                type: "object",
-              },
-              maxItems: 16,
-              minItems: 1,
-              type: "array",
-            },
-          },
-          required: ["fields"],
-          type: "object",
-        },
-        type: "function",
-      },
-      {
-        description:
-          "Move through or finish the interview when the member gives a clear navigation command. Include any explicit current-topic facts spoken with the command.",
-        name: "control_environment_interview",
-        parameters: {
-          additionalProperties: false,
-          properties: {
-            action: {
-              enum: ["back", "next", "skip", "finish"],
-              type: "string",
-            },
-            fields: {
-              items: {
-                additionalProperties: false,
-                properties: {
-                  aspectId: { type: "string" },
-                  indicatorId: { type: "string" },
-                  note: {
-                    anyOf: [
-                      { maxLength: 400, minLength: 1, type: "string" },
-                      { type: "null" },
-                    ],
-                  },
-                  value: {
-                    anyOf: [
-                      { type: "string" },
-                      { type: "number" },
-                      { type: "boolean" },
-                    ],
-                  },
-                },
-                required: ["aspectId", "indicatorId", "value"],
-                type: "object",
-              },
-              maxItems: 16,
-              type: "array",
-            },
-          },
-          required: ["action"],
-          type: "object",
-        },
-        type: "function",
-      },
-      {
-        description:
           "Continue only when the latest turn is unrelated, unintelligible, or contains no explicit new fact or interview command. Do not use this for a concise answer that is semantically valid for the visible field.",
-        name: "continue_environment_interview",
+        name: ENVIRONMENT_REALTIME_TOOL_NAMES.continueInterview,
         parameters: {
           additionalProperties: false,
           properties: {},
@@ -263,11 +180,15 @@ function buildEnvironmentRealtimeSession() {
       },
       {
         description:
-          "Save one or more completed Environment topics using only explicit member answers.",
-        name: "save_environment_topics",
+          "Save every explicit fact for the visible topic, then optionally navigate. Facts are saved before navigation.",
+        name: ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
         parameters: {
           additionalProperties: false,
           properties: {
+            action: {
+              enum: ["back", "next", "skip", "finish"],
+              type: "string",
+            },
             languageCode: {
               description:
                 "ISO 639-1 code of the language spoken in the member's latest answer.",
@@ -314,7 +235,7 @@ function buildEnvironmentRealtimeSession() {
               type: "array",
             },
           },
-          required: ["languageCode", "topics"],
+          anyOf: [{ required: ["topics"] }, { required: ["action"] }],
           type: "object",
         },
         type: "function",

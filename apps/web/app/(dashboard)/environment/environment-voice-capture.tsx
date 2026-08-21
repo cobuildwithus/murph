@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ENVIRONMENT_INTERVIEW_NOTE_MAX_LENGTH,
+  ENVIRONMENT_REALTIME_TOOL_NAMES,
   HABITAT_DECLINED_VALUE,
 } from "@murphai/contracts";
 import {
@@ -928,7 +929,7 @@ export function EnvironmentVoiceCapture({
         handledCallIdsRef.current.add(callId);
         toolCallPendingRef.current = true;
         const channel = dataChannelRef.current;
-        if (payload.name === "set_environment_language") {
+        if (payload.name === ENVIRONMENT_REALTIME_TOOL_NAMES.setLanguage) {
           const language = parseToolLanguage(payload.arguments);
           if (!language) {
             toolCallPendingRef.current = false;
@@ -957,7 +958,9 @@ export function EnvironmentVoiceCapture({
           requestQueuedResponse();
           return;
         }
-        if (payload.name === "continue_environment_interview") {
+        if (
+          payload.name === ENVIRONMENT_REALTIME_TOOL_NAMES.continueInterview
+        ) {
           toolCallPendingRef.current = false;
           responsePendingRef.current = false;
           sendFunctionResult(
@@ -975,7 +978,7 @@ export function EnvironmentVoiceCapture({
           requestQueuedResponse();
           return;
         }
-        if (payload.name !== "update_environment_interview") {
+        if (payload.name !== ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview) {
           toolCallPendingRef.current = false;
           responsePendingRef.current = false;
           prepareForNextTurn();
@@ -2060,7 +2063,7 @@ function buildRealtimeTools(
     {
       description:
         "Change the visible interview language when the member asks for a specific language.",
-      name: "set_environment_language",
+      name: ENVIRONMENT_REALTIME_TOOL_NAMES.setLanguage,
       parameters: {
         additionalProperties: false,
         properties: {
@@ -2077,7 +2080,7 @@ function buildRealtimeTools(
     {
       description:
         "Continue only when the latest turn is unrelated, unintelligible, or contains no explicit new fact or interview command. Do not use this for a concise answer that is semantically valid for the visible field.",
-      name: "continue_environment_interview",
+      name: ENVIRONMENT_REALTIME_TOOL_NAMES.continueInterview,
       parameters: {
         additionalProperties: false,
         properties: {},
@@ -2088,7 +2091,7 @@ function buildRealtimeTools(
     {
       description:
         "Save every explicit fact for the current or next visible topic, then optionally navigate. Facts are always saved before navigation. Next leaves unresolved fields unchanged. Skip declines every other unresolved current field.",
-      name: "update_environment_interview",
+      name: ENVIRONMENT_REALTIME_TOOL_NAMES.updateInterview,
       parameters: {
         additionalProperties: false,
         properties: {
