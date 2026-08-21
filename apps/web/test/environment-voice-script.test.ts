@@ -5,7 +5,10 @@ import {
   HABITAT_DECLINED_VALUE,
 } from "@murphai/contracts";
 
-import { buildEnvironmentVoiceScript } from "../app/(dashboard)/environment/environment-voice-script";
+import {
+  buildEnvironmentVoiceScript,
+  buildEnvironmentVoiceScriptForGroup,
+} from "../app/(dashboard)/environment/environment-voice-script";
 import type { HabitatValues } from "../app/(dashboard)/environment/home-model";
 
 describe("environment voice script", () => {
@@ -61,6 +64,16 @@ describe("environment voice script", () => {
     expect(script.dialogTitle).toBe("Update your environment");
     expect(script.topics).toHaveLength(1);
     expect(script.topics[0].id).toBe("update");
+  });
+
+  it("uses canonical accepted topic ids for category interviews", () => {
+    const script = buildEnvironmentVoiceScriptForGroup("sleep", {});
+
+    expect(script).not.toBeNull();
+    const topicIds = script?.topics.map((topic) => topic.id) ?? [];
+    expect(topicIds).toEqual(
+      topicIds.map((_, chunkIndex) => `sleep:${chunkIndex}`),
+    );
   });
 });
 

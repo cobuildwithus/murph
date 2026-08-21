@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildEnvironmentInterviewTopicId } from "@murphai/contracts";
 
 import {
   buildHostedExecutionEnvironmentInterviewCompletedWake,
@@ -28,7 +29,7 @@ describe("environment-interview.completed hosted execution wake", () => {
               value: 19,
             },
           ],
-          topicId: "sleep:0",
+          topicId: buildEnvironmentInterviewTopicId("sleep", 0),
         },
       ],
     });

@@ -179,13 +179,10 @@ test("waits for changed Environment values after realtime topic processing", asy
     const refreshOptions = mocks.refresh.mock.calls[0]?.[0];
     assert.equal(refreshOptions?.background, true);
     assert.equal(
-      typeof refreshOptions?.requestRuntimeRefreshUntil,
+      typeof refreshOptions?.requestRuntimeRefreshUntilAfterRequest,
       "function",
     );
-    assert.equal(
-      refreshOptions?.requestRuntimeRefreshUntilAfterRequest,
-      undefined,
-    );
+    assert.equal(refreshOptions?.requestRuntimeRefreshUntil, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
@@ -230,6 +227,95 @@ test("restarts replica tracking for every accepted realtime topic", async () => 
       await vi.advanceTimersByTimeAsync(2_000);
     });
     assert.equal(mocks.refresh.mock.calls.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
+
+test("keeps saving when an earlier accepted topic refresh finishes last", async () => {
+  vi.useFakeTimers();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async () => Response.json({ processing: false }));
+  let resolveFirstRefresh: (() => void) | null = null;
+  let resolveSecondRefresh: (() => void) | null = null;
+  mocks.refresh
+    .mockImplementationOnce(() => new Promise<undefined>((resolve) => {
+      resolveFirstRefresh = () => resolve(undefined);
+    }))
+    .mockImplementationOnce(() => new Promise<undefined>((resolve) => {
+      resolveSecondRefresh = () => resolve(undefined);
+    }));
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const acceptAnother = rendered.window.document.querySelector(
+      '[aria-label="Accept another realtime topic"]',
+    );
+    assert.ok(acceptAnother instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      acceptAnother.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+
+    await act(async () => {
+      acceptAnother.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 2);
+
+    const firstCompletion =
+      mocks.refresh.mock.calls[0]?.[0]?.requestRuntimeRefreshUntilAfterRequest;
+    assert.equal(typeof firstCompletion, "function");
+    assert.equal(firstCompletion?.(null!, createReplicaRef("b")), true);
+    assert.ok(resolveFirstRefresh);
+    await act(async () => {
+      resolveFirstRefresh?.();
+      await Promise.resolve();
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is saving your answers/,
+    );
+
+    const secondCompletion =
+      mocks.refresh.mock.calls[1]?.[0]?.requestRuntimeRefreshUntilAfterRequest;
+    assert.equal(typeof secondCompletion, "function");
+    assert.equal(secondCompletion?.(null!, createReplicaRef("c")), true);
+    assert.ok(resolveSecondRefresh);
+    await act(async () => {
+      resolveSecondRefresh?.();
+      await Promise.resolve();
+    });
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is saving your answers/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
@@ -288,7 +374,7 @@ test("restores server-side realtime processing after reload", async () => {
     );
 
     assert.equal(
-      typeof mocks.refresh.mock.calls[0]?.[0]?.requestRuntimeRefreshUntil,
+      typeof mocks.refresh.mock.calls[0]?.[0]?.requestRuntimeRefreshUntilAfterRequest,
       "function",
     );
   } finally {
@@ -403,7 +489,7 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     ).length, patchCallsBeforeReplicaRetry + 1);
 
     assert.equal(
-      typeof mocks.refresh.mock.calls[1]?.[0]?.requestRuntimeRefreshUntil,
+      typeof mocks.refresh.mock.calls[1]?.[0]?.requestRuntimeRefreshUntilAfterRequest,
       "function",
     );
   } finally {

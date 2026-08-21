@@ -41,6 +41,18 @@ export const ENVIRONMENT_INTERVIEW_TOPIC_GROUPS = [
 export type EnvironmentInterviewTopicGroupId =
   (typeof ENVIRONMENT_INTERVIEW_TOPIC_GROUPS)[number]["id"];
 
+export function buildEnvironmentInterviewTopicId(
+  groupId: EnvironmentInterviewTopicGroupId,
+  chunkIndex: number,
+): string {
+  if (!Number.isSafeInteger(chunkIndex) || chunkIndex < 0) {
+    throw new TypeError(
+      "Environment interview topic index must be a non-negative integer.",
+    );
+  }
+  return `${groupId}:${chunkIndex}`;
+}
+
 const ENVIRONMENT_INTERVIEW_UPDATE_TOPIC = {
   aspectIds: ENVIRONMENT_INTERVIEW_TOPIC_GROUPS.flatMap(
     (group) => [...group.aspectIds],

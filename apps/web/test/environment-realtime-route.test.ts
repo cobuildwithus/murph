@@ -64,6 +64,9 @@ import {
   PATCH as recheckTopicProcessing,
   POST as saveTopics,
 } from "../app/api/environment/realtime/topics/route";
+import {
+  buildEnvironmentVoiceScriptForGroup,
+} from "../app/(dashboard)/environment/environment-voice-script";
 
 describe("Environment Realtime routes", () => {
   beforeEach(() => {
@@ -161,6 +164,36 @@ describe("Environment Realtime routes", () => {
       expectedUserId: "member_123",
       mailboxItemId: "mailbox_123",
     });
+  });
+
+  it("accepts the topic id emitted by a category voice script", async () => {
+    const script = buildEnvironmentVoiceScriptForGroup("sleep", {});
+    const topicId = script?.topics[0]?.id;
+    expect(topicId).toBe("sleep:0");
+    const completedAt = new Date().toISOString();
+
+    const response = await saveTopics(new Request(
+      "https://local.withmurph.ai/api/environment/realtime/topics",
+      {
+        body: JSON.stringify({
+          completedAt,
+          completionId: "550e8400-e29b-41d4-a716-446655440001",
+          topics: [{
+            answers: [{
+              aspectId: "sleep-environment",
+              indicatorId: "night_temp_c",
+              value: 19,
+            }],
+            topicId,
+          }],
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    ));
+
+    expect(response.status).toBe(202);
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
   });
 
   it("reports and re-signals pending topic work", async () => {

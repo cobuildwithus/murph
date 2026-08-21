@@ -1,4 +1,5 @@
 import {
+  buildEnvironmentInterviewTopicId,
   ENVIRONMENT_INTERVIEW_TOPIC_GROUPS,
   HABITAT_DECLINED_VALUE,
   listEnvironmentInterviewFields,
@@ -221,7 +222,7 @@ export function buildEnvironmentVoiceScriptForGroup(
       eyebrow: copy?.eyebrow ?? group.eyebrow,
       fields,
       focus: fields.map((field) => field.label),
-      id: `${group.id}:section:${chunkIndex}`,
+      id: buildEnvironmentInterviewTopicId(group.id, chunkIndex),
       prompt: topicPrompt(fields.length),
       title: copy?.title ?? group.title,
     };
@@ -307,7 +308,7 @@ function buildMissingScript(
           eyebrow: voiceTopicCopy?.eyebrow ?? group.eyebrow,
           fields,
           focus: fields.map((field) => field.label),
-          id: `${group.id}:${chunkIndex}`,
+          id: buildEnvironmentInterviewTopicId(group.id, chunkIndex),
           prompt: topicPrompt(fields.length),
           title: voiceTopicCopy?.title ?? group.title,
         };

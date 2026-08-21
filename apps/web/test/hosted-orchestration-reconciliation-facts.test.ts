@@ -1627,6 +1627,20 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
+  it("exposes pending Environment interviews to the orchestration owner", async () => {
+    mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
+      id: "mailbox_environment_interview_1",
+    });
+
+    const response = await reconciliationRoute.GET(
+      requestForFacts(),
+      routeContext(),
+    );
+    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+
+    expect(facts.environmentInterviewPending).toBe(true);
+  });
+
   it("blocks inactive members while preserving workspace facts", async () => {
     mocks.readHostedMemberCoreState.mockResolvedValue(buildActiveMemberRecord({
       billingStatus: "paused",
