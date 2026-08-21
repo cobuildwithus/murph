@@ -2052,10 +2052,51 @@ function junctionDisjointDailyAliasSnapshot() {
   };
 }
 
+function junctionRepairOrdinaryOwnerOverlapSnapshot(reverse = false) {
+  const data = [
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-25T00:30:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 47,
+    },
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-26T02:00:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 47,
+    },
+    {
+      calendar_date: "2026-06-26",
+      timestamp: "2026-06-26T01:00:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 44,
+    },
+  ];
+  return {
+    accountId: "junction-user-legacy-days",
+    importedAt: "2026-06-26T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: reverse ? [...data].reverse() : data,
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  };
+}
+
 async function createJunctionDailyAliasSplit(input: {
   historicalTimeZoneOffsetMinutes?: number;
   legacyOccurredAt?: string;
   legacyValue?: number;
+  ownerOccurredAt?: string;
   primaryValue?: number;
 } = {}) {
   const vaultRoot = await makeTempDirectory("murph-junction-daily-aggregate-alias-repair");
@@ -2095,8 +2136,12 @@ async function createJunctionDailyAliasSplit(input: {
     value: number;
   }) => ({
     kind: "observation" as const,
-    occurredAt: options.occurredAt ?? "2026-06-25T10:00:00.000Z",
-    recordedAt: "2026-06-25T10:00:00.000Z",
+    occurredAt: options.occurredAt
+      ?? input.ownerOccurredAt
+      ?? "2026-06-25T10:00:00.000Z",
+    recordedAt: options.occurredAt
+      ?? input.ownerOccurredAt
+      ?? "2026-06-25T10:00:00.000Z",
     dayKey: options.dayKey,
     title: "Junction stress level average",
     externalRef: options.externalRef,
@@ -2255,6 +2300,34 @@ test.each([false, true])(
             provider: "junction",
             vaultRoot: fixture.vaultRoot,
             snapshot: junctionReciprocalDailyAliasSnapshot(reverse),
+          },
+          { corePort: coreRuntime },
+        ),
+        (error) =>
+          error instanceof coreRuntime.VaultError
+          && error.code === "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      );
+      assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([false, true])(
+  "Junction daily aggregate alias repair refuses an ordinary entry claiming its survivor (reverse=%s)",
+  async (reverse) => {
+    const fixture = await createJunctionDailyAliasSplit({
+      ownerOccurredAt: "2026-06-26T01:00:00.000Z",
+    });
+    try {
+      const before = await snapshotVaultFiles(fixture.vaultRoot);
+      await assert.rejects(
+        importDeviceProviderSnapshot(
+          {
+            provider: "junction",
+            vaultRoot: fixture.vaultRoot,
+            snapshot: junctionRepairOrdinaryOwnerOverlapSnapshot(reverse),
           },
           { corePort: coreRuntime },
         ),

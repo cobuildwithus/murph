@@ -4408,10 +4408,25 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (aliasRepairOwnerIds.has(ownerId)) {
         throw new VaultError(
           "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
-          "Junction daily aggregate alias repair plans cannot share persisted owners.",
+          "Junction daily aggregate alias repair operations cannot share persisted owners.",
         );
       }
       aliasRepairOwnerIds.add(ownerId);
+    }
+  }
+  if (aliasRepairOwnerIds.size > 0) {
+    for (const [entryIndex, entry] of entries.entries()) {
+      if (aliasRepairByEntryIndex.has(entryIndex)) {
+        continue;
+      }
+      const resolved = resolveDeviceEventIdentity(entry, context, { strict: true });
+      const ownerId = resolved?.latest?.id;
+      if (ownerId && aliasRepairOwnerIds.has(ownerId)) {
+        throw new VaultError(
+          "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+          "Junction daily aggregate alias repair operations cannot share persisted owners.",
+        );
+      }
     }
   }
   for (const [entryIndex, aliasRepair] of aliasRepairByEntryIndex) {
