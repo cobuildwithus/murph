@@ -231,6 +231,7 @@ export async function runHostedDeviceSyncPass(
     options.onStage?.("retry_fence");
     await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
       nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+      persistAtCanonicalBoundary: true,
       userId: wake.userId,
       vaultRoot,
     });

@@ -449,6 +449,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       EXA_API_KEY: "exa-user",
+      GEMINI_API_KEY: "gemini-user",
       HF_TOKEN: "hf-user",
       LINQ_API_TOKEN: "linq-user",
       MAPBOX_ACCESS_TOKEN: "mapbox-user",
@@ -1184,6 +1185,7 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining([
         "LINQ_API_TOKEN",
         "EXA_API_KEY",
+        "GEMINI_API_KEY",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",
       ]),

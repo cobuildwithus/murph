@@ -115,6 +115,9 @@ import {
 import {
   MURPH_ASK_GROK_TOOL,
 } from './dynamic-tools/ask-grok.js'
+import {
+  MURPH_ANALYZE_VIDEO_TOOL,
+} from './dynamic-tools/analyze-video.js'
 export { MURPH_ASSISTANT_STYLE_TOOL } from './dynamic-tools/assistant-style.js'
 export type {
   AssistantStyleTurnSettingsOverlay,
@@ -136,6 +139,7 @@ export {
 } from './dynamic-tools/clinical-records.js'
 export { MURPH_SEND_PHYSICAL_NOTE_TOOL } from './dynamic-tools/physical-notes.js'
 export { MURPH_ASK_GROK_TOOL } from './dynamic-tools/ask-grok.js'
+export { MURPH_ANALYZE_VIDEO_TOOL } from './dynamic-tools/analyze-video.js'
 const MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF =
   'skill-assets/murph-character-sheet-v1.png'
 export const GENERATE_IMAGE_REFERENCE_IMAGE_REFS_DESCRIPTION =
@@ -383,14 +387,11 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   },
 } as const
 
-export const MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE =
-  'Before classifying a Murph path as missing or filing missing-capability feedback, use the provided deferred-tool discovery surface; absence from eager tools is not proof.'
-
 export const MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL = {
   namespace: 'murph',
   name: 'submit_product_feedback',
   description:
-    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. ${MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE} When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
+    `Submit one structured Murph product-feedback candidate for the current accepted request. Provide the feedback kind, one concise product-only summary, and optional related changelog item ids. When feedback describes a failure or workflow issue, put the general feedback first and append a privacy-safe reproduction recipe in the same summary field. Ordinary feedback is best-effort after the reply. Explicit verified-private human support uses kind "frustration", empty changelog ids, and a concise de-identified explanation beginning exactly "Support escalation:"; that mode waits for the durable callback. The result reports accepted, already accepted, or unavailable; do not retry after any result.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1533,6 +1534,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_GROUP_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GENERATE_SONG_TOOL,
+  MURPH_ANALYZE_VIDEO_TOOL,
   MURPH_ASK_GROK_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SEND_VAULT_FILE_TOOL,
@@ -1608,6 +1610,7 @@ export interface MurphDynamicToolAvailability {
   voiceMemoGenerationAvailable?: boolean | null
   pendingVaultFilesAvailable?: boolean | null
   vaultFileSendAvailable?: boolean | null
+  analyzeVideoAvailable?: boolean | null
   askGrokAvailable?: boolean | null
 }
 
@@ -1654,6 +1657,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_SONG_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],
     [MURPH_GENERATE_IMAGE_TOOL, defaultOn((a) => a.imageGenerationAvailable)],
+    [MURPH_ANALYZE_VIDEO_TOOL, defaultOff((a) => a.analyzeVideoAvailable)],
     [MURPH_ASK_GROK_TOOL, defaultOff((a) => a.askGrokAvailable)],
     [MURPH_SEND_VAULT_FILE_TOOL, defaultOff((a) => a.vaultFileSendAvailable)],
     [MURPH_PENDING_VAULT_FILES_TOOL, defaultOff((a) => a.pendingVaultFilesAvailable)],

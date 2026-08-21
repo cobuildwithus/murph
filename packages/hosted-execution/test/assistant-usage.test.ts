@@ -12,6 +12,7 @@ import {
   buildHostedCodexMemoryUsageRecord,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
+  buildHostedGeminiVideoAnalysisUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
   classifyAssistantOpenAiImageUsageBasis,
@@ -465,6 +466,48 @@ test("hosted ElevenLabs music usage retains the provider request start", () => {
   assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.providerRequestId, "music_request_123");
   assert.deepEqual(record.rawUsageJson, { durationMs: 45_000 });
+});
+
+test("hosted Gemini video usage records preserve bounded token evidence", () => {
+  const record = buildHostedGeminiVideoAnalysisUsageRecord({
+    memberId: "member_123",
+    model: "gemini-3.7-flash",
+    occurredAt: PROVIDER_REQUEST_STARTED_AT,
+    providerRequestId: "gemini_request_123",
+    usage: {
+      cachedContentTokenCount: 16,
+      candidatesTokenCount: 80,
+      promptTokenCount: 320,
+      thoughtsTokenCount: 24,
+      totalTokenCount: 424,
+      trafficType: "ON_DEMAND",
+    },
+  });
+
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
+  assert.match(record.turnId, /^turn_gemini_video_[0-9a-f]{32}$/u);
+  assert.equal(record.usageId, `${record.turnId}.attempt-1`);
+  assert.equal(record.apiKeyEnv, "GEMINI_API_KEY");
+  assert.equal(record.baseUrl, "https://generativelanguage.googleapis.com");
+  assert.equal(record.credentialSource, "platform");
+  assert.equal(record.featureKey, "video-analysis");
+  assert.equal(record.provider, "gemini");
+  assert.equal(record.providerName, "Google Gemini");
+  assert.equal(record.inputTokens, 320);
+  assert.equal(record.cachedInputTokens, 16);
+  assert.equal(record.outputTokens, 80);
+  assert.equal(record.reasoningTokens, 24);
+  assert.equal(record.totalTokens, 424);
+  assert.equal(record.providerRequestId, "gemini_request_123");
+  assert.equal(record.triggerKind, "analyze-video");
+  assert.equal(record.usageExtractionVersion, "gemini-video-analysis-v1");
+  assert.deepEqual(record.rawUsageJson, {
+    cachedContentTokenCount: 16,
+    candidatesTokenCount: 80,
+    promptTokenCount: 320,
+    thoughtsTokenCount: 24,
+    totalTokenCount: 424,
+  });
 });
 
 test("hosted xAI search usage records carry the provider-reported cost basis and dedupe like turn usage", () => {

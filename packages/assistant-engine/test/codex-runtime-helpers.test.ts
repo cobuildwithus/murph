@@ -324,6 +324,7 @@ describe('Codex assistant registry helpers', () => {
     const env = {
       [HOSTED_RUNTIME_PROCESS_ENV_MARKER]: '1',
       CODEX_HOME: '/runtime/codex-home',
+      GEMINI_API_KEY: 'worker-owned-sentinel',
       HOME: '/runtime/home',
       PATH: '/usr/bin',
     }
@@ -375,6 +376,11 @@ describe('Codex assistant registry helpers', () => {
       expect(preparationInput?.[key]).toEqual(turnInput?.[key])
     }
     expect(preparationInput?.signal).toBe(signal)
+    expect(preparationInput?.env).not.toHaveProperty('GEMINI_API_KEY')
+    expect(turnInput?.env).not.toHaveProperty('GEMINI_API_KEY')
+    expect(turnInput?.analyzeVideoRuntime).toMatchObject({
+      apiKey: 'worker-owned-sentinel',
+    })
     expect(preparationInput).not.toHaveProperty('prompt')
     expect(preparationInput).not.toHaveProperty('resumeSessionId')
     expect(preparationInput).not.toHaveProperty('dynamicTools')

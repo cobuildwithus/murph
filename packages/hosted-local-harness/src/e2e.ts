@@ -57,6 +57,7 @@ interface HostedLocalE2eRunnerCleanupOptions {
 
 export type HostedLocalE2eScenarioName =
   | "all"
+  | "analyze-video-roundtrip"
   | "active-turn-latency"
   | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
@@ -417,6 +418,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-vault-file-approval-resume-e2e.test.ts",
     name: "vault-file-approval-resume",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-analyze-video-roundtrip-e2e.test.ts",
+    name: "analyze-video-roundtrip",
+    requiresParserToolchain: true,
     testControls: true,
   },
   {

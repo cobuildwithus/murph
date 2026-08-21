@@ -13,12 +13,18 @@ import {
   createAskGrokToolRuntimeFromEnv,
 } from '../../assistant-codex/ask-grok-tool.js'
 import {
+  createAnalyzeVideoToolRuntimeFromEnv,
+} from '../../assistant-codex/analyze-video-tool.js'
+import {
   resolveSupportedCodexAppServerApprovalPolicy,
 } from '../../assistant-codex/app-server-requests.js'
 import {
   resolveStrictAssistantCodexModelProvider,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
+} from '@murphai/hosted-execution/assistant-capabilities'
 import {
   DEFAULT_CODEX_MODELS,
 } from './catalog.js'
@@ -214,6 +220,12 @@ export async function executeCodexAssistantTurnAttempt(
     publicFetchImpl: input.publicInternetFetch ?? null,
     voiceMemoDeliveryChannel: input.voiceMemoDeliveryChannel ?? null,
   })
+  // Null when GEMINI_API_KEY is absent; the executor then fails closed with a
+  // not-configured result instead of attempting a provider call.
+  const analyzeVideoRuntime = createAnalyzeVideoToolRuntimeFromEnv({
+    env: input.env ?? process.env,
+    fetchImpl: input.providerFetch ?? fetch,
+  })
   // Null when XAI_API_KEY is absent; the executor then fails closed with a
   // not-configured result instead of attempting a provider call.
   const askGrokRuntime = createAskGrokToolRuntimeFromEnv({
@@ -311,6 +323,7 @@ export async function executeCodexAssistantTurnAttempt(
     serviceTier: input.serviceTier ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
+    analyzeVideoRuntime,
     askGrokRuntime,
   } as const
 
@@ -575,11 +588,20 @@ function resolveCodexAssistantProcessLaunchInput(
     codexCommand: providerConfig.target.codexCommand ?? undefined,
     codexHome: providerConfig.target.codexHome ?? undefined,
     configOverrides: configOverrides.length > 0 ? configOverrides : undefined,
-    env: prepareAssistantDirectCliEnv(input.env),
+    env: prepareCodexProcessEnv(input.env ?? process.env),
     oss: providerConfig.target.oss,
     profile: providerConfig.target.profile ?? undefined,
     workingDirectory: input.workingDirectory,
   }
+}
+
+function prepareCodexProcessEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const prepared = prepareAssistantDirectCliEnv(env)
+  const {
+    [HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV]: _geminiApiKey,
+    ...processEnv
+  } = prepared
+  return processEnv
 }
 
 function byteLength(value: string | null): number {

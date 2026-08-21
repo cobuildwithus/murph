@@ -17,10 +17,8 @@ import {
 } from '@murphai/runtime-state/node'
 import {
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
 import type {
@@ -70,7 +68,11 @@ import {
   createAskGrokToolRuntimeFromEnv,
 } from '../src/assistant-codex/ask-grok-tool.ts'
 import type {
-  AssistantHostedToolContext,
+  AnalyzeVideoAttachmentAuthority,
+} from '../src/assistant-codex/analyze-video-tool.ts'
+import {
+  createAssistantHostedToolContext,
+  type AssistantHostedToolContext,
 } from '../src/assistant/hosted-tool-context.ts'
 import type {
   AssistantHostedAutomationToolRequest,
@@ -2039,12 +2041,6 @@ text(result.output);
 
   it.each([
     {
-      label: 'member-memory',
-      permissionProfile: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
-      profileLines:
-        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    },
-    {
       label: 'onboarding read-only',
       permissionProfile: MURPH_MEMBER_READ_PERMISSION_PROFILE,
       profileLines: buildMurphMemberReadPermissionProfileTomlLines(),
@@ -2103,10 +2099,7 @@ text(result.output);
   })
 
   it('runs member-memory maintenance through its host-owned tool with shell suppressed', async () => {
-    const scenario = await prepareScriptedTurnScenario({
-      additionalTomlLines:
-        buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
-    })
+    const scenario = await prepareScriptedTurnScenario()
     const vaultRoot = scenario.turnInput.workingDirectory
     const forbiddenShellPath = path.join(vaultRoot, 'shell-should-not-run')
     await writeFile(
@@ -2153,11 +2146,10 @@ text(JSON.stringify(result));
       dynamicTools: [MURPH_MEMBER_MEMORY_TOOL],
       ephemeral: true,
       memberMemoryMaintenanceAuthorized: true,
-      permissions: MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
       processLifetime: 'one-shot',
       prompt: 'Show memory, save the scripted preference, then reply exactly RESTRICTED_MEMBER_MEMORY_OK.',
       runtimeWorkspaceRoots: [vaultRoot],
-      sandbox: undefined,
+      sandbox: 'danger-full-access',
       threadConfig: TOOL_ONLY_MAINTENANCE_THREAD_CONFIG,
       vaultRoot,
     })
@@ -10246,6 +10238,345 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it.each([
+    {
+      expectedFinalMessage:
+        'I found eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+      expectedToolOutput: 'Eight visible push-ups',
+      geminiStatus: 200,
+      name: 'Gemini returns an analysis',
+    },
+    {
+      expectedFinalMessage:
+        'I could not analyze that video because the provider is rate-limited right now. Please try again later.',
+      expectedToolOutput:
+        'Video analysis was rate-limited; no analysis was retrieved',
+      geminiStatus: 429,
+      name: 'Gemini is rate-limited',
+    },
+  ])(
+    'carries a private-direct video result through the real tool loop into final output when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ expectedFinalMessage, expectedToolOutput, geminiStatus }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        geminiStatus === 200
+          ? Response.json({
+              candidates: [{
+                content: {
+                  parts: [{
+                    text:
+                      'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+                  }],
+                  role: 'model',
+                },
+                finishReason: 'STOP',
+              }],
+            })
+          : new Response(JSON.stringify({ error: 'rate limited' }), {
+              headers: { 'content-type': 'application/json' },
+              status: geminiStatus,
+            }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        {
+          requestExcludes: [
+            fixture.rawPath,
+            fixture.videoBytes.toString('base64'),
+          ],
+          requestIncludes: [expectedToolOutput],
+          text: expectedFinalMessage,
+        },
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+        .flatMap((summary) => summary.functionCallOutputs ?? [])
+      expect(toolOutputs).toEqual(expect.arrayContaining([
+        expect.stringContaining(expectedToolOutput),
+      ]))
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalMessage).toBe(expectedFinalMessage)
+      expect(result.providerAuthoredFinalMessage).toBe(expectedFinalMessage)
+      expect(result.transcriptMessage).toBe(expectedFinalMessage)
+      if (geminiStatus === 429) {
+        expect(result.finalMessage).not.toBe(expectedToolOutput)
+      }
+      expect(result.responseDeliveryContextOrdinal).toBe(0)
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+    },
+  )
+
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      name: 'the model returns empty text',
+      providerResponses: [{ text: '' }],
+    },
+    {
+      allowFinishWithoutReply: true,
+      name: 'the model explicitly selects no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+    },
+  ] satisfies readonly {
+    allowFinishWithoutReply: boolean
+    name: string
+    providerResponses: readonly ScriptedResponse[]
+  }[])(
+    'delivers the trusted video-analysis failure fallback when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ allowFinishWithoutReply, providerResponses }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const expectedFallback =
+        'Video analysis was rate-limited; no analysis was retrieved. Please try again later.'
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        new Response(JSON.stringify({ error: 'rate limited' }), {
+          headers: { 'content-type': 'application/json' },
+          status: 429,
+        }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        ...providerResponses,
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          allowFinishWithoutReply,
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalAction).toBeNull()
+      expect(result.finalActionExplicit).toBe(false)
+      expect(result.finalMessage).toBe(expectedFallback)
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toBe(expectedFallback)
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(
+        allowFinishWithoutReply ? 3 : 2,
+      )
+    },
+  )
+
+  it.each([
+    {
+      allowFinishWithoutReply: false,
+      name: 'the model returns empty text',
+      providerResponses: [{ text: '' }],
+    },
+    {
+      allowFinishWithoutReply: true,
+      name: 'the model explicitly selects no reply',
+      providerResponses: [
+        {
+          functionCall: {
+            arguments: {},
+            name: 'finish_without_reply',
+            namespace: 'murph',
+          },
+        },
+        { text: '' },
+      ],
+    },
+  ] satisfies readonly {
+    allowFinishWithoutReply: boolean
+    name: string
+    providerResponses: readonly ScriptedResponse[]
+  }[])(
+    'delivers the trusted video-analysis success fallback when $name',
+    { timeout: TURN_TIMEOUT_MS },
+    async ({ allowFinishWithoutReply, providerResponses }) => {
+      const scenario = await prepareScriptedTurnScenario()
+      const fixture = await prepareScriptedAnalyzeVideoFixture(
+        scenario.turnInput.workingDirectory,
+      )
+      const geminiFetch = vi.fn<typeof fetch>(async () =>
+        Response.json({
+          candidates: [{
+            content: {
+              parts: [{
+                text:
+                  'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+              }],
+              role: 'model',
+            },
+            finishReason: 'STOP',
+          }],
+        }),
+      )
+      scenario.stub.queue(
+        {
+          functionCall: {
+            arguments: {
+              message_ref: fixture.inputId,
+              question: 'Count the visible push-ups and describe the form.',
+            },
+            name: 'analyze_video',
+            namespace: 'murph',
+          },
+        },
+        ...providerResponses,
+      )
+
+      const result = await executeCodexAppServerTurn({
+        ...scenario.turnInput,
+        allowFinishWithoutReply,
+        analyzeVideoRuntime: {
+          apiKey: 'scripted-gemini-key',
+          fetchImpl: geminiFetch,
+        },
+        dynamicTools: resolveMurphDynamicTools({
+          allowFinishWithoutReply,
+          analyzeVideoAvailable: true,
+          progressUpdatesAvailable: false,
+        }),
+        groupConversation: false,
+        hostedToolContext: fixture.hostedToolContext,
+        prompt: 'Analyze my attached video and answer my question.',
+        vaultRoot: fixture.vaultRoot,
+      })
+
+      expect(geminiFetch).toHaveBeenCalledOnce()
+      expect(result.finalAction).toBeNull()
+      expect(result.finalActionExplicit).toBe(false)
+      expect(result.finalMessage).toContain('Eight visible push-ups')
+      expect(result.finalMessage).toContain('Gemini video analysis below')
+      expect(result.providerAuthoredFinalMessage).toBe('')
+      expect(result.transcriptMessage).toContain('Eight visible push-ups')
+      expect(scenario.stub.requestCountSinceBaseline()).toBe(
+        allowFinishWithoutReply ? 3 : 2,
+      )
+    },
+  )
+
+  it('preserves the first successful video-analysis fallback after a later limit failure', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const fixture = await prepareScriptedAnalyzeVideoFixture(
+      scenario.turnInput.workingDirectory,
+    )
+    const geminiFetch = vi.fn<typeof fetch>(async () =>
+      Response.json({
+        candidates: [{
+          content: {
+            parts: [{
+              text:
+                'Eight visible push-ups. The hips rise before the shoulders on the last two reps.',
+            }],
+            role: 'model',
+          },
+          finishReason: 'STOP',
+        }],
+      }),
+    )
+    const analyzeCall = {
+      functionCall: {
+        arguments: {
+          message_ref: fixture.inputId,
+          question: 'Count the visible push-ups and describe the form.',
+        },
+        name: 'analyze_video',
+        namespace: 'murph',
+      },
+    } satisfies ScriptedResponse
+    scenario.stub.queue(
+      analyzeCall,
+      analyzeCall,
+      { text: '' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      analyzeVideoRuntime: {
+        apiKey: 'scripted-gemini-key',
+        fetchImpl: geminiFetch,
+      },
+      dynamicTools: resolveMurphDynamicTools({
+        analyzeVideoAvailable: true,
+        progressUpdatesAvailable: false,
+      }),
+      groupConversation: false,
+      hostedToolContext: fixture.hostedToolContext,
+      prompt: 'Analyze my attached video twice and answer my question.',
+      vaultRoot: fixture.vaultRoot,
+    })
+
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.functionCallOutputs ?? [])
+    expect(toolOutputs).toEqual(expect.arrayContaining([
+      expect.stringContaining('Eight visible push-ups'),
+      expect.stringContaining('Video analysis limit reached for this turn'),
+    ]))
+    expect(geminiFetch).toHaveBeenCalledOnce()
+    expect(result.finalMessage).toContain('Eight visible push-ups')
+    expect(result.finalMessage).not.toContain('Video analysis limit reached')
+    expect(result.providerAuthoredFinalMessage).toBe('')
+    expect(result.transcriptMessage).toContain('Eight visible push-ups')
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
   it('ends an accepted group email effect without another provider request', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
@@ -10860,6 +11191,55 @@ function createScriptedGroupToolContext(
       throw new Error('Vault-file sending is unavailable for this turn.')
     },
     vaultFileSendAvailable: false,
+  }
+}
+
+async function prepareScriptedAnalyzeVideoFixture(
+  workingDirectory: string,
+): Promise<{
+  hostedToolContext: AssistantHostedToolContext
+  inputId: string
+  rawPath: string
+  vaultRoot: string
+  videoBytes: Buffer
+}> {
+  const inputId = `ain_${'7'.repeat(32)}`
+  const rawPath = 'raw/inbox/cap_video/attachments/01__video.mp4'
+  const vaultRoot = path.join(workingDirectory, 'video-vault')
+  const absolutePath = path.join(vaultRoot, rawPath)
+  const videoBytes = Buffer.concat([
+    Buffer.from([0, 0, 0, 16]),
+    Buffer.from('ftyp'),
+    Buffer.from('isom'),
+    Buffer.from('scripted-video'),
+  ])
+  await mkdir(path.dirname(absolutePath), { recursive: true })
+  await writeFile(absolutePath, videoBytes)
+  const attachmentAuthority: AnalyzeVideoAttachmentAuthority = {
+    byteSize: videoBytes.byteLength,
+    messageRef: inputId,
+    mimeType: 'video/mp4',
+    ordinal: 1,
+    rawPath,
+    sha256: createHash('sha256').update(videoBytes).digest('hex'),
+  }
+  const hostedToolContext = createAssistantHostedToolContext({
+    getAnalyzeVideoAttachmentAuthorities: () => [attachmentAuthority],
+    getConversationScope: () => 'direct',
+    getUserActionAcceptedInputIds: () => [inputId],
+    messageInput: { channel: 'linq' } as never,
+    session: {
+      binding: { channel: 'linq' },
+      sessionId: 'session_scripted_analyze_video',
+    } as never,
+  })
+
+  return {
+    hostedToolContext,
+    inputId,
+    rawPath,
+    vaultRoot,
+    videoBytes,
   }
 }
 

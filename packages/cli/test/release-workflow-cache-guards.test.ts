@@ -311,7 +311,7 @@ function isAllowedNativeHostedE2eHandoff(
     : file === 'native-android-hosted-e2e.yml'
       ? {
           checkoutStep: 'Checkout trusted default-branch control code',
-          databaseSecret: 'NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_ANDROID_E2E_DATABASE_URL }}',
+          databaseSecret: 'NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}',
           dispatchCommand: 'node scripts/native-android-hosted-e2e.mjs pr',
         }
       : null

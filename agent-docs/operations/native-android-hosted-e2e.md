@@ -54,9 +54,15 @@ a run that passed preflight cannot outlive that fallback fence before cleanup.
 
 ## Protected environments
 
-### `native-android-hosted-e2e`
+### `native-ios-hosted-e2e` (shared PR lifecycle)
 
-Required variables:
+The Android controller deliberately uses the existing historical
+`native-ios-hosted-e2e` environment. Both native lanes operate the same
+dedicated Vercel deployment, database, Junction namespace, and Privy identity,
+so those non-exportable credentials have one protected owner rather than
+platform-named copies that can drift.
+
+Android adds these variables to the shared environment:
 
 - `NATIVE_ANDROID_E2E_GITHUB_APP_ID`
 - `NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER`
@@ -64,24 +70,15 @@ Required variables:
 - `NATIVE_ANDROID_E2E_ANDROID_WORKFLOW`
 - `NATIVE_ANDROID_E2E_ANDROID_REF`
 - `NATIVE_ANDROID_E2E_ANDROID_EXPECTED_SHA`
-- `NATIVE_ANDROID_E2E_JUNCTION_TEAM_ID`
-- `NATIVE_ANDROID_E2E_PRIVY_APP_ID`
-- `NATIVE_ANDROID_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID`
-- `NATIVE_ANDROID_E2E_VERCEL_JUNCTION_NAMESPACE_ENV_ID`
-- `NATIVE_ANDROID_E2E_VERCEL_PROJECT_ID`
-- `NATIVE_ANDROID_E2E_VERCEL_PROJECT_NAME`
-- `NATIVE_ANDROID_E2E_VERCEL_TEAM_ID`
 
-Required secrets:
+Android adds this secret to the shared environment:
 
 - `NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY`
-- `NATIVE_ANDROID_E2E_DATABASE_URL`
-- `NATIVE_ANDROID_E2E_DIRECT_DATABASE_URL`
-- `NATIVE_ANDROID_E2E_JUNCTION_API_KEY`
-- `NATIVE_ANDROID_E2E_JUNCTION_CLIENT_USER_ID_SECRET`
-- `NATIVE_ANDROID_E2E_PRIVY_APP_SECRET`
-- `NATIVE_ANDROID_E2E_PRIVY_TEST_PHONE`
-- `NATIVE_ANDROID_E2E_VERCEL_TOKEN`
+
+The shared lifecycle remains configured through the existing
+`NATIVE_IOS_E2E_*` database, Junction, Privy, and Vercel variables and secrets.
+The Android workflow maps those values into the shared lifecycle module without
+copying them to another GitHub environment.
 
 The GitHub App installation must be limited to the private Android repository
 and grant only Actions write and Contents read. The trusted controller mints
@@ -91,16 +88,15 @@ before deployment. It removes the App id and private key from its process
 environment immediately after constructing that ephemeral supplier; child
 commands and summaries never receive either value. The protected phone must be the
 same reusable E.164 identity configured in the Android repository's protected
-workflow environment. `NATIVE_ANDROID_E2E_PRIVY_APP_ID` must identify the same
-Privy application as the private Android environment's public app id, and that
-Android environment's client id must belong to it. The fixed OTP remains only
-in the private Android repository; the shared backend neither receives nor
-stores it.
+workflow environment. The shared `NATIVE_IOS_E2E_PRIVY_APP_ID` must identify
+the same Privy application as the private Android environment's public app id,
+and that Android environment's client id must belong to it. The fixed OTP
+remains only in the private Android repository; the shared backend neither
+receives nor stores it.
 
-The database URLs must name the same explicit E2E/test database. The Vercel
-custom environment and Junction namespace variable must be the existing
-hosted-native E2E target and namespace; do not provision a second live-row
-owner for Android.
+The database URLs name the same explicit E2E/test database. The shared Vercel
+custom environment and Junction namespace remain the existing hosted-native
+E2E target and namespace; do not provision a second live-row owner for Android.
 
 ### `native-android-production-canary`
 

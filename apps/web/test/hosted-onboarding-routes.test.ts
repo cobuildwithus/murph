@@ -125,6 +125,9 @@ describe("hosted onboarding routes", () => {
 
   beforeEach(() => {
     setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
+    vi.stubEnv("HOSTED_SIGNUP_NOTIFICATION_EMAILS", "");
+    vi.stubEnv("HOSTED_SIGNUP_WELCOME_EMAIL_FROM", "");
+    vi.stubEnv("RESEND_API_KEY", "");
     vi.clearAllMocks();
     mocks.requirePrivyCompletionSession.mockResolvedValue({
       identity: {
@@ -224,6 +227,7 @@ describe("hosted onboarding routes", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     setHostedOnboardingTestNodeEnv(ORIGINAL_NODE_ENV);
   });
 
@@ -264,6 +268,7 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
+      now: expect.any(Date),
     });
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
@@ -317,6 +322,7 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: null,
+      now: expect.any(Date),
     });
   });
 
@@ -353,6 +359,7 @@ describe("hosted onboarding routes", () => {
         },
       },
       inviteCode: "invite-code",
+      now: expect.any(Date),
     });
   });
 

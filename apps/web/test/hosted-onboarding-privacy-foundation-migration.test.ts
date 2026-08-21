@@ -86,6 +86,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
+    'signupNotificationContextEncrypted String? @map("signup_notification_context_encrypted")',
+    'signupNotificationContextExpiresAt DateTime? @map("signup_notification_context_expires_at")',
     "pendingGroupSetup HostedPendingGroupSetup?",
     "physicalNotes HostedPhysicalNote[]",
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
@@ -435,6 +437,13 @@ describe("hosted Prisma baseline migration", () => {
     const hostedSignupNotificationEmailAttemptMigrationSql = readFileSync(
       new URL(
         "../prisma/migrations/2026061500_hosted_signup_notification_email_attempt/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    const hostedSignupNotificationContextMigrationSql = readFileSync(
+      new URL(
+        "../prisma/migrations/20260820020000_hosted_signup_notification_context/migration.sql",
         import.meta.url,
       ),
       "utf8",
@@ -1145,6 +1154,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260815120000_hosted_phone_call_result_notification_channel",
       "20260815190000_outbound_message_volume_receipts",
       "20260820010000_hosted_email_public_bootstrap",
+      "20260820020000_hosted_signup_notification_context",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
@@ -2152,6 +2162,27 @@ describe("hosted Prisma baseline migration", () => {
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("member.activated");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE TABLE");
     expect(hostedSignupNotificationEmailAttemptMigrationSql).not.toContain("CREATE INDEX");
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'ADD COLUMN "signup_notification_context_encrypted" TEXT',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'ADD COLUMN "signup_notification_context_expires_at" TIMESTAMP(3)',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_member_signup_notification_context_retention_idx"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      "CREATE FUNCTION clear_hosted_signup_notification_context_on_attempt()",
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'CREATE TRIGGER "hosted_signup_notification_context_attempt_clear"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'BEFORE UPDATE OF\n  "signup_notification_email_attempted_at",\n  "signup_notification_context_encrypted",\n  "signup_notification_context_expires_at"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).not.toContain(
+      'ADD COLUMN "signup_notification_context_encrypted" TEXT NOT NULL',
+    );
     expect(hostedSubscriptionCancellationEmailSentMigrationSql).toContain(
       'ADD COLUMN "subscription_cancellation_email_sent_at" TIMESTAMP(3)',
     );

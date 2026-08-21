@@ -5,6 +5,8 @@ import {
 } from "@prisma/client";
 import {
   classifyAssistantOpenAiImageUsageBasis,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION,
   type AssistantOpenAiImageUsageTokenBuckets,
   type AssistantOpenAiImageUsageUnpriceableReason,
   type AssistantUsageCredentialSource,
@@ -12,6 +14,11 @@ import {
   type AssistantUsageTokenPricingBasis,
   normalizeAssistantUsageTokenPricingBasis,
 } from "@murphai/hosted-execution/assistant-usage";
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+} from "@murphai/hosted-execution/assistant-capabilities";
 import {
   isHostedAiUsageOpenAiTokenPricingProviderName,
   normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
@@ -533,6 +540,39 @@ const HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_RAW_USAGE_KEYS: ReadonlySet<string> =
   ]);
 const HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO = 10_000n;
 
+// Gemini 3.7 Flash video analysis is token-priced independently from Murph's
+// primary assistant-model catalog. Google publishes one introductory rate
+// through 2026-12-31 and a higher rate beginning 2027-01-01. Output pricing
+// includes thinking tokens, so candidates and thoughts share one output bucket.
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_PRICING_SOURCE =
+  "https://ai.google.dev/gemini-api/docs/pricing";
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_PRICING_VERSION =
+  "gemini-3.7-flash-video-pricing-through-2026-12-31";
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_PRICING_VERSION =
+  "gemini-3.7-flash-video-pricing-from-2027-01-01";
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_START_MS =
+  Date.parse("2027-01-01T00:00:00.000Z");
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  750_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  75_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_OUTPUT_USD_MICROS_PER_MILLION_TOKENS =
+  3_750_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  1_500_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS =
+  150_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_OUTPUT_USD_MICROS_PER_MILLION_TOKENS =
+  7_500_000n;
+const HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_RAW_USAGE_KEYS: ReadonlySet<string> =
+  new Set([
+    "cachedContentTokenCount",
+    "candidatesTokenCount",
+    "promptTokenCount",
+    "thoughtsTokenCount",
+    "totalTokenCount",
+  ]);
+
 const HOSTED_AI_USAGE_ALLOWANCE_GPT_56_SOL_MODEL_PRICE = {
   cachedInputUsdMicrosPerMillionTokens: 500_000n,
   cacheWriteUsdMicrosPerMillionTokens: 6_250_000n,
@@ -708,6 +748,20 @@ function resolveHostedAiUsageAllowancePricingDecision(
         },
         pricingVersion: HOSTED_AI_USAGE_ALLOWANCE_XAI_SEARCH_PRICING_VERSION,
       },
+    };
+  }
+
+  const geminiVideoMatch = matchHostedAiUsageGeminiVideoAnalysisRecord(record);
+  if (geminiVideoMatch !== null) {
+    assertHostedAiUsageGeminiVideoTokenPricingBasis(tokenPricingBasis);
+    return {
+      kind: "priced",
+      priced: priceHostedAiUsageGeminiVideoForAllowance({
+        counted,
+        credentialSource,
+        match: geminiVideoMatch,
+        record,
+      }),
     };
   }
 
@@ -899,6 +953,11 @@ function validateHostedAiUsageAllowanceDeniedTokenPricingBasis(
 
   if (matchHostedAiUsageXaiSearchRecord(record) !== null) {
     assertHostedAiUsageXaiSearchTokenPricingBasis(tokenPricingBasis);
+    return tokenPricingBasis;
+  }
+
+  if (matchHostedAiUsageGeminiVideoAnalysisRecord(record) !== null) {
+    assertHostedAiUsageGeminiVideoTokenPricingBasis(tokenPricingBasis);
     return tokenPricingBasis;
   }
 
@@ -2929,6 +2988,214 @@ function divideXaiUsdTicksToMicrosCeil(costInUsdTicks: bigint): bigint {
     + HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO
     - 1n
   ) / HOSTED_AI_USAGE_ALLOWANCE_XAI_USD_TICKS_PER_USD_MICRO;
+}
+
+interface HostedAiUsageAllowanceGeminiVideoMatch {
+  cachedInputTokens: bigint;
+  inputTokens: bigint;
+  outputTokens: bigint;
+  reasoningTokens: bigint;
+  totalTokens: bigint;
+}
+
+// Only the exact Worker-authored Gemini video-analysis row takes this pricing
+// branch. A malformed row that merely claims the provider or model falls
+// through to generic model pricing and fails closed rather than booking free.
+function matchHostedAiUsageGeminiVideoAnalysisRecord(
+  record: AssistantUsageRecord,
+): HostedAiUsageAllowanceGeminiVideoMatch | null {
+  const rawUsageJson = record.rawUsageJson;
+  if (
+    record.provider !== "gemini"
+    || record.providerName !== "Google Gemini"
+    || record.apiKeyEnv !== HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV
+    || record.baseUrl !== HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL
+    || record.credentialSource !== "platform"
+    || record.featureKey !== "video-analysis"
+    || record.surface !== "hosted-runner"
+    || record.triggerKind !== "analyze-video"
+    || record.usageExtractionSourcePath
+      !== HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH
+    || record.usageExtractionVersion
+      !== HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION
+    || record.requestedModel !== HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL
+    || record.servedModel !== null
+    || record.cacheWriteTokens !== null
+    || rawUsageJson === null
+    || !Object.keys(rawUsageJson).every((key) =>
+      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_RAW_USAGE_KEYS.has(key)
+    )
+  ) {
+    return null;
+  }
+
+  const inputTokens = readHostedAiUsageNonNegativeInteger(
+    rawUsageJson.promptTokenCount,
+  );
+  const output = readHostedAiUsageOptionalNonNegativeInteger(
+    rawUsageJson,
+    "candidatesTokenCount",
+  );
+  const totalTokens = readHostedAiUsageNonNegativeInteger(
+    rawUsageJson.totalTokenCount,
+  );
+  const cachedInput = readHostedAiUsageOptionalNonNegativeInteger(
+    rawUsageJson,
+    "cachedContentTokenCount",
+  );
+  const reasoning = readHostedAiUsageOptionalNonNegativeInteger(
+    rawUsageJson,
+    "thoughtsTokenCount",
+  );
+  if (
+    inputTokens === null
+    || output === null
+    || totalTokens === null
+    || cachedInput === null
+    || reasoning === null
+    || cachedInput.value > inputTokens
+    || totalTokens !== inputTokens + output.value + reasoning.value
+    || record.inputTokens !== Number(inputTokens)
+    || record.outputTokens !== (output.present ? Number(output.value) : null)
+    || record.totalTokens !== Number(totalTokens)
+    || record.cachedInputTokens
+      !== (cachedInput.present ? Number(cachedInput.value) : null)
+    || record.reasoningTokens
+      !== (reasoning.present ? Number(reasoning.value) : null)
+  ) {
+    return null;
+  }
+
+  return {
+    cachedInputTokens: cachedInput.value,
+    inputTokens,
+    outputTokens: output.value,
+    reasoningTokens: reasoning.value,
+    totalTokens,
+  };
+}
+
+function readHostedAiUsageOptionalNonNegativeInteger(
+  record: Record<string, unknown>,
+  key: string,
+): { present: boolean; value: bigint } | null {
+  if (!Object.prototype.hasOwnProperty.call(record, key)) {
+    return { present: false, value: 0n };
+  }
+  const value = readHostedAiUsageNonNegativeInteger(record[key]);
+  return value === null ? null : { present: true, value };
+}
+
+function assertHostedAiUsageGeminiVideoTokenPricingBasis(
+  tokenPricingBasis: AssistantUsageTokenPricingBasis,
+): void {
+  if (tokenPricingBasis !== "standard") {
+    throw new TypeError(
+      "Gemini video-analysis hosted AI usage must use standard token pricing basis.",
+    );
+  }
+}
+
+function priceHostedAiUsageGeminiVideoForAllowance(input: {
+  counted: boolean;
+  credentialSource: AssistantUsageCredentialSource;
+  match: HostedAiUsageAllowanceGeminiVideoMatch;
+  record: AssistantUsageRecord;
+}): HostedAiUsageAllowancePricingResult {
+  const pricing = resolveHostedAiUsageGeminiVideoPricing(input.record.occurredAt);
+  const billableNonCachedInputTokens =
+    input.match.inputTokens - input.match.cachedInputTokens;
+  const billableOutputTokens =
+    input.match.outputTokens + input.match.reasoningTokens;
+  const standardCostUsdMicros =
+    priceTokenBucketUsdMicros(
+      billableNonCachedInputTokens,
+      pricing.inputUsdMicrosPerMillionTokens,
+    )
+    + priceTokenBucketUsdMicros(
+      input.match.cachedInputTokens,
+      pricing.cachedInputUsdMicrosPerMillionTokens,
+    )
+    + priceTokenBucketUsdMicros(
+      billableOutputTokens,
+      pricing.outputUsdMicrosPerMillionTokens,
+    );
+
+  return {
+    costUsdMicros: input.counted ? standardCostUsdMicros : 0n,
+    counted: input.counted,
+    pricingSnapshot: {
+      credentialSource: input.credentialSource,
+      model: HOSTED_GEMINI_VIDEO_ANALYSIS_MODEL,
+      modelSource: "requested",
+      pricingSource: HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_PRICING_SOURCE,
+      pricingWindow: {
+        effectiveFrom: pricing.effectiveFrom,
+        effectiveThrough: pricing.effectiveThrough,
+      },
+      ratesUsdMicrosPerMillionTokens: {
+        cachedInput: pricing.cachedInputUsdMicrosPerMillionTokens.toString(),
+        input: pricing.inputUsdMicrosPerMillionTokens.toString(),
+        outputIncludingThinking:
+          pricing.outputUsdMicrosPerMillionTokens.toString(),
+      },
+      requestedModel: input.record.requestedModel,
+      schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+      servedModel: input.record.servedModel,
+      standardCostUsdMicros: standardCostUsdMicros.toString(),
+      tokenPricingBasis: "standard",
+      tokens: {
+        ...buildHostedAiUsageAllowanceTokenSnapshot(input.record),
+        billableCachedInput: input.match.cachedInputTokens.toString(),
+        billableNonCachedInput: billableNonCachedInputTokens.toString(),
+        billableOutputIncludingThinking: billableOutputTokens.toString(),
+        cachedInputIncludedInPromptInput:
+          input.match.cachedInputTokens.toString(),
+        providerTotal: input.match.totalTokens.toString(),
+      },
+    },
+    pricingVersion: pricing.pricingVersion,
+  };
+}
+
+function resolveHostedAiUsageGeminiVideoPricing(
+  occurredAt: Date | string,
+): {
+  cachedInputUsdMicrosPerMillionTokens: bigint;
+  effectiveFrom: string | null;
+  effectiveThrough: string | null;
+  inputUsdMicrosPerMillionTokens: bigint;
+  outputUsdMicrosPerMillionTokens: bigint;
+  pricingVersion: string;
+} {
+  const at = normalizeHostedAiUsageAllowanceDate(occurredAt);
+  if (at.getTime() >= HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_START_MS) {
+    return {
+      effectiveFrom: "2027-01-01T00:00:00.000Z",
+      effectiveThrough: null,
+      cachedInputUsdMicrosPerMillionTokens:
+        HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+      inputUsdMicrosPerMillionTokens:
+        HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+      outputUsdMicrosPerMillionTokens:
+        HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
+      pricingVersion:
+        HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2027_PRICING_VERSION,
+    };
+  }
+
+  return {
+    effectiveFrom: null,
+    effectiveThrough: "2026-12-31T23:59:59.999Z",
+    cachedInputUsdMicrosPerMillionTokens:
+      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_CACHED_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+    inputUsdMicrosPerMillionTokens:
+      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_INPUT_USD_MICROS_PER_MILLION_TOKENS,
+    outputUsdMicrosPerMillionTokens:
+      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_OUTPUT_USD_MICROS_PER_MILLION_TOKENS,
+    pricingVersion:
+      HOSTED_AI_USAGE_ALLOWANCE_GEMINI_VIDEO_2026_PRICING_VERSION,
+  };
 }
 
 function readHostedAiUsageNonNegativeInteger(value: unknown): bigint | null {

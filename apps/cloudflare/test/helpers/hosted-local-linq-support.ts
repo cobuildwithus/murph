@@ -222,6 +222,14 @@ export const HOSTED_LOCAL_LINQ_PDF_BYTES = new TextEncoder().encode([
   "%%EOF",
   "",
 ].join("\n"));
+const HOSTED_LOCAL_LINQ_VIDEO_MP4_BYTES = Uint8Array.from([
+  0x00, 0x00, 0x00, 0x18,
+  0x66, 0x74, 0x79, 0x70,
+  0x69, 0x73, 0x6f, 0x6d,
+  0x00, 0x00, 0x02, 0x00,
+  0x69, 0x73, 0x6f, 0x6d,
+  0x6d, 0x70, 0x34, 0x32,
+]);
 
 const HOSTED_LOCAL_LINQ_IMAGE_PNG_WIDTH = 768;
 const HOSTED_LOCAL_LINQ_IMAGE_PNG_HEIGHT = 512;
@@ -235,6 +243,10 @@ let hostedLocalLinqImagePngBytes: Uint8Array | null = null;
 export function readHostedLocalLinqImagePngBytes(): Uint8Array {
   hostedLocalLinqImagePngBytes ??= buildHostedLocalLargeImagePngBytes();
   return hostedLocalLinqImagePngBytes.slice();
+}
+
+export function readHostedLocalLinqVideoMp4Bytes(): Uint8Array {
+  return HOSTED_LOCAL_LINQ_VIDEO_MP4_BYTES.slice();
 }
 
 export async function startHostedLocalLinqStub(input: {
@@ -483,7 +495,7 @@ export async function startHostedLocalLinqStub(input: {
     if (
       request.method === "GET"
       && request.url
-      && /^\/attachment-downloads\/[^/]+\.(?:m4a|pdf|png|wav)$/u.test(request.url)
+      && /^\/attachment-downloads\/[^/]+\.(?:m4a|mp4|pdf|png|wav)$/u.test(request.url)
     ) {
       response.statusCode = 200;
       if (request.url.endsWith(".pdf")) {
@@ -492,6 +504,9 @@ export async function startHostedLocalLinqStub(input: {
       } else if (request.url.endsWith(".png")) {
         response.setHeader("content-type", "image/png");
         response.end(Buffer.from(readHostedLocalLinqImagePngBytes()));
+      } else if (request.url.endsWith(".mp4")) {
+        response.setHeader("content-type", "video/mp4");
+        response.end(Buffer.from(HOSTED_LOCAL_LINQ_VIDEO_MP4_BYTES));
       } else {
         response.setHeader(
           "content-type",
@@ -1242,7 +1257,9 @@ function buildHostedLocalLinqAttachmentDownloadUrl(
     ? "pdf"
     : attachmentId.startsWith("att_image_")
       ? "png"
-      : "wav";
+      : attachmentId.startsWith("att_video_")
+        ? "mp4"
+        : "wav";
   return `${attachmentDownloadBaseUrl}/${encodeURIComponent(attachmentId)}.${extension}`;
 }
 

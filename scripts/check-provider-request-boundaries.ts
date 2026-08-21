@@ -212,6 +212,14 @@ export const providerBoundaryRegistry = Object.freeze([
     sdkModules: [],
   },
   {
+    hosts: ["generativelanguage.googleapis.com"],
+    id: "gemini",
+    identifiers: ["gemini", "google-generative-language"],
+    label: "Google Gemini",
+    rawHttpPolicy: "require-official-sdk",
+    sdkModules: ["@google/genai"],
+  },
+  {
     hosts: ["api.telegram.org"],
     id: "telegram",
     identifiers: ["telegram"],
@@ -250,6 +258,7 @@ type ApprovedRawHttpOwnerReason =
   | "official-sdk-fetch-hook"
   | "presigned-byte-transfer"
   | "provider-sdk-override"
+  | "gemini-video-analysis"
   | "xai-x-search";
 
 interface ApprovedRawHttpOwner {
@@ -317,6 +326,12 @@ export const approvedProviderRawHttpOwners = Object.freeze([
     providerIds: ["linq"],
     reason: "presigned-byte-transfer",
     relativePath: "packages/assistant-runtime/src/hosted-runtime/events/linq.ts",
+  },
+  {
+    ownerName: "executeAnalyzeVideoTool",
+    providerIds: ["gemini"],
+    reason: "gemini-video-analysis",
+    relativePath: "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts",
   },
   {
     ownerName: "executeAskGrokTool",
@@ -417,7 +432,7 @@ export const approvedProviderRawHttpOwners = Object.freeze([
   },
   {
     ownerName: "fetchAuthorizedProviderUpstream",
-    providerIds: ["elevenlabs", "exa", "linq", "openai", "xai"],
+    providerIds: ["elevenlabs", "exa", "gemini", "linq", "openai", "xai"],
     reason: "existing-provider-boundary",
     relativePath: "apps/cloudflare/src/runner-egress-intercept.ts",
   },

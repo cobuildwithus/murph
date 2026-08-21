@@ -682,6 +682,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
       FFMPEG_COMMAND: "/stale/ffmpeg",
       ELEVENLABS_API_KEY: "elevenlabs-token",
       EXA_API_KEY: "exa-token",
+      GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL: {
         send: async (_message: unknown) => undefined,
       },
@@ -713,6 +714,7 @@ test("hosted runtime forwarded env profiles are runtime-owned and transport-mapp
     {
       ELEVENLABS_API_KEY: "elevenlabs-token",
       EXA_API_KEY: "exa-token",
+      GEMINI_API_KEY: "gemini-token",
       HOSTED_EMAIL_DOMAIN: "mail.example.test",
       HOSTED_EMAIL_INGRESS_READY: "true",
       HOSTED_EMAIL_LOCAL_PART: "assistant",
@@ -940,6 +942,7 @@ test("hosted runtime config lets platform forward Codex dev overrides but strips
   const normalized = normalizeHostedAssistantRuntimeConfig(
     {
       forwardedEnv: {
+        GEMINI_API_KEY: "gemini-secret",
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
           "/usr/local/share/murph/codex-model-catalog.openai-flex.json",
@@ -948,6 +951,7 @@ test("hosted runtime config lets platform forward Codex dev overrides but strips
         OPENAI_API_KEY: "openai-secret",
       },
       userEnv: {
+        GEMINI_API_KEY: "user-gemini-secret",
         [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: "user-controlled-auth-seed",
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]:
           "/tmp/user-controlled-catalog.json",
@@ -960,6 +964,7 @@ test("hosted runtime config lets platform forward Codex dev overrides but strips
   );
 
   assert.deepEqual(normalized.forwardedEnv, {
+    GEMINI_API_KEY: "gemini-secret",
     [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodedChatGptAuthJson,
     [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
       "http://127.0.0.1:4111/v1",
