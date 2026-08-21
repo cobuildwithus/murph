@@ -1682,6 +1682,81 @@ describe("recoverHostedPhysicalNote", () => {
     expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { kind: "complimentary" as const, sequence: 260 },
+    { kind: "legacy-restored" as const, sequence: 261 },
+  ])(
+    "keeps concurrent $kind acceptance usage-free after a local reread",
+    async ({ kind, sequence }) => {
+      const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+      const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+      const store = createPhysicalNoteStore();
+      const sendProvider = kind === "complimentary"
+        ? createPhysicalNoteRuntime([{ kind: "ambiguous_failure" }])
+        : createPhysicalNoteRuntime([
+            { kind: "accepted", providerLetterId: "ltr_concurrent_free_seed" },
+            { kind: "ambiguous_failure" },
+          ]);
+      if (kind === "legacy-restored") {
+        await createHostedPhysicalNote({
+          ...buildRequest(sequence),
+          prisma: store.prisma,
+          runtime: sendProvider.runtime,
+        });
+      }
+      const pending = await createHostedPhysicalNote({
+        ...buildRequest(sequence + 1),
+        prisma: store.prisma,
+        runtime: sendProvider.runtime,
+      });
+      const noteId = pending.physicalNoteId!;
+      const findProviderLetter = vi.fn(async () => {
+        store.setFailureReason(
+          noteId,
+          kind === "legacy-restored" ? "prior_note_accepted" : null,
+        );
+        await store.prisma.hostedPhysicalNote.updateMany({
+          data: {
+            acceptedAt: new Date(),
+            providerLetterId: `ltr_concurrent_${kind}`,
+            status: "accepted",
+          },
+          where: { id: noteId },
+        });
+        return { kind: "indeterminate" as const };
+      });
+      const originAssistantInputId = recoveryOrigin(sequence);
+      const runtime = {
+        async create() {
+          throw new Error("Recovery must not create a physical note.");
+        },
+        findLetterByNoteId: findProviderLetter,
+      } satisfies LobPhysicalNoteRuntime;
+
+      const recovered = await recoverHostedPhysicalNote({
+        memberId: MEMBER_ID,
+        originAssistantInputId,
+        prisma: store.prisma,
+        runtime,
+      });
+      await expect(recoverHostedPhysicalNote({
+        memberId: MEMBER_ID,
+        originAssistantInputId,
+        prisma: store.prisma,
+        runtime,
+      })).resolves.toEqual(recovered);
+
+      expect(recovered).toEqual({
+        remainingUnresolved: false,
+        retryAfter: null,
+        settledUsageCostUsdMicros: null,
+        status: "accepted",
+      });
+      expect(findProviderLetter).toHaveBeenCalledOnce();
+      expect(mocks.recordUsage).not.toHaveBeenCalled();
+    },
+  );
+
   it("replays a targeted accepted recovery result after the response is lost", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();

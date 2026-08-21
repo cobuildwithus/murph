@@ -373,7 +373,11 @@ export async function recoverHostedPhysicalNote(
   const remainingUnresolved = remainingGuard !== null;
   let response: HostedPhysicalNoteRecoveryResponse;
   if (reconciled.status === "accepted") {
-    response = physicalNoteRecoveryResponse("accepted", remainingUnresolved);
+    response = physicalNoteRecoveryResponse(
+      "accepted",
+      remainingUnresolved,
+      readSettledUsageCostForAcceptedRecoveryTarget(reconciled),
+    );
   } else if (
     reconciled.status === "starting"
     || (reconciled.status === "failed" && reconciled.failureReason === null)
