@@ -689,6 +689,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: ["member_123"],
       prisma,
+      surface: "website",
     });
     expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult).toHaveBeenCalledWith({
       hostedExecutionEventId: "wake_123",
@@ -739,6 +740,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: ["member_123"],
       prisma,
+      surface: "website",
     });
     expect(
       mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],

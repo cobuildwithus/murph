@@ -23,6 +23,9 @@ import {
 } from "@/src/lib/hosted-onboarding/app-session";
 import { resolveHostedSignupTimeZone } from "@/src/lib/hosted-onboarding/time-zone-hint";
 import {
+  buildHostedSignupNotificationContext,
+} from "@/src/lib/hosted-onboarding/signup-notification-context";
+import {
   readHostedConsentStatus,
   type HostedConsentStatus,
 } from "@/src/lib/legal/consent";
@@ -56,10 +59,18 @@ export const POST = withJsonError(async (request: Request) => {
       clientTimeZone: body.timeZone,
       headers: request.headers,
     });
+    const now = new Date();
     const result = await completeHostedPrivyVerification({
       authMethod,
       identity: auth.identity,
       inviteCode: typeof body.inviteCode === "string" ? body.inviteCode : null,
+      now,
+      signupNotificationContext: buildHostedSignupNotificationContext({
+        headers: request.headers,
+        occurredAt: now,
+        surface: "website",
+        timeZone,
+      }),
       ...(timeZone ? { timeZone } : {}),
     }).catch((error: unknown) => {
       throw remapHostedPrivyCompletionLagError(error);

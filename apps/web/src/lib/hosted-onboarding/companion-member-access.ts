@@ -21,6 +21,10 @@ import {
   remapHostedPrivyCompletionLagError,
   type HostedPrivyIdentity,
 } from "./privy";
+import {
+  buildHostedSignupNotificationContext,
+  type HostedSignupNotificationContextV1,
+} from "./signup-notification-context";
 import { resolveHostedPrivySessionFromBearerToken } from "./hosted-session";
 
 /**
@@ -45,9 +49,17 @@ export async function requireHostedCompanionMemberIdFromRequest(input: {
     });
   }
 
+  const now = new Date();
   return ensureHostedCompanionMemberId({
     identity: session.identity,
+    now,
     prisma,
+    signupNotificationContext: buildHostedSignupNotificationContext({
+      headers: input.request.headers,
+      occurredAt: now,
+      surface: "mobile_app",
+      timeZone: input.timeZone,
+    }),
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   });
 }
@@ -56,6 +68,7 @@ export async function ensureHostedCompanionMemberId(input: {
   identity: HostedPrivyIdentity;
   now?: Date;
   prisma?: PrismaClient;
+  signupNotificationContext?: HostedSignupNotificationContextV1;
   timeZone?: string | null;
 }): Promise<string> {
   const prisma = input.prisma ?? getPrisma();
@@ -88,6 +101,7 @@ export async function ensureHostedCompanionMemberId(input: {
     identity: input.identity,
     now,
     prisma,
+    signupNotificationContext: input.signupNotificationContext,
     ...(input.timeZone ? { timeZone: input.timeZone } : {}),
   }).catch((error: unknown) => {
     throw remapHostedPrivyCompletionLagError(error);

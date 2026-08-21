@@ -9,6 +9,7 @@ import {
   claimHostedMemberSignupNotificationEmailAttempt,
   readHostedMemberCoreState,
   readHostedMemberEmailAuthorization,
+  readHostedMemberSignupNotificationContext,
 } from "./hosted-member-store";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
@@ -17,6 +18,12 @@ import {
   sendHostedResendPlainTextEmail,
   type HostedResendPlainTextEmailConfig,
 } from "./resend-plain-text-email";
+import {
+  formatHostedSignupLocation,
+  formatHostedSignupSurface,
+  type HostedSignupNotificationContextV1,
+  type HostedSignupSurface,
+} from "./signup-notification-context";
 
 const HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT = "New Murph signup";
 
@@ -42,8 +49,7 @@ export type HostedSignupNotificationEmailError = HostedResendPlainTextEmailError
 export function scheduleHostedSignupNotificationEmails(input: {
   memberIds: readonly string[];
   prisma: PrismaClient;
-  sourceEventId?: string | null;
-  sourceEventType?: string | null;
+  surface?: HostedSignupSurface;
 }): void {
   const memberIds = [...new Set(input.memberIds)];
   if (memberIds.length === 0) {
@@ -55,8 +61,7 @@ export function scheduleHostedSignupNotificationEmails(input: {
       await sendHostedSignupNotificationEmailForMemberBestEffort({
         memberId,
         prisma: input.prisma,
-        sourceEventId: input.sourceEventId,
-        sourceEventType: input.sourceEventType,
+        surface: input.surface,
       });
     }
   };
@@ -74,8 +79,7 @@ export async function sendHostedSignupNotificationEmailForMemberBestEffort(input
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
-  sourceEventId?: string | null;
-  sourceEventType?: string | null;
+  surface?: HostedSignupSurface;
 }): Promise<void> {
   try {
     await sendHostedSignupNotificationEmailForMember(input);
@@ -99,12 +103,16 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
   memberId: string;
   now?: Date;
   prisma?: PrismaClient;
-  sourceEventId?: string | null;
-  sourceEventType?: string | null;
+  surface?: HostedSignupSurface;
 }): Promise<HostedSignupNotificationEmailResult> {
   const config = readHostedSignupNotificationEmailConfig(input.env ?? process.env);
 
   if (!config) {
+    await claimHostedMemberSignupNotificationEmailAttempt({
+      attemptedAt: input.now ?? new Date(),
+      memberId: input.memberId,
+      prisma: input.prisma ?? getPrisma(),
+    });
     return {
       reason: "not_configured",
       status: "skipped",
@@ -128,6 +136,16 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     };
   }
 
+  const signupSnapshot = await readHostedMemberSignupNotificationContext({
+    memberId: input.memberId,
+    prisma,
+  });
+  if (!signupSnapshot) {
+    return {
+      reason: "member_not_found",
+      status: "skipped",
+    };
+  }
   const emailAuthorization = await readHostedMemberEmailAuthorization({
     memberId: input.memberId,
     prisma,
@@ -153,12 +171,12 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     config: config.resend,
     fetchImpl: input.fetchImpl,
     idempotencyKey: buildHostedSignupNotificationEmailIdempotencyKey(input.memberId),
-    subject: HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT,
+    subject: buildHostedSignupNotificationEmailSubject(signupSnapshot.context),
     text: buildHostedSignupNotificationEmailText({
       customerEmail,
-      memberId: input.memberId,
-      sourceEventId: input.sourceEventId,
-      sourceEventType: input.sourceEventType,
+      fallbackOccurredAt: signupSnapshot.createdAt,
+      fallbackSurface: input.surface,
+      signupContext: signupSnapshot.context,
     }),
     to: config.recipients,
   });
@@ -212,18 +230,45 @@ function readHostedSignupNotificationEmailRecipients(value: string | undefined):
 
 function buildHostedSignupNotificationEmailText(input: {
   customerEmail?: string | null;
-  memberId: string;
-  sourceEventId?: string | null;
-  sourceEventType?: string | null;
+  fallbackOccurredAt: Date;
+  fallbackSurface?: HostedSignupSurface;
+  signupContext: HostedSignupNotificationContextV1 | null;
 }): string {
+  const location = formatHostedSignupLocation(input.signupContext?.location);
+  const occurredAt = input.signupContext?.occurredAt
+    ?? input.fallbackOccurredAt.toISOString();
+  const surface = input.signupContext?.surface ?? input.fallbackSurface;
+  const timeZone = input.signupContext?.timeZone ?? "UTC";
+  const subject = buildHostedSignupNotificationEmailSubject(input.signupContext);
+
   return [
-    "New Murph signup.",
+    `${subject}.`,
     "",
-    `Member ID: ${input.memberId}`,
+    `Signed up: ${formatHostedSignupLocalDateTime(occurredAt, timeZone)} (${timeZone})`,
+    surface ? `Source: ${formatHostedSignupSurface(surface)}` : null,
+    location ? `Location: ${location}` : null,
     input.customerEmail ? `Email: ${input.customerEmail}` : null,
-    input.sourceEventType ? `Stripe event: ${input.sourceEventType}` : null,
-    input.sourceEventId ? `Stripe event ID: ${input.sourceEventId}` : null,
   ].filter((line): line is string => line !== null).join("\n");
+}
+
+function buildHostedSignupNotificationEmailSubject(
+  context: HostedSignupNotificationContextV1 | null,
+): string {
+  const location = formatHostedSignupLocation(context?.location);
+  return location
+    ? `${HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT} from ${context?.location?.city ?? location}`
+    : HOSTED_SIGNUP_NOTIFICATION_EMAIL_SUBJECT;
+}
+
+function formatHostedSignupLocalDateTime(
+  occurredAt: string,
+  timeZone: string,
+): string {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone,
+  }).format(new Date(occurredAt));
 }
 
 function buildHostedSignupNotificationEmailIdempotencyKey(memberId: string): string {

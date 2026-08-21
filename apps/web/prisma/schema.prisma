@@ -7,47 +7,47 @@ datasource db {
 }
 
 model DeviceConnection {
-  id                         String                   @id
-  userId                     String                   @map("user_id")
-  provider                   String
-  providerAccountBlindIndex  String                   @map("provider_account_blind_index")
-  status                     String                   @default("active")
-  displayName                String?                  @map("display_name")
-  scopesJson                 Json?                    @map("scopes_json")
-  metadataJson               Json?                    @map("metadata_json")
-  credentialKind             String                   @default("oauth_tokens") @map("credential_kind")
-  providerConfigKey          String?                  @map("provider_config_key")
-  providerApplicationId      String?                  @map("provider_application_id")
-  providerApplicationRevision Int?                    @map("provider_application_revision")
-  credentialMetadataJson     Json?                    @map("credential_metadata_json")
-  setupPhase                 String?                  @map("setup_phase")
-  setupExpiresAt             DateTime?                @map("setup_expires_at")
-  externalAccountIdEncrypted String?                  @map("external_account_id_encrypted")
-  accessTokenEncrypted       String?                  @map("access_token_encrypted")
-  refreshTokenEncrypted      String?                  @map("refresh_token_encrypted")
-  accessTokenExpiresAt       DateTime?                @map("access_token_expires_at")
-  tokenVersion               Int?                     @map("token_version")
-  refreshLeaseOwner          String?                  @map("refresh_lease_owner")
-  refreshLeaseExpiresAt      DateTime?                @map("refresh_lease_expires_at")
-  refreshLeaseTokenVersion   Int?                     @map("refresh_lease_token_version")
-  keyVersion                 String?                  @map("key_version")
-  connectedAt                DateTime                 @map("connected_at")
-  lastWebhookAt              DateTime?                @map("last_webhook_at")
-  lastSyncStartedAt          DateTime?                @map("last_sync_started_at")
-  lastSyncCompletedAt        DateTime?                @map("last_sync_completed_at")
-  lastSyncErrorAt            DateTime?                @map("last_sync_error_at")
-  lastErrorCode              String?                  @map("last_error_code")
-  lastErrorMessage           String?                  @map("last_error_message")
-  nextReconcileAt            DateTime?                @map("next_reconcile_at")
-  createdAt                  DateTime                 @default(now()) @map("created_at")
-  updatedAt                  DateTime                 @updatedAt @map("updated_at")
-  signals                    DeviceSyncSignal[]
-  sources                    DeviceConnectionSource[]
-  tokenAudits                DeviceTokenAudit[]
-  dirtyState                 DeviceSyncDirtyConnection?
-  dirtyPayloads              DeviceSyncDirtyPayload[]
-  companionCaptureReceipts   DeviceSyncCompanionCaptureReceipt[]
-  providerApplication        DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Restrict)
+  id                          String                              @id
+  userId                      String                              @map("user_id")
+  provider                    String
+  providerAccountBlindIndex   String                              @map("provider_account_blind_index")
+  status                      String                              @default("active")
+  displayName                 String?                             @map("display_name")
+  scopesJson                  Json?                               @map("scopes_json")
+  metadataJson                Json?                               @map("metadata_json")
+  credentialKind              String                              @default("oauth_tokens") @map("credential_kind")
+  providerConfigKey           String?                             @map("provider_config_key")
+  providerApplicationId       String?                             @map("provider_application_id")
+  providerApplicationRevision Int?                                @map("provider_application_revision")
+  credentialMetadataJson      Json?                               @map("credential_metadata_json")
+  setupPhase                  String?                             @map("setup_phase")
+  setupExpiresAt              DateTime?                           @map("setup_expires_at")
+  externalAccountIdEncrypted  String?                             @map("external_account_id_encrypted")
+  accessTokenEncrypted        String?                             @map("access_token_encrypted")
+  refreshTokenEncrypted       String?                             @map("refresh_token_encrypted")
+  accessTokenExpiresAt        DateTime?                           @map("access_token_expires_at")
+  tokenVersion                Int?                                @map("token_version")
+  refreshLeaseOwner           String?                             @map("refresh_lease_owner")
+  refreshLeaseExpiresAt       DateTime?                           @map("refresh_lease_expires_at")
+  refreshLeaseTokenVersion    Int?                                @map("refresh_lease_token_version")
+  keyVersion                  String?                             @map("key_version")
+  connectedAt                 DateTime                            @map("connected_at")
+  lastWebhookAt               DateTime?                           @map("last_webhook_at")
+  lastSyncStartedAt           DateTime?                           @map("last_sync_started_at")
+  lastSyncCompletedAt         DateTime?                           @map("last_sync_completed_at")
+  lastSyncErrorAt             DateTime?                           @map("last_sync_error_at")
+  lastErrorCode               String?                             @map("last_error_code")
+  lastErrorMessage            String?                             @map("last_error_message")
+  nextReconcileAt             DateTime?                           @map("next_reconcile_at")
+  createdAt                   DateTime                            @default(now()) @map("created_at")
+  updatedAt                   DateTime                            @updatedAt @map("updated_at")
+  signals                     DeviceSyncSignal[]
+  sources                     DeviceConnectionSource[]
+  tokenAudits                 DeviceTokenAudit[]
+  dirtyState                  DeviceSyncDirtyConnection?
+  dirtyPayloads               DeviceSyncDirtyPayload[]
+  companionCaptureReceipts    DeviceSyncCompanionCaptureReceipt[]
+  providerApplication         DeviceProviderApplication?          @relation(fields: [providerApplicationId], references: [id], onDelete: Restrict)
 
   @@unique([provider, providerAccountBlindIndex])
   @@index([providerApplicationId])
@@ -105,16 +105,16 @@ model DeviceTokenAudit {
 }
 
 model DeviceOauthSession {
-  state                       String    @id
-  userId                      String?   @map("user_id")
+  state                       String                     @id
+  userId                      String?                    @map("user_id")
   provider                    String
-  providerApplicationId       String?   @map("provider_application_id")
-  providerApplicationRevision Int?      @map("provider_application_revision")
-  returnTo                    String?   @map("return_to")
-  metadataJson                Json?     @map("metadata_json")
-  createdAt                   DateTime  @map("created_at")
-  expiresAt                   DateTime  @map("expires_at")
-  consumedAt                  DateTime? @map("consumed_at")
+  providerApplicationId       String?                    @map("provider_application_id")
+  providerApplicationRevision Int?                       @map("provider_application_revision")
+  returnTo                    String?                    @map("return_to")
+  metadataJson                Json?                      @map("metadata_json")
+  createdAt                   DateTime                   @map("created_at")
+  expiresAt                   DateTime                   @map("expires_at")
+  consumedAt                  DateTime?                  @map("consumed_at")
   providerApplication         DeviceProviderApplication? @relation(fields: [providerApplicationId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
@@ -124,31 +124,31 @@ model DeviceOauthSession {
 }
 
 model DeviceProviderApplication {
-  id                    String    @id
-  memberId              String    @map("member_id")
-  provider              String
-  revision              Int       @default(1)
-  configEncrypted       String    @map("config_encrypted")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
-  member                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  connections           DeviceConnection[]
-  oauthSessions         DeviceOauthSession[]
+  id              String               @id
+  memberId        String               @map("member_id")
+  provider        String
+  revision        Int                  @default(1)
+  configEncrypted String               @map("config_encrypted")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  member          HostedMember         @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  connections     DeviceConnection[]
+  oauthSessions   DeviceOauthSession[]
 
   @@unique([memberId, provider])
   @@map("device_provider_application")
 }
 
 model DeviceConnectIntent {
-  claimHash            String    @id @map("claim_hash")
-  memberId             String    @map("member_id")
-  provider             String
-  connectSourceId      String    @map("connect_source_id")
-  connectTarget        String    @map("connect_target")
-  sourceProviderSlug   String?   @map("source_provider_slug")
-  createdAt            DateTime  @default(now()) @map("created_at")
-  expiresAt            DateTime  @map("expires_at")
-  startedAt            DateTime? @map("started_at")
+  claimHash          String    @id @map("claim_hash")
+  memberId           String    @map("member_id")
+  provider           String
+  connectSourceId    String    @map("connect_source_id")
+  connectTarget      String    @map("connect_target")
+  sourceProviderSlug String?   @map("source_provider_slug")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  expiresAt          DateTime  @map("expires_at")
+  startedAt          DateTime? @map("started_at")
 
   @@index([expiresAt])
   @@index([memberId, expiresAt])
@@ -172,7 +172,6 @@ model DeviceWebhookTrace {
   @@index([receivedAt])
   @@map("device_webhook_trace")
 }
-
 
 model DeviceSyncSignal {
   id                   Int               @id @default(autoincrement())
@@ -235,7 +234,7 @@ model DeviceSyncDirtyPayload {
   resourceEncrypted     String           @map("resource_encrypted")
   credentialIndependent Boolean?         @map("credential_independent")
   createdAt             DateTime         @default(now()) @map("created_at")
-  connection    DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  connection            DeviceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   @@index([connectionId, dirtyRevision])
   @@index([userId, connectionId, dirtyRevision])
@@ -583,95 +582,96 @@ enum HostedPhysicalNoteFailureReason {
 }
 
 model HostedMember {
-  id                             String                          @id
-  billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
-  usageCreditBalanceUsdMicros    BigInt?                         @default(0) @map("usage_credit_balance_usd_micros")
-  usageCreditLedgerVersion       BigInt?                         @default(0) @map("usage_credit_ledger_version")
-  assistantModelPreference       String?                         @map("assistant_model_preference")
-  assistantProviderPreference    String?                         @map("assistant_provider_preference")
-  assistantReasoningEffortPreference String?                     @map("assistant_reasoning_effort_preference")
-  assistantPersona               String?                         @map("assistant_persona")
-  assistantPersonaCausalSeq      BigInt?                         @map("assistant_persona_causal_seq")
-  assistantTone                  String?                         @map("assistant_tone")
-  assistantToneCausalSeq         BigInt?                         @map("assistant_tone_causal_seq")
-  assistantVoice                 String?                         @map("assistant_voice")
-  assistantVoiceCausalSeq        BigInt?                         @map("assistant_voice_causal_seq")
-  assistantHumor                 Int?                            @map("assistant_humor")
-  assistantHumorCausalSeq        BigInt?                         @map("assistant_humor_causal_seq")
-  assistantPush                  Int?                            @map("assistant_push")
-  assistantPushCausalSeq         BigInt?                         @map("assistant_push_causal_seq")
-  assistantDetail                Int?                            @map("assistant_detail")
-  assistantDetailCausalSeq       BigInt?                         @map("assistant_detail_causal_seq")
-  assistantUnhinged              Int?                            @map("assistant_unhinged")
-  assistantUnhingedCausalSeq     BigInt?                         @map("assistant_unhinged_causal_seq")
-  initialOnboardingCompletedAt   DateTime?                       @default(now()) @map("initial_onboarding_completed_at")
-  pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
-  signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
-  signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
-  suspendedAt                    DateTime?                       @map("suspended_at")
-  createdAt                      DateTime                        @default(now()) @map("created_at")
-  updatedAt                      DateTime                        @updatedAt @map("updated_at")
-  invites                        HostedInvite[]                 @relation("HostedInviteMember")
-  signupReferralInvites          HostedInvite[]                 @relation("HostedInviteReferrer")
-  accountGroupsOwned             HostedAccountGroup[]            @relation("HostedAccountGroupOwner")
-  accountGroupMemberships        HostedAccountGroupMembership[]   @relation("HostedAccountGroupMember")
-  accountGroupInvitesSent        HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteSender")
-  accountGroupInvitesAccepted    HostedAccountGroupInvite[]       @relation("HostedAccountGroupInviteAcceptor")
-  aiUsage                        HostedAiUsage[]
-  linqDailyStates                HostedLinqDailyState[]
-  linqContactCardShares          HostedLinqContactCardShare[]
-  identity                       HostedMemberIdentity?
-  routing                        HostedMemberRouting?
-  billingRef                     HostedMemberBillingRef?
-  subscriptionCheckouts          HostedMemberSubscriptionCheckout[]
-  emailAuthorization             HostedMemberEmailAuthorization?
-  emailPublicBootstrapAttempts   HostedEmailPublicBootstrapAttempt[]
-  hostedMailboxItems             HostedMailboxItem[]
-  hostedMailboxPayloads          HostedMailboxPayload[]
-  hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
-  hostedWorkspace                HostedWorkspace?
-  hostedAiUsagePeriods           HostedAiUsagePeriod[]
-  usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
-  usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
-  groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
-  groupSponsorshipsReceived      HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationBeneficiary")
-  groupSponsorshipMomentsCreated HostedGroupSponsorshipMoment[]  @relation("HostedGroupSponsorshipMomentCreator")
-  usageCreditEntries             HostedUsageCreditEntry[]
-  usageReferralsAsReferrer       HostedUsageReferral[]            @relation("HostedUsageReferralReferrer")
-  usageReferralsAsBeneficiary    HostedUsageReferral[]            @relation("HostedUsageReferralBeneficiary")
-  usageReferralsAsIntroduced     HostedUsageReferral[]            @relation("HostedUsageReferralIntroducedMember")
-  consentEvents                  HostedConsentEvent[]
-  consentGrants                  HostedConsentGrant[]
-  vaultSharesGranted             HostedVaultShare[]              @relation("VaultShareGrantor")
-  vaultSharesReceived            HostedVaultShare[]              @relation("VaultShareDestination")
-  hostedGroupsOwned              HostedGroup[]                   @relation("HostedGroupOwner")
-  hostedGroupMemberships         HostedGroupMember[]             @relation("HostedGroupMember")
-  hostedGroupRuntime             HostedGroup?                    @relation("HostedGroupRuntimeMember")
-  hostedCryptoEnvelopes          HostedUserCryptoEnvelope[]
-  deviceProviderApplications     DeviceProviderApplication[]
-  hostedCryptoAudits             HostedUserCryptoAudit[]
-  webSessions                    HostedWebSession[]
-  mealPhotoCaptureEnrollments    HostedMealPhotoCaptureEnrollment[]
-  addressBookProjection          HostedAddressBookProjection?
-  connectedAppsSession           HostedConnectedAppsSession?
-  connectedAppConnectIntents     HostedConnectedAppConnectIntent[]
-  clinicalRecordConnectIntents       ClinicalRecordConnectIntent[]
-  clinicalRecordOauthSessions        ClinicalRecordOauthSession[]
-  clinicalRecordConnections          ClinicalRecordConnection[]
-  clinicalRecordRetrievalRuns        ClinicalRecordRetrievalRun[]
-  clinicalRecordRetrievalRequests    ClinicalRecordRetrievalRequest[]
-  codexAuthConnection            HostedCodexAuthConnection?
-  inferenceConnection            HostedInferenceConnection?
-  computerRuns                   HostedComputerRun[]
-  computerHandoffs               HostedComputerHandoff[]
-  phoneCalls                     HostedPhoneCall[]
-  physicalNotes                  HostedPhysicalNote[]
-  productFeedback                HostedProductFeedback[]
-  sensitiveActionChallenges      HostedSensitiveActionChallenge[]
-  threadContainer                HostedThreadContainer?          @relation("HostedThreadContainerMember")
-  ownedThreadContainers          HostedThreadContainer[]         @relation("HostedThreadContainerOwner")
-  threadContainerParticipations  HostedThreadContainerParticipant[] @relation("HostedThreadContainerParticipantMember")
-  pendingGroupSetup              HostedPendingGroupSetup?
+  id                                        String                                  @id
+  billingStatus                             HostedBillingStatus                     @default(not_started) @map("billing_status")
+  usageCreditBalanceUsdMicros               BigInt?                                 @default(0) @map("usage_credit_balance_usd_micros")
+  usageCreditLedgerVersion                  BigInt?                                 @default(0) @map("usage_credit_ledger_version")
+  assistantModelPreference                  String?                                 @map("assistant_model_preference")
+  assistantProviderPreference               String?                                 @map("assistant_provider_preference")
+  assistantReasoningEffortPreference        String?                                 @map("assistant_reasoning_effort_preference")
+  assistantPersona                          String?                                 @map("assistant_persona")
+  assistantPersonaCausalSeq                 BigInt?                                 @map("assistant_persona_causal_seq")
+  assistantTone                             String?                                 @map("assistant_tone")
+  assistantToneCausalSeq                    BigInt?                                 @map("assistant_tone_causal_seq")
+  assistantVoice                            String?                                 @map("assistant_voice")
+  assistantVoiceCausalSeq                   BigInt?                                 @map("assistant_voice_causal_seq")
+  assistantHumor                            Int?                                    @map("assistant_humor")
+  assistantHumorCausalSeq                   BigInt?                                 @map("assistant_humor_causal_seq")
+  assistantPush                             Int?                                    @map("assistant_push")
+  assistantPushCausalSeq                    BigInt?                                 @map("assistant_push_causal_seq")
+  assistantDetail                           Int?                                    @map("assistant_detail")
+  assistantDetailCausalSeq                  BigInt?                                 @map("assistant_detail_causal_seq")
+  assistantUnhinged                         Int?                                    @map("assistant_unhinged")
+  assistantUnhingedCausalSeq                BigInt?                                 @map("assistant_unhinged_causal_seq")
+  initialOnboardingCompletedAt              DateTime?                               @default(now()) @map("initial_onboarding_completed_at")
+  pendingActivationTimeZone                 String?                                 @map("pending_activation_time_zone")
+  signupNotificationContextEncrypted        String?                                 @map("signup_notification_context_encrypted")
+  signupNotificationEmailAttemptedAt        DateTime?                               @map("signup_notification_email_attempted_at")
+  signupWelcomeEmailAttemptedAt             DateTime?                               @map("signup_welcome_email_attempted_at")
+  suspendedAt                               DateTime?                               @map("suspended_at")
+  createdAt                                 DateTime                                @default(now()) @map("created_at")
+  updatedAt                                 DateTime                                @updatedAt @map("updated_at")
+  invites                                   HostedInvite[]                          @relation("HostedInviteMember")
+  signupReferralInvites                     HostedInvite[]                          @relation("HostedInviteReferrer")
+  accountGroupsOwned                        HostedAccountGroup[]                    @relation("HostedAccountGroupOwner")
+  accountGroupMemberships                   HostedAccountGroupMembership[]          @relation("HostedAccountGroupMember")
+  accountGroupInvitesSent                   HostedAccountGroupInvite[]              @relation("HostedAccountGroupInviteSender")
+  accountGroupInvitesAccepted               HostedAccountGroupInvite[]              @relation("HostedAccountGroupInviteAcceptor")
+  aiUsage                                   HostedAiUsage[]
+  linqDailyStates                           HostedLinqDailyState[]
+  linqContactCardShares                     HostedLinqContactCardShare[]
+  identity                                  HostedMemberIdentity?
+  routing                                   HostedMemberRouting?
+  billingRef                                HostedMemberBillingRef?
+  subscriptionCheckouts                     HostedMemberSubscriptionCheckout[]
+  emailAuthorization                        HostedMemberEmailAuthorization?
+  emailPublicBootstrapAttempts              HostedEmailPublicBootstrapAttempt[]
+  hostedMailboxItems                        HostedMailboxItem[]
+  hostedMailboxPayloads                     HostedMailboxPayload[]
+  hostedMailboxLaneCounters                 HostedMailboxLaneCounter[]
+  hostedWorkspace                           HostedWorkspace?
+  hostedAiUsagePeriods                      HostedAiUsagePeriod[]
+  usageCreditPurchasesPaid                  HostedUsageCreditPurchase[]             @relation("HostedUsageCreditPurchasePayer")
+  usageCreditPurchasesReceived              HostedUsageCreditPurchase[]             @relation("HostedUsageCreditPurchaseBeneficiary")
+  groupSponsorshipsPaid                     HostedGroupSponsorshipAuthorization[]   @relation("HostedGroupSponsorshipAuthorizationPayer")
+  groupSponsorshipsReceived                 HostedGroupSponsorshipAuthorization[]   @relation("HostedGroupSponsorshipAuthorizationBeneficiary")
+  groupSponsorshipMomentsCreated            HostedGroupSponsorshipMoment[]          @relation("HostedGroupSponsorshipMomentCreator")
+  usageCreditEntries                        HostedUsageCreditEntry[]
+  usageReferralsAsReferrer                  HostedUsageReferral[]                   @relation("HostedUsageReferralReferrer")
+  usageReferralsAsBeneficiary               HostedUsageReferral[]                   @relation("HostedUsageReferralBeneficiary")
+  usageReferralsAsIntroduced                HostedUsageReferral[]                   @relation("HostedUsageReferralIntroducedMember")
+  consentEvents                             HostedConsentEvent[]
+  consentGrants                             HostedConsentGrant[]
+  vaultSharesGranted                        HostedVaultShare[]                      @relation("VaultShareGrantor")
+  vaultSharesReceived                       HostedVaultShare[]                      @relation("VaultShareDestination")
+  hostedGroupsOwned                         HostedGroup[]                           @relation("HostedGroupOwner")
+  hostedGroupMemberships                    HostedGroupMember[]                     @relation("HostedGroupMember")
+  hostedGroupRuntime                        HostedGroup?                            @relation("HostedGroupRuntimeMember")
+  hostedCryptoEnvelopes                     HostedUserCryptoEnvelope[]
+  deviceProviderApplications                DeviceProviderApplication[]
+  hostedCryptoAudits                        HostedUserCryptoAudit[]
+  webSessions                               HostedWebSession[]
+  mealPhotoCaptureEnrollments               HostedMealPhotoCaptureEnrollment[]
+  addressBookProjection                     HostedAddressBookProjection?
+  connectedAppsSession                      HostedConnectedAppsSession?
+  connectedAppConnectIntents                HostedConnectedAppConnectIntent[]
+  clinicalRecordConnectIntents              ClinicalRecordConnectIntent[]
+  clinicalRecordOauthSessions               ClinicalRecordOauthSession[]
+  clinicalRecordConnections                 ClinicalRecordConnection[]
+  clinicalRecordRetrievalRuns               ClinicalRecordRetrievalRun[]
+  clinicalRecordRetrievalRequests           ClinicalRecordRetrievalRequest[]
+  codexAuthConnection                       HostedCodexAuthConnection?
+  inferenceConnection                       HostedInferenceConnection?
+  computerRuns                              HostedComputerRun[]
+  computerHandoffs                          HostedComputerHandoff[]
+  phoneCalls                                HostedPhoneCall[]
+  physicalNotes                             HostedPhysicalNote[]
+  productFeedback                           HostedProductFeedback[]
+  sensitiveActionChallenges                 HostedSensitiveActionChallenge[]
+  threadContainer                           HostedThreadContainer?                  @relation("HostedThreadContainerMember")
+  ownedThreadContainers                     HostedThreadContainer[]                 @relation("HostedThreadContainerOwner")
+  threadContainerParticipations             HostedThreadContainerParticipant[]      @relation("HostedThreadContainerParticipantMember")
+  pendingGroupSetup                         HostedPendingGroupSetup?
   groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")
   groupCurrentSenderClarificationsAsTarget  HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationTarget")
 
@@ -709,12 +709,12 @@ model HostedInferenceConnection {
 }
 
 model HostedProductFeedback {
-  id                          String       @id
-  memberId                    String?      @map("member_id")
+  id                          String        @id
+  memberId                    String?       @map("member_id")
   kind                        String
-  relatedChangelogItemIdsJson Json         @map("related_changelog_item_ids_json")
+  relatedChangelogItemIdsJson Json          @map("related_changelog_item_ids_json")
   summary                     String?
-  createdAt                   DateTime     @default(now()) @map("created_at")
+  createdAt                   DateTime      @default(now()) @map("created_at")
   member                      HostedMember? @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, createdAt])
@@ -723,22 +723,22 @@ model HostedProductFeedback {
 }
 
 model HostedWebSession {
-  id           String       @id
-  tokenHash    String       @unique @map("token_hash")
-  memberId     String       @map("member_id")
-  privyUserId  String       @map("privy_user_id")
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-  expiresAt    DateTime     @map("expires_at")
-  lastSeenAt   DateTime?    @map("last_seen_at")
-  revokedAt    DateTime?    @map("revoked_at")
-  revokeReason String?      @map("revoke_reason")
+  id           String    @id
+  tokenHash    String    @unique @map("token_hash")
+  memberId     String    @map("member_id")
+  privyUserId  String    @map("privy_user_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  expiresAt    DateTime  @map("expires_at")
+  lastSeenAt   DateTime? @map("last_seen_at")
+  revokedAt    DateTime? @map("revoked_at")
+  revokeReason String?   @map("revoke_reason")
 
   computerHandoffViewportWidth      Int?      @map("computer_handoff_viewport_width")
   computerHandoffViewportHeight     Int?      @map("computer_handoff_viewport_height")
   computerHandoffViewportObservedAt DateTime? @map("computer_handoff_viewport_observed_at")
 
-  member       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  member HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
   @@index([memberId, privyUserId, createdAt, id])
@@ -777,8 +777,8 @@ model HostedAddressBookProjection {
   revision              Int
   lastMutationId        String                     @map("last_mutation_id")
   lastMutationOperation String                     @map("last_mutation_operation")
-  lastReplacedAt        DateTime?                   @map("last_replaced_at")
-  disabledAt            DateTime?                   @map("disabled_at")
+  lastReplacedAt        DateTime?                  @map("last_replaced_at")
+  disabledAt            DateTime?                  @map("disabled_at")
   createdAt             DateTime                   @default(now()) @map("created_at")
   updatedAt             DateTime                   @updatedAt @map("updated_at")
   member                HostedMember               @relation(fields: [memberId], references: [id], onDelete: Cascade)
@@ -800,23 +800,23 @@ model HostedAddressBookContact {
 }
 
 model HostedSensitiveActionChallenge {
-  tokenHash          String                                @id @map("token_hash")
-  memberId           String                                @map("member_id")
-  kind               String
-  bindingHash        String                                @map("binding_hash")
-  createdAt          DateTime                              @default(now()) @map("created_at")
-  expiresAt          DateTime                              @map("expires_at")
-  approvalKey        String?                               @unique @map("approval_key")
-  actionId           String?                               @map("action_id")
-  actionHash         String?                               @map("action_hash")
-  presentationTitle  String?                               @map("presentation_title")
-  presentationBody   String?                               @map("presentation_body")
-  approvalStatus     HostedSensitiveActionApprovalStatus?  @map("approval_status")
-  decidedAt          DateTime?                             @map("decided_at")
-  consumedAt         DateTime?                             @map("consumed_at")
-  consumedBy         String?                               @map("consumed_by")
-  returnContactKind  String?                               @map("return_contact_kind")
-  member             HostedMember                          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  tokenHash         String                               @id @map("token_hash")
+  memberId          String                               @map("member_id")
+  kind              String
+  bindingHash       String                               @map("binding_hash")
+  createdAt         DateTime                             @default(now()) @map("created_at")
+  expiresAt         DateTime                             @map("expires_at")
+  approvalKey       String?                              @unique @map("approval_key")
+  actionId          String?                              @map("action_id")
+  actionHash        String?                              @map("action_hash")
+  presentationTitle String?                              @map("presentation_title")
+  presentationBody  String?                              @map("presentation_body")
+  approvalStatus    HostedSensitiveActionApprovalStatus? @map("approval_status")
+  decidedAt         DateTime?                            @map("decided_at")
+  consumedAt        DateTime?                            @map("consumed_at")
+  consumedBy        String?                              @map("consumed_by")
+  returnContactKind String?                              @map("return_contact_kind")
+  member            HostedMember                         @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId, expiresAt])
   @@index([expiresAt])
@@ -861,26 +861,26 @@ model HostedConnectedAppConnectIntent {
 }
 
 model HostedComputerRun {
-  id                         String                         @id
-  memberId                   String                         @map("member_id")
-  kernelProfileName          String                         @map("kernel_profile_name")
-  status                     HostedComputerRunStatus        @default(running)
-  kernelSessionId            String?                        @map("kernel_session_id")
-  kernelLiveViewUrlEncrypted String?                        @map("kernel_live_view_url_encrypted")
-  lastUrl                    String?                        @map("last_url")
-  lastTitle                  String?                        @map("last_title")
-  awaitingReason             HostedComputerAwaitingReason?  @map("awaiting_reason")
-  awaitingMessage            String?                        @map("awaiting_message")
-  suggestedReply             String?                        @map("suggested_reply")
-  pausedAt                   DateTime?                      @map("paused_at")
-  resumeAfterMailboxLaneSeq  BigInt?                        @map("resume_after_mailbox_lane_seq")
-  pendingHandoffId           String?                        @map("pending_handoff_id")
-  metadataJson               Json?                          @map("metadata_json")
-  expiresAt                  DateTime                       @map("expires_at")
-  createdAt                  DateTime                       @default(now()) @map("created_at")
-  updatedAt                  DateTime                       @updatedAt @map("updated_at")
-  completedAt                DateTime?                      @map("completed_at")
-  member                     HostedMember                   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                         String                        @id
+  memberId                   String                        @map("member_id")
+  kernelProfileName          String                        @map("kernel_profile_name")
+  status                     HostedComputerRunStatus       @default(running)
+  kernelSessionId            String?                       @map("kernel_session_id")
+  kernelLiveViewUrlEncrypted String?                       @map("kernel_live_view_url_encrypted")
+  lastUrl                    String?                       @map("last_url")
+  lastTitle                  String?                       @map("last_title")
+  awaitingReason             HostedComputerAwaitingReason? @map("awaiting_reason")
+  awaitingMessage            String?                       @map("awaiting_message")
+  suggestedReply             String?                       @map("suggested_reply")
+  pausedAt                   DateTime?                     @map("paused_at")
+  resumeAfterMailboxLaneSeq  BigInt?                       @map("resume_after_mailbox_lane_seq")
+  pendingHandoffId           String?                       @map("pending_handoff_id")
+  metadataJson               Json?                         @map("metadata_json")
+  expiresAt                  DateTime                      @map("expires_at")
+  createdAt                  DateTime                      @default(now()) @map("created_at")
+  updatedAt                  DateTime                      @updatedAt @map("updated_at")
+  completedAt                DateTime?                     @map("completed_at")
+  member                     HostedMember                  @relation(fields: [memberId], references: [id], onDelete: Cascade)
   handoffs                   HostedComputerHandoff[]
 
   @@index([memberId, status, updatedAt])
@@ -890,20 +890,20 @@ model HostedComputerRun {
 }
 
 model HostedComputerHandoff {
-  id             String                       @id
-  runId          String                       @map("run_id")
-  memberId       String                       @map("member_id")
-  tokenHash      String                       @unique @map("token_hash")
-  purpose        String
-  status         HostedComputerHandoffStatus  @default(open)
-  suggestedReply String?                      @map("suggested_reply")
-  returnContactKind String?                   @map("return_contact_kind")
-  createdAt      DateTime                     @default(now()) @map("created_at")
-  expiresAt      DateTime                     @map("expires_at")
-  completedAt    DateTime?                    @map("completed_at")
-  updatedAt      DateTime                     @updatedAt @map("updated_at")
-  member         HostedMember                 @relation(fields: [memberId], references: [id], onDelete: Cascade)
-  run            HostedComputerRun            @relation(fields: [runId], references: [id], onDelete: Cascade)
+  id                String                      @id
+  runId             String                      @map("run_id")
+  memberId          String                      @map("member_id")
+  tokenHash         String                      @unique @map("token_hash")
+  purpose           String
+  status            HostedComputerHandoffStatus @default(open)
+  suggestedReply    String?                     @map("suggested_reply")
+  returnContactKind String?                     @map("return_contact_kind")
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  expiresAt         DateTime                    @map("expires_at")
+  completedAt       DateTime?                   @map("completed_at")
+  updatedAt         DateTime                    @updatedAt @map("updated_at")
+  member            HostedMember                @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  run               HostedComputerRun           @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@index([memberId, status, expiresAt])
   @@index([runId, status])
@@ -912,27 +912,27 @@ model HostedComputerHandoff {
 }
 
 model HostedPhoneCall {
-  id             String                @id
-  memberId       String                @map("member_id")
-  requestKey     String                @map("request_key")
-  originSessionId String?              @map("origin_session_id")
-  provider       String                @default("retell")
-  providerCallId String?               @unique @map("provider_call_id")
-  status         HostedPhoneCallStatus @default(starting)
-  briefJson      Json?                 @map("brief_json")
-  briefEncrypted String?               @map("brief_encrypted")
-  resultJson     Json?                 @map("result_json")
-  resultEncrypted String?              @map("result_encrypted")
-  stopRequestedAt DateTime?            @map("stop_requested_at")
+  id                        String                                    @id
+  memberId                  String                                    @map("member_id")
+  requestKey                String                                    @map("request_key")
+  originSessionId           String?                                   @map("origin_session_id")
+  provider                  String                                    @default("retell")
+  providerCallId            String?                                   @unique @map("provider_call_id")
+  status                    HostedPhoneCallStatus                     @default(starting)
+  briefJson                 Json?                                     @map("brief_json")
+  briefEncrypted            String?                                   @map("brief_encrypted")
+  resultJson                Json?                                     @map("result_json")
+  resultEncrypted           String?                                   @map("result_encrypted")
+  stopRequestedAt           DateTime?                                 @map("stop_requested_at")
   resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
-  resultDeliveryStatus HostedPhoneCallResultDeliveryStatus? @map("result_delivery_status")
-  resultDeliveryGeneration Int?        @default(0) @map("result_delivery_generation")
-  resultDeliveryTerminalAt DateTime?   @map("result_delivery_terminal_at")
-  endedAt        DateTime?             @map("ended_at")
-  analyzedAt     DateTime?             @map("analyzed_at")
-  createdAt      DateTime              @default(now()) @map("created_at")
-  updatedAt      DateTime              @updatedAt @map("updated_at")
-  member         HostedMember          @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  resultDeliveryStatus      HostedPhoneCallResultDeliveryStatus?      @map("result_delivery_status")
+  resultDeliveryGeneration  Int?                                      @default(0) @map("result_delivery_generation")
+  resultDeliveryTerminalAt  DateTime?                                 @map("result_delivery_terminal_at")
+  endedAt                   DateTime?                                 @map("ended_at")
+  analyzedAt                DateTime?                                 @map("analyzed_at")
+  createdAt                 DateTime                                  @default(now()) @map("created_at")
+  updatedAt                 DateTime                                  @updatedAt @map("updated_at")
+  member                    HostedMember                              @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
@@ -942,21 +942,21 @@ model HostedPhoneCall {
 }
 
 model HostedPhysicalNote {
-  id                       String                   @id
-  memberId                 String                   @map("member_id")
-  requestKey               String                   @map("request_key")
-  requestFingerprint       String                   @map("request_fingerprint")
-  provider                 String                   @default("lob")
-  providerLetterId         String?                  @unique @map("provider_letter_id")
-  status                   HostedPhysicalNoteStatus @default(starting)
-  failureReason            HostedPhysicalNoteFailureReason? @map("failure_reason")
-  complimentaryOfferCode   String?                  @map("complimentary_offer_code")
-  providerCostUsdMicros    BigInt                   @map("provider_cost_usd_micros")
-  pricingVersion           String                   @map("pricing_version")
-  acceptedAt               DateTime?                @map("accepted_at")
-  createdAt                DateTime                 @default(now()) @map("created_at")
-  updatedAt                DateTime                 @updatedAt @map("updated_at")
-  member                   HostedMember             @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                     String                           @id
+  memberId               String                           @map("member_id")
+  requestKey             String                           @map("request_key")
+  requestFingerprint     String                           @map("request_fingerprint")
+  provider               String                           @default("lob")
+  providerLetterId       String?                          @unique @map("provider_letter_id")
+  status                 HostedPhysicalNoteStatus         @default(starting)
+  failureReason          HostedPhysicalNoteFailureReason? @map("failure_reason")
+  complimentaryOfferCode String?                          @map("complimentary_offer_code")
+  providerCostUsdMicros  BigInt                           @map("provider_cost_usd_micros")
+  pricingVersion         String                           @map("pricing_version")
+  acceptedAt             DateTime?                        @map("accepted_at")
+  createdAt              DateTime                         @default(now()) @map("created_at")
+  updatedAt              DateTime                         @updatedAt @map("updated_at")
+  member                 HostedMember                     @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([memberId, requestKey])
   @@unique([memberId, complimentaryOfferCode])
@@ -989,32 +989,32 @@ model HostedMemberIdentity {
 }
 
 model HostedMemberRouting {
-  memberId                           String       @unique @map("member_id")
+  memberId                                String       @unique @map("member_id")
   /// Sticky post-activation Linq home thread for the member's long-lived Murph number.
-  linqChatLookupKey                  String?      @unique @map("linq_chat_lookup_key")
-  linqChatIdEncrypted                String?      @map("linq_chat_id_encrypted")
+  linqChatLookupKey                       String?      @unique @map("linq_chat_lookup_key")
+  linqChatIdEncrypted                     String?      @map("linq_chat_id_encrypted")
   /// Blinded participant identity that owns the durable home thread.
-  linqParticipantContactKind        String?      @map("linq_participant_contact_kind")
-  linqParticipantContactLookupKey   String?      @map("linq_participant_contact_lookup_key")
-  linqRecipientPhoneLookupKey        String?      @map("linq_recipient_phone_lookup_key")
-  linqRecipientPhoneEncrypted        String?      @map("linq_recipient_phone_encrypted")
-  linqHomeLineAssignedAt             DateTime?    @map("linq_home_line_assigned_at")
+  linqParticipantContactKind              String?      @map("linq_participant_contact_kind")
+  linqParticipantContactLookupKey         String?      @map("linq_participant_contact_lookup_key")
+  linqRecipientPhoneLookupKey             String?      @map("linq_recipient_phone_lookup_key")
+  linqRecipientPhoneEncrypted             String?      @map("linq_recipient_phone_encrypted")
+  linqHomeLineAssignedAt                  DateTime?    @map("linq_home_line_assigned_at")
   /// Pre-activation Linq acquisition/referral thread before a home line is chosen.
-  pendingLinqChatLookupKey           String?      @unique @map("pending_linq_chat_lookup_key")
-  pendingLinqChatIdEncrypted         String?      @map("pending_linq_chat_id_encrypted")
-  pendingLinqRecipientPhoneLookupKey String?      @map("pending_linq_recipient_phone_lookup_key")
-  pendingLinqRecipientPhoneEncrypted String?      @map("pending_linq_recipient_phone_encrypted")
-  pendingLinqParticipantContactKind       String?   @map("pending_linq_participant_contact_kind")
-  pendingLinqParticipantContactLookupKey  String?   @unique @map("pending_linq_participant_contact_lookup_key")
-  pendingLinqParticipantContactEncrypted  String?   @map("pending_linq_participant_contact_encrypted")
-  pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")
-  replyAliasLookupKey                String?      @unique @map("reply_alias_lookup_key")
-  replyAliasGeneration               Int?         @map("reply_alias_generation")
-  telegramUserLookupKey              String?      @unique @map("telegram_user_lookup_key")
-  telegramUserIdEncrypted            String?      @map("telegram_user_id_encrypted")
-  createdAt                          DateTime     @default(now()) @map("created_at")
-  updatedAt                          DateTime     @updatedAt @map("updated_at")
-  member                             HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  pendingLinqChatLookupKey                String?      @unique @map("pending_linq_chat_lookup_key")
+  pendingLinqChatIdEncrypted              String?      @map("pending_linq_chat_id_encrypted")
+  pendingLinqRecipientPhoneLookupKey      String?      @map("pending_linq_recipient_phone_lookup_key")
+  pendingLinqRecipientPhoneEncrypted      String?      @map("pending_linq_recipient_phone_encrypted")
+  pendingLinqParticipantContactKind       String?      @map("pending_linq_participant_contact_kind")
+  pendingLinqParticipantContactLookupKey  String?      @unique @map("pending_linq_participant_contact_lookup_key")
+  pendingLinqParticipantContactEncrypted  String?      @map("pending_linq_participant_contact_encrypted")
+  pendingLinqParticipantContactObservedAt DateTime?    @map("pending_linq_participant_contact_observed_at")
+  replyAliasLookupKey                     String?      @unique @map("reply_alias_lookup_key")
+  replyAliasGeneration                    Int?         @map("reply_alias_generation")
+  telegramUserLookupKey                   String?      @unique @map("telegram_user_lookup_key")
+  telegramUserIdEncrypted                 String?      @map("telegram_user_id_encrypted")
+  createdAt                               DateTime     @default(now()) @map("created_at")
+  updatedAt                               DateTime     @updatedAt @map("updated_at")
+  member                                  HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([linqRecipientPhoneLookupKey])
   @@index([linqRecipientPhoneLookupKey, linqHomeLineAssignedAt])
@@ -1023,54 +1023,54 @@ model HostedMemberRouting {
 }
 
 model HostedMemberBillingRef {
-  memberId                      String       @unique @map("member_id")
-  stripeCustomerLookupKey       String?      @unique @map("stripe_customer_lookup_key")
-  stripeCustomerIdEncrypted     String?      @map("stripe_customer_id_encrypted")
-  stripeSubscriptionLookupKey   String?      @unique @map("stripe_subscription_lookup_key")
-  stripeSubscriptionIdEncrypted String?      @map("stripe_subscription_id_encrypted")
+  memberId                              String       @unique @map("member_id")
+  stripeCustomerLookupKey               String?      @unique @map("stripe_customer_lookup_key")
+  stripeCustomerIdEncrypted             String?      @map("stripe_customer_id_encrypted")
+  stripeSubscriptionLookupKey           String?      @unique @map("stripe_subscription_lookup_key")
+  stripeSubscriptionIdEncrypted         String?      @map("stripe_subscription_id_encrypted")
   stripeSubscriptionScheduleLookupKey   String?      @unique @map("stripe_subscription_schedule_lookup_key")
   stripeSubscriptionScheduleIdEncrypted String?      @map("stripe_subscription_schedule_id_encrypted")
-  stripeCheckoutSessionLookupKey    String?      @unique @map("stripe_checkout_session_lookup_key")
-  stripeCheckoutSessionIdEncrypted  String?      @map("stripe_checkout_session_id_encrypted")
-  checkoutAttemptId                 String?      @map("checkout_attempt_id")
-  checkoutIntentHash                String?      @map("checkout_intent_hash")
-  checkoutCreatedAt                 DateTime?    @map("checkout_created_at")
-  stripeEffectClaimId               String?      @map("stripe_effect_claim_id")
-  stripeEffectKind                  String?      @map("stripe_effect_kind")
-  stripeEffectTargetPlanCode        String?      @map("stripe_effect_target_plan_code")
-  stripeEffectClaimedAt             DateTime?    @map("stripe_effect_claimed_at")
-  stripeEffectExecutionId           String?      @map("stripe_effect_execution_id")
-  stripeEffectExecutionStartedAt    DateTime?    @map("stripe_effect_execution_started_at")
-  currentBillingPlanCode        String?      @map("current_billing_plan_code")
-  currentBillingPhase           String?      @map("current_billing_phase")
-  currentCheckoutOffer          String?      @map("current_checkout_offer")
-  scheduledBillingPlanCode      String?      @map("scheduled_billing_plan_code")
-  scheduledBillingEffectiveAt   DateTime?    @map("scheduled_billing_effective_at")
-  pulseTrialRedeemedAt          DateTime?    @map("pulse_trial_redeemed_at")
-  pulseTrialPolicyVersion       String?      @map("pulse_trial_policy_version")
-  pulseTrialStartSource         String?      @map("pulse_trial_start_source")
-  currentPeriodStart            DateTime?    @map("current_period_start")
-  currentPeriodEnd              DateTime?    @map("current_period_end")
-  currentTrialStartedAt         DateTime?    @map("current_trial_started_at")
-  currentTrialEndsAt            DateTime?    @map("current_trial_ends_at")
-  lastStripeEventCreatedAt      DateTime?    @map("last_stripe_event_created_at")
-  usagePlanTransitionAt         DateTime?    @map("usage_plan_transition_at")
-  usagePlanTransitionFromCode   String?      @map("usage_plan_transition_from_code")
-  usagePlanTransitionKind       String?      @map("usage_plan_transition_kind")
-  usagePlanTransitionToCode     String?      @map("usage_plan_transition_to_code")
-  createdAt                     DateTime     @default(now()) @map("created_at")
-  updatedAt                     DateTime     @updatedAt @map("updated_at")
-  member                        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  stripeCheckoutSessionLookupKey        String?      @unique @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted      String?      @map("stripe_checkout_session_id_encrypted")
+  checkoutAttemptId                     String?      @map("checkout_attempt_id")
+  checkoutIntentHash                    String?      @map("checkout_intent_hash")
+  checkoutCreatedAt                     DateTime?    @map("checkout_created_at")
+  stripeEffectClaimId                   String?      @map("stripe_effect_claim_id")
+  stripeEffectKind                      String?      @map("stripe_effect_kind")
+  stripeEffectTargetPlanCode            String?      @map("stripe_effect_target_plan_code")
+  stripeEffectClaimedAt                 DateTime?    @map("stripe_effect_claimed_at")
+  stripeEffectExecutionId               String?      @map("stripe_effect_execution_id")
+  stripeEffectExecutionStartedAt        DateTime?    @map("stripe_effect_execution_started_at")
+  currentBillingPlanCode                String?      @map("current_billing_plan_code")
+  currentBillingPhase                   String?      @map("current_billing_phase")
+  currentCheckoutOffer                  String?      @map("current_checkout_offer")
+  scheduledBillingPlanCode              String?      @map("scheduled_billing_plan_code")
+  scheduledBillingEffectiveAt           DateTime?    @map("scheduled_billing_effective_at")
+  pulseTrialRedeemedAt                  DateTime?    @map("pulse_trial_redeemed_at")
+  pulseTrialPolicyVersion               String?      @map("pulse_trial_policy_version")
+  pulseTrialStartSource                 String?      @map("pulse_trial_start_source")
+  currentPeriodStart                    DateTime?    @map("current_period_start")
+  currentPeriodEnd                      DateTime?    @map("current_period_end")
+  currentTrialStartedAt                 DateTime?    @map("current_trial_started_at")
+  currentTrialEndsAt                    DateTime?    @map("current_trial_ends_at")
+  lastStripeEventCreatedAt              DateTime?    @map("last_stripe_event_created_at")
+  usagePlanTransitionAt                 DateTime?    @map("usage_plan_transition_at")
+  usagePlanTransitionFromCode           String?      @map("usage_plan_transition_from_code")
+  usagePlanTransitionKind               String?      @map("usage_plan_transition_kind")
+  usagePlanTransitionToCode             String?      @map("usage_plan_transition_to_code")
+  createdAt                             DateTime     @default(now()) @map("created_at")
+  updatedAt                             DateTime     @updatedAt @map("updated_at")
+  member                                HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@map("hosted_member_billing_ref")
 }
 
 model HostedMemberSubscriptionCheckout {
-  stripeCheckoutSessionLookupKey String       @id @map("stripe_checkout_session_lookup_key")
-  stripeCheckoutSessionIdEncrypted String     @map("stripe_checkout_session_id_encrypted")
-  memberId                       String       @map("member_id")
-  createdAt                      DateTime     @default(now()) @map("created_at")
-  member                         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  stripeCheckoutSessionLookupKey   String       @id @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted String       @map("stripe_checkout_session_id_encrypted")
+  memberId                         String       @map("member_id")
+  createdAt                        DateTime     @default(now()) @map("created_at")
+  member                           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
   @@map("hosted_member_subscription_checkout")
@@ -1114,30 +1114,30 @@ model HostedMemberEmailAuthorization {
 }
 
 model HostedMailboxItem {
-  id                      String                @id
-  userId                  String                @map("user_id")
-  assistantInputLookupKey String?               @map("assistant_input_lookup_key")
-  sourceMessageLookupKey  String?               @map("source_message_lookup_key")
-  subscriptionActionClaim String?               @map("subscription_action_claim")
-  causalSeq               BigInt?               @map("causal_seq")
+  id                      String                     @id
+  userId                  String                     @map("user_id")
+  assistantInputLookupKey String?                    @map("assistant_input_lookup_key")
+  sourceMessageLookupKey  String?                    @map("source_message_lookup_key")
+  subscriptionActionClaim String?                    @map("subscription_action_claim")
+  causalSeq               BigInt?                    @map("causal_seq")
   lane                    String
-  laneSeq                 BigInt                @map("lane_seq")
-  dedupeKey               String                @map("dedupe_key")
+  laneSeq                 BigInt                     @map("lane_seq")
+  dedupeKey               String                     @map("dedupe_key")
   kind                    String
-  occurredAt              DateTime              @map("occurred_at")
-  payloadSchema           String                @map("payload_schema")
-  payloadInlineCiphertext String?               @map("payload_inline_ciphertext")
-  payloadRef              String?               @map("payload_ref")
-  payloadBytes            Int?                  @map("payload_bytes")
-  payloadHash             String?               @map("payload_hash")
-  consumedAt              DateTime?             @map("consumed_at")
-  aiUsageDeniedAt         DateTime?             @map("ai_usage_denied_at")
-  expiresAt               DateTime?             @map("expires_at")
-  contentRetiredAt        DateTime?             @map("content_retired_at")
-  retentionDisposition    String?               @map("retention_disposition")
-  createdAt               DateTime              @default(now()) @map("created_at")
-  updatedAt               DateTime              @updatedAt @map("updated_at")
-  member                  HostedMember          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  occurredAt              DateTime                   @map("occurred_at")
+  payloadSchema           String                     @map("payload_schema")
+  payloadInlineCiphertext String?                    @map("payload_inline_ciphertext")
+  payloadRef              String?                    @map("payload_ref")
+  payloadBytes            Int?                       @map("payload_bytes")
+  payloadHash             String?                    @map("payload_hash")
+  consumedAt              DateTime?                  @map("consumed_at")
+  aiUsageDeniedAt         DateTime?                  @map("ai_usage_denied_at")
+  expiresAt               DateTime?                  @map("expires_at")
+  contentRetiredAt        DateTime?                  @map("content_retired_at")
+  retentionDisposition    String?                    @map("retention_disposition")
+  createdAt               DateTime                   @default(now()) @map("created_at")
+  updatedAt               DateTime                   @updatedAt @map("updated_at")
+  member                  HostedMember               @relation(fields: [userId], references: [id], onDelete: Cascade)
   payload                 HostedMailboxPayload?
   latencyTrace            HostedIngressLatencyTrace?
 
@@ -1170,29 +1170,29 @@ model HostedMailboxPayload {
 }
 
 model HostedIngressLatencyTrace {
-  id                       String            @id
-  userId                   String            @map("user_id")
+  id                       String              @id
+  userId                   String              @map("user_id")
   source                   String
-  mailboxItemId            String            @unique @map("mailbox_item_id")
-  mailboxLane              String            @map("mailbox_lane")
-  mailboxLaneSeq           BigInt            @map("mailbox_lane_seq")
-  assistantInputId         String?           @map("assistant_input_id")
-  runtimeAttemptId         String?           @map("runtime_attempt_id")
-  replyRuntimeAttemptId    String?           @map("reply_runtime_attempt_id")
-  linqDeliveryId           String?           @map("linq_delivery_id")
-  acceptedAt               DateTime          @map("accepted_at")
-  temporalSignalAcceptedAt DateTime?         @map("temporal_signal_accepted_at")
-  runnerJobAcceptedAt      DateTime?         @map("runner_job_accepted_at")
-  runtimePhaseStartedAt    DateTime?         @map("runtime_phase_started_at")
-  workspaceRestoreDoneAt   DateTime?         @map("workspace_restore_done_at")
-  mailboxImportDoneAt      DateTime?         @map("mailbox_import_done_at")
-  assistantInputStagedAt   DateTime?         @map("assistant_input_staged_at")
-  providerStartAt          DateTime?         @map("provider_start_at")
-  providerRequestOrdinal   Int?              @map("provider_request_ordinal")
-  phaseBreakdownJson       Json?             @map("phase_breakdown_json")
-  createdAt                DateTime          @default(now()) @map("created_at")
-  updatedAt                DateTime          @updatedAt @map("updated_at")
-  mailboxItem              HostedMailboxItem @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
+  mailboxItemId            String              @unique @map("mailbox_item_id")
+  mailboxLane              String              @map("mailbox_lane")
+  mailboxLaneSeq           BigInt              @map("mailbox_lane_seq")
+  assistantInputId         String?             @map("assistant_input_id")
+  runtimeAttemptId         String?             @map("runtime_attempt_id")
+  replyRuntimeAttemptId    String?             @map("reply_runtime_attempt_id")
+  linqDeliveryId           String?             @map("linq_delivery_id")
+  acceptedAt               DateTime            @map("accepted_at")
+  temporalSignalAcceptedAt DateTime?           @map("temporal_signal_accepted_at")
+  runnerJobAcceptedAt      DateTime?           @map("runner_job_accepted_at")
+  runtimePhaseStartedAt    DateTime?           @map("runtime_phase_started_at")
+  workspaceRestoreDoneAt   DateTime?           @map("workspace_restore_done_at")
+  mailboxImportDoneAt      DateTime?           @map("mailbox_import_done_at")
+  assistantInputStagedAt   DateTime?           @map("assistant_input_staged_at")
+  providerStartAt          DateTime?           @map("provider_start_at")
+  providerRequestOrdinal   Int?                @map("provider_request_ordinal")
+  phaseBreakdownJson       Json?               @map("phase_breakdown_json")
+  createdAt                DateTime            @default(now()) @map("created_at")
+  updatedAt                DateTime            @updatedAt @map("updated_at")
+  mailboxItem              HostedMailboxItem   @relation(fields: [userId, mailboxItemId], references: [userId, id], onDelete: Cascade)
   linqDelivery             HostedLinqDelivery? @relation(fields: [linqDeliveryId], references: [id], onDelete: SetNull)
 
   @@unique([userId, mailboxItemId])
@@ -1260,20 +1260,20 @@ model HostedUserCryptoAudit {
 }
 
 model HostedWorkspace {
-  userId                 String       @id @map("user_id")
-  version                BigInt       @default(0)
-  snapshotRef            Json?        @map("snapshot_ref")
-  browserVaultReplicaRef Json?        @map("browser_vault_replica_ref")
-  nextWakeAt             DateTime?    @map("next_wake_at")
-  nextWakeReason         String?      @map("next_wake_reason")
-  inboxMediaRetentionWakeAt DateTime? @map("inbox_media_retention_wake_at")
-  inboxMediaRetentionSignalAttemptedAt DateTime? @map("inbox_media_retention_signal_attempted_at")
-  acceptedAttemptFailureRecheckClaimedAt DateTime? @map("accepted_attempt_failure_recheck_claimed_at")
-  redactedStatusJson     Json?        @map("redacted_status_json")
-  checkpointedAt         DateTime?    @map("checkpointed_at")
-  createdAt              DateTime     @default(now()) @map("created_at")
-  updatedAt              DateTime     @updatedAt @map("updated_at")
-  member                 HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                                 String       @id @map("user_id")
+  version                                BigInt       @default(0)
+  snapshotRef                            Json?        @map("snapshot_ref")
+  browserVaultReplicaRef                 Json?        @map("browser_vault_replica_ref")
+  nextWakeAt                             DateTime?    @map("next_wake_at")
+  nextWakeReason                         String?      @map("next_wake_reason")
+  inboxMediaRetentionWakeAt              DateTime?    @map("inbox_media_retention_wake_at")
+  inboxMediaRetentionSignalAttemptedAt   DateTime?    @map("inbox_media_retention_signal_attempted_at")
+  acceptedAttemptFailureRecheckClaimedAt DateTime?    @map("accepted_attempt_failure_recheck_claimed_at")
+  redactedStatusJson                     Json?        @map("redacted_status_json")
+  checkpointedAt                         DateTime?    @map("checkpointed_at")
+  createdAt                              DateTime     @default(now()) @map("created_at")
+  updatedAt                              DateTime     @updatedAt @map("updated_at")
+  member                                 HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("hosted_workspace")
 }
@@ -1300,14 +1300,14 @@ model HostedInvite {
 }
 
 model HostedAccountGroup {
-  id             String                         @id
-  displayName    String?                        @map("display_name")
-  ownerMemberId  String                         @unique @map("owner_member_id")
-  billingStatus  HostedBillingStatus            @default(not_started) @map("billing_status")
-  suspendedAt    DateTime?                      @map("suspended_at")
-  createdAt      DateTime                       @default(now()) @map("created_at")
-  updatedAt      DateTime                       @updatedAt @map("updated_at")
-  owner          HostedMember                   @relation("HostedAccountGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  id             String                           @id
+  displayName    String?                          @map("display_name")
+  ownerMemberId  String                           @unique @map("owner_member_id")
+  billingStatus  HostedBillingStatus              @default(not_started) @map("billing_status")
+  suspendedAt    DateTime?                        @map("suspended_at")
+  createdAt      DateTime                         @default(now()) @map("created_at")
+  updatedAt      DateTime                         @updatedAt @map("updated_at")
+  owner          HostedMember                     @relation("HostedAccountGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   memberships    HostedAccountGroupMembership[]
   invites        HostedAccountGroupInvite[]
   planCapacities HostedAccountGroupPlanCapacity[]
@@ -1318,23 +1318,23 @@ model HostedAccountGroup {
 }
 
 model HostedAccountGroupMembership {
-  id          String             @id
-  groupId     String             @map("group_id")
-  memberId    String             @map("member_id")
-  role        String
-  planCode    String             @default("pulse") @map("plan_code")
-  pendingPlanCode String?        @map("pending_plan_code")
-  status      String             @default("active")
-  usagePlanTransitionAt       DateTime? @map("usage_plan_transition_at")
-  usagePlanTransitionFromCode String?   @map("usage_plan_transition_from_code")
-  usagePlanTransitionKind     String?   @map("usage_plan_transition_kind")
-  usagePlanTransitionToCode   String?   @map("usage_plan_transition_to_code")
-  joinedAt    DateTime?          @map("joined_at")
-  removedAt   DateTime?          @map("removed_at")
-  createdAt   DateTime           @default(now()) @map("created_at")
-  updatedAt   DateTime           @updatedAt @map("updated_at")
-  group       HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  member      HostedMember       @relation("HostedAccountGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+  id                          String             @id
+  groupId                     String             @map("group_id")
+  memberId                    String             @map("member_id")
+  role                        String
+  planCode                    String             @default("pulse") @map("plan_code")
+  pendingPlanCode             String?            @map("pending_plan_code")
+  status                      String             @default("active")
+  usagePlanTransitionAt       DateTime?          @map("usage_plan_transition_at")
+  usagePlanTransitionFromCode String?            @map("usage_plan_transition_from_code")
+  usagePlanTransitionKind     String?            @map("usage_plan_transition_kind")
+  usagePlanTransitionToCode   String?            @map("usage_plan_transition_to_code")
+  joinedAt                    DateTime?          @map("joined_at")
+  removedAt                   DateTime?          @map("removed_at")
+  createdAt                   DateTime           @default(now()) @map("created_at")
+  updatedAt                   DateTime           @updatedAt @map("updated_at")
+  group                       HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member                      HostedMember       @relation("HostedAccountGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, memberId])
   @@index([memberId, status])
@@ -1343,28 +1343,28 @@ model HostedAccountGroupMembership {
 }
 
 model HostedAccountGroupInvite {
-  id                              String              @id
-  groupId                         String              @map("group_id")
-  inviteCode                      String              @unique @map("invite_code")
-  invitedByMemberId               String              @map("invited_by_member_id")
-  acceptedByMemberId              String?             @map("accepted_by_member_id")
-  targetLabel                     String?             @map("target_label")
-  targetPhoneLookupKey            String?             @map("target_phone_lookup_key")
-  targetPhoneNumberEncrypted      String?             @map("target_phone_number_encrypted")
-  targetTelegramUsernameLookupKey String?             @map("target_telegram_username_lookup_key")
-  targetTelegramUsernameEncrypted String?             @map("target_telegram_username_encrypted")
-  targetEmailLookupKey            String?             @map("target_email_lookup_key")
-  targetEmailEncrypted            String?             @map("target_email_encrypted")
-  channel                         String              @default("family")
-  planCode                        String              @default("pulse") @map("plan_code")
-  status                          String              @default("pending")
-  acceptedAt                      DateTime?           @map("accepted_at")
-  expiresAt                       DateTime            @map("expires_at")
-  createdAt                       DateTime            @default(now()) @map("created_at")
-  updatedAt                       DateTime            @updatedAt @map("updated_at")
-  group                           HostedAccountGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  invitedBy                       HostedMember        @relation("HostedAccountGroupInviteSender", fields: [invitedByMemberId], references: [id], onDelete: Cascade)
-  acceptedBy                      HostedMember?       @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
+  id                              String             @id
+  groupId                         String             @map("group_id")
+  inviteCode                      String             @unique @map("invite_code")
+  invitedByMemberId               String             @map("invited_by_member_id")
+  acceptedByMemberId              String?            @map("accepted_by_member_id")
+  targetLabel                     String?            @map("target_label")
+  targetPhoneLookupKey            String?            @map("target_phone_lookup_key")
+  targetPhoneNumberEncrypted      String?            @map("target_phone_number_encrypted")
+  targetTelegramUsernameLookupKey String?            @map("target_telegram_username_lookup_key")
+  targetTelegramUsernameEncrypted String?            @map("target_telegram_username_encrypted")
+  targetEmailLookupKey            String?            @map("target_email_lookup_key")
+  targetEmailEncrypted            String?            @map("target_email_encrypted")
+  channel                         String             @default("family")
+  planCode                        String             @default("pulse") @map("plan_code")
+  status                          String             @default("pending")
+  acceptedAt                      DateTime?          @map("accepted_at")
+  expiresAt                       DateTime           @map("expires_at")
+  createdAt                       DateTime           @default(now()) @map("created_at")
+  updatedAt                       DateTime           @updatedAt @map("updated_at")
+  group                           HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  invitedBy                       HostedMember       @relation("HostedAccountGroupInviteSender", fields: [invitedByMemberId], references: [id], onDelete: Cascade)
+  acceptedBy                      HostedMember?      @relation("HostedAccountGroupInviteAcceptor", fields: [acceptedByMemberId], references: [id], onDelete: SetNull)
 
   @@index([groupId, status, createdAt])
   @@index([groupId, status, expiresAt, id], map: "hagi_group_status_expires_id_idx")
@@ -1390,69 +1390,69 @@ model HostedAccountGroupPlanCapacity {
 }
 
 model HostedAccountGroupBillingRef {
-  groupId                       String              @unique @map("group_id")
-  stripeCustomerLookupKey       String?             @unique @map("stripe_customer_lookup_key")
-  stripeCustomerIdEncrypted     String?             @map("stripe_customer_id_encrypted")
-  stripeSubscriptionLookupKey   String?             @unique @map("stripe_subscription_lookup_key")
-  stripeSubscriptionIdEncrypted String?             @map("stripe_subscription_id_encrypted")
-  stripeSubscriptionItemLookupKey   String?         @unique @map("stripe_subscription_item_lookup_key")
-  stripeSubscriptionItemIdEncrypted String?         @map("stripe_subscription_item_id_encrypted")
-  stripeCheckoutSessionLookupKey    String?         @unique @map("stripe_checkout_session_lookup_key")
-  stripeCheckoutSessionIdEncrypted  String?         @map("stripe_checkout_session_id_encrypted")
-  checkoutAttemptId                 String?         @map("checkout_attempt_id")
-  checkoutSeatCount                 Int?            @map("checkout_seat_count")
-  checkoutCreatedAt                 DateTime?       @map("checkout_created_at")
-  billedSeatCount                   Int?            @map("billed_seat_count")
-  stripeEffectClaimId               String?         @map("stripe_effect_claim_id")
-  stripeEffectKind                  String?         @map("stripe_effect_kind")
-  stripeEffectSourcePulseSeats      Int?            @map("stripe_effect_source_pulse_seats")
-  stripeEffectSourceEdgeSeats       Int?            @map("stripe_effect_source_edge_seats")
-  stripeEffectSourceMaxSeats        Int?            @map("stripe_effect_source_max_seats")
-  stripeEffectTargetPulseSeats      Int?            @map("stripe_effect_target_pulse_seats")
-  stripeEffectTargetEdgeSeats       Int?            @map("stripe_effect_target_edge_seats")
-  stripeEffectTargetMaxSeats        Int?            @map("stripe_effect_target_max_seats")
-  stripeEffectBeneficiaryMemberId   String?         @map("stripe_effect_beneficiary_member_id")
-  stripeEffectFamilySubscriptionLookupKey String?   @map("stripe_effect_family_subscription_lookup_key")
-  stripeEffectDirectSubscriptionLookupKey String?   @map("stripe_effect_direct_subscription_lookup_key")
-  stripeEffectClaimedAt             DateTime?       @map("stripe_effect_claimed_at")
-  stripeEffectExecutionId           String?         @map("stripe_effect_execution_id")
-  stripeEffectExecutionStartedAt    DateTime?       @map("stripe_effect_execution_started_at")
-  currentBillingPlanCode        String?             @map("current_billing_plan_code")
-  currentBillingPhase           String?             @map("current_billing_phase")
-  currentPeriodStart            DateTime?           @map("current_period_start")
-  currentPeriodEnd              DateTime?           @map("current_period_end")
-  lastStripeEventCreatedAt      DateTime?           @map("last_stripe_event_created_at")
-  createdAt                     DateTime            @default(now()) @map("created_at")
-  updatedAt                     DateTime            @updatedAt @map("updated_at")
-  group                         HostedAccountGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  groupId                                 String             @unique @map("group_id")
+  stripeCustomerLookupKey                 String?            @unique @map("stripe_customer_lookup_key")
+  stripeCustomerIdEncrypted               String?            @map("stripe_customer_id_encrypted")
+  stripeSubscriptionLookupKey             String?            @unique @map("stripe_subscription_lookup_key")
+  stripeSubscriptionIdEncrypted           String?            @map("stripe_subscription_id_encrypted")
+  stripeSubscriptionItemLookupKey         String?            @unique @map("stripe_subscription_item_lookup_key")
+  stripeSubscriptionItemIdEncrypted       String?            @map("stripe_subscription_item_id_encrypted")
+  stripeCheckoutSessionLookupKey          String?            @unique @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted        String?            @map("stripe_checkout_session_id_encrypted")
+  checkoutAttemptId                       String?            @map("checkout_attempt_id")
+  checkoutSeatCount                       Int?               @map("checkout_seat_count")
+  checkoutCreatedAt                       DateTime?          @map("checkout_created_at")
+  billedSeatCount                         Int?               @map("billed_seat_count")
+  stripeEffectClaimId                     String?            @map("stripe_effect_claim_id")
+  stripeEffectKind                        String?            @map("stripe_effect_kind")
+  stripeEffectSourcePulseSeats            Int?               @map("stripe_effect_source_pulse_seats")
+  stripeEffectSourceEdgeSeats             Int?               @map("stripe_effect_source_edge_seats")
+  stripeEffectSourceMaxSeats              Int?               @map("stripe_effect_source_max_seats")
+  stripeEffectTargetPulseSeats            Int?               @map("stripe_effect_target_pulse_seats")
+  stripeEffectTargetEdgeSeats             Int?               @map("stripe_effect_target_edge_seats")
+  stripeEffectTargetMaxSeats              Int?               @map("stripe_effect_target_max_seats")
+  stripeEffectBeneficiaryMemberId         String?            @map("stripe_effect_beneficiary_member_id")
+  stripeEffectFamilySubscriptionLookupKey String?            @map("stripe_effect_family_subscription_lookup_key")
+  stripeEffectDirectSubscriptionLookupKey String?            @map("stripe_effect_direct_subscription_lookup_key")
+  stripeEffectClaimedAt                   DateTime?          @map("stripe_effect_claimed_at")
+  stripeEffectExecutionId                 String?            @map("stripe_effect_execution_id")
+  stripeEffectExecutionStartedAt          DateTime?          @map("stripe_effect_execution_started_at")
+  currentBillingPlanCode                  String?            @map("current_billing_plan_code")
+  currentBillingPhase                     String?            @map("current_billing_phase")
+  currentPeriodStart                      DateTime?          @map("current_period_start")
+  currentPeriodEnd                        DateTime?          @map("current_period_end")
+  lastStripeEventCreatedAt                DateTime?          @map("last_stripe_event_created_at")
+  createdAt                               DateTime           @default(now()) @map("created_at")
+  updatedAt                               DateTime           @updatedAt @map("updated_at")
+  group                                   HostedAccountGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@map("hosted_account_group_billing_ref")
 }
 
 model HostedGrowthDailySnapshot {
-  snapshotDate       DateTime @id @map("snapshot_date") @db.Date
-  capturedAt         DateTime @map("captured_at")
-  totalMembers       Int      @map("total_members")
-  payingIndividuals  Int      @map("paying_individuals")
-  payingFamilyGroups Int      @map("paying_family_groups")
-  payingFamilySeats  Int      @map("paying_family_seats")
-  payingCustomers    Int      @map("paying_customers")
-  coveredMembers     Int      @map("covered_members")
-  trialingMembers    Int      @map("trialing_members")
-  mrrUsdCents        Int      @map("mrr_usd_cents")
+  snapshotDate             DateTime @id @map("snapshot_date") @db.Date
+  capturedAt               DateTime @map("captured_at")
+  totalMembers             Int      @map("total_members")
+  payingIndividuals        Int      @map("paying_individuals")
+  payingFamilyGroups       Int      @map("paying_family_groups")
+  payingFamilySeats        Int      @map("paying_family_seats")
+  payingCustomers          Int      @map("paying_customers")
+  coveredMembers           Int      @map("covered_members")
+  trialingMembers          Int      @map("trialing_members")
+  mrrUsdCents              Int      @map("mrr_usd_cents")
   // Message volume for the full UTC day before snapshot_date, captured here
   // because the live source rows are short-lived (mailbox TTL, delivery churn).
-  inboundMessagesPriorDay  Int? @map("inbound_messages_prior_day")
-  outboundMessagesPriorDay Int? @map("outbound_messages_prior_day")
+  inboundMessagesPriorDay  Int?     @map("inbound_messages_prior_day")
+  outboundMessagesPriorDay Int?     @map("outbound_messages_prior_day")
   // Unique attributable senders for the completed UTC day before
   // snapshot_date and the seven completed UTC days ending at snapshot_date.
   // Null means the window is unknown or incomplete, never zero.
-  activeUsersPriorDay      Int? @map("active_users_prior_day")
-  activeUsersTrailing7Days Int? @map("active_users_trailing_7_days")
+  activeUsersPriorDay      Int?     @map("active_users_prior_day")
+  activeUsersTrailing7Days Int?     @map("active_users_trailing_7_days")
   // MRR split behind mrr_usd_cents: individual plans versus family seats.
   // Null means the row predates split capture, never zero.
-  individualMrrUsdCents Int? @map("individual_mrr_usd_cents")
-  familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
+  individualMrrUsdCents    Int?     @map("individual_mrr_usd_cents")
+  familyMrrUsdCents        Int?     @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
 }
@@ -1482,13 +1482,13 @@ model HostedGrowthAggregate {
 }
 
 model HostedLinqFirstContactAdmissionDecision {
-  eventId             String   @id @map("event_id")
-  decision            String
-  category            String?
-  confidence          Float
-  source              String
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  eventId    String   @id @map("event_id")
+  decision   String
+  category   String?
+  confidence Float
+  source     String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("hosted_linq_first_contact_admission_decision")
 }
@@ -1505,21 +1505,21 @@ model HostedLinqFirstContactAdmissionBudget {
 }
 
 model HostedStripeEvent {
-  eventId          String                  @id @map("event_id")
-  type             String
-  stripeCreatedAt  DateTime                @map("stripe_created_at")
-  receivedAt       DateTime                @map("received_at")
-  status           HostedStripeEventStatus @default(pending)
-  attemptCount     Int                     @default(0) @map("attempt_count")
-  nextAttemptAt    DateTime                @default(now()) @map("next_attempt_at")
-  claimExpiresAt   DateTime?               @map("claim_expires_at")
-  processedAt      DateTime?               @map("processed_at")
-  activationResultJson Json?                @map("activation_result_json")
+  eventId                             String                  @id @map("event_id")
+  type                                String
+  stripeCreatedAt                     DateTime                @map("stripe_created_at")
+  receivedAt                          DateTime                @map("received_at")
+  status                              HostedStripeEventStatus @default(pending)
+  attemptCount                        Int                     @default(0) @map("attempt_count")
+  nextAttemptAt                       DateTime                @default(now()) @map("next_attempt_at")
+  claimExpiresAt                      DateTime?               @map("claim_expires_at")
+  processedAt                         DateTime?               @map("processed_at")
+  activationResultJson                Json?                   @map("activation_result_json")
   subscriptionCancellationEmailSentAt DateTime?               @map("subscription_cancellation_email_sent_at")
-  lastErrorCode    String?                 @map("last_error_code")
-  lastErrorMessage String?                 @map("last_error_message")
-  createdAt        DateTime                @default(now()) @map("created_at")
-  updatedAt        DateTime                @updatedAt @map("updated_at")
+  lastErrorCode                       String?                 @map("last_error_code")
+  lastErrorMessage                    String?                 @map("last_error_message")
+  createdAt                           DateTime                @default(now()) @map("created_at")
+  updatedAt                           DateTime                @updatedAt @map("updated_at")
 
   @@index([status, stripeCreatedAt, createdAt])
   @@index([status, nextAttemptAt, stripeCreatedAt, createdAt])
@@ -1548,23 +1548,23 @@ model HostedAccountExitReason {
 /// FK-free retry ownership for external cleanup after canonical account rows
 /// are gone. The payload contains only KMS-encrypted provider/runtime ids.
 model HostedAccountDeletionCleanup {
-  id                    String    @id
-  payloadCiphertext     String    @map("payload_ciphertext")
-  kmsKeyName            String    @map("kms_key_name")
-  environment           String
-  privyUserLookupKey    String?   @map("privy_user_lookup_key")
-  cloudflareCompletedAt DateTime? @map("cloudflare_completed_at")
-  stripeCompletedAt     DateTime? @map("stripe_completed_at")
-  privyCompletedAt      DateTime? @map("privy_completed_at")
+  id                     String    @id
+  payloadCiphertext      String    @map("payload_ciphertext")
+  kmsKeyName             String    @map("kms_key_name")
+  environment            String
+  privyUserLookupKey     String?   @map("privy_user_lookup_key")
+  cloudflareCompletedAt  DateTime? @map("cloudflare_completed_at")
+  stripeCompletedAt      DateTime? @map("stripe_completed_at")
+  privyCompletedAt       DateTime? @map("privy_completed_at")
   runtimeLogsCompletedAt DateTime? @map("runtime_logs_completed_at")
-  attemptCount          Int       @default(0) @map("attempt_count")
-  nextAttemptAt         DateTime  @map("next_attempt_at")
-  lastAttemptedAt       DateTime? @map("last_attempted_at")
-  lastErrorCode         String?   @map("last_error_code")
-  leaseToken            String?   @map("lease_token")
-  leaseExpiresAt        DateTime? @map("lease_expires_at")
-  createdAt             DateTime  @default(now()) @map("created_at")
-  updatedAt             DateTime  @updatedAt @map("updated_at")
+  attemptCount           Int       @default(0) @map("attempt_count")
+  nextAttemptAt          DateTime  @map("next_attempt_at")
+  lastAttemptedAt        DateTime? @map("last_attempted_at")
+  lastErrorCode          String?   @map("last_error_code")
+  leaseToken             String?   @map("lease_token")
+  leaseExpiresAt         DateTime? @map("lease_expires_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
   @@index([nextAttemptAt, leaseExpiresAt])
   @@index([privyUserLookupKey, privyCompletedAt])
@@ -1581,47 +1581,47 @@ enum HostedAccountExitReasonCode {
 }
 
 model HostedUsageCreditPurchase {
-  id                                String                               @id
-  payerMemberId                     String?                              @map("payer_member_id")
-  beneficiaryMemberId               String                               @map("beneficiary_member_id")
-  offerCode                         String                               @map("offer_code")
-  cashCurrency                      String                               @map("cash_currency")
-  cashAmountMinor                   Int                                  @map("cash_amount_minor")
-  grantUsdMicros                    BigInt                               @map("grant_usd_micros")
-  remainingCreditUsdMicros          BigInt                               @default(0) @map("remaining_credit_usd_micros")
-  clientRequestKey                  String                               @map("client_request_key")
-  checkoutRequestPolicyVersion      String                               @map("checkout_request_policy_version")
-  status                            HostedUsageCreditPurchaseStatus       @default(created)
-  stripeLiveMode                    Boolean                              @map("stripe_live_mode")
-  stripePriceLookupKey              String                               @map("stripe_price_lookup_key")
-  stripePriceIdEncrypted            String?                              @map("stripe_price_id_encrypted")
-  stripeCustomerLookupKey           String                               @map("stripe_customer_lookup_key")
-  stripeCustomerIdEncrypted         String?                              @map("stripe_customer_id_encrypted")
-  stripeCheckoutSessionLookupKey    String?                              @unique(map: "hosted_usage_credit_purchase_session_lookup_key") @map("stripe_checkout_session_lookup_key")
-  stripeCheckoutSessionIdEncrypted  String?                              @map("stripe_checkout_session_id_encrypted")
-  stripeCheckoutUrlEncrypted        String?                              @map("stripe_checkout_url_encrypted")
-  stripePaymentIntentLookupKey      String?                              @unique(map: "hosted_usage_credit_purchase_payment_intent_lookup_key") @map("stripe_payment_intent_lookup_key")
-  stripePaymentIntentIdEncrypted    String?                              @map("stripe_payment_intent_id_encrypted")
-  stripeChargeLookupKey             String?                              @unique(map: "hosted_usage_credit_purchase_charge_lookup_key") @map("stripe_charge_lookup_key")
-  stripeChargeIdEncrypted           String?                              @map("stripe_charge_id_encrypted")
-  checkoutSuccessUrl                String                               @map("checkout_success_url")
-  checkoutCancelUrl                 String                               @map("checkout_cancel_url")
-  checkoutExpiresAt                 DateTime                             @map("checkout_expires_at")
-  paidAt                            DateTime?                            @map("paid_at")
-  terminalAt                        DateTime?                            @map("terminal_at")
-  grantSlotReleasedAt               DateTime?                            @map("grant_slot_released_at")
-  lastReconciledAt                  DateTime?                            @map("last_reconciled_at")
-  reconciliationVersion             BigInt                               @default(0) @map("reconciliation_version")
-  createdAt                         DateTime                             @default(now()) @map("created_at")
-  updatedAt                         DateTime                             @updatedAt @map("updated_at")
-  payer                             HostedMember?                        @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
-  beneficiary                       HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
-  entries                           HostedUsageCreditEntry[]
-  groupSponsorshipAuthorizationId   String?                              @map("group_sponsorship_authorization_id")
+  id                               String                               @id
+  payerMemberId                    String?                              @map("payer_member_id")
+  beneficiaryMemberId              String                               @map("beneficiary_member_id")
+  offerCode                        String                               @map("offer_code")
+  cashCurrency                     String                               @map("cash_currency")
+  cashAmountMinor                  Int                                  @map("cash_amount_minor")
+  grantUsdMicros                   BigInt                               @map("grant_usd_micros")
+  remainingCreditUsdMicros         BigInt                               @default(0) @map("remaining_credit_usd_micros")
+  clientRequestKey                 String                               @map("client_request_key")
+  checkoutRequestPolicyVersion     String                               @map("checkout_request_policy_version")
+  status                           HostedUsageCreditPurchaseStatus      @default(created)
+  stripeLiveMode                   Boolean                              @map("stripe_live_mode")
+  stripePriceLookupKey             String                               @map("stripe_price_lookup_key")
+  stripePriceIdEncrypted           String?                              @map("stripe_price_id_encrypted")
+  stripeCustomerLookupKey          String                               @map("stripe_customer_lookup_key")
+  stripeCustomerIdEncrypted        String?                              @map("stripe_customer_id_encrypted")
+  stripeCheckoutSessionLookupKey   String?                              @unique(map: "hosted_usage_credit_purchase_session_lookup_key") @map("stripe_checkout_session_lookup_key")
+  stripeCheckoutSessionIdEncrypted String?                              @map("stripe_checkout_session_id_encrypted")
+  stripeCheckoutUrlEncrypted       String?                              @map("stripe_checkout_url_encrypted")
+  stripePaymentIntentLookupKey     String?                              @unique(map: "hosted_usage_credit_purchase_payment_intent_lookup_key") @map("stripe_payment_intent_lookup_key")
+  stripePaymentIntentIdEncrypted   String?                              @map("stripe_payment_intent_id_encrypted")
+  stripeChargeLookupKey            String?                              @unique(map: "hosted_usage_credit_purchase_charge_lookup_key") @map("stripe_charge_lookup_key")
+  stripeChargeIdEncrypted          String?                              @map("stripe_charge_id_encrypted")
+  checkoutSuccessUrl               String                               @map("checkout_success_url")
+  checkoutCancelUrl                String                               @map("checkout_cancel_url")
+  checkoutExpiresAt                DateTime                             @map("checkout_expires_at")
+  paidAt                           DateTime?                            @map("paid_at")
+  terminalAt                       DateTime?                            @map("terminal_at")
+  grantSlotReleasedAt              DateTime?                            @map("grant_slot_released_at")
+  lastReconciledAt                 DateTime?                            @map("last_reconciled_at")
+  reconciliationVersion            BigInt                               @default(0) @map("reconciliation_version")
+  createdAt                        DateTime                             @default(now()) @map("created_at")
+  updatedAt                        DateTime                             @updatedAt @map("updated_at")
+  payer                            HostedMember?                        @relation("HostedUsageCreditPurchasePayer", fields: [payerMemberId], references: [id], onDelete: Restrict)
+  beneficiary                      HostedMember                         @relation("HostedUsageCreditPurchaseBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
+  entries                          HostedUsageCreditEntry[]
+  groupSponsorshipAuthorizationId  String?                              @map("group_sponsorship_authorization_id")
   groupSponsorshipPeriodStartedAt  DateTime?                            @map("group_sponsorship_period_started_at")
   groupSponsorshipChargeOrdinal    Int?                                 @map("group_sponsorship_charge_ordinal")
   groupSponsorshipAuthorization    HostedGroupSponsorshipAuthorization? @relation(fields: [groupSponsorshipAuthorizationId], references: [id], onDelete: Restrict)
-  groupSponsorshipMoment            HostedGroupSponsorshipMoment?
+  groupSponsorshipMoment           HostedGroupSponsorshipMoment?
 
   @@unique([payerMemberId, clientRequestKey], map: "hosted_usage_credit_purchase_payer_request_key")
   @@unique([groupSponsorshipAuthorizationId, groupSponsorshipPeriodStartedAt, groupSponsorshipChargeOrdinal], map: "hosted_usage_credit_purchase_sponsorship_period_ordinal_key")
@@ -1634,23 +1634,23 @@ model HostedUsageCreditPurchase {
 }
 
 model HostedGroupSponsorshipAuthorization {
-  id                       String   @id
-  payerMemberId            String?  @map("payer_member_id")
-  beneficiaryMemberId      String   @map("beneficiary_member_id")
-  status                   HostedGroupSponsorshipAuthorizationStatus @default(pending_activation)
-  monthlyCapMinor          Int      @map("monthly_cap_minor")
-  pendingMonthlyCapMinor   Int?     @map("pending_monthly_cap_minor")
-  periodStartedAt          DateTime @map("period_started_at")
-  periodEndsAt             DateTime @map("period_ends_at")
-  anchorDay                Int      @map("anchor_day")
-  anchorEndOfMonth         Boolean  @map("anchor_end_of_month")
-  recoveryStartedAt        DateTime? @map("recovery_started_at")
-  canceledAt               DateTime? @map("canceled_at")
-  createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt                DateTime @updatedAt @map("updated_at")
-  payer                    HostedMember? @relation("HostedGroupSponsorshipAuthorizationPayer", fields: [payerMemberId], references: [id], onDelete: SetNull)
-  beneficiary              HostedMember @relation("HostedGroupSponsorshipAuthorizationBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
-  purchases                HostedUsageCreditPurchase[]
+  id                     String                                    @id
+  payerMemberId          String?                                   @map("payer_member_id")
+  beneficiaryMemberId    String                                    @map("beneficiary_member_id")
+  status                 HostedGroupSponsorshipAuthorizationStatus @default(pending_activation)
+  monthlyCapMinor        Int                                       @map("monthly_cap_minor")
+  pendingMonthlyCapMinor Int?                                      @map("pending_monthly_cap_minor")
+  periodStartedAt        DateTime                                  @map("period_started_at")
+  periodEndsAt           DateTime                                  @map("period_ends_at")
+  anchorDay              Int                                       @map("anchor_day")
+  anchorEndOfMonth       Boolean                                   @map("anchor_end_of_month")
+  recoveryStartedAt      DateTime?                                 @map("recovery_started_at")
+  canceledAt             DateTime?                                 @map("canceled_at")
+  createdAt              DateTime                                  @default(now()) @map("created_at")
+  updatedAt              DateTime                                  @updatedAt @map("updated_at")
+  payer                  HostedMember?                             @relation("HostedGroupSponsorshipAuthorizationPayer", fields: [payerMemberId], references: [id], onDelete: SetNull)
+  beneficiary            HostedMember                              @relation("HostedGroupSponsorshipAuthorizationBeneficiary", fields: [beneficiaryMemberId], references: [id], onDelete: Restrict)
+  purchases              HostedUsageCreditPurchase[]
 
   @@index([payerMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_payer_status_idx")
   @@index([beneficiaryMemberId, status, updatedAt], map: "hosted_group_sponsorship_authorization_beneficiary_status_idx")
@@ -1658,22 +1658,22 @@ model HostedGroupSponsorshipAuthorization {
 }
 
 model HostedGroupSponsorshipMoment {
-  purchaseId                 String   @id @map("purchase_id")
-  beneficiaryMemberId        String   @map("beneficiary_member_id")
-  creatorMemberId            String   @map("creator_member_id")
-  configurationDigest        String   @map("configuration_digest")
-  creativeRequestEncrypted   String?  @map("creative_request_encrypted")
-  publicAliasEncrypted       String?  @map("public_alias_encrypted")
-  fundingPageAliasConsent    String?  @map("funding_page_alias_consent")
-  sponsorMessageEncrypted    String?  @map("sponsor_message_encrypted")
-  runningBitRequestEncrypted String?  @map("running_bit_request_encrypted")
-  activatedAt                DateTime? @map("activated_at")
-  fundingPageAliasPublishedAt DateTime? @map("funding_page_alias_published_at")
-  expiresAt                  DateTime? @map("expires_at")
-  createdAt                  DateTime  @default(now()) @map("created_at")
-  updatedAt                  DateTime  @updatedAt @map("updated_at")
-  purchase                   HostedUsageCreditPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
-  creator                    HostedMember @relation("HostedGroupSponsorshipMomentCreator", fields: [creatorMemberId], references: [id], onDelete: Cascade)
+  purchaseId                  String                    @id @map("purchase_id")
+  beneficiaryMemberId         String                    @map("beneficiary_member_id")
+  creatorMemberId             String                    @map("creator_member_id")
+  configurationDigest         String                    @map("configuration_digest")
+  creativeRequestEncrypted    String?                   @map("creative_request_encrypted")
+  publicAliasEncrypted        String?                   @map("public_alias_encrypted")
+  fundingPageAliasConsent     String?                   @map("funding_page_alias_consent")
+  sponsorMessageEncrypted     String?                   @map("sponsor_message_encrypted")
+  runningBitRequestEncrypted  String?                   @map("running_bit_request_encrypted")
+  activatedAt                 DateTime?                 @map("activated_at")
+  fundingPageAliasPublishedAt DateTime?                 @map("funding_page_alias_published_at")
+  expiresAt                   DateTime?                 @map("expires_at")
+  createdAt                   DateTime                  @default(now()) @map("created_at")
+  updatedAt                   DateTime                  @updatedAt @map("updated_at")
+  purchase                    HostedUsageCreditPurchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  creator                     HostedMember              @relation("HostedGroupSponsorshipMomentCreator", fields: [creatorMemberId], references: [id], onDelete: Cascade)
 
   @@index([beneficiaryMemberId, expiresAt], map: "hosted_group_sponsorship_moment_active_idx")
   @@index([creatorMemberId, createdAt], map: "hosted_group_sponsorship_moment_creator_idx")
@@ -1715,13 +1715,13 @@ model HostedUsageCreditEntry {
 /// entry. Beneficiary identity and FIFO sequence are immutable canonical-entry
 /// copies; the entry ledger remains the canonical accounting history.
 model HostedUsageCreditGrant {
-  entryId              String                 @id @map("entry_id")
-  beneficiaryMemberId  String                 @map("beneficiary_member_id")
-  beneficiarySequence  BigInt                 @map("beneficiary_sequence")
-  remainingUsdMicros   BigInt                 @map("remaining_usd_micros")
-  createdAt            DateTime               @default(now()) @map("created_at")
-  updatedAt            DateTime               @updatedAt @map("updated_at")
-  entry                HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
+  entryId             String                 @id @map("entry_id")
+  beneficiaryMemberId String                 @map("beneficiary_member_id")
+  beneficiarySequence BigInt                 @map("beneficiary_sequence")
+  remainingUsdMicros  BigInt                 @map("remaining_usd_micros")
+  createdAt           DateTime               @default(now()) @map("created_at")
+  updatedAt           DateTime               @updatedAt @map("updated_at")
+  entry               HostedUsageCreditEntry @relation(fields: [entryId], references: [id], onDelete: Restrict)
 
   @@map("hosted_usage_credit_grant")
 }
@@ -1760,8 +1760,8 @@ model HostedUsageReferral {
   targetContainer         HostedThreadContainer?        @relation(fields: [targetContainerMemberId], references: [memberId], onDelete: Restrict)
   creditEntries           HostedUsageCreditEntry[]
 
-  @@index([referrerMemberId, status, armedAt], map: "hosted_usage_referral_referrer_status_armed_idx")
   @@unique([targetContainerMemberId, policyCode], map: "hosted_usage_referral_target_policy_key")
+  @@index([referrerMemberId, status, armedAt], map: "hosted_usage_referral_referrer_status_armed_idx")
   @@index([beneficiaryMemberId, rewardedAt], map: "hosted_usage_referral_beneficiary_rewarded_idx")
   @@index([expiresAt, status], map: "hosted_usage_referral_expiry_status_idx")
   @@index([introducedMemberId], map: "hosted_usage_referral_introduced_member_idx")
@@ -1803,22 +1803,21 @@ model HostedConsentGrant {
   @@map("hosted_consent_grant")
 }
 
-
 model HostedGroup {
-  id                String              @id
-  ownerMemberId     String              @map("owner_member_id")
-  runtimeMemberId   String?             @unique @map("runtime_member_id")
-  kind              String              @default("custom")
-  displayName       String?             @map("display_name")
-  joinCode          String?             @unique @map("join_code")
-  joinCodeCreatedAt DateTime?           @map("join_code_created_at")
-  joinPolicyJson    Json?               @map("join_policy_json")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  owner             HostedMember        @relation("HostedGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
-  runtimeMember     HostedMember?       @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
-  members           HostedGroupMember[]
-  joinOffers        HostedGroupJoinOffer[]
+  id                    String                            @id
+  ownerMemberId         String                            @map("owner_member_id")
+  runtimeMemberId       String?                           @unique @map("runtime_member_id")
+  kind                  String                            @default("custom")
+  displayName           String?                           @map("display_name")
+  joinCode              String?                           @unique @map("join_code")
+  joinCodeCreatedAt     DateTime?                         @map("join_code_created_at")
+  joinPolicyJson        Json?                             @map("join_policy_json")
+  createdAt             DateTime                          @default(now()) @map("created_at")
+  updatedAt             DateTime                          @updatedAt @map("updated_at")
+  owner                 HostedMember                      @relation("HostedGroupOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  runtimeMember         HostedMember?                     @relation("HostedGroupRuntimeMember", fields: [runtimeMemberId], references: [id], onDelete: SetNull)
+  members               HostedGroupMember[]
+  joinOffers            HostedGroupJoinOffer[]
   disclosurePermissions HostedGroupDisclosurePermission[]
 
   @@index([ownerMemberId])
@@ -1827,15 +1826,15 @@ model HostedGroup {
 }
 
 model HostedGroupJoinOffer {
-  id                  String      @id
-  groupId             String      @map("group_id")
-  messageLookupKey    String      @unique @map("message_lookup_key")
-  messageIdSuffix     String?     @map("message_id_suffix")
-  projectionKindsJson Json        @map("projection_kinds_json")
-  postedAt            DateTime    @map("posted_at")
-  revokedAt           DateTime?   @map("revoked_at")
-  group               HostedGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  joinOutreaches       HostedGroupJoinOutreach[]
+  id                  String                    @id
+  groupId             String                    @map("group_id")
+  messageLookupKey    String                    @unique @map("message_lookup_key")
+  messageIdSuffix     String?                   @map("message_id_suffix")
+  projectionKindsJson Json                      @map("projection_kinds_json")
+  postedAt            DateTime                  @map("posted_at")
+  revokedAt           DateTime?                 @map("revoked_at")
+  group               HostedGroup               @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  joinOutreaches      HostedGroupJoinOutreach[]
 
   @@index([groupId, revokedAt, postedAt])
   @@map("hosted_group_join_offer")
@@ -1862,18 +1861,18 @@ model HostedGroupJoinOutreach {
 }
 
 model HostedGroupMember {
-  id        String       @id
-  groupId   String       @map("group_id")
-  memberId  String       @map("member_id")
-  role      String       @default("member")
-  joinedAt  DateTime?    @map("joined_at")
-  joinConfirmationEligibleAt DateTime? @map("join_confirmation_eligible_at")
-  joinConfirmationOrigin String?       @map("join_confirmation_origin")
-  createdAt DateTime     @default(now()) @map("created_at")
-  updatedAt DateTime     @updatedAt @map("updated_at")
-  group     HostedGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  member    HostedMember @relation("HostedGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
-  disclosureGrants HostedGroupDisclosureGrant[]
+  id                         String                       @id
+  groupId                    String                       @map("group_id")
+  memberId                   String                       @map("member_id")
+  role                       String                       @default("member")
+  joinedAt                   DateTime?                    @map("joined_at")
+  joinConfirmationEligibleAt DateTime?                    @map("join_confirmation_eligible_at")
+  joinConfirmationOrigin     String?                      @map("join_confirmation_origin")
+  createdAt                  DateTime                     @default(now()) @map("created_at")
+  updatedAt                  DateTime                     @updatedAt @map("updated_at")
+  group                      HostedGroup                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  member                     HostedMember                 @relation("HostedGroupMember", fields: [memberId], references: [id], onDelete: Cascade)
+  disclosureGrants           HostedGroupDisclosureGrant[]
 
   @@unique([groupId, memberId])
   @@index([memberId])
@@ -1883,13 +1882,13 @@ model HostedGroupMember {
 }
 
 model HostedGroupDisclosurePermission {
-  id                      String                           @id
-  groupId                 String                           @map("group_id")
-  permissionTextEncrypted String                           @map("permission_text_encrypted")
-  permissionDigest        String                           @map("permission_digest")
-  messageLookupKey        String                           @unique @map("message_lookup_key")
-  postedAt                DateTime                         @map("posted_at")
-  group                   HostedGroup                      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  id                      String                       @id
+  groupId                 String                       @map("group_id")
+  permissionTextEncrypted String                       @map("permission_text_encrypted")
+  permissionDigest        String                       @map("permission_digest")
+  messageLookupKey        String                       @unique @map("message_lookup_key")
+  postedAt                DateTime                     @map("posted_at")
+  group                   HostedGroup                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
   grants                  HostedGroupDisclosureGrant[]
 
   @@index([groupId])
@@ -1950,12 +1949,12 @@ model HostedVaultShare {
 }
 
 model HostedThreadContainer {
-  memberId                   String              @id @map("member_id")
-  ownerMemberId              String              @map("owner_member_id")
-  monthlyUsageLimitUsdMicros BigInt              @default(7500000) @map("monthly_usage_limit_usd_micros")
-  createdAt                  DateTime            @default(now()) @map("created_at")
-  member                     HostedMember        @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
-  owner                      HostedMember        @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
+  memberId                   String                             @id @map("member_id")
+  ownerMemberId              String                             @map("owner_member_id")
+  monthlyUsageLimitUsdMicros BigInt                             @default(7500000) @map("monthly_usage_limit_usd_micros")
+  createdAt                  DateTime                           @default(now()) @map("created_at")
+  member                     HostedMember                       @relation("HostedThreadContainerMember", fields: [memberId], references: [id], onDelete: Cascade)
+  owner                      HostedMember                       @relation("HostedThreadContainerOwner", fields: [ownerMemberId], references: [id], onDelete: Restrict)
   participants               HostedThreadContainerParticipant[]
   routes                     HostedThreadRoute[]
   usageReferralTargets       HostedUsageReferral[]
@@ -1999,19 +1998,19 @@ model HostedThreadContainerParticipant {
 }
 
 model HostedThreadRoute {
-  channel                 String
+  channel                              String
   /// Blinded canonical delivery-account projection. Null is limited to the
   /// additive rollout window and legacy rows awaiting the one-shot backfill.
-  accountLookupKey        String?               @map("account_lookup_key")
-  threadLookupKey         String                @map("thread_lookup_key")
-  threadIdentityLookupKey String                @map("thread_identity_lookup_key")
-  containerMemberId       String                @map("container_member_id")
-  deliveryRouteEncrypted   String?               @map("delivery_route_encrypted")
-  pendingParticipantAddition Boolean? @default(false) @map("pending_participant_addition")
-  pendingGroupReactionContextEncrypted String? @map("pending_group_reaction_context_encrypted")
-  createdAt               DateTime              @default(now()) @map("created_at")
-  updatedAt               DateTime              @default(now()) @updatedAt @map("updated_at")
-  container               HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
+  accountLookupKey                     String?               @map("account_lookup_key")
+  threadLookupKey                      String                @map("thread_lookup_key")
+  threadIdentityLookupKey              String                @map("thread_identity_lookup_key")
+  containerMemberId                    String                @map("container_member_id")
+  deliveryRouteEncrypted               String?               @map("delivery_route_encrypted")
+  pendingParticipantAddition           Boolean?              @default(false) @map("pending_participant_addition")
+  pendingGroupReactionContextEncrypted String?               @map("pending_group_reaction_context_encrypted")
+  createdAt                            DateTime              @default(now()) @map("created_at")
+  updatedAt                            DateTime              @default(now()) @updatedAt @map("updated_at")
+  container                            HostedThreadContainer @relation(fields: [containerMemberId], references: [memberId], onDelete: Cascade)
 
   @@id([channel, threadIdentityLookupKey])
   @@index([channel, accountLookupKey])
@@ -2021,63 +2020,63 @@ model HostedThreadRoute {
 }
 
 model HostedLinqLine {
-  phoneNumberLookupKey       String    @id @map("phone_number_lookup_key")
-  phoneNumberEncrypted       String?   @map("phone_number_encrypted")
-  phoneNumberHint            String    @map("phone_number_hint")
-  source                     String    @default("unknown")
-  configuredAt               DateTime? @map("configured_at")
-  providerSeenAt             DateTime? @map("provider_seen_at")
-  providerPhoneNumberId      String?   @unique @map("provider_phone_number_id")
+  phoneNumberLookupKey         String                    @id @map("phone_number_lookup_key")
+  phoneNumberEncrypted         String?                   @map("phone_number_encrypted")
+  phoneNumberHint              String                    @map("phone_number_hint")
+  source                       String                    @default("unknown")
+  configuredAt                 DateTime?                 @map("configured_at")
+  providerSeenAt               DateTime?                 @map("provider_seen_at")
+  providerPhoneNumberId        String?                   @unique @map("provider_phone_number_id")
   /// Written only when a validated authoritative provider phone-number
   /// snapshot confirms this row's phone-to-provider-id pairing. Distinct from
   /// providerSeenAt/providerLastSeenAt, which chat-health and status
   /// projection also advance, so it is the only trustworthy freshness signal
   /// for ownership-gated consumers.
-  providerInventoryConfirmedAt DateTime? @map("provider_inventory_confirmed_at")
-  providerFirstSeenAt        DateTime? @map("provider_first_seen_at")
-  providerLastSeenAt         DateTime? @map("provider_last_seen_at")
-  healthStatus               String    @default("unknown") @map("health_status")
-  egressPolicy               String    @default("enabled") @map("egress_policy")
-  providerStatus             String?   @map("provider_status")
-  providerReason             String?   @map("provider_reason")
-  providerServiceStatus      String?   @map("provider_service_status")
-  providerServiceUpdatedAt   DateTime? @map("provider_service_updated_at")
-  lastServiceStatusEventId   String?   @map("last_service_status_event_id")
-  providerReputationStatus   String?   @map("provider_reputation_status")
-  providerReputationUpdatedAt DateTime? @map("provider_reputation_updated_at")
-  lastReputationStatusEventId String?   @map("last_reputation_status_event_id")
-  providerUpdatedAt          DateTime? @map("provider_updated_at")
-  lastStatusEventId          String?   @map("last_status_event_id")
-  lastOutboundAt             DateTime? @map("last_outbound_at")
-  lastDeliveredAt            DateTime? @map("last_delivered_at")
-  lastFailedAt               DateTime? @map("last_failed_at")
-  lastReceiptAt              DateTime? @map("last_receipt_at")
-  lastReceiptEventId         String?   @map("last_receipt_event_id")
-  lastFailureCode            String?   @map("last_failure_code")
-  lastFailureReason          String?   @map("last_failure_reason")
-  lastInboundAt              DateTime? @map("last_inbound_at")
-  consecutiveFailures        Int       @default(0) @map("consecutive_failures")
-  totalOutboundCount         Int       @default(0) @map("total_outbound_count")
-  totalDeliveredCount        Int       @default(0) @map("total_delivered_count")
-  totalFailedCount           Int       @default(0) @map("total_failed_count")
-  totalInboundCount          Int       @default(0) @map("total_inbound_count")
+  providerInventoryConfirmedAt DateTime?                 @map("provider_inventory_confirmed_at")
+  providerFirstSeenAt          DateTime?                 @map("provider_first_seen_at")
+  providerLastSeenAt           DateTime?                 @map("provider_last_seen_at")
+  healthStatus                 String                    @default("unknown") @map("health_status")
+  egressPolicy                 String                    @default("enabled") @map("egress_policy")
+  providerStatus               String?                   @map("provider_status")
+  providerReason               String?                   @map("provider_reason")
+  providerServiceStatus        String?                   @map("provider_service_status")
+  providerServiceUpdatedAt     DateTime?                 @map("provider_service_updated_at")
+  lastServiceStatusEventId     String?                   @map("last_service_status_event_id")
+  providerReputationStatus     String?                   @map("provider_reputation_status")
+  providerReputationUpdatedAt  DateTime?                 @map("provider_reputation_updated_at")
+  lastReputationStatusEventId  String?                   @map("last_reputation_status_event_id")
+  providerUpdatedAt            DateTime?                 @map("provider_updated_at")
+  lastStatusEventId            String?                   @map("last_status_event_id")
+  lastOutboundAt               DateTime?                 @map("last_outbound_at")
+  lastDeliveredAt              DateTime?                 @map("last_delivered_at")
+  lastFailedAt                 DateTime?                 @map("last_failed_at")
+  lastReceiptAt                DateTime?                 @map("last_receipt_at")
+  lastReceiptEventId           String?                   @map("last_receipt_event_id")
+  lastFailureCode              String?                   @map("last_failure_code")
+  lastFailureReason            String?                   @map("last_failure_reason")
+  lastInboundAt                DateTime?                 @map("last_inbound_at")
+  consecutiveFailures          Int                       @default(0) @map("consecutive_failures")
+  totalOutboundCount           Int                       @default(0) @map("total_outbound_count")
+  totalDeliveredCount          Int                       @default(0) @map("total_delivered_count")
+  totalFailedCount             Int                       @default(0) @map("total_failed_count")
+  totalInboundCount            Int                       @default(0) @map("total_inbound_count")
   /// Deprecated rollout compatibility for builds predating weighted planning.
   /// Current assignment does not read this column.
-  activeMemberLimit          Int?      @map("active_member_limit")
-  maxNewConversationsPerDay  Int?      @map("max_new_conversations_per_day")
-  proactiveConversationDayUtc DateTime? @db.Date @map("proactive_conversation_day_utc")
-  proactiveConversationCount  Int?      @map("proactive_conversation_count")
-  maxOutboundPerDay          Int?      @map("max_outbound_per_day")
-  warmupStartedAt            DateTime? @map("warmup_started_at")
-  warmupEndsAt               DateTime? @map("warmup_ends_at")
-  assignmentWeight           Int       @default(100) @map("assignment_weight")
-  notes                      String?
-  createdAt                  DateTime  @default(now()) @map("created_at")
-  updatedAt                  DateTime  @updatedAt @map("updated_at")
-  providerEvents             HostedLinqProviderEvent[]
-  deliveries                 HostedLinqDelivery[]
-  alerts                     HostedLinqAlert[]
-  chatHealth                 HostedLinqChatHealth[]
+  activeMemberLimit            Int?                      @map("active_member_limit")
+  maxNewConversationsPerDay    Int?                      @map("max_new_conversations_per_day")
+  proactiveConversationDayUtc  DateTime?                 @map("proactive_conversation_day_utc") @db.Date
+  proactiveConversationCount   Int?                      @map("proactive_conversation_count")
+  maxOutboundPerDay            Int?                      @map("max_outbound_per_day")
+  warmupStartedAt              DateTime?                 @map("warmup_started_at")
+  warmupEndsAt                 DateTime?                 @map("warmup_ends_at")
+  assignmentWeight             Int                       @default(100) @map("assignment_weight")
+  notes                        String?
+  createdAt                    DateTime                  @default(now()) @map("created_at")
+  updatedAt                    DateTime                  @updatedAt @map("updated_at")
+  providerEvents               HostedLinqProviderEvent[]
+  deliveries                   HostedLinqDelivery[]
+  alerts                       HostedLinqAlert[]
+  chatHealth                   HostedLinqChatHealth[]
 
   @@index([healthStatus, egressPolicy])
   @@index([configuredAt, egressPolicy, healthStatus])
@@ -2091,15 +2090,15 @@ model HostedLinqLine {
 }
 
 model HostedLinqChatHealth {
-  linqChatLookupKey     String   @id @map("linq_chat_lookup_key")
-  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
-  providerStatus       String   @map("provider_status")
-  providerUpdatedAt    DateTime @map("provider_updated_at")
-  providerObservedAt   DateTime @map("provider_observed_at")
-  isGroup              Boolean? @map("is_group")
+  linqChatLookupKey    String          @id @map("linq_chat_lookup_key")
+  phoneNumberLookupKey String?         @map("phone_number_lookup_key")
+  providerStatus       String          @map("provider_status")
+  providerUpdatedAt    DateTime        @map("provider_updated_at")
+  providerObservedAt   DateTime        @map("provider_observed_at")
+  isGroup              Boolean?        @map("is_group")
   service              String?
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
   line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
 
   @@index([phoneNumberLookupKey, providerStatus], map: "hosted_linq_chat_health_phone_status_idx")
@@ -2108,39 +2107,39 @@ model HostedLinqChatHealth {
 }
 
 model HostedLinqProviderEvent {
-  eventId              String   @id @map("event_id")
-  eventType            String   @map("event_type")
-  apiVersion           String?  @map("api_version")
-  webhookVersion       String?  @map("webhook_version")
-  traceIdSuffix        String?  @map("trace_id_suffix")
-  providerCreatedAt    DateTime @map("provider_created_at")
-  receivedAt           DateTime @map("received_at")
-  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
-  phoneNumberHint      String?  @map("phone_number_hint")
-  phoneNumberRole      String?  @map("phone_number_role")
-  linqChatLookupKey    String?  @map("linq_chat_lookup_key")
-  messageLookupKey     String?  @map("message_lookup_key")
-  messageIdSuffix      String?  @map("message_id_suffix")
-  direction            String?
-  service              String?
-  deliveryStatus       String?  @map("delivery_status")
-  failureCode          String?  @map("failure_code")
-  failureReason        String?  @map("failure_reason")
-  providerStatus       String?  @map("provider_status")
-  providerReason       String?  @map("provider_reason")
-  providerServiceStatus String? @map("provider_service_status")
-  providerReputationStatus String? @map("provider_reputation_status")
-  chatHealthStatus     String?  @map("chat_health_status")
-  chatHealthUpdatedAt  DateTime? @map("chat_health_updated_at")
-  groupJoinOfferHandledAt DateTime? @map("group_join_offer_handled_at")
-  extractionVersion    Int      @default(1) @map("extraction_version")
-  extractionJson       Json?    @map("extraction_json")
-  payloadShapeJson     Json?    @map("payload_shape_json")
-  payloadSanitizedJson Json?    @map("payload_sanitized_json")
-  payloadHash          String?  @map("payload_hash")
-  createdAt            DateTime @default(now()) @map("created_at")
-  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
-  alerts               HostedLinqAlert[]
+  eventId                  String            @id @map("event_id")
+  eventType                String            @map("event_type")
+  apiVersion               String?           @map("api_version")
+  webhookVersion           String?           @map("webhook_version")
+  traceIdSuffix            String?           @map("trace_id_suffix")
+  providerCreatedAt        DateTime          @map("provider_created_at")
+  receivedAt               DateTime          @map("received_at")
+  phoneNumberLookupKey     String?           @map("phone_number_lookup_key")
+  phoneNumberHint          String?           @map("phone_number_hint")
+  phoneNumberRole          String?           @map("phone_number_role")
+  linqChatLookupKey        String?           @map("linq_chat_lookup_key")
+  messageLookupKey         String?           @map("message_lookup_key")
+  messageIdSuffix          String?           @map("message_id_suffix")
+  direction                String?
+  service                  String?
+  deliveryStatus           String?           @map("delivery_status")
+  failureCode              String?           @map("failure_code")
+  failureReason            String?           @map("failure_reason")
+  providerStatus           String?           @map("provider_status")
+  providerReason           String?           @map("provider_reason")
+  providerServiceStatus    String?           @map("provider_service_status")
+  providerReputationStatus String?           @map("provider_reputation_status")
+  chatHealthStatus         String?           @map("chat_health_status")
+  chatHealthUpdatedAt      DateTime?         @map("chat_health_updated_at")
+  groupJoinOfferHandledAt  DateTime?         @map("group_join_offer_handled_at")
+  extractionVersion        Int               @default(1) @map("extraction_version")
+  extractionJson           Json?             @map("extraction_json")
+  payloadShapeJson         Json?             @map("payload_shape_json")
+  payloadSanitizedJson     Json?             @map("payload_sanitized_json")
+  payloadHash              String?           @map("payload_hash")
+  createdAt                DateTime          @default(now()) @map("created_at")
+  line                     HostedLinqLine?   @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  alerts                   HostedLinqAlert[]
 
   @@index([eventType, providerCreatedAt])
   @@index([phoneNumberLookupKey, providerCreatedAt])
@@ -2153,37 +2152,37 @@ model HostedLinqProviderEvent {
 }
 
 model HostedLinqDelivery {
-  id                       String   @id
-  idempotencyKey           String?  @unique @map("idempotency_key")
+  id                       String                      @id
+  idempotencyKey           String?                     @unique @map("idempotency_key")
   source                   String
-  sourceRef                String?  @map("source_ref")
+  sourceRef                String?                     @map("source_ref")
   template                 String?
-  groupJoinOutreachId      String?  @map("group_join_outreach_id")
-  groupJoinReplyOccurredAt DateTime? @map("group_join_reply_occurred_at")
-  phoneNumberLookupKey     String?  @map("phone_number_lookup_key")
-  phoneNumberHint          String?  @map("phone_number_hint")
-  targetKind               String?  @map("target_kind")
-  threadIsDirect           Boolean? @map("thread_is_direct")
-  linqChatLookupKey        String?  @map("linq_chat_lookup_key")
-  messageLookupKey         String?  @unique @map("message_lookup_key")
-  messageIdSuffix          String?  @map("message_id_suffix")
+  groupJoinOutreachId      String?                     @map("group_join_outreach_id")
+  groupJoinReplyOccurredAt DateTime?                   @map("group_join_reply_occurred_at")
+  phoneNumberLookupKey     String?                     @map("phone_number_lookup_key")
+  phoneNumberHint          String?                     @map("phone_number_hint")
+  targetKind               String?                     @map("target_kind")
+  threadIsDirect           Boolean?                    @map("thread_is_direct")
+  linqChatLookupKey        String?                     @map("linq_chat_lookup_key")
+  messageLookupKey         String?                     @unique @map("message_lookup_key")
+  messageIdSuffix          String?                     @map("message_id_suffix")
   service                  String?
-  status                   String   @default("attempted")
-  attemptedAt              DateTime @map("attempted_at")
-  acceptedAt               DateTime? @map("accepted_at")
-  deliveredAt              DateTime? @map("delivered_at")
-  failedAt                 DateTime? @map("failed_at")
-  retryAfterAt             DateTime? @map("retry_after_at")
-  skippedAt                DateTime? @map("skipped_at")
-  lastReceiptAt            DateTime? @map("last_receipt_at")
-  lastProviderEventId      String?  @map("last_provider_event_id")
-  failureCode              String?  @map("failure_code")
-  failureReason            String?  @map("failure_reason")
-  skipReason               String?  @map("skip_reason")
-  createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt                DateTime @updatedAt @map("updated_at")
-  groupJoinOutreach        HostedGroupJoinOutreach? @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
-  line                     HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  status                   String                      @default("attempted")
+  attemptedAt              DateTime                    @map("attempted_at")
+  acceptedAt               DateTime?                   @map("accepted_at")
+  deliveredAt              DateTime?                   @map("delivered_at")
+  failedAt                 DateTime?                   @map("failed_at")
+  retryAfterAt             DateTime?                   @map("retry_after_at")
+  skippedAt                DateTime?                   @map("skipped_at")
+  lastReceiptAt            DateTime?                   @map("last_receipt_at")
+  lastProviderEventId      String?                     @map("last_provider_event_id")
+  failureCode              String?                     @map("failure_code")
+  failureReason            String?                     @map("failure_reason")
+  skipReason               String?                     @map("skip_reason")
+  createdAt                DateTime                    @default(now()) @map("created_at")
+  updatedAt                DateTime                    @updatedAt @map("updated_at")
+  groupJoinOutreach        HostedGroupJoinOutreach?    @relation(fields: [groupJoinOutreachId], references: [id], onDelete: Cascade)
+  line                     HostedLinqLine?             @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
   alerts                   HostedLinqAlert[]
   ingressLatencyTraces     HostedIngressLatencyTrace[]
   messages                 HostedLinqDeliveryMessage[]
@@ -2198,22 +2197,22 @@ model HostedLinqDelivery {
 }
 
 model HostedLinqDeliveryMessage {
-  id                  String   @id
-  deliveryId          String   @map("delivery_id")
+  id                  String             @id
+  deliveryId          String             @map("delivery_id")
   ordinal             Int
-  messageLookupKey    String   @unique @map("message_lookup_key")
-  messageIdSuffix     String?  @map("message_id_suffix")
-  status              String   @default("accepted")
-  acceptedAt          DateTime @map("accepted_at")
-  deliveredAt         DateTime? @map("delivered_at")
-  failedAt            DateTime? @map("failed_at")
-  lastReceiptAt       DateTime? @map("last_receipt_at")
-  lastProviderEventId String?  @map("last_provider_event_id")
-  failureCode         String?  @map("failure_code")
-  failureReason       String?  @map("failure_reason")
+  messageLookupKey    String             @unique @map("message_lookup_key")
+  messageIdSuffix     String?            @map("message_id_suffix")
+  status              String             @default("accepted")
+  acceptedAt          DateTime           @map("accepted_at")
+  deliveredAt         DateTime?          @map("delivered_at")
+  failedAt            DateTime?          @map("failed_at")
+  lastReceiptAt       DateTime?          @map("last_receipt_at")
+  lastProviderEventId String?            @map("last_provider_event_id")
+  failureCode         String?            @map("failure_code")
+  failureReason       String?            @map("failure_reason")
   service             String?
-  createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
   delivery            HostedLinqDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
 
   @@unique([deliveryId, ordinal])
@@ -2223,27 +2222,27 @@ model HostedLinqDeliveryMessage {
 }
 
 model HostedLinqAlert {
-  id                   String   @id
+  id                   String                   @id
   kind                 String
-  status               String   @default("pending")
-  eventId              String?  @map("event_id")
-  deliveryId           String?  @map("delivery_id")
-  phoneNumberLookupKey String?  @map("phone_number_lookup_key")
-  phoneNumberHint      String?  @map("phone_number_hint")
+  status               String                   @default("pending")
+  eventId              String?                  @map("event_id")
+  deliveryId           String?                  @map("delivery_id")
+  phoneNumberLookupKey String?                  @map("phone_number_lookup_key")
+  phoneNumberHint      String?                  @map("phone_number_hint")
   subject              String
-  detailsJson          Json     @map("details_json")
-  claimedAt            DateTime @map("claimed_at")
-  lastAttemptedAt      DateTime? @map("last_attempted_at")
-  sentAt               DateTime? @map("sent_at")
-  providerMessageId    String?  @map("provider_message_id")
-  attemptCount         Int      @default(0) @map("attempt_count")
-  lastErrorCode        String?  @map("last_error_code")
-  lastProviderStatus   Int?     @map("last_provider_status")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  detailsJson          Json                     @map("details_json")
+  claimedAt            DateTime                 @map("claimed_at")
+  lastAttemptedAt      DateTime?                @map("last_attempted_at")
+  sentAt               DateTime?                @map("sent_at")
+  providerMessageId    String?                  @map("provider_message_id")
+  attemptCount         Int                      @default(0) @map("attempt_count")
+  lastErrorCode        String?                  @map("last_error_code")
+  lastProviderStatus   Int?                     @map("last_provider_status")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
   event                HostedLinqProviderEvent? @relation(fields: [eventId], references: [eventId], onDelete: SetNull)
-  delivery             HostedLinqDelivery? @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
-  line                 HostedLinqLine? @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
+  delivery             HostedLinqDelivery?      @relation(fields: [deliveryId], references: [id], onDelete: SetNull)
+  line                 HostedLinqLine?          @relation(fields: [phoneNumberLookupKey], references: [phoneNumberLookupKey], onDelete: SetNull)
 
   @@unique([kind, eventId])
   @@index([status, claimedAt])
@@ -2252,58 +2251,58 @@ model HostedLinqAlert {
 }
 
 model HostedAiUsage {
-  id                         String       @id
-  memberId                   String       @map("member_id")
-  sessionId                  String       @map("session_id")
-  turnId                     String       @map("turn_id")
-  attemptCount               Int          @map("attempt_count")
-  providerRequestOrdinal     Int          @default(0) @map("provider_request_ordinal")
-  occurredAt                 DateTime     @map("occurred_at")
-  provider                   String
-  routeId                    String?      @map("route_id")
-  requestedModel             String?      @map("requested_model")
-  servedModel                String?      @map("served_model")
-  providerName               String?      @map("provider_name")
-  tokenPricingBasis          String       @default("standard") @map("token_pricing_basis")
-  providerRequestId          String?      @map("provider_request_id")
-  rawUsageJson               Json?        @map("raw_usage_json")
-  rawUsageJsonHash           String?      @map("raw_usage_json_hash")
-  turnProfileJson            Json?        @map("turn_profile_json")
-  usageExtractionVersion     String       @default("legacy") @map("usage_extraction_version")
-  usageExtractionSourcePath  String?      @map("usage_extraction_source_path")
-  baseUrl                    String?      @map("base_url")
-  apiKeyEnv                  String?      @map("api_key_env")
-  credentialSource           String?      @map("credential_source")
-  featureKey                 String?      @map("feature_key")
-  surface                    String?
-  triggerKind                String?      @map("trigger_kind")
-  reportingUserId            String?      @map("reporting_user_id")
-  gatewayTagsJson            Json?        @map("gateway_tags_json")
-  stripeMeterSource          String       @default("murph") @map("stripe_meter_source")
-  inputTokens                Int?         @map("input_tokens")
-  outputTokens               Int?         @map("output_tokens")
-  reasoningTokens            Int?         @map("reasoning_tokens")
-  cachedInputTokens          Int?         @map("cached_input_tokens")
-  cacheWriteTokens           Int?         @map("cache_write_tokens")
-  totalTokens                Int?         @map("total_tokens")
-  providerRequestOutcome     String       @default("succeeded") @map("provider_request_outcome")
-  allowanceAccountedAt       DateTime?    @map("allowance_accounted_at")
-  allowancePeriodStart       DateTime?    @map("allowance_period_start")
-  allowancePeriodEnd         DateTime?    @map("allowance_period_end")
-  allowanceCostUsdMicros     BigInt       @default(0) @map("allowance_cost_usd_micros")
-  allowancePricingVersion    String?      @map("allowance_pricing_version")
-  allowancePricingSnapshotJson Json?      @map("allowance_pricing_snapshot_json")
-  allowanceCounted           Boolean      @default(false) @map("allowance_counted")
-  stripeMeterStatus          String       @default("skipped") @map("stripe_meter_status")
-  stripeMeterAttemptCount    Int          @default(0) @map("stripe_meter_attempt_count")
-  stripeMeterLastAttemptedAt DateTime?    @map("stripe_meter_last_attempted_at")
-  stripeMeterNextAttemptAt   DateTime?    @map("stripe_meter_next_attempt_at")
-  stripeMeteredAt            DateTime?    @map("stripe_metered_at")
-  stripeMeterIdentifier      String?      @map("stripe_meter_identifier")
-  stripeMeterError           String?      @map("stripe_meter_error")
-  createdAt                  DateTime     @default(now()) @map("created_at")
-  updatedAt                  DateTime     @updatedAt @map("updated_at")
-  member                     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  id                           String       @id
+  memberId                     String       @map("member_id")
+  sessionId                    String       @map("session_id")
+  turnId                       String       @map("turn_id")
+  attemptCount                 Int          @map("attempt_count")
+  providerRequestOrdinal       Int          @default(0) @map("provider_request_ordinal")
+  occurredAt                   DateTime     @map("occurred_at")
+  provider                     String
+  routeId                      String?      @map("route_id")
+  requestedModel               String?      @map("requested_model")
+  servedModel                  String?      @map("served_model")
+  providerName                 String?      @map("provider_name")
+  tokenPricingBasis            String       @default("standard") @map("token_pricing_basis")
+  providerRequestId            String?      @map("provider_request_id")
+  rawUsageJson                 Json?        @map("raw_usage_json")
+  rawUsageJsonHash             String?      @map("raw_usage_json_hash")
+  turnProfileJson              Json?        @map("turn_profile_json")
+  usageExtractionVersion       String       @default("legacy") @map("usage_extraction_version")
+  usageExtractionSourcePath    String?      @map("usage_extraction_source_path")
+  baseUrl                      String?      @map("base_url")
+  apiKeyEnv                    String?      @map("api_key_env")
+  credentialSource             String?      @map("credential_source")
+  featureKey                   String?      @map("feature_key")
+  surface                      String?
+  triggerKind                  String?      @map("trigger_kind")
+  reportingUserId              String?      @map("reporting_user_id")
+  gatewayTagsJson              Json?        @map("gateway_tags_json")
+  stripeMeterSource            String       @default("murph") @map("stripe_meter_source")
+  inputTokens                  Int?         @map("input_tokens")
+  outputTokens                 Int?         @map("output_tokens")
+  reasoningTokens              Int?         @map("reasoning_tokens")
+  cachedInputTokens            Int?         @map("cached_input_tokens")
+  cacheWriteTokens             Int?         @map("cache_write_tokens")
+  totalTokens                  Int?         @map("total_tokens")
+  providerRequestOutcome       String       @default("succeeded") @map("provider_request_outcome")
+  allowanceAccountedAt         DateTime?    @map("allowance_accounted_at")
+  allowancePeriodStart         DateTime?    @map("allowance_period_start")
+  allowancePeriodEnd           DateTime?    @map("allowance_period_end")
+  allowanceCostUsdMicros       BigInt       @default(0) @map("allowance_cost_usd_micros")
+  allowancePricingVersion      String?      @map("allowance_pricing_version")
+  allowancePricingSnapshotJson Json?        @map("allowance_pricing_snapshot_json")
+  allowanceCounted             Boolean      @default(false) @map("allowance_counted")
+  stripeMeterStatus            String       @default("skipped") @map("stripe_meter_status")
+  stripeMeterAttemptCount      Int          @default(0) @map("stripe_meter_attempt_count")
+  stripeMeterLastAttemptedAt   DateTime?    @map("stripe_meter_last_attempted_at")
+  stripeMeterNextAttemptAt     DateTime?    @map("stripe_meter_next_attempt_at")
+  stripeMeteredAt              DateTime?    @map("stripe_metered_at")
+  stripeMeterIdentifier        String?      @map("stripe_meter_identifier")
+  stripeMeterError             String?      @map("stripe_meter_error")
+  createdAt                    DateTime     @default(now()) @map("created_at")
+  updatedAt                    DateTime     @updatedAt @map("updated_at")
+  member                       HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@unique([turnId, attemptCount, providerRequestOrdinal], map: "hosted_ai_usage_turn_attempt_provider_request_idx")
   @@index([featureKey, createdAt])
@@ -2316,19 +2315,19 @@ model HostedAiUsage {
 }
 
 model HostedAiUsagePeriod {
-  memberId          String       @map("member_id")
-  periodStart       DateTime     @map("period_start")
-  periodEnd         DateTime     @map("period_end")
-  billingPlanCode   String       @map("billing_plan_code")
-  highestBillingPlanCode String? @map("highest_billing_plan_code")
-  planResetAt DateTime? @map("plan_reset_at")
-  limitUsdMicros    BigInt       @map("limit_usd_micros")
-  spentUsdMicros    BigInt       @default(0) @map("spent_usd_micros")
-  blockedAt         DateTime?    @map("blocked_at")
-  lastUsageAt       DateTime?    @map("last_usage_at")
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @updatedAt @map("updated_at")
-  member            HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId               String       @map("member_id")
+  periodStart            DateTime     @map("period_start")
+  periodEnd              DateTime     @map("period_end")
+  billingPlanCode        String       @map("billing_plan_code")
+  highestBillingPlanCode String?      @map("highest_billing_plan_code")
+  planResetAt            DateTime?    @map("plan_reset_at")
+  limitUsdMicros         BigInt       @map("limit_usd_micros")
+  spentUsdMicros         BigInt       @default(0) @map("spent_usd_micros")
+  blockedAt              DateTime?    @map("blocked_at")
+  lastUsageAt            DateTime?    @map("last_usage_at")
+  createdAt              DateTime     @default(now()) @map("created_at")
+  updatedAt              DateTime     @updatedAt @map("updated_at")
+  member                 HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@id([memberId, periodStart])
   @@index([memberId, periodEnd])
@@ -2383,12 +2382,12 @@ model HostedLinqDailyState {
 }
 
 model HostedLinqContactCardShare {
-  linqChatLookupKey                String       @id @map("linq_chat_lookup_key")
-  memberId                         String       @map("member_id")
-  lastContactCardShareAttemptedAt  DateTime?    @map("last_contact_card_share_attempted_at")
-  createdAt                        DateTime     @default(now()) @map("created_at")
-  updatedAt                        DateTime     @updatedAt @map("updated_at")
-  member                           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  linqChatLookupKey               String       @id @map("linq_chat_lookup_key")
+  memberId                        String       @map("member_id")
+  lastContactCardShareAttemptedAt DateTime?    @map("last_contact_card_share_attempted_at")
+  createdAt                       DateTime     @default(now()) @map("created_at")
+  updatedAt                       DateTime     @updatedAt @map("updated_at")
+  member                          HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
 
   @@index([memberId])
   @@index([lastContactCardShareAttemptedAt])

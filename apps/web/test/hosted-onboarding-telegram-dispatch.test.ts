@@ -3070,6 +3070,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: [acceptedMemberId],
       prisma,
+      surface: "telegram",
     });
     expect(
       mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],

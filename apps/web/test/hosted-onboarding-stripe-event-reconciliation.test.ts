@@ -595,8 +595,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: ["member_123"],
       prisma: prisma.client,
-      sourceEventId: "evt_invoice_paid_123",
-      sourceEventType: "invoice.paid",
+      surface: "website",
     });
     expect(
       mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
@@ -1264,8 +1263,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: ["member_123"],
       prisma: prisma.client,
-      sourceEventId: event.id,
-      sourceEventType: event.type,
+      surface: "website",
     });
     expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
     expect(
@@ -2733,8 +2731,7 @@ describe("hosted Stripe event reconciliation", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: ["member_123"],
       prisma: prisma.client,
-      sourceEventId: "evt_invoice_paid_123",
-      sourceEventType: "invoice.paid",
+      surface: "website",
     });
   });
 
@@ -2856,8 +2853,7 @@ describe("hosted Stripe event reconciliation", () => {
         "member_family_child",
       ],
       prisma: prisma.client,
-      sourceEventId: event.id,
-      sourceEventType: event.type,
+      surface: "website",
     });
   });
 

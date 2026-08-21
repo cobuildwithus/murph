@@ -81,6 +81,7 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
     scheduleHostedSignupNotificationEmails({
       memberIds: activationOutcome.newlyActivatedMemberIds,
       prisma,
+      surface: "website",
     });
   }
   if (activationOutcome.cleanupFamilySponsoredStripeSubscriptionId) {

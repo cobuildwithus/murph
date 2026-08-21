@@ -38,6 +38,7 @@ import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
   scheduleHostedSignupNotificationEmails,
 } from "./signup-notification-email";
+import type { HostedSignupSurface } from "./signup-notification-context";
 import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
@@ -106,7 +107,7 @@ type HostedStarterUsageEnrollmentPolicy = {
   };
   requireActivationRuntimeWake: boolean;
   requireLaunchConsent: boolean;
-  source: HostedStarterUsageSource;
+  source: Exclude<HostedStarterUsageSource, "legacy_trial_migration">;
   suppressSignupWelcomeEmail: boolean;
   suppressSignupWelcome: boolean;
 };
@@ -490,6 +491,7 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     scheduleHostedSignupNotificationEmails({
       memberIds: [outcome.effects.signupNotificationEmailMemberId],
       prisma,
+      surface: resolveHostedStarterSignupSurface(policy.source),
     });
   }
 
@@ -523,6 +525,19 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     deferredActivationWake,
     result: outcome.result,
   };
+}
+
+function resolveHostedStarterSignupSurface(
+  source: HostedStarterUsageEnrollmentPolicy["source"],
+): HostedSignupSurface {
+  switch (source) {
+    case "companion_onboarding":
+      return "mobile_app";
+    case "linq_instant_start":
+      return "imessage";
+    case "web_onboarding":
+      return "website";
+  }
 }
 
 async function prepareHostedStarterUsageActivationCrypto(input: {

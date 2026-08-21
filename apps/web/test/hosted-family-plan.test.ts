@@ -4134,6 +4134,7 @@ describe("hosted Family plan", () => {
       .toHaveBeenCalledWith({
         memberIds: ["member_mom"],
         prisma,
+        surface: "website",
       });
     expect(
       signupNotificationMocks.scheduleHostedSignupNotificationEmails.mock

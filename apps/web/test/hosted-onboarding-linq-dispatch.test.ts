@@ -6581,6 +6581,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
       memberIds: ["member_family"],
       prisma,
+      surface: "imessage",
     });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],

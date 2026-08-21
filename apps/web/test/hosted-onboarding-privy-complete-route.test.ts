@@ -221,6 +221,10 @@ describe("hosted onboarding Privy completion route", () => {
         }),
         headers: {
           origin: "https://join.example.test",
+          "x-vercel-ip-city": "Atlanta",
+          "x-vercel-ip-country": "US",
+          "x-vercel-ip-country-region": "GA",
+          "x-vercel-ip-timezone": "America/New_York",
         },
         method: "POST",
       }),
@@ -251,7 +255,24 @@ describe("hosted onboarding Privy completion route", () => {
         wallet: null,
       },
       inviteCode: "invite_123",
+      now: expect.any(Date),
+      signupNotificationContext: {
+        schema: "murph.hosted-signup-notification-context.v1",
+        occurredAt: expect.any(String),
+        surface: "website",
+        timeZone: "America/New_York",
+        location: {
+          city: "Atlanta",
+          country: "US",
+          countryRegion: "GA",
+        },
+      },
+      timeZone: "America/New_York",
     });
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput?.signupNotificationContext?.occurredAt).toBe(
+      completionInput?.now?.toISOString(),
+    );
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
       privyUserId: "did:privy:user_123",

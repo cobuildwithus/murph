@@ -714,6 +714,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           scheduleHostedSignupNotificationEmails({
             memberIds: planned.postCommitSignupNotificationMemberIds,
             prisma,
+            surface: "imessage",
           });
         }
         if (
@@ -1994,6 +1995,7 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     scheduleHostedSignupNotificationEmails({
       memberIds: plan.postCommitSignupNotificationMemberIds,
       prisma,
+      surface: "telegram",
     });
   }
 
