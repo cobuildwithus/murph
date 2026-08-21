@@ -137,24 +137,34 @@ function schemaCovers(
   return schemaAlternatives(other).every((item) => candidateKeys.has(schemaKey(item)))
 }
 
-function descriptionLength(schema: JsonSchemaObject): number {
-  return typeof schema.description === 'string' ? schema.description.length : 0
+function mergePropertySchemas(schemas: JsonSchemaObject[]): JsonSchemaObject {
+  const unique = [...new Map(schemas.map((schema) => {
+    const semanticSchema = withoutTopLevelDescription(schema)
+    return [schemaKey(semanticSchema), semanticSchema] as const
+  })).values()]
+  let merged: JsonSchemaObject
+  if (unique.length === 1) {
+    merged = unique[0]
+  } else {
+    const covering = unique.find((candidate) =>
+      unique.every((other) => schemaCovers(candidate, other)))
+    merged = covering ?? { anyOf: unique }
+  }
+  return merged
 }
 
-function mergePropertySchemas(schemas: JsonSchemaObject[]): JsonSchemaObject {
-  const unique = [...new Map(schemas.map((schema) => [schemaKey(schema), schema])).values()]
-  if (unique.length === 1) {
-    return unique[0]
-  }
-
-  const covering = unique
-    .filter((candidate) => unique.every((other) => schemaCovers(candidate, other)))
-    .sort((left, right) => descriptionLength(right) - descriptionLength(left))
-  if (covering[0]) {
-    return covering[0]
-  }
-
-  return { anyOf: unique }
+function buildActionPropertyConstraint(
+  actionSchema: JsonSchemaObject,
+  mergedSchema: JsonSchemaObject,
+): JsonSchemaObject {
+  const actionSemanticSchema = withoutTopLevelDescription(actionSchema)
+  const mergedSemanticSchema = withoutTopLevelDescription(mergedSchema)
+  const semanticConstraint = schemaKey(actionSemanticSchema) === schemaKey(
+    mergedSemanticSchema,
+  )
+    ? {}
+    : actionSemanticSchema
+  return semanticConstraint
 }
 
 function containsReference(value: unknown): boolean {
@@ -185,8 +195,11 @@ export function deriveAutomationModelInputSchema(
   const actions: string[] = []
   const propertyOrder: string[] = []
   const propertyVariants = new Map<string, JsonSchemaObject[]>()
-  const requiredByAction: JsonSchemaObject[] = []
-  const actionDescriptions: JsonSchemaObject[] = []
+  const branchByAction: Array<{
+    action: string
+    properties: JsonSchemaObject
+    required: string[]
+  }> = []
 
   for (const branch of branches) {
     if (
@@ -210,7 +223,6 @@ export function deriveAutomationModelInputSchema(
     }
     const action = actionSchema.const
     actions.push(action)
-    actionDescriptions.push(actionSchema)
 
     for (const [name, propertySchema] of Object.entries(branch.properties)) {
       if (!isJsonSchemaObject(propertySchema)) {
@@ -226,23 +238,16 @@ export function deriveAutomationModelInputSchema(
       propertyVariants.get(name)?.push(propertySchema)
     }
 
-    requiredByAction.push({
-      properties: { action: { const: action } },
+    branchByAction.push({
+      action,
+      properties: branch.properties,
       required: branch.required,
     })
   }
 
-  const actionDescription = actionDescriptions
-    .filter((schema) => typeof schema.description === 'string')
-    .sort((left, right) => descriptionLength(right) - descriptionLength(left))[0]
-    ?.description
   const properties: JsonSchemaObject = {
     action: {
-      type: 'string',
       enum: actions,
-      ...(typeof actionDescription === 'string'
-        ? { description: actionDescription }
-        : {}),
     },
   }
   for (const name of propertyOrder) {
@@ -253,14 +258,36 @@ export function deriveAutomationModelInputSchema(
     properties[name] = mergePropertySchemas(variants)
   }
 
+  const actionContracts: JsonSchemaObject[] = []
+  for (const branch of branchByAction) {
+    const actionProperties: JsonSchemaObject = {
+      action: { const: branch.action },
+    }
+    for (const [name, propertySchema] of Object.entries(branch.properties)) {
+      if (name === 'action' || !isJsonSchemaObject(propertySchema)) {
+        continue
+      }
+      const mergedSchema = properties[name]
+      if (!isJsonSchemaObject(mergedSchema)) {
+        return canonicalSchema
+      }
+      actionProperties[name] = buildActionPropertyConstraint(
+        propertySchema,
+        mergedSchema,
+      )
+    }
+    actionContracts.push({
+      properties: actionProperties,
+      required: branch.required,
+      additionalProperties: false,
+    })
+  }
+
   const modelSchema: JsonSchemaObject = {
-    ...(typeof resolved.value.$schema === 'string'
-      ? { $schema: resolved.value.$schema }
-      : {}),
     type: 'object',
     properties,
     required: ['action'],
-    oneOf: requiredByAction,
+    oneOf: actionContracts,
     additionalProperties: false,
   }
   return containsReference(modelSchema) ? canonicalSchema : modelSchema

@@ -1352,6 +1352,8 @@ function limitAssistantConversationHistoryMessages(
     return retained
   }
 
+  retainedBytes -= dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
+
   const marker: AssistantProviderConversationMessage = {
     content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
     role: 'assistant',
@@ -1370,8 +1372,24 @@ function limitAssistantConversationHistoryMessages(
     }
     retainedBytes -= assistantConversationHistoryUtf8Bytes(removed.content)
   }
+  dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
   return [marker, ...retained]
+}
+
+function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
+  messages: AssistantProviderConversationMessage[],
+): number {
+  const firstUserIndex = messages.findIndex((message) => message.role === 'user')
+  if (firstUserIndex <= 0) {
+    return 0
+  }
+  const removed = messages.splice(0, firstUserIndex)
+  return removed.reduce((total, message) => (
+    typeof message.content === 'string'
+      ? total + assistantConversationHistoryUtf8Bytes(message.content)
+      : total
+  ), 0)
 }
 
 async function measureRoutePlanningAsync<TResult>(

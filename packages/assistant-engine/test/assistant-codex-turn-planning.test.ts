@@ -5064,6 +5064,8 @@ describe('assistant Codex turn planning', () => {
         hostedToolContext,
         input: {
           ...createMessageInput(),
+          prompt:
+            'Use the automation decision from my first message. What did I decide?',
           vault,
         },
         profile: executionProfile,
@@ -5081,10 +5083,18 @@ describe('assistant Codex turn planning', () => {
       await appendAssistantTranscriptEntries(
         vault,
         baseSession.sessionId,
-        Array.from({ length: 30 }, (_, index) => ({
-          kind: 'assistant' as const,
-          text: `Committed automation context ${index + 1}: ${'x'.repeat(600)}`,
-        })),
+        Array.from({ length: 30 }, (_, index) => ([
+          {
+            kind: 'user' as const,
+            text:
+              `Member automation decision ${index + 1}: ${'x'.repeat(300)}`,
+          },
+          {
+            kind: 'assistant' as const,
+            text:
+              `Assistant acknowledged automation decision ${index + 1}: ${'y'.repeat(300)}`,
+          },
+        ])).flat(),
       )
 
       const currentPlan = await buildPlan(baseSession)
@@ -5118,14 +5128,24 @@ describe('assistant Codex turn planning', () => {
         content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
         role: 'assistant',
       })
+      expect(transitionPlan.conversationHistoryMessages?.[0]?.content)
+        .toContain('ask a useful clarification instead of guessing')
       expect(transitionPlan.conversationHistoryMessages?.length)
         .toBeGreaterThan(1)
       expect(transitionPlan.conversationHistoryMessages?.length)
         .toBeLessThanOrEqual(24)
+      expect(transitionPlan.conversationHistoryMessages?.[1]?.role).toBe('user')
       expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
-        .not.toContain('Committed automation context 1:')
+        .not.toContain('Member automation decision 1:')
       expect(JSON.stringify(transitionPlan.conversationHistoryMessages))
-        .toContain('Committed automation context 30:')
+        .toContain('Assistant acknowledged automation decision 30:')
+      const replayedHistory = transitionPlan.conversationHistoryMessages?.slice(1)
+        ?? []
+      for (const [index, message] of replayedHistory.entries()) {
+        if (message.role === 'assistant') {
+          expect(replayedHistory[index - 1]?.role).toBe('user')
+        }
+      }
 
       const transitionedSession =
         await applyAssistantSessionCodexResumeStateAction({
