@@ -9756,4 +9756,95 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.upsertDirtyConnection).toHaveBeenCalledOnce();
   });
 
+  it("completes a Junction event for a source with no connect route", async () => {
+    const admissionRecord = buildWebhookAdmissionRecord({
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(admissionRecord);
+    mocks.getConnectionRecordForUser.mockResolvedValue(admissionRecord);
+    const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
+
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:00:00.000Z",
+      registry: { get: mocks.registryGet, list: mocks.registryList, register: vi.fn() },
+      sourceAdmissionDeferred: true,
+      store,
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        dataSourceProviderSlug: "future_sensor",
+        eventType: "historical.data.workout_distance.created",
+        jobs: [{
+          kind: "resource",
+          payload: {
+            resource: "workout_distance",
+            sourceProviderSlug: "future_sensor",
+          },
+        }],
+        sourceProviderSlug: "future_sensor",
+      },
+    })).resolves.toBeUndefined();
+
+    expect(mocks.completeWebhookTrace).toHaveBeenCalledOnce();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.markConnectionSourceDataReceived).not.toHaveBeenCalled();
+    expect(mocks.markWebhookReceived).not.toHaveBeenCalled();
+    expect(mocks.prepareDirtyConnectionUpsert).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Junction source with no connect route retryable while setup is pending", async () => {
+    const admissionRecord = buildWebhookAdmissionRecord({
+      provider: "junction",
+      setupExpiresAt: "2026-03-26T12:15:00.000Z",
+      setupPhase: "pending_link",
+    });
+    mocks.prismaTx.deviceConnection.findUnique.mockResolvedValue(admissionRecord);
+    mocks.getConnectionRecordForUser.mockResolvedValue(admissionRecord);
+    const store = new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
+
+    await expect(handleHostedDeviceSyncWebhookAccepted({
+      account: {
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        id: "dsc_123",
+        provider: "junction",
+      },
+      claimToken: "claim-token",
+      now: "2026-03-26T12:00:00.000Z",
+      ownerId: "user-123",
+      processingAttemptedAt: "2026-03-26T12:14:59.999Z",
+      registry: { get: mocks.registryGet, list: mocks.registryList, register: vi.fn() },
+      sourceAdmissionDeferred: true,
+      store,
+      traceId: "trace_123",
+      webhook: {
+        acceptanceMode: "durable_webhook_work",
+        eventType: "daily.data.activity.created",
+        jobs: [{
+          kind: "resource",
+          payload: { resource: "activity" },
+        }],
+        sourceProviderSlug: "future_sensor",
+      },
+    })).rejects.toMatchObject({
+      code: "WEBHOOK_SOURCE_NOT_READY",
+      httpStatus: 503,
+      retryable: true,
+    });
+
+    expect(mocks.completeWebhookTrace).not.toHaveBeenCalled();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.upsertDirtyConnection).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+  });
 });
