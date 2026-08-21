@@ -174,8 +174,16 @@ On a scheduled run:
    replaces retained image bytes with a privacy tombstone. Any removal failure
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
-6. After inspection, enrichment, read-back, and photo cleanup, first prove the
-   active Goal read is complete. Run `vault-cli goal list --status active
+6. After inspection, enrichment, read-back, and photo cleanup, read and apply
+   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
+   as the complete safety gate before target resolution or a card, even when
+   five accepted goals already exist. Reuse every complete identical
+   current-turn read the shared gate permits. For this scheduled run, when that
+   gate suppresses numeric output or any required safety read is incomplete,
+   unavailable, or unreadable, keep the ordinary compact closeout, perform no
+   Goal or measurement mutation, ask no question, and attach no card. Only after
+   the gate passes, prove the active Goal read is complete. Run `vault-cli goal
+   list --status active
    --limit 200 --format json`. If it returns 200 records, fail closed with the
    ordinary compact closeout: run no Goal detail reads, perform no Goal or
    measurement mutation, ask no question, and attach no card. Otherwise, run
@@ -186,51 +194,9 @@ On a scheduled run:
    date, conflicts, and the 1,200-kcal boundary only after inspecting that
    complete detail set. This active-target authority read is separate from any
    all-status Goal lookup used to reuse or honor Murph's managed paused or
-   abandoned proposal; never substitute that lookup here. Then read and apply
-   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
-   before resolving a card, even when five accepted goals already exist. This
-   first requires `vault-cli memory show --format json`; if that complete
-   canonical memory read fails or is unreadable, keep the ordinary compact
-   closeout, perform no Goal or measurement mutation, ask no question, and
-   attach no card. A clearly current saved age under 18 or clearly current
-   intuitive-eating or number-sensitive preference uses the same non-numeric,
-   no-write, no-question, no-card path. Missing or ambiguous age alone does not
-   block a scheduled closeout and never authorizes a question. The gate also
-   requires both `vault-cli condition list --status active --limit 200 --format
-   json` and `vault-cli regimen list --status active --limit 200 --format json`.
-   If either returns exactly 200 records or fails, run no condition or regimen
-   detail reads, keep the ordinary compact closeout, perform no Goal or
-   measurement mutation, ask no question, and attach no card. Otherwise, run
-   `vault-cli condition show <condition-id> --format json` for every returned
-   condition and `vault-cli regimen show <regimen-id> --format json` for every
-   returned regimen before applying the safety gate. Never use the five-record
-   context projection, a title, substance, severity, or the default list prefix
-   to select the safety set. If any required detail read fails, is explicitly
-   truncated, or is unreadable, retry that exact id once through `vault-cli show
-   <same-id> --format json`. Continue only when the fallback returns one complete,
-   unambiguous canonical record; otherwise use the same ordinary-text, no-write,
-   no-question, no-card failure behavior. Never omit fields, shrink the safety
-   set, or retry indefinitely.
-   Also run `vault-cli event list --kind procedure --limit 200 --format json`
-   and follow the shared gate's procedure-item inspection and conditional detail
-   reads. A completed bariatric procedure uses the same non-numeric,
-   no-write, no-question, no-card path; failed, unreadable, or saturated
-   procedure discovery uses the failure path. Also run `vault-cli event list
-   --kind encounter --limit 200 --format json`, detail-read every returned item
-   with nonzero `data.diagnosesCount`, and apply the shared gate's current active
-   diagnosis rules. A relevant active documented or suspected diagnosis uses
-   the same non-numeric path; failed, unreadable, saturated, required-detail,
-   or unresolved safety-relevant diagnosis discovery uses the failure path.
-   Then run the shared gate's bounded body-measurement read, separate
-   `pregnancy-test` measurement read, and bounded canonical test-event list plus
-   every required test detail read. A failed read, a body-measurement read
-   saturated without resolving usable BMI evidence, or a saturated
-   pregnancy-evidence read uses the same failure behavior. An explicit positive
-   pregnancy-test result from either canonical owner
-   uses the same non-numeric, no-write, no-question, no-card path. Reuse all
-   complete gate reads for the current turn. If the active target bundle is
-   incomplete after those reads, the first eligible managed closeout has one
-   proposal-only exception. Read and follow
+   abandoned proposal; never substitute that lookup here. If the active target
+   bundle is incomplete after those reads, the first eligible managed closeout
+   has one proposal-only exception. Read and follow
    `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`,
    then run `vault-cli goal list --limit 200 --format json` and detail-read only
    candidate managed records. If that read fails, is unreadable, is saturated,

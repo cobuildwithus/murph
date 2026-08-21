@@ -27,6 +27,10 @@ and bounded safety recovery.
   still coexisted with research-owned timing and a media-specific bare tool
   directive. A direct email route could therefore omit the tool while retaining
   an impossible instruction to call it.
+- Final ReviewGPT round 5 found that automatic closeout repeated the complete
+  safety gate it already required from the shared nutrition-card safety
+  reference. The duplicate made future safety changes vulnerable to drift and
+  made the dynamically loaded skill larger without adding an authority owner.
 
 ## Tasks
 
@@ -42,6 +46,9 @@ and bounded safety recovery.
 5. Delete the research and media progress directives, keep their evidence and
    bounded-inspection contracts, and prove complete no-progress email plus
    progress-capable direct/group prompts have one executable global owner.
+6. Keep the shared nutrition-card safety reference as the only complete safety
+   owner; reduce automatic closeout to ordering that gate before target and card
+   work plus its scheduled fail-closed disposition.
 
 ## Constraints
 
@@ -59,6 +66,11 @@ and bounded safety recovery.
   tests passed, 75 opt-in real-provider tests skipped. The round-4 assembled
   route also passed independently in the turn-planning file's 91-test run.
 - Assistant-engine typecheck and `git diff --check`: passed.
+- Round-5 remediation proof passed 131 tests across the automatic-capture
+  contract, shared safety owner, scripted runtime, and response-card boundary.
+  The scheduled runtime coverage still proves safe attachment, exact recovery
+  acceptance, bad recovery rejection, saturation before detail fanout, and no
+  question, Goal/measurement mutation, or card on safety failure.
 - `pnpm test:diff` across every changed assistant-engine path exited 0. It
   passed affected package typechecks and tests, hosted web tests/lint/dev smoke/
   production build, and Cloudflare Node/Workers verification. The workspace
@@ -69,5 +81,10 @@ and bounded safety recovery.
   then removed 25 tokens / 129 bytes from private direct input and 19 tokens /
   104 bytes from group input. The resulting complete measurements are 16,046
   tokens / 72,075 bytes for private direct and 14,168 / 61,489 for group.
+- The round-5 deletion does not change initial provider input because the
+  automatic-capture skill is loaded later on demand. Its provider-visible skill
+  payload itself shrank by 2,598 serialized bytes and 34 net production lines;
+  the initial direct/group measurements therefore remain 16,046 / 72,075 and
+  14,168 / 61,489.
 - Exact-head ReviewGPT round after the substantive remediation and required
   GitHub checks.

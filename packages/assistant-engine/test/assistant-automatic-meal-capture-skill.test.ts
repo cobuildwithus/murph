@@ -150,37 +150,27 @@ describe('assistant automatic meal capture skill', () => {
       'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactSkill).toContain(
-      'requires both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
+      'as the complete safety gate before target resolution or a card, even when five accepted goals already exist.',
     )
     expect(compactSkill).toContain(
-      'If either returns exactly 200 records or fails, run no condition or regimen detail reads, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+      'For this scheduled run, when that gate suppresses numeric output or any required safety read is incomplete, unavailable, or unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
     )
-    expect(compactSkill).toContain(
-      'run `vault-cli condition show <condition-id> --format json` for every returned condition and `vault-cli regimen show <regimen-id> --format json` for every returned regimen before applying the safety gate.',
+    expect(compactSkill).not.toContain('`vault-cli memory show --format json`')
+    expect(compactSkill).not.toContain(
+      '`vault-cli condition list --status active --limit 200 --format json`',
     )
-    expect(compactSkill).toContain(
-      'Never use the five-record context projection, a title, substance, severity, or the default list prefix to select the safety set.',
+    expect(compactSkill).not.toContain(
+      '`vault-cli regimen list --status active --limit 200 --format json`',
     )
-    expect(compactSkill).toContain(
-      'If any required detail read fails, is explicitly truncated, or is unreadable, retry that exact id once through `vault-cli show <same-id> --format json`.',
+    expect(compactSkill).not.toContain('`vault-cli show <same-id> --format json`')
+    expect(compactSkill).not.toContain(
+      '`vault-cli event list --kind procedure --limit 200 --format json`',
     )
-    expect(compactSkill).toContain(
-      'Never omit fields, shrink the safety set, or retry indefinitely.',
+    expect(compactSkill).not.toContain(
+      '`vault-cli event list --kind encounter --limit 200 --format json`',
     )
-    expect(compactSkill).toContain(
-      'Also run `vault-cli event list --kind procedure --limit 200 --format json` and follow the shared gate\'s procedure-item inspection and conditional detail reads.',
-    )
-    expect(compactSkill).toContain(
-      'A completed bariatric procedure uses the same non-numeric, no-write, no-question, no-card path; failed, unreadable, or saturated procedure discovery uses the failure path.',
-    )
-    expect(compactSkill).toContain(
-      'Also run `vault-cli event list --kind encounter --limit 200 --format json`, detail-read every returned item with nonzero `data.diagnosesCount`, and apply the shared gate\'s current active diagnosis rules.',
-    )
-    expect(compactSkill).toContain(
-      'A relevant active documented or suspected diagnosis uses the same non-numeric path; failed, unreadable, saturated, required-detail, or unresolved safety-relevant diagnosis discovery uses the failure path.',
-    )
-    expect(compactSkill).toContain(
-      'Then run the shared gate\'s bounded body-measurement read, separate `pregnancy-test` measurement read, and bounded canonical test-event list plus every required test detail read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-evidence read uses the same failure behavior.',
+    expect(compactSkill).not.toContain(
+      '`vault-cli measurement entry list --metric pregnancy-test',
     )
     expect(compactSkill).toContain(
       'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
@@ -232,18 +222,6 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
-    )
-    expect(compactSkill).toContain(
-      'before resolving a card, even when five accepted goals already exist.',
-    )
-    expect(compactSkill).toContain(
-      'first requires `vault-cli memory show --format json`; if that complete canonical memory read fails or is unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
-    )
-    expect(compactSkill).toContain(
-      'A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same non-numeric, no-write, no-question, no-card path.',
-    )
-    expect(compactSkill).toContain(
-      'Missing or ambiguous age alone does not block a scheduled closeout and never authorizes a question.',
     )
     expect(compactSkill).toContain(
       'the first eligible managed closeout has one proposal-only exception',
@@ -311,9 +289,6 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(compactSafety).toContain(
       'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
-    )
-    expect(compactSkill).toContain(
-      'An explicit positive pregnancy-test result from either canonical owner uses the same non-numeric, no-write, no-question, no-card path.',
     )
     expect(compactSafety).toContain(
       'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
@@ -385,6 +360,16 @@ describe('assistant automatic meal capture skill', () => {
     ).toBeLessThan(attachCardIndex)
     expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
       .toBeLessThan(attachCardIndex)
+    expect(
+      compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
+    ).toBeLessThan(
+      compactSkill.indexOf('daily-nutrition-card-safety.md'),
+    )
+    expect(compactSkill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
+      compactSkill.indexOf(
+        'vault-cli goal list --status active --limit 200 --format json',
+      ),
+    )
     expect(
       compactSkill.indexOf(
         'vault-cli goal list --status active --limit 200 --format json',
