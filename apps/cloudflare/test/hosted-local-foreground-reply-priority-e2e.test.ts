@@ -2280,7 +2280,7 @@ function buildEverySystemWake(
   return [
     buildHostedExecutionEnvironmentInterviewCompletedWake({
       completedAt,
-      completionId: `environment_interview_priority_${runId}`,
+      completionId: randomUUID(),
       eventId: `environment-interview.completed:priority:${runId}`,
       memberId: identity.userId,
       occurredAt: completedAt,
