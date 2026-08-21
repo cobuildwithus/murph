@@ -133,6 +133,13 @@ Updated: 2026-08-20
   request-1 failure without stale-draft delivery.
 - Passed the Assistant Engine typecheck, the six highest-risk reconsideration
   tests, and a 294-test focused controller/prompt/planning/runtime regression set.
-- Remaining: changelog item after GitHub assigns the PR number, provider-input
-  measurement, exact pushed-head ReviewGPT and CI, finding remediation, parent
+- Added and validated the `group-replies-follow-current-beat` changelog item for
+  PR #2107; 57 focused changelog tests and the Web typecheck pass.
+- Pinned real Codex App Server capture with identical synthetic direct/group
+  turns and `gpt-tokenizer` 3.4.0 `o200k_harmony`: direct initial input is
+  unchanged at 26,466 tokens / 121,426 UTF-8 bytes; group input moves from
+  22,966 / 105,932 to 22,733 / 104,688 (-233 tokens / -1,244 bytes), entirely
+  from removing the obsolete group cadence prompt. The temporary capture hook,
+  captures, tokenizer install, and detached base worktree were removed.
+- Remaining: exact pushed-head ReviewGPT and CI, finding remediation, parent
   final review, plan closure, and merge-tree proof. The PR remains unmerged.
