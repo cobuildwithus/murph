@@ -142,6 +142,9 @@ import {
   loadHostedDeviceSyncMaintenanceModule,
 } from "./device-sync-maintenance-import.ts";
 import {
+  HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
+} from "./device-sync-maintenance-limits.ts";
+import {
   buildHostedDeviceSyncStatusPrompt,
   type HostedDeviceSyncStatusPromptReconnectTarget,
 } from "./device-sync-status-prompt.ts";
@@ -4775,7 +4778,7 @@ async function runIdleDeviceSyncWakeLaneBestEffort(input: {
       signal: input.phaseInput.signal ?? null,
       skipDirtyPendingFetch: input.phaseInput.suppressDirtyPendingFetch ?? false,
       stagedDirtyAcks: input.phaseInput.stagedDirtyAcks ?? null,
-      timeoutMs: input.phaseInput.runtime.commitTimeoutMs,
+      timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
       vaultRoot: input.phaseInput.restored.vaultRoot,
       wake: input.wake,
     });

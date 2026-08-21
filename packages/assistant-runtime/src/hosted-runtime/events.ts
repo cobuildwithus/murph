@@ -25,6 +25,9 @@ import {
   loadHostedDeviceSyncMaintenanceModule,
 } from "./device-sync-maintenance-import.ts";
 import {
+  HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
+} from "./device-sync-maintenance-limits.ts";
+import {
   loadHostedClinicalRecordsMaintenanceModule,
 } from "./clinical-records-maintenance-import.ts";
 import type {
@@ -338,7 +341,7 @@ async function executeHostedSystemWake(input: {
           ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
           : {}),
         ...(input.signal ? { signal: input.signal } : {}),
-        timeoutMs: input.runtime.commitTimeoutMs,
+        timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
