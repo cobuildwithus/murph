@@ -380,7 +380,12 @@ export async function requestHostedGroupContextHandoff(input: {
     originAssistantInputId: input.originAssistantInputId,
   });
 
-  const preparedSelection = await prisma.$transaction(async (tx) => {
+  const preparedSelection: {
+    result: HostedGroupAssistantAskAdmission;
+  } | {
+    membershipId: string;
+    targetRuntimeMemberId: string;
+  } = await prisma.$transaction(async (tx) => {
     if (!await isEligiblePersonalAssistantAskCallerTx({
       memberId: input.memberId,
       now,
