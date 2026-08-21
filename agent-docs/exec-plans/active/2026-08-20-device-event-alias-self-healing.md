@@ -56,14 +56,23 @@ ambiguous histories must remain safe.
 
 ## State
 
-Active. The smaller local implementation and focused verification are green;
-the exact pushed candidate still needs the required review gates and CI.
+Active. The local implementation includes the accepted findings from seven
+ReviewGPT final-gate rounds. The round-seven ordinary-entry/repair-owner overlap
+fix is pushed and locally verified, but the retry cap was reached without a
+PASS; another round requires an explicit continuation decision. The one allowed
+base refresh was consumed, and a later `main` advance now conflicts in the two
+runner-bundle budget files, preventing GitHub from creating the latest PR merge
+ref and registering its required Actions. Keep the draft PR and worktree active
+until those two completion decisions are resolved.
 
 ## Working set
 
 - `packages/core/src/mutations.ts`
 - `packages/importers/src/device-providers/junction.ts`
+- `packages/importers/test/device-providers-junction.test.ts`
 - `packages/importers/test/device-providers.test.ts`
+- `apps/cloudflare/scripts/runner-bundle/bundle-cli.ts`
+- `apps/cloudflare/test/runner-bundle-cli-bundle.test.ts`
 - `apps/web/changelog/entries/2026-08-20/connected-health-daily-record-recovery.json`
 - relevant focused core/importer tests discovered during tracing
 - ReviewGPT WIP artifact under the ignored task audit package
