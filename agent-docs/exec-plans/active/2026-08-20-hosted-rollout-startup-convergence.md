@@ -93,18 +93,30 @@ That premise is now invalidated. The corrective decision is:
   observes the same start healthy at nine seconds with one start and no destroy.
 - Replacement-order regressions keep stale health and old destroy settlement
   bound to the captured start rather than a newer platform start.
+- Round 5 found that status-read and destroy failures could still let cleanup
+  for an old start set the container-wide unsettled-cleanup flag after a
+  replacement started. Cleanup now revalidates the captured start record after
+  each asynchronous boundary, and publishing a replacement clears invalidation
+  owned by the old record.
+- Focused regressions cover stale status-read rejection, stale destroy
+  rejection, and unsettled cleanup completing before the replacement `onStart`.
 - A stale never-ready start older than 20 seconds still enters bounded cleanup.
 
 ## State
 
-Active. The corrected implementation is complete locally. Focused Cloudflare
-tests pass (420 tests across five files), the hosted-execution suite passes
-(544 tests across 49 files), and both package typechecks pass. Diff-aware
-verification also passed the hosted guards and every affected-package
-typecheck; its workspace-boundary step reported two unrelated existing
-Junction import violations, and its test phase was stopped while waiting for a
-shared host slot held by another verifier. Exact-head CI and a fresh ReviewGPT
-audit remain. The PR remains draft and no production action is authorized.
+Active. ReviewGPT round 5 returned one material stale-cleanup ownership finding,
+and its smallest exact-record correction is implemented locally. The focused
+Cloudflare gate passes 423 tests across five files, and the Cloudflare package
+typecheck passes. The focused web orchestration test passes all 31 tests after
+correcting its stale 15-second expectation to the derived 25-second Temporal
+activity budget. The hosted-execution suite passed 544 tests across 49 files,
+and its package typecheck passed before this Cloudflare-only correction.
+Diff-aware verification also passed the hosted guards and every affected-package
+typecheck; its workspace-boundary step reported two unrelated existing Junction
+import violations, and its test phase was stopped while waiting for a shared
+host slot held by another verifier. A substantive ReviewGPT round 6 and
+exact-head CI remain. The PR remains draft and no production action is
+authorized.
 
 ## Working Set
 

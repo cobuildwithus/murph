@@ -2095,6 +2095,196 @@ describe("RunnerContainer", () => {
     },
   );
 
+  it.each([
+    { completion: "status read rejects", expectedDestroyCalls: 0 },
+    { completion: "destroy rejects", expectedDestroyCalls: 1 },
+  ] as const)(
+    "does not let old cleanup invalidate a replacement when its $completion",
+    async ({ completion, expectedDestroyCalls }) => {
+      const fixedNowMs = Date.parse("2026-08-20T19:30:00.000Z");
+      let nowMs = fixedNowMs;
+      const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+      let healthChecks = 0;
+      let statusReads = 0;
+      let lastChange = fixedNowMs;
+      const oldCleanupStarted = createDeferred<void>();
+      const releaseOldCleanup = createDeferred<void>();
+      const getState = vi.fn(async () => {
+        statusReads += 1;
+        const capturedState = { lastChange, status: "running" as const };
+        if (completion === "status read rejects" && statusReads === 3) {
+          oldCleanupStarted.resolve(undefined);
+          await releaseOldCleanup.promise;
+          throw new Error("old status read failed");
+        }
+        return capturedState;
+      });
+      const containerFetch = vi.fn(async (url: string) => {
+        if (!url.endsWith("/health")) {
+          throw new Error(`Unexpected runner request URL: ${url}`);
+        }
+        healthChecks += 1;
+        if (healthChecks === 2 || healthChecks === 3) {
+          return new Response(JSON.stringify({ error: "not ready" }), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 503,
+          });
+        }
+        return new Response(JSON.stringify(createRunnerHealthResult()), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 200,
+        });
+      });
+      const destroy = vi.fn(async () => {
+        if (completion !== "destroy rejects") {
+          throw new Error("replacement should supersede cleanup before destroy");
+        }
+        oldCleanupStarted.resolve(undefined);
+        await releaseOldCleanup.promise;
+        throw new Error("old destroy failed");
+      });
+      const startAndWaitForPorts = vi.fn(async () => {
+        throw new DOMException("Timed out", "TimeoutError");
+      });
+      const { container } = createContainerDouble({
+        containerFetch,
+        destroy,
+        env: {
+          HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+        },
+        getState,
+        initialStatus: "running",
+        platformRunning: true,
+        startAndWaitForPorts,
+      });
+
+      try {
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toMatchObject({ kind: "ready" });
+
+        nowMs += 6_000;
+        const oldShellReadiness = container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        });
+        await oldCleanupStarted.promise;
+
+        nowMs += 1_000;
+        const replacementStartedAtMs = nowMs;
+        lastChange = replacementStartedAtMs;
+        container.onStart();
+        releaseOldCleanup.resolve(undefined);
+
+        await expect(oldShellReadiness).rejects.toMatchObject({ name: "TimeoutError" });
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
+
+        nowMs = replacementStartedAtMs + 8_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+
+        nowMs = replacementStartedAtMs + 9_000;
+        await expect(container.ensureReadyForProcessing({
+          timeoutMs: 8_000,
+          userId: "member_123",
+        })).resolves.toEqual({
+          action: "already_warm",
+          kind: "ready",
+        });
+
+        expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+        expect(destroy).toHaveBeenCalledTimes(expectedDestroyCalls);
+        expect(healthChecks).toBe(4);
+      } finally {
+        now.mockRestore();
+      }
+    },
+  );
+
+  it("does not carry an unsettled cold-start cleanup into a later start", async () => {
+    const fixedNowMs = Date.parse("2026-08-20T20:00:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let healthChecks = 0;
+    let lastChange = fixedNowMs;
+    let status: "running" | "stopped" = "stopped";
+    const getState = vi.fn(async () => ({ lastChange, status }));
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      return new Response(JSON.stringify(
+        healthChecks === 1
+          ? { error: "old start failed health" }
+          : createRunnerHealthResult()
+      ), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: healthChecks === 1 ? 503 : 200,
+      });
+    });
+    const destroy = vi.fn(async () => {
+      throw new Error("old destroy failed");
+    });
+    const startAndWaitForPorts = vi.fn(async () => {
+      status = "running";
+      lastChange = Date.now();
+    });
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState,
+      initialStatus: "stopped",
+      platformRunning: true,
+      startAndWaitForPorts,
+    });
+
+    try {
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      })).resolves.toEqual({ kind: "cleanup_unsettled" });
+      expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(true);
+
+      nowMs += 1_000;
+      const replacementStartedAtMs = nowMs;
+      lastChange = replacementStartedAtMs;
+      container.onStart();
+
+      expect(Reflect.get(container, "warmShellInvalidatedByUnsettledDestroy")).toBe(false);
+      expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+        startedAtMs: replacementStartedAtMs,
+      });
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 15_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+      expect(healthChecks).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("restarts an unobserved container after the readiness window elapses", async () => {
     const timeoutControllers: AbortController[] = [];
     const timeout = vi.spyOn(AbortSignal, "timeout")
