@@ -1,6 +1,6 @@
 # Manual Meal Photo Submission
 
-Status: active
+Status: completed
 Started: 2026-08-20
 
 ## Outcome
@@ -66,9 +66,16 @@ change to automatic-capture enrollment.
 - Focused Vitest for meal-photo validation and companion routes.
 - Web TypeScript typecheck for the changed route/lib graph.
 - Retained-root replay proof plus the broader eight-file meal-photo/mailbox
-  suite: 266 focused tests passing, including zero provider calls under the
+  suite: 269 focused tests passing after the current-base integration,
+  including zero provider calls under the
   final append and cleanup transactions.
-- Exact-head required GitHub checks, specialist ReviewGPT, final ReviewGPT, and
-  current-base merge-tree proof.
+- Web TypeScript typecheck and scoped ESLint pass after regenerating the local
+  Prisma client for the current base.
+- Preliminary ReviewGPT findings were resolved. Final ReviewGPT round three
+  passed the complete sensitive behavior patch with no qualifying findings.
+  Required GitHub checks and current-base merge-tree proof run against the
+  final pushed archival head.
 - Native counterpart independently runs XcodeGen, SwiftFormat lint, focused
-  unit tests, simulator build/tests, and exact-head visual evidence.
+  unit tests, the complete simulator scheme, and exact-head visual evidence.
+Updated: 2026-08-21
+Completed: 2026-08-21
