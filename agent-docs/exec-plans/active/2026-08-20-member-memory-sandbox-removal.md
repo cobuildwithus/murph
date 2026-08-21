@@ -63,13 +63,25 @@ memory consolidation.
 - Final review then proved that a permanent earlier-seed reconciliation failure
   could leave the pre-correction target hint in place while the same due pass
   continued into the automation lane. It also proved that GPT-5.5 was outside
-  the durable usage-pricing table. The retrospective chose one existing owner:
-  immutable-id cron admission now derives the complete target and standard
-  service tier, ignores stale persisted hints, and uses the existing allowance
-  owner with the official GPT-5.5 standard rate. No new state, repair loop,
-  reconciliation path, compatibility layer, or sandbox was added.
-- The real App Server proof, 328 focused assistant-engine tests, 300 hosted
-  phase tests, 115 usage-accounting tests, and all affected package/Web
-  typechecks pass with that correction.
+  the durable usage-pricing table. The first retrospective correction removed
+  persisted target authority and added the official GPT-5.5 standard rate to
+  the existing allowance owner.
+- The next full audit identified that cron's explicit hosted-OpenAI provider
+  transition could conflict with an invocation already hydrated only for
+  custom inference or Venice. Static tracing and the documented provider
+  contract proved the mechanism. Aggregate production inspection found no
+  active non-default provider selection, so the incident path remains managed
+  OpenAI, but the architecture now preserves the provider boundary generally.
+- The final target owner is the existing provider-aware turn route. Cron passes
+  no stored target for the exact memory profile. Managed OpenAI derives GPT-5.5
+  and low reasoning; verified custom inference retains its opaque revision
+  model; a provider catalog that cannot expose the one-tool contract fails
+  before provider entry without fallback. No new state, repair loop, provider
+  registry, compatibility layer, or sandbox was added.
+- Provider-routing, managed-seed, focused cron, final-coverage, and real App
+  Server tests pass (346 assertions). The App Server cases cover managed OpenAI
+  and custom inference and assert exactly `murph.member_memory` on every
+  provider request. Assistant-engine, assistant-runtime, and hosted-execution
+  typechecks pass for the provider-aware change; exact-head CI remains pending.
 - Exact-head CI and next final review gate: pending.
 - Production deploy and bounded runtime-log verification: pending.

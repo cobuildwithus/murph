@@ -29,6 +29,7 @@ import {
   createDefaultLocalAssistantModelTarget,
 } from '@murphai/operator-config/assistant-backend'
 import {
+  HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
   HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
 } from '@murphai/operator-config/assistant/target-runtime'
 import { createIntegratedVaultServices } from '@murphai/vault-usecases/vault-services'
@@ -2099,11 +2100,23 @@ text(result.output);
     })
   })
 
-  it('advertises only the host-owned member-memory tool without a sandbox', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario({
+  it.each([
+    {
+      label: 'managed OpenAI',
       model: 'gpt-5.5',
+      modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
+    },
+    {
+      label: 'custom inference',
+      model: 'murph-custom-r7',
+      modelProvider: HOSTED_CUSTOM_INFERENCE_CODEX_MODEL_PROVIDER_ID,
+    },
+  ])('advertises only the host-owned member-memory tool without a sandbox on $label', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async ({ model, modelProvider }) => {
+    const scenario = await prepareScriptedTurnScenario({
+      model,
+      modelProvider,
     })
     const vaultRoot = scenario.turnInput.workingDirectory
     await writeFile(
@@ -2177,7 +2190,7 @@ text(result.output);
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries.length).toBeGreaterThan(0)
     for (const summary of summaries) {
-      expect(summary.model).toBe('gpt-5.5')
+      expect(summary.model).toBe(model)
       expect(summary.providerRequestDiagnostics?.toolDescriptors).toEqual([
         {
           name: 'member_memory',

@@ -578,9 +578,13 @@ supported provider credential.
   hosted config emits no member-memory permission profile. Assistant-engine
   planning, tool-boundary, provider-seam, and real App Server tests prove only
   the exact managed id receives `murph.member_memory`, the dedicated hosted
-  OpenAI maintenance target is derived at cron admission even when the stored
-  record has a stale target hint, advertises exactly that one function on every
-  provider request, and uses standard service with durable allowance pricing.
+  maintenance target ignores a stale stored target at cron admission, then the
+  provider-aware route derives GPT-5.5 only for managed OpenAI and retains an
+  opaque verified custom-inference target. Unsupported provider catalogs fail
+  before provider entry without fallback. Real App Server cases prove both
+  managed OpenAI and custom inference advertise exactly that one function on
+  every provider request; managed OpenAI uses standard service with durable
+  allowance pricing.
   The hosted phase suite proves a permanent earlier managed-seed failure still
   reaches the automation lane without granting the stored hint authority.
   Shell and every other native capability stay disabled even without a sandbox

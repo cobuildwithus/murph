@@ -4532,11 +4532,6 @@ describe('assistant cron runtime orchestration', () => {
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
         bindingDeliveryTarget: undefined,
-        assistantTargetOverride: {
-          model: 'gpt-5.5',
-          modelProvider: 'hosted-openai',
-          reasoningEffort: 'low',
-        },
         channel: null,
         deliveryKind: undefined,
         deliverySource: null,
@@ -4557,6 +4552,9 @@ describe('assistant cron runtime orchestration', () => {
         turnTrigger: 'automation-cron',
       }),
     )
+    expect(
+      cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0],
+    ).not.toHaveProperty('assistantTargetOverride')
   })
 
   it('runs retained group room-model maintenance silently with the group evidence profile', async () => {
@@ -4692,11 +4690,6 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        assistantTargetOverride: {
-          model: 'gpt-5.5',
-          modelProvider: 'hosted-openai',
-          reasoningEffort: 'low',
-        },
         bindingDeliveryTarget: undefined,
         channel: null,
         deliveryKind: undefined,
@@ -4715,6 +4708,9 @@ describe('assistant cron runtime orchestration', () => {
         },
       }),
     )
+    expect(
+      cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0],
+    ).not.toHaveProperty('assistantTargetOverride')
     expect(findCanonicalAutomation(
       vaultRoot,
       MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,

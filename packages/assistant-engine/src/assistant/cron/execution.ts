@@ -56,7 +56,6 @@ import {
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID,
-  resolveMurphManagedAutomationExecutionTargetOverride,
   resolveMurphManagedAutomationOwnerScope,
   resolveMurphManagedMaintenancePolicy,
   type MurphManagedMaintenancePolicy,
@@ -1989,9 +1988,10 @@ function resolveAssistantCronAutomationTargetOverride(
   if (job.kind !== 'canonical' || job.source.kind !== 'automation') {
     return null
   }
-  return resolveMurphManagedAutomationExecutionTargetOverride(
-    job.source.automationId,
-  ) ?? job.source.assistantTargetOverride
+  return resolveMurphManagedMaintenancePolicy(job.source.automationId)
+    ?.profile === 'member-memory'
+    ? null
+    : job.source.assistantTargetOverride
 }
 
 export function resolveAssistantCronScheduledInvocationAuthority(input: {

@@ -30,9 +30,6 @@ import {
   applyAssistantSelfDeliveryTargetDefaults,
 } from '@murphai/operator-config/operator-config'
 import {
-  HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-} from '@murphai/operator-config/assistant/target-runtime'
-import {
   resolveDeliverableAutomationRoute,
   type AssistantCronDeliveryRouteValidationProfile,
 } from './cron/targets.js'
@@ -200,18 +197,6 @@ export function resolveMurphManagedMaintenancePolicy(
     }
   }
   return null
-}
-
-export function resolveMurphManagedAutomationExecutionTargetOverride(
-  automationId: string | null | undefined,
-): AutomationAssistantTargetOverride | null {
-  return automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-    ? {
-        model: 'gpt-5.5',
-        modelProvider: HOSTED_OPENAI_CODEX_MODEL_PROVIDER_ID,
-        reasoningEffort: 'low',
-      }
-    : null
 }
 
 export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {

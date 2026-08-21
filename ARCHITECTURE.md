@@ -391,11 +391,14 @@ legacy roster handle before any group summary reaches the model.
 
 Immutable hosted memory consolidation remains an isolated one-shot automation.
 Only its exact built-in id receives `murph.member_memory`. The managed seed pins
-no effective provider target: cron admission derives `gpt-5.5` on hosted OpenAI
-at low reasoning with standard service directly from that immutable id, so a
-stale or unreconciled record cannot change the provider contract. Existing
-allowance accounting records successful GPT-5.5 usage at the official standard
-rate without enabling it as the general hosted default. Process-launch config
+no effective provider target, and cron passes no stored target for that id. The
+existing provider-aware turn route retains the invocation's hydrated provider:
+managed OpenAI derives `gpt-5.5` at low reasoning with standard service, while
+verified custom inference retains its opaque revision model. A provider catalog
+that cannot expose the exact tool-only contract fails before provider entry
+without fallback. Existing allowance accounting records successful GPT-5.5
+usage at the official standard rate without enabling it as the general hosted
+default. Process-launch config
 leaves that host-owned function as the complete provider-visible tool inventory.
 The host executes canonical core memory operations while the one-shot turn has
 no shell, filesystem, browser, app, plugin, web-search, environment, or public
