@@ -1464,7 +1464,7 @@ function emptySourceShape() {
     hostedWorkspace: null as { userId: string } | null,
     pendingActivationTimeZone: null,
     routing: null as { memberId: string } | null,
-    signupNotificationContextEncrypted: null,
+    signupNotificationContextEncrypted: null as string | null,
     signupNotificationEmailAttemptedAt: null,
     signupWelcomeEmailAttemptedAt: null,
     threadContainer: null,
