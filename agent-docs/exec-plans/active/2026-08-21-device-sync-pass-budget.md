@@ -27,6 +27,18 @@ Updated: 2026-08-21
 - Focused call-boundary tests and the durable hosted-runtime protocol.
 - The existing related public changelog item.
 
+## Product UX
+
+- Outcome: Established members with delayed connected-health work catch up
+  faster through the existing background-sync journey.
+- Reaches: Explicit device mailbox wakes and idle scheduled reconciles; no new
+  surface, audience, data source, or permission.
+- Proof: Both production entry paths receive the 90-second budget in focused
+  tests, while the existing cancellation suite proves foreground and abort
+  propagation.
+- Walkthrough: Ready. Queued work gets a longer bounded pass, foreground input
+  still preempts it, and partial work retains the existing durable continuation.
+
 ## Constraints
 
 - Do not add another scheduler, retry owner, environment variable, or persisted
@@ -52,6 +64,7 @@ Updated: 2026-08-21
 - The three focused hosted runtime suites pass: 3 files and 317 tests.
 - The full assistant-runtime suite passes: 90 files and 2,467 tests, with five
   intentionally skipped tests.
+- Changelog generation and its focused fragment suite pass: 1 file and 7 tests.
 - The optional diff verifier repeated the same full owner-package pass, then
   was stopped at an unrelated shared-host app-slot wait. Before that wait it
   reported two existing workspace-boundary violations in untouched test files.
