@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-20
+Last verified: 2026-08-21
 
 ## Purpose
 
@@ -175,8 +175,10 @@ Linq, Linq instant-start, and Telegram. Activation persists one canonical start
 and independently carries any available direct route; a missing Telegram route
 is filled later by ordinary managed reconciliation without moving the original
 finite window. Welcome delivery is optional and never owns enrollment.
-Direct-route enforcement, bounded write retry, archive preservation, and
-hosted-local proof are specified by `ARCHITECTURE.md`,
+Every new activation wake emits enrollment intent; genuine member activation
+enrolls while synthetic group-thread containers explicitly opt out. Legacy
+wakes default to enrollment during rollout. Direct-route enforcement, bounded
+write retry, archive preservation, and hosted-local proof are specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`,
 `packages/assistant-runtime/README.md`, and
 `agent-docs/references/testing-ci-map.md`.

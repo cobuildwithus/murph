@@ -25,6 +25,10 @@ follow-up.
 
 - `member.activated` starts canonical onboarding state exactly once at the
   activation timestamp.
+- New activation wakes always carry onboarding-follow-up enrollment intent.
+  Genuine member activation defaults to enrollment, while the existing
+  synthetic group-thread container producer explicitly opts out. Legacy wakes
+  without the field remain enrolled for rollout compatibility.
 - The activation contract carries an optional direct follow-up route separately
   from the optional welcome payload.
 - When a route is present, activation immediately performs the canonical,
@@ -49,8 +53,10 @@ follow-up.
 ## Verification
 
 - Hosted activation contracts preserve and parse the independent route.
+- Contract and runtime tests prove the enrollment default, explicit synthetic
+  group opt-out, and legacy missing-field compatibility.
 - Web activation tests cover standard Linq, Linq instant-start, and established
-  Telegram routing.
+  Telegram routing, while group-thread provisioning proves it opts out.
 - Runtime tests cover route-only activation, welcome-plus-route activation,
   Telegram suppression, retryable persistence failure, and legacy notification
   non-ownership.
@@ -89,5 +95,13 @@ follow-up.
   also needed a fail-closed Web selection fallback and two tests moved onto
   already-declared workspace entrypoints; Web typecheck, 39 handoff tests, both
   affected package tests, and the workspace-boundary verifier pass.
+- Parent review found that synthetic group-thread containers reuse the
+  activation envelope but must not acquire personal onboarding state. The
+  activation contract now carries one explicit enrollment intent: the central
+  signup producer sets it, the synthetic container producer clears it, and the
+  builder emits the genuine-member default on every new wake. Legacy persisted
+  wakes remain opt-in so runtime-first deployment is safe. Focused verification
+  passes 547 hosted-execution tests, 418 assistant-runtime tests, 180 Web tests,
+  package builds, Web and Cloudflare typechecks, and workspace-boundary checks.
 - Remaining work is the corrected exact-head CI run, final ReviewGPT round,
   parent review, and plan closure.

@@ -309,10 +309,12 @@ exact admitted group thread.
 
 Durable onboarding follow-up enrollment coverage is owner-split. Hosted-
 execution contract tests preserve the optional route independent of welcome
-delivery. Web activation tests cover standard Linq, Linq instant-start, and an
-established Telegram thread. Assistant-runtime tests prove route-only and
-welcome-plus-route activation, Telegram welcome suppression, retryable seed
-failure, and legacy notification non-ownership. Assistant-engine tests prove
+delivery and emit explicit enrollment on new activation wakes. Web activation
+tests cover standard Linq, Linq instant-start, an established Telegram thread,
+and the synthetic group-thread opt-out. Assistant-runtime tests prove
+route-only and welcome-plus-route activation, Telegram welcome suppression,
+synthetic group exclusion, missing-field compatibility, retryable seed failure,
+and legacy notification non-ownership. Assistant-engine tests prove
 activation replay stability, delayed route availability, direct-only routing,
 the activation-anchored cutoff, completed-state closure, and archive
 preservation. The hosted-local Telegram first-contact scenario proves silent
