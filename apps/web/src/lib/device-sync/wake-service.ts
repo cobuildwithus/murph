@@ -1995,12 +1995,17 @@ async function prepareHostedWebhookSourceObservation(input: {
           tx,
         });
         if (!source) {
-          if (
-            !sourceInstanceKey
-            || resolveJunctionDeviceConnectRouteByProviderSlug(
-              sourceProviderSlug,
-            ) === null
-          ) {
+          const connectRoute = resolveJunctionDeviceConnectRouteByProviderSlug(
+            sourceProviderSlug,
+          );
+          if (connectRoute === null && !setupPending) {
+            // No connect route can register this slug, so no later delivery can
+            // admit the event. Settle the trace instead of retaining it until
+            // the Queue dead-letters it.
+            await completeHostedWebhookTraceTx(input, tx);
+            return { kind: "terminal" };
+          }
+          if (!sourceInstanceKey || connectRoute === null) {
             throw webhookSourceNotReadyError(
               "Device source setup is not visible yet. Retry shortly.",
             );
@@ -3342,11 +3347,12 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
       currentSource = source;
     } else {
       if (!source) {
-        // Pending setup already left above, and starting a source connect
-        // writes its row first, so this connection never admitted this source.
-        // Retrying cannot change that, and the event carries no admissible data.
-        await completeHostedWebhookTraceTx(input, tx);
-        return { kind: "completed" };
+        throw deviceSyncError({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          message: "Device source setup is not visible yet. Retry shortly.",
+          retryable: true,
+          httpStatus: 503,
+        });
       }
 
       if (source.status !== "connected" || isHostedSourceDisconnectFenced(source)) {
@@ -3432,16 +3438,9 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
         tx,
       });
   if (!dataSource) {
-    if (setupPending) {
-      throw webhookSourceNotReadyError(
-        "Device data source setup is not visible yet. Retry shortly.",
-      );
-    }
-    // Same rule as the event source above: a confirmed connection with no row
-    // never admitted this data source, and an admitted row that is merely
-    // unusable already completes below.
-    await completeHostedWebhookTraceTx(input, tx);
-    return { kind: "completed" };
+    throw webhookSourceNotReadyError(
+      "Device data source setup is not visible yet. Retry shortly.",
+    );
   }
   const observedSourceWillBeAdmitted = Boolean(
     input.sourceObservation?.sourceAccessActive
