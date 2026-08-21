@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import assert from 'node:assert/strict'
 
 import { afterEach, expect, test, vi } from 'vitest'
@@ -35,6 +37,7 @@ import type {
 } from '../src/assistant/providers/types.ts'
 import {
   readAssistantInputEvent,
+  updateAssistantInputAttachmentEvidence,
   upsertAssistantInputEvent,
 } from '../src/assistant/input-store.ts'
 import {
@@ -3688,6 +3691,54 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       threadIsDirect: false,
     },
   })
+  const writeVideoEvidence = async (input: {
+    inputId: string
+    label: string
+    status: 'available' | 'failed'
+  }) => {
+    const rawPath =
+      `raw/inbox/cap_${input.label}/attachments/01__video.mp4`
+    const bytes = Buffer.from([
+      0, 0, 0, 16, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+      input.label.length,
+    ])
+    const sha256 = createHash('sha256').update(bytes).digest('hex')
+    await mkdir(path.dirname(path.join(context.vaultRoot, rawPath)), {
+      recursive: true,
+    })
+    await writeFile(path.join(context.vaultRoot, rawPath), bytes)
+    await updateAssistantInputAttachmentEvidence({
+      attachmentEvidence: {
+        attachments: [{
+          byteSize: bytes.byteLength,
+          derived: null,
+          descriptorAttachmentId: `descriptor_${input.label}`,
+          fileName: 'video.mp4',
+          inlineFragments: [],
+          kind: 'video',
+          mime: 'video/mp4',
+          ordinal: 1,
+          parseState: 'succeeded',
+          raw: {
+            byteSize: bytes.byteLength,
+            kind: 'vault-relative-file',
+            mediaType: 'video/mp4',
+            path: rawPath,
+            sha256,
+          },
+          sourceAttachmentId: `source_${input.label}`,
+        }],
+        optionalInboxCaptureId: `cap_${input.label}`,
+        reasonCode: input.status === 'failed' ? 'evidence_failed' : null,
+        source: 'hosted-inbox-projection',
+        status: input.status,
+        updatedAt: null,
+      },
+      inputId: input.inputId,
+      vault: context.vaultRoot,
+    })
+    return { bytes, rawPath, sha256 }
+  }
   const earlierHostedInput = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
     now: new Date('2026-04-22T10:00:00.500Z'),
@@ -3716,6 +3767,11 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
         laneSeq: '1',
       }),
     },
+  })
+  const initialVideo = await writeVideoEvidence({
+    inputId: earlierHostedInput.inputId,
+    label: 'initial_video',
+    status: 'available',
   })
   const hostedInput = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
@@ -3746,6 +3802,11 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       }),
     },
   })
+  const acceptedVideo = await writeVideoEvidence({
+    inputId: hostedInput.inputId,
+    label: 'active_turn_video',
+    status: 'available',
+  })
   const uncoveredHostedInput = await upsertAssistantInputEvent({
     vault: context.vaultRoot,
     now: new Date('2026-04-22T10:00:02.000Z'),
@@ -3775,6 +3836,11 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       }),
     },
   })
+  await writeVideoEvidence({
+    inputId: uncoveredHostedInput.inputId,
+    label: 'failed_video',
+    status: 'failed',
+  })
   const providerStarted = createDeferred<void>()
   const providerRelease = createDeferred<void>()
   const toolExecutionRequested = createDeferred<void>()
@@ -3785,6 +3851,8 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
   const secondPreflightRequested = createDeferred<void>()
   const toolExecutionCheckpointed = createDeferred<void>()
   const liveSteeredPrompts: string[] = []
+  let videoAuthoritiesBeforePreflight: readonly unknown[] = []
+  let videoAuthoritiesAfterPreflight: readonly unknown[] = []
   let earlierParticipantAuthorization: { targetInputId: string } | null = null
   let earlierParticipantAuthorizationError: unknown = null
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
@@ -3861,12 +3929,22 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       providerTurnId: 'turn-live-provider',
       sessionId: session.sessionId,
       steer: async (input) => {
+        if (input.prompt === 'Event-backed follow up') {
+          await writeVideoEvidence({
+            inputId: hostedInput.inputId,
+            label: 'active_turn_video_after_steer',
+            status: 'available',
+          })
+        }
         liveSteeredPrompts.push(input.prompt)
       },
       turnId: 'turn-1',
     })
     providerStarted.resolve()
     await toolExecutionRequested.promise
+    videoAuthoritiesBeforePreflight =
+      providerInput.hostedToolContext
+        ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
     await providerInput.hostedToolContext?.beforeToolExecution?.(0)
     ordinalZeroPreflightChecked.resolve()
     await ordinalOnePreflightRequested.promise
@@ -3879,6 +3957,9 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
       Promise.resolve()
     secondPreflightRequested.resolve()
     await Promise.all([firstPreflight, secondPreflight])
+    videoAuthoritiesAfterPreflight =
+      providerInput.hostedToolContext
+        ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? []
     try {
       earlierParticipantAuthorization =
         await providerInput.authorizeAcceptedMessageTarget?.({
@@ -3940,6 +4021,10 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
   await vi.waitFor(() => {
     expect(liveSteeredPrompts).toEqual(['Event-backed follow up'])
   })
+  await writeFile(
+    path.join(context.vaultRoot, acceptedVideo.rawPath),
+    Buffer.alloc(acceptedVideo.bytes.byteLength, 0x7f),
+  )
   toolExecutionRequested.resolve()
   await ordinalZeroPreflightChecked.promise
 
@@ -3996,6 +4081,41 @@ test('sendAssistantMessageLocal serializes concurrent hosted tool preflights at 
     earlierHostedInput.inputId,
     hostedInput.inputId,
   ])
+  expect(videoAuthoritiesBeforePreflight).toEqual([{
+    byteSize: initialVideo.bytes.byteLength,
+    messageRef: earlierHostedInput.inputId,
+    mimeType: 'video/mp4',
+    ordinal: 1,
+    rawPath: initialVideo.rawPath,
+    sha256: initialVideo.sha256,
+  }])
+  expect(videoAuthoritiesAfterPreflight).toEqual([
+    {
+      byteSize: initialVideo.bytes.byteLength,
+      messageRef: earlierHostedInput.inputId,
+      mimeType: 'video/mp4',
+      ordinal: 1,
+      rawPath: initialVideo.rawPath,
+      sha256: initialVideo.sha256,
+    },
+    {
+      byteSize: acceptedVideo.bytes.byteLength,
+      messageRef: hostedInput.inputId,
+      mimeType: 'video/mp4',
+      ordinal: 1,
+      rawPath: acceptedVideo.rawPath,
+      sha256: acceptedVideo.sha256,
+    },
+  ])
+  const refreshedHostedInput = await readAssistantInputEvent({
+    inputId: hostedInput.inputId,
+    vault: context.vaultRoot,
+  })
+  expect(
+    refreshedHostedInput?.attachmentEvidence.attachments[0]?.raw?.path,
+  ).toBe(
+    'raw/inbox/cap_active_turn_video_after_steer/attachments/01__video.mp4',
+  )
   providerRelease.resolve()
 
   await expect(resultPromise).resolves.toMatchObject({

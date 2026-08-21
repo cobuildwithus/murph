@@ -127,11 +127,16 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // projection-backed command path without adding a package or changing the
 // static startup closure. The merged public Linux graph measured 9,360,190 B
 // on 2026-08-21 and remains within that retained allowance.
+// Direct Gemini video analysis extends the existing CLI and contract graph
+// without adding a package or changing the static startup closure. Combined
+// with the batched-workout graph, public Linux measured 9,382,747 B on
+// 2026-08-21. The cap is ratcheted from that exact baseline and retains the
+// ordinary 32 KiB graph allowance plus the 8 KiB production-overlay reserve.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_381_583;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_423_707;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

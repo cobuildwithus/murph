@@ -9,6 +9,8 @@ const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"])
 const ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT =
   "murph.assistant-usage.reporting-user.v1";
 const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
+  "cachedContentTokenCount",
+  "candidatesTokenCount",
   "cacheWriteInputTokens",
   "cacheWriteTokens",
   "cache_write_tokens",
@@ -20,11 +22,14 @@ const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
   "input_tokens",
   "outputTokens",
   "output_tokens",
+  "promptTokenCount",
   "promptTokens",
   "prompt_tokens",
   "reasoningTokens",
   "reasoning_tokens",
   "reasoningOutputTokens",
+  "thoughtsTokenCount",
+  "totalTokenCount",
   "totalTokens",
   "total_tokens",
 ]);
@@ -678,6 +683,90 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
     usageExtractionSourcePath: "elevenlabs.music.compose",
     usageExtractionVersion: "elevenlabs-music-v1",
   });
+}
+
+// Usage record for Worker-mediated Gemini video analysis. The tool runs
+// outside the primary assistant model request, so each completed provider call
+// receives a synthetic turn id while retaining the provider's exact token
+// counters when available.
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH =
+  "gemini.generateContent.usageMetadata";
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION =
+  "gemini-video-analysis-v1";
+
+export function buildHostedGeminiVideoAnalysisUsageRecord(input: {
+  memberId: string;
+  model: string;
+  occurredAt: string;
+  providerRequestId?: string | null;
+  usage?: Record<string, unknown> | null;
+}): AssistantUsageRecord {
+  const turnId = `turn_gemini_video_${randomUUID().replaceAll("-", "")}`;
+  const inputTokens = readNonNegativeInteger(input.usage?.promptTokenCount);
+  const outputTokens = readNonNegativeInteger(input.usage?.candidatesTokenCount);
+  const totalTokens = readNonNegativeInteger(input.usage?.totalTokenCount);
+  const cachedInputTokens = readNonNegativeInteger(
+    input.usage?.cachedContentTokenCount,
+  );
+  const reasoningTokens = readNonNegativeInteger(input.usage?.thoughtsTokenCount);
+  const rawUsageJson = compactHostedGeminiUsage(input.usage);
+
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "GEMINI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://generativelanguage.googleapis.com",
+    cachedInputTokens,
+    credentialSource: "platform",
+    featureKey: "video-analysis",
+    inputTokens,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    outputTokens,
+    provider: "gemini",
+    providerName: "Google Gemini",
+    providerRequestId: input.providerRequestId ?? null,
+    ...(rawUsageJson ? { rawUsageJson } : {}),
+    reasoningTokens,
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    totalTokens,
+    triggerKind: "analyze-video",
+    turnId,
+    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
+    usageExtractionSourcePath:
+      HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH,
+    usageExtractionVersion:
+      HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION,
+  });
+}
+
+const HOSTED_GEMINI_USAGE_KEYS = [
+  "cachedContentTokenCount",
+  "candidatesTokenCount",
+  "promptTokenCount",
+  "thoughtsTokenCount",
+  "totalTokenCount",
+] as const;
+
+function compactHostedGeminiUsage(
+  usage: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  const output: Record<string, unknown> = {};
+  for (const key of HOSTED_GEMINI_USAGE_KEYS) {
+    const value = readNonNegativeInteger(usage?.[key]);
+    if (value !== null) {
+      output[key] = value;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : null;
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
 }
 
 // Exact usage for Codex-native memory work intercepted outside the foreground

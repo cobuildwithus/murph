@@ -4,6 +4,10 @@ import {
   buildExaResearchScoutBatchLaneRequest,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION,
+} from "@murphai/hosted-execution/assistant-capabilities";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -24,6 +28,7 @@ import {
   handleHostedRunnerCustomInferenceOutbound,
   handleHostedRunnerElevenLabsOutbound,
   handleHostedRunnerExaOutbound,
+  handleHostedRunnerGeminiOutbound,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
   handleHostedRunnerMapboxOutbound,
@@ -78,6 +83,9 @@ import {
   HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
 } from "../src/runner-egress-venice.ts";
 import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+} from "../src/runner-egress-gemini.ts";
 import {
   sealHostedInferenceRuntimeTarget,
 } from "../src/hosted-inference-target-envelope.ts";
@@ -214,6 +222,34 @@ function createHostedXaiResponsesRequestBody(
       to_date: "2026-07-23",
       type: "x_search",
     }],
+    ...overrides,
+  };
+}
+
+function createHostedGeminiVideoAnalysisRequestBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    contents: [{
+      parts: [
+        {
+          inlineData: {
+            data: Buffer.from("video-bytes").toString("base64"),
+            mimeType: "video/mp4",
+          },
+          videoMetadata: { fps: 1 },
+        },
+        { text: "Count the visible push-ups." },
+      ],
+      role: "user",
+    }],
+    generationConfig: {
+      maxOutputTokens: 1_800,
+      thinkingConfig: { thinkingLevel: "low" },
+    },
+    systemInstruction: {
+      parts: [{ text: HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION }],
+    },
     ...overrides,
   };
 }
@@ -361,6 +397,10 @@ describe("hostedRunnerIntercept", () => {
     expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai).toBe("api.x.ai");
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai])
       .toBe(handleHostedRunnerXaiOutbound);
+    expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini)
+      .toBe("generativelanguage.googleapis.com");
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini])
+      .toBe(handleHostedRunnerGeminiOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["graph.facebook.com"]).toBeUndefined();
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
       .toBe(handleHostedRunnerInternalOutbound);
@@ -1970,6 +2010,392 @@ describe("hostedRunnerIntercept", () => {
       expect(response.status).toBe(403);
     }
 
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("injects Gemini credentials, preserves the fixed request, and records token usage", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        cachedContentTokenCount: 4,
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 7,
+        totalTokenCount: 345,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (target, init) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        const usage = (JSON.parse(String(init?.body)) as {
+          usage: { usageId: string };
+        }).usage;
+        return Response.json({ recorded: true, usageId: usage.usageId });
+      }
+      return Response.json(upstreamPayload, {
+        headers: { "x-goog-request-id": "gemini-req-1" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const requestBody = createHostedGeminiVideoAnalysisRequestBody();
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(requestBody),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            cookie: "session=user-supplied-cookie",
+            "proxy-authorization": "Bearer user-supplied-proxy-token",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = findFetchCall(fetchMock, "generativelanguage.googleapis.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.headers.get("x-goog-api-key"))
+      .toBe("gemini-worker-secret");
+    expect(forwardedRequest.redirect).toBe("manual");
+    expect(forwardedRequest.headers.has("cookie")).toBe(false);
+    expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
+    expect(await forwardedRequest.clone().json()).toEqual(requestBody);
+    expect(await response.clone().json()).toEqual(upstreamPayload);
+
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    const usageCall = findFetchCall(fetchMock, "web.example.test");
+    expect(usageCall).toBeDefined();
+    const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      apiKeyEnv: "GEMINI_API_KEY",
+      cachedInputTokens: 4,
+      featureKey: "video-analysis",
+      inputTokens: 320,
+      memberId: "member_123",
+      outputTokens: 18,
+      provider: "gemini",
+      providerName: "Google Gemini",
+      providerRequestId: "gemini-req-1",
+      reasoningTokens: 7,
+      requestedModel: "gemini-3.7-flash",
+      totalTokens: 345,
+      triggerKind: "analyze-video",
+      usageExtractionSourcePath: "gemini.generateContent.usageMetadata",
+      usageExtractionVersion: "gemini-video-analysis-v1",
+    });
+  });
+
+  it("keeps a successful Gemini response when durable usage recording fails", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return Response.json({ recorded: false, usageId: "usage_rejected" });
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: RUNNER_CONTAINER_NAME,
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(upstreamPayload);
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeDefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({ providerKind: "gemini" }),
+        level: "warn",
+        message: "Hosted Gemini video usage recording failed; response delivery unaffected.",
+      }),
+    );
+  });
+
+  it("returns the buffered Gemini response without awaiting slow accounting when waitUntil is unavailable", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    let markAccountingStarted: (() => void) | undefined;
+    const accountingStarted = new Promise<void>((resolve) => {
+      markAccountingStarted = resolve;
+    });
+    let finishAccounting: ((response: Response) => void) | undefined;
+    const pendingAccounting = new Promise<Response>((resolve) => {
+      finishAccounting = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        markAccountingStarted?.();
+        return await pendingAccounting;
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request(
+            `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+            {
+              body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+              headers: {
+                ...BOUND_USER_WRITE_FENCE_HEADERS,
+                "content-type": "application/json",
+                "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+              },
+              method: "POST",
+            },
+          ),
+          createInterceptEnv({
+            GEMINI_API_KEY: "gemini-worker-secret",
+            validateRuntimeWriteFence: async () => true,
+          }),
+          { containerId: RUNNER_CONTAINER_NAME },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Gemini delivery waited for the accounting callback"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(upstreamPayload);
+      await accountingStarted;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      finishAccounting?.(Response.json({ recorded: true, usageId: "usage_1" }));
+    }
+  });
+
+  it("rejects an oversized Gemini response without widening the delivery buffer", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: {
+          parts: [{
+            text: "x".repeat(HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES),
+          }],
+          role: "model",
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(upstreamPayload));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: RUNNER_CONTAINER_NAME,
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toBe("Hosted Gemini response too large.");
+    expect(waitUntilPromises).toHaveLength(0);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          providerKind: "gemini",
+          responseStatus: 200,
+        },
+        level: "warn",
+        message: "Hosted Gemini response exceeded the delivery body limit; no usage recorded.",
+      }),
+    );
+  });
+
+  it("does not follow Gemini redirects with the injected credential", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const request = target as Request;
+      expect(request.redirect).toBe("manual");
+      return new Response(null, {
+        headers: { location: "https://redirected.example.test/capture" },
+        status: 302,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: RUNNER_CONTAINER_NAME },
+    );
+
+    expect(response.status).toBe(302);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects Gemini path, credential, model-shape, and FPS drift before upstream egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const baseUrl = "https://generativelanguage.googleapis.com";
+    const valid = createHostedGeminiVideoAnalysisRequestBody();
+    const cases = [
+      new Request(`${baseUrl}/v1beta/models/gemini-other:generateContent`, {
+        body: JSON.stringify(valid),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request(`${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`, {
+        body: JSON.stringify(valid),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "x-goog-api-key": "caller-key",
+        },
+        method: "POST",
+      }),
+      new Request(`${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`, {
+        body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody({
+          contents: [{
+            parts: [
+              {
+                inlineData: {
+                  data: Buffer.from("video-bytes").toString("base64"),
+                  mimeType: "video/mp4",
+                },
+                videoMetadata: { fps: 5 },
+              },
+              { text: "Count reps." },
+            ],
+            role: "user",
+          }],
+        })),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+    ];
+
+    for (const request of cases) {
+      const response = await hostedRunnerIntercept(
+        request,
+        createInterceptEnv({
+          GEMINI_API_KEY: "gemini-worker-secret",
+          validateRuntimeWriteFence: async () => true,
+        }),
+        { containerId: RUNNER_CONTAINER_NAME },
+      );
+      expect(response.status).toBe(403);
+    }
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -9381,6 +9807,7 @@ function createInterceptEnv(input: {
   AI?: RunnerOutboundEnvironmentSource["AI"];
   ELEVENLABS_API_KEY?: string;
   EXA_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
@@ -9423,6 +9850,7 @@ function createInterceptEnv(input: {
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     ELEVENLABS_API_KEY: input.ELEVENLABS_API_KEY,
     EXA_API_KEY: input.EXA_API_KEY,
+    GEMINI_API_KEY: input.GEMINI_API_KEY,
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
