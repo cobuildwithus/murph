@@ -48,6 +48,7 @@ import {
 } from "./hosted-member-routing-store";
 import {
   encodeHostedSignupNotificationContext,
+  HOSTED_SIGNUP_NOTIFICATION_CONTEXT_RETENTION_MS,
   parseHostedSignupNotificationContext,
   type HostedSignupNotificationContextV1,
 } from "./signup-notification-context";
@@ -480,6 +481,7 @@ export async function claimHostedMemberSignupNotificationEmailAttempt(input: {
 
 export async function readHostedMemberSignupNotificationContext(input: {
   memberId: string;
+  now: Date;
   prisma: HostedOnboardingReadClient;
 }): Promise<HostedMemberSignupNotificationContextSnapshot | null> {
   const record = await input.prisma.hostedMember.findUnique({
@@ -487,6 +489,7 @@ export async function readHostedMemberSignupNotificationContext(input: {
       createdAt: true,
       id: true,
       signupNotificationContextEncrypted: true,
+      signupNotificationContextExpiresAt: true,
     },
     where: {
       id: input.memberId,
@@ -496,12 +499,18 @@ export async function readHostedMemberSignupNotificationContext(input: {
     return null;
   }
 
-  const plaintext = await decryptHostedWebNullableString({
-    field: HOSTED_MEMBER_SIGNUP_NOTIFICATION_CONTEXT_FIELD,
-    memberId: record.id,
-    prisma: input.prisma,
-    value: record.signupNotificationContextEncrypted,
-  });
+  const contextIsLive = record.signupNotificationContextExpiresAt
+    ? record.signupNotificationContextExpiresAt.getTime() > input.now.getTime()
+    : false;
+
+  const plaintext = contextIsLive
+    ? await decryptHostedWebNullableString({
+        field: HOSTED_MEMBER_SIGNUP_NOTIFICATION_CONTEXT_FIELD,
+        memberId: record.id,
+        prisma: input.prisma,
+        value: record.signupNotificationContextEncrypted,
+      })
+    : null;
   return {
     context: parseHostedSignupNotificationContextOrNull(plaintext),
     createdAt: record.createdAt,
@@ -534,6 +543,10 @@ export async function writeHostedMemberSignupNotificationContextIfPendingTx(
   const result = await input.prisma.hostedMember.updateMany({
     data: {
       signupNotificationContextEncrypted: encrypted,
+      signupNotificationContextExpiresAt: new Date(
+        new Date(input.context.occurredAt).getTime()
+          + HOSTED_SIGNUP_NOTIFICATION_CONTEXT_RETENTION_MS,
+      ),
     },
     where: {
       NOT: activeHostedMemberAccessWhere(),

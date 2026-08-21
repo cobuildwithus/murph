@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-20
-Updated: 2026-08-20
+Updated: 2026-08-21
 
 ## Goal
 
@@ -18,8 +18,9 @@ Updated: 2026-08-20
   context containing only server time, a closed surface, normalized IANA time
   zone, and normalized coarse city/region/country headers.
 - The context is encrypted with the existing member Web control root, first
-  writer wins while the notification remains pending, and the attempt claim
-  clears it atomically before provider entry.
+  writer wins while the notification remains pending, reads stop disclosing it
+  after 24 hours, the existing hourly retention owner clears overdue rows, and
+  the attempt claim clears it atomically before provider entry.
 - The email omits member ID and Stripe event metadata, uses a location-aware
   subject when possible, explicitly labels network location as approximate, and
   renders the signup date/time in the captured local time zone.
@@ -30,8 +31,9 @@ Updated: 2026-08-20
 ## Scope
 
 - In scope: authenticated Web and companion signup-context capture; encrypted
-  pending storage; notification formatting/consumption; the additive schema
-  migration; focused tests; current architecture, security, and Web owner docs.
+  pending storage and bounded retention; notification formatting/consumption;
+  the additive schema migration; focused tests; current architecture,
+  security, and Web owner docs.
 - Out of scope: precise coordinates or postal code, analytics, permanent
   location history, member-visible mail, notification recipient changes, and
   changes to activation or billing authority.
@@ -74,6 +76,11 @@ Updated: 2026-08-20
    Mitigation: use the already-prepared local encryption root inside the auth
    transaction; all email reads, claim, formatting, and provider work remain in
    the existing post-commit task.
+5. Risk: a member who never activates, or a pre-claim read failure after
+   activation, can leave the encrypted projection without an attempt claim.
+   Mitigation: persist a 24-hour expiry beside the ciphertext, refuse to decrypt
+   at or after expiry, and reuse the existing hourly retention sweep with a
+   partial expiry index, bounded batches, and `SKIP LOCKED` claims.
 
 ## Tasks
 
@@ -90,9 +97,27 @@ Updated: 2026-08-20
 - Keep activation, not account-row creation, as signup-notification authority.
 - Store one encrypted pending blob on `hosted_member`; no new service, queue,
   or permanent analytics owner is introduced.
+- Preserve request context for the normal immediate-activation window because
+  it is required for the requested local-time/location notice, but cap that
+  projection at 24 hours. Reuse the existing hourly hosted-retention owner with
+  one expiry timestamp and one partial index; do not add another cron, queue,
+  or lifecycle service.
 - Use Vercel's documented city, country-region, and country request headers;
   do not retain latitude, longitude, IP address, postal code, or provider
   payloads.
+
+## Round-three retrospective
+
+- The final privacy review correctly found that attempt-trigger cleanup alone
+  did not terminate context for never-activated members or failures before the
+  claim. That invalidated the earlier assumption that no lifetime owner was
+  necessary.
+- The product outcome still requires a short pre-activation handoff so the
+  eventual notice can report the actual signup request rather than activation
+  fallback. The smallest bounded correction is therefore one 24-hour expiry on
+  the same row plus the repository's existing hourly retention owner. This
+  adds no independent process or durable history and also retires any malformed
+  context that is missing its expiry.
 
 ## Verification
 
@@ -101,5 +126,6 @@ Updated: 2026-08-20
   formatting; Web prepared typecheck; Prisma format/validation and migration
   guards; `git diff --check` and identifier scan.
 - Expected outcomes: all focused commands pass, the generated Prisma client
-  reflects the nullable column, no private identifiers enter the diff, and
-  exact-head required CI plus ReviewGPT report no unresolved finding.
+  reflects both nullable context columns, the PostgreSQL trigger proof clears
+  both fields, no private identifiers enter the diff, and exact-head required
+  CI plus ReviewGPT report no unresolved finding.

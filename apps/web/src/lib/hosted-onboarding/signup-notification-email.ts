@@ -104,11 +104,12 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
   now?: Date;
   prisma?: PrismaClient;
 }): Promise<HostedSignupNotificationEmailResult> {
+  const now = input.now ?? new Date();
   const config = readHostedSignupNotificationEmailConfig(input.env ?? process.env);
 
   if (!config) {
     await claimHostedMemberSignupNotificationEmailAttempt({
-      attemptedAt: input.now ?? new Date(),
+      attemptedAt: now,
       memberId: input.memberId,
       prisma: input.prisma ?? getPrisma(),
     });
@@ -137,6 +138,7 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
 
   const signupSnapshot = await readHostedMemberSignupNotificationContext({
     memberId: input.memberId,
+    now,
     prisma,
   });
   if (!signupSnapshot) {
@@ -154,7 +156,7 @@ export async function sendHostedSignupNotificationEmailForMember(input: {
     ?? null;
 
   const claimed = await claimHostedMemberSignupNotificationEmailAttempt({
-    attemptedAt: input.now ?? new Date(),
+    attemptedAt: now,
     memberId: input.memberId,
     prisma,
   });

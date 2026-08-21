@@ -607,6 +607,7 @@ model HostedMember {
   initialOnboardingCompletedAt   DateTime?                       @default(now()) @map("initial_onboarding_completed_at")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
   signupNotificationContextEncrypted String?                    @map("signup_notification_context_encrypted")
+  signupNotificationContextExpiresAt DateTime?                   @map("signup_notification_context_expires_at")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
   suspendedAt                    DateTime?                       @map("suspended_at")

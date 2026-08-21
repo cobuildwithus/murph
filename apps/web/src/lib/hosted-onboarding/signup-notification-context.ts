@@ -7,6 +7,9 @@ const HOSTED_SIGNUP_COUNTRY_HEADER = "x-vercel-ip-country";
 const HOSTED_SIGNUP_COUNTRY_REGION_HEADER = "x-vercel-ip-country-region";
 const HOSTED_SIGNUP_CITY_MAX_LENGTH = 100;
 
+export const HOSTED_SIGNUP_NOTIFICATION_CONTEXT_RETENTION_MS =
+  24 * 60 * 60 * 1_000;
+
 export type HostedSignupSurface =
   | "imessage"
   | "mobile_app"

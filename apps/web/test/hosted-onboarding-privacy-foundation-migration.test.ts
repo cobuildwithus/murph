@@ -87,6 +87,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     'signupNotificationContextEncrypted String? @map("signup_notification_context_encrypted")',
+    'signupNotificationContextExpiresAt DateTime? @map("signup_notification_context_expires_at")',
     "pendingGroupSetup HostedPendingGroupSetup?",
     "physicalNotes HostedPhysicalNote[]",
     "sensitiveActionChallenges HostedSensitiveActionChallenge[]",
@@ -2165,19 +2166,22 @@ describe("hosted Prisma baseline migration", () => {
       'ADD COLUMN "signup_notification_context_encrypted" TEXT',
     );
     expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'ADD COLUMN "signup_notification_context_expires_at" TIMESTAMP(3)',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
+      'CREATE INDEX CONCURRENTLY "hosted_member_signup_notification_context_retention_idx"',
+    );
+    expect(hostedSignupNotificationContextMigrationSql).toContain(
       "CREATE FUNCTION clear_hosted_signup_notification_context_on_attempt()",
     );
     expect(hostedSignupNotificationContextMigrationSql).toContain(
       'CREATE TRIGGER "hosted_signup_notification_context_attempt_clear"',
     );
     expect(hostedSignupNotificationContextMigrationSql).toContain(
-      'BEFORE UPDATE OF\n  "signup_notification_email_attempted_at",\n  "signup_notification_context_encrypted"',
+      'BEFORE UPDATE OF\n  "signup_notification_email_attempted_at",\n  "signup_notification_context_encrypted",\n  "signup_notification_context_expires_at"',
     );
     expect(hostedSignupNotificationContextMigrationSql).not.toContain(
       'ADD COLUMN "signup_notification_context_encrypted" TEXT NOT NULL',
-    );
-    expect(hostedSignupNotificationContextMigrationSql).not.toMatch(
-      /CREATE\s+(?:UNIQUE\s+)?INDEX/iu,
     );
     expect(hostedSubscriptionCancellationEmailSentMigrationSql).toContain(
       'ADD COLUMN "subscription_cancellation_email_sent_at" TIMESTAMP(3)',

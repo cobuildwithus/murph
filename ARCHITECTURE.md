@@ -1588,9 +1588,12 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   pending: server occurrence time, validated IANA time zone, closed signup
   surface, and Vercel's advisory network city/region/country headers. Web
   encrypts that context with the member control root and never stores the
-  request IP or precise coordinates. A database trigger clears the ciphertext
-  for every durable email-attempt claim, including one from a rollback runner,
-  and prevents a later context update from restoring it. The email labels the
+  request IP or precise coordinates. The context row carries a 24-hour expiry;
+  reads stop disclosing it at that boundary, and the existing hourly hosted
+  retention owner retires expired or missing-expiry ciphertext in indexed,
+  locked batches. A database trigger clears both ciphertext and expiry for
+  every durable email-attempt claim, including one from a rollback runner, and
+  prevents a later context update from restoring it. The email labels the
   network location as approximate. It uses member creation time in UTC and
   labels an exact fallback as the activation surface when no request context
   exists; batch activation omits the source when it lacks per-member

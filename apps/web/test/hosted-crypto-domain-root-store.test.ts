@@ -3524,6 +3524,7 @@ function createHostedMemberIdentityServiceTransaction(): HostedCryptoTestTransac
         id: input.data.id,
         pendingActivationTimeZone: null,
         signupNotificationContextEncrypted: null,
+        signupNotificationContextExpiresAt: null,
         signupNotificationEmailAttemptedAt: null,
         signupWelcomeEmailAttemptedAt: null,
         suspendedAt: input.data.suspendedAt instanceof Date ? input.data.suspendedAt : null,

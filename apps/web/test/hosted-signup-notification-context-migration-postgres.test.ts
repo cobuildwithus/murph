@@ -48,10 +48,12 @@ describe.skipIf(!runPostgresMigrationProof)(
             "signup_notification_email_attempted_at"
           ) VALUES ('member_fixture', NULL);
         `);
-        await client.query(migrationSql);
+        await applyMigrationWithConcurrentIndex(client, migrationSql);
         await client.query(`
           UPDATE "hosted_member"
-          SET "signup_notification_context_encrypted" = 'encrypted-context'
+          SET
+            "signup_notification_context_encrypted" = 'encrypted-context',
+            "signup_notification_context_expires_at" = '2026-08-21T20:00:00.000'
           WHERE "id" = 'member_fixture';
 
           UPDATE "hosted_member"
@@ -62,17 +64,21 @@ describe.skipIf(!runPostgresMigrationProof)(
         await expect(readFixture(client)).resolves.toEqual({
           attemptedAt: new Date("2026-08-20T20:00:00.000Z"),
           encryptedContext: null,
+          expiresAt: null,
         });
 
         await client.query(`
           UPDATE "hosted_member"
-          SET "signup_notification_context_encrypted" = 'late-context'
+          SET
+            "signup_notification_context_encrypted" = 'late-context',
+            "signup_notification_context_expires_at" = '2026-08-21T20:00:00.000'
           WHERE "id" = 'member_fixture';
         `);
 
         await expect(readFixture(client)).resolves.toEqual({
           attemptedAt: new Date("2026-08-20T20:00:00.000Z"),
           encryptedContext: null,
+          expiresAt: null,
         });
       } finally {
         await client.query(`DROP SCHEMA IF EXISTS ${quotedSchemaName} CASCADE`);
@@ -82,17 +88,40 @@ describe.skipIf(!runPostgresMigrationProof)(
   },
 );
 
+async function applyMigrationWithConcurrentIndex(
+  client: pg.Client,
+  sql: string,
+): Promise<void> {
+  const concurrentIndex = sql.match(
+    /CREATE INDEX CONCURRENTLY[\s\S]*?;\s*/u,
+  );
+  if (!concurrentIndex || concurrentIndex.index === undefined) {
+    throw new Error("Expected signup-notification retention index migration.");
+  }
+
+  const beforeIndex = sql.slice(0, concurrentIndex.index);
+  const afterIndex = sql.slice(
+    concurrentIndex.index + concurrentIndex[0].length,
+  );
+  await client.query(beforeIndex);
+  await client.query(concurrentIndex[0]);
+  await client.query(afterIndex);
+}
+
 async function readFixture(client: pg.Client): Promise<{
   attemptedAt: Date | null;
   encryptedContext: string | null;
+  expiresAt: Date | null;
 }> {
   const result = await client.query<{
     attemptedAt: Date | null;
     encryptedContext: string | null;
+    expiresAt: Date | null;
   }>(`
     SELECT
       "signup_notification_email_attempted_at" AS "attemptedAt",
-      "signup_notification_context_encrypted" AS "encryptedContext"
+      "signup_notification_context_encrypted" AS "encryptedContext",
+      "signup_notification_context_expires_at" AS "expiresAt"
     FROM "hosted_member"
     WHERE "id" = 'member_fixture'
   `);

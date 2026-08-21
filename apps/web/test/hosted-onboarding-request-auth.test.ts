@@ -558,6 +558,7 @@ function createHostedMember(
     id: "member_123",
     pendingActivationTimeZone: null,
     signupNotificationContextEncrypted: null,
+    signupNotificationContextExpiresAt: null,
     signupNotificationEmailAttemptedAt: null,
     signupWelcomeEmailAttemptedAt: null,
     suspendedAt: null,
