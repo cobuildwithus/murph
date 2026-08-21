@@ -108,7 +108,7 @@ export function SiteFooter({
                 Murph
               </span>
               <nav
-                className="grid gap-2 sm:grid-flow-col sm:grid-rows-5 sm:gap-x-12 md:grid-rows-4"
+                className="grid gap-2 sm:grid-flow-col sm:grid-rows-6 sm:gap-x-12 md:grid-rows-4"
                 aria-label="Product links"
               >
                 {productLinks.map((link) => (
