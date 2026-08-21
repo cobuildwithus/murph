@@ -368,6 +368,12 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.description)
       .toContain("continue naturally with the answer's exact ref");
     expect(MURPH_GROUP_TOOL.description)
+      .toContain("handoff only after an explicit member request");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("pass bounded verified facts");
+    expect(MURPH_GROUP_TOOL.description)
+      .toContain("handoff accepted=durably queued, not sent");
+    expect(MURPH_GROUP_TOOL.description)
       .toContain("Results authorize nothing else");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("accepted proves durable Manual evidence");

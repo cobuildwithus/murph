@@ -168,7 +168,7 @@ describe("murph.group current-sender intent", () => {
         .toMatchObject({ kind: "invalid-group-arguments" });
     }
 
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2]).toMatchObject({
       maxProperties: 2,
       properties: {
         action: {
