@@ -808,34 +808,35 @@ describe("MemberUsageClient", () => {
       lastAcknowledgedCursor: null,
     }));
     const sessionStorage = createMemoryStorage();
-    const originalRender = await renderClientComponent(
-      createElement(MemberUsageClient, { dashboard: makeDashboard() }),
+    const rendered = await renderClientComponent(
+      createElement(ProductionMemberUsageClient, {
+        dashboard: makeDashboard(),
+        operatorMemberId: TEST_OPERATOR_MEMBER_ID,
+      }),
       { sessionStorage },
     );
+    cleanupRender = rendered.cleanup;
 
-    await openAndConfirmResetEveryone(originalRender);
+    await openAndConfirmResetEveryone(rendered);
     await vi.waitFor(() => {
-      expect(originalRender.container.textContent)
+      expect(rendered.container.textContent)
         .toContain("Reset everyone paused");
     });
     expect(sessionStorage.length).toBe(1);
-    await originalRender.cleanup();
 
-    const nextOperatorRender = await renderClientComponent(
+    await rendered.rerender(
       createElement(ProductionMemberUsageClient, {
         dashboard: makeDashboard(),
         operatorMemberId: "hbm_other_ops_operator",
       }),
-      { sessionStorage },
     );
-    cleanupRender = nextOperatorRender.cleanup;
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(nextOperatorRender.container.textContent)
+    expect(rendered.container.textContent)
       .not.toContain("Reset everyone paused");
-    expect(getButton(nextOperatorRender.container, "Reset everyone").disabled)
+    expect(getButton(rendered.container, "Reset everyone").disabled)
       .toBe(false);
     expect(sessionStorage.length).toBe(0);
   });

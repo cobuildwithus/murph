@@ -144,7 +144,7 @@ interface MemberUsageClientProps {
 export function MemberUsageClient(props: MemberUsageClientProps) {
   return (
     <MemberUsageClientSurface
-      key={props.dashboard.search.query ?? ""}
+      key={`${props.operatorMemberId ?? "design"}:${props.dashboard.search.query ?? ""}`}
       {...props}
     />
   );
