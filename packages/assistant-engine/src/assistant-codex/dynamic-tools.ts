@@ -2549,32 +2549,18 @@ export async function executeMurphDynamicToolRequest(input: {
             messageRef: explicitOriginCandidate,
           })
         : null
-      const targetOriginAssistantInputId =
-        input.request.targetMessageRef && userActionScope
-          ? resolvePhysicalNoteExplicitOriginInputId({
-              acceptedInputIds: userActionScope.acceptedInputIds,
-              conversationScope: userActionScope.conversationScope,
-              messageRef: input.request.targetMessageRef,
-            })
-          : null
       if (!resolvePhysicalNote || !originAssistantInputId) {
         return toolTextResult(
           false,
           'physical-note recovery requires the exact current authorizing Message ref and hosted recovery transport',
         )
       }
-      if (input.request.targetMessageRef && !targetOriginAssistantInputId) {
-        return toolTextResult(
-          false,
-          'physical-note recovery target_message_ref must identify an accepted earlier Message ref in this conversation',
-        )
-      }
 
       try {
         const result = await resolvePhysicalNote({
           originAssistantInputId,
-          ...(targetOriginAssistantInputId
-            ? { targetOriginAssistantInputId }
+          ...(input.request.targetMessageRef
+            ? { targetOriginAssistantInputId: input.request.targetMessageRef }
             : {}),
         }, {
           signal: input.abortSignal ?? null,
