@@ -49,8 +49,8 @@ import {
 import {
   acceptHostedCompanionHrvRmssdObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
-  buildHostedJunctionSourceEstablishmentWork,
   buildHostedCompanionHrvRmssdDirtyResource,
+  buildHostedJunctionSourceEstablishmentWork,
   captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
@@ -58,7 +58,7 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
-  hasNonTerminalHostedGoogleHealthFitbitLegacySource,
+  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
 import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
@@ -144,8 +144,8 @@ export class HostedDeviceSyncPublicIngressService {
             ? buildHostedJunctionSourceEstablishmentWork({
                 buildSourceConnectionWork,
                 connectionWork: connection,
-                hasNonTerminalLegacyFitbitSource:
-                  hasNonTerminalHostedGoogleHealthFitbitLegacySource(legacySources),
+                hasAuthorizedLegacyFitbitBackfillSource:
+                  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(legacySources),
                 now,
                 sourceProviderSlug,
               })

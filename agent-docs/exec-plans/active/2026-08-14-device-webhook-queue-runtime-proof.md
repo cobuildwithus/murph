@@ -76,6 +76,12 @@ Updated: 2026-08-20
    webhook recovery, bind both exact-source backfills to the admitted Google
    Health `firstSeenAt`, exclude legacy Fitbit reconcile work, and prove the
    mailbox through hosted parsing and the Junction job executor.
+5. Risk: a concurrent explicit Fitbit disconnect remains migration-nonterminal
+   and is mistaken for permission to fetch more Fitbit history.
+   Mitigation: derive migration pending and legacy-read authorization
+   separately from the same bounded source rows, require a non-disconnected,
+   unfenced source before appending Fitbit work, and revalidate both decisions
+   across the existing two-pass admission boundary.
 
 ## Tasks
 
@@ -189,6 +195,14 @@ Updated: 2026-08-20
   Fitbit reconcile, durable state, queue, or lifecycle owner was added. The
   hosted wake parser now admits the two manifest-owned proof fields so runtime
   can execute the durable mailbox instead of rejecting it.
+- Accepted Hercules round 3's review-induced authority finding. A Fitbit
+  disconnect fence remains nonterminal for migration ordering but no longer
+  authorizes Fitbit provider reads. Callback and webhook reconstruction now
+  share the narrower unfenced-source decision, while the broad nonterminal
+  decision continues to hold Google Health data until terminal disconnect or
+  cutover. Final admission compares both transient decisions so a fence added
+  during preparation forces the existing bounded replan; no state or owner was
+  added.
 
 ## Verification
 
@@ -205,7 +219,7 @@ Updated: 2026-08-20
   bindings configured. The workerd reseal regression now passes; its follow-up
   PR and protected redeploy passed. The corrected transport canary accepted
   Queue traffic. The missing-source and queue/wake focused proof now passes all
-  200 cases, and all 14 real-PostgreSQL authority cases pass. This includes
+  204 cases, including all 16 real-PostgreSQL authority cases. This includes
   inactive provider proof followed by successful replay of the same prepared
   event, same-account older/newer Queue ordering, and unsupported missing-source
   rejection without state. The added PostgreSQL case proves the admitted Google
@@ -214,7 +228,11 @@ Updated: 2026-08-20
   survive runtime handoff, stale same-day work keeps a distinct dedupe identity,
   and only the current dual-history proof can make migration ready. The existing
   PostgreSQL cutover journey now also replays the retained Google Health event
-  after cutover and proves its trace plus durable payload commit. Prepared Web
-  and `device-syncd` typechecking pass. Exact-head final
+  after cutover and proves its trace plus durable payload commit. Fenced Fitbit
+  callback cases and real-PostgreSQL missing-row cases prove both an existing
+  fence and a fence installed between admission passes produce Google-only
+  source-establishment work, while the active-source case retains both
+  epoch-bound backfills and terminal disconnect still admits the retained
+  Google event. Prepared Web and `device-syncd` typechecking pass. Exact-head final
   review, Web redeploy, bounded encrypted redrive, and the repeated production
   canary remain pending.

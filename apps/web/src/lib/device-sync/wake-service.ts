@@ -2135,14 +2135,14 @@ export function buildHostedJunctionSourceEstablishmentWork(input: {
     DeviceConnectionHandler["buildSourceConnectionWork"]
   >;
   connectionWork: Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
-  hasNonTerminalLegacyFitbitSource: boolean;
+  hasAuthorizedLegacyFitbitBackfillSource: boolean;
   now: string;
   sourceProviderSlug: string | null | undefined;
 }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt"> {
   const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
   if (
     sourceProviderSlug !== JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-    || !input.hasNonTerminalLegacyFitbitSource
+    || !input.hasAuthorizedLegacyFitbitBackfillSource
   ) {
     return input.connectionWork;
   }
@@ -2890,8 +2890,8 @@ async function persistHostedDeviceSyncWebhookAccepted(
             buildSourceConnectionWork:
               input.sourceObservation.buildSourceConnectionWork,
             connectionWork: input.sourceObservation.connectionWork,
-            hasNonTerminalLegacyFitbitSource:
-              initialAdmission?.status.hasNonTerminalLegacyFitbitSource === true,
+            hasAuthorizedLegacyFitbitBackfillSource:
+              initialAdmission?.status.hasAuthorizedLegacyFitbitBackfillSource === true,
             now: input.acceptedAt,
             sourceProviderSlug: input.sourceObservation.source.sourceProviderSlug,
           })
@@ -2949,6 +2949,8 @@ async function persistHostedDeviceSyncWebhookAccepted(
               initialAdmission
               && (
                 finalAdmission.kind !== initialAdmission.status.kind
+                || finalAdmission.hasAuthorizedLegacyFitbitBackfillSource
+                  !== initialAdmission.status.hasAuthorizedLegacyFitbitBackfillSource
                 || finalAdmission.hasNonTerminalLegacyFitbitSource
                   !== initialAdmission.status.hasNonTerminalLegacyFitbitSource
               )
@@ -3190,6 +3192,7 @@ type HostedDeviceSyncWebhookAdmissionStatus =
   | {
       currentConnectionRecord: HostedConnectionRecord | null;
       currentSource: HostedConnectionSourceAdmissionCandidate | null;
+      hasAuthorizedLegacyFitbitBackfillSource: boolean;
       hasNonTerminalLegacyFitbitSource: boolean;
       kind: "ready";
       setupPending: boolean;
@@ -3197,6 +3200,7 @@ type HostedDeviceSyncWebhookAdmissionStatus =
   | {
       currentConnectionRecord: HostedConnectionRecord | null;
       currentSource: HostedConnectionSourceAdmissionCandidate | null;
+      hasAuthorizedLegacyFitbitBackfillSource: boolean;
       hasNonTerminalLegacyFitbitSource: boolean;
       kind: "migration_pending";
       setupPending: boolean;
@@ -3389,6 +3393,8 @@ async function inspectHostedDeviceSyncWebhookAdmissionTx(
   const ready = {
     currentConnectionRecord: sourceCredentialCurrent,
     currentSource,
+    hasAuthorizedLegacyFitbitBackfillSource:
+      hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(legacySources),
     hasNonTerminalLegacyFitbitSource,
     kind: "ready" as const,
     setupPending,
@@ -3481,6 +3487,17 @@ export function hasNonTerminalHostedGoogleHealthFitbitLegacySource(
     normalizeJunctionProviderSlug(source.sourceProviderSlug)
       === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
     && !isGoogleHealthFitbitMigrationLegacyTerminal(source)
+  );
+}
+
+export function hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(
+  sources: readonly HostedDeviceConnectionSource[],
+): boolean {
+  return sources.some((source) =>
+    normalizeJunctionProviderSlug(source.sourceProviderSlug)
+      === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
+    && source.status !== "disconnected"
+    && !isHostedSourceDisconnectFenced(source)
   );
 }
 

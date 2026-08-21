@@ -523,6 +523,27 @@ async function cleanupFixture(fixture: Fixture): Promise<void> {
   fixture.restoreCryptoEnvironment();
 }
 
+async function readSourceEstablishmentJobs(fixture: Fixture) {
+  const mailboxItems = await fixture.prisma.hostedMailboxItem.findMany({
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+    where: { userId: fixture.memberId },
+  });
+  const wakes = await Promise.all(mailboxItems.map((item) =>
+    readHostedMailboxWakeByItemId({
+      mailboxItemId: item.id,
+      prisma: fixture.prisma,
+    })
+  ));
+  const sourceWake = wakes.find((wake) =>
+    wake?.kind === "device-sync.wake" && wake.reason === "connected"
+  );
+  if (!sourceWake || sourceWake.kind !== "device-sync.wake") {
+    throw new TypeError("Expected source-establishment mailbox work.");
+  }
+  return sourceWake.hint?.jobs ?? [];
+}
+
 function historyCoverageVersion(resource: string): number {
   const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
   if (version === null) {
@@ -773,24 +794,7 @@ describe.skipIf(!runPostgresProof)(
           firstSeenAt: fixture.receivedAt,
           status: "connected",
         });
-        const mailboxItems = await fixture.prisma.hostedMailboxItem.findMany({
-          orderBy: { createdAt: "asc" },
-          select: { id: true },
-          where: { userId: fixture.memberId },
-        });
-        const wakes = await Promise.all(mailboxItems.map((item) =>
-          readHostedMailboxWakeByItemId({
-            mailboxItemId: item.id,
-            prisma: fixture.prisma,
-          })
-        ));
-        const sourceWake = wakes.find((wake) =>
-          wake?.kind === "device-sync.wake" && wake.reason === "connected"
-        );
-        if (!sourceWake || sourceWake.kind !== "device-sync.wake") {
-          throw new TypeError("Expected source-establishment mailbox work.");
-        }
-        const jobs = sourceWake.hint?.jobs ?? [];
+        const jobs = await readSourceEstablishmentJobs(fixture);
         expect(jobs).toEqual(expect.arrayContaining([
           expect.objectContaining({
             kind: "backfill",
@@ -816,6 +820,143 @@ describe.skipIf(!runPostgresProof)(
           }),
         ]));
       } finally {
+        await cleanupFixture(fixture);
+      }
+    });
+
+    it.each([
+      {
+        fenceDuringAdmission: false,
+        label: "an existing disconnect fence",
+      },
+      {
+        fenceDuringAdmission: true,
+        label: "a disconnect fence installed between admission passes",
+      },
+    ])("does not authorize legacy Fitbit reads after $label", async ({
+      fenceDuringAdmission,
+    }) => {
+      const sourceProviderSlug = "google_health";
+      const fixture = await createFixture({
+        sourceLastErrorCode: null,
+        sourceProviderSlug,
+      });
+      const googleSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug,
+      });
+      const fitbitSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+        connectionId: fixture.connectionId,
+        sourceProviderSlug: "fitbit",
+      });
+      if (!googleSourceInstanceKey || !fitbitSourceInstanceKey) {
+        throw new TypeError("Expected canonical Google Health and Fitbit source identities.");
+      }
+      const providerFetch = vi.fn(async () => new Response(JSON.stringify({
+        data: [
+          { slug: "fitbit", status: "connected" },
+          { slug: sourceProviderSlug, status: "connected" },
+        ],
+      }), {
+        headers: { "content-type": "application/json" },
+        status: 200,
+      }));
+      const registry = createJunctionRegistry(providerFetch);
+      let restoreLegacySourceRead = () => {};
+      let legacySourceReadCount = 0;
+
+      try {
+        await fixture.prisma.deviceConnectionSource.delete({
+          where: { id: fixture.sourceId },
+        });
+        await fixture.store.upsertConnectionSource({
+          connectionId: fixture.connectionId,
+          firstSeenAt: new Date(fixture.receivedAt.getTime() - 86_400_000).toISOString(),
+          lastErrorCode: fenceDuringAdmission
+            ? null
+            : DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+          lastSeenAt: fixture.receivedAt.toISOString(),
+          sourceInstanceKey: fitbitSourceInstanceKey,
+          sourceProviderSlug: "fitbit",
+          status: "connected",
+        });
+        const prepared = await prepareDailyData({
+          fixture,
+          registry,
+          sourceProviderSlug,
+        });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: fixture.store,
+        });
+
+        if (fenceDuringAdmission) {
+          const listLegacySources =
+            fixture.store.listBoundedConnectionSourcesForConnections.bind(fixture.store);
+          const legacySourceRead = vi.spyOn(
+            fixture.store,
+            "listBoundedConnectionSourcesForConnections",
+          ).mockImplementation(async (input) => {
+            legacySourceReadCount += 1;
+            if (legacySourceReadCount === 2) {
+              await fixture.observer.deviceConnectionSource.update({
+                data: {
+                  lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+                  lastSeenAt: new Date(fixture.receivedAt.getTime() + 1).toISOString(),
+                },
+                where: {
+                  connectionId_sourceInstanceKey: {
+                    connectionId: fixture.connectionId,
+                    sourceInstanceKey: fitbitSourceInstanceKey,
+                  },
+                },
+              });
+            }
+            return listLegacySources(input);
+          });
+          restoreLegacySourceRead = () => legacySourceRead.mockRestore();
+        }
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).rejects.toMatchObject({
+          code: "WEBHOOK_SOURCE_NOT_READY",
+          retryable: true,
+        });
+
+        expect(providerFetch).toHaveBeenCalledOnce();
+        if (fenceDuringAdmission) {
+          expect(legacySourceReadCount).toBe(4);
+        }
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: { firstSeenAt: true, status: true },
+          where: {
+            connectionId_sourceInstanceKey: {
+              connectionId: fixture.connectionId,
+              sourceInstanceKey: googleSourceInstanceKey,
+            },
+          },
+        })).resolves.toEqual({
+          firstSeenAt: fixture.receivedAt,
+          status: "connected",
+        });
+        const jobs = await readSourceEstablishmentJobs(fixture);
+        expect(jobs).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            kind: "backfill",
+            payload: expect.objectContaining({
+              historicalProofFirstSeenAt: fixture.receivedAt.toISOString(),
+              historicalProofSourceProviderSlug: sourceProviderSlug,
+              sourceProviderSlug,
+            }),
+          }),
+        ]));
+        expect(jobs).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({ sourceProviderSlug: "fitbit" }),
+          }),
+        ]));
+      } finally {
+        restoreLegacySourceRead();
         await cleanupFixture(fixture);
       }
     });

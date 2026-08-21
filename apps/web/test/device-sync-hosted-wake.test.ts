@@ -659,6 +659,7 @@ import {
 } from "@/src/lib/device-sync/public-ingress-service";
 import {
   HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+  HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
 } from "@/src/lib/device-sync/connection-source-lifecycle";
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 import {
@@ -6338,7 +6339,29 @@ describe("hosted device-sync wakes", () => {
     expect(sourceInstanceKey).not.toMatch(/dsc|junction|garmin/u);
   });
 
-  it("enqueues exact legacy Fitbit history when Google Health starts migration", async () => {
+  it.each([
+    {
+      expectedFitbitBackfill: true,
+      label: "enqueues exact legacy Fitbit history while the source is active",
+      legacyOverrides: {},
+    },
+    {
+      expectedFitbitBackfill: false,
+      label: "does not enqueue Fitbit history after disconnect is fenced",
+      legacyOverrides: {
+        lastErrorCode: HOSTED_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
+        status: "connected" as const,
+      },
+    },
+    {
+      expectedFitbitBackfill: false,
+      label: "does not enqueue Fitbit history while start cleanup is fenced",
+      legacyOverrides: {
+        lastErrorCode: HOSTED_SOURCE_START_CLEANUP_IN_PROGRESS_ERROR_CODE,
+        status: "connected" as const,
+      },
+    },
+  ])("$label", async ({ expectedFitbitBackfill, legacyOverrides }) => {
     const buildSourceConnectionWork = vi.fn((input: {
       historicalProofAuthorization?: {
         firstSeenAt: string;
@@ -6371,7 +6394,7 @@ describe("hosted device-sync wakes", () => {
       nextReconcileAt: "2026-03-26T12:15:00.000Z",
     }));
     mocks.listConnectionSources.mockResolvedValue([
-      buildHostedConnectionSource("dsc_123", "fitbit"),
+      buildHostedConnectionSource("dsc_123", "fitbit", legacyOverrides),
     ]);
     mocks.getConnectionForUser.mockResolvedValue(buildHostedConnection({
       id: "dsc_123",
@@ -6425,14 +6448,6 @@ describe("hosted device-sync wakes", () => {
       expectedOwnerId: "user-123",
     });
 
-    expect(buildSourceConnectionWork).toHaveBeenCalledWith({
-      historicalProofAuthorization: {
-        firstSeenAt: "2026-03-26T12:00:00.000Z",
-        sourceProviderSlug: "google_health",
-      },
-      now: "2026-03-26T12:00:00.000Z",
-      sourceProviderSlug: "fitbit",
-    });
     const jobs = mocks.appendHostedMailboxEnvelope.mock.calls.at(-1)?.[0]
       ?.envelope.hint.jobs;
     expect(jobs).toEqual(expect.arrayContaining([
@@ -6444,15 +6459,34 @@ describe("hosted device-sync wakes", () => {
           sourceProviderSlug: "google_health",
         }),
       }),
-      expect.objectContaining({
-        kind: "backfill",
-        payload: expect.objectContaining({
-          historicalProofFirstSeenAt: "2026-03-26T12:00:00.000Z",
-          historicalProofSourceProviderSlug: "google_health",
-          sourceProviderSlug: "fitbit",
-        }),
-      }),
     ]));
+    if (expectedFitbitBackfill) {
+      expect(buildSourceConnectionWork).toHaveBeenCalledWith({
+        historicalProofAuthorization: {
+          firstSeenAt: "2026-03-26T12:00:00.000Z",
+          sourceProviderSlug: "google_health",
+        },
+        now: "2026-03-26T12:00:00.000Z",
+        sourceProviderSlug: "fitbit",
+      });
+      expect(jobs).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: "backfill",
+          payload: expect.objectContaining({
+            historicalProofFirstSeenAt: "2026-03-26T12:00:00.000Z",
+            historicalProofSourceProviderSlug: "google_health",
+            sourceProviderSlug: "fitbit",
+          }),
+        }),
+      ]));
+    } else {
+      expect(buildSourceConnectionWork).not.toHaveBeenCalled();
+      expect(jobs).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          payload: expect.objectContaining({ sourceProviderSlug: "fitbit" }),
+        }),
+      ]));
+    }
     expect(jobs).not.toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "reconcile",
