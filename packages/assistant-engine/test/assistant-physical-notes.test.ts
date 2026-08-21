@@ -238,6 +238,11 @@ describe('assistant physical notes', () => {
         'No unresolved physical-note submission remains',
       )
     }
+    if (response.status === 'pending') {
+      expect(result.rpcResult.contentItems[0]?.text).not.toContain(
+        'checked earlier submission was cleared',
+      )
+    }
     if (
       response.remainingUnresolved
       && (response.status === 'accepted' || response.status === 'clear')

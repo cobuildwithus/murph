@@ -689,6 +689,84 @@ describe.skipIf(!runPostgresProof)(
         await Promise.allSettled([holderTransaction]);
       }
     });
+
+    it("selects an equal-timestamp recovery guard by a stable total order", async () => {
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const createdAt = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+      const ids = [
+        `hpn_${randomUUID().replaceAll("-", "")}`,
+        `hpn_${randomUUID().replaceAll("-", "")}`,
+      ].sort();
+      const oldestId = ids[0]!;
+      const { recoverHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      await observer.hostedPhysicalNote.createMany({
+        data: ids.map((id, index) => ({
+          complimentaryOfferCode: null,
+          createdAt,
+          failureReason: null,
+          id,
+          memberId: beneficiary,
+          pricingVersion: "lob-test-v1",
+          provider: "lob" as const,
+          providerCostUsdMicros: 250_000n,
+          requestFingerprint: `tied-legacy-fingerprint-${index}`,
+          requestKey: `tied-legacy-${id}`,
+          status: "failed" as const,
+        })),
+      });
+      const createProviderLetter = vi.fn(async () => ({
+        kind: "accepted" as const,
+        providerLetterId: "ltr_must_not_send",
+      }));
+      const findProviderLetter = vi.fn(async () => ({
+        kind: "indeterminate" as const,
+      }));
+
+      await expect(recoverHostedPhysicalNote({
+        memberId: beneficiary,
+        originAssistantInputId: buildRequest(7, beneficiary).originAssistantInputId,
+        prisma: observer,
+        runtime: {
+          create: createProviderLetter,
+          findLetterByNoteId: findProviderLetter,
+        },
+      })).resolves.toEqual({
+        remainingUnresolved: true,
+        retryAfter: null,
+        status: "pending",
+      });
+      expect(findProviderLetter).toHaveBeenCalledWith({
+        noteId: oldestId,
+        signal: undefined,
+      });
+      expect(createProviderLetter).not.toHaveBeenCalled();
+
+      const repeatedOldestIds = await Promise.all(
+        Array.from({ length: 5 }, async () =>
+          (await observer.hostedPhysicalNote.findFirst({
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+            select: { id: true },
+            where: {
+              memberId: beneficiary,
+              OR: [
+                { status: "starting" },
+                { failureReason: null, status: "failed" },
+              ],
+            },
+          }))?.id ?? null
+        ),
+      );
+      expect(repeatedOldestIds).toEqual(Array(5).fill(oldestId));
+      await expect(observer.hostedPhysicalNote.findUnique({
+        where: { id: oldestId },
+      })).resolves.toMatchObject({
+        failureReason: null,
+        status: "failed",
+      });
+    });
   },
 );
 

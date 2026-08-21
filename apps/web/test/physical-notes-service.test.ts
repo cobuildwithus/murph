@@ -111,6 +111,7 @@ type PhysicalNoteUpdateData = Partial<Pick<
 interface PhysicalNoteStore {
   allRows(): HostedPhysicalNote[];
   prisma: PrismaClient;
+  queueFindFirstRowIds(...ids: string[]): void;
   setCreatedAt(id: string, createdAt: Date): void;
   setFailureReason(
     id: string,
@@ -1313,6 +1314,10 @@ describe("recoverHostedPhysicalNote", () => {
       runtime: createPhysicalNoteRuntime([]).runtime,
     });
     store.setFailureReason(blocked.physicalNoteId!, null);
+    const blockedCreatedAt = store.allRows().find(
+      (row) => row.id === blocked.physicalNoteId,
+    )!.createdAt;
+    store.setCreatedAt(guardId, new Date(blockedCreatedAt.getTime() - 1));
     const provider = createPhysicalNoteRuntime([], [{
       kind: "accepted",
       providerLetterId: "ltr_recovered_with_remaining",
@@ -1365,6 +1370,43 @@ describe("recoverHostedPhysicalNote", () => {
       status: "failed",
     });
     expect(provider.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps the checked tied guard pending when the aggregate reread selects another row", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const { guardId, store } = await createLegacyPhysicalNoteGuard(212);
+    const blocked = await createHostedPhysicalNote({
+      ...buildRequest(213),
+      prisma: store.prisma,
+      runtime: createPhysicalNoteRuntime([]).runtime,
+    });
+    const blockedId = blocked.physicalNoteId!;
+    const tiedCreatedAt = new Date(Date.now() - REPLAY_WINDOW_MS - 1);
+    store.setFailureReason(blockedId, null);
+    store.setCreatedAt(guardId, tiedCreatedAt);
+    store.setCreatedAt(blockedId, tiedCreatedAt);
+    store.queueFindFirstRowIds(guardId, blockedId);
+    const provider = createPhysicalNoteRuntime([], [{ kind: "indeterminate" }]);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: buildRequest(212).originAssistantInputId,
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    })).resolves.toEqual({
+      remainingUnresolved: true,
+      retryAfter: null,
+      status: "pending",
+    });
+    expect(provider.findLetterByNoteId).toHaveBeenCalledWith({
+      noteId: guardId,
+      signal: undefined,
+    });
+    expect(store.allRows().find((row) => row.id === guardId)).toMatchObject({
+      failureReason: null,
+      status: "failed",
+    });
   });
 
   it("clears an aged proven absence and its unsent blocker", async () => {
@@ -1621,6 +1663,7 @@ function createPhysicalNoteStore(
   const rows = new Map(
     initialRows.map((row) => [row.id, cloneRow(row)]),
   );
+  const queuedFindFirstRowIds: string[] = [];
 
   const hostedPhysicalNote = {
     async create(input: {
@@ -1640,19 +1683,30 @@ function createPhysicalNoteStore(
     },
 
     async findFirst(input: {
-      orderBy?: { createdAt: "asc" };
+      orderBy?: readonly [
+        { createdAt: "asc" },
+        { id: "asc" },
+      ];
       select?: { id: true };
       where: PhysicalNoteWhere;
     }): Promise<HostedPhysicalNote | { id: string } | null> {
       const candidates = [...rows.values()].filter((candidate) =>
         matchesWhere(candidate, input.where)
       );
-      if (input.orderBy?.createdAt === "asc") {
-        candidates.sort((left, right) =>
-          left.createdAt.getTime() - right.createdAt.getTime()
-        );
+      if (input.orderBy?.[0]?.createdAt === "asc") {
+        candidates.sort((left, right) => {
+          const createdAtOrder =
+            left.createdAt.getTime() - right.createdAt.getTime();
+          return createdAtOrder || left.id.localeCompare(right.id);
+        });
       }
-      const row = candidates[0];
+      const queuedId = queuedFindFirstRowIds.shift();
+      const row = queuedId
+        ? candidates.find((candidate) => candidate.id === queuedId)
+        : candidates[0];
+      if (queuedId && !row) {
+        throw new Error(`queued physical note ${queuedId} did not match`);
+      }
       if (!row) return null;
       return input.select ? { id: row.id } : cloneRow(row);
     },
@@ -1721,6 +1775,9 @@ function createPhysicalNoteStore(
   return {
     allRows: () => [...rows.values()].map(cloneRow),
     prisma,
+    queueFindFirstRowIds(...ids) {
+      queuedFindFirstRowIds.push(...ids);
+    },
     setCreatedAt(id, createdAt) {
       const row = rows.get(id);
       if (!row) {

@@ -360,17 +360,20 @@ export async function recoverHostedPhysicalNote(
   if (reconciled.status === "accepted") {
     return physicalNoteRecoveryResponse("accepted", remainingUnresolved);
   }
-  if (remainingGuard?.id !== guard.id) {
-    return physicalNoteRecoveryResponse("clear", remainingUnresolved);
+  if (
+    reconciled.status === "starting"
+    || (reconciled.status === "failed" && reconciled.failureReason === null)
+  ) {
+    const retryAfterMs = reconciled.createdAt.getTime() + REPLAY_WINDOW_MS;
+    return {
+      remainingUnresolved,
+      retryAfter: retryAfterMs > Date.now()
+        ? new Date(retryAfterMs).toISOString()
+        : null,
+      status: "pending",
+    };
   }
-  const retryAfterMs = remainingGuard.createdAt.getTime() + REPLAY_WINDOW_MS;
-  return {
-    remainingUnresolved: true,
-    retryAfter: retryAfterMs > Date.now()
-      ? new Date(retryAfterMs).toISOString()
-      : null,
-    status: "pending",
-  };
+  return physicalNoteRecoveryResponse("clear", remainingUnresolved);
 }
 
 async function requireHostedPhysicalNoteActionAuthority(input: {
@@ -507,7 +510,7 @@ async function findPhysicalNoteEffectGuard(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<HostedPhysicalNote | null> {
   return await input.prisma.hostedPhysicalNote.findFirst({
-    orderBy: { createdAt: "asc" },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     where: {
       memberId: input.memberId,
       OR: [
