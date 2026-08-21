@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
-import { rm } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 
 import { Cli } from 'incur'
 import { afterAll } from 'vitest'
@@ -103,6 +104,31 @@ function requireShownRevision(shown: ShowResult): number {
   const revision = shown.entity.data.lifecycle?.revision
   assert.equal(typeof revision, 'number')
   return revision!
+}
+
+async function removeStoredLifecycle(
+  vaultRoot: string,
+  workout: Pick<WorkoutResult, 'eventId' | 'ledgerFile'>,
+): Promise<void> {
+  const ledgerPath = path.join(vaultRoot, workout.ledgerFile)
+  const records = (await readFile(ledgerPath, 'utf8'))
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+  let removed = false
+
+  for (const record of records) {
+    if (record.id === workout.eventId) {
+      delete record.lifecycle
+      removed = true
+    }
+  }
+  assert.equal(removed, true)
+  await writeFile(
+    ledgerPath,
+    `${records.map((record) => JSON.stringify(record)).join('\n')}\n`,
+    'utf8',
+  )
 }
 
 test('live workout commands target exact records without a global active singleton', async () => {
@@ -332,6 +358,96 @@ test('workout start writes one complete ordered exercise batch in one canonical 
     'workout', 'show', otherWorkout.eventId, '--vault', vaultRoot,
   ])).envelope)
   assert.equal(otherStillOpen.entity.data.workout.endedAt, undefined)
+})
+
+test('legacy workouts expose effective revision one for guarded replacement deletion', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-live-workout-legacy-revision-',
+  )
+  cleanupPaths.push(parentRoot)
+  const cli = createWorkoutCli()
+
+  assert.equal(requireData((await run<{ created: boolean }>(cli, [
+    'init', '--vault', vaultRoot, '--timezone', 'UTC',
+  ])).envelope).created, true)
+  const unrelated = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Unrelated workout', '--vault', vaultRoot,
+  ])).envelope)
+
+  const approved = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Legacy approved workout', '--vault', vaultRoot,
+  ])).envelope)
+  await removeStoredLifecycle(vaultRoot, approved)
+  const approvedRead = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', approved.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(requireShownRevision(approvedRead), 1)
+
+  const replacement = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Verified replacement',
+    '--exercise', 'name=Pull-up;sets=2;reps=10;mode=bodyweight',
+    '--exercise', 'name=Press;sets=3;reps=8;mode=weight_reps',
+    '--vault', vaultRoot,
+  ])).envelope)
+  const verifiedReplacement = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', replacement.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.deepEqual(
+    verifiedReplacement.entity.data.workout.exercises.map((exercise) => exercise.name),
+    ['Pull-up', 'Press'],
+  )
+  assert.equal(requireData((await run<{ deleted: true }>(cli, [
+    'workout', 'delete', approved.eventId,
+    '--expected-revision', String(requireShownRevision(approvedRead)),
+    '--vault', vaultRoot,
+  ])).envelope).deleted, true)
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'show', approved.eventId, '--vault', vaultRoot,
+  ])).envelope.ok, false)
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'show', replacement.eventId, '--vault', vaultRoot,
+  ])).envelope.ok, true)
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'show', unrelated.eventId, '--vault', vaultRoot,
+  ])).envelope.ok, true)
+
+  const staleApproved = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Legacy stale workout', '--vault', vaultRoot,
+  ])).envelope)
+  await removeStoredLifecycle(vaultRoot, staleApproved)
+  const staleApprovedRead = requireData((await run<ShowResult>(cli, [
+    'workout', 'show', staleApproved.eventId, '--vault', vaultRoot,
+  ])).envelope)
+  assert.equal(requireShownRevision(staleApprovedRead), 1)
+  const retainedReplacement = requireData((await run<WorkoutResult>(cli, [
+    'workout', 'start', 'Retained replacement',
+    '--exercise', 'name=Row;sets=2;reps=12;mode=weight_reps',
+    '--vault', vaultRoot,
+  ])).envelope)
+  await addLiveWorkoutExercise({
+    vault: vaultRoot,
+    workoutId: staleApproved.eventId,
+    name: 'Concurrent correction',
+    order: 1,
+    setCount: 1,
+  })
+
+  const conflict = await run<{ deleted: true }>(cli, [
+    'workout', 'delete', staleApproved.eventId,
+    '--expected-revision', String(requireShownRevision(staleApprovedRead)),
+    '--vault', vaultRoot,
+  ])
+  assert.equal(conflict.envelope.ok, false)
+  if (conflict.envelope.ok) {
+    throw new Error('Expected guarded legacy workout deletion to conflict.')
+  }
+  assert.equal(conflict.envelope.error.code, 'conflict')
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'show', staleApproved.eventId, '--vault', vaultRoot,
+  ])).envelope.ok, true)
+  assert.equal((await run<ShowResult>(cli, [
+    'workout', 'show', retainedReplacement.eventId, '--vault', vaultRoot,
+  ])).envelope.ok, true)
 })
 
 test('create-first replacement deletes only the exact approved workout revision', async () => {

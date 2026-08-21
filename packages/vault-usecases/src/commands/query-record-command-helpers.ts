@@ -1,5 +1,9 @@
 import { readFile } from 'node:fs/promises'
-import { extractIsoDatePrefix, type EventRecord } from '@murphai/contracts'
+import {
+  eventRevisionFromLifecycle,
+  extractIsoDatePrefix,
+  type EventRecord,
+} from '@murphai/contracts'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
@@ -113,6 +117,15 @@ export function toExactEventQueryRecord(
       : event.id
   const relatedIds = [...new Set((event.links ?? []).map((link) => link.targetId))]
   const attributes: JsonObject = structuredClone(event) as JsonObject
+  const storedLifecycle = attributes.lifecycle
+  attributes.lifecycle = {
+    ...(storedLifecycle !== null
+      && typeof storedLifecycle === 'object'
+      && !Array.isArray(storedLifecycle)
+      ? storedLifecycle
+      : {}),
+    revision: eventRevisionFromLifecycle(event.lifecycle),
+  }
 
   if (displayId !== event.id) {
     attributes.entityId = displayId
