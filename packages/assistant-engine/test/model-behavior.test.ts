@@ -136,50 +136,23 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
-    expect(groupPrompt).toContain(
-      'It does not withdraw an answer already completed in that turn; that answer still sends.',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted before the first completed assistant response may join this turn.',
-    )
-    expect(groupPrompt).toContain(
-      'never replace, retract, or suppress completed text or media',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
-    )
+    expect(groupPrompt).toContain('reason over the whole current beat')
+    expect(groupPrompt).toContain('do not repeat completed effects')
     expect(groupPrompt).not.toContain('replaces the earlier answer')
     expect(groupPrompt).not.toContain('carry forward anything still worth saying')
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
-      'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
+      'Take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
     expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
+      'Do not answer each accepted message separately or recap the burst point by point.',
     )
-    expect(groupPrompt).toContain(
-      'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
-    )
-    expect(groupPrompt).toContain(
-      'answer newly urgent or time-sensitive input without another sleep',
-    )
-    expect(groupPrompt).toContain(
-      'Only when the refreshed beat still warrants an ordinary text reply, run one final `sleep 6`',
-    )
-    expect(groupPrompt).toContain(
-      'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
-    )
-    expect(groupPrompt).toContain(
-      'Never sleep more than 14 seconds total.',
-    )
-    expect(groupPrompt).toContain(
-      'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
-    )
-    expect(directPrompt).not.toContain('run shell `sleep 8`')
+    expect(groupPrompt).not.toContain('sleep 8')
+    expect(groupPrompt).not.toContain('sleep 6')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
-      'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
+      'use the CLI only for public reference reads and group-owned state other than the `group-room-model` page',
     )
     expect(groupPrompt).toContain(
       'Send an ordinary group reply as one text bubble.',

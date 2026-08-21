@@ -22608,7 +22608,7 @@ describe('steered final segments', () => {
     try {
       const turn = executeCodexAppServerTurn({
         onFirstAssistantResponseCompleted: () => {
-          controller.closeInputAdmission()
+          controller.closeTurnAdmission()
         },
         onLiveTurn: (liveTurn) => {
           const releaseLiveTurn = controller.registerLiveProviderTurn({

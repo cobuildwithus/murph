@@ -256,7 +256,7 @@ export async function executeCodexAssistantTurnAttempt(
     threadConfig: input.codexThreadConfig ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
-        ? () => input.activeTurnSteering?.closeInputAdmission()
+        ? () => input.activeTurnSteering?.onFirstAssistantResponseCompleted()
         : undefined,
     onLiveTurn:
       input.activeTurnSteering

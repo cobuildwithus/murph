@@ -1046,7 +1046,7 @@ describe('Codex model catalog', () => {
       vaultFileSendAvailable: true,
     }
     const activeTurnSteering = {
-      closeInputAdmission: vi.fn(),
+      onFirstAssistantResponseCompleted: vi.fn(),
       registerLiveProviderTurn: vi.fn(() => vi.fn()),
     } satisfies AssistantActiveTurnLiveProviderSteering
     const input = {

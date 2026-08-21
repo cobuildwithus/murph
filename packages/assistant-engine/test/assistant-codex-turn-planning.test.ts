@@ -3664,8 +3664,8 @@ describe('assistant Codex turn planning', () => {
     expect(attendedPlan.systemPrompt).toContain(
       '`murph.select_reply_target` annotates the one eventual group response',
     )
-    expect(attendedPlan.systemPrompt).toContain('run shell `sleep 8`')
-    expect(attendedPlan.systemPrompt).toContain('one final `sleep 6`')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 8')
+    expect(attendedPlan.systemPrompt).not.toContain('sleep 6')
     expect(attendedPlan.systemPrompt).not.toContain(
       'including every `---` bubble',
     )

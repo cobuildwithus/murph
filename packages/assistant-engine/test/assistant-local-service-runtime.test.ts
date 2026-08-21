@@ -3392,7 +3392,7 @@ test('sendAssistantMessageLocal leaves an acknowledged uncovered steer pending a
       })
     providerStarted.resolve()
     await finishProviderResult.promise
-    providerInput.activeTurnSteering?.closeInputAdmission()
+    providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
     admissionClosed.resolve()
     await steerSettled.promise
     releaseLiveTurn?.()
@@ -4174,6 +4174,11 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
           kind: 'no-new-input',
         }
       }
+      if (!input.availableInputIds?.length) {
+        return {
+          kind: 'no-new-input',
+        }
+      }
       expect(input.availableInputIds).toEqual([hostedInput.inputId])
       return {
         acceptedInputs: [
@@ -4366,7 +4371,7 @@ test('sendAssistantMessageLocal attributes required progress after real live ste
     response: 'final after event input',
   })
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
-  assert.equal(activeTurnInput.mock.calls.length, 2)
+  assert.equal(activeTurnInput.mock.calls.length, 3)
   const journal = await readAssistantAcceptedTurnInputJournal(
     context.vaultRoot,
     'turn-1',
@@ -5939,6 +5944,496 @@ test('sendAssistantMessageLocal treats input after provider close as a normal ne
   assert.equal(activeTurnCheckpoint.mock.calls.length, 0)
 })
 
+async function assertHeldGroupReplyReconsideration(input: {
+  finalResponse: string
+}): Promise<void> {
+  const { finalResponse } = input
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: {
+        kind: 'thread',
+        target: 'thread-1',
+      },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const firstDraftReady = createDeferred<void>()
+  const reconsiderationStarted = createDeferred<void>()
+  const reconsiderationRelease = createDeferred<void>()
+  const reconsiderationSteers: string[] = []
+  const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(
+    async () => ({ kind: 'no-new-input' }),
+  )
+  const activeTurnCheckpoint = vi.fn(
+    async (_input: AssistantActiveTurnInputCheckpointInput) => undefined,
+  )
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: {
+      ...sharedPlan,
+      persistUserPromptOnFailure: false,
+    },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      firstDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-review',
+          precedingResponseSegments: [
+            {
+              deliveryContextOrdinal: 0,
+              media: [],
+              response: 'Provisional segment.',
+            },
+          ],
+          response: 'The stale draft.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: 'The stale draft.',
+        },
+      }
+    })
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      const releaseLiveTurn =
+        providerInput.activeTurnSteering?.registerLiveProviderTurn({
+          interrupt: async () => undefined,
+          codexThreadId: 'provider-thread-group-review',
+          providerTurnId: 'provider-turn-group-review-1',
+          sessionId: session.sessionId,
+          steer: async (steerInput) => {
+            reconsiderationSteers.push(steerInput.prompt)
+          },
+          turnId: 'turn-1',
+        })
+      reconsiderationStarted.resolve()
+      await reconsiderationRelease.promise
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      releaseLiveTurn?.()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-review',
+          precedingResponseSegments: [
+            {
+              deliveryContextOrdinal: 0,
+              media: [],
+              response: 'Another provisional segment.',
+            },
+          ],
+          response: finalResponse,
+          responseDeliveryContextOrdinal: 1,
+          route: { routeId: 'route-group-review' },
+          session,
+          transcriptResponse: finalResponse,
+        },
+      }
+    })
+
+  vi.useFakeTimers()
+  const initialResultPromise = sendAssistantMessageLocal({
+    activeTurnCheckpoint,
+    activeTurnInput,
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    deliverResponse: true,
+    prompt: 'Initial group message',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+  await firstDraftReady.promise
+  const reconsideredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'Actually, plans changed.',
+    vault: '/vaults/test',
+  })
+  await vi.advanceTimersByTimeAsync(4_000)
+  await reconsiderationStarted.promise
+  const finalSteeredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'One more group detail.',
+    vault: '/vaults/test',
+  })
+  await vi.waitFor(() => {
+    expect(reconsiderationSteers).toEqual(['One more group detail.'])
+  })
+  reconsiderationRelease.resolve()
+
+  await expect(initialResultPromise).resolves.toMatchObject({
+    prompt: 'One more group detail.',
+    response: finalResponse,
+  })
+  await expect(reconsideredResultPromise).resolves.toMatchObject({
+    prompt: 'One more group detail.',
+    response: finalResponse,
+  })
+  await expect(finalSteeredResultPromise).resolves.toMatchObject({
+    prompt: 'One more group detail.',
+    response: finalResponse,
+  })
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls.map(
+      ([providerInput]) => providerInput.providerRequestOrdinal,
+    ),
+  ).toEqual([0, 1])
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input,
+  ).toMatchObject({
+    prompt: 'Actually, plans changed.',
+    turnContext: expect.stringContaining(
+      'Your previous response was held and was not sent.',
+    ),
+  })
+  expect(
+    mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession
+      ?.resumeState,
+  ).toMatchObject({
+    routeFingerprint: 'route-group-review',
+    threadId: 'provider-thread-group-review',
+  })
+  expect(activeTurnCheckpoint).toHaveBeenCalledWith(
+    expect.objectContaining({ providerRequestOrdinal: 1 }),
+  )
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledTimes(1)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
+  ).toMatchObject({
+    precedingResponseSegments: [],
+    response: finalResponse,
+    responseDeliveryContextOrdinal: 2,
+  })
+  expect(mocks.deliverAssistantPrecedingReplies).toHaveBeenCalledWith(
+    expect.objectContaining({ segments: [] }),
+  )
+  expect(mocks.dispatchAssistantReply).toHaveBeenCalledTimes(1)
+  expect(mocks.dispatchAssistantReply.mock.calls[0]?.[0]?.response).toBe(
+    finalResponse,
+  )
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).toHaveBeenCalledTimes(1)
+}
+
+test.each([
+  {
+    finalResponse: 'The stale draft.',
+    outcome: 'keeps the same answer',
+  },
+  {
+    finalResponse: 'The updated final reply.',
+    outcome: 'replaces the answer',
+  },
+])(
+  'sendAssistantMessageLocal $outcome after one held-group reconsideration and sends one copy',
+  assertHeldGroupReplyReconsideration,
+)
+
+test('sendAssistantMessageLocal commits reconsidered group silence without provisional reply evidence', async () => {
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const firstDraftReady = createDeferred<void>()
+  const noReplyAccepted = vi.fn(async () => undefined)
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      firstDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-silence',
+          response: 'The now-stale draft.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-silence' },
+          session,
+          transcriptResponse: 'The now-stale draft.',
+        },
+      }
+    })
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          acceptedNoReplyDeliveryContextOrdinals: [0],
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-silence',
+          finalAction: { kind: 'none' },
+          response: 'This contradictory text must not escape.',
+          responseDeliveryContextOrdinal: 0,
+          responseMedia: [
+            {
+              alt: 'provisional image',
+              kind: 'image',
+              source: null,
+              url: 'https://cdn.example.test/provisional.png',
+            },
+          ],
+          route: { routeId: 'route-group-silence' },
+          session,
+          transcriptResponse: 'This contradictory text must not escape.',
+        },
+      }
+    })
+
+  const initialResultPromise = sendAssistantMessageLocal({
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted: noReplyAccepted,
+    prompt: 'Initial group message',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  })
+  await firstDraftReady.promise
+  const reconsideredResultPromise = sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'A human already answered.',
+    vault: '/vaults/test',
+  })
+
+  const [initialResult, reconsideredResult] = await Promise.all([
+    initialResultPromise,
+    reconsideredResultPromise,
+  ])
+  expect(initialResult).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(reconsideredResult).toMatchObject({
+    response: '',
+    responseDisposition: 'none',
+  })
+  expect(noReplyAccepted).toHaveBeenCalledTimes(1)
+  expect(noReplyAccepted).toHaveBeenCalledWith({
+    acceptedInputIds: ['initial', 'manual-1'],
+    deliveryContextOrdinal: 1,
+    messageReactionPending: false,
+  })
+  expect(mocks.finalizeAssistantTurnArtifacts).toHaveBeenCalledTimes(1)
+  expect(
+    mocks.finalizeAssistantTurnArtifacts.mock.calls[0]?.[0]?.providerResult,
+  ).toMatchObject({
+    acceptedNoReplyDeliveryContextOrdinals: [1],
+    precedingResponseSegments: [],
+    response: '',
+    responseDeliveryContextOrdinal: 1,
+    responseMedia: [],
+    transcriptResponse: null,
+  })
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+})
+
+test('sendAssistantMessageLocal never sends the first group draft when reconsideration fails', async () => {
+  const terminalError = new Error('reconsideration provider failed')
+  const session = createAssistantSession({
+    binding: {
+      actorId: null,
+      channel: 'telegram',
+      conversationKey: 'channel:telegram|identity:identity-1|thread:thread-1',
+      delivery: { kind: 'thread', target: 'thread-1' },
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      threadIsDirect: false,
+    },
+  })
+  const firstDraftReady = createDeferred<void>()
+  const noReplyAccepted = vi.fn(async () => undefined)
+  const sharedPlan = createSharedPlan()
+  sharedPlan.conversationPolicy.audience.channel = 'telegram'
+  sharedPlan.conversationPolicy.audience.threadIsDirect = false
+  const { mocks, sendAssistantMessageLocal } = await loadLocalServiceModule({
+    plan: { ...sharedPlan, persistUserPromptOnFailure: false },
+    session,
+  })
+  mocks.executeCodexTurnWithRecovery
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-0',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      providerInput.activeTurnSteering?.onFirstAssistantResponseCompleted()
+      firstDraftReady.resolve()
+      return {
+        kind: 'succeeded',
+        providerTurn: {
+          onboardingGuidanceInjected: true,
+          codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: 'provider-thread-group-failure',
+          response: 'The stale draft must not send.',
+          responseDeliveryContextOrdinal: 0,
+          route: { routeId: 'route-group-failure' },
+          session,
+          transcriptResponse: 'The stale draft must not send.',
+        },
+      }
+    })
+    .mockImplementationOnce(async (providerInput) => {
+      await providerInput.onProviderRequestPlanned?.({
+        providerAttemptId: 'attempt-1',
+        codexContinuation: { kind: 'explicit-structured-history' },
+      })
+      await providerInput.onFinishWithoutReplyAccepted?.({
+        deliveryContextOrdinal: 0,
+        messageReactionPending: false,
+      })
+      return {
+        acceptedNoReplyDeliveryContextOrdinals: [0],
+        attemptCount: 1,
+        codexContinuation: { kind: 'explicit-structured-history' },
+        codexThreadId: 'provider-thread-group-failure',
+        error: terminalError,
+        kind: 'failed_terminal',
+        providerRequestOutcome: 'failed',
+        providerTurnId: 'provider-turn-group-failure',
+        rawEvents: [],
+        route: {
+          provider: 'codex-cli',
+          providerOptions: { model: 'gpt-5.4' },
+          routeId: 'route-group-failure',
+        },
+        session,
+        usage: null,
+        usageAttribution: null,
+      }
+    })
+
+  const capture = <T>(promise: Promise<T>) =>
+    promise.then(
+      (result) => ({ result, status: 'fulfilled' as const }),
+      (error: unknown) => ({ error, status: 'rejected' as const }),
+    )
+  const initialResultPromise = capture(sendAssistantMessageLocal({
+    activeTurnInput: async () => ({ kind: 'no-new-input' }),
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    deliverResponse: true,
+    onFinishWithoutReplyAccepted: noReplyAccepted,
+    prompt: 'Initial group message',
+    turnTrigger: 'automation-auto-reply',
+    vault: '/vaults/test',
+  }))
+  await firstDraftReady.promise
+  const reconsideredResultPromise = capture(sendAssistantMessageLocal({
+    conversation: {
+      channel: 'telegram',
+      identityId: 'identity-1',
+      threadId: 'thread-1',
+      directness: 'group',
+    },
+    expectedActiveTurnId: 'turn-1',
+    prompt: 'New group input',
+    vault: '/vaults/test',
+  }))
+
+  const outcomes = await Promise.all([
+    initialResultPromise,
+    reconsideredResultPromise,
+  ])
+  expect(outcomes.map((outcome) => outcome.status)).toEqual([
+    'rejected',
+    'rejected',
+  ])
+  for (const outcome of outcomes) {
+    assert.equal(outcome.status, 'rejected')
+    assert.equal(outcome.error, terminalError)
+  }
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+  expect(noReplyAccepted).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnArtifacts).not.toHaveBeenCalled()
+  expect(mocks.dispatchAssistantReply).not.toHaveBeenCalled()
+  expect(
+    mocks.runtimeState.turns.acceptedInputs.updateAdmissionState,
+  ).not.toHaveBeenCalled()
+  expect(mocks.finalizeAssistantTurnReceipt).toHaveBeenCalledWith(
+    expect.objectContaining({ response: null, status: 'failed' }),
+  )
+})
+
 test('sendAssistantMessageLocal probes active-turn input once before provider start', async () => {
   let admissionOrdinal = 0
   const activeTurnInput = vi.fn<AssistantActiveTurnInputAdmissionHook>(async () => {
@@ -6077,7 +6572,7 @@ test('sendAssistantMessageLocal keeps hosted progress wired in queue-only auto-r
   })
 
   assert.equal(result.response, 'assistant response')
-  assert.equal(activeTurnInput.mock.calls.length, 1)
+  assert.equal(activeTurnInput.mock.calls.length, 2)
   assert.equal(mocks.executeCodexTurnWithRecovery.mock.calls.length, 1)
   const progressDelivery =
     mocks.executeCodexTurnWithRecovery.mock.calls[0]?.[0]?.progressDelivery

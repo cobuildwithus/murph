@@ -151,27 +151,24 @@ blander preference.
 
 ## Reply cadence
 
-An ordinary interactive Linq/iMessage or Telegram group reply uses the existing
-live-turn steering primitive as conversational pacing:
+For an ordinary interactive Linq/iMessage or Telegram group reply, the runtime
+holds the first completed provider response in memory for four seconds before
+the existing commit boundary. Input accepted before that first response still
+uses live provider steering. Input accepted during the held-draft window causes
+exactly one same-thread continuation that is told the prior response was not
+sent and may keep, replace, or suppress it. There is never a third provider
+request for the turn.
 
-1. Before the first text reply, Murph runs `sleep 8`.
-2. If new human input arrives during that pause, Murph re-evaluates safety,
-   time sensitivity, and floor ownership when the initial sleep returns. Newly
-   urgent or time-sensitive input skips the extra pause, while a human-owned or
-   otherwise silent beat finishes without text.
-3. Only when the refreshed beat still warrants an ordinary text reply does
-   Murph run one final `sleep 6`, absorb anything else that arrives, and
-   re-evaluate the room's current beat.
-4. Murph takes one terminal action for the beat: one text reply, one reaction,
-   or silence. It never answers each accepted message separately, recaps the
-   burst point by point, or mentions the pause.
+The held response is not transcript, terminal no-reply evidence, or outbox
+state. Only the selected result crosses `commit-started`. At the final cutoff,
+later input remains pending for the next ordinary turn. Completed tools,
+progress messages, and other real-world effects are not provisional and must
+not be repeated by reconsideration.
 
-Urgent safety and genuinely time-sensitive coordination present before cadence
-starts skip it entirely. If that urgency first arrives during the initial
-non-interruptible shell sleep, the prompt-only implementation answers after
-that sleep returns and never runs the extra six seconds. Total cadence sleep
-never exceeds 14 seconds. Human-owned and otherwise silent beats remain
-immediate no-replies when first evaluated and do not sleep.
+Murph takes one terminal action for the beat: one text reply, one reaction, or
+silence. It never answers each accepted message separately or recaps the burst
+point by point. Human-owned and otherwise silent beats remain ordinary
+no-replies; no model-directed shell sleep is part of reply cadence.
 
 Ordinary interactive group text uses one outbound bubble. Murph keeps any needed
 paragraphs or list items in that message and does not use `---` to split it into
@@ -179,11 +176,9 @@ consecutive replies. Explicitly requested tool-owned media or effects may still
 accompany the text, and scheduled editions keep their existing one-message
 contract.
 
-This is prompt policy over the current active-turn admission and steering path.
-It adds no database state, queue, timer owner, scheduler, webhook debounce,
-typing subscription, delivery policy, or new tool. Runtime enforcement is a
-later option only if production evidence shows the model repeatedly ignores the
-prompt contract.
+This reuses the current active-turn admission, accepted-input journal, provider
+continuation, transcript, and outbox paths. It adds no database state, queue,
+scheduler, webhook debounce, delivery policy, or new tool.
 
 ## Room relationship and tapering
 

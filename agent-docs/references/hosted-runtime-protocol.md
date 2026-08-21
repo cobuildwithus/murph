@@ -2682,14 +2682,17 @@ maintenance or the idle checkpoint.
 The assistant engine admits the frozen same-wake compound batch before provider
 start without broad hosted mailbox rediscovery. While a Codex turn is live,
 later mailbox input may still be imported and staged. Its exact staged input ID
-may join through the generic live-steering path only before the first completed
-assistant response, only while the turn remains below the cumulative 50-message
+may join through the generic live-steering path while the current provider
+request is open, only while the turn remains below the cumulative 50-message
 initial-plus-live bound, and only when the stored event is the next positive
 causal-sequence successor and preserves the direct actor and native reply
 anchor, or for an authenticated non-direct group preserves the room, delivery
 route, account/audience, projection readiness, and reaction boundary. Every
-completed provider text or media segment remains deliverable; the group audience
-does not create a latest-response replacement rule. A
+completed provider text or media segment remains deliverable for ordinary
+turns. An ordinary interactive Linq/iMessage or Telegram group auto-reply is the
+narrow exception: provider request 0 is an in-memory draft until the existing
+commit boundary, and late input during a four-second held-draft window may
+select one same-thread provider request 1 whose result replaces that draft. A
 projection-pending input is a causal barrier until the existing
 projection-completion notification retries it; terminal projection failure is
 still replyable through the normal fallback. Duplicate staging and
@@ -2699,15 +2702,20 @@ acknowledges transport only. Before any hosted tool effect or final delivery,
 Murph journals and checkpoints only accepted inputs at or below that tool
 request's or provider result's authoritative delivery-context ordinal. An
 acknowledged later input that remains above the ordinal stays pending for a
-normal later assistant turn. First-response closure removes the conversation
-registration and starts no further steer, but retains the existing
-provider-turn correlation until the one steer already started under that exact
-key settles; a rejected steer is not acknowledged and its input remains
-pending. Missing input, a causal gap, a boundary change, capacity overflow, or
-input arriving after the first completed response remains pending for a normal
+normal later assistant turn. Outside the held-draft group exception,
+first-response closure removes the conversation registration and starts no
+further steer, but retains the existing provider-turn correlation until the one
+steer already started under that exact key settles; a rejected steer is not
+acknowledged and its input remains pending. In the exception, request 0 pauses
+provider steering but keeps conversation admission registered until an atomic
+quiet cutoff or one reconsideration admission; request 1 closes at its first
+completed response. Missing input, a causal gap, a boundary change, capacity
+overflow, or input arriving after the final cutoff remains pending for a normal
 later assistant turn. Strict active-turn-targeted input still fails closed
-instead of falling through, and the assistant engine does not synthesize
-another provider request inside the same assistant turn. Final-delivery and
+instead of falling through. Reconsideration is capped at provider request 1 and
+only its selected conversational result may enter transcript, terminal
+evidence, and outbox state; completed tools and progress effects remain
+authoritative and are not repeated. Final-delivery and
 hosted-tool effect keys use the newest accepted causal input as the stable
 replay anchor while the full answered-mailbox set remains attached as evidence.
 When mailbox import produces or reuses a canonical write receipt, the runner

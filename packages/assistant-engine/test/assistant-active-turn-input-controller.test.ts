@@ -209,6 +209,164 @@ test('active-turn controller only steers exact conversations while open', async 
   }
 })
 
+test('active-turn controller keeps admission open for one held-draft review', async () => {
+  vi.useFakeTimers()
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const steer = vi.fn(async () => undefined)
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook: async () => ({
+      acceptedInputs: [
+        {
+          id: 'late-input',
+          promptFallbackReason: 'missing-content-ref',
+          promptFallbackText: 'Late group message',
+          source: 'assistant-input',
+        },
+      ],
+      kind: 'accepted',
+      prompt: 'Late group message',
+      transcriptText: 'Late group message',
+      userMessageContent: [
+        {
+          text: 'Late group message',
+          type: 'text',
+        },
+      ],
+    }),
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+  const releaseLiveTurn = controller.registerLiveProviderTurn({
+    interrupt: async () => undefined,
+    codexThreadId: 'provider-session',
+    providerTurnId: 'provider-turn-0',
+    sessionId: 'session-test',
+    steer,
+    turnId: 'turn-active',
+  })
+
+  try {
+    controller.pauseProviderSteering()
+    await controller.notifyInputAvailable({ inputIds: ['late-input'] })
+    expect(steer).not.toHaveBeenCalled()
+
+    const outcomePromise = controller.finishDraftWindow()
+    await vi.advanceTimersByTimeAsync(4_000)
+    await expect(outcomePromise).resolves.toMatchObject({
+      acceptedInput: {
+        kind: 'accepted',
+        prompt: 'Late group message',
+      },
+      kind: 'review',
+    })
+
+    const next = steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'Input for reconsideration',
+      vault: '/vaults/test',
+    })
+    assert.ok(next)
+    next.catch(() => undefined)
+  } finally {
+    releaseLiveTurn()
+    controller.fail(new Error('held-draft review test complete'))
+    controller.close()
+  }
+})
+
+test('active-turn controller closes a quiet held-draft cutoff atomically', async () => {
+  vi.useFakeTimers()
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const admissionHook = vi.fn(async () => ({
+    kind: 'no-new-input' as const,
+  }))
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook,
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    controller.pauseProviderSteering()
+    const outcomePromise = controller.finishDraftWindow()
+    await vi.advanceTimersByTimeAsync(4_000)
+    await expect(outcomePromise).resolves.toEqual({
+      controllerClosed: true,
+      kind: 'commit',
+    })
+    expect(admissionHook).toHaveBeenCalledTimes(1)
+    expect(steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'After cutoff',
+      vault: '/vaults/test',
+    })).toBeNull()
+  } finally {
+    controller.close()
+  }
+})
+
+test('active-turn controller leaves input racing after the final probe for the next turn', async () => {
+  vi.useFakeTimers()
+  const {
+    createAssistantActiveTurnInputController,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const finalProbeStarted = createDeferred<void>()
+  const finalProbeRelease = createDeferred<void>()
+  const admissionHook = vi.fn(async () => {
+    finalProbeStarted.resolve()
+    await finalProbeRelease.promise
+    return { kind: 'no-new-input' as const }
+  })
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook,
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    controller.pauseProviderSteering()
+    const outcomePromise = controller.finishDraftWindow()
+    await vi.advanceTimersByTimeAsync(4_000)
+    await finalProbeStarted.promise
+
+    const racingNotification = controller.notifyInputAvailable({
+      inputIds: ['after-final-probe'],
+    })
+    finalProbeRelease.resolve()
+
+    await expect(outcomePromise).resolves.toEqual({
+      controllerClosed: true,
+      kind: 'commit',
+    })
+    await expect(racingNotification).resolves.toBeUndefined()
+    expect(admissionHook).toHaveBeenCalledTimes(1)
+  } finally {
+    controller.close()
+  }
+})
+
 test('active-turn controller closes admission at the first completed assistant response boundary', async () => {
   const {
     createAssistantActiveTurnInputController,
@@ -221,7 +379,7 @@ test('active-turn controller closes admission at the first completed assistant r
     vault: '/vaults/test',
   })
 
-  controller.closeInputAdmission()
+  controller.closeTurnAdmission()
 
   expect(steerAssistantActiveTurnInput({
     conversation: {
@@ -293,7 +451,7 @@ test('active-turn controller lets only an already-started deferred steer settle 
     assert.ok(second)
     second.catch(() => undefined)
 
-    controller.closeInputAdmission()
+    controller.closeTurnAdmission()
     expect(steerAssistantActiveTurnInput({
       conversation: {
         channel: 'telegram',
@@ -464,7 +622,7 @@ test('active-turn controller leaves a rejected in-flight steer unaccepted after 
   try {
     await controller.notifyInputAvailable({ inputIds: ['hook-1'] })
     await steerStarted.promise
-    controller.closeInputAdmission()
+    controller.closeTurnAdmission()
     steerRejected.resolve()
 
     await expect(controller.admitLiveSteered()).resolves.toBeUndefined()
@@ -647,6 +805,7 @@ test('active-turn controller does not admit probed hook input after provider rel
     })
     expect(providerSteerOrder).toEqual(['causal-seq', 'provider'])
     releaseLiveTurn()
+    controller.closeTurnAdmission()
 
     const acceptedAdmission = await controller.admitLiveSteered()
     expect(acceptedAdmission).toEqual({
@@ -901,6 +1060,7 @@ test('active-turn controller drains in-flight live steer input without post-rele
     steered.catch(() => undefined)
     await steerStarted.promise
     releaseLiveTurn()
+    controller.closeTurnAdmission()
 
     const admission = controller.admitLiveSteered()
     steerRelease.resolve()
@@ -1329,6 +1489,7 @@ test('active-turn controller drops in-flight hook input that resolves after prov
     const notification = controller.notifyInputAvailable()
     await admissionStarted.promise
     releaseLiveTurn()
+    controller.closeTurnAdmission()
     admissionRelease.resolve()
 
     await expect(notification).resolves.toEqual({

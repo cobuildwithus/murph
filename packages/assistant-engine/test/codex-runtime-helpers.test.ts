@@ -3826,7 +3826,7 @@ describe('Codex assistant registry helpers', () => {
   })
 
   it('closes active input admission through the production provider adapter', async () => {
-    const closeInputAdmission = vi.fn()
+    const onFirstAssistantResponseCompleted = vi.fn()
     codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
       finalMessage: 'Final answer.',
       transcriptMessage: 'Final answer.',
@@ -3844,7 +3844,7 @@ describe('Codex assistant registry helpers', () => {
 
     const attempt = await executeCodexAssistantTurnAttempt({
       activeTurnSteering: {
-        closeInputAdmission,
+        onFirstAssistantResponseCompleted,
         registerLiveProviderTurn: vi.fn(() => () => {}),
       },
       automationRelativeDateReferenceWindow: {
@@ -3869,7 +3869,7 @@ describe('Codex assistant registry helpers', () => {
       latestAt: '2031-02-15T09:59:59.900Z',
     })
     appServerInput?.onFirstAssistantResponseCompleted?.()
-    expect(closeInputAdmission).toHaveBeenCalledTimes(1)
+    expect(onFirstAssistantResponseCompleted).toHaveBeenCalledTimes(1)
   })
 
   it('preserves response delivery ordinals across the provider adapter', async () => {
