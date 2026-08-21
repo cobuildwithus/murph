@@ -1,8 +1,6 @@
 export const MURPH_GROUP_READ_PERMISSION_PROFILE = "murph-group-read" as const;
 export const MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE =
   "murph-group-room-model-maintenance" as const;
-export const MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE =
-  "murph-member-memory-maintenance" as const;
 export const MURPH_MEMBER_READ_PERMISSION_PROFILE =
   "murph-member-read" as const;
 export const MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE =
@@ -41,22 +39,6 @@ export function buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines():
     '"." = "deny"',
     "",
     `[permissions.${MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE}.network]`,
-    "enabled = false",
-    "",
-  ];
-}
-
-export function buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(): readonly string[] {
-  return [
-    "# Silent member memory consolidation uses only its host-owned dynamic tool.",
-    `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.filesystem]`,
-    '":minimal" = "read"',
-    "glob_scan_max_depth = 1",
-    "",
-    `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
-    '"." = "deny"',
-    "",
-    `[permissions.${MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE}.network]`,
     "enabled = false",
     "",
   ];

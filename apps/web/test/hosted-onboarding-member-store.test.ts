@@ -24,11 +24,15 @@ import {
   claimHostedMemberSignupNotificationEmailAttempt,
   composeHostedMemberSnapshot,
   createHostedMember as createHostedMemberStore,
+  hostedMemberVerifiedEmailRecordsEqual,
+  lockHostedMemberVerifiedEmailRecordTx,
   lookupHostedMemberByVerifiedEmailAddress,
   prepareHostedMemberVerifiedEmailReplyAlias,
+  projectHostedMemberVerifiedEmailRecord,
   readHostedMemberEmailSnapshots,
   readHostedMemberMessagingSetupState,
   readHostedMemberSnapshot,
+  readHostedMemberVerifiedEmailRecord,
   readHostedMemberVerifiedEmailSnapshots,
   type HostedMemberCoreState,
 } from "@/src/lib/hosted-onboarding/hosted-member-store";
@@ -402,6 +406,69 @@ describe("hosted-member-store", () => {
     });
   });
 
+  it("reads, projects, compares, and locks the exact verified-email owner record", async () => {
+    const memberId = "member_verified_email_owner";
+    const verifiedAt = new Date("2026-07-15T12:00:00.000Z");
+    const record = {
+      memberId,
+      verifiedEmailAddressEncrypted: await encryptHostedWebNullableString({
+        field: "hosted-member-email-authorization.verified-email",
+        memberId,
+        value: "owner@example.test",
+      }),
+      verifiedEmailLookupKey: "hbidx:email:v1:owner",
+      verifiedEmailVerifiedAt: verifiedAt,
+    };
+    const findUnique = vi.fn().mockResolvedValue(record);
+    const queryRaw = createMemberRowLockQueryRaw();
+    const prisma = {
+      $queryRaw: queryRaw,
+      hostedMemberEmailAuthorization: { findUnique },
+    } as never;
+
+    await expect(readHostedMemberVerifiedEmailRecord({
+      memberId,
+      prisma,
+    })).resolves.toEqual(record);
+    await expect(projectHostedMemberVerifiedEmailRecord(
+      record,
+      prisma,
+    )).resolves.toEqual({
+      memberId,
+      verifiedEmail: {
+        address: "owner@example.test",
+        lookupKey: "hbidx:email:v1:owner",
+        verifiedAt,
+      },
+    });
+    expect(hostedMemberVerifiedEmailRecordsEqual(record, {
+      ...record,
+      verifiedEmailVerifiedAt: new Date(verifiedAt),
+    })).toBe(true);
+    expect(hostedMemberVerifiedEmailRecordsEqual(record, {
+      ...record,
+      verifiedEmailLookupKey: "hbidx:email:v1:changed",
+    })).toBe(false);
+    await expect(lockHostedMemberVerifiedEmailRecordTx({
+      memberId,
+      prisma,
+    })).resolves.toBeUndefined();
+    expect(findUnique).toHaveBeenCalledWith({
+      where: { memberId },
+      select: {
+        memberId: true,
+        verifiedEmailAddressEncrypted: true,
+        verifiedEmailLookupKey: true,
+        verifiedEmailVerifiedAt: true,
+      },
+    });
+    expect(queryRaw).toHaveBeenCalledOnce();
+    expect(queryRaw.mock.calls[0]?.[0].join(" ")).toContain(
+      'FROM "hosted_member_email_authorization"',
+    );
+    expect(queryRaw.mock.calls[0]?.[1]).toBe(memberId);
+  });
+
   it("fails closed when verified email read candidates match multiple members", async () => {
     const findMany = vi.fn().mockResolvedValue([
       {
@@ -500,6 +567,49 @@ describe("hosted-member-store", () => {
       },
       include: {
         member: true,
+      },
+    });
+  });
+
+  it("looks up only core member state for a Privy principal without decrypting identity fields", async () => {
+    const member = createHostedMember();
+    const core = {
+      billingStatus: member.billingStatus,
+      createdAt: member.createdAt,
+      id: member.id,
+      suspendedAt: member.suspendedAt,
+      updatedAt: member.updatedAt,
+    };
+    const findMany = vi.fn().mockResolvedValue([{ memberId: member.id, member: core }]);
+    const prisma = {
+      hostedMemberIdentity: { findMany },
+    } as never;
+
+    await expect(lookupHostedMemberIdentityByPrivyUserId({
+      prisma,
+      privyUserId: "did:privy:user_123",
+      projection: "core",
+    })).resolves.toEqual({
+      core,
+      matchedBy: "privyUserId",
+    });
+    expect(findMany).toHaveBeenCalledWith({
+      where: {
+        privyUserLookupKey: {
+          in: [expect.stringMatching(/^hbidx:privy-user:v1:/u)],
+        },
+      },
+      select: {
+        memberId: true,
+        member: {
+          select: {
+            billingStatus: true,
+            createdAt: true,
+            id: true,
+            suspendedAt: true,
+            updatedAt: true,
+          },
+        },
       },
     });
   });
@@ -4626,6 +4736,8 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     createdAt: new Date("2026-04-06T00:00:00.000Z"),
     id: "member_123",
     pendingActivationTimeZone: null,
+    signupNotificationContextEncrypted: null,
+    signupNotificationContextExpiresAt: null,
     signupNotificationEmailAttemptedAt: null,
     signupWelcomeEmailAttemptedAt: null,
     suspendedAt: null,

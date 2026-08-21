@@ -35,6 +35,7 @@ import {
   type HostedMemberCoreState,
   syncHostedMemberVerifiedEmailAuthorization,
   updateHostedMemberPendingActivationTimeZoneIfActivationPending,
+  writeHostedMemberSignupNotificationContextIfPendingTx,
 } from "./hosted-member-store";
 import {
   projectHostedMemberRoutingState,
@@ -74,6 +75,9 @@ import { readHostedMemberIdentity } from "./hosted-member-identity-store";
 import { readActiveHostedMemberAccess } from "./member-access";
 import type { HostedPostVerificationStage } from "./stage";
 import { hostedOnboardingError } from "./errors";
+import type {
+  HostedSignupNotificationContextV1,
+} from "./signup-notification-context";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
@@ -90,6 +94,7 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
+  signupNotificationContext?: HostedSignupNotificationContextV1;
   timeZone?: string | null;
 }): Promise<{
   inviteCode: string;
@@ -130,6 +135,7 @@ export async function completeHostedPrivyVerification(input: {
       invite,
       now,
       prisma,
+      signupNotificationContext: input.signupNotificationContext,
       timeZone,
     });
     const member = memberResolution.member;
@@ -211,6 +217,7 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
   invite: Awaited<ReturnType<typeof requireHostedInviteForAuthentication>> | null;
   now: Date;
   prisma: PrismaClient;
+  signupNotificationContext?: HostedSignupNotificationContextV1;
   timeZone: string | null;
 }): Promise<HostedPrivyCompletionMemberResolution> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -282,6 +289,12 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
               prisma: tx,
               timeZone: input.timeZone,
             });
+            await syncHostedMemberSignupNotificationContextTx({
+              context: input.signupNotificationContext,
+              memberId: reconciled.member.id,
+              preparedControlRoot: preparedRoot,
+              prisma: tx,
+            });
             return reconciled;
             })
           ),
@@ -331,6 +344,12 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
               memberId: memberResolution.member.id,
               prisma: tx,
               timeZone: input.timeZone,
+            });
+            await syncHostedMemberSignupNotificationContextTx({
+              context: input.signupNotificationContext,
+              memberId: memberResolution.member.id,
+              preparedControlRoot: preparedRoot,
+              prisma: tx,
             });
             return {
               identity: memberResolution.identity,
@@ -495,6 +514,24 @@ async function syncHostedMemberPendingActivationTimeZoneTx(input: {
   await updateHostedMemberPendingActivationTimeZoneIfActivationPending({
     memberId: input.memberId,
     pendingActivationTimeZone: input.timeZone,
+    prisma: input.prisma,
+  });
+}
+
+async function syncHostedMemberSignupNotificationContextTx(input: {
+  context?: HostedSignupNotificationContextV1;
+  memberId: string;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.context) {
+    return;
+  }
+
+  await writeHostedMemberSignupNotificationContextIfPendingTx({
+    context: input.context,
+    memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
     prisma: input.prisma,
   });
 }

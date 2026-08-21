@@ -1008,19 +1008,27 @@ export function ComponentsContent() {
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "processing" }}
+                state={{ baselineValues: "{}", status: "processing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "refreshing" }}
+                state={{
+                  factsAdded: 3,
+                  factsChanged: true,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: true, status: "updated" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: false, status: "updated" }}
+                state={{
+                  factsAdded: 0,
+                  factsChanged: false,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice

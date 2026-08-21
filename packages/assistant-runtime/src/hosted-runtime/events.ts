@@ -390,6 +390,15 @@ async function executeHostedSystemWake(input: {
         wake: input.wake,
       });
     }
+    case "environment-interview.completed": {
+      const { executeHostedEnvironmentInterviewWake } = await import(
+        "./events/environment-interview.ts"
+      );
+      return await executeHostedEnvironmentInterviewWake({
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    }
     case "runtime.manual-requested":
     case "runtime.pending-effects-reconcile-requested":
     case "runtime.browser-vault-refresh-requested":

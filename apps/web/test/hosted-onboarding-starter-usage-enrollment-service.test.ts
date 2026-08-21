@@ -437,6 +437,7 @@ describe("Starter usage enrollment owner", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .not.toHaveBeenCalled();
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "mobile_app",
       memberIds: [memberState.id],
       prisma,
     });
@@ -468,6 +469,7 @@ describe("Starter usage enrollment owner", () => {
     expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
       .toHaveBeenCalledOnce();
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "website",
       memberIds: [memberState.id],
       prisma,
     });
@@ -778,6 +780,7 @@ describe("Starter usage enrollment owner", () => {
       expect(mocks.sendHostedSignupWelcomeEmailForMemberBestEffort)
         .not.toHaveBeenCalled();
       expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+        activationSurface: "imessage",
         memberIds: [memberState.id],
         prisma,
       });

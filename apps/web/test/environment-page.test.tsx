@@ -278,7 +278,7 @@ test("the hero explains urgent grade caps without requiring a dialog", () => {
   );
 
   assert.match(strongMarkup, />94%/);
-  assert.match(strongMarkup, /of known conditions within target/);
+  assert.match(strongMarkup, /Murph knows 16 of 16 conditions/);
   assert.match(strongMarkup, /1 urgent issue caps the grade at E/);
 
   const sparseValues: HabitatValues = {

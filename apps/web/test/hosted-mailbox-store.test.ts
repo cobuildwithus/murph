@@ -3,7 +3,6 @@ import { Buffer } from "node:buffer";
 import {
   buildHostedExecutionAssistantAskRequestedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
-  type HostedExecutionDirectRoute,
 } from "@murphai/hosted-execution";
 import {
   createHostedMailboxAssistantInputId,
@@ -23,7 +22,6 @@ import {
   appendHostedMailboxEnvelopeWithIdentityTx,
   appendHostedMailboxEnvelopeWithSourceMessageTx,
   appendHostedEnvironmentVoiceMailboxEnvelopeTx,
-  appendHostedMealPhotoMailboxEnvelopeTx,
   appendHostedMailboxItemTx,
   claimHostedMailboxConversationSubscriptionAction,
   decodeHostedMailboxStoredPayload,
@@ -1909,69 +1907,6 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     expect(hostedMailboxPayload.create).not.toHaveBeenCalled();
   });
 
-  it("keeps the first staged object as the canonical exact-duplicate meal photo", async () => {
-    const rows: HostedMailboxItemRow[] = [];
-    const findUnique = vi.fn<HostedMailboxFindUnique>(async (args) => {
-      const where = readHostedMailboxFindUniqueWhere(args);
-      return rows.find((row) => (
-        row.userId === where.userId && row.dedupeKey === where.dedupeKey
-      )) ?? null;
-    });
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      create: vi.fn<HostedMailboxCreate>(async (args) => {
-        const row = buildHostedMailboxItemRow(args.data);
-        rows.push(row);
-        return row;
-      }),
-      findFirst: vi.fn<HostedMailboxItemFindFirst>(async () => rows[0] ?? null),
-      findUnique,
-    });
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    const first = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-a"),
-      tx,
-    });
-    const duplicate = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: buildHostedMealPhotoEnvelope(
-        "meal-photo-attempt-b",
-        { channel: "telegram", threadId: "telegram_home_thread" },
-      ),
-      tx,
-    });
-
-    expect(first).toMatchObject({
-      claimedMealPhotoKey: "meal-photo-attempt-a",
-      dedupeConflict: false,
-      duplicate: false,
-      inserted: true,
-    });
-    expect(duplicate).toMatchObject({
-      claimedMealPhotoKey: "meal-photo-attempt-a",
-      dedupeConflict: false,
-      duplicate: true,
-      inserted: false,
-      item: { id: first.item.id },
-    });
-    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
-    await expect(readHostedMailboxWakeByItemId({
-      availableAt: FIXED_NOW,
-      mailboxItemId: first.item.id,
-      prisma: tx,
-    })).resolves.toMatchObject({
-      directRoute: {
-        channel: "linq",
-        threadId: "linq_home_thread",
-      },
-    });
-    expect(vi.mocked(tx.$executeRaw).mock.invocationCallOrder[0]).toBeLessThan(
-      findUnique.mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
-    );
-  });
-
   it("keeps the first staged object as the canonical exact-duplicate environment recording", async () => {
     const rows: HostedMailboxItemRow[] = [];
     const hostedMailboxItem = createHostedMailboxItemDelegate({
@@ -2086,49 +2021,6 @@ describe("appendHostedMailboxEnvelopeTx", () => {
     });
   });
 
-  it("still rejects conflicting reuse of a meal-photo capture event", async () => {
-    const rows: HostedMailboxItemRow[] = [];
-    const hostedMailboxItem = createHostedMailboxItemDelegate({
-      create: vi.fn<HostedMailboxCreate>(async (args) => {
-        const row = buildHostedMailboxItemRow(args.data);
-        rows.push(row);
-        return row;
-      }),
-      findUnique: vi.fn<HostedMailboxFindUnique>(async (args) => {
-        const where = readHostedMailboxFindUniqueWhere(args);
-        return rows.find((row) => (
-          row.userId === where.userId && row.dedupeKey === where.dedupeKey
-        )) ?? null;
-      }),
-    });
-    const tx = createHostedMailboxTx({
-      hostedMailboxItem,
-      hostedMailboxPayload: createHostedMailboxPayloadDelegate(),
-    });
-
-    await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: buildHostedMealPhotoEnvelope("meal-photo-attempt-a"),
-      tx,
-    });
-    const conflict = await appendHostedMealPhotoMailboxEnvelopeTx({
-      envelope: {
-        ...buildHostedMealPhotoEnvelope("meal-photo-attempt-b"),
-        mealPhoto: {
-          ...buildHostedMealPhotoEnvelope("meal-photo-attempt-b").mealPhoto,
-          sha256: "c".repeat(64),
-        },
-      },
-      tx,
-    });
-
-    expect(conflict).toMatchObject({
-      claimedMealPhotoKey: "meal-photo-attempt-b",
-      dedupeConflict: true,
-      duplicate: true,
-      inserted: false,
-    });
-    expect(hostedMailboxItem.create).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
@@ -2640,6 +2532,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
       prisma,
       userId: "member_mailbox_1",
     })).resolves.toEqual({
+      dedupeKey: "dedupe_1",
       kind: "assistant.ask.completed",
       laneSeq: "5",
     });
@@ -2648,6 +2541,7 @@ describe("fetchHostedMailboxItemsAfterLaneCursors", () => {
         laneSeq: "asc",
       },
       select: {
+        dedupeKey: true,
         kind: true,
         laneSeq: true,
       },
@@ -3529,29 +3423,6 @@ function buildHostedGroupEmailEnvelope(userId: string) {
     },
     occurredAt: "2026-04-26T00:00:00.000Z",
     userId,
-  };
-}
-
-function buildHostedMealPhotoEnvelope(
-  mealPhotoKey: string,
-  directRoute: HostedExecutionDirectRoute = {
-    channel: "linq",
-    threadId: "linq_home_thread",
-  },
-) {
-  return {
-    directRoute,
-    eventId: `meal-photo:hmp_enrollment:${"a".repeat(64)}`,
-    kind: "meal-photo.captured" as const,
-    mealPhoto: {
-      byteLength: 4,
-      captureId: "a".repeat(64),
-      capturedAt: "2026-07-12T16:30:45.000Z",
-      mealPhotoKey,
-      sha256: "b".repeat(64),
-    },
-    occurredAt: "2026-07-12T16:30:45.000Z",
-    userId: "member_mailbox_1",
   };
 }
 

@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   fetchCompleteHostedDeviceSyncRuntimeSnapshot: vi.fn(),
   applyHostedPendingDirtyDeviceSyncStateForWake: vi.fn(),
   initInboxRuntime: vi.fn(),
+  persistHostedRuntimeStateAtCanonicalBoundary: vi.fn(),
   readConfiguredJunctionDeviceSyncProviderConfig: vi.fn(),
   readHostedAssistantRuntimeState: vi.fn(),
   requireHostedRuntimeDeviceSyncStore: vi.fn(),
@@ -90,6 +91,8 @@ vi.mock("@murphai/vault-usecases/vault-services", () => ({
 vi.mock("@murphai/core", () => ({
   detectWearableStorageMigrationCandidates:
     mocks.detectWearableStorageMigrationCandidates,
+  persistHostedRuntimeStateAtCanonicalBoundary:
+    mocks.persistHostedRuntimeStateAtCanonicalBoundary,
   pruneWearableDenseRawTimeseries: mocks.pruneWearableDenseRawTimeseries,
 }));
 
@@ -1776,6 +1779,12 @@ describe("runHostedDeviceSyncPass", () => {
       },
     );
 
+    expect(mocks.persistHostedRuntimeStateAtCanonicalBoundary).toHaveBeenCalledTimes(1);
+    expect(
+      mocks.persistHostedRuntimeStateAtCanonicalBoundary.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.syncHostedDeviceSyncControlPlaneState.mock.invocationCallOrder[0],
+    );
     expect(mocks.syncHostedDeviceSyncControlPlaneState).toHaveBeenCalledWith(
       expect.objectContaining({
         skipDirtyPendingFetch: true,

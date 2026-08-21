@@ -465,6 +465,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
+      createEnvironmentRealtimeCall: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,
@@ -501,6 +502,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
+      createEnvironmentRealtimeCall: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData: vi.fn().mockResolvedValue({
@@ -546,6 +548,7 @@ describe("deleteHostedRunnerUserDataBestEffort", () => {
     vi.mocked(readHostedExecutionControlClientIfConfigured).mockReturnValue({
       createBrowserVaultExportSession: vi.fn(),
       createBrowserVaultSession: vi.fn(),
+      createEnvironmentRealtimeCall: vi.fn(),
       deleteEnvironmentVoice: vi.fn(),
       deleteMealPhoto: vi.fn(),
       deleteUserData,

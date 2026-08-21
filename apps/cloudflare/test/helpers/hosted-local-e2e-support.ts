@@ -28,6 +28,7 @@ export const HOSTED_LOCAL_ASSISTANT_STUB_CLEARED_ENV_KEYS = [
   "CEREBRAS_API_KEY",
   "DEEPSEEK_API_KEY",
   "FIREWORKS_API_KEY",
+  "GEMINI_API_KEY",
   "GOOGLE_GENERATIVE_AI_API_KEY",
   "GROQ_API_KEY",
   "HF_TOKEN",
@@ -232,6 +233,7 @@ function quoteShellArgument(value: string): string {
 export function expectAdvertisedMurphDynamicTools(
   requests: readonly HostedLocalAssistantProviderStubRequest[],
   options: {
+    analyzeVideoAvailable?: boolean;
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
@@ -253,6 +255,13 @@ export function expectAdvertisedMurphDynamicTools(
     .find((request) => request.url === "/v1/responses");
   const expectedToolNames = listMurphDynamicToolNames()
     .filter((name) => {
+      if (
+        options.analyzeVideoAvailable !== true
+        && name === "murph.analyze_video"
+      ) {
+        return false;
+      }
+
       if (
         options.computerToolsAvailable !== true
         && name.startsWith("murph.computer_")

@@ -1,4 +1,5 @@
 import {
+  type EventRecord,
   type EventSource,
   type ActivityStrengthExercise,
   type JsonObject,
@@ -739,6 +740,10 @@ interface EditWorkoutRecordInput {
   set?: string[]
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
+  validatedEvent?: {
+    event: EventRecord
+    ledgerFile: string
+  }
 }
 
 async function persistWorkoutRecordEdit(input: EditWorkoutRecordInput) {
@@ -751,9 +756,13 @@ async function persistWorkoutRecordEdit(input: EditWorkoutRecordInput) {
     clear: input.clear,
     dayKeyPolicy: input.dayKeyPolicy,
     expectedKinds: ['activity_session'],
+    validatedEvent: input.validatedEvent,
   })
 
-  return showWorkoutRecord(input.vault, result.lookupId)
+  return {
+    vault: input.vault,
+    entity: result.entity,
+  }
 }
 
 export async function editWorkoutRecord(input: EditWorkoutRecordInput) {
@@ -762,11 +771,11 @@ export async function editWorkoutRecord(input: EditWorkoutRecordInput) {
 }
 
 /**
- * Persists a live-workout replacement after its exact-record owner validates
- * the complete next exercise snapshot. Generic workout edits must use
+ * Persists a validated complete exercise snapshot after its exact-record owner
+ * proves one targeted structural mutation. Generic workout edits must use
  * editWorkoutRecord so omissions and ambiguous exercise identity fail closed.
  */
-export function editWorkoutRecordAfterValidatedExerciseReplacement(
+export function editWorkoutRecordAfterValidatedExerciseUpdate(
   input: {
     durationMinutes?: number
     endedAt?: string
@@ -774,6 +783,10 @@ export function editWorkoutRecordAfterValidatedExerciseReplacement(
     lastMemberActionId?: string
     lookup: string
     vault: string
+    validatedEvent: {
+      event: EventRecord
+      ledgerFile: string
+    }
   },
 ) {
   const set = [
@@ -792,18 +805,21 @@ export function editWorkoutRecordAfterValidatedExerciseReplacement(
     lookup: input.lookup,
     set,
     vault: input.vault,
+    validatedEvent: input.validatedEvent,
   })
 }
 
 export async function deleteWorkoutRecord(input: {
   vault: string
   lookup: string
+  expectedRevision: number
 }) {
   return deleteEventRecord({
     vault: input.vault,
     lookup: input.lookup,
     entityLabel: 'workout',
     expectedKinds: ['activity_session'],
+    expectedRevision: input.expectedRevision,
   })
 }
 

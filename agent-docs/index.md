@@ -100,6 +100,15 @@ boundary is jointly specified by `agent-docs/SECURITY.md` and
 `agent-docs/RELIABILITY.md`; its completed round-three scope decision is recorded
 in `agent-docs/exec-plans/completed/2026-08-20-public-email-bootstrap-round-3-retrospective.md`.
 
+The internal hosted signup notification replaces opaque identifiers with local
+time, exact signup or activation provenance, and an explicitly approximate
+network location. Its request context is disclosed for at most 24 hours; reads
+stop at expiry, the existing hourly retention owner retires overdue ciphertext
+in bounded indexed batches, and a database-owned attempt trigger clears both
+value and expiry across mixed Web versions. Batch activation without
+member-level provenance omits source. This boundary is
+jointly specified by `ARCHITECTURE.md` and `agent-docs/SECURITY.md`.
+
 Hosted device-sync wake ownership keeps provider cadence in Web's canonical
 `nextReconcileAt`, while the encrypted system-mailbox item retains exact
 connection-specific retry work and Web dirty rows retain dirty resource/deletion
@@ -137,6 +146,19 @@ path-and-function owners with a one-call limit. Its policy and focused proof are
 specified by `agent-docs/SECURITY.md`,
 `agent-docs/references/testing-ci-map.md`, and
 `agent-docs/exec-plans/active/2026-08-12-provider-request-guard.md`.
+
+On-demand hosted video analysis is one turn-scoped Gemini 3.7 Flash call over
+an exact accepted-message attachment authority. The tool is offered only on
+private-direct turns with accepted user-action input and a configured Worker
+credential; group turns omit it. It may be present before that input has video
+authority because provider tools freeze at turn start and the first video may
+arrive through live steering. Murph freezes attachment metadata before Codex
+can act on each initial or live-steered input, verifies the exact bytes before
+cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
+the Worker boundary. The architecture, security, deployment order, and
+verification owners are `ARCHITECTURE.md`,
+`agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
+`agent-docs/references/testing-ci-map.md`.
 
 Hosted Junction setup recovery treats a signed source-attributed webhook as a
 trigger, not as connection proof. Web reads the live provider source list, then
@@ -311,6 +333,13 @@ confirmation-failure ownership, and provider-no-replay recovery, are jointly
 specified by `agent-docs/RELIABILITY.md` and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
+Silent member-memory consolidation reuses the shared restricted one-shot turn,
+grants the exact built-in automation its canonical host-owned memory state tool,
+suppresses native effects at the host boundary, and has no dedicated permission
+profile or provider-catalog inventory contract. This boundary and its focused
+proof are jointly specified by `ARCHITECTURE.md`, `agent-docs/SECURITY.md`,
+`agent-docs/RELIABILITY.md`, and `agent-docs/references/testing-ci-map.md`.
+
 Independent partial PlanetScale metric normalization, sparse connection-error
 port acceptance without false monitoring pages, continued evaluation of
 available database signals, per-port baseline advancement with new/reset
@@ -334,7 +363,9 @@ per-installation revision fence, credential-free revocation tombstone,
 prepared-before-active iOS credential handoff, bodyless scoped activation,
 member-plus-Family-sponsorship authority serialization,
 schema-v1 revision-zero compatibility, expand/contract migration sequence, and
-focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,
+the independent identity-authenticated foreground camera/Photos submission
+path with member-bound UUID retry identity and shared private ingestion, plus
+the focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/operations/verification-and-runtime.md`, and
 `agent-docs/references/testing-ci-map.md`.
@@ -556,7 +587,8 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router and compact agent work contract for task classes, proportional Product UX planning and walkthrough routing, action authority, evidence/tool use, focused local PR proof with exact-head CI ownership, completion-owned ReviewGPT waiting, review gates, commit paths, worktree isolation, and safe retirement. | Agent workflow routing | High | 2026-08-19 |
 | `agent-docs/operations/product-ux.md` | Single owner for proportional Product UX planning, post-code walkthroughs, and preliminary review across affected people, minimum useful value, known context, complete journeys, weak states, risk-based evidence, and evidence-backed finding levels. | Product UX workflow | High | 2026-08-17 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-candidate docs-drift CI comparisons, broad exact-head CI for PRs, fail-closed tag-release matrices with exact-head packing, the informational native iOS hosted E2E status whose explicit real-journey pass is production-shaped proof, namespace-only cleanup inside a disposable shared Junction sandbox, claim-based rendered evidence, canonical command and executor semantics, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-20 |
+| `agent-docs/operations/native-android-hosted-e2e.md` | Protected native Android hosted E2E ownership, exact Web/Android source binding, the single shared hosted-native PR credential and identity lifecycle environment, refreshable repository-scoped GitHub App credentials, receipted and unreceipted dispatch fencing, production-canary isolation, privacy boundary, rollout order, and physical-device proof gap. | Native Android verification operations | High | 2026-08-21 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-candidate docs-drift CI comparisons, broad exact-head CI for PRs, fail-closed tag-release matrices with exact-head packing, native iOS and Android hosted E2E statuses whose explicit real-journey passes are production-shaped proof, namespace-only cleanup inside a disposable shared Junction sandbox, claim-based rendered evidence, canonical command and executor semantics, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-20 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Point-in-time production catalog at its exact audited base covering interactive transactions and explicit locks, starvation classifications, retained-lock evidence policy, replacement patterns, PR ordering, and privacy-safe observability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, optional local canonical verification with explicit Crabbox-on-Blacksmith escalation and an exclusive heavyweight lane, focused PR proof, direct-default acceptance, scoped diff and repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Outcome-based completion with proportional Product UX plans and walkthroughs, claim-based evidence, a narrow static route-metadata proof exemption, a concise PR contract with required changelog and deployment dispositions, a categorized added/deleted LOC breakdown, conditional risk details, and an ordered PR-gate launch preflight, exact-head specialist review, focused local proof, broad PR CI, scoped commit and plan closure, and merge-readiness handoff. | Completion workflow | High | 2026-08-20 |
@@ -568,13 +600,13 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/PLANS.md` | Execution-plan lifecycle and storage rules. | Plan workflow | Medium | 2026-03-31 |
 | `agent-docs/exec-plans/completed/README.md` | Marks completed plans as immutable, non-operative historical snapshots and routes current implementation, deployment, rollback, and incident guidance to live owner docs. | Completed-plan archive interpretation | Medium | 2026-07-22 |
 | `agent-docs/generated/README.md` | Meaning and expectations for generated doc artifacts. | Generated-doc conventions | Low | 2026-04-02 |
-| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans, including current phone-call status remediation and the ReviewGPT 0.5.131 exact-head gate. | Active plan lifecycle | Medium | 2026-08-15 |
+| `agent-docs/exec-plans/active/` | Task-owned in-flight execution plans, including bounded Gemini video analysis, current phone-call status remediation, and the ReviewGPT 0.5.131 exact-head gate. | Active plan lifecycle | Medium | 2026-08-20 |
 | `agent-docs/exec-plans/tech-debt-tracker.md` | Current debt register with owner/priority/status. | Rolling debt tracker | Medium | 2026-03-12 |
 | `agent-docs/prompts/` | Reusable prompt, frontend, coverage, and fallback deep-review guidance. Product UX review rules live in `agent-docs/operations/product-ux.md`. | Workflow prompt library | Low | 2026-08-17 |
 | `agent-docs/prompts/seam-audits/` | One-pass bespoke seam prompts governed by a shared review-only, evidence, correction, and zero-finding contract. | Seam-audit prompt library | Low | 2026-07-13 |
 | `apps/web/README.md` | Hosted web control-plane overview, env/runtime contract, one-shot first-visit persona picker handoff, fixed-pack usage-credit Checkout plus capped monthly group authorization and explicit saved-card PaymentIntents, metadata-only Stripe failure alert configuration, canonical purchase/referral credit-entry ownership and remaining projections, conversational referral state, product-label database restore and constraint rollout order, gated OpenAI/Venice assistant Settings projection, signed conversation convergence, and cross-lane mailbox causal-sequence ownership, hosted AI usage allowance ownership, hosted computer-use run/handoff ownership, hosted Linq first-contact decision retention and iMessage app-fallback screening boundary, health-data revocation rollback floor, approval-read rollback floor, Temporal reconciliation-facts boundary, and app-source/testkit ownership split. | `apps/web/**` | Medium | 2026-08-09 |
 | `apps/cloudflare/README.md` | Hosted execution-plane overview and runtime contract, including payloadless direct Linq and Assistant Ask latency wakes, strict plan-usage consumer rollout order, Worker-owned provider egress allowlists, runner-scoped OpenAI and Venice egress credentials, asynchronous private generated-image delivery, and encrypted temporary group-avatar staging. | `apps/cloudflare/**` | Medium | 2026-07-29 |
-| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, immediate runner rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-15 |
+| `apps/cloudflare/DEPLOY.md` | Current deployment procedure for hosted execution, including the coordinated health-data revocation Web/Worker rollback floor, gated Venice provider activation, Web-first Gemini video-analysis pricing and immediate Worker/runner activation, rollout and rollback floors for shared message targeting, direct support escalation, and group room-model maintenance, hard-cut Assistant Ask and consented group disclosure rollback floors, phone-call fail-closed direct-origin/result/stop rollout with deterministic-item rollback proof and fence drain, group-funding urgency/capability rollout order, additive failed-request diagnostic rollout, native permission smoke, Blacksmith deploy handoff validation, private generated-image delivery and group-avatar staging, the approval-read web/runtime compatibility floor, the gated personality projection-convergence hard cut, and no signed usage-allowance start secret. | Hosted deploy flow | Medium | 2026-08-20 |
 | `packages/assistantd/README.md` | Local assistant daemon boundary and control-plane contract. | `packages/assistantd/**` | Medium | 2026-03-30 |
 | `packages/assistant-runtime/README.md` | Headless hosted runtime surface consumed by Cloudflare, including bounded same-conversation exact-successor provider-turn batches, terminal input-id authority for Web-derived preference order, mailbox-causal assistant-preference application, and legacy pending-item replay. | `packages/assistant-runtime/**` | Medium | 2026-07-15 |
 | `packages/device-syncd/README.md` | Local wearable sync runtime boundary and env contract. | `packages/device-syncd/**` | Medium | 2026-04-02 |

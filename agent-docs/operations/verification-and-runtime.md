@@ -67,22 +67,25 @@ narrow injected boundaries and prove acquisition ordering, success, relevant
 failure exits, exactly-once release, and awaited cleanup. Text inspection may
 supplement that proof, but it cannot establish runtime cleanup behavior.
 
-Native companion auth/control/device-sync PRs additionally use the
-`Native iOS hosted E2E` status described in `agent-docs/references/testing-ci-map.md`.
+Native companion auth/control/device-sync PRs additionally use the applicable
+`Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
+`agent-docs/references/testing-ci-map.md`.
 A canceled native workflow must not be rerun directly because the rerun retains
 its original queue identity. From an authenticated operator checkout, use
 `node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
 open same-repository human-authored PR and exact current head before rerunning a
 successful exact-head Repo Hygiene owner, whose completion creates a fresh
-native waiter without widening the protected environment or secret boundary.
+applicable iOS and Android waiter without widening the protected environment or
+secret boundary.
 A status description that records a real pass is production-shaped evidence:
-exact hosted PR Web deployment plus real Privy/Junction/HealthKit native flow.
+exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
+Connect native flow.
 Path-filtered informational success explicitly records that no real journey ran
 and must not become a required-check substitute. UI completion is not enough;
 trusted orchestration must also prove the exact candidate is anonymously reachable,
 a freshly created fixed Privy principal exists, and a connected real Junction
-`apple_health_kit` provider exists before cleanup. Local mocked or hosted-local
-tests do not replace it. Runtime credentials stay in the dedicated Vercel
+`apple_health_kit` or `health_connect` provider exists before cleanup. Local
+mocked or hosted-local tests do not replace it. Runtime credentials stay in the dedicated Vercel
 custom environment; the cleanup/dispatch credentials stay only in protected
 Actions environments. Junction cleanup completely enumerates the configured
 sandbox team, validates every returned team id, and deletes at most one user in
@@ -94,6 +97,17 @@ data.
 PR reset ownership is `orchestrator_owned_reset`, while production canary mode
 is non-destructive and receives none of that authority. Controller child
 commands and direct PostgreSQL reads are explicitly time-bounded.
+The Android controller additionally binds the exact private Android commit to
+an immutable lightweight tag and a short dispatch lease. It mints short-lived
+GitHub App installation credentials inside the existing protected controller
+owner and refreshes them before expiry; the App private key is removed from the
+process environment before any child command. If a dispatch receipt is
+uncertain, or a known run cannot be proven terminal after cancellation, cleanup
+remains fenced through the lease, the private job timeout, and a terminal grace
+window. Raw Android
+instrumentation output and provider prose are never uploaded or published;
+only the private workflow's closed allowlisted stage summary may reach Actions
+output. See `agent-docs/operations/native-android-hosted-e2e.md`.
 
 ## Expensive And Stochastic Proof Order
 
@@ -586,6 +600,13 @@ a redundant root `pnpm typecheck`.
 | Changes under `packages/cli` | Either `pnpm test:diff <path ...>`, or `pnpm typecheck` plus `pnpm --dir packages/cli verify:coverage` | Prefer `pnpm test:diff <path ...>` when it truthfully covers the touched CLI files. Otherwise run `pnpm --dir packages/cli verify:coverage` so the package stays on its prepared runtime and package-shape coverage lane instead of falling back to a no-coverage loop. Repo checks now run `packages/cli` typecheck plus package-local verification through `pnpm verify:cli`. The package-local `pnpm --dir packages/cli test` loop remains source-first. When a source-only dependency change reaches CLI tests through reverse-dependent `pnpm test:diff` fanout, the verifier now prepares the shared CLI runtime once under its existing workspace artifact lock and marks the fanout prepared, so individual Vitest workers never enter the fallback repair-lock path. That prepared marker does not enable real release packaging; only explicit CLI acceptance and coverage lanes opt into the release-tarball test. Direct CLI artifact-sensitive changes still escalate into `pnpm verify:cli`; those surfaces include the CLI package manifest/build/package-shape config, the CLI workspace Vitest configs, the prepared-runtime helper, and the root workspace manifests. The explicit acceptance commands remain `pnpm --dir packages/cli verify`, `pnpm --dir packages/cli verify:coverage`, and the repo-composed `pnpm verify:cli`. The CLI Vitest surface runs through nine workspace buckets; the health-tail, read-model, assistant, and expansion buckets share the bounded root worker pool, while the five explicit `fileParallelism: false` smoke buckets retain separate serial phases. Local worker caps default to `MURPH_VITEST_MAX_WORKERS=75%` unless the environment overrides it, file-level Vitest parallelism is enabled locally by default but disabled in CI by default, and in-file suite concurrency is opt-in unless `MURPH_VITEST_SUITE_CONCURRENCY` explicitly enables it. `MURPH_VITEST_FILE_PARALLELISM` can force file parallelism, and `MURPH_VITEST_MAX_CONCURRENCY` / `MURPH_CLI_VITEST_MAX_CONCURRENCY` cap concurrent tests within a file when suite concurrency is enabled (default `2` locally, `1` in CI). The prepared acceptance lane still covers the required hosted-execution, runtime-state, core, importer, device-syncd, query, inboxd, parser, and CLI runtime artifacts, including the reusable `packages/cli/dist/cli-entry.js` module. The shared CLI runtime-artifact helper trusts a verified in-process artifact state instead of rechecking the full artifact set on every later invocation, and non-stdin CLI integration tests can reuse a persistent subprocess harness by default with `MURPH_CLI_TEST_PERSISTENT_HARNESS=0` as the escape hatch back to isolated per-command processes. |
 | User explicitly says to skip checks | Skip checks for that turn only. | User instruction takes precedence. |
 
+The targeted hosted analyze-video acceptance command is
+`pnpm hosted-local e2e analyze-video-roundtrip`. It sends signed private Linq
+video turns through accepted attachment projection, the real Codex dynamic
+tool loop, Worker-owned Gemini egress, usage recording, and final Linq
+delivery; the same scenario also proves a Gemini 503 becomes a delivered
+retryable final response without an additional Gemini usage row.
+
 For the hosted product-feedback digest, focused Web proof includes the digest
 service, authenticated cron route, shared operational-email config, production
 cron allowlist, Prisma schema/migration inventory, and Web typecheck. The
@@ -987,7 +1008,7 @@ the advisory budget.
 - `pnpm test:scenario-integrity`: the coverage-bearing root command for
   fixture/scenario-manifest integrity, documented-command coverage, and indexed
   fixture references. It is not executable end-to-end smoke.
-- Automatic meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`. Enrollment-contract changes additionally prove both arrival orders for schema-v2 enable/disable, missing-row tombstones, exact disabled replay, stale and duplicate conflict behavior, higher-revision prepare, lost-response inactivity, exact bodyless activation and retry, activation/deletion in both serialization orders, activation against direct access, consent, sponsored-member, and sponsoring-group loss under real PostgreSQL locks, schema-v1 revision-zero immediate activation, signed-32-bit parsing, complete prepared/active credentials, and exact expand/contract SQL against opt-in local PostgreSQL. PR-bound work runs focused route, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement proof locally while exact-head CI owns broad acceptance. A direct shared-default push must use `pnpm verify:acceptance`. Neither automated path replaces a signed physical-iPhone opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
+- Meal-photo capture spans `apps/web`, `packages/{cloudflare-hosted-control,hosted-execution,assistant-runtime,runtime-state,assistant-engine,core,vault-usecases,cli}`, and `apps/cloudflare`. Enrollment-contract changes additionally prove both arrival orders for schema-v2 enable/disable, missing-row tombstones, exact disabled replay, stale and duplicate conflict behavior, higher-revision prepare, lost-response inactivity, exact bodyless activation and retry, activation/deletion in both serialization orders, activation against direct access, consent, sponsored-member, and sponsoring-group loss under real PostgreSQL locks, schema-v1 revision-zero immediate activation, signed-32-bit parsing, complete prepared/active credentials, and exact expand/contract SQL against opt-in local PostgreSQL. Manual-upload changes additionally prove strict UUID retry parsing, member-bound capture identity, identity/access/consent rechecks after the member and sponsored-access locks, automatic-enrollment independence, accepted/failed partial retry behavior on the native client, and shared staging/mailbox/ambiguous-cleanup behavior. PR-bound work runs focused route, validation, manual authority, companion bearer-consent recovery, current verified-email recipient authority, accepted-capture member-wide engagement, system-only cron/cleanup, foreground fairness, contract, storage, canonical-import, managed-automation, oldest-first closeout-work, and photo-retirement proof locally while exact-head CI owns broad acceptance. A direct shared-default push must use `pnpm verify:acceptance`. Neither automated path replaces a signed physical-iPhone opt-in/upload check because routine CI has neither iOS Photos authority nor production R2 access.
 - `pnpm release:check`: assumes dependencies are already installed, syntax-checks the release helpers and final-tarball secret guard, runs the guard's focused Node tests, validates the fixed-version monorepo release manifest plus publish metadata, then runs `pnpm build:workspace:clean` and `pnpm verify:acceptance`. `pnpm release:check:preflight` retains those release guards and the clean build but runs the reusable root typecheck plus doc gardening instead of the monolithic acceptance tail. The tag-driven release workflow derives fail-closed package and hosted-web matrices from the tagged checkout, runs preflight, isolated package-coverage shards, scenario-integrity coverage, the memory-measured hosted-web build/lint/smoke lane, four hosted-web test-file shards, and Cloudflare verification as required branches, then preserves the required `build` status as an `always()` aggregator. The build lane reruns the production-trace and prepared-smoke assertions after their outputs exist so clean test shards cannot turn those checks into no-ops. That aggregator rejects every failed, canceled, or skipped branch, proves its pack checkout is the same workflow SHA, rebuilds publishable output cleanly, and only then packs. Packing scans the final tarballs before writing their manifest, npm publication scans them again before its first provider request, and GitHub Release creation scans the downloaded one-day handoff artifact before permanent upload. The manifest may live outside the checkout and point to the established external pack output, but it still records repository-relative `.tgz` paths and one exact shared-directory inventory. Treat full `release:check` as the release-specific extension of `pnpm verify:acceptance`; the preflight mode is only the shared prerequisite branch of the tag workflow.
 
 ## Incur-Backed CLI Guardrails

@@ -687,6 +687,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
       prisma,
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "website",
       memberIds: ["member_123"],
       prisma,
     });
@@ -737,6 +738,7 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     })).rejects.toThrow("cleanup unavailable");
 
     expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "website",
       memberIds: ["member_123"],
       prisma,
     });

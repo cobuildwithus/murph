@@ -16,9 +16,13 @@ import {
   RunnerContainer as BaseRunnerContainer,
 } from "../runner-container.ts";
 import {
+  handleHostedRunnerGeminiOutbound,
   handleHostedRunnerOpenAiOutbound,
   HOSTED_RUNNER_OUTBOUND_BY_HOST,
 } from "../runner-egress-intercept.ts";
+import {
+  hostedLocalGeminiVideoAnalysisFetch,
+} from "./gemini-video-analysis.ts";
 import {
   HOSTED_RUNNER_BOUND_USER_ID_HEADER,
 } from "../runner-outbound/headers.ts";
@@ -697,6 +701,17 @@ const wrapOpenAiImagesForTest: HostedLocalTestRunnerOutboundHandler = (request, 
   );
 };
 
+const handleHostedLocalGeminiVideoAnalysis: HostedLocalTestRunnerOutboundHandler = (
+  request,
+  env,
+  ctx,
+) => handleHostedRunnerGeminiOutbound(
+  request,
+  env,
+  ctx,
+  hostedLocalGeminiVideoAnalysisFetch,
+);
+
 const handleHostedLocalLinqAttachmentUpload: HostedLocalTestRunnerOutboundHandler = async (
   request,
 ) => {
@@ -753,6 +768,7 @@ const hostedLocalTestOutboundByHost: typeof HOSTED_RUNNER_OUTBOUND_BY_HOST = {
   [CLOUDFLARE_HOSTED_RUNTIME_HOSTS.effectsPort]: effectsPortHandler,
   [HOSTED_LOCAL_LINQ_ATTACHMENT_UPLOAD_HOST]: handleHostedLocalLinqAttachmentUpload,
   "api.openai.com": wrapOpenAiImagesForTest,
+  "generativelanguage.googleapis.com": handleHostedLocalGeminiVideoAnalysis,
 };
 
 RunnerContainer.outboundByHost = hostedLocalTestOutboundByHost;

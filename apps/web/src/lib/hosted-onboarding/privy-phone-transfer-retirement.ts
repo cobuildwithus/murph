@@ -265,6 +265,7 @@ export async function prepareHostedPrivyPhoneTransferSourceRetirementTx(input: {
         suspendedAt: null,
       },
       data: {
+        signupNotificationContextEncrypted: null,
         suspendedAt: input.now,
       },
     });

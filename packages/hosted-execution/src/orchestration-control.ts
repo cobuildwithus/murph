@@ -70,10 +70,28 @@ export const HOSTED_RUNTIME_PROCESSING_MODES =
 export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
+  "assistant.notification.requested",
   "device-sync.wake",
   "runtime.browser-vault-refresh-requested",
   "runtime.maintenance-requested",
 ] as const satisfies readonly HostedMailboxKind[];
+
+export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
+  ["assistant.notification.requested:group-join:"] as const;
+
+export function isHostedSystemMailboxModelFreeNotification(input: {
+  dedupeKey: string | null | undefined;
+  kind: string;
+}): boolean {
+  if (input.kind !== "assistant.notification.requested") {
+    return false;
+  }
+
+  const dedupeKey = input.dedupeKey?.trim() ?? "";
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.some(
+    (prefix) => dedupeKey.length > prefix.length && dedupeKey.startsWith(prefix),
+  );
+}
 
 export const HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES = [
   "default_owned",
@@ -99,6 +117,7 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 
 export interface HostedRuntimeReconciliationFacts {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
+  environmentInterviewPending: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }

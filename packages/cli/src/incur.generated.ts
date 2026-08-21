@@ -169,7 +169,7 @@ declare module 'incur' {
       'habitat catalog': { args: { aspect?: string }; options: {} }
       'habitat coverage': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
       'habitat list': { args: {}; options: { domain?: "environment" | "workspace" | "exercise" } }
-      'habitat save': { args: { aspect: string }; options: { indicator?: string[]; recordedAt?: string; note?: string; body?: string } }
+      'habitat save': { args: { aspect: string }; options: { indicator?: string[]; indicatorNote?: string[]; recordedAt?: string; note?: string; body?: string } }
       'habitat show': { args: { lookup: string }; options: {} }
       'immunization import-json': { args: {}; options: { requestId?: string; input: string } }
       'immunization list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
@@ -319,7 +319,7 @@ declare module 'incur' {
       'wearables sleep pattern': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; timeZone?: string; windowDays: number } }
       'wearables sources list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
       'workout add': { args: { text?: string }; options: { requestId?: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string; workoutEndedAt?: string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[] } }
-      'workout delete': { args: { id: string }; options: { requestId?: string } }
+      'workout delete': { args: { id: string }; options: { requestId?: string; expectedRevision: number } }
       'workout edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute"; duration?: number; type?: string; distanceKm?: number; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string; workoutEndedAt?: string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[]; clearDuration?: boolean; clearDistance?: boolean; clearWorkout?: boolean } }
       'workout exercise add': { args: { name: string }; options: { requestId?: string; workoutId: string; sourceExerciseId?: string; order: number; groupId?: string; mode?: "weight_reps" | "bodyweight" | "assisted_bodyweight" | "weighted_bodyweight" | "duration" | "cardio"; unitOverride?: "lb" | "kg"; note?: string; sets?: number } }
       'workout exercise set-reps': { args: { exercise?: string }; options: { requestId?: string; workoutId: string; exerciseId?: string; exerciseOrder?: number; reps?: number; clear?: boolean } }
@@ -338,7 +338,7 @@ declare module 'incur' {
       'workout set clear': { args: { exercise?: string }; options: { requestId?: string; workoutId: string; exerciseId?: string; exerciseOrder?: number; setOrder: number } }
       'workout set log': { args: { exercise?: string }; options: { requestId?: string; workoutId: string; exerciseId?: string; exerciseOrder?: number; setOrder: number; requireExistingSet?: boolean; type?: "normal" | "warmup" | "dropset" | "failure"; note?: string; reps?: number; weight?: number; weightUnit?: "lb" | "kg"; durationSeconds?: number; distanceMeters?: number; rpe?: number; bodyweightKg?: number; assistanceKg?: number; addedWeightKg?: number } }
       'workout show': { args: { id: string }; options: { requestId?: string } }
-      'workout start': { args: { name?: string }; options: { requestId?: string; routine?: string; type?: string; note?: string; startedAt?: string } }
+      'workout start': { args: { name?: string }; options: { requestId?: string; routine?: string; exercise?: string[]; type?: string; note?: string; startedAt?: string } }
       'workout units set': { args: {}; options: { requestId?: string; weight?: "lb" | "kg"; bodyMeasurement?: "cm" | "in"; recordedAt?: string } }
       'workout units show': { args: {}; options: { requestId?: string } }
     }

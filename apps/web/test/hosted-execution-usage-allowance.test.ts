@@ -3,6 +3,7 @@ import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedGeminiVideoAnalysisUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
   parseAssistantUsageRecord,
@@ -957,6 +958,164 @@ describe("hosted AI usage allowance pricing", () => {
         modelSource: "served",
         requestedModel: "gpt-unpriced",
         servedModel: "openai/gpt-5.6-terra",
+      },
+    });
+  });
+
+  it("prices Gemini 3.7 Flash video analysis with thinking in the output bucket", () => {
+    const usage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      providerRequestId: "gemini_request_123",
+      usage: {
+        cachedContentTokenCount: 16,
+        candidatesTokenCount: 80,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 24,
+        totalTokenCount: 424,
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance(usage)).toEqual({
+      costUsdMicros: 620n,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        model: "gemini-3.7-flash",
+        modelSource: "requested",
+        pricingSource: "https://ai.google.dev/gemini-api/docs/pricing",
+        pricingWindow: {
+          effectiveFrom: null,
+          effectiveThrough: "2026-12-31T23:59:59.999Z",
+        },
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "75000",
+          input: "750000",
+          outputIncludingThinking: "3750000",
+        },
+        requestedModel: "gemini-3.7-flash",
+        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+        servedModel: null,
+        standardCostUsdMicros: "620",
+        tokenPricingBasis: "standard",
+        tokens: {
+          billableCachedInput: "16",
+          billableNonCachedInput: "304",
+          billableOutputIncludingThinking: "104",
+          cachedInput: "16",
+          cachedInputIncludedInPromptInput: "16",
+          cacheWrite: "0",
+          input: "320",
+          output: "80",
+          providerTotal: "424",
+          reasoning: "24",
+          total: "424",
+        },
+      },
+      pricingVersion:
+        "gemini-3.7-flash-video-pricing-through-2026-12-31",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...usage,
+      occurredAt: "2027-01-01T00:00:00.000Z",
+    })).toMatchObject({
+      costUsdMicros: 1_239n,
+      pricingSnapshot: {
+        pricingWindow: {
+          effectiveFrom: "2027-01-01T00:00:00.000Z",
+          effectiveThrough: null,
+        },
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "150000",
+          input: "1500000",
+          outputIncludingThinking: "7500000",
+        },
+      },
+      pricingVersion: "gemini-3.7-flash-video-pricing-from-2027-01-01",
+    });
+  });
+
+  it("fails closed when Gemini video usage drifts from its Worker-authored shape", () => {
+    const usage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      usage: {
+        candidatesTokenCount: 80,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 24,
+        totalTokenCount: 424,
+      },
+    });
+
+    for (const malformed of [
+      {
+        ...usage,
+        requestedModel: "gemini-3.7-pro",
+      },
+      {
+        ...usage,
+        rawUsageJson: {
+          candidatesTokenCount: 80,
+          promptTokenCount: 320,
+          thoughtsTokenCount: 25,
+          totalTokenCount: 424,
+        },
+      },
+      {
+        ...usage,
+        rawUsageJson: {
+          candidatesTokenCount: 80,
+          promptTokenCount: 320,
+          thoughtsTokenCount: 24,
+          totalTokenCount: 425,
+        },
+        totalTokens: 425,
+      },
+      {
+        ...usage,
+        rawUsageJson: {
+          candidatesTokenCount: 80,
+          promptTokenCount: 320,
+          thoughtsTokenCount: 24,
+        },
+      },
+    ] satisfies AssistantUsageRecord[]) {
+      expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
+        "pricing is missing",
+      );
+    }
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...usage,
+      tokenPricingBasis: "openai-flex",
+    })).toThrow(
+      "Gemini video-analysis hosted AI usage must use standard token pricing basis",
+    );
+  });
+
+  it("prices Gemini input-only usage when a blocked response omits candidates", () => {
+    const usage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      usage: {
+        promptTokenCount: 320,
+        totalTokenCount: 320,
+      },
+    });
+
+    expect(usage.outputTokens).toBeNull();
+    expect(priceHostedAiUsageForAllowance(usage)).toMatchObject({
+      costUsdMicros: 240n,
+      counted: true,
+      pricingSnapshot: {
+        tokens: {
+          billableNonCachedInput: "320",
+          billableOutputIncludingThinking: "0",
+        },
       },
     });
   });

@@ -391,8 +391,10 @@ legacy roster handle before any group summary reaches the model.
 
 Immutable hosted memory consolidation remains an isolated one-shot automation.
 Only its exact built-in id receives `murph.member_memory`; the host executes
-that narrow tool through canonical core memory operations while the Codex turn
-has shell/native capabilities disabled and its workspace and network denied.
+that narrow state tool through canonical core memory operations. The turn uses
+the shared restricted maintenance configuration and needs no separate
+permission profile or filesystem mutation path; native controls are not an
+additional memory owner, and the host suppresses their effects in this lane.
 Reminder availability uses no
 model turn or separate automation: the existing hosted background automation
 pass deterministically scans active private automations that explicitly store
@@ -1583,10 +1585,25 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   reconciliation, and Family invite acceptance from the browser, Linq, or
   Telegram; its one post-response task is registered at the first post-commit
   boundary, and both its read and attempt claim use canonical hosted access,
-  including Family sponsorship. A welcome-only or later paid-billing event is
-  not signup evidence. Later successful payments and accepted-invite replays
-  must not repeat activation side effects, and email paths must not persist
-  provider payloads or expose recipients in logs.
+  including Family sponsorship. The first authenticated website or companion
+  request may write one schema-closed signup context while the notification is
+  pending: server occurrence time, validated IANA time zone, closed signup
+  surface, and Vercel's advisory network city/region/country headers. Web
+  encrypts that context with the member control root and never stores the
+  request IP or precise coordinates. The context row carries a 24-hour expiry;
+  reads stop disclosing it at that boundary, and the existing hourly hosted
+  retention owner retires expired or missing-expiry ciphertext in indexed,
+  locked batches. A database trigger clears both ciphertext and expiry for
+  every durable email-attempt claim, including one from a rollback runner, and
+  prevents a later context update from restoring it. The email labels the
+  network location as approximate. It uses member creation time in UTC and
+  labels an exact fallback as the activation surface when no request context
+  exists; batch activation omits the source when it lacks per-member
+  provenance. The email excludes member and provider event identifiers. A
+  welcome-only or later paid-billing event is not signup evidence. Later
+  successful payments and accepted-invite replays must not repeat activation
+  side effects, and email paths must not persist provider payloads or expose
+  recipients in logs.
 
   Reserved support escalation uses the existing product-feedback callback as a
   one-turn explicit action. A verified-private request for Murph human support
@@ -1882,13 +1899,23 @@ cache, and rollout contract is recorded in
 `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`, and
 `agent-docs/references/hosted-runtime-protocol.md`.
 
-### Automatic meal-photo capture
+### Meal-photo capture
 
 The iOS companion is the only owner of photo-library observation and on-device meal classification. A member explicitly enables the feature, and the companion considers only photos created after that opt-in; the hosted system never receives or scans the rest of the library. Foreground enrollment uses the member's Privy identity token, while background uploads use a dedicated renewable bearer that grants only meal-photo upload and self-revocation. `apps/web` owns one enrollment row per member and hashed installation UUID. Schema-v2 identity mutations carry a positive signed-32-bit `authorityRevision`; the server accepts only a revision newer than that row's high-water mark, except that an exact replay of the current disabled revision is idempotently revoked. Identity revocation upserts a credential-free tombstone even when enrollment has not arrived, so a delayed lower-revision enable cannot restore upload authority. A higher revision is required for an explicit later re-enable. Existing schema-v1 installations remain on revision zero with their prior immediate enrollment, refresh, and revocation behavior, but schema-v1 identity mutations cannot cross a positive v2 fence.
 
+Explicit foreground submission is a separate, narrower authority path. The
+iOS companion may accept at most ten member-selected images from Apple's system
+camera or Photos picker, sanitize them locally, hold them in memory, and upload
+each only after the member taps Send to Murph. `POST
+/api/device-sync/companion/meal-photos` uses the current Privy identity bearer
+and does not create, activate, or read an automatic-capture enrollment. Web
+normalizes the caller's UUID idempotency key into a member-bound SHA-256 capture
+id so the existing hosted wake contract and per-member mailbox dedupe remain
+unchanged. It stores no manual queue or new product record.
+
 Schema-v2 enrollment is two-phase on that same row. Identity-authenticated `POST` prepares a complete credential at the requested revision with `activatedAt = null` and returns the existing bearer, idempotency secret, and expiry response shape unchanged. The foreground iOS app must durably save that credential before a bodyless scoped-bearer `PUT` activates it, and it enables background capture only after activation succeeds. Upload rejects a prepared credential. Exact-token activation replay is idempotent; activation and scoped bodyless `DELETE` serialize on the member lock and reread the exact current token, so activation followed by deletion ends revoked while deletion followed by activation fails authorization. Activation also locks any active Family membership and group access rows before rechecking consent and access. Family billing locks its owner and active roster members in stable order before changing those rows, so a sponsor or group access loss cannot commit between the activation guard and success and the existing owners cannot deadlock across member and sponsorship locks. A lost enrollment response or a delayed `POST` after trust-boundary teardown can therefore create at most unusable prepared state, never unknown upload authority. Revision conflicts report the current revision and active, prepared, or revoked state without returning credential material.
 
-Web stores only hashes of the bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Prepared and active enrollment rows have the complete credential triple; only active rows have `activatedAt`, while revoked rows retain neither activation nor credentials. Upload reads fail closed on prepared, expired, revoked, or incomplete state. The nullable revision-and-activation schema expansion deploys before fence-aware Web code. Revision-zero rows with a null activation marker remain active during rollout for old-Web compatibility. After the fence-aware deployment is live and prior Web functions drain, the contract migration marks those final legacy rows active, scrubs historical revoked credentials and activation, and validates the row-shape constraints. Only then may a schema-v2 iOS writer ship. Once a positive revision exists, fence-aware Web is the rollback floor. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, web locks the hosted member and any active sponsorship membership/group rows, then rechecks the same enrollment, active member access, and launch consent. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.
+Web stores only hashes of the bearer and installation UUID plus an encrypted idempotency secret, validates a bounded metadata-free JPEG, and stages the bytes through the internal Cloudflare control client. Prepared and active enrollment rows have the complete credential triple; only active rows have `activatedAt`, while revoked rows retain neither activation nor credentials. Upload reads fail closed on prepared, expired, revoked, or incomplete state. The nullable revision-and-activation schema expansion deploys before fence-aware Web code. Revision-zero rows with a null activation marker remain active during rollout for old-Web compatibility. After the fence-aware deployment is live and prior Web functions drain, the contract migration marks those final legacy rows active, scrubs historical revoked credentials and activation, and validates the row-shape constraints. Only then may a schema-v2 iOS writer ship. Once a positive revision exists, fence-aware Web is the rollback floor. Each upload attempt owns a distinct staged object. Before the metadata-only mailbox append commits, Web prepares the existing ingress-root mailbox crypto outside the transaction, then locks the hosted member and any active sponsorship membership/group rows. Automatic upload rechecks the exact enrollment, active access, and historical launch consent. Manual upload instead rechecks the verified Privy blind-index core binding, active access, and the same historical consent without projecting private identity fields or touching enrollment state. The direct route and any verified-email fallback are projected outside the transaction, then the exact raw routing owner rows are locked and compared after those final authority checks but before append; a change fails with the typed route-required conflict. Only database root revalidation, local authenticated encryption, authority reads, and the metadata append remain inside the bounded transaction. Both paths enter one shared staging, mailbox, wake, and cleanup owner. The first accepted mailbox item chooses the canonical object for exact duplicate attempts; losing or failed attempts delete only their own unclaimed object, while ambiguous commit cleanup first reconciles against the mailbox. Postgres, Temporal, and the hosted mailbox receive metadata only.
 
 The post-drain credential-shape constraint is itself a database rollback floor because older Web revocation code retained credential columns on revoked rows. A positive schema-v2 revision independently makes older Web logically unsafe because it could ignore the high-water mark and reactivate a tombstone. Rolling back below the fence-aware deployment therefore requires a forward schema/code repair rather than an ordinary application rollback.
 
@@ -3717,6 +3744,63 @@ still carries no identity, canonical id, credential, or authority, and all other
 card kinds remain local presentation. This adds no mutable card state, card
 database, background synchronization owner, queue, or model turn. V4 workout
 cards already in transcripts remain readable but cannot open the direct editor.
+
+## On-demand Gemini video analysis
+
+`murph.analyze_video` is an explicit, turn-scoped assistant capability for one
+video attached to an accepted message. The first release offers it only in a
+private direct turn with accepted user-action input when the Worker-held
+credential is configured; group runtimes do not receive it. A direct turn may
+receive the schema before its accepted input has video authority because the
+provider tool set freezes at turn start. Keeping the tool available lets the
+first live-steered video be drained, frozen, and authorized by the
+`beforeToolExecution` boundary in that same turn; the consumed steer is not
+carried forward as next-turn authority. Before Codex can act on the initial
+input, the turn owner snapshots each eligible attachment's normalized raw path,
+byte count, SHA-256 digest, MIME type, message ref, and ordinal into process
+memory. For active steering it freezes new attachments in the accepted-input
+validator before forwarding the steer to Codex. Existing keys are never
+refreshed from model-writable runtime files, and the tool sees only snapshots
+whose message refs remain in the current user-action scope. At invocation,
+Murph materializes the exact path, opens it without following the final
+symlink, reads exactly the snapshotted byte count with an EOF probe, verifies
+the digest and MP4/QuickTime/WebM signature, and only then permits external
+egress.
+
+The first version makes one inline legacy `generateContent` request to the
+fixed `gemini-3.7-flash` model with explicit `videoMetadata.fps = 1`, low
+thinking, a 14 MiB raw-video cap, a 90-second timeout, and no retry. It creates
+no Gemini Files API object, upload lifecycle, queue, cache, or database owner.
+The byte cap and one-call ceiling bound transport and memory; video duration
+and provider-token consumption remain bounded by Gemini's fixed model/request
+limits rather than a local duration probe.
+
+The ceiling is per host turn, not an exactly-once receipt across a rare outer
+hosted retry. If execution fails after Gemini accepts the request but before
+Murph commits terminal delivery evidence, replaying the same accepted member
+request may send the same clip to Gemini once more. The endpoint exposes no
+Murph-usable idempotency key. V1 accepts that bounded at-least-once residual
+instead of persisting provider prose or adding an analysis-effect state
+machine; exact-once recovery would require a durable pre-egress receipt plus
+cached-result or explicit recovery semantics and a separate retention review.
+For completed turns, a trusted tool-failure fallback defeats explicit no-reply
+and fills blank model output without replacing non-empty model/card wording. If
+the primary provider transport itself fails after the tool result but before
+final assembly, the ordinary outer turn retry remains the owner; v1 does not
+promote the fallback through failed-attempt delivery state.
+
+Hosted execution carries only the Gemini sentinel in the runner. The exact
+Google host, model path, method, JSON shape, MIME set, FPS, thinking level,
+request/response limits, and manual redirect posture are revalidated by the
+Cloudflare egress interceptor before the Worker substitutes its credential.
+The narrow raw HTTP owner is intentional: the Google SDK does not expose the
+request-scoped fetch injection required by Murph's identity-bound provider
+boundary, while the current Interactions API cannot explicitly set video FPS.
+Successful upstream calls record only bounded token counters and provider
+metadata through the existing usage ledger. Video bytes, prompts, paths, and
+Gemini response text never enter operational logs, usage rows, diagnostics, or
+derived vault artifacts. The bounded, one-way-framed tool result may enter the
+authorized assistant transcript like other tool output.
 
 ## Scheduled assistant tool authority
 

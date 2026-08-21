@@ -222,6 +222,7 @@ describe("Privy phone-transfer source retirement", () => {
     });
     expect(fixture.prisma.hostedMember.updateMany).toHaveBeenCalledWith({
       data: {
+        signupNotificationContextEncrypted: null,
         suspendedAt: NOW,
       },
       where: {
@@ -354,6 +355,24 @@ describe("Privy phone-transfer source retirement", () => {
       autoTrialBilling: null,
       sourceMemberId: SOURCE_MEMBER_ID,
     });
+  });
+
+  it("clears pending signup context while fencing a disposable source", async () => {
+    const fixture = makeFixture();
+    fixture.sourceShape.signupNotificationContextEncrypted = "encrypted-context";
+
+    await expect(prepare(fixture)).resolves.toEqual({
+      autoTrialBilling: null,
+      sourceMemberId: SOURCE_MEMBER_ID,
+    });
+
+    expect(fixture.prisma.hostedMember.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          signupNotificationContextEncrypted: null,
+        }),
+      }),
+    );
   });
 
   it("rejects a Starter source after any of its canonical grant was consumed", async () => {
@@ -1445,6 +1464,7 @@ function emptySourceShape() {
     hostedWorkspace: null as { userId: string } | null,
     pendingActivationTimeZone: null,
     routing: null as { memberId: string } | null,
+    signupNotificationContextEncrypted: null as string | null,
     signupNotificationEmailAttemptedAt: null,
     signupWelcomeEmailAttemptedAt: null,
     threadContainer: null,

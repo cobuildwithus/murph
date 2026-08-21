@@ -8,7 +8,6 @@ import {
 import {
   buildMurphGroupReadPermissionProfileTomlLines,
   buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines,
-  buildMurphMemberMemoryMaintenancePermissionProfileTomlLines,
   buildMurphMemberReadPermissionProfileTomlLines,
   buildMurphMemberWorkspacePermissionProfileTomlLines,
 } from "@murphai/hosted-execution/assistant-permissions";
@@ -630,7 +629,6 @@ export function buildHostedCodexConfigToml(input: {
     ...providerConfigLines,
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
-    ...buildMurphMemberMemoryMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
     ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
     "# Hosted runs should not perform Codex plugin marketplace or remote plugin",
