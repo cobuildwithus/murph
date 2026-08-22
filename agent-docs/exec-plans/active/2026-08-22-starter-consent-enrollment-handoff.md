@@ -144,7 +144,7 @@ Updated: 2026-08-22
 - Other consent callers: requests without the explicit invite continuation do
   not enter enrollment and retain the existing consent and health-runtime
   ordering.
-- Evidence: 96 focused Vitest cases passed across the consent route, real join
+- Evidence: 111 focused Vitest cases passed across the consent route, real join
   island, join page/view, and canonical Starter enrollment service; Web
   typechecking and lint pass on the simplified candidate. The recovery proof
   covers every supported direct-billing recovery status with retained
