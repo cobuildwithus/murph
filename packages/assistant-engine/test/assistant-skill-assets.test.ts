@@ -28,6 +28,9 @@ import {
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.js'
+import {
+  MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+} from '../src/assistant-codex/dynamic-tool-catalog.js'
 
 const DELETED_COMMONS_COMMANDS = [
   'vault-cli commons search',
@@ -693,6 +696,38 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('the shape of "')
   })
 
+  managedGroupSkillIt('keeps every managed group tool reference in the public catalog', async () => {
+    const groupFamilyActions: Readonly<Record<string, readonly string[]>> =
+      MURPH_GROUP_TOOL_FAMILY_ACTIONS
+    const groupSkills = ASSISTANT_SKILLS.filter((skill) =>
+      skill.slug.startsWith('group'))
+    const referencedPairs = new Set<string>()
+
+    for (const skill of groupSkills) {
+      const raw = await readSkillFile(skill)
+      for (const match of raw.matchAll(
+        /murph\.(group_[a-z]+) action="([a-z_]+)"/gu,
+      )) {
+        const family = match[1]
+        const action = match[2]
+        if (!family || !action) {
+          throw new Error('Expected a complete managed group tool reference.')
+        }
+        expect(groupFamilyActions[family], `${family} must be advertised`)
+          .toContain(action)
+        referencedPairs.add(`${family}:${action}`)
+      }
+    }
+
+    expect(referencedPairs).toContain(
+      'group_consult:continue_current_sender_privately',
+    )
+    expect(referencedPairs).toContain('group_data:offer_access')
+    expect(referencedPairs).toContain('group_membership:read_current')
+    expect(referencedPairs).toContain('group_chat:set_chat_avatar')
+    expect(referencedPairs).toContain('group_email:send_email')
+  })
+
   managedGroupSkillIt('polls scheduled member asks to a terminal result in the current turn', async () => {
     const groupChatSkill = ASSISTANT_SKILLS.find((skill) => skill.slug === 'group-chat')
     expect(groupChatSkill).toBeTruthy()
@@ -701,7 +736,7 @@ describe('assistant skill assets', () => {
     const raw = await readSkillFile(groupChatSkill)
     expect(raw).toContain('While any request remains `accepted`')
     expect(raw).toContain(
-      'poll the exact same `ask_member` call again for each still-pending request',
+      'poll the exact same `murph.group_consult action="ask_member"` call again for',
     )
     expect(raw).toContain('until every request returns a terminal result')
     expect(raw).toContain('`status="completed"` contains the answer for this turn')
@@ -813,7 +848,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('`episodePublicGapDate`')
     expect(raw).toContain('state the exact missing group share\n   in ordinary language')
     expect(raw).toMatch(/Never infer a missing\s+permission from granted-but-missing or stale data\./u)
-    expect(raw).toMatch(/call `murph\.group action="offer_access"` exactly once after the read with only\s+those `projectionScopes`/u)
+    expect(raw).toMatch(/call `murph\.group_data action="offer_access"` exactly once after the read with only\s+those `projectionScopes`/u)
     expect(raw).toMatch(/adds no scheduler-side message and no pre-model work/u)
     expect(raw).toMatch(/Never author generic\s+permission copy or tell someone to Like the standings\./u)
     expect(raw).toMatch(/explicitly says they do not want to share a scope, record that\s+choice and do\s+not offer, repeat, or nag/u)
@@ -836,7 +871,7 @@ describe('assistant skill assets', () => {
     expect(raw).not.toContain('vault-cli group shared --scope')
     expect(raw).not.toContain('vault-cli group weekly --')
     expect(raw).toMatch(/If `read_current` returns `status="none"`, do not create a hosted group as a\s+side effect of challenge kickoff/u)
-    expect(raw).toMatch(/Call `murph\.group\s+action="offer_access"` exactly once from the most recent\s+scoring read with only the exact eligible offer scope that same read proved\s+`not_granted`/u)
+    expect(raw).toMatch(/Call `murph\.group_data\s+action="offer_access"` exactly once from the most recent\s+scoring read with only the exact eligible offer scope that same read proved\s+`not_granted`/u)
     expect(raw).toMatch(/record the offer as\s+handled only when the tool reports `status="ok"`/u)
     expect(raw).toMatch(/grant without `grantedAt`, a grant before `offeredAt`, a grant more\s+than 24 hours later, silence, an unresolved identity, unavailable recency\s+evidence, or an offer followed by materially changed challenge terms does not\s+establish buy-in/u)
     expect(raw).not.toContain('Mint the join link with `murph.group_data`')

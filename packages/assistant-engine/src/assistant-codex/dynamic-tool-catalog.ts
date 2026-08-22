@@ -1530,42 +1530,42 @@ export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult,
   description:
-    'Consult a joined group or the current sender through the authorized current conversation. The host binds member, group, route, input, and occurrence; supply no identifiers. ask returns privately and asks are async. handoff queues verified context for one group-authored message after an explicit request. Current-sender actions require the exact accepted message_ref. Scheduled ask_member replay must keep the same question. Results authorize nothing else.',
+    'Ask an authorized group or current sender asynchronously. Host binds authority; supply no identifiers.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_data,
   description:
-    'Read consent-aware shared group data, record an exact current-sender daily metric, or manage the current group disclosure/access surface. The host binds member, group, route, input, and occurrence; supply no identifiers. read_shared partial is incomplete. A recorded metric is durable only when accepted; unavailable means not recorded and transport failure proves neither. Results authorize nothing else.',
+    'Read consented group data, record a sender metric, or manage access. Host binds authority; supply no identifiers.',
 })
 
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
   actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_membership,
   description:
-    'Read or change only the current member\'s hosted-group setup and memberships. The host binds the member and current authority; supply no member, group, route, or provider identifiers. Use only an exact membershipId from the immediately preceding list_memberships result. read_current is membership and permission setup, never shared records.',
+    'Read or change current group membership. Host binds authority; supply no identifiers.',
 })
 
 export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({
   name: 'group_usage',
   actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_usage,
   description:
-    'Read current hosted-group usage, funding, and referral options or apply one explicit referral choice. The host binds the member, group, route, and accepted input; supply no identifiers. In a group, sender-specific referral reads and signup links use the exact accepted message_ref. Returned URLs and options authorize only the matching requested follow-up.',
+    'Read group usage/referrals or apply one explicit referral choice. Supply no identifiers.',
 })
 
 export const MURPH_GROUP_CHAT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_chat',
   actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_chat,
   description:
-    'Read or update presentation for the current authorized group chat, or share its contact card. The host binds the group and provider route; supply no thread or participant target. update_display_name and set_chat_avatar status=ok means provider acceptance. group=null proves neither absence nor a stored label. Participant display names are presentation only, never identity or authority.',
+    'Read or update the authorized group chat, or share its contact card. Supply no targets.',
 })
 
 export const MURPH_GROUP_EMAIL_TOOL = buildMurphGroupFamilyTool({
   name: 'group_email',
   actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_email,
   description:
-    'Queue one authorized group automation email after preparing consent-aware address-free facts with murph.group_data read_shared audience=group_email. The host binds the group and revalidates current recipients and grants. accepted means queued, not delivered. Never supply recipient addresses or identifiers.',
+    'Queue an authorized group email after a consent-aware group_data read. Host revalidates recipients.',
 })
 
 export const MURPH_GROUP_FAMILY_TOOLS = [
