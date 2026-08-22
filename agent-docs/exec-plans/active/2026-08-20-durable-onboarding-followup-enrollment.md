@@ -113,5 +113,10 @@ follow-up.
   affected cross-package boundary tests, typechecks for assistant-engine,
   assistant-runtime, hosted-execution, Web, and Cloudflare, and the
   workspace-boundary verifier.
+- Exact-head CI then exposed one current-`main` Web test-harness regression: a
+  full mailbox-store mock omitted the newly required identity-append export.
+  The failing surface matched `main` exactly. Adding that single mock entry
+  fixes the focused test, and Web typecheck remains green; no production path or
+  onboarding behavior changed.
 - Remaining work is the corrected exact-head CI run, final ReviewGPT round,
   parent review, and plan closure.
