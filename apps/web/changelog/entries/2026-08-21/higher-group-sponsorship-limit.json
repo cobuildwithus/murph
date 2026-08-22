@@ -9,6 +9,6 @@
     "summary": "Monthly group sponsorship now offers a $50 maximum alongside the existing $5, $10, and $20 choices.",
     "details": "Starting still purchases $5 of usage, and later automatic purchases remain fixed at $5 and happen only when the group needs capacity and the selected monthly maximum allows it.",
     "relevanceTags": ["groups", "billing", "usage", "sponsorship"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2140]
   }
 }
