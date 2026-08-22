@@ -103,6 +103,9 @@ and bounded safety recovery.
   focused remediation run passed 5 files and 137 tests, with 75 credential-
   gated real-provider cases skipped; assistant-engine typecheck and
   `git diff --check` passed. Changelog generation and its four focused files
-  passed 57 tests.
+  passed 57 tests. Exact-head coverage then measured the intentional resident
+  response-card authority wording at 59,022 characters, 112 above the prior
+  ratchet; the ratchet was updated to that exact value and its focused file
+  passed 74 tests without changing provider behavior.
 - Exact-head ReviewGPT round after the substantive remediation and required
   GitHub checks.

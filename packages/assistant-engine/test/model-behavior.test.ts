@@ -2016,9 +2016,10 @@ describe('assistant system prompt cache stability', () => {
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
     // The local automation delivery limitation, the established Apple
-    // Health/WHOOP relay and cross-route repeated-set boundary, plus the private
-    // longitudinal recommendation policy set this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(58_910)
+    // Health/WHOOP relay, cross-route repeated-set boundary, private
+    // longitudinal recommendation policy, and response-card dietary/burn
+    // target-authority boundary set this ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_022)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
