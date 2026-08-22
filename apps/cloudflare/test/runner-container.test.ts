@@ -3258,6 +3258,96 @@ describe("RunnerContainer", () => {
     expect(startAndWaitForPorts).toHaveBeenCalledTimes(1);
   });
 
+  it("does not let a delayed lifecycle error clear a replacement start's pending window", async () => {
+    const fixedNowMs = Date.parse("2026-08-22T05:00:00.000Z");
+    let nowMs = fixedNowMs;
+    const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    let healthChecks = 0;
+    let lastChange = fixedNowMs;
+    const containerFetch = vi.fn(async (url: string) => {
+      if (!url.endsWith("/health")) {
+        throw new Error(`Unexpected runner request URL: ${url}`);
+      }
+      healthChecks += 1;
+      return new Response(JSON.stringify(
+        healthChecks === 1
+          ? { error: "replacement is still starting" }
+          : createRunnerHealthResult(),
+      ), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+        },
+        status: healthChecks === 1 ? 503 : 200,
+      });
+    });
+    const destroy = vi.fn(async () => undefined);
+    const { container } = createContainerDouble({
+      containerFetch,
+      destroy,
+      env: {
+        HOSTED_EXECUTION_RUNNER_READY_TIMEOUT_MS: "20000",
+      },
+      getState: vi.fn(async () => ({
+        lastChange,
+        status: "running" as const,
+      })),
+      initialStatus: "running",
+      platformRunning: true,
+    });
+
+    try {
+      container.onStart();
+      const oldStart = Reflect.get(container, "currentContainerStart");
+
+      nowMs += 1_000;
+      lastChange = nowMs;
+      const replacementStartedAtMs = nowMs;
+      container.onStart();
+      const replacementStart = Reflect.get(container, "currentContainerStart");
+      expect(replacementStart).not.toBe(oldStart);
+
+      expect(() => container.onError(new Error("old start failed late"))).toThrow(
+        "old start failed late",
+      );
+      expect(Reflect.get(container, "currentContainerStart")).toBe(replacementStart);
+      expect(replacementStart).toMatchObject({
+        pendingUntilMs: replacementStartedAtMs + 20_000,
+        readyObservedBy: null,
+        startedAtMs: replacementStartedAtMs,
+      });
+
+      nowMs = replacementStartedAtMs + 8_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).rejects.toThrow(
+        "Hosted runner container health check returned HTTP 503.",
+      );
+      expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(replacementStart);
+
+      nowMs = replacementStartedAtMs + 9_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_123",
+      })).resolves.toEqual({
+        action: "already_warm",
+        kind: "ready",
+      });
+
+      expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(replacementStart);
+      expect(replacementStart).toMatchObject({
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: replacementStartedAtMs,
+      });
+      expect(healthChecks).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("falls back to warm health after a container stop invalidates startup readiness proof", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 

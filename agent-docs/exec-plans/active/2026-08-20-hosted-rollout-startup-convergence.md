@@ -107,6 +107,12 @@ That premise is now invalidated. The corrective decision is:
   process identity. The correction keeps the same record pending through
   health, adopts the first lifecycle hook into that record, and returns
   unsettled when platform state is newer but ownership is ambiguous.
+- Round 7 found the remaining generation-blind lifecycle mutation: `onError`
+  cleared the pending window on whichever start was current when a delayed
+  callback arrived. The correction deletes that mutation, leaving exact-start
+  readiness, stopped-state detection, fatal classification, and the existing
+  20-second deadline as the cleanup authorities. A focused replacement-order
+  regression proves that an old error cannot revoke the replacement's window.
 - The eight-to-nine-second regression now times out during health after the
   port is ready, proves the first `onStart` retains object identity, retries
   without destroy, and then proves a later warm-health failure still recycles
@@ -115,16 +121,19 @@ That premise is now invalidated. The corrective decision is:
 
 ## State
 
-Active. ReviewGPT round 6 returned one material startup-ownership finding, and
-its smallest single-record correction is implemented. Current `main` merged
-cleanly without manual conflict resolution. The merge exposed one synthetic
-preemption fixture that changed `lastChange` on every read and omitted the real
-`onStart` hook; the fixture now uses one stable platform timestamp and the
-existing lifecycle callback, with no production-code expansion. The merged
-head passes 423 focused Cloudflare tests, 550 hosted-execution tests, 31 focused
-Web orchestration tests, and the Cloudflare and hosted-execution typechecks.
-Exact-head CI and substantive ReviewGPT round 7 remain. The PR remains draft
-and no production action is authorized.
+Active. ReviewGPT round 7 returned one material delayed-lifecycle-error finding
+at the hard cap, and its smallest deletion-only production correction is
+implemented with an ordering regression. Current `main` merged cleanly twice
+without manual conflict resolution, including the upstream repair for the
+unrelated Web release-test mock failure and updated native device-sync timeout
+proof. The earlier merge exposed one synthetic preemption fixture that changed
+`lastChange` on every read and omitted the real `onStart` hook; the fixture now
+uses one stable platform timestamp and the existing lifecycle callback, with no
+production-code expansion. Focused verification, parent final review, and
+exact-head CI remain; the merged corrected tree passes 424 focused Cloudflare
+tests, 550 hosted-execution tests, 32 focused Web tests, and the Cloudflare and
+hosted-execution typechecks. The hard cap prohibits an automatic round 8. The
+PR remains draft and no production action is authorized.
 
 ## Working Set
 

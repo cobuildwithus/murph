@@ -1771,7 +1771,6 @@ export class RunnerContainer extends Container {
   override onError(error: unknown): never {
     const context = this.currentLogContext;
     this.clearRecentReadinessProof();
-    this.clearContainerPendingWindow(this.currentContainerStart);
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
