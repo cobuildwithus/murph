@@ -44,14 +44,11 @@ export function buildCodexThreadStartParams(
     workingDirectory: string
   },
 ): Record<string, unknown> {
-  return {
-    ...buildCodexThreadContextParams({
-      includeInstructions: true,
-      includeServiceName: true,
-      input,
-    }),
-    experimentalRawEvents: true,
-  }
+  return buildCodexThreadContextParams({
+    includeInstructions: true,
+    includeServiceName: true,
+    input,
+  })
 }
 
 export function buildCodexThreadMetadataResumeParams(

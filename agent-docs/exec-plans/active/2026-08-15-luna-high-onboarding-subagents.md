@@ -8,11 +8,12 @@ Updated: 2026-08-22
 
 - Prepare hosted onboarding to delegate bounded health-history persistence to
   `gpt-5.6-luna` workers at high reasoning without activating the route before
-  exact model and token accounting is authoritative for every child request.
+  effective model and cumulative token accounting are authoritative for every
+  completed child turn.
 
 ## Success criteria
 
-- No onboarding assignment selects Luna/high until authoritative child-request
+- No onboarding assignment selects Luna/high until authoritative child-turn
   model, tier, attempt, and terminal-usage evidence is available and the
   executable Codex boundary can enforce the requested route.
 - The existing onboarding foundation-memo contract continues to delegate each
@@ -29,7 +30,7 @@ Updated: 2026-08-22
 
 ## Scope
 
-- In scope: hosted OpenAI Codex config, authoritative child-request accounting
+- In scope: hosted OpenAI Codex config, authoritative child-turn accounting
   boundaries where Murph owns them, the requested ReviewGPT dependency bump,
   and focused regression coverage.
 - Out of scope: arbitrary per-spawn model selection, nested delegation,
@@ -38,9 +39,8 @@ Updated: 2026-08-22
 ## Constraints
 
 - Technical constraints: V2 `subAgentActivity` does not expose authoritative
-  effective child-model evidence; both HTTP streaming and WebSocket Responses
-  transports must preserve bytes, latency, retry semantics, and provider
-  response delivery; usage persistence must be idempotent and private-safe.
+  effective child-model evidence; accounting must stay content-free,
+  idempotent, and independent of parent reply timing.
 - Product/process constraints: health-data authorization and canonical owners
   remain unchanged; children are one-shot bounded leaves; the root replies
   without waiting and never claims a save before canonical readback.
@@ -50,7 +50,7 @@ Updated: 2026-08-22
 1. Risk: egress and engine both record the same hosted OpenAI call.
    Mitigation: keep assistant-engine as the only ledger owner and add exact
    regression proof for root and child calls.
-2. Risk: transport evidence lacks Murph's accepted-turn, attempt, request, or
+2. Risk: provider evidence lacks Murph's accepted-turn, attempt, request, or
    child-assignment identity.
    Mitigation: keep the Worker out of ledger writes and extend the execution
    evidence at the owner that already has those logical coordinates.
@@ -75,15 +75,18 @@ Updated: 2026-08-22
 5. [x] Finish the initial candidate, push it, open a draft PR, and start the
    preliminary specialist and final ReviewGPT passes concurrently with CI.
 6. [x] Re-open the accounting boundary against the stock Codex app-server
-   protocol and verify that fresh raw-event listeners expose exact per-response
-   child usage while metadata-only resume exposes the effective child config.
+   protocol and verify that cumulative token usage is emitted before child
+   terminal completion while metadata-only resume exposes effective pricing
+   identity.
 7. [x] Recover, integrity-check, apply, and locally audit the ReviewGPT metering
    patch; fix the billing-order, rerouted-model, and raw-content-retention gaps
    found by the parent review.
-8. [ ] Push the corrected candidate and run sensitive final ReviewGPT round 2
+8. [x] Push the corrected candidate and run sensitive final ReviewGPT round 2
    concurrently with exact-head CI; the one allowed preliminary specialist
    pass already completed on the immutable first-reviewed head.
-9. [ ] Complete the parent final review, archive this plan, and create the final
+9. [ ] Delete the raw-event branch, verify the terminal cumulative owner, and
+   run sensitive final ReviewGPT round 3 concurrently with exact-head CI.
+10. [ ] Complete the parent final review, archive this plan, and create the final
    scoped commit.
 
 ## Decisions
@@ -120,56 +123,53 @@ Updated: 2026-08-22
 - Follow the registry to ReviewGPT 0.5.132 when it appears during the gate.
   That release fixes Deep Research conversation identity and timestamped
   submitted-attachment matching; retain Murph's wrapper-owned trust floor.
-- The earlier no-authoritative-usage conclusion is superseded by stock
-  app-server protocol evidence: `thread/start.experimentalRawEvents` enables
-  exact, non-cumulative `rawResponse/completed` usage on fresh parent and
-  inherited child listeners. Resumed legacy parents intentionally retain the
-  cumulative `thread/tokenUsage/updated` fallback because `thread/resume` does
-  not accept the raw-event switch.
+- Stock app-server ordering makes one cumulative path sufficient: each
+  completed upstream response is incorporated into `thread/tokenUsage/updated`
+  before Codex emits the child `turn/completed`. The terminal event therefore
+  finalizes the child turn without experimental raw events or source
+  arbitration.
 - Treat the exclusively owned app-server process as the trust boundary. A
   non-root thread notification correlates that child with the active turn; a
   particular parent collab-item shape is not a second billing-authorization
   protocol. The process retains the small usage callback after the root reply
   so detached child usage is still attributed to the originating Murph turn.
-- Fresh hosted turns use exact raw-response usage only. Resumed legacy parents
-  retain their pre-existing cumulative fallback because `thread/resume` cannot
-  enable raw events; no per-child arbitration state is needed.
-- Resolve the child's effective model, provider, service tier, and reasoning
-  effort through one cached metadata-only `thread/resume` with
-  `excludeTurns: true`. Incomplete or failed metadata drops that usage sample
-  without retry or parent-identity fallback. The returned effective model is
-  used for both requested and served fields because there is no separate
-  authoritative requested-model fact on the V2 child lifecycle.
-- Enabling raw events also causes the parent listener to receive full upstream
-  response items. Drop `rawResponseItem/completed` before trace or provider
-  event buffering; only the strict, usage-only completion shape participates
-  in child accounting.
+- Fresh and resumed hosted turns use the same cumulative terminal finalizer.
+  Deleting the finalized sample makes duplicate terminal notifications a
+  no-op; no separate response-id set, finalized bit, raw marker, or metadata
+  cache is needed.
+- Resolve only the child's effective model, provider, and service tier through
+  one metadata-only `thread/resume` with `excludeTurns: true`. Incomplete or
+  failed pricing metadata drops that usage sample without retry or
+  parent-identity fallback. Reasoning effort is not consumed by accounting, so
+  it is not validated or copied into a synthetic turn profile.
+- Non-hosted result aggregation retains the existing cumulative helper and
+  parent model because it has no ledger callback. Hosted accounting never
+  inspects parent collab events for authorization or model attribution.
 
 ## Verification
 
 - `pnpm --dir packages/assistant-engine exec vitest run --config
   vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts
-  test/assistant-codex-runtime.test.ts` passed on the corrected metering diff:
-  287 tests.
+  test/assistant-codex-runtime.test.ts` passed on the terminal cumulative
+  correction: 274 tests.
 - `pnpm --dir packages/hosted-execution exec vitest run --config
   vitest.config.ts --no-coverage test/assistant-usage.test.ts` passed: 23 tests.
 - `pnpm --dir packages/assistant-engine typecheck` and
   `pnpm --dir packages/hosted-execution typecheck` passed after the final
   TypeScript edits.
-- The stock Codex source confirms that raw completion usage is optional,
-  per-upstream-response, non-cumulative, emitted before cumulative token
-  accounting, and inherited by child listeners from a raw-enabled fresh
-  parent. Its running-thread metadata-only resume path returns the current
-  config snapshot without replaying historical token usage.
-- The simplified path removes the arbitrary 32-thread accounting cap and the
-  raw/cumulative source-arbitration sorter. Focused proof covers post-reply
-  child usage, response-id deduplication, malformed-then-valid completions,
-  strict metadata failure without retry or parent fallback, and exclusion of
-  full raw response items from both buffered and traced events.
+- The stock Codex source confirms that every response completion records token
+  usage and emits `thread/tokenUsage/updated` before the turn task emits
+  `turn/completed`. Its running-thread metadata-only resume path returns the
+  current config snapshot without replaying historical usage into a finalized
+  sample.
+- The terminal cumulative correction deletes 879 net lines from the prior head
+  across source and focused tests. Proof covers post-reply child completion,
+  duplicate terminal no-op, strict metadata failure without retry or parent
+  fallback, cumulative reset arithmetic, and content-free ledger drafts.
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-codex-config.test.ts`
   passed: 44 tests, 4 skipped.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts`
-  passed: 12 tests.
+  is included in the 274-test focused assistant-engine run above.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-skill-assets.test.ts`
   passed: 25 tests, 6 skipped.
 - `pnpm --dir packages/assistant-runtime typecheck`,
@@ -248,5 +248,12 @@ Updated: 2026-08-22
   ownership from the exclusively owned App Server process and non-root thread
   notifications. The working production-source correction is net deletion
   relative to the previously pushed head; focused tests cover unrecognized
-  parent item shapes, post-reply delivery, duplicate raw responses, incomplete
-  metadata, privacy, and unbounded observed fan-out.
+  parent item shapes, post-reply delivery, incomplete metadata, privacy, and
+  unbounded observed fan-out.
+- Current final ReviewGPT round 2 found that the raw branch still finalized at
+  response time instead of the detached child terminal, exposed unnecessary
+  raw response bytes to the active stdout consumer, and described reasoning
+  metadata more strictly than the parser enforced. All three were accepted.
+  The correction deletes raw-event enablement, parsing, response deduplication,
+  synthetic request profiles, cached metadata state, and spawn-model parsing;
+  the child terminal now owns one cumulative ledger draft.

@@ -51,13 +51,6 @@ export interface CodexThreadTokenUsage {
   total: CodexTokenUsageBreakdown
 }
 
-export interface CodexRawResponseCompleted {
-  responseId: string
-  threadId: string
-  turnId: string
-  usage: CodexTokenUsageBreakdown
-}
-
 const CODEX_APP_SERVER_METHOD_PATTERN =
   /^[a-z][A-Za-z0-9]*(?:\/[a-z][A-Za-z0-9]*)*$/u
 
@@ -203,38 +196,6 @@ export function readCodexTokenUsageBreakdown(
     outputTokens,
     reasoningOutputTokens,
     totalTokens,
-  }
-}
-
-export function readCodexRawResponseCompleted(
-  value: unknown,
-): CodexRawResponseCompleted | null {
-  const notification = readCodexServerNotification(value)
-  if (
-    notification?.method !== 'rawResponse/completed' ||
-    !hasOnlyOwn(notification.params, [
-      'responseId',
-      'threadId',
-      'turnId',
-      'usage',
-    ])
-  ) {
-    return null
-  }
-
-  const responseId = readCodexNonEmptyString(notification.params.responseId)
-  const threadId = readCodexNonEmptyString(notification.params.threadId)
-  const turnId = readCodexNonEmptyString(notification.params.turnId)
-  const usage = readCodexTokenUsageBreakdown(notification.params.usage)
-  if (!responseId || !threadId || !turnId || !usage) {
-    return null
-  }
-
-  return {
-    responseId,
-    threadId,
-    turnId,
-    usage,
   }
 }
 

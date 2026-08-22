@@ -118,7 +118,6 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   readCodexNonEmptyString,
-  readCodexRawResponseCompleted,
   readCodexRecord,
   readCodexThreadTokenUsage,
   type CodexTokenUsageBreakdown,
@@ -143,9 +142,7 @@ import {
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
 import {
-  buildCodexSubagentRawUsageDraft,
-  type CodexSubagentEffectiveMetadata,
-  type CodexSubagentRawUsageSample,
+  buildCodexSubagentUsageDraft,
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
@@ -3007,6 +3004,12 @@ function createCodexSubagentTurnUsageKey(input: {
   return `${input.threadId}\u0000${input.turnId}`
 }
 
+interface CodexSubagentEffectiveMetadata {
+  model: string
+  modelProvider: string
+  serviceTier: AssistantProviderServiceTier | null
+}
+
 function readCodexSubagentEffectiveMetadataResult(input: {
   result: unknown
   threadId: string
@@ -3035,10 +3038,6 @@ function readCodexSubagentEffectiveMetadataResult(input: {
   return {
     model,
     modelProvider,
-    reasoningEffort:
-      result.reasoningEffort === null
-        ? null
-        : readCodexNonEmptyString(result.reasoningEffort),
     serviceTier,
   }
 }
@@ -3312,11 +3311,6 @@ async function runCodexAppServerTurnOnProcess(
     : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
-  const reportedSubagentResponseIds = new Set<string>()
-  const subagentMetadataByThreadId = new Map<
-    string,
-    Promise<CodexSubagentEffectiveMetadata | null>
-  >()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -3416,16 +3410,13 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
-  // Resumed legacy threads do not expose raw response events. Keep their
-  // existing cumulative fallback; fresh threads use exact raw usage only.
   const buildSubagentUsageDrafts = (): AssistantProviderUsageDraft[] =>
-    requestedResumeThreadId === null && input.onAdditionalUsage
+    input.onAdditionalUsage
       ? []
       : extractCodexSubagentUsageDrafts({
           modelProvider: normalizeNullableString(input.modelProvider) ?? null,
           ordinalStart: nextDynamicToolUsageOrdinal,
           parentModel: normalizeNullableString(input.model) ?? null,
-          parentRawEvents: jsonEvents,
           serviceTier: input.serviceTier ?? null,
           subagentTokenUsageByTurn,
         })
@@ -5078,13 +5069,6 @@ async function runCodexAppServerTurnOnProcess(
     message: CodexRpcMessage,
     method: string | null,
   ): void => {
-    // Fresh thread listeners must enable the stock raw-event stream so child
-    // completions expose exact usage. The same switch also emits full upstream
-    // response items for the parent; Murph has no accounting use for that
-    // content, so keep it out of traces and buffered provider events.
-    if (method === 'rawResponseItem/completed') {
-      return
-    }
     acceptJsonEvent(message)
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
@@ -5335,30 +5319,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const rawResponseCompleted = readCodexRawResponseCompleted(message)
-    if (
-      requestedResumeThreadId === null &&
-      input.onAdditionalUsage &&
-      rawResponseCompleted
-    ) {
-      if (
-        rawResponseCompleted.threadId !== threadId ||
-        reportedSubagentResponseIds.has(rawResponseCompleted.responseId)
-      ) {
-        return
-      }
-      reportedSubagentResponseIds.add(rawResponseCompleted.responseId)
-      reportSubagentRawUsage({
-        occurredAt: new Date().toISOString(),
-        ...rawResponseCompleted,
-      })
-      return
-    }
-
-    if (requestedResumeThreadId === null && input.onAdditionalUsage) {
-      return
-    }
-
     const eventMethod = readCodexEventMethod(message)
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     if (isCodexTurnStartedMethod(eventMethod)) {
@@ -5381,10 +5341,7 @@ async function runCodexAppServerTurnOnProcess(
       })
       return
     }
-    if (
-      !isAssistantCodexTokenUsageEventType(eventMethod)
-      || !messageTurnId
-    ) {
+    if (!messageTurnId) {
       return
     }
 
@@ -5393,9 +5350,23 @@ async function runCodexAppServerTurnOnProcess(
       turnId: messageTurnId,
     })
     const sample = subagentTokenUsageByTurn.get(usageKey)
+    if (isCodexTurnCompletedMethod(eventMethod)) {
+      if (!sample || !input.onAdditionalUsage) {
+        return
+      }
+      // Removing the terminal sample is the exactly-once fence.
+      subagentTokenUsageByTurn.delete(usageKey)
+      if (sample.firstEvent === null || sample.lastEvent === null) {
+        return
+      }
+      reportSubagentUsage(sample)
+      return
+    }
+    if (!isAssistantCodexTokenUsageEventType(eventMethod)) {
+      return
+    }
     if (!sample) {
-      // A child token sample without an observed start has no accounting
-      // timestamp for the legacy cumulative fallback.
+      // A child token sample without an observed start has no accounting timestamp.
       return
     }
     sample.firstEvent ??= message
@@ -5578,13 +5549,8 @@ async function runCodexAppServerTurnOnProcess(
 
   const readSubagentEffectiveMetadata = (
     threadId: string,
-  ): Promise<CodexSubagentEffectiveMetadata | null> => {
-    const existing = subagentMetadataByThreadId.get(threadId)
-    if (existing) {
-      return existing
-    }
-
-    const request = withCodexRpcTimeout(
+  ): Promise<CodexSubagentEffectiveMetadata | null> =>
+    withCodexRpcTimeout(
       sendRequest(
         'thread/resume',
         buildCodexThreadMetadataResumeParams(threadId),
@@ -5594,24 +5560,24 @@ async function runCodexAppServerTurnOnProcess(
     ).then((result) =>
       readCodexSubagentEffectiveMetadataResult({ result, threadId }),
     ).catch(() => null)
-    subagentMetadataByThreadId.set(threadId, request)
-    return request
-  }
 
-  const reportSubagentRawUsage = (
-    sample: CodexSubagentRawUsageSample,
+  const reportSubagentUsage = (
+    sample: CodexSubagentTurnTokenUsageSample,
   ): void => {
+    const ordinal = nextDynamicToolUsageOrdinal++
     const report = readSubagentEffectiveMetadata(sample.threadId)
       .then(async (metadata) => {
         if (!metadata) {
           return
         }
-        const draft = buildCodexSubagentRawUsageDraft({
+        const draft = buildCodexSubagentUsageDraft({
           metadata,
-          ordinal: nextDynamicToolUsageOrdinal++,
+          ordinal,
           sample,
         })
-        await input.onAdditionalUsage?.(draft)
+        if (draft) {
+          await input.onAdditionalUsage?.(draft)
+        }
       })
       .catch(() => undefined)
     codexProcess.trackDetachedUsageReport(report)
