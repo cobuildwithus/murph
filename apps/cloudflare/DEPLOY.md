@@ -28,6 +28,39 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Gemini Video Analysis Rollout
+
+Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
+pricing first. Next, map the platform-owned `GEMINI_API_KEY` in the private
+Murph Cloud workflow and GitHub Environment without exposing its value to the
+public repository, only after vendor approval confirms that the exact hosted
+Gemini project has the applicable paid/no-training controls required by
+Murph's health-data policy. Key presence alone does not prove those controls.
+Finally, deploy the Worker and runner bundle together with
+immediate convergence. The runner receives only the normal injected-credential
+sentinel; the Worker owns the real key and substitutes it only after the exact
+Gemini request passes authorization and shape validation.
+
+Do not deploy the Cloudflare producer ahead of Web pricing: the Worker now
+withholds a successful Gemini response until Web accepts its usage row, so an
+older Web would turn every otherwise successful analysis into a 502. Missing
+key configuration is fail-closed and
+omits `murph.analyze_video`. During an immediate rollout, old instances omit
+the tool and new instances expose it only for a private-direct turn with
+accepted user-action input. Group turns continue to omit it. A direct turn may
+receive the schema before its accepted input has video authority because the
+provider tool set freezes at turn start; this lets the first live-steered video
+be frozen and authorized before tool execution in that same turn. There is no
+schema, backfill, dual-write, or stored compatibility state.
+
+Rollback the Worker/runner producer first, then remove the private secret
+mapping if desired; the Web reader and pricing branch are safe to leave in
+place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
+direct conversation to verify a single Gemini request, explicit 1 FPS
+metadata, bounded output, and one usage
+record. Inspect only bounded status/error aggregates, never media, prompts,
+paths, response bodies, or credential values.
+
 ## Assistant Turn-Profile V2 Rollout
 
 Deploy Web's shared hosted-execution reader first; it accepts both v1 and v2

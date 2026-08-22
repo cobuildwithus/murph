@@ -5946,6 +5946,33 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
   });
 
+  it("allows hosted Gemini provider fetches through the intercepted provider boundary", async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const hostedFetch = createCloudflareHostedProviderFetch(
+      "member_123",
+      fetchMock as typeof fetch,
+      {
+        readCurrentLease: () => ({
+          attemptId: "runtime_write_123",
+          leaseGeneration: "7",
+          providerEgressToken: "provider-egress-token-local",
+          userId: "member_123",
+          workspaceVersion: "6",
+        }),
+      },
+    );
+
+    const response = await hostedFetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+      { body: "{}", method: "POST" },
+    );
+
+    expect(response.status).toBe(204);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = requireFetchRequest(fetchMock.mock.calls[0], "gemini provider fetch");
+    expect(request.headers.get(HOSTED_RUNNER_BOUND_USER_ID_HEADER)).toBe("member_123");
+  });
+
   it("allows configured hosted-local provider fetch URLs through the runner host alias", async () => {
     const providerFetchBaseUrlSource = {
       HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "172.17.0.1",

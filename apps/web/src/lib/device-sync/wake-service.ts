@@ -1995,12 +1995,17 @@ async function prepareHostedWebhookSourceObservation(input: {
           tx,
         });
         if (!source) {
-          if (
-            !sourceInstanceKey
-            || resolveJunctionDeviceConnectRouteByProviderSlug(
-              sourceProviderSlug,
-            ) === null
-          ) {
+          const connectRoute = resolveJunctionDeviceConnectRouteByProviderSlug(
+            sourceProviderSlug,
+          );
+          if (connectRoute === null && !setupPending) {
+            // No connect route can register this slug, so no later delivery can
+            // admit the event. Settle the trace instead of retaining it until
+            // the Queue dead-letters it.
+            await completeHostedWebhookTraceTx(input, tx);
+            return { kind: "terminal" };
+          }
+          if (!sourceInstanceKey || connectRoute === null) {
             throw webhookSourceNotReadyError(
               "Device source setup is not visible yet. Retry shortly.",
             );

@@ -2,6 +2,9 @@ import type { AssistantSession } from '@murphai/operator-config/assistant-cli-co
 import { resolveXaiApiKey } from '@murphai/operator-config/xai-runtime'
 import { isMurphAndroidAppEnabled } from '@murphai/hosted-execution/env'
 import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
+} from '@murphai/hosted-execution/assistant-capabilities'
+import {
   resolveAssistantEffectiveStyle,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
   type AssistantPersonaId,
@@ -1015,6 +1018,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
           userActionAcceptedInputIds.length > 0 &&
           typeof input.hostedToolContext?.phoneCalls?.stop === 'function',
         voiceMemoGenerationAvailable: voiceMemoDeliveryChannel !== null,
+        analyzeVideoAvailable:
+          privateInteractiveProviderTurn &&
+          userActionAcceptedInputIds.length > 0 &&
+          normalizeNullableString(
+            input.sharedPlan.cliAccess.env[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV],
+          ) !== null,
         askGrokAvailable:
           resolveXaiApiKey(input.sharedPlan.cliAccess.env) !== null,
         pendingVaultFilesAvailable:

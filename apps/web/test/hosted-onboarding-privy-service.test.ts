@@ -599,10 +599,13 @@ describe("completeHostedPrivyVerification", () => {
       where,
     }: {
       include?: { member?: boolean };
-      select?: { memberId?: boolean };
+      select?: { member?: unknown; memberId?: boolean };
       where: Record<string, unknown>;
     }) => {
       if (where.privyUserLookupKey) {
+        if (select?.member) {
+          return [{ member: selectedMember, memberId: selectedMember.id }];
+        }
         return include?.member
           ? [{ ...selectedIdentity, member: selectedMember }]
           : [selectedIdentity];
@@ -660,6 +663,15 @@ describe("completeHostedPrivyVerification", () => {
     expect(privyManagementMocks.getUser).toHaveBeenCalledTimes(1);
     expect(prepareHostedDomainRootForWeb).toHaveBeenCalledTimes(1);
     expect(revalidatePreparedHostedDomainRootForWebTx).toHaveBeenCalledTimes(1);
+    expect(identityFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        member: expect.anything(),
+        memberId: true,
+      }),
+      where: expect.objectContaining({
+        privyUserLookupKey: expect.anything(),
+      }),
+    }));
     expect(identityFindMany).toHaveBeenCalledWith(expect.objectContaining({
       select: {
         memberId: true,

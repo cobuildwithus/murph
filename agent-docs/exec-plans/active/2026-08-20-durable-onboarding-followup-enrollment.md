@@ -103,5 +103,13 @@ follow-up.
   wakes remain opt-in so runtime-first deployment is safe. Focused verification
   passes 547 hosted-execution tests, 418 assistant-runtime tests, 180 Web tests,
   package builds, Web and Cloudflare typechecks, and workspace-boundary checks.
+- The latest `main` is integrated. Its sole textual conflict was the adjacent
+  reliability contract; the resolution preserves both this activation-owned
+  enrollment contract and `main`'s updated memory-maintenance contract. On the
+  integrated tree, focused verification passes 45 assistant-engine tests, 430
+  assistant-runtime tests, 94 hosted-execution tests, 180 Web activation and
+  routing tests, both affected cross-package boundary tests, typechecks for
+  assistant-engine, assistant-runtime, hosted-execution, Web, and Cloudflare,
+  and the workspace-boundary verifier.
 - Remaining work is the corrected exact-head CI run, final ReviewGPT round,
   parent review, and plan closure.

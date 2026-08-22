@@ -6,7 +6,7 @@ import {
   type HabitatIndicatorValue,
 } from "@murphai/contracts";
 
-import type { ResolvedCategory } from "./home-model";
+import type { HabitatIndicatorNotes, ResolvedCategory } from "./home-model";
 
 export type CategoryGrade = {
   letter: "A" | "B" | "C" | "D" | "E" | null;
@@ -15,6 +15,8 @@ export type CategoryGrade = {
   graded: number;
   eligible: number;
   redFlags: number;
+  basePct?: number;
+  capabilityBonus?: number;
 };
 
 export type FactRow = {
@@ -25,6 +27,7 @@ export type FactRow = {
   met: boolean | null;
   priority: HabitatIndicatorPriority;
   detail: string | null;
+  note: string | null;
 };
 
 export type QuietFact = {
@@ -179,6 +182,19 @@ function humanizeValue(
 }
 
 const MIN_GRADE_COVERAGE = 0.5;
+const MAX_CAPABILITY_BONUS = 15;
+
+function gradeLetter(
+  pct: number,
+  redFlags: number,
+): Exclude<CategoryGrade["letter"], null> {
+  if (redFlags > 0) return "E";
+  if (pct >= 90) return "A";
+  if (pct >= 75) return "B";
+  if (pct >= 55) return "C";
+  if (pct >= 35) return "D";
+  return "E";
+}
 
 function gradeFromCounts(
   met: number,
@@ -195,23 +211,66 @@ function gradeFromCounts(
   }
 
   const pct = Math.round((100 * met) / graded);
-  if (redFlags > 0) {
-    return { letter: "E", pct, met, graded, eligible, redFlags };
-  }
-  if (pct >= 90) return { letter: "A", pct, met, graded, eligible, redFlags };
-  if (pct >= 75) return { letter: "B", pct, met, graded, eligible, redFlags };
-  if (pct >= 55) return { letter: "C", pct, met, graded, eligible, redFlags };
-  if (pct >= 35) return { letter: "D", pct, met, graded, eligible, redFlags };
-  return { letter: "E", pct, met, graded, eligible, redFlags };
+  return {
+    letter: gradeLetter(pct, redFlags),
+    pct,
+    met,
+    graded,
+    eligible,
+    redFlags,
+  };
 }
 
-export function overallGrade(notes: readonly CategoryNote[]): CategoryGrade {
-  return gradeFromCounts(
+function capabilityBonus(
+  values: Record<string, Record<string, HabitatIndicatorValue>>,
+): number {
+  const pointsByGroup = new Map<string, number>();
+
+  for (const aspect of HABITAT_CATALOG.aspects) {
+    const aspectValues = values[aspect.id];
+    if (!aspectValues) continue;
+
+    for (const indicator of aspect.indicators) {
+      const bonus = indicator.capabilityBonus;
+      const value = aspectValues[indicator.id];
+      if (!bonus || !isKnownValue(value)) continue;
+
+      const points = bonus.pointsByValue[String(value)] ?? 0;
+      if (points <= 0) continue;
+
+      const group = bonus.group ?? `${aspect.id}.${indicator.id}`;
+      pointsByGroup.set(group, Math.max(pointsByGroup.get(group) ?? 0, points));
+    }
+  }
+
+  return Math.min(
+    MAX_CAPABILITY_BONUS,
+    Array.from(pointsByGroup.values()).reduce((sum, points) => sum + points, 0),
+  );
+}
+
+export function overallGrade(
+  notes: readonly CategoryNote[],
+  values?: Record<string, Record<string, HabitatIndicatorValue>>,
+): CategoryGrade {
+  const baseGrade = gradeFromCounts(
     notes.reduce((sum, note) => sum + note.grade.met, 0),
     notes.reduce((sum, note) => sum + note.grade.graded, 0),
     notes.reduce((sum, note) => sum + note.grade.eligible, 0),
     notes.reduce((sum, note) => sum + note.grade.redFlags, 0),
   );
+
+  if (!values || baseGrade.pct === null) return baseGrade;
+
+  const bonus = capabilityBonus(values);
+  const pct = Math.min(100, baseGrade.pct + bonus);
+  return {
+    ...baseGrade,
+    letter: gradeLetter(pct, baseGrade.redFlags),
+    pct,
+    basePct: baseGrade.pct,
+    capabilityBonus: bonus,
+  };
 }
 
 function mergedValue(
@@ -248,14 +307,34 @@ function mergedDetail(
   return null;
 }
 
+function mergedNote(
+  indicatorId: string,
+  note: string | undefined,
+  knownNotes: ReadonlyMap<string, string>,
+): string | null {
+  const notes = [note];
+  for (const [foldedId, parentId] of Object.entries(FOLDED_INTO)) {
+    if (parentId === indicatorId) {
+      notes.push(knownNotes.get(foldedId));
+    }
+  }
+  const unique = notes.filter(
+    (candidate, index, values): candidate is string =>
+      Boolean(candidate) && values.indexOf(candidate) === index,
+  );
+  return unique.length > 0 ? unique.join(" ") : null;
+}
+
 export function deriveCategoryNote(
   category: Pick<ResolvedCategory, "id" | "title" | "aspectIds">,
   values: Record<string, Record<string, HabitatIndicatorValue>>,
+  indicatorNotes: HabitatIndicatorNotes = {},
 ): CategoryNote {
   const indicators: Array<{
     aspectId: string;
     indicator: HabitatIndicatorDefinition;
     value: HabitatIndicatorValue | undefined;
+    note: string | undefined;
     index: number;
   }> = [];
 
@@ -268,15 +347,20 @@ export function deriveCategoryNote(
         aspectId,
         indicator,
         value: aspectValues[indicator.id],
+        note: indicatorNotes[aspectId]?.[indicator.id],
         index: indicators.length,
       });
     }
   }
 
   const knownFoldedValues = new Map<string, string>();
-  for (const { indicator, value } of indicators) {
+  const knownNotes = new Map<string, string>();
+  for (const { indicator, note, value } of indicators) {
     if (FOLDED_INTO[indicator.id] && isKnownValue(value)) {
       knownFoldedValues.set(indicator.id, humanizeValue(value, indicator));
+    }
+    if (note) {
+      knownNotes.set(indicator.id, note);
     }
   }
 
@@ -287,7 +371,7 @@ export function deriveCategoryNote(
   let known = 0;
   let total = 0;
 
-  for (const { aspectId, indicator, value, index } of indicators) {
+  for (const { aspectId, indicator, note, value, index } of indicators) {
     const label = displayLabel(aspectId, indicator);
     const rank = PRIORITY_RANK[indicator.priority];
     const core = indicator.informational !== true;
@@ -339,6 +423,7 @@ export function deriveCategoryNote(
       met,
       priority: indicator.priority,
       detail: mergedDetail(indicator.id, knownFoldedValues),
+      note: mergedNote(indicator.id, note, knownNotes),
       index,
     });
   }
@@ -381,6 +466,7 @@ export function deriveCategoryNote(
         met: rowMet,
         priority,
         detail,
+        note,
       }) => ({
         indicatorId,
         label,
@@ -389,6 +475,7 @@ export function deriveCategoryNote(
         met: rowMet,
         priority,
         detail,
+        note,
       }),
     ),
     optionalFacts: optional

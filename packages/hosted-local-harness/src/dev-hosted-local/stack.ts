@@ -2255,7 +2255,6 @@ const HOSTED_LOCAL_HOST_ONLY_CODEX_ENV_NAMES = [
   "CODEX_MANAGED_BY_NPM",
   "CODEX_THREAD_ID",
   "DEEPSEEK_API_KEY",
-  "GEMINI_API_KEY",
   "GOOGLE_AI_API_KEY",
   "GOOGLE_API_KEY",
   // Harness-derived only; inherited shell/env-file values are never trusted.

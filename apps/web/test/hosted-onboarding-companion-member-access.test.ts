@@ -1,5 +1,5 @@
 import { HostedBillingStatus } from "@prisma/client";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -125,12 +125,16 @@ function completion(
   };
 }
 
-function admissionRequest(token = "privy-identity-token"): Request {
+function admissionRequest(
+  token = "privy-identity-token",
+  headers: Record<string, string> = {},
+): Request {
   return new Request(
     "https://app.example.test/api/device-sync/companion/admission",
     {
       headers: {
         authorization: `Bearer ${token}`,
+        ...headers,
       },
       method: "POST",
     },
@@ -146,6 +150,9 @@ describe("native companion hosted member admission", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_SIGNUP_NOTIFICATION_EMAILS", "founder@example.com");
+    vi.stubEnv("HOSTED_SIGNUP_WELCOME_EMAIL_FROM", "Murph <welcome@example.com>");
+    vi.stubEnv("RESEND_API_KEY", "re_test");
     mocks.getPrisma.mockReturnValue(prisma);
     mocks.assertHostedHistoricalLaunchConsentGranted.mockResolvedValue(undefined);
     mocks.assertActiveHostedMemberAccessAllowed.mockResolvedValue(undefined);
@@ -157,6 +164,10 @@ describe("native companion hosted member admission", () => {
     });
     mocks.retryPendingHostedStarterUsageActivationRuntimeWake
       .mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("requires bearer identity without falling back to browser authority", async () => {
@@ -299,7 +310,15 @@ describe("native companion hosted member admission", () => {
     mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
     mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
 
-    const response = await admissionRoute.POST(admissionRequest());
+    const response = await admissionRoute.POST(admissionRequest(
+      "privy-identity-token",
+      {
+        "x-vercel-ip-city": "Denver",
+        "x-vercel-ip-country": "US",
+        "x-vercel-ip-country-region": "CO",
+        "x-vercel-ip-timezone": "America/Denver",
+      },
+    ));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true });
@@ -307,7 +326,23 @@ describe("native companion hosted member admission", () => {
       identity: emailIdentity,
       now: expect.any(Date),
       prisma,
+      signupNotificationContext: {
+        schema: "murph.hosted-signup-notification-context.v1",
+        occurredAt: expect.any(String),
+        surface: "mobile_app",
+        timeZone: "America/Denver",
+        location: {
+          city: "Denver",
+          country: "US",
+          countryRegion: "CO",
+        },
+      },
+      timeZone: "America/Denver",
     });
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput?.signupNotificationContext?.occurredAt).toBe(
+      completionInput?.now?.toISOString(),
+    );
     expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledWith({
       inviteCode: "invite_native",
       member: {
@@ -323,6 +358,57 @@ describe("native companion hosted member admission", () => {
       prisma,
     });
     expect(mocks.createHostedDeviceSyncPublicIngressService).not.toHaveBeenCalled();
+  });
+
+  it("does not collect signup notification context when notification email is disabled", async () => {
+    vi.stubEnv("HOSTED_SIGNUP_NOTIFICATION_EMAILS", "");
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({
+      identity: emailIdentity,
+    });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    const response = await admissionRoute.POST(admissionRequest(
+      "privy-identity-token",
+      {
+        "x-vercel-ip-city": "Denver",
+        "x-vercel-ip-country": "US",
+        "x-vercel-ip-country-region": "CO",
+        "x-vercel-ip-timezone": "America/Denver",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledOnce();
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput).toMatchObject({
+      identity: emailIdentity,
+      timeZone: "America/Denver",
+    });
+    expect(completionInput).not.toHaveProperty("signupNotificationContext");
+  });
+
+  it("does not collect signup notification context when Resend is only partially configured", async () => {
+    vi.stubEnv("HOSTED_SIGNUP_WELCOME_EMAIL_FROM", "");
+    mocks.resolveHostedPrivySessionFromBearerToken.mockResolvedValue({
+      identity: emailIdentity,
+    });
+    mocks.lookupHostedMemberForPrivyPrincipal.mockResolvedValue(null);
+    mocks.readActiveHostedMemberAccess.mockResolvedValue(false);
+
+    const response = await admissionRoute.POST(admissionRequest(
+      "privy-identity-token",
+      {
+        "x-vercel-ip-city": "Denver",
+        "x-vercel-ip-country": "US",
+        "x-vercel-ip-timezone": "America/Denver",
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledOnce();
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput).not.toHaveProperty("signupNotificationContext");
   });
 
   it("uses a read-only fast path for an existing active member", async () => {

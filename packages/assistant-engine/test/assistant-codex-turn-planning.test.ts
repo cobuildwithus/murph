@@ -3196,6 +3196,100 @@ describe('assistant Codex turn planning', () => {
       .toContain('ask_grok')
   })
 
+  it('plans murph.analyze_video only for private accepted-input turns with the Gemini key', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: false,
+    })
+    const acceptedInputId = 'ain_11111111111111111111111111111111'
+    const planToolNamesFor = async (options: {
+      acceptedInputItems?: NonNullable<
+        AssistantMessageInput['acceptedTurnInput']
+      >['initialInputs']
+      conversationScope?: 'direct' | 'group'
+      env: NodeJS.ProcessEnv
+    }) => {
+      const conversationScope = options.conversationScope ?? 'direct'
+      const plan = await resolveAssistantRouteTurnPlan({
+        acceptedInputItems: options.acceptedInputItems ?? [],
+        executionContext: conversationScope === 'group'
+          ? {
+              hosted: {
+                memberId: 'member-analyze-video-group',
+                userEnvKeys: [],
+              },
+            }
+          : null,
+        hostedToolContext: {
+          ...createHostedToolContext(),
+          currentAnalyzeVideoAttachmentAuthorities: () => [],
+        },
+        input: {
+          ...createMessageInput(),
+          threadIsDirect: conversationScope === 'direct',
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-20',
+          currentTimeZone: 'America/New_York',
+        },
+        route: createRoute(),
+        session: createSession(),
+        sharedPlan: createSharedPlan({
+          cliAccess: {
+            env: options.env,
+            rawCommand: 'vault-cli',
+            setupCommand: 'murph',
+          },
+        }, conversationScope === 'group'
+          ? {
+              channel: 'telegram',
+              effectiveThreadIsDirect: false,
+              threadId: 'group-analyze-video',
+              threadIsDirect: false,
+            }
+          : {}),
+      })
+      return plan.dynamicTools.map((tool) => tool.name)
+    }
+
+    const acceptedInputItems = [{
+      id: acceptedInputId,
+      source: 'assistant-input' as const,
+    }]
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      env: {},
+    })).not.toContain('analyze_video')
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      env: { GEMINI_API_KEY: '   ' },
+    }))
+      .not.toContain('analyze_video')
+    expect(await planToolNamesFor({
+      env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
+    }))
+      .not.toContain('analyze_video')
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
+    }))
+      .toContain('analyze_video')
+    expect(await planToolNamesFor({
+      acceptedInputItems,
+      conversationScope: 'group',
+      env: { GEMINI_API_KEY: 'gemini-sentinel-key' },
+    }))
+      .not.toContain('analyze_video')
+  })
+
   it('co-gates message-target tools from route capability instead of the latest message', async () => {
     planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue('bootstrap contract')
     planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)

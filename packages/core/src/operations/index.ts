@@ -38,6 +38,7 @@ export {
   listWriteOperationMetadataPaths,
   listWriteOperationMetadataPathsWithStageDirectories,
   applyHostedCanonicalWriteReceipt,
+  persistHostedRuntimeStateAtCanonicalBoundary,
   readStoredWriteOperation,
   readStoredWriteOperationJsonlAppendPayload,
   resolveHostedCanonicalWritePayloadFilePath,

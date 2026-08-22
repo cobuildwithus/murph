@@ -86,6 +86,7 @@ export const HOSTED_SHARED_FORWARDED_ENV_CATEGORY_KEYS = {
 } as const satisfies Record<string, readonly string[]>;
 
 export const HOSTED_SHARED_MODEL_CREDENTIAL_ENV_NAMES = [
+  "GEMINI_API_KEY",
   "MURPH_CUSTOM_INFERENCE_API_KEY",
   "OPENAI_API_KEY",
   "VENICE_API_KEY",
