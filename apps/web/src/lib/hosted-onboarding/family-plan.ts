@@ -103,6 +103,9 @@ import {
   signalHostedMemberActivationRuntimeWakeBestEffortResult,
 } from "./member-activation-runtime-wake";
 import {
+  signalHostedAccessGrantRuntimeRecheckBestEffort,
+} from "./member-access-runtime-recheck";
+import {
   scheduleHostedSignupNotificationEmails,
 } from "./signup-notification-email";
 import {
@@ -2286,6 +2289,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
           ? await readHostedFamilyRuntimeRecheckMemberIdsForEventTx({
               eventCreatedAt,
               groupId: group.id,
+              includeActiveMemberships: currentActiveFamilySubscription,
               ownerMemberId: currentActiveFamilySubscription
                 ? group.ownerMemberId
                 : null,
@@ -2475,6 +2479,11 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
       !activeMembersFitPaidSeats
     ? HostedBillingStatus.unpaid
     : stripeBillingStatus;
+  const familyAccessRestored = !hasHostedAccountGroupAccess(group) &&
+    hasHostedAccountGroupAccess({
+      billingStatus,
+      suspendedAt: group.suspendedAt,
+    });
   const billingRef = await writeHostedAccountGroupStripeBillingTx({
     billingStatus,
     currentBillingPhase:
@@ -2509,6 +2518,11 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
   }
 
   if (billingStatus === HostedBillingStatus.active) {
+    if (familyAccessRestored || recheckOwnerOnExactActiveEventReplay) {
+      for (const membership of activeMemberships) {
+        runtimeRecheckMemberIds.add(membership.memberId);
+      }
+    }
     // A direct-paid owner conversion reuses the same Stripe subscription. The
     // Family webhook is the single handoff point: only clear the old individual
     // billing owner after the paid Family projection is durably reconciled.
@@ -2554,6 +2568,7 @@ export async function applyHostedFamilyStripeSubscriptionUpdatedTx(input: {
 async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
   eventCreatedAt: Date | null;
   groupId: string;
+  includeActiveMemberships: boolean;
   ownerMemberId: string | null;
   tx: Prisma.TransactionClient;
 }): Promise<string[]> {
@@ -2566,8 +2581,12 @@ async function readHostedFamilyRuntimeRecheckMemberIdsForEventTx(input: {
     where: {
       groupId: input.groupId,
       status: "active",
-      usagePlanTransitionAt: input.eventCreatedAt,
-      usagePlanTransitionKind: "plan_upgrade",
+      ...(input.includeActiveMemberships
+        ? {}
+        : {
+            usagePlanTransitionAt: input.eventCreatedAt,
+            usagePlanTransitionKind: "plan_upgrade",
+          }),
     },
   });
   return [
@@ -4961,6 +4980,11 @@ export async function acceptHostedFamilyInvite(input: {
       timeoutMs: HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
     });
   } else {
+    await signalHostedAccessGrantRuntimeRecheckBestEffort({
+      memberId: membership.memberId,
+      prisma,
+      timeoutMs: HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS,
+    });
     await materializePendingHostedGroupJoinConfirmationsBestEffort({
       memberId: membership.memberId,
       prisma,

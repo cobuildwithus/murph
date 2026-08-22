@@ -48,6 +48,9 @@ const nextServerMocks = vi.hoisted(() => ({
 const activationWakeMocks = vi.hoisted(() => ({
   signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
 }));
+const accessGrantRecheckMocks = vi.hoisted(() => ({
+  signalHostedAccessGrantRuntimeRecheckBestEffort: vi.fn(),
+}));
 const groupJoinConfirmationMocks = vi.hoisted(() => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
 }));
@@ -70,6 +73,10 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
   HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS: 5_000,
   signalHostedMemberActivationRuntimeWakeBestEffortResult:
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+}));
+vi.mock("@/src/lib/hosted-onboarding/member-access-runtime-recheck", () => ({
+  signalHostedAccessGrantRuntimeRecheckBestEffort:
+    accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   HostedDomainRootPreparationMismatchError: class extends Error {
@@ -326,6 +333,8 @@ describe("hosted Family plan", () => {
       signalAccepted: true,
       workflowIdPresent: true,
     });
+    accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort
+      .mockResolvedValue(undefined);
     mailboxMocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       item: { id: "mailbox_item_owner_notification" },
     });
@@ -4157,6 +4166,45 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("rechecks an established member runtime after browser Family access is granted", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
+    activationMocks.activateHostedMemberForFamilySponsorshipTx.mockResolvedValueOnce({
+      activated: false,
+      hostedExecutionEventId: null,
+      hostedExecutionMailboxItemId: null,
+      memberId: "member_mom",
+    });
+    const prisma = tx as FamilyPlanTxMock & {
+      $transaction: ReturnType<typeof vi.fn>;
+    };
+    prisma.$transaction = vi.fn((callback) => callback(tx));
+
+    await expect(acceptHostedFamilyInvite({
+      acceptedMemberId: "member_mom",
+      inviteCode: "invite_phone",
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ memberId: "member_mom" });
+
+    expect(
+      activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
+    ).not.toHaveBeenCalled();
+    expect(
+      accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
+    ).toHaveBeenCalledWith({
+      memberId: "member_mom",
+      prisma,
+      timeoutMs: 5_000,
+    });
+    expect(
+      accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort.mock
+        .invocationCallOrder[0],
+    ).toBeLessThan(
+      groupJoinConfirmationMocks.materializePendingHostedGroupJoinConfirmationsBestEffort
+        .mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
   it("returns a missing browser invite before crypto preparation", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(null);
@@ -5789,6 +5837,28 @@ describe("hosted Family plan", () => {
     );
   });
 
+  it("rechecks every sponsored runtime when Family billing restores access", async () => {
+    const tx = createTxMock({
+      group: {
+        billingStatus: HostedBillingStatus.unpaid,
+        id: "hbag_family",
+        ownerMemberId: "member_owner",
+        suspendedAt: null,
+      },
+    });
+
+    await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
+      dispatchContext: {
+        eventCreatedAt: new Date("2026-08-22T12:30:00.000Z"),
+      },
+      subscription: makeFamilyStripeSubscription(),
+      tx,
+    })).resolves.toMatchObject({
+      groupId: "hbag_family",
+      runtimeRecheckMemberIds: ["member_owner", "member_mom"],
+    });
+  });
+
   it("prepares at most six Family members sequentially before reconciliation", async () => {
     const tx = createTxMock();
     const memberships = Array.from(
@@ -6119,7 +6189,10 @@ describe("hosted Family plan", () => {
       lastStripeEventCreatedAt: new Date("2026-07-15T12:31:00.000Z"),
     });
     tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(billingRef);
-    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([]);
+    tx.hostedAccountGroupMembership.findMany.mockResolvedValue([
+      { memberId: "member_owner" },
+      { memberId: "member_mom" },
+    ]);
     tx.hostedMemberBillingRef.findUnique.mockResolvedValue(null);
 
     await expect(applyHostedFamilyStripeSubscriptionUpdatedTx({
@@ -6128,7 +6201,7 @@ describe("hosted Family plan", () => {
       tx,
     })).resolves.toMatchObject({
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner"],
+      runtimeRecheckMemberIds: ["member_owner", "member_mom"],
     });
 
     expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();

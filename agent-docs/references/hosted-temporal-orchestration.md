@@ -105,11 +105,19 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint, and Temporal retires the pointer only when that
-frontier reaches its lane sequence. Workspace-version movement may bypass
-same-version no-progress backoff, but cannot prove that the pointed system item
-was handled. The frontier is optional during additive deployment skew; absence
-retains the pointer and its ordinary retry owner.
+redacted workspace checkpoint. Temporal applies three distinct retirement
+rules: a handled-through frontier that reaches the pointer lane sequence retires
+it as completed; an explicit `systemMailboxFrontier: null` retires only
+Temporal's noncanonical pointer projection because the current facts admit no
+live system frontier; and an omitted frontier retains the pointer during
+additive deployment skew. Explicit-null retirement never marks the mailbox item
+handled or deletes Web-owned durable mailbox state. Inactive facts can therefore
+retire retry ownership without reading or consuming retained work, which Web
+re-reads after reactivation. Every owner that restores runtime access must send
+a post-commit mailbox wake or payload-free `runtime_recheck_requested`; Family
+billing restoration applies that handoff to the bounded active roster, including
+exact event retries. Workspace-version movement may bypass same-version
+no-progress backoff, but cannot prove that the pointed system item was handled.
 
 Web/runtime status is durable truth when no runner owns execution. Cloudflare's
 write fence is the active ownership truth while a run is in flight.

@@ -329,6 +329,7 @@ export function buildFamilyInviteAcceptedResponse(input: {
   message: string;
   messageId: string;
   occurredAt: string;
+  runtimeRecheckMemberId?: string;
   signupNotificationMemberId?: string;
   sourceEventId: string;
   wakeHandoff?: HostedWebhookWakeHandoff;
@@ -350,6 +351,9 @@ export function buildFamilyInviteAcceptedResponse(input: {
       reason: "family-invite-accepted",
     },
     postCommitGroupJoinConfirmationMemberIds: [input.memberId],
+    ...(input.runtimeRecheckMemberId
+      ? { postCommitRuntimeRecheckMemberIds: [input.runtimeRecheckMemberId] }
+      : {}),
     ...(input.signupNotificationMemberId
       ? {
           postCommitSignupNotificationMemberIds: [

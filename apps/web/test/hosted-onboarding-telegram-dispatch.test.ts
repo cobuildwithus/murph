@@ -136,6 +136,7 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
+    signalHostedAccessGrantRuntimeRecheckBestEffort: vi.fn(async () => {}),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(async () => {}),
     scheduleHostedSignupNotificationEmails: vi.fn(),
     provisionActiveHostedDomainRootEnvelopeForUserOnly: vi.fn(async () => ({})),
@@ -294,6 +295,11 @@ vi.mock("@/src/lib/hosted-growth/usage-referral", () => ({
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access-runtime-recheck", () => ({
+  signalHostedAccessGrantRuntimeRecheckBestEffort:
+    mocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
@@ -3110,6 +3116,9 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
       expectedUserId: acceptedMemberId,
       mailboxItemId: "mailbox_assistant.notification.requested:family-chat:member_telegram_family:telegram:update:333",
     });
+    expect(
+      mocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
+    ).not.toHaveBeenCalled();
     expect(
       mocks.rearmHostedPhoneCallResultNotificationRecovery,
     ).toHaveBeenCalledWith({

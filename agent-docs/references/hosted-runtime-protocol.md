@@ -1316,6 +1316,13 @@ the durable retained frontier. For inactive access, Web emits `null` without a
 mailbox read so Temporal can retire its pointer projection while the durable
 mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
+Because explicit-null retirement removes Temporal's last local reason to wake,
+every Web owner that restores active access must hand off a post-commit mailbox
+wake or payload-free `runtime_recheck_requested`. Family subscription recovery
+rechecks its bounded active roster and preserves that roster on exact/stale
+Stripe-event retries; Family invite acceptance rechecks an established member
+when activation did not append a mailbox item. Ordinary successful active-to-active
+billing events do not wake the roster.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and

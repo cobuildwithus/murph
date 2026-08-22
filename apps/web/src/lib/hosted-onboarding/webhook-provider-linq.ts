@@ -1859,6 +1859,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       : undefined;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+  let familyRuntimeRecheckMemberId: string | null = null;
   let familySignupNotificationMemberId: string | null = null;
   let familyDraftCheckoutConflict = false;
   let familyStripeEffectPending = false;
@@ -1935,6 +1936,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
               source: "linq",
               userId: activation.memberId,
             };
+          } else {
+            familyRuntimeRecheckMemberId = activation.memberId;
           }
         },
         ...(preparedFamilyCryptoDomainRoots && preparedDirectRoutingAuthority
@@ -2007,6 +2010,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
           : {}),
         sourceEventId: input.event.event_id,
         ...(familyActivationWake ? { wakeHandoff: familyActivationWake } : {}),
+        ...(familyRuntimeRecheckMemberId && !familyActivationWake
+          ? { runtimeRecheckMemberId: familyRuntimeRecheckMemberId }
+          : {}),
       }),
       buildHostedLinqWebhookPlannerDetails(input.event, context, {
         dailyInboundCount: dailyState.inboundCount,
