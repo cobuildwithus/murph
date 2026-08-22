@@ -202,7 +202,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     linqStub = null;
   }, 120_000);
 
-  it("replies promptly while model-free work owns every durable system wake", async () => {
+  it("replies promptly while generic model-free system work owns the runner", async () => {
     await seedProbe(systemMailboxProbe);
     const stagedMealPhoto = await stageMealPhotoForProbe(systemMailboxProbe);
     const stagedEnvironmentVoice = await stageEnvironmentVoiceForProbe(
@@ -215,7 +215,10 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
     );
     expect(systemWakes.map((wake) => wake.kind).sort()).toEqual(
       HOSTED_EXECUTION_WAKE_KINDS
-        .filter((kind) => kind !== "conversation.message")
+        .filter((kind) =>
+          kind !== "conversation.message"
+          && kind !== "environment-interview.completed"
+        )
         .sort(),
     );
 

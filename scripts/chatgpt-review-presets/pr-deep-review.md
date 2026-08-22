@@ -10,6 +10,20 @@ material Product UX failures, material purpose drift, and material
 opportunities to preserve the same behavior with less complexity or user
 friction.
 
+# Requirement boundary
+
+This review is a merge veto, not product brainstorming. Do not turn imaginable
+behavior into a requirement. Missing behavior qualifies only when the stated
+current outcome or a hard applicable invariant requires it, the PR causes or
+materially worsens the gap relative to the base, and an ordinary current
+production path creates material harm.
+
+Repository guidance constrains behavior already in scope; it is not a product
+backlog. Aspirational principles, possible future consumers or capabilities,
+generic operation symmetry, and unrelated upstream mutations are not current
+requirements unless a current owner contract makes them part of this PR's
+promise.
+
 # Success criteria
 
 - Every finding identifies the PR hunk or review-remediation delta that causes
@@ -141,42 +155,28 @@ intended behavior should be deleted.
 ## Product UX audit
 
 When the PR is user-facing, first state its irreducible user purpose and the
-smallest complete experience that fulfills it. Then trace the actual production
-journey rather than reviewing isolated components or internal completion:
+smallest complete experience that fulfills it. Trace the ordinary current
+production journey from its entry and promise through the existing owners to
+the timely result and intended destination. Internal completion is not success
+when the current journey loses, misroutes, or never delivers that result.
+Require production-faithful evidence only for the changed claims and boundaries.
 
-- the initiating person, entry point, intent, immediate acknowledgement, and
-  whether that acknowledgement makes a truthful promise;
-- every queue, runtime, provider, workflow, permission, or asynchronous handoff,
-  including the existing owner that starts or wakes the next step;
-- the expected timing class and longest normal wait through cold, busy, dirty,
-  backlogged, retry, restart, and concurrent-input states;
-- progress, completion, and the exact place and audience that receive the
-  result without requiring an unrelated new inbound action; and
-- denial, timeout, cancellation, revocation, failure, recovery, and what the
-  person experiences next.
-
-`Asynchronous` is not a complete experience or latency contract. Durable
-acceptance or internal completion is not success when work waits behind
-unrelated idle or maintenance activity, receives misleading or absent feedback,
-arrives too late to be useful, reaches the wrong context, or never closes the
-loop with its initiator. Require production-faithful evidence for cross-runtime
-wakeups, timing, and final delivery; unit mocks and internal state alone do not
-prove them. Calibrate latency to the interaction and the PR's stated timing
-class instead of inventing a universal budget.
+Inspect an exceptional state only when the diff changes it, the current product
+supports it as part of this journey, or concrete evidence shows a realistically
+frequent, material, or irreversible failure. Do not infer a new feature,
+control, cascade, or lifecycle from an imaginable state. Calibrate timing to the
+declared interaction instead of inventing a universal budget.
 
 For frontend-facing changes, audit the interaction economy from the changed
 source and PR flow. Inspect rendered states only when readable visual artifacts
 are present inside `codebase.zip`; otherwise state the exact rendered-evidence
-gap and do not infer visual quality. Make every word, click, field, choice,
-confirmation, setting, screen, and visual element earn its place. Prefer one
-clear primary action, strong defaults, inference, direct manipulation, and
-progressive disclosure. Delete copy that repeats labels, narrates an avoidable
-interaction, or compensates for weak hierarchy; preserve words and controls
-needed for safety, consent, accessibility, trust, undo, revocation, or recovery.
-Judge loading, empty, success, partial, delayed, error, and recovery states as
-carefully as the happy path. When rendered evidence is available, the result
-should feel coherent, calm, intentional, and finished—not like generic
-dashboard furniture or ornamental polish competing with the feature's purpose.
+gap and do not infer visual quality. Make each changed element earn its place
+and prefer one clear primary action, strong defaults, and progressive
+disclosure. Inspect only states touched by the diff or required by the declared
+outcome; do not infer optional controls for generic completeness. Preserve
+in-scope accessibility, consent, trust, authority, and recovery. When rendered
+evidence is available, the result should feel coherent, calm, intentional, and
+finished.
 
 Report only reachable, material gaps between that experience and the
 implementation. Treat the PR's UX outline as an intent contract, never as proof
@@ -241,6 +241,11 @@ optimize, speed up, or automate it. Add complexity back only when a failing
 test, production-faithful reachable scenario, measured bottleneck, applicable
 security, privacy, or repository invariant, or concrete product need proves
 that the simpler design is insufficient.
+
+An added persisted field or state must have a current writer, current consumer,
+and present-day outcome or hard invariant. An added control or ownership path
+must be required by a current supported journey. Otherwise recommend deletion;
+composability means a small clear owner, not speculative surface area.
 
 Simplicity constrains every finding and correction. Do not recommend a
 correction that adds a durable state owner, state machine, lifecycle state,

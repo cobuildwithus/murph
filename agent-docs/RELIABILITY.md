@@ -1444,8 +1444,9 @@ Last verified: 2026-08-20
   webhook ciphertext, provider identity, member identity, or Queue message id.
 - Junction Link setup remains retryable and inert until either a proof-verified
   browser callback completes or hosted Web verifies the exact prepared source
-  against Junction's current provider list after an authenticated,
-  source-attributed webhook. The webhook is only a reconciliation trigger. It
+  has only the literal status `connected` in Junction's current provider list
+  after an authenticated, source-attributed webhook. The webhook is only a
+  reconciliation trigger. It
   cannot confirm setup by itself. Hosted recovery rechecks consent, shared-app
   binding, connection epoch, credential epoch, source epoch, and disconnect
   fences before it commits `source_confirmed`, source admission,
@@ -1535,7 +1536,7 @@ Last verified: 2026-08-20
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 45-second maintenance cancellation can release it as an unclassified
+  hosted 90-second device-pass cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
   UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;

@@ -157,6 +157,31 @@ describe("hosted signup notification context store", () => {
     });
   });
 
+  it("treats unreadable encrypted context as optional projection data", async () => {
+    const createdAt = new Date("2026-08-21T00:07:00.000Z");
+    mocks.decryptHostedWebNullableString.mockRejectedValue(
+      new Error("synthetic decrypt failure"),
+    );
+
+    await expect(readHostedMemberSignupNotificationContext({
+      memberId: "member_123",
+      prisma: {
+        hostedMember: {
+          findUnique: vi.fn().mockResolvedValue({
+            createdAt,
+            id: "member_123",
+            signupNotificationContextEncrypted: "encrypted-context",
+            signupNotificationContextExpiresAt: new Date("2026-08-22T00:07:00.000Z"),
+          }),
+        },
+      } as never,
+      now: new Date("2026-08-21T12:00:00.000Z"),
+    })).resolves.toEqual({
+      context: null,
+      createdAt,
+    });
+  });
+
   it("does not decrypt context after its disclosure window expires", async () => {
     const createdAt = new Date("2026-08-21T00:07:00.000Z");
 

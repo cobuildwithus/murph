@@ -348,9 +348,10 @@ by the App Server. On the pinned Codex version, request-level `permissions`
 becomes the session `default_permissions` override even when the lower hosted
 config retains its ordinary legacy sandbox default. The isolated request never
 passes legacy `sandbox`, because request-level `permissions` and `sandbox` do
-not compose. Assert the effective profile, roots, working directory,
-instruction sources, and approval policy before model work, and fail closed on
-any mismatch.
+not compose. The request supplies the exact profile, roots, working directory,
+disabled instruction sources, and approval policy. Do not treat echoed
+thread-start metadata as a security boundary; prove the named profile's actual
+Linux behavior before enabling the feature.
 
 The named profile must OS-enforce read access only to Codex's `:minimal`
 runtime and the exact `:workspace_roots`, no writes, explicit denial of
