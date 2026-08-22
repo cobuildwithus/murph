@@ -5306,10 +5306,6 @@ async function runCodexAppServerTurnOnProcess(
     pendingSubagentMetadataRequests.set(sample.threadId, request)
   }
 
-  const drainPendingSubagentMetadataRequests = async (): Promise<void> => {
-    await Promise.all([...pendingSubagentMetadataRequests.values()])
-  }
-
   const handleSubagentThreadMessage = (
     threadId: string,
     message: CodexRpcMessage,
@@ -5329,7 +5325,7 @@ async function runCodexAppServerTurnOnProcess(
     const eventMethod = readCodexEventMethod(message)
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     if (isCodexTurnStartedMethod(eventMethod)) {
-      if (!messageTurnId || !collabReceiverThreadIds.has(threadId)) {
+      if (!messageTurnId) {
         return
       }
       const usageKey = createCodexSubagentTurnUsageKey({
@@ -5368,7 +5364,9 @@ async function runCodexAppServerTurnOnProcess(
         turnId: messageTurnId,
       }
       subagentTokenUsageByTurn.set(usageKey, sample)
-      beginSubagentMetadataRequest(sample)
+      if (collabReceiverThreadIds.has(threadId)) {
+        beginSubagentMetadataRequest(sample)
+      }
       return
     }
     if (!messageTurnId) {
@@ -5566,6 +5564,13 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     handleAcceptedEvent(message, method)
+    for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
+      for (const sample of subagentTokenUsageByTurn.values()) {
+        if (sample.threadId === receiverThreadId) {
+          beginSubagentMetadataRequest(sample)
+        }
+      }
+    }
   }
 
   const emitActionDiagnosticsTrace = () => {
@@ -5861,7 +5866,6 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_running'
     await turnCompleted
     clearInterruptCleanupTimer()
-    await drainPendingSubagentMetadataRequests()
     await drainPendingDynamicToolRequests()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
@@ -5919,7 +5923,6 @@ async function runCodexAppServerTurnOnProcess(
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
-    await drainPendingSubagentMetadataRequests()
     await drainPendingDynamicToolRequests()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()

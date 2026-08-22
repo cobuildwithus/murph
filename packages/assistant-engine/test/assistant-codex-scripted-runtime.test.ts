@@ -3357,6 +3357,89 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
+  it('meters one synchronous child through the real pinned app-server', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario({
+      multiAgentV2: true,
+    })
+    const rootPrompt = 'METER_ONE_SYNCHRONOUS_CHILD'
+    const childResult = 'SYNCHRONOUS_CHILD_COMPLETE'
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            fork_turns: 'none',
+            message: `Return exactly ${childResult}.`,
+            task_name: 'exact_usage_child',
+          },
+          name: 'spawn_agent',
+          namespace: 'collaboration',
+        },
+        requestIncludes: [rootPrompt],
+      },
+      {
+        completionLabel: childResult,
+        requestIncludes: [
+          'Message Type: NEW_TASK',
+          'exact_usage_child',
+        ],
+        text: childResult,
+        usageInputTokens: 37,
+      },
+      {
+        functionCall: {
+          arguments: {},
+          name: 'wait_agent',
+          namespace: 'collaboration',
+        },
+        requestExcludes: ['Message Type: NEW_TASK'],
+        requestIncludes: [rootPrompt],
+      },
+      {
+        requestExcludes: ['Message Type: NEW_TASK'],
+        requestIncludes: [rootPrompt],
+        text: 'ROOT_COMPLETED_AFTER_CHILD',
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: 'Use the scripted collaboration tools and return the final result.',
+      prompt: rootPrompt,
+    })
+
+    expect(result.finalMessage).toBe('ROOT_COMPLETED_AFTER_CHILD')
+    expect(result.additionalUsages).toMatchObject([{
+      provider: 'codex-cli',
+      providerRequestOrdinal: 1,
+      usage: {
+        inputTokens: 37,
+        outputTokens: 7,
+        providerMetadataJson: {
+          reasoningEffort: 'low',
+          requestedServiceTier: null,
+        },
+        providerName: SCRIPTED_MODEL_PROVIDER,
+        providerRequestId: expect.stringMatching(/^resp_scripted_/u),
+        reasoningTokens: 0,
+        requestedModel: SCRIPTED_MODEL,
+        servedModel: SCRIPTED_MODEL,
+        totalTokens: 44,
+        usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
+      },
+    }])
+    expect(result.additionalUsages).toHaveLength(1)
+    expect(
+      result.jsonEvents
+        .map((event) => readString(readRecord(event)?.method))
+        .filter((method): method is string => method !== null),
+    ).not.toEqual(expect.arrayContaining([
+      'rawResponseItem/completed',
+      'rawResponse/completed',
+    ]))
+  })
+
   it.each(['direct', 'group'] as const)(
     'carries a delayed V2 child completion into a later %s root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
