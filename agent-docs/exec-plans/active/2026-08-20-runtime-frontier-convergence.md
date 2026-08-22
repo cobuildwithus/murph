@@ -44,6 +44,9 @@ truth:
    final exact-head ReviewGPT gates with required CI.
 6. Deploy in compatibility order and verify the corrected production frontiers
    converge before resolving the incident.
+7. Retire stale Temporal system-pointer projections when inactive access admits
+   no mailbox work, while preserving the independent inbox-media retention wake
+   and durable Web-owned mailbox rows for later reactivation.
 
 ## Verification
 
@@ -51,8 +54,13 @@ truth:
   corrections are implemented with focused red-before/green-after regressions.
 - Public package build, typecheck, and full runtime tests pass. Private Temporal
   PR #40 is merged with its replay-safe bounded redispatch proof.
-- Pending final exact-head CI and ReviewGPT gate.
-- Pending safe deployment and production convergence proof.
+- The deployed tolerant Temporal consumer can distinguish an omitted rollout
+  field from an explicit no-work frontier. Residual production proof showed
+  inactive workflows receiving the omitted form and repeatedly retrying their
+  retained pointer projection even though Web admitted no mailbox work.
+- Pending focused public regression proof, exact-head CI and ReviewGPT gates.
+- Pending Web deployment and aggregate production convergence proof with the
+  Temporal workers and device-sync schedule left active.
 
 ## Review Anomaly Retrospective
 
