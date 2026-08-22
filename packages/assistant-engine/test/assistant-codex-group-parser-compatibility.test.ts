@@ -258,6 +258,19 @@ describe("murph.group parser-first family compatibility", () => {
     });
   });
 
+  it("attributes post-schema validation errors to the focused family", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall("group_chat", {
+      action: "set_chat_avatar",
+      avatarSource: "image_ref",
+    }))).toMatchObject({
+      kind: "invalid-group-arguments",
+      validationDigest: {
+        schemaName: "murph.group_chat.input",
+        toolName: "murph.group_chat",
+      },
+    });
+  });
+
   it("leaves the advertised descriptor and catalog names unchanged", () => {
     expect(createHash("sha256")
       .update(JSON.stringify(MURPH_GROUP_TOOL))

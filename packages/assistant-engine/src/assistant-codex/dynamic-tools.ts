@@ -7214,9 +7214,9 @@ function parseGroupArguments(
               },
             ]),
             rawInput: value,
-            schemaName: 'murph.group.input',
+            schemaName: `${qualifiedToolName}.input`,
             schemaRootKeys: ['action'],
-            toolName: 'murph.group',
+            toolName: qualifiedToolName,
           }),
         }
       }
@@ -7250,9 +7250,9 @@ function parseGroupArguments(
             },
           ]),
           rawInput: value,
-          schemaName: 'murph.group.input',
+          schemaName: `${qualifiedToolName}.input`,
           schemaRootKeys: ['action'],
-          toolName: 'murph.group',
+          toolName: qualifiedToolName,
         }),
       }
     }
