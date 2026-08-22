@@ -45,10 +45,12 @@ The expensive pull-request workflows admit only non-draft `opened` or
 `synchronize`. A synchronize event that occurred while the PR was ready records
 the new exact head through a successful read-only observer receipt, then a
 trusted default-branch controller returns the PR to draft only while that event
-still names the current SHA. The controller resolves exactly one open target PR
-from the workflow-run head repository, branch, and SHA, so a fork receipt does
-not depend on GitHub populating `workflow_run.pull_requests`. Zero, ambiguous,
-or mismatched resolutions fail closed before the sole draft mutation. A
+still names the current SHA. The controller lists open PRs in the base
+repository with GitHub's validated `head=owner:branch` filter, then resolves
+exactly one target from the workflow-run head repository, branch, and SHA. Fork
+default branches therefore follow the same path without depending on GitHub
+populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
+resolutions fail closed before the sole draft mutation. A
 synchronize event that occurred while the PR was already draft produces no
 consumable receipt, so delayed handling cannot undo a newer Ready action on the
 unchanged SHA. Mark the PR ready again to prove the new exact head. A skipped

@@ -117,6 +117,13 @@ Updated: 2026-08-21
   the existing current-state, exact-head, and sole GraphQL mutation checks.
   Reject missing, ambiguous, or mismatched candidates before mutation; add no
   second controller, mutation owner, queue, or persisted state.
+- Accept the final round-four default-branch fork finding: the
+  associated-commit endpoint in a fork does not reliably return the upstream
+  open PR when the synchronized commit is on that fork's default branch.
+  Replace that single read with the base repository's open-PR query filtered by
+  validated `head=owner:branch`, then retain the exact base/head repository,
+  branch, SHA, uniqueness, current-state, and sole GraphQL mutation checks. Add
+  no fallback, second resolver, mutation owner, queue, or persisted state.
 
 ## Verification
 

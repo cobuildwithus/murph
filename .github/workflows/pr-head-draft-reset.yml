@@ -36,10 +36,14 @@ jobs:
             echo "::error::Head-change receipt did not expose a valid head branch."
             exit 1
           }
+          HEAD_OWNER="${HEAD_REPOSITORY%%/*}"
 
-          candidates="$(gh api --paginate --slurp \
+          candidates="$(gh api --method GET --paginate --slurp \
             -H "Accept: application/vnd.github+json" \
-            "repos/${HEAD_REPOSITORY}/commits/${EXPECTED_HEAD_SHA}/pulls" | jq -c \
+            "repos/${GITHUB_REPOSITORY}/pulls" \
+            -f state=open \
+            -f head="${HEAD_OWNER}:${HEAD_BRANCH}" \
+            -f per_page=100 | jq -c \
             --arg base_repository "${GITHUB_REPOSITORY}" \
             --arg head_branch "${HEAD_BRANCH}" \
             --arg head_repository "${HEAD_REPOSITORY}" \

@@ -477,7 +477,12 @@ function isAllowedPrHeadDraftResetHandoff(
     && resetStep.env.HEAD_BRANCH === '${{ github.event.workflow_run.head_branch }}'
     && resetStep.env.HEAD_REPOSITORY === '${{ github.event.workflow_run.head_repository.full_name }}'
     && !workflow.includes('github.event.workflow_run.pull_requests[0]')
-    && resetStep.run.includes('repos/${HEAD_REPOSITORY}/commits/${EXPECTED_HEAD_SHA}/pulls')
+    && !resetStep.run.includes('commits/${EXPECTED_HEAD_SHA}/pulls')
+    && resetStep.run.includes('HEAD_OWNER="${HEAD_REPOSITORY%%/*}"')
+    && resetStep.run.includes('gh api --method GET --paginate --slurp')
+    && resetStep.run.includes('repos/${GITHUB_REPOSITORY}/pulls')
+    && resetStep.run.includes('-f state=open')
+    && resetStep.run.includes('-f head="${HEAD_OWNER}:${HEAD_BRANCH}"')
     && resetStep.run.includes('if [[ "${candidate_count}" != 1 ]]; then')
     && resetStep.run.includes('.base.repo.full_name == $base_repository')
     && resetStep.run.includes('.head.repo.full_name == $head_repository')

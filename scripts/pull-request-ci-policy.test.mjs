@@ -157,7 +157,12 @@ function inspectDraftReset(source) {
   assert.match(source, /HEAD_BRANCH: \$\{\{ github\.event\.workflow_run\.head_branch \}\}/u);
   assert.match(source, /HEAD_REPOSITORY: \$\{\{ github\.event\.workflow_run\.head_repository\.full_name \}\}/u);
   assert.doesNotMatch(source, /workflow_run\.pull_requests\[0\]/u);
-  assert.match(source, /repos\/\$\{HEAD_REPOSITORY\}\/commits\/\$\{EXPECTED_HEAD_SHA\}\/pulls/u);
+  assert.doesNotMatch(source, /commits\/\$\{EXPECTED_HEAD_SHA\}\/pulls/u);
+  assert.match(source, /HEAD_OWNER="\$\{HEAD_REPOSITORY%%\/\*\}"/u);
+  assert.match(source, /gh api --method GET --paginate --slurp/u);
+  assert.match(source, /repos\/\$\{GITHUB_REPOSITORY\}\/pulls/u);
+  assert.match(source, /-f state=open/u);
+  assert.match(source, /-f head="\$\{HEAD_OWNER\}:\$\{HEAD_BRANCH\}"/u);
   assert.match(source, /candidate_count/u);
   assert.match(source, /candidate_count\}" != 1/u);
   assert.match(source, /\.base\.repo\.full_name == \$base_repository/u);
@@ -227,33 +232,38 @@ test("draft reset executes only for an event-time ready receipt and current elig
   }), 1, "an unconfirmed GraphQL mutation must fail after exactly one write attempt");
 });
 
-test("draft reset resolves fork and same-repository heads without workflow-run PR associations", async () => {
+test("draft reset resolves fork-default, fork-feature, and same-repository heads without workflow-run PR associations", async () => {
   const currentReadyPullRequest = {
     draft: false,
     head: { sha: "a".repeat(40) },
     node_id: "PR_node",
     state: "open",
   };
-  for (const headRepository of ["cobuildwithus/murph", "contributor/murph"]) {
+  for (const { headBranch, headRepository } of [
+    { headBranch: "feature", headRepository: "cobuildwithus/murph" },
+    { headBranch: "feature", headRepository: "contributor/murph" },
+    { headBranch: "main", headRepository: "contributor/murph" },
+  ]) {
     assert.equal(await runDraftResetScenario({
       currentPullRequest: currentReadyPullRequest,
+      headBranch,
       headRepository,
       synchronizedWhileDraft: false,
-    }), 1, `${headRepository} must resolve to exactly one draft conversion`);
+    }), 1, `${headRepository}:${headBranch} must resolve to exactly one draft conversion`);
   }
 });
 
 test("draft reset rejects missing, ambiguous, or mismatched head candidates before mutation", async () => {
   const sha = "a".repeat(40);
   const headRepository = "contributor/murph";
-  const candidate = associatedPullRequest({ headRepository, sha });
+  const candidate = listedPullRequest({ headRepository, sha });
   const currentPullRequest = {
     draft: false,
     head: { sha },
     node_id: "PR_node",
     state: "open",
   };
-  for (const associatedPullRequests of [
+  for (const listedPullRequests of [
     [],
     [candidate, { ...candidate, number: 43 }],
     [{ ...candidate, base: { repo: { full_name: "outside/repository" } } }],
@@ -263,10 +273,10 @@ test("draft reset rejects missing, ambiguous, or mismatched head candidates befo
     [{ ...candidate, state: "closed" }],
   ]) {
     assert.equal(await runDraftResetScenario({
-      associatedPullRequests,
       currentPullRequest,
       expectSuccess: false,
       headRepository,
+      listedPullRequests,
       synchronizedWhileDraft: false,
     }), 0);
   }
@@ -321,12 +331,12 @@ function extractWorkflowStepScript(source, stepName) {
 }
 
 async function runDraftResetScenario({
-  associatedPullRequests,
   confirmMutation = true,
   currentPullRequest,
   expectSuccess = confirmMutation,
   headBranch = "feature",
   headRepository = "cobuildwithus/murph",
+  listedPullRequests,
   synchronizedWhileDraft,
 }) {
   const observer = await workflow("pr-head-change.yml");
@@ -338,7 +348,7 @@ async function runDraftResetScenario({
   inspectDraftReset(controller);
   if (observerConclusion !== "success") return 0;
 
-  const candidates = associatedPullRequests ?? [associatedPullRequest({
+  const candidates = listedPullRequests ?? [listedPullRequest({
     headBranch,
     headRepository,
     sha: "a".repeat(40),
@@ -350,16 +360,19 @@ async function runDraftResetScenario({
     await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
 set -euo pipefail
 [[ "$1" == api ]]
-case "$2" in
-  --paginate)
-    printf '%s\n' "\${GH_ASSOCIATED_JSON}"
-    ;;
-  repos/*/pulls/*)
-    printf '%s\n' "\${GH_PR_JSON}"
-    ;;
-  graphql)
+case "$*" in
+  *graphql*)
     printf '%s\n' mutation >> "\${GH_MUTATION_CAPTURE}"
     printf '%s\n' "\${GH_MUTATION_JSON}"
+    ;;
+  *repos/*/pulls/*)
+    printf '%s\n' "\${GH_PR_JSON}"
+    ;;
+  *repos/*/pulls*)
+    [[ "$*" == *"--method GET"* ]]
+    [[ "$*" == *"state=open"* ]]
+    [[ "$*" == *"head=\${GH_EXPECTED_HEAD_QUERY}"* ]]
+    printf '%s\n' "\${GH_LISTED_PULLS_JSON}"
     ;;
   *)
     exit 2
@@ -376,7 +389,8 @@ esac
       env: {
         ...process.env,
         EXPECTED_HEAD_SHA: "a".repeat(40),
-        GH_ASSOCIATED_JSON: JSON.stringify([candidates]),
+        GH_EXPECTED_HEAD_QUERY: `${headRepository.split("/", 1)[0]}:${headBranch}`,
+        GH_LISTED_PULLS_JSON: JSON.stringify([candidates]),
         GH_MUTATION_CAPTURE: capturePath,
         GH_MUTATION_JSON: JSON.stringify({
           data: {
@@ -408,7 +422,7 @@ esac
   }
 }
 
-function associatedPullRequest({
+function listedPullRequest({
   headBranch = "feature",
   headRepository = "cobuildwithus/murph",
   sha = "a".repeat(40),
