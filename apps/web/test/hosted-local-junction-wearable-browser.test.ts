@@ -321,6 +321,20 @@ describe("hosted-local Junction wearable browser authorization", () => {
 
     const session = await openHostedLocalJunctionBrowserSessionForTest(config);
     expect(process.listenerCount("exit")).toBe(parentExitListenersBefore + 1);
+    expect(kernelLifecycleMocks.spawn).toHaveBeenCalledWith(
+      "/opt/kernel-tools/kernel",
+      [
+        "browsers",
+        "ssh",
+        "kernel-session-1",
+        "-R",
+        "43123:localhost:43123",
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ["pipe", "ignore", "ignore"],
+      }),
+    );
 
     await closeHostedLocalJunctionBrowserSessionForTest(session, config);
 

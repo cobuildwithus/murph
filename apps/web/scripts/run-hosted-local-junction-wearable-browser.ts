@@ -327,7 +327,10 @@ function startKernelTunnel(input: {
     {
       detached: true,
       env: buildKernelCliEnvironment(input.apiKey, process.env),
-      stdio: "ignore",
+      // Kernel's SSH command opens a remote shell in addition to the reverse
+      // forward. Keep its stdin open so EOF does not close that shell and tear
+      // down the tunnel before the browser reaches hosted-local Web.
+      stdio: ["pipe", "ignore", "ignore"],
     },
   );
   if (child.pid === undefined) {
