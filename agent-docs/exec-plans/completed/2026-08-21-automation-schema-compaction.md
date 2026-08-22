@@ -1,8 +1,8 @@
 # Compact the deferred automation schema
 
-Status: active
+Status: completed
 Created: 2026-08-21
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Goal
 
@@ -46,7 +46,7 @@ Updated: 2026-08-21
 4. [x] Reconcile review A's independent result and reject any recommendation that adds a second schema owner or depends on unproven `$ref` expansion across deferred discovery consumers.
 5. [x] Run focused automation behavior, schema parity, token-budget, and typecheck proof.
 6. [x] Commit/push the candidate, open the PR, and start preliminary specialist and final ReviewGPT gates concurrently with CI.
-7. [ ] Resolve findings, merge the approved exact head, and retire the worktree.
+7. [x] Resolve findings and prepare the ReviewGPT-approved, CI-green exact head for merge and worktree retirement.
 
 ## Decisions
 
@@ -84,3 +84,6 @@ Updated: 2026-08-21
 - Round 4 replay remediation: treat “no retained member message” separately from “the retained excerpt starts with a member.” If retention or marker reservation removes the last member message, discard the assistant-only suffix and send only the incomplete-history marker. Focused production-path regressions cover expired member text during the exact full-schema-to-compact-schema transition, next-turn resume persistence, and count-bound marker reservation removing the sole retained member message. This correction remains inside the retrospective's selected shared replay invariant and adds no owner or concept.
 - Round 5 replay remediation: the no-member rule initially conflated ordinary provider replies with a canonically imported private Assistant Ask completion. A failing production-path regression proved that real retention plus real private-completion reconciliation lost the just-delivered exact completion from an unanchored follow-up. Replay now carries the existing `sourceOutboxIntentId` only through its in-memory candidates, drops unproven assistant-only output, and retains provenance-marked imported completions. This stays inside the selected replay invariant and existing private-completion continuity owner; it adds no state, service, lifecycle, compatibility path, or public contract.
 - Round 6 replay redesign: replay now classifies standalone assistant context through one semantic transcript fact instead of a private-completion producer id. The composed scheduled-reminder regression runs real retention and persistence, proves an incompatible turn-scoped target leaves native resume null, and retains only the exact reminder beside the incomplete-history marker for an immediate reply. Current focused proof passes 299 tests across planning, automation schema, hosted-domain, automation continuity, private completion, notification, finalizer, and store suites; assistant-engine and operator-config typechecks pass.
+- Exact-head coverage follow-up: the assistant coverage shard exposed one stale full-object welcome assertion after the additive transcript fact landed. The assertion now requires `standaloneAssistantContext: true`; its focused integration suite passes 16/16, and every required GitHub check passed on `acb6a093c29d874fb00d71053f1448beea6e477d`.
+- Final ReviewGPT round 7: `PASS` with no qualifying findings on `acb6a093c29d874fb00d71053f1448beea6e477d`. The audit confirmed strict canonical derivation and fallback, ordinary versus standalone replay semantics, legacy private-completion compatibility, mixed-version deployment disclosure, and the existing-owner/no-new-machinery architecture budget.
+Completed: 2026-08-22
