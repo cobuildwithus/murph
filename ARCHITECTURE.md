@@ -3436,7 +3436,22 @@ for bounded provider cleanup and audit compatibility; those fields never grant
 capacity. The ops growth read derives current starter activation from the
 immutable starter grant and maps invalid source references to Unknown while
 exposing only the existing masked phone hint; it never decrypts contact data
-for attribution. Operator recovery is not acquisition: an exhausted canonical
+for attribution.
+
+Invited Web onboarding continues from launch consent inside the authenticated
+consent request rather than relying on a later browser-only enrollment effect.
+The join client supplies its invite code as an explicit continuation hint; the
+legal-consent owner first commits the requested scope and continues only when
+the authoritative returned status has both launch scopes current. It then
+delegates to the existing idempotent Starter enrollment service, which remains
+the sole owner of invite/member matching, suspension, messaging readiness,
+billing eligibility, grant creation, activation, routing, welcome work, and
+runtime handoff. The hint grants no authority by itself. The existing Starter
+island remains a recovery path for already-consented historical or interrupted
+states; Privy authentication webhooks are not activation authority and do not
+replace the consent-owned continuation.
+
+Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
 version, appends immutable history with a distinct Ops source, and is excluded

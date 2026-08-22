@@ -874,6 +874,7 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
   const { cleanup, container, window } = await renderClientComponent(
     createElement(JoinInviteLegalConsentIsland, {
       initialStatus: currentStatus,
+      inviteCode: "invite-code",
     }),
     { requireButton: false },
   );
@@ -888,6 +889,27 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
   await vi.waitFor(() => {
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
+
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({
+      payload: expect.objectContaining({
+        inviteCode: "invite-code",
+        scope: "launch.legal",
+      }),
+      url: "/api/legal/consent/accept",
+    }),
+  );
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({
+      payload: expect.objectContaining({
+        inviteCode: "invite-code",
+        scope: "launch.health-data",
+      }),
+      url: "/api/legal/consent/accept",
+    }),
+  );
 
   expect(container.textContent).toContain("Terms");
   expect(container.textContent).toContain("Health data");

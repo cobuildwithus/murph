@@ -261,7 +261,10 @@ function JoinInviteLaunchLegalConsentPanel({
   }
 
   return (
-    <JoinInviteLegalConsentIsland initialStatus={model.launchConsent.initialStatus} />
+    <JoinInviteLegalConsentIsland
+      initialStatus={model.launchConsent.initialStatus}
+      inviteCode={model.inviteCode}
+    />
   );
 }
 

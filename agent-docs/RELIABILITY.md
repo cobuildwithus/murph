@@ -306,6 +306,17 @@ Last verified: 2026-08-20
   attempt. Both prewarm operations settle before transaction entry; signing,
   provider, or KMS failure starts no transaction, and activation's control and
   ingress unwraps must be scoped-cache hits.
+- Invited Web launch consent removes the ordinary response-to-next-effect gap:
+  once the committed consent status shows both launch scopes current, that same
+  authenticated request calls the canonical idempotent Starter enrollment
+  owner before acknowledging consent. Consent and enrollment intentionally do
+  not share one long transaction. If enrollment fails after consent commits,
+  the request returns the existing retryable owner error; replay may record the
+  current consent again but converges on the same semantic Starter grant and
+  activation. Losing the completed HTTP response is likewise safe because the
+  server-side activation is already durable. The client enrollment island is a
+  fallback for members who entered the page with consent already current, not
+  the ordinary fresh-signup continuation owner.
 - Standalone generic mailbox-item append resolves an already-durable dedupe
   replay before crypto work. On a miss it unwraps the exact active ingress root
   before `BEGIN`; the transaction locks and re-reads that root identity, then
