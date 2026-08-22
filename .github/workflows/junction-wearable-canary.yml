@@ -106,9 +106,10 @@ jobs:
           MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID: member_e2e_junction_garmin_github_canary
           MURPH_E2E_JUNCTION_WEARABLE_SOURCES: garmin
           MURPH_E2E_PROVIDER_BROWSER: kernel
-          # Kernel owns the remote stealth browser and its dedicated persisted
-          # Garmin profile; authorization and callback assertions stay exact.
-          MURPH_E2E_WEARABLE_HEADLESS: "1"
+          # Kernel owns the headed remote stealth browser and its dedicated
+          # persisted Garmin profile. CI remains unattended and the exact
+          # authorization and callback assertions stay fail-closed.
+          MURPH_E2E_WEARABLE_HEADLESS: "0"
           MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
           MURPH_E2E_GARMIN_EMAIL: ${{ secrets.GARMIN_CANARY_EMAIL }}
           MURPH_E2E_GARMIN_PASSWORD: ${{ secrets.GARMIN_CANARY_PASSWORD }}
