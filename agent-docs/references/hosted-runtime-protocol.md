@@ -1321,6 +1321,14 @@ workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
 keep old histories replaying the old invalid/no-op signal behavior.
 
+The additive top-level `environmentInterviewPending` fact is a scheduling hint,
+not a second Environment state owner. Deploy the tolerant, priority-aware
+Temporal consumer before Web emits it. Once Web emits the field, that consumer
+is the rollback floor until all histories containing prioritized Environment
+Activities have drained. The worker gives the matching processing Activity
+high Task Queue priority, leaves ordinary work at the default, and starts the
+global device-sync sweep at low priority on the same queue.
+
 The completed PR65+PR66 runtime reconciliation change was an explicit hard-cut
 exception to the tolerant deploy sequence above. It deleted the old demand
 Activity and legacy direct demand signals; operators stopped the old workers,

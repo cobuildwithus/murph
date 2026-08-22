@@ -42,10 +42,9 @@ export const GET = withJsonError(async (
     factsRequest,
   );
 
-  // Keep the wire response compatible with the deployed Temporal worker.
-  // Additive facts must reach that consumer before Web begins emitting them.
   return jsonOk({
     blocked: facts.blocked,
+    environmentInterviewPending: facts.environmentInterviewPending,
     mailboxLag: facts.mailboxLag,
     workspace: facts.workspace,
   });

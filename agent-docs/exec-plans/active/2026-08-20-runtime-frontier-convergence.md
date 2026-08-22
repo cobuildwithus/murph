@@ -1,7 +1,7 @@
 # Hosted Runtime Frontier Convergence
 
 Status: active
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Goal
 
@@ -14,7 +14,9 @@ truth:
 2. a device-sync pass that starts must leave durable completion or exact
    interruption/retry evidence before ownership is released; and
 3. a foreground-progress checkpoint with still-due device work must receive a
-   bounded orchestration re-dispatch.
+   bounded orchestration re-dispatch; and
+4. an interactive Environment interview must not wait behind background
+   device-sync recovery load on the shared Temporal Task Queue.
 
 ## Constraints
 
@@ -47,6 +49,10 @@ truth:
 7. Retire stale Temporal system-pointer projections when inactive access admits
    no mailbox work, while preserving the independent inbox-media retention wake
    and durable Web-owned mailbox rows for later reactivation.
+8. Deploy a priority-aware private Temporal consumer, then expose the existing
+   Environment-pending reconciliation fact from Web. Keep interactive work at
+   high priority, ordinary work at the default, and the global device-sync
+   sweep at low priority on the same Task Queue.
 
 ## Verification
 
@@ -61,6 +67,7 @@ truth:
 - Pending focused public regression proof, exact-head CI and ReviewGPT gates.
 - Pending Web deployment and aggregate production convergence proof with the
   Temporal workers and device-sync schedule left active.
+- Pending consumer-first priority rollout: private Temporal first, then Web.
 
 ## Review Anomaly Retrospective
 

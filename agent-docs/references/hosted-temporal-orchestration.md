@@ -356,6 +356,8 @@ coverage gates require that marker to remain present.
 The per-user workflow reads source-less reconciliation facts from web:
 
 - `blocked`: nullable product/access block with `reason` and `retryAt`
+- `environmentInterviewPending`: whether one admitted Environment recording is
+  waiting for the silent maintenance pass
 - `mailboxLag`: lane lag counters only
 - `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`,
   `inboxMediaRetentionWakeAt`, optional `systemMailboxFrontier`, and `version`
@@ -386,6 +388,13 @@ Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,
 parser, and availability failures remain activity exceptions and keep the normal
 Temporal retry/error semantics.
+
+The private Temporal consumer maps `environmentInterviewPending` only to Task
+Queue scheduling metadata. It gives the matching processing Activity higher
+priority without adding product state or changing the mailbox owner. The global
+device-sync sweep starts at lower priority on the same Task Queue. Other work
+keeps Temporal's normal priority. Priority changes dispatch order only while
+tasks wait; they do not interrupt work already running.
 If AI usage becomes denied after runner execution starts, the web mailbox plane
 returns the exact `HOSTED_RUNTIME_MAILBOX_AI_USAGE_DENIED` code. The Cloudflare
 mailbox adapter treats only that code, including when preserved through a
