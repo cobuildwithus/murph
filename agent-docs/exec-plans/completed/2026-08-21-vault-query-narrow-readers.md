@@ -1,6 +1,6 @@
 # Stop exact and family-scoped CLI reads from rebuilding the full vault projection
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-22
 
@@ -149,6 +149,11 @@ Updated: 2026-08-22
   Projection/read-model parity, every generic-show route, typed misses, an
   initialized-vault exact read, and a delayed Europe/Berlin meal closeout now
   protect the corrected behavior.
+- 2026-08-22: ReviewGPT round 2 re-audited the complete corrected PR snapshot,
+  validated the immutable first-head and previous-head ancestry, confirmed all
+  prior accepted findings resolved, and returned `ROUND_OUTCOME: PASS` with no
+  new original or review-induced issue. The selected Pro-model evidence and
+  elapsed review duration exceeded the final-gate trust floor.
 
 ## Verification
 
@@ -166,12 +171,17 @@ Updated: 2026-08-22
   - `pnpm test:scenario-integrity` passed for 207 scenarios, 12 sample inputs,
     and 29 golden-output directories.
   - `git diff --check`, artifact reverse-check, and privacy scans passed.
+  - Corrected-head required GitHub checks passed.
+  - Preliminary specialists completed with three accepted findings; final
+    round 1 completed with two overlapping accepted findings; full-snapshot
+    final round 2 returned `ROUND_OUTCOME: PASS` after every correction landed.
 - Remaining exact-head proof:
-  - Corrected-head GitHub Actions, final ReviewGPT `ROUND_OUTCOME: PASS`, and
-    current-base `git merge-tree --write-tree` proof.
+  - Close this plan on the final docs-only head, wait for its required GitHub
+    checks, and run current-base `git merge-tree --write-tree` proof.
 - Expected outcomes:
   - Representative exact and family reads do not create or modify the query
     projection and are insensitive to unrelated malformed records.
   - Output/error compatibility fixtures pass.
   - No exact/family handler reaches the full projection gateway.
   - No unresolved accepted ReviewGPT or CI finding remains.
+Completed: 2026-08-22
