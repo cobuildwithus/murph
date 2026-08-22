@@ -1,0 +1,156 @@
+name: Temporal Compatibility
+
+on:
+  workflow_run:
+    workflows:
+      - Repo Hygiene
+    types:
+      - completed
+
+# This workflow always executes trusted default-branch code. It classifies the
+# exact PR head before entering the protected environment and never checks out
+# pull-request code on a runner that can reach the private repository.
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: temporal-compatibility-${{ github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  select-pr:
+    name: Select Temporal compatibility
+    if: ${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      head_sha: ${{ steps.select.outputs.head_sha }}
+      selected: ${{ steps.select.outputs.selected }}
+      trusted: ${{ steps.select.outputs.trusted }}
+    steps:
+      - name: Checkout trusted controller
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Resolve exact PR head and compatibility owners
+        id: select
+        env:
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/hosted-orchestration-compatibility.mjs select
+
+      - name: Mark stable status pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STATUS_SHA: ${{ steps.select.outputs.head_sha }}
+        run: >-
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}"
+          -f state=pending
+          -f context='Temporal compatibility'
+          -f description='Waiting for exact-SHA Temporal reader compatibility proof.'
+          -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          >/dev/null
+
+  compatibility:
+    name: Prove supported Temporal readers
+    needs: select-pr
+    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    environment: temporal-compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Revalidate exact PR head before credentialed setup
+        env:
+          EXPECTED_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          [[ "${current}" == "${EXPECTED_HEAD_SHA}" ]] || {
+            echo "::error::PR head changed before Temporal compatibility setup."
+            exit 1
+          }
+
+      - name: Checkout trusted controller
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Mint private compatibility token
+        id: private-app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}
+          private-key: ${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}
+          owner: cobuildwithus
+          repositories: murph-cloud
+          permission-actions: write
+          permission-contents: read
+
+      - name: Dispatch exact private reader matrix
+        env:
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PUBLIC_SHA: ${{ needs.select-pr.outputs.head_sha }}
+          TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA: ${{ vars.TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA }}
+          TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN: ${{ steps.private-app-token.outputs.token }}
+          TEMPORAL_COMPATIBILITY_PRIVATE_REF: ${{ vars.TEMPORAL_COMPATIBILITY_PRIVATE_REF }}
+          TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node scripts/hosted-orchestration-compatibility.mjs run
+          --sha "${PUBLIC_SHA}"
+          --pr-number "${PR_NUMBER}"
+          --request-id "temporal-${PUBLIC_SHA}-${{ github.run_id }}-${{ github.run_attempt }}"
+
+  required:
+    name: Publish Temporal compatibility commit status
+    needs:
+      - select-pr
+      - compatibility
+    if: ${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Publish stable commit status
+        env:
+          COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
+          GH_TOKEN: ${{ github.token }}
+          SELECT_RESULT: ${{ needs.select-pr.result }}
+          SELECTED: ${{ needs.select-pr.outputs.selected }}
+          SOURCE_RESULT: ${{ github.event.workflow_run.conclusion }}
+          STATUS_SHA: ${{ needs.select-pr.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha }}
+          TRUSTED: ${{ needs.select-pr.outputs.trusted }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Temporal compatibility selection failed.'
+          if [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
+            state=success
+            description='No hosted Temporal compatibility owner changed.'
+          elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
+            description='Repo Hygiene did not pass for this exact commit.'
+          elif [[ "${SELECT_RESULT}" == success && "${TRUSTED}" != true ]]; then
+            description='Relevant changes require a same-repository human-authored head.'
+          elif [[ "${SELECT_RESULT}" == success && "${COMPATIBILITY_RESULT}" == success ]]; then
+            state=success
+            description='Exact public SHA passed every supported private Temporal reader.'
+          elif [[ "${SELECT_RESULT}" == success ]]; then
+            description='No complete exact-SHA private Temporal compatibility proof was recorded.'
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/statuses/${STATUS_SHA}" \
+            -f state="${state}" \
+            -f context='Temporal compatibility' \
+            -f description="${description}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" >/dev/null
+          [[ "${state}" == success ]]

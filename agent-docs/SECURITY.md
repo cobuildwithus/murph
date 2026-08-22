@@ -1437,6 +1437,16 @@ Last verified: 2026-08-20
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- Public Temporal compatibility credentials belong only to the protected
+  `temporal-compatibility` GitHub Environment. The GitHub App installation is
+  limited to private `cobuildwithus/murph-cloud` and grants only Actions write
+  plus Contents read. The `workflow_run` controller executes default-branch
+  code, classifies and revalidates the exact public head before token minting,
+  checks out only the public default branch, pins a reviewed private SHA through
+  an immutable lightweight tag, and accepts only the returned exact private run
+  and digest-bound proof jobs. It must not check out PR code, restore
+  candidate-controlled caches, read private logs or artifacts, expose reader
+  revisions publicly, or accept workflow/check names from the candidate.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority and a dedicated WHOOP test account. Keep those four credentials
   exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
