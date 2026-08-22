@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
-} from "../packages/hosted-execution/src/orchestration-control.ts";
+} from "../packages/hosted-execution/src/reconciliation-facts-wire.ts";
 
 import {
   buildTemporalCompatibilityProducerFixtures,

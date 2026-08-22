@@ -2,13 +2,23 @@ import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
   type HostedMailboxKind,
   type HostedMailboxLane,
-  type HostedMailboxLaneLag,
   type HostedWorkspaceInvocationProcessingMode,
 } from "./runtime-control.ts";
 
+import type {
+  HostedRuntimeReconciliationBlockedReason,
+} from "./reconciliation-facts-wire.ts";
+
 export {
+  HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
+  HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   projectHostedRuntimeReconciliationFactsWireResponse,
+  type HostedRuntimeReconciliationBlockedReason,
+  type HostedRuntimeReconciliationFacts,
+  type HostedRuntimeReconciliationFactsBlocked,
   type HostedRuntimeReconciliationFactsWireResponse,
+  type HostedRuntimeReconciliationFactsWorkspace,
+  type HostedRuntimeSystemMailboxFrontierClass,
 } from "./reconciliation-facts-wire.ts";
 
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
@@ -53,18 +63,6 @@ export interface HostedRuntimeMailboxPointer {
   laneSeq: string;
 }
 
-export const HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS = [
-  "ai_usage_denied",
-  "ai_usage_gate_unavailable",
-  "automation_engagement_paused",
-  "health_data_consent_withdrawn",
-  "hosted_runtime_not_configured",
-  "user_not_active",
-] as const;
-
-export type HostedRuntimeReconciliationBlockedReason =
-  (typeof HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS)[number];
-
 export interface HostedRuntimeReconciliationFactsRequest {
   userId: string;
 }
@@ -96,35 +94,6 @@ export function isHostedSystemMailboxModelFreeNotification(input: {
   return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.some(
     (prefix) => dedupeKey.length > prefix.length && dedupeKey.startsWith(prefix),
   );
-}
-
-export const HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES = [
-  "default_owned",
-  "model_free",
-] as const;
-
-export type HostedRuntimeSystemMailboxFrontierClass =
-  (typeof HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES)[number];
-
-export interface HostedRuntimeReconciliationFactsWorkspace {
-  hostedMailboxSystemHandledThroughSeq?: string;
-  inboxMediaRetentionWakeAt: string | null;
-  nextWakeAt: string | null;
-  nextWakeReason: string | null;
-  systemMailboxFrontier?: HostedRuntimeSystemMailboxFrontierClass | null;
-  version: string | null;
-}
-
-export interface HostedRuntimeReconciliationFactsBlocked {
-  reason: HostedRuntimeReconciliationBlockedReason;
-  retryAt: string | null;
-}
-
-export interface HostedRuntimeReconciliationFacts {
-  blocked: HostedRuntimeReconciliationFactsBlocked | null;
-  environmentInterviewPending: boolean;
-  mailboxLag: HostedMailboxLaneLag[];
-  workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {

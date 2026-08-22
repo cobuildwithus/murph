@@ -3,14 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  projectHostedRuntimeReconciliationFactsWireResponse,
-  type HostedRuntimeReconciliationFactsWireResponse,
-} from "../packages/hosted-execution/src/reconciliation-facts-wire.ts";
-import {
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
+  projectHostedRuntimeReconciliationFactsWireResponse,
   type HostedRuntimeReconciliationFacts,
-} from "../packages/hosted-execution/src/orchestration-control.ts";
+  type HostedRuntimeReconciliationFactsWireResponse,
+} from "../packages/hosted-execution/src/reconciliation-facts-wire.ts";
 
 export function buildTemporalCompatibilityProducerFixtures():
   HostedRuntimeReconciliationFactsWireResponse[] {
