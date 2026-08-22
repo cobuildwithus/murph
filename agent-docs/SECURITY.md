@@ -1442,11 +1442,16 @@ Last verified: 2026-08-20
   limited to private `cobuildwithus/murph-cloud` and grants only Actions write
   plus Contents read. The `workflow_run` controller executes default-branch
   code, classifies and revalidates the exact public head before token minting,
-  checks out only the public default branch, pins a reviewed private SHA through
-  an immutable lightweight tag, and accepts only the returned exact private run
-  and digest-bound proof jobs. It must not check out PR code, restore
-  candidate-controlled caches, read private logs or artifacts, expose reader
-  revisions publicly, or accept workflow/check names from the candidate.
+  and checks out only the public default branch. Candidate code executes only
+  in the unprivileged Repo Hygiene job, which uploads one exact-run/head fixture
+  artifact. The trusted controller bounds and canonicalizes that artifact as
+  untrusted JSON, pins the reviewed private SHA and SHA-suffixed immutable
+  lightweight tag from `.github/temporal-compatibility-controller.json`, and
+  accepts only the returned exact private run and proof-digest job. Private CI
+  must never check out or import public candidate code. Neither side may restore
+  candidate-controlled caches beside credentials, read private logs or
+  artifacts, expose reader revisions publicly, or accept workflow/check names
+  from the candidate.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority and a dedicated WHOOP test account. Keep those four credentials
   exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to

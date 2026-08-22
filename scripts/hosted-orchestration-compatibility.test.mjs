@@ -14,8 +14,10 @@ import {
   buildDispatchInputs,
   buildReaderJobName,
   cancelAcceptedRun,
+  compatibilityProofDigest,
   inspectAttestationJobs,
   inspectChangedFilePage,
+  inspectControllerPolicy,
   inspectDispatchReceipt,
   inspectExactPublicHead,
   inspectJobPage,
@@ -23,6 +25,7 @@ import {
   inspectPrivateTag,
   inspectPrivateWorkflow,
   inspectPullRequest,
+  inspectProducerFixtures,
   isTemporalCompatibilityRelevantPath,
   runTemporalCompatibility,
   selectPullRequest,
@@ -32,8 +35,14 @@ import {
 const PUBLIC_SHA = "a".repeat(40);
 const PRIVATE_SHA = "b".repeat(40);
 const OTHER_READER_SHA = "c".repeat(40);
-const PRIVATE_REF = "temporal-compatibility-v1";
+const PRIVATE_REF = `temporal-compatibility-v1-${PRIVATE_SHA}`;
 const REQUEST_ID = `temporal-${PUBLIC_SHA}-123-1`;
+const PRODUCER_FIXTURES = JSON.stringify([{
+  blocked: null,
+  mailboxLag: [],
+  workspace: null,
+}]);
+const PRODUCER_DIGEST = inspectProducerFixtures(PRODUCER_FIXTURES).digest;
 const WORKFLOW_ID = 321;
 const RUN_ID = 654;
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -69,7 +78,12 @@ function privateRun(overrides = {}) {
   };
 }
 
-function proofJobs({ digest = supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]) } = {}) {
+function proofJobs({ proofDigest = compatibilityProofDigest({
+  producerDigest: PRODUCER_DIGEST,
+  publicSha: PUBLIC_SHA,
+  readersDigest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
+  requestId: REQUEST_ID,
+}) } = {}) {
   return [
     {
       conclusion: "success",
@@ -91,11 +105,38 @@ function proofJobs({ digest = supportedReaderDigest([PRIVATE_SHA, OTHER_READER_S
       conclusion: "success",
       head_sha: PRIVATE_SHA,
       id: 3,
-      name: buildAttestationJobName({ digest, publicSha: PUBLIC_SHA, requestId: REQUEST_ID }),
+      name: buildAttestationJobName({ proofDigest }),
       run_id: RUN_ID,
       status: "completed",
     },
   ];
+}
+
+function compatibilityArgs(overrides = {}) {
+  return {
+    expectedPrivateSha: PRIVATE_SHA,
+    privateRef: PRIVATE_REF,
+    privateToken: "private-token",
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicRepository: "cobuildwithus/murph",
+    publicSha: PUBLIC_SHA,
+    publicToken: "public-token",
+    prNumber: 42,
+    requestId: REQUEST_ID,
+    ...overrides,
+  };
+}
+
+function proofInspectionArgs(overrides = {}) {
+  return {
+    privateSha: PRIVATE_SHA,
+    producerDigest: PRODUCER_DIGEST,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+    runId: RUN_ID,
+    ...overrides,
+  };
 }
 
 test("classifier selects every hosted Web and Cloudflare change", () => {
@@ -111,6 +152,8 @@ test("classifier selects Temporal contracts, harnesses, and CI owners", () => {
     "packages/contracts/src/index.ts",
     "scripts/check-hosted-temporal-orchestration-guards.ts",
     "scripts/setup-temporal-cli.sh",
+    "scripts/temporal-compatibility-producer-fixtures.ts",
+    ".github/temporal-compatibility-controller.json",
     ".github/workflows/temporal-compatibility.yml",
     "pnpm-lock.yaml",
   ]) {
@@ -212,16 +255,47 @@ test("selection fails safe above GitHub's changed-file listing ceiling", async (
 });
 
 test("dispatch contract is closed, versioned, and exact-SHA only", () => {
-  assert.deepEqual(buildDispatchInputs({ publicSha: PUBLIC_SHA, requestId: REQUEST_ID }), {
+  assert.deepEqual(buildDispatchInputs({
+    producerDigest: PRODUCER_DIGEST,
+    producerFixtures: PRODUCER_FIXTURES,
+    publicSha: PUBLIC_SHA,
+    requestId: REQUEST_ID,
+  }), {
     contract_version: "1",
     mode: "temporal_compatibility",
     murph_sha: PUBLIC_SHA,
+    producer_digest: PRODUCER_DIGEST,
+    producer_fixtures: PRODUCER_FIXTURES,
     request_id: REQUEST_ID,
   });
   assert.throws(
-    () => buildDispatchInputs({ publicSha: "main", requestId: REQUEST_ID }),
+    () => buildDispatchInputs({
+      producerDigest: PRODUCER_DIGEST,
+      producerFixtures: PRODUCER_FIXTURES,
+      publicSha: "main",
+      requestId: REQUEST_ID,
+    }),
     /exact lowercase Git SHA/u,
   );
+});
+
+test("producer artifact and controller policy are bounded exact-SHA data", () => {
+  assert.deepEqual(inspectProducerFixtures(`  ${PRODUCER_FIXTURES}\n`), {
+    digest: PRODUCER_DIGEST,
+    serialized: PRODUCER_FIXTURES,
+  });
+  assert.throws(() => inspectProducerFixtures(JSON.stringify([])), /artifact is invalid/u);
+  assert.throws(() => inspectProducerFixtures(`[{"value":"${"x".repeat(33_000)}"}]`), /too large/u);
+  assert.deepEqual(inspectControllerPolicy({
+    contractVersion: 1,
+    privateRef: PRIVATE_REF,
+    privateSha: PRIVATE_SHA,
+  }), { privateRef: PRIVATE_REF, privateSha: PRIVATE_SHA });
+  assert.throws(() => inspectControllerPolicy({
+    contractVersion: 1,
+    privateRef: "temporal-compatibility-v1-stale",
+    privateSha: PRIVATE_SHA,
+  }), /bind its exact SHA/u);
 });
 
 test("private tag proof accepts only the reviewed lightweight tag", () => {
@@ -291,12 +365,15 @@ test("supported-reader digest is deterministic and rejects duplicates", () => {
 
 test("attestation accepts every unique successful reader and its exact digest", () => {
   assert.deepEqual(inspectAttestationJobs(proofJobs(), {
-    privateSha: PRIVATE_SHA,
-    publicSha: PUBLIC_SHA,
-    requestId: REQUEST_ID,
-    runId: RUN_ID,
+    ...proofInspectionArgs(),
   }), {
     digest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
+    proofDigest: compatibilityProofDigest({
+      producerDigest: PRODUCER_DIGEST,
+      publicSha: PUBLIC_SHA,
+      readersDigest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
+      requestId: REQUEST_ID,
+    }),
     readerCount: 2,
   });
 });
@@ -304,10 +381,7 @@ test("attestation accepts every unique successful reader and its exact digest", 
 test("attestation rejects an omitted pinned controller reader", () => {
   const jobs = proofJobs().filter((job) => job.name !== buildReaderJobName(PRIVATE_SHA));
   assert.throws(() => inspectAttestationJobs(jobs, {
-    privateSha: PRIVATE_SHA,
-    publicSha: PUBLIC_SHA,
-    requestId: REQUEST_ID,
-    runId: RUN_ID,
+    ...proofInspectionArgs(),
   }), /omitted the pinned private controller/u);
 });
 
@@ -317,19 +391,13 @@ test("attestation rejects duplicate readers and duplicate job ids", () => {
     id: 4,
   };
   assert.throws(() => inspectAttestationJobs([...proofJobs(), duplicateReader], {
-    privateSha: PRIVATE_SHA,
-    publicSha: PUBLIC_SHA,
-    requestId: REQUEST_ID,
-    runId: RUN_ID,
+    ...proofInspectionArgs(),
   }), /duplicate SHA/u);
   assert.throws(() => inspectAttestationJobs([
     ...proofJobs(),
     { ...duplicateReader, id: 1 },
   ], {
-    privateSha: PRIVATE_SHA,
-    publicSha: PUBLIC_SHA,
-    requestId: REQUEST_ID,
-    runId: RUN_ID,
+    ...proofInspectionArgs(),
   }), /duplicate id/u);
 });
 
@@ -345,35 +413,23 @@ test("attestation rejects malformed, skipped, failed, and mismatched proof jobs"
       replacement,
       ...proofJobs().slice(1),
     ], {
-      privateSha: PRIVATE_SHA,
-      publicSha: PUBLIC_SHA,
-      requestId: REQUEST_ID,
-      runId: RUN_ID,
+      ...proofInspectionArgs(),
     }), expected);
   }
 });
 
-test("attestation rejects a digest, public SHA, or request-id mismatch", () => {
-  assert.throws(() => inspectAttestationJobs(proofJobs({ digest: "d".repeat(64) }), {
-    privateSha: PRIVATE_SHA,
-    publicSha: PUBLIC_SHA,
-    requestId: REQUEST_ID,
-    runId: RUN_ID,
+test("attestation rejects a producer digest, public SHA, or request-id mismatch", () => {
+  assert.throws(() => inspectAttestationJobs(proofJobs({ proofDigest: "d".repeat(64) }), {
+    ...proofInspectionArgs(),
   }), /does not bind the requested proof/u);
-  const jobs = proofJobs();
-  jobs[2] = {
-    ...jobs[2],
-    name: buildAttestationJobName({
-      digest: supportedReaderDigest([PRIVATE_SHA, OTHER_READER_SHA]),
-      publicSha: "d".repeat(40),
-      requestId: REQUEST_ID,
-    }),
-  };
-  assert.throws(() => inspectAttestationJobs(jobs, {
-    privateSha: PRIVATE_SHA,
-    publicSha: PUBLIC_SHA,
-    requestId: REQUEST_ID,
-    runId: RUN_ID,
+  assert.throws(() => inspectAttestationJobs(proofJobs(), {
+    ...proofInspectionArgs({ producerDigest: "d".repeat(64) }),
+  }), /does not bind the requested proof/u);
+  assert.throws(() => inspectAttestationJobs(proofJobs(), {
+    ...proofInspectionArgs({ publicSha: "d".repeat(40) }),
+  }), /does not bind the requested proof/u);
+  assert.throws(() => inspectAttestationJobs(proofJobs(), {
+    ...proofInspectionArgs({ requestId: "different-request" }),
   }), /does not bind the requested proof/u);
 });
 
@@ -416,7 +472,12 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
       calls.push("dispatch");
       assert.equal(init.method, "POST");
       assert.deepEqual(JSON.parse(init.body), {
-        inputs: buildDispatchInputs({ publicSha: PUBLIC_SHA, requestId: REQUEST_ID }),
+        inputs: buildDispatchInputs({
+          producerDigest: PRODUCER_DIGEST,
+          producerFixtures: PRODUCER_FIXTURES,
+          publicSha: PUBLIC_SHA,
+          requestId: REQUEST_ID,
+        }),
         ref: PRIVATE_REF,
         return_run_details: true,
       });
@@ -432,15 +493,9 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
-    const proof = await runTemporalCompatibility({
-      privateToken: "private-token",
-      publicRepository: "cobuildwithus/murph",
-      publicSha: PUBLIC_SHA,
-      publicToken: "public-token",
-      prNumber: 42,
-      requestId: REQUEST_ID,
+    const proof = await runTemporalCompatibility(compatibilityArgs({
       sleepFn: async () => undefined,
-    });
+    }));
     assert.equal(proof.readerCount, 2);
     assert.deepEqual(calls, ["tag", "workflow", "head", "dispatch", "run", "jobs"]);
   }));
@@ -474,15 +529,9 @@ test("controller cancels only its accepted run when status polling becomes uncer
     }
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
-    await assert.rejects(() => runTemporalCompatibility({
-      privateToken: "private-token",
-      publicRepository: "cobuildwithus/murph",
-      publicSha: PUBLIC_SHA,
-      publicToken: "public-token",
-      prNumber: 42,
-      requestId: REQUEST_ID,
+    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
       sleepFn: async () => undefined,
-    }), /run lookup failed with HTTP 503/u);
+    })), /run lookup failed with HTTP 503/u);
     assert.deepEqual(controlUrls, [
       `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
     ]);
@@ -522,17 +571,11 @@ test("controller times out and cancels only its accepted run", async () => {
       }
       throw new Error(`unexpected URL ${url}`);
     }, async () => {
-      await assert.rejects(() => runTemporalCompatibility({
-        privateToken: "private-token",
-        publicRepository: "cobuildwithus/murph",
-        publicSha: PUBLIC_SHA,
-        publicToken: "public-token",
-        prNumber: 42,
-        requestId: REQUEST_ID,
+      await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
         sleepFn: async () => {
           deadlineReached = true;
         },
-      }), /run timed out/u);
+      })), /run timed out/u);
     }));
   } finally {
     Date.now = originalNow;
@@ -562,14 +605,10 @@ test("missing dispatch identity never issues a broad or guessed cancellation", a
     if (url.includes("/cancel")) controls.push(url);
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
-    await assert.rejects(() => runTemporalCompatibility({
-      privateToken: "private-token",
-      publicRepository: "cobuildwithus/murph",
-      publicSha: PUBLIC_SHA,
-      publicToken: "public-token",
-      prNumber: 42,
-      requestId: REQUEST_ID,
-    }), /did not return workflow_run_id/u);
+    await assert.rejects(
+      () => runTemporalCompatibility(compatibilityArgs()),
+      /did not return workflow_run_id/u,
+    );
     assert.deepEqual(controls, []);
   }));
 });
@@ -615,6 +654,9 @@ test("workflow keeps credentials behind trusted selection and publishes one stab
   assert.match(workflow, /environment: temporal-compatibility/u);
   assert.match(workflow, /owner: cobuildwithus\n\s+repositories: murph-cloud/u);
   assert.match(workflow, /permission-actions: write\n\s+permission-contents: read/u);
+  assert.match(workflow, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/u);
+  assert.match(workflow, /temporal-compatibility-producer-\$\{\{ needs\.select-pr\.outputs\.head_sha \}\}/u);
+  assert.doesNotMatch(workflow, /TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA/u);
   assert.match(workflow, /context='Temporal compatibility'/u);
   assert.doesNotMatch(workflow, /ref: \$\{\{ needs\.select-pr\.outputs\.head_sha \}\}/u);
   const credentialedJob = workflow.slice(
@@ -694,20 +736,7 @@ test("Repo Hygiene owns the focused controller contract test", async () => {
 });
 
 async function withCompatibilityEnv(fn) {
-  const names = {
-    TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA: PRIVATE_SHA,
-    TEMPORAL_COMPATIBILITY_PRIVATE_REF: PRIVATE_REF,
-  };
-  const original = new Map(Object.keys(names).map((name) => [name, process.env[name]]));
-  try {
-    Object.assign(process.env, names);
-    return await fn();
-  } finally {
-    for (const [name, value] of original) {
-      if (value === undefined) delete process.env[name];
-      else process.env[name] = value;
-    }
-  }
+  return fn();
 }
 
 async function withFetch(fetchImpl, fn) {

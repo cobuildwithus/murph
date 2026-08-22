@@ -252,9 +252,13 @@ Last verified: 2026-08-20
   trusted default-branch controller and the private owner's immutable
   supported-reader manifest. Irrelevant changes complete without private work;
   relevant changes require the same current public head throughout selection
-  and dispatch. Missing dispatch identity, stale heads, incomplete pagination,
-  duplicate or failed readers, skipped proof jobs, a mismatched digest,
-  cancellation, or private failure cannot publish success. Once dispatch
+  and dispatch. The exact candidate producer runs in unprivileged public CI;
+  the trusted controller sends only its bounded canonical fixture JSON and
+  digest to private CI. The private proof digest binds public SHA, request id,
+  supported-reader digest, and producer digest. Missing artifacts or dispatch
+  identity, stale heads, incomplete pagination, duplicate or failed readers,
+  skipped proof jobs, a mismatched digest, cancellation, or private failure
+  cannot publish success. Once dispatch
   returns a run id, uncertain polling or timeout cancels only that run, escalates
   to force-cancel only if ordinary cancellation does not make it terminal, and
   never searches for or cancels a guessed run.

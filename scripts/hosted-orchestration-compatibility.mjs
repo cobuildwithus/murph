@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFile } from "node:fs/promises";
+import { appendFile, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -16,6 +16,8 @@ const PRIVATE_RUN_TIMEOUT_MS = 60 * 60_000;
 const CANCEL_GRACE_MS = 2 * 60_000;
 const POLL_MS = 15_000;
 const MAX_CHANGED_FILES = 3_000;
+const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
+const MAX_PRODUCER_FIXTURES = 16;
 const PAGE_SIZE = 100;
 
 const RELEVANT_PREFIXES = [
@@ -34,6 +36,7 @@ const RELEVANT_PREFIXES = [
 const RELEVANT_EXACT_PATHS = new Set([
   ".github/workflows/repo-hygiene.yml",
   ".github/workflows/temporal-compatibility.yml",
+  ".github/temporal-compatibility-controller.json",
   ".nvmrc",
   "config/workspace-source-resolution.ts",
   "package.json",
@@ -47,6 +50,8 @@ const RELEVANT_EXACT_PATHS = new Set([
   "scripts/hosted-orchestration-compatibility.mjs",
   "scripts/hosted-orchestration-compatibility.test.mjs",
   "scripts/setup-temporal-cli.sh",
+  "scripts/temporal-compatibility-producer-fixtures.test.ts",
+  "scripts/temporal-compatibility-producer-fixtures.ts",
   "scripts/temporal-dev-server.sh",
   "tsconfig.base.json",
 ]);
@@ -129,15 +134,61 @@ export async function selectPullRequest({ expectedHeadSha, prNumber, repository,
   return { ...pullRequest, selected };
 }
 
-export function buildDispatchInputs({ publicSha, requestId }) {
+export function buildDispatchInputs({ producerDigest, producerFixtures, publicSha, requestId }) {
+  assertDigest(producerDigest, "producer fixture digest");
+  const inspected = inspectProducerFixtures(producerFixtures);
+  if (inspected.digest !== producerDigest) {
+    throw new Error("Producer fixture digest does not match the canonical fixture payload.");
+  }
   assertSha(publicSha, "public SHA");
   assertSafeId(requestId, "request id", 120);
   return {
     contract_version: TEMPORAL_COMPATIBILITY_CONTRACT_VERSION,
     mode: "temporal_compatibility",
     murph_sha: publicSha,
+    producer_digest: producerDigest,
+    producer_fixtures: inspected.serialized,
     request_id: requestId,
   };
+}
+
+export function inspectProducerFixtures(value) {
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") > MAX_PRODUCER_FIXTURE_BYTES) {
+    throw new Error("Temporal producer fixture artifact is missing or too large.");
+  }
+  let fixtures;
+  try {
+    fixtures = JSON.parse(value);
+  } catch {
+    throw new Error("Temporal producer fixture artifact is invalid JSON.");
+  }
+  if (
+    !Array.isArray(fixtures)
+    || fixtures.length === 0
+    || fixtures.length > MAX_PRODUCER_FIXTURES
+    || fixtures.some((fixture) => !isRecord(fixture))
+  ) {
+    throw new Error("Temporal producer fixture artifact is invalid.");
+  }
+  const serialized = JSON.stringify(fixtures);
+  return {
+    digest: createHash("sha256").update(serialized).digest("hex"),
+    serialized,
+  };
+}
+
+export function inspectControllerPolicy(raw) {
+  assertRecord(raw, "Temporal compatibility controller policy");
+  if (raw.contractVersion !== Number(TEMPORAL_COMPATIBILITY_CONTRACT_VERSION)) {
+    throw new Error("Temporal compatibility controller policy version is invalid.");
+  }
+  const privateSha = requiredString(raw.privateSha, "private compatibility controller SHA");
+  assertSha(privateSha, "private compatibility controller SHA");
+  const privateRef = safeTag(requiredString(raw.privateRef, "private compatibility controller ref"));
+  if (privateRef !== `temporal-compatibility-v1-${privateSha}`) {
+    throw new Error("Private compatibility controller ref must bind its exact SHA.");
+  }
+  return { privateRef, privateSha };
 }
 
 export function inspectPrivateTag(raw, { expectedSha, ref }) {
@@ -228,20 +279,29 @@ export function supportedReaderDigest(readerShas) {
   return createHash("sha256").update(`${normalized.join("\n")}\n`).digest("hex");
 }
 
+export function compatibilityProofDigest({ producerDigest, publicSha, readersDigest, requestId }) {
+  assertDigest(producerDigest, "producer fixture digest");
+  assertDigest(readersDigest, "supported-reader digest");
+  assertSha(publicSha, "public SHA");
+  assertSafeId(requestId, "request id", 120);
+  return createHash("sha256")
+    .update(`${publicSha}\n${requestId}\n${readersDigest}\n${producerDigest}\n`)
+    .digest("hex");
+}
+
 export function buildReaderJobName(readerSha) {
   assertSha(readerSha, "supported reader SHA");
   return `Temporal compatibility reader [sha=${readerSha}]`;
 }
 
-export function buildAttestationJobName({ digest, publicSha, requestId }) {
-  assertDigest(digest, "supported-reader digest");
-  assertSha(publicSha, "public SHA");
-  assertSafeId(requestId, "request id", 120);
-  return `Temporal compatibility attestation [public=${publicSha};request=${requestId};readers=${digest}]`;
+export function buildAttestationJobName({ proofDigest }) {
+  assertDigest(proofDigest, "compatibility proof digest");
+  return `Temporal compatibility attestation [proof=${proofDigest}]`;
 }
 
 export function inspectAttestationJobs(jobs, {
   privateSha,
+  producerDigest,
   publicSha,
   requestId,
   runId,
@@ -263,7 +323,7 @@ export function inspectAttestationJobs(jobs, {
     }
     const name = requiredString(raw.name, "private compatibility job name");
     const readerMatch = /^Temporal compatibility reader \[sha=([0-9a-f]{40})\]$/u.exec(name);
-    const attestationMatch = /^Temporal compatibility attestation \[public=([0-9a-f]{40});request=([A-Za-z0-9._:-]+);readers=([0-9a-f]{64})\]$/u.exec(name);
+    const attestationMatch = /^Temporal compatibility attestation \[proof=([0-9a-f]{64})\]$/u.exec(name);
     if (readerMatch || attestationMatch) {
       if (raw.status !== "completed" || raw.conclusion !== "success") {
         throw new Error("Private compatibility proof job did not complete successfully.");
@@ -272,11 +332,7 @@ export function inspectAttestationJobs(jobs, {
       throw new Error("Private compatibility run returned a malformed proof job.");
     }
     if (readerMatch) readers.push(readerMatch[1]);
-    if (attestationMatch) attestations.push({
-      digest: attestationMatch[3],
-      publicSha: attestationMatch[1],
-      requestId: attestationMatch[2],
-    });
+    if (attestationMatch) attestations.push(attestationMatch[1]);
   }
   if (attestations.length !== 1) {
     throw new Error("Private compatibility run must return exactly one attestation job.");
@@ -285,15 +341,16 @@ export function inspectAttestationJobs(jobs, {
     throw new Error("Supported-reader proof omitted the pinned private controller revision.");
   }
   const digest = supportedReaderDigest(readers);
-  const [attestation] = attestations;
-  if (
-    attestation.publicSha !== publicSha
-    || attestation.requestId !== requestId
-    || attestation.digest !== digest
-  ) {
+  const proofDigest = compatibilityProofDigest({
+    producerDigest,
+    publicSha,
+    readersDigest: digest,
+    requestId,
+  });
+  if (attestations[0] !== proofDigest) {
     throw new Error("Private compatibility attestation does not bind the requested proof.");
   }
-  return { digest, readerCount: readers.length };
+  return { digest, proofDigest, readerCount: readers.length };
 }
 
 export function inspectJobPage(raw, { expectedTotal, page }) {
@@ -334,7 +391,11 @@ export async function listAllRunJobs({ runId, token }) {
 }
 
 export async function runTemporalCompatibility({
+  expectedPrivateSha,
   privateToken,
+  privateRef,
+  producerDigest,
+  producerFixtures,
   publicRepository,
   publicSha,
   publicToken,
@@ -350,14 +411,14 @@ export async function runTemporalCompatibility({
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) {
     throw new Error("Pull request number must be a positive integer.");
   }
-  const privateRef = safeTag(requiredEnv("TEMPORAL_COMPATIBILITY_PRIVATE_REF"));
-  const expectedPrivateSha = requiredEnv("TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA");
+  const inspectedPrivateRef = safeTag(privateRef);
+  assertSha(expectedPrivateSha, "reviewed private compatibility SHA");
   const encodedPrivateRepository = encodeRepository(TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY);
   const privateSha = inspectPrivateTag(await fetchJson(
-    `https://api.github.com/repos/${encodedPrivateRepository}/git/ref/tags/${privateRef.split("/").map(encodeURIComponent).join("/")}`,
+    `https://api.github.com/repos/${encodedPrivateRepository}/git/ref/tags/${inspectedPrivateRef.split("/").map(encodeURIComponent).join("/")}`,
     { headers: githubHeaders(privateToken) },
     "private compatibility tag lookup",
-  ), { expectedSha: expectedPrivateSha, ref: privateRef });
+  ), { expectedSha: expectedPrivateSha, ref: inspectedPrivateRef });
   const workflowId = inspectPrivateWorkflow(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}`,
     { headers: githubHeaders(privateToken) },
@@ -374,8 +435,8 @@ export async function runTemporalCompatibility({
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}/dispatches`,
     {
       body: JSON.stringify({
-        inputs: buildDispatchInputs({ publicSha, requestId }),
-        ref: privateRef,
+        inputs: buildDispatchInputs({ producerDigest, producerFixtures, publicSha, requestId }),
+        ref: inspectedPrivateRef,
         return_run_details: true,
       }),
       headers: { ...githubHeaders(privateToken), "content-type": "application/json" },
@@ -389,7 +450,7 @@ export async function runTemporalCompatibility({
     const deadline = Date.now() + PRIVATE_RUN_TIMEOUT_MS;
     while (Date.now() < deadline) {
       const run = inspectPrivateRun(await readPrivateRun(runId, privateToken), {
-        privateRef,
+        privateRef: inspectedPrivateRef,
         privateSha,
         runId,
         workflowId,
@@ -401,6 +462,7 @@ export async function runTemporalCompatibility({
         }
         const proof = inspectAttestationJobs(await listAllRunJobs({ runId, token: privateToken }), {
           privateSha,
+          producerDigest,
           publicSha,
           requestId,
           runId,
@@ -415,7 +477,7 @@ export async function runTemporalCompatibility({
     if (!terminal) {
       try {
         await cancelAcceptedRun({
-          privateRef,
+          privateRef: inspectedPrivateRef,
           privateSha,
           runId,
           sleepFn,
@@ -547,8 +609,14 @@ async function runCompatibilityCommand(args) {
   const privateToken = requiredEnv("TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN");
   delete process.env.TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN;
   delete process.env.TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN;
+  const policy = inspectControllerPolicy(JSON.parse(await readFile(requiredArg(args, "policy"), "utf8")));
+  const producer = inspectProducerFixtures(await readFile(requiredArg(args, "fixtures"), "utf8"));
   await runTemporalCompatibility({
+    expectedPrivateSha: policy.privateSha,
     privateToken,
+    privateRef: policy.privateRef,
+    producerDigest: producer.digest,
+    producerFixtures: producer.serialized,
     publicRepository: requiredEnv("GITHUB_REPOSITORY"),
     publicSha: requiredArg(args, "sha"),
     publicToken,
