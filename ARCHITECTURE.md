@@ -1598,7 +1598,9 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   prevents a later context update from restoring it. The email labels the
   network location as approximate. It uses member creation time in UTC and
   labels an exact fallback as the activation surface when no request context
-  exists; batch activation omits the source when it lacks per-member
+  exists. Unreadable optional context or email enrichment degrades to that
+  context-free fallback instead of suppressing the one allowed notification
+  attempt; batch activation omits the source when it lacks per-member
   provenance. The email excludes member and provider event identifiers. A
   welcome-only or later paid-billing event is not signup evidence. Later
   successful payments and accepted-invite replays must not repeat activation
@@ -2676,8 +2678,9 @@ account in `pending_link` or `link_returned` cannot accept ordinary webhook side
 effects, persist dirty work, wake or schedule the runtime, execute queued
 provider jobs, or promote itself through sync success. Hosted Web may recover a
 missing browser callback only after an authenticated, source-attributed webhook
-owns its trace and a live Junction provider-list read confirms the exact
-prepared source. The webhook is a trigger, not proof by itself. The runtime
+owns its trace and a live Junction provider-list read returns only the literal
+status `connected` for the exact prepared source. The webhook is a trigger, not
+proof by itself. The runtime
 rechecks consent, shared-app binding, connection and credential epochs, source
 epoch, and disconnect fences. It then commits `source_confirmed`, source
 admission, the callback-equivalent source-scoped initial jobs, a mandatory

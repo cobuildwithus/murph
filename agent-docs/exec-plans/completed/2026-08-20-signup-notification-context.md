@@ -1,6 +1,6 @@
 # Enrich signup notifications with coarse location, local time, and source
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-21
 
@@ -81,6 +81,11 @@ Updated: 2026-08-21
    Mitigation: persist a 24-hour expiry beside the ciphertext, refuse to decrypt
    at or after expiry, and reuse the existing hourly retention sweep with a
    partial expiry index, bounded batches, and `SKIP LOCKED` claims.
+6. Risk: optional context decryption can fail before the durable attempt claim
+   and suppress the context-free notice.
+   Mitigation: degrade only the optional context projection to `null`, retain
+   the trusted member creation time, and continue through the existing fallback
+   formatter, attempt claim, and provider path.
 
 ## Tasks
 
@@ -119,6 +124,35 @@ Updated: 2026-08-21
   adds no independent process or durable history and also retires any malformed
   context that is missing its expiry.
 
+## Recovered round-four findings
+
+- The accepted exact-head round completed after PR #2112 had already merged,
+  but its waiter did not persist the response. An exact-thread export recovered
+  `ROUND_OUTCOME: FINDINGS` for the merged `fe9c0c0829` head.
+- Accepted product failure: an unreadable live encrypted context threw before
+  the durable attempt claim, so the outer best-effort wrapper could permanently
+  lose the one-shot notice. The correction reuses the existing `context: null`
+  fallback and adds no retry owner or state.
+- Accepted simplification: the final migration no longer needs the
+  review-induced repository-wide SQL statement lexer. Restore the bounded
+  whole-file migration guard and delete the lexer-only regression. Retain the
+  existing Frog entry because its synthetic cross-statement false positive is
+  still a reproducible tooling limitation even though this migration no longer
+  needs a parser fix.
+- Because the reviewed head was already merged, land both corrections in a
+  dedicated follow-up PR from current `main` and run that PR's ordinary
+  specialist/final ReviewGPT and CI gates with a new immutable baseline.
+
+## Follow-up PR round-one finding
+
+- The first corrective full audit proved the context fallback was incomplete:
+  the following optional email-authorization projection uses the same control
+  root and could still throw before the attempt claim.
+- Accept the finding and extend the existing sender-boundary omit behavior to
+  email enrichment. If that projection is unreadable, use `customerEmail: null`
+  and continue through the same claim and context-free provider path. Required
+  access, member, claim, and provider failures remain unchanged.
+
 ## Verification
 
 - Commands to run: focused Vitest slices for request context, member store,
@@ -129,3 +163,16 @@ Updated: 2026-08-21
   reflects both nullable context columns, the PostgreSQL trigger proof clears
   both fields, no private identifiers enter the diff, and exact-head required
   CI plus ReviewGPT report no unresolved finding.
+
+## Completion
+
+- Follow-up PR #2123 preserves the one-shot notification when either optional
+  context or email enrichment is unreadable and removes the unnecessary SQL
+  statement lexer.
+- Focused verification passed 77 tests, the prepared Web typecheck, Prisma
+  validation, documentation drift checks, scoped lint, `git diff --check`, and
+  the identifier scan.
+- The preliminary specialist finding was reproduced and resolved. Final
+  ReviewGPT round two returned `ROUND_OUTCOME: PASS`, and all required checks
+  passed on the reviewed implementation head.
+Completed: 2026-08-21

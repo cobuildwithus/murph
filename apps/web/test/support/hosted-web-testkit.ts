@@ -574,6 +574,20 @@ interface HostedMailboxAppendForTestStoreModule {
       laneSeq: bigint | number | string;
     };
   }>;
+  appendHostedMailboxEnvelopeWithIdentityTx(input: {
+    envelope: HostedExecutionWake;
+    expiresAt: Date | string | null;
+    itemId: string;
+    tx: unknown;
+  }): Promise<{
+    duplicate: boolean;
+    inserted: boolean;
+    item: {
+      dedupeKey: string;
+      id: string;
+      laneSeq: bigint | number | string;
+    };
+  }>;
 }
 
 interface HostedWorkspaceSeedForTestPrismaClient {
@@ -873,10 +887,18 @@ export async function appendHostedExecutionWakeForTest(input: {
   const wake = parseHostedExecutionWake(input.wake);
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
     const append = await deps.prisma.$transaction(async (tx) =>
-      deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      }));
+      wake.kind === "assistant.ask.requested"
+        || wake.kind === "assistant.ask.completed"
+        ? deps.hostedMailboxStore.appendHostedMailboxEnvelopeWithIdentityTx({
+            envelope: wake,
+            expiresAt: wake.ask.expiresAt,
+            itemId: wake.eventId,
+            tx,
+          })
+        : deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
+            envelope: wake,
+            tx,
+          }));
     return {
       duplicate: append.duplicate,
       inserted: append.inserted,
@@ -2310,6 +2332,8 @@ async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxApp
     advanceHostedMailboxConsumedSeqByLane:
       typedHostedMailboxStoreModule.advanceHostedMailboxConsumedSeqByLane,
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithIdentityTx:
+      typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeWithIdentityTx,
   };
 }
 

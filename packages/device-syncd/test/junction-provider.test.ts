@@ -8069,7 +8069,7 @@ test("Junction provider cleanup deregisters only the requested source", async ()
   ]);
 });
 
-test("Junction provider proves source access only from explicit active statuses", async () => {
+test("Junction provider proves source access only from an unambiguous explicit connected status", async () => {
   const provider = createJunctionProvider(async (input) => {
     assert.equal(
       readUrl(input),
@@ -8078,6 +8078,7 @@ test("Junction provider proves source access only from explicit active statuses"
     return createJsonResponse({
       data: [
         { slug: "source_connected", status: "connected" },
+        { slug: "source_connected", status: "CONNECTED" },
         { slug: "source_active", status: "active" },
         { slug: "source_available", status: "available" },
         { slug: "source_ok", status: "ok" },
@@ -8089,6 +8090,8 @@ test("Junction provider proves source access only from explicit active statuses"
         { slug: "source_disconnected", status: "disconnected" },
         { slug: "source_revoked", status: "revoked" },
         { slug: "source_inactive", status: "inactive" },
+        { slug: "source_mixed", status: "connected" },
+        { slug: "source_mixed", status: "error" },
       ],
     });
   });
@@ -8096,15 +8099,11 @@ test("Junction provider proves source access only from explicit active statuses"
     provider.connectionHandler?.isSourceAccessActive,
   );
 
+  assert.equal(await isSourceAccessActive(createAccount(), "source_connected"), true);
   for (const slug of [
-    "source_connected",
     "source_active",
     "source_available",
     "source_ok",
-  ]) {
-    assert.equal(await isSourceAccessActive(createAccount(), slug), true);
-  }
-  for (const slug of [
     "source_unknown",
     "source_missing",
     "source_unrecognized",
@@ -8113,8 +8112,27 @@ test("Junction provider proves source access only from explicit active statuses"
     "source_disconnected",
     "source_revoked",
     "source_inactive",
+    "source_mixed",
   ]) {
     assert.equal(await isSourceAccessActive(createAccount(), slug), false);
+  }
+  for (const slug of [
+    "source_active",
+    "source_available",
+    "source_ok",
+    "source_unknown",
+    "source_missing",
+    "source_unrecognized",
+    "source_error",
+    "source_failed",
+    "source_mixed",
+  ]) {
+    await assert.rejects(
+      () => isSourceAccessActive(createAccount(), slug, { requireDefinitive: true }),
+      (error: unknown) => error instanceof DeviceSyncError
+        && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
+        && error.retryable === true,
+    );
   }
 });
 
@@ -8130,7 +8148,8 @@ test("Junction provider requires definitive absence for cutover recovery", async
         { slug: "fitbit", status: "revoked" },
         { slug: "oura", status: "revoked" },
         { slug: "garmin", status: "connected" },
-        { slug: "garmin", status: "error" },
+        { slug: "mixed", status: "connected" },
+        { slug: "mixed", status: "error" },
       ],
     });
   });
@@ -8148,6 +8167,12 @@ test("Junction provider requires definitive absence for cutover recovery", async
   );
   await assert.rejects(
     () => isSourceAccessActive(createAccount(), "fitbit", { requireDefinitive: true }),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
+      && error.retryable === true,
+  );
+  await assert.rejects(
+    () => isSourceAccessActive(createAccount(), "mixed", { requireDefinitive: true }),
     (error: unknown) => error instanceof DeviceSyncError
       && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
       && error.retryable === true,
