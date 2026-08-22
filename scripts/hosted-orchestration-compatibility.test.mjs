@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -486,6 +488,60 @@ test("controller cancels only its accepted run when status polling becomes uncer
   }));
 });
 
+test("controller times out and cancels only its accepted run", async () => {
+  const controlUrls = [];
+  const originalNow = Date.now;
+  let deadlineReached = false;
+  let runReads = 0;
+  try {
+    Date.now = () => deadlineReached ? 1_000_000_000_000 : 0;
+    await withCompatibilityEnv(async () => withFetch(async (url) => {
+      if (url.includes("/git/ref/tags/")) {
+        return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+      }
+      if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+        return jsonResponse({
+          id: WORKFLOW_ID,
+          name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+          path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+          state: "active",
+        });
+      }
+      if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+      if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+      if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
+        controlUrls.push(url);
+        return new Response(null, { status: 202 });
+      }
+      if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+        runReads += 1;
+        return jsonResponse(privateRun(runReads === 1
+          ? { conclusion: null, status: "in_progress" }
+          : { conclusion: "cancelled", status: "completed" }));
+      }
+      throw new Error(`unexpected URL ${url}`);
+    }, async () => {
+      await assert.rejects(() => runTemporalCompatibility({
+        privateToken: "private-token",
+        publicRepository: "cobuildwithus/murph",
+        publicSha: PUBLIC_SHA,
+        publicToken: "public-token",
+        prNumber: 42,
+        requestId: REQUEST_ID,
+        sleepFn: async () => {
+          deadlineReached = true;
+        },
+      }), /run timed out/u);
+    }));
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.deepEqual(controlUrls, [
+    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+  ]);
+  assert.equal(runReads, 2);
+});
+
 test("missing dispatch identity never issues a broad or guessed cancellation", async () => {
   const controls = [];
   await withCompatibilityEnv(async () => withFetch(async (url) => {
@@ -574,6 +630,60 @@ test("workflow keeps credentials behind trusted selection and publishes one stab
   );
 });
 
+test("workflow status shell executes every terminal outcome", async () => {
+  const workflow = await readFile(
+    path.join(REPO_ROOT, ".github", "workflows", "temporal-compatibility.yml"),
+    "utf8",
+  );
+  const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
+  const baseEnv = {
+    COMPATIBILITY_RESULT: "skipped",
+    SELECT_RESULT: "success",
+    SELECTED: "true",
+    SOURCE_RESULT: "success",
+    TRUSTED: "true",
+  };
+  const scenarios = [
+    [{ SELECT_RESULT: "failure" }, "failure", "Temporal compatibility selection failed."],
+    [{ SELECTED: "false" }, "success", "No hosted Temporal compatibility owner changed."],
+    [{ SOURCE_RESULT: "failure" }, "failure", "Repo Hygiene did not pass for this exact commit."],
+    [{ TRUSTED: "false" }, "failure", "Relevant changes require a same-repository human-authored head."],
+    [{ COMPATIBILITY_RESULT: "success" }, "success", "Exact public SHA passed every supported private Temporal reader."],
+    [{ COMPATIBILITY_RESULT: "failure" }, "failure", "No complete exact-SHA private Temporal compatibility proof was recorded."],
+  ];
+  const tempDir = await mkdtemp(path.join(tmpdir(), "temporal-compatibility-status-proof-"));
+  try {
+    await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$@" > "$GH_CAPTURE"
+`, { mode: 0o755 });
+    for (const [index, [overrides, expectedState, expectedDescription]] of scenarios.entries()) {
+      const capturePath = path.join(tempDir, `gh-${index}.args`);
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: REPO_ROOT,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ...baseEnv,
+          ...overrides,
+          GH_CAPTURE: capturePath,
+          GITHUB_REPOSITORY: "cobuildwithus/murph",
+          GITHUB_RUN_ID: "987",
+          GITHUB_SERVER_URL: "https://github.example.test",
+          PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+          STATUS_SHA: PUBLIC_SHA,
+        },
+      });
+      assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
+      const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
+      assert.ok(ghArgs.includes(`state=${expectedState}`));
+      assert.ok(ghArgs.includes(`description=${expectedDescription}`));
+    }
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+});
+
 test("Repo Hygiene owns the focused controller contract test", async () => {
   const workflow = await readFile(
     path.join(REPO_ROOT, ".github", "workflows", "repo-hygiene.yml"),
@@ -610,6 +720,21 @@ async function withFetch(fetchImpl, fn) {
     console.log = originalLog;
     globalThis.fetch = originalFetch;
   }
+}
+
+function extractWorkflowStepScript(workflow, stepName) {
+  const stepStart = workflow.indexOf(`      - name: ${stepName}\n`);
+  assert.ok(stepStart >= 0, `${stepName} step must exist`);
+  const runMarker = "        run: |\n";
+  const scriptStart = workflow.indexOf(runMarker, stepStart);
+  assert.ok(scriptStart >= 0, `${stepName} script must exist`);
+  const scriptLines = [];
+  for (const line of workflow.slice(scriptStart + runMarker.length).split("\n")) {
+    if (!line.startsWith("          ")) break;
+    scriptLines.push(line.slice(10));
+  }
+  assert.ok(scriptLines.length > 0, `${stepName} script must be readable`);
+  return scriptLines.join("\n");
 }
 
 function jsonResponse(value, init = {}) {
