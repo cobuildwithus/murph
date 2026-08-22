@@ -373,8 +373,9 @@ the focused static, PostgreSQL, and physical-iPhone proof matrix, is jointly spe
 `agent-docs/references/testing-ci-map.md`.
 
 Protected-main Junction wearable canary credential derivation, headed remote
-Kernel authorization, handling, and verification ownership are specified by
-`agent-docs/SECURITY.md` and `agent-docs/references/testing-ci-map.md`.
+Kernel mitigation, post-main authorization proof, handling, and verification
+ownership are specified by `agent-docs/SECURITY.md` and
+`agent-docs/references/testing-ci-map.md`.
 
 Spread-free official provider SDK request construction, including the generated
 Composio client boundary, and the safe opt-in Stripe test-mode resume contract

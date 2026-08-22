@@ -472,16 +472,18 @@ function readLiveJunctionWearableConfig(
   const browserTransport = readLiveBrowserTransport(
     env.MURPH_E2E_PROVIDER_BROWSER,
   );
+  const ci = env.CI?.trim().toLowerCase();
+  const unattendedCi = ci === "1" || ci === "true";
+  const soleKernelSource = sources.length === 1 ? sources[0] : null;
+  const admittedKernelCanary = headless
+    ? soleKernelSource === "garmin" || soleKernelSource === "whoop"
+    : soleKernelSource === "garmin" && unattendedCi;
   if (
     browserTransport === "kernel"
-    && (
-      !headless
-      || sources.length !== 1
-      || (sources[0] !== "garmin" && sources[0] !== "whoop")
-    )
+    && !admittedKernelCanary
   ) {
     throw new Error(
-      "Live Junction Kernel browser transport is reserved for an unattended headless Garmin or WHOOP canary.",
+      "Live Junction Kernel browser transport requires unattended Garmin or headless WHOOP authorization.",
     );
   }
   const providers: Partial<Record<LiveWearableSource, LiveProviderCredentials>> = {};
@@ -775,10 +777,6 @@ async function runJunctionWearableBrowser(input: {
   startUrl: string;
   webBaseUrl: string;
 }): Promise<JunctionWearableBrowserResult> {
-  const providerCredentials = input.config.providers[input.source];
-  if (!providerCredentials) {
-    throw new Error(`Live Junction wearable E2E did not configure ${input.source}.`);
-  }
   const { stdout } = await execFileAsync(
     "pnpm",
     [
@@ -791,29 +789,7 @@ async function runJunctionWearableBrowser(input: {
     {
       cwd: repoRoot,
       encoding: "utf8",
-      env: {
-        ...buildBrowserProcessEnvironment(),
-        ...(input.config.kernelApiKey
-          ? { KERNEL_API_KEY: input.config.kernelApiKey }
-          : {}),
-        MURPH_E2E_CONNECT_URL: input.startUrl,
-        MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
-        ...(input.config.kernelCliPath
-          ? { MURPH_E2E_KERNEL_CLI_PATH: input.config.kernelCliPath }
-          : {}),
-        MURPH_E2E_WEB_BASE_URL: input.webBaseUrl,
-        MURPH_E2E_PROVIDER_EMAIL: providerCredentials.email,
-        MURPH_E2E_PROVIDER_BROWSER: input.config.browserTransport,
-        MURPH_E2E_PROVIDER_HEADLESS: input.config.headless ? "1" : "0",
-        ...(providerCredentials.otp
-          ? { MURPH_E2E_PROVIDER_OTP: providerCredentials.otp }
-          : {}),
-        ...(providerCredentials.password
-          ? { MURPH_E2E_PROVIDER_PASSWORD: providerCredentials.password }
-          : {}),
-        MURPH_E2E_PROVIDER_SOURCE: input.source,
-        MURPH_E2E_PROVIDER_TIMEOUT_MS: String(input.config.timeoutMs),
-      },
+      env: buildJunctionWearableBrowserEnvironment(input),
       maxBuffer: 1_000_000,
       timeout: input.config.timeoutMs + 60_000,
     },
@@ -831,8 +807,47 @@ async function runJunctionWearableBrowser(input: {
   ) as JunctionWearableBrowserResult;
 }
 
-function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
-  const environment = { ...process.env };
+function buildJunctionWearableBrowserEnvironment(input: {
+  config: LiveJunctionWearableConfig;
+  environment?: NodeJS.ProcessEnv;
+  hostedSessionCookie: string;
+  source: LiveWearableSource;
+  startUrl: string;
+  webBaseUrl: string;
+}): NodeJS.ProcessEnv {
+  const providerCredentials = input.config.providers[input.source];
+  if (!providerCredentials) {
+    throw new Error(`Live Junction wearable E2E did not configure ${input.source}.`);
+  }
+  return {
+    ...buildBrowserProcessEnvironment(input.environment),
+    ...(input.config.kernelApiKey
+      ? { KERNEL_API_KEY: input.config.kernelApiKey }
+      : {}),
+    MURPH_E2E_CONNECT_URL: input.startUrl,
+    MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
+    ...(input.config.kernelCliPath
+      ? { MURPH_E2E_KERNEL_CLI_PATH: input.config.kernelCliPath }
+      : {}),
+    MURPH_E2E_WEB_BASE_URL: input.webBaseUrl,
+    MURPH_E2E_PROVIDER_EMAIL: providerCredentials.email,
+    MURPH_E2E_PROVIDER_BROWSER: input.config.browserTransport,
+    MURPH_E2E_PROVIDER_HEADLESS: input.config.headless ? "1" : "0",
+    ...(providerCredentials.otp
+      ? { MURPH_E2E_PROVIDER_OTP: providerCredentials.otp }
+      : {}),
+    ...(providerCredentials.password
+      ? { MURPH_E2E_PROVIDER_PASSWORD: providerCredentials.password }
+      : {}),
+    MURPH_E2E_PROVIDER_SOURCE: input.source,
+    MURPH_E2E_PROVIDER_TIMEOUT_MS: String(input.config.timeoutMs),
+  };
+}
+
+function buildBrowserProcessEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const environment = { ...source };
   for (const key of [
     "JUNCTION_API_KEY",
     "JUNCTION_CLIENT_USER_ID_SECRET",
@@ -867,6 +882,80 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
   }
   return environment;
 }
+
+function createWorkflowShapedGarminEnvironment(
+  overrides: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return {
+    CI: "true",
+    JUNCTION_API_KEY: "sk_us_junction-test",
+    JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret-value",
+    JUNCTION_ENV: "sandbox",
+    JUNCTION_REGION: "us",
+    KERNEL_API_KEY: "kernel-test-key",
+    MURPH_E2E_GARMIN_EMAIL: "garmin@example.test",
+    MURPH_E2E_GARMIN_PASSWORD: "garmin-password",
+    MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1",
+    MURPH_E2E_JUNCTION_WEARABLE_SOURCES: "garmin",
+    MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+    MURPH_E2E_PROVIDER_BROWSER: "kernel",
+    MURPH_E2E_WEARABLE_HEADLESS: "0",
+    ...overrides,
+  };
+}
+
+describe("live Junction wearable configuration boundary", () => {
+  it.each(["true", "1"])(
+    "admits the protected headed Garmin workflow with CI=%s",
+    (ci) => {
+      const environment = createWorkflowShapedGarminEnvironment({ CI: ci });
+      const config = readLiveJunctionWearableConfig(environment);
+      expect(config).toMatchObject({
+        browserTransport: "kernel",
+        headless: false,
+        sources: ["garmin"],
+      });
+      if (!config) throw new Error("Expected live Garmin configuration.");
+
+      const childEnvironment = buildJunctionWearableBrowserEnvironment({
+        config,
+        environment,
+        hostedSessionCookie: "hosted-session",
+        source: "garmin",
+        startUrl: "http://localhost:43123/connect#deviceConnectIntent=opaque",
+        webBaseUrl: "http://localhost:43123",
+      });
+      expect(childEnvironment).toMatchObject({
+        CI: ci,
+        KERNEL_API_KEY: "kernel-test-key",
+        MURPH_E2E_PROVIDER_BROWSER: "kernel",
+        MURPH_E2E_PROVIDER_HEADLESS: "0",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      });
+      expect(childEnvironment.JUNCTION_API_KEY).toBeUndefined();
+      expect(childEnvironment.JUNCTION_CLIENT_USER_ID_SECRET).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ["headed Garmin outside CI", { CI: undefined }],
+    [
+      "headed WHOOP",
+      { MURPH_E2E_JUNCTION_WEARABLE_SOURCES: "whoop" },
+    ],
+    ["Oura", { MURPH_E2E_JUNCTION_WEARABLE_SOURCES: "oura" }],
+    [
+      "multiple sources",
+      { MURPH_E2E_JUNCTION_WEARABLE_SOURCES: "garmin,whoop" },
+    ],
+  ])("rejects %s over Kernel", (_label, overrides) => {
+    expect(() => readLiveJunctionWearableConfig(
+      createWorkflowShapedGarminEnvironment(overrides),
+    )).toThrow(
+      "Live Junction Kernel browser transport requires unattended Garmin or headless WHOOP authorization.",
+    );
+  });
+});
 
 function requireScenario(): HostedLocalFullStackScenario {
   if (!scenario) {
