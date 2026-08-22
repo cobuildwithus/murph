@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { fileURLToPath } from "node:url";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -357,6 +358,70 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "kernel-session-1",
     );
     expect(process.listenerCount("exit")).toBe(parentExitListenersBefore);
+  });
+
+  it("keeps the real tunnel child alive until owned cleanup", async () => {
+    const { spawn: actualSpawn } = await vi.importActual<
+      typeof import("node:child_process")
+    >("node:child_process");
+    const browser = {
+      close: vi.fn(async () => undefined),
+      contexts: vi.fn(() => [{ clearCookies: vi.fn(async () => undefined) }]),
+    };
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: fileURLToPath(
+        new URL("fixtures/kernel-tunnel-stdin.sh", import.meta.url),
+      ),
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+    const parentExitListenersBefore = process.listenerCount("exit");
+    let session: Awaited<
+      ReturnType<typeof openHostedLocalJunctionBrowserSessionForTest>
+    > | null = null;
+
+    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
+    kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
+      cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
+      sessionId: "kernel-session-real-child",
+    });
+    kernelLifecycleMocks.spawn.mockImplementationOnce(actualSpawn);
+    kernelLifecycleMocks.connectOverCDP.mockResolvedValueOnce(browser);
+    kernelLifecycleMocks.deleteBrowserByIdOrName.mockResolvedValueOnce(undefined);
+
+    try {
+      session = await openHostedLocalJunctionBrowserSessionForTest(config);
+      const tunnel = session.kernelTunnel;
+      expect(tunnel).not.toBeNull();
+      if (!tunnel) throw new Error("Expected the Kernel tunnel fixture to start.");
+
+      const exitedBeforeCleanup = await Promise.race([
+        new Promise<boolean>((resolve) => {
+          tunnel.child.once("exit", () => resolve(true));
+        }),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => resolve(false), 200);
+        }),
+      ]);
+      expect(exitedBeforeCleanup).toBe(false);
+      expect(tunnel.child.exitCode).toBeNull();
+      expect(tunnel.child.signalCode).toBeNull();
+
+      await closeHostedLocalJunctionBrowserSessionForTest(session, config);
+      session = null;
+
+      expect(tunnel.child.signalCode).toBe("SIGTERM");
+      expect(process.listenerCount("exit")).toBe(parentExitListenersBefore);
+    } finally {
+      if (session) {
+        await closeHostedLocalJunctionBrowserSessionForTest(session, config)
+          .catch(() => undefined);
+      }
+    }
   });
 
   it("deletes the created Kernel browser when CDP exposes no context", async () => {
