@@ -1438,7 +1438,8 @@ Last verified: 2026-08-20
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
 - The public automated live Junction wearable canary uses only sandbox Junction
-  authority and a dedicated WHOOP test account. Keep those four credentials
+  authority, Kernel browser authority, and a dedicated WHOOP test account. Keep
+  those five credentials
   exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
   protected `main`, and never duplicate them as repository secrets. The
   `JUNCTION_CLIENT_USER_ID_SECRET` is Murph-owned rather than Junction-issued:
@@ -1454,13 +1455,20 @@ Last verified: 2026-08-20
   only, upload no screenshots, traces, videos, provider pages, or hosted-local
   state, pass only one provider login to the browser at a time, and perform
   bounded provider-specific deregistration before and after each proof.
+  `KERNEL_API_KEY` must pass only to the isolated browser child, never the
+  hosted-local Web, Worker, runner, Temporal, bundle, cleanup, or generic browser
+  environment. The Kernel browser must keep telemetry disabled and use only the
+  dedicated WHOOP canary profile; clear hosted-local cookies before deleting the
+  browser so only external authorization session state is eligible for profile
+  persistence.
   Oura web authentication requires a fresh emailed one-time code, so its live
   Junction browser proof is operator-run and headful rather than an unattended
   GitHub canary. It accepts the dedicated Oura account email only, waits for
   manual code entry without persisting the code or a password, and retains the
   same credential partitioning, artifact prohibition, and cleanup boundaries.
   Retain the retired `MURPH_E2E_OURA_PASSWORD` name only in scrub lists so a
-  stale operator-shell export cannot reach preparation, runtimes, or Chromium.
+  stale operator-shell export cannot reach preparation, runtimes, or either
+  browser transport.
   Because a newly added workflow is not yet a protected trust root, its first
   credentialed proof occurs only after that exact workflow lands on `main`.
 - The protected native iOS and Android PR E2E lanes may share a Junction sandbox only through

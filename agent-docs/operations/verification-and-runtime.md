@@ -262,19 +262,22 @@ by the frozen root dependency graph before hosted-local model-catalog
 preparation. That workspace pin currently matches the independently owned
 `Dockerfile.cloudflare-hosted-runner-base` pin; both owners remain visible in
 the guarded review context, but no executable cross-owner equality guard links
-them. The credential-free setup must also verify the stable Google Chrome
-binary supplied by the pinned `ubuntu-24.04` runner image, and the headed CI
-browser driver must select Playwright's `chrome` channel. This keeps the live
-identity proof on the current public browser instead of Playwright's
-ahead-of-stable bundled Chromium build; see the official
-[runner image inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md)
-and [Playwright browser-channel guidance](https://playwright.dev/docs/browsers#google-chrome--microsoft-edge).
+them. The credential-free setup must also install and smoke-check a
+checksum-pinned Kernel CLI plus checksum-pinned `websocat`, which the CLI uses
+for a reverse SSH tunnel from the Kernel browser VM to hosted-local Web. The
+unattended proof uses a headless stealth browser with telemetry disabled and a
+dedicated persistent WHOOP canary profile; the profile can reuse a still-valid
+WHOOP session, while an expired session falls back to the dedicated login. See
+Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
+[CDP](https://www.kernel.sh/docs/browsers/cdp), and
+[stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
 Keep those setup steps free of Environment secrets; only the final
-browser-canary step may receive Junction sandbox authority and the dedicated
-WHOOP login. A real sign-in proof remains available only after the exact
-workflow reaches protected `main`, where non-canceling concurrency serializes
-the dedicated provider account. Do not weaken the protected-branch gate or
-expose live credentials to a pull request to obtain earlier proof.
+browser-canary step may receive Kernel authority, Junction sandbox authority,
+and the dedicated WHOOP login. A real authorization proof remains available
+only after the exact workflow reaches protected `main`, where non-canceling
+concurrency serializes the dedicated provider account. Do not weaken the
+protected-branch gate or expose live credentials to a pull request to obtain
+earlier proof.
 
 ## Verification Execution Location
 
