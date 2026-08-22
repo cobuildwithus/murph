@@ -252,6 +252,12 @@ export function inspectRetirableE2eDeploymentAliases(listed) {
   if (!Array.isArray(listed.aliases)) {
     throw new Error("Vercel deployment alias list was invalid.");
   }
+  if (listed.pagination != null) {
+    assertRecord(listed.pagination, "Vercel deployment alias pagination");
+    if (listed.pagination.next != null) {
+      throw new Error("Vercel deployment alias list was incomplete; refusing destructive reset.");
+    }
+  }
   return listed.aliases.map((item) => {
     assertRecord(item, "Vercel deployment alias");
     requiredString(item.alias, "Vercel deployment alias name");

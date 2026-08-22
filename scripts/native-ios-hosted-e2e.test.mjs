@@ -721,7 +721,8 @@ test("Vercel retirement deletes exact aliases first and preserves the deployment
   const originalFetch = globalThis.fetch;
   const originalLog = console.log;
   const destructiveCalls = [];
-  let aliasDeleteStatus = 204;
+  const aliasDeleteStatuses = { alias_one: 204, alias_two: 204 };
+  let paginationNext = null;
   try {
     Object.assign(process.env, env);
     globalThis.fetch = async (url, init = {}) => {
@@ -748,17 +749,19 @@ test("Vercel retirement deletes exact aliases first and preserves the deployment
       }
       if (value.includes("/v2/deployments/dpl_owned/aliases")) {
         return jsonResponse({
-          aliases: [{
-            alias: "native-e2e.example.test",
+          aliases: ["one", "two"].map((suffix) => ({
+            alias: `native-e2e-${suffix}.example.test`,
             created: "2026-08-22T00:00:00.000Z",
             redirect: null,
-            uid: "alias_owned",
-          }],
+            uid: `alias_${suffix}`,
+          })),
+          pagination: { next: paginationNext },
         });
       }
-      if (value.includes("/v2/aliases/alias_owned") && method === "DELETE") {
-        destructiveCalls.push("alias");
-        return new Response(null, { status: aliasDeleteStatus });
+      const aliasId = value.match(/\/v2\/aliases\/(alias_(?:one|two))/u)?.[1];
+      if (aliasId && method === "DELETE") {
+        destructiveCalls.push(aliasId);
+        return new Response(null, { status: aliasDeleteStatuses[aliasId] });
       }
       if (value.includes("/v13/deployments/dpl_owned") && method === "DELETE") {
         destructiveCalls.push("deployment");
@@ -769,15 +772,24 @@ test("Vercel retirement deletes exact aliases first and preserves the deployment
     console.log = () => undefined;
 
     await retireE2eDeployments(null);
-    assert.deepEqual(destructiveCalls, ["alias", "deployment"]);
+    assert.deepEqual(destructiveCalls, ["alias_one", "alias_two", "deployment"]);
 
     destructiveCalls.length = 0;
-    aliasDeleteStatus = 500;
+    aliasDeleteStatuses.alias_two = 500;
     await assert.rejects(
       () => retireE2eDeployments(null),
       /Vercel E2E alias cleanup failed with HTTP 500/u,
     );
-    assert.deepEqual(destructiveCalls, ["alias"]);
+    assert.deepEqual(destructiveCalls, ["alias_one", "alias_two"]);
+
+    destructiveCalls.length = 0;
+    aliasDeleteStatuses.alias_two = 204;
+    paginationNext = "next-page";
+    await assert.rejects(
+      () => retireE2eDeployments(null),
+      /deployment alias list was incomplete/u,
+    );
+    assert.deepEqual(destructiveCalls, []);
   } finally {
     console.log = originalLog;
     globalThis.fetch = originalFetch;
@@ -803,6 +815,13 @@ test("Vercel retirement validates the complete exact-deployment alias response",
   assert.throws(
     () => inspectRetirableE2eDeploymentAliases({ aliases: null }),
     /deployment alias list was invalid/u,
+  );
+  assert.throws(
+    () => inspectRetirableE2eDeploymentAliases({
+      aliases: [owned],
+      pagination: { next: "next-page" },
+    }),
+    /deployment alias list was incomplete/u,
   );
 });
 
