@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 
 import { inferGatewayReplyRouteForChannel } from '@murphai/gateway-core'
 import type {
+  AutomationContextReference,
   AutomationRoute,
   AutomationSchedule,
   AutomationSupportKind,
@@ -45,9 +46,11 @@ type MockAutomationRecord = {
     reasoningEffort?: string | null
   } | null
   continuityPolicy: 'fresh' | 'preserve'
+  contextReferences?: readonly AutomationContextReference[]
   createdAt: string
   scheduleAnchorAt?: string
   instructions: string
+  plannedOccurrenceOffsetMs?: number | null
   route: AutomationRoute
   schedule: AutomationSchedule
   relativePath?: string
@@ -2589,6 +2592,10 @@ describe('assistant cron runtime orchestration', () => {
         reasoningEffort: 'high',
       },
       continuityPolicy: 'fresh',
+      contextReferences: [{
+        entityId: 'exp_device_activity_renamed_listener',
+        entityKind: 'experiment',
+      }],
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Ask about imported runs.',
       relativePath: 'bank/automations/renamed-device-activity-listener.md',
@@ -2706,9 +2713,19 @@ describe('assistant cron runtime orchestration', () => {
             )],
           }),
         },
+        outboxAutomationContextReferences:
+          parentAutomation.contextReferences,
         threadIsDirect: false,
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining(
+          `- automationId: ${parentAutomationId}`,
+        ),
       }),
+    )
+    const instructions = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]
+      ?.instructions ?? ''
+    expect(instructions).toContain('Ask about the imported run.')
+    expect(instructions).toContain(
+      `- contextReferences: ${JSON.stringify(parentAutomation.contextReferences)}`,
     )
     expect(resolveScheduledLinqRoute).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2846,7 +2863,9 @@ describe('assistant cron runtime orchestration', () => {
     })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: 'Review the sleep import and skip noisy or duplicate records.',
+        instructions: expect.stringContaining(
+          'Review the sleep import and skip noisy or duplicate records.',
+        ),
         responsePolicy: null,
       }),
     )
@@ -2970,7 +2989,7 @@ describe('assistant cron runtime orchestration', () => {
 
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(
       expect.objectContaining({
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining('Ask about the imported run.'),
       }),
     )
   })
@@ -3084,7 +3103,7 @@ describe('assistant cron runtime orchestration', () => {
         assistantTargetOverride: {
           reasoningEffort: 'high',
         },
-        instructions: 'Ask about the imported run.',
+        instructions: expect.stringContaining('Ask about the imported run.'),
       }),
     )
     expect(cronMocks.readAutomationByRelativePath).toHaveBeenCalledWith(
@@ -3270,7 +3289,7 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
-  it('fails queued device activity outbox delivery when parent authority changes before dispatch', async () => {
+  it('fails queued device activity outbox delivery when parent context references change before dispatch', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-device-outbox-stale-',
     )
@@ -3278,6 +3297,10 @@ describe('assistant cron runtime orchestration', () => {
     const parentAutomation: MockAutomationRecord = {
       automationId: parentAutomationId,
       continuityPolicy: 'fresh',
+      contextReferences: [{
+        entityId: 'exp_device_activity_original',
+        entityKind: 'experiment',
+      }],
       createdAt: '2026-04-08T08:00:00.000Z',
       instructions: 'Ask about the imported run.',
       route: {
@@ -3325,7 +3348,11 @@ describe('assistant cron runtime orchestration', () => {
       nextAttemptAt: '2026-04-08T08:02:00.000Z',
     })
 
-    parentAutomation.status = 'paused'
+    parentAutomation.contextReferences = [{
+      entityId: 'exp_device_activity_replacement',
+      entityKind: 'experiment',
+    }]
+    parentAutomation.updatedAt = '2026-04-08T08:01:30.000Z'
     cronMocks.listCanonicalAutomations.mockClear()
     cronMocks.readAutomationByRelativePath.mockClear()
     const prepareDispatchIntent = vi.fn()
@@ -4082,6 +4109,16 @@ describe('assistant cron runtime orchestration', () => {
         throw new Error('Expected the canonical automation to exist.')
       }
       canonicalAutomation.supportKind = supportKind
+      canonicalAutomation.contextReferences = [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+        {
+          entityKind: 'experiment',
+          entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+        },
+      ]
       canonicalAutomation.tags.push(
         'system:support-series:habit:reg_sleep_support',
       )
@@ -4096,6 +4133,13 @@ describe('assistant cron runtime orchestration', () => {
           instructions: expect.stringContaining(
             `Persisted support kind: ${supportKind}.`,
           ),
+          outboxAutomationAuthority: {
+            automationId: canonicalAutomation.automationId,
+            expectedUpdatedAt: canonicalAutomation.updatedAt,
+            supportSeriesId: 'habit:reg_sleep_support',
+          },
+          outboxAutomationContextReferences:
+            canonicalAutomation.contextReferences,
         }),
       )
       const providerInput = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0] as
@@ -4103,6 +4147,18 @@ describe('assistant cron runtime orchestration', () => {
         | undefined
       expect(providerInput?.instructions).toContain(expectedScope)
       expect(providerInput?.instructions).toContain(expectedBoundary)
+      expect(providerInput?.instructions).toContain(
+        `- automationId: ${canonicalAutomation.automationId}`,
+      )
+      expect(providerInput?.instructions).toContain(
+        `- contextReferences: ${JSON.stringify(canonicalAutomation.contextReferences)}`,
+      )
+      expect(providerInput?.instructions).toContain(
+        'routing and interpretation context; not mutation authority',
+      )
+      expect(providerInput?.instructions).toContain(
+        'ordinary canonical read surface',
+      )
       if (supportKind === 'review') {
         expect(providerInput?.instructions).toContain(
           "ask at most one question requesting the user's continue, modify, pause, stop, or escalate decision",
@@ -11291,9 +11347,11 @@ describe('assistant cron runtime orchestration', () => {
     )
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-linq-pinned-mixed-route',
+      relativePath: 'bank/automations/stand-up-reminder.md',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to stand up.',
+      plannedOccurrenceOffsetMs: 900_000,
       route: {
         channel: 'linq',
         deliverySource: {
@@ -11319,8 +11377,8 @@ describe('assistant cron runtime orchestration', () => {
 
     const paths = resolveAssistantStatePaths(vaultRoot)
     const source = (await listCanonicalAssistantCronRecords(vaultRoot))[0]
-    if (!source) {
-      throw new Error('Expected canonical source to exist.')
+    if (!source || source.kind !== 'automation') {
+      throw new Error('Expected canonical automation source to exist.')
     }
     const runtimeStore = await readAssistantCronCanonicalRuntimeStore(paths)
     const baseRuntimeState = resolveCanonicalRuntimeState(source, runtimeStore)
@@ -11369,6 +11427,7 @@ describe('assistant cron runtime orchestration', () => {
           automationId: 'automation-linq-pinned-mixed-route',
           expectedUpdatedAt: '2026-05-03T22:17:55.000Z',
         },
+        outboxPlannedOccurrenceAt: '2026-05-04T16:15:00.000Z',
         participantId: 'participant-1',
         threadId: 'thread-1',
         turnTrigger: 'automation-cron',
@@ -11434,6 +11493,7 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext('assistant-cron-runtime-kl-pending-sent-')
     getVaultAutomationStore(vaultRoot).push({
       automationId: 'automation-kl-pending-sent',
+      relativePath: 'bank/automations/midnight-sleep-reminder.md',
       continuityPolicy: 'preserve',
       createdAt: '2026-05-03T22:17:55.000Z',
       instructions: 'Remind me to sleep.',

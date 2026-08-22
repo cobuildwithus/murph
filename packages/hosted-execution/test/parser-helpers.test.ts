@@ -70,6 +70,7 @@ describe("telegram parser", () => {
       mediaGroupId: null,
       messageId: "message-1",
       replyContextPreview: "Replying to: Earlier message",
+      replyToMessageId: "earlier-message-1",
       schema: "murph.hosted-telegram-message.v1",
       text: "hello",
       threadId: "thread-1",
@@ -90,6 +91,7 @@ describe("telegram parser", () => {
       mediaGroupId: null,
       messageId: "message-1",
       replyContextPreview: "Replying to: Earlier message",
+      replyToMessageId: "earlier-message-1",
       schema: "murph.hosted-telegram-message.v1",
       text: "hello",
       threadId: "thread-1",
@@ -151,6 +153,15 @@ describe("telegram parser", () => {
         threadId: "thread-1",
       }),
     ).toThrow(/attachments must be an array/i);
+
+    expect(() =>
+      parseHostedExecutionTelegramMessage({
+        messageId: "message-1",
+        replyToMessageId: 42,
+        schema: "murph.hosted-telegram-message.v1",
+        threadId: "thread-1",
+      }),
+    ).toThrow(/replyToMessageId must be a non-empty string/i);
 
     expect(() =>
       parseHostedExecutionTelegramMessage({

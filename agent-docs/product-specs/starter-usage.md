@@ -1,13 +1,25 @@
 # Non-expiring starter usage
 
-Last verified: 2026-08-11
+Last verified: 2026-08-18
 Status: Implemented current-state contract
 
 ## Product contract
 
-Every eligible new hosted member receives one non-expiring starter-usage grant
-worth $4.50. The grant remains available until usage consumes it. Account age,
-a calendar deadline, and historical Stripe trial timestamps never deny work.
+Every eligible new hosted member receives one non-expiring starter-enrollment
+grant worth $4.50. The grant remains available until usage consumes it. Account
+age, a calendar deadline, and historical Stripe trial timestamps never deny
+work.
+
+Authorized support recovery is separate from enrollment. When the canonical
+gate shows a direct Starter member fully exhausted with zero total credit, an
+operator may use `/ops/usage` to append one fresh $4.50 recovery grant. Each
+action restores one allowance; a later action is eligible only after that
+credit is genuinely consumed and the current gate is exhausted again. This is
+an operator-discretion recovery control, not an automatic refill, member
+self-service entitlement, scheduled cadence, or promise of recurring free
+usage. Historical paid, purchase, or referral activity does not independently
+admit or deny recovery; the current locked direct-Starter gate and zero total
+credit are the authority.
 
 Starter usage is the free entry state, not a subscription plan:
 
@@ -32,7 +44,9 @@ usage-credit ledger owns the grant and all later consumption:
 
 - grant kind: `starter_grant`;
 - amount: `4_500_000` USD micros;
-- semantic key: one policy-versioned key per beneficiary member;
+- enrollment semantic key: one policy-versioned key per beneficiary member;
+- Ops recovery semantic key: one key per beneficiary and locked pre-grant
+  ledger version;
 - mutable projection: the existing `HostedUsageCreditGrant` remaining balance;
 - member projection: the existing usage-credit balance and ledger version; and
 - consumption: ordinary `usage_debit` entries attributed to the exact parent
@@ -45,11 +59,12 @@ and performs the existing post-commit runtime wake and welcome effects. Duplicat
 web, companion, invite, retry, or Linq instant-start attempts converge on the
 same grant.
 
-No second balance, allowance table, timer, scheduler, expiry job, or recovery
-queue is introduced. The usage gate represents starter access as a direct
-starter allowance with zero recurring included allowance plus the ordinary
-credit ledger balance. Starter status uses a lifetime meter derived from the
-ledger rather than a synthetic monthly period.
+No second balance, allowance table, timer, scheduler, expiry job, or automatic
+recovery queue is introduced. Enrollment and operator recovery both append to
+the ordinary ledger under the beneficiary lock. The usage gate represents
+starter access as a direct Starter allowance with zero recurring included
+allowance plus the ordinary credit ledger balance. Starter status uses a
+lifetime meter derived from the ledger rather than a synthetic monthly period.
 
 ## Enrollment paths
 
@@ -184,6 +199,10 @@ After deploy, verify:
 
 - a fresh web, companion, and direct-iMessage member receives exactly one grant;
 - a duplicate enrollment does not change balance or ledger version;
+- an authorized Ops recovery adds exactly one policy-sized grant for the
+  locked exhausted ledger version, while a stale replay adds none;
+- a later Ops recovery is unavailable until the prior recovery is consumed and
+  the current direct-Starter gate is fully exhausted again;
 - migrated untouched, partial, and exhausted members have full-grant plus
   deterministic-debit history and the correct remaining balance;
 - elapsed historical trial dates do not block execution;

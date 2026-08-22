@@ -59,7 +59,10 @@ export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
 export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
 const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 1;
+// Packed bits do not carry their resource policy generation. Advancing the
+// existing envelope version makes every pre-180-day m1 bit stale without a new
+// metadata field, slot map, migration, or repair owner.
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 2;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX =
   `m${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION}|`;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY = 64;
@@ -81,14 +84,20 @@ const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS = Object.freeze([
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
   "weight",
 ] as const);
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>([
-  ["blood_pressure", 1],
-  ["note", 2],
+export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.freeze([
+  ["note", 3] as const,
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
-    (resource) => [resource, 1] as const,
+    (resource) => [resource, 2] as const,
   ),
-  ["weight", 1],
+  ["weight", 2] as const,
 ]);
+export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS = Object.freeze([
+  ["blood_pressure", 2] as const,
+  ...JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS,
+]);
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME = new Map<string, number>(
+  JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS,
+);
 const JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCE_SET = new Set<string>(
   JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES,
 );
@@ -154,6 +163,12 @@ export function isJunctionSparseDailyTimeseriesHistoryBackfillResource(
   resource: string,
 ): resource is JunctionSparseDailyTimeseriesHistoryBackfillResource {
   return JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCE_SET.has(resource);
+}
+
+export function resolveJunctionExtendedTimeseriesHistoryBackfillVersion(
+  resource: string,
+): number | null {
+  return JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSION_BY_NAME.get(resource) ?? null;
 }
 
 const JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS = Object.freeze([
@@ -597,7 +612,10 @@ export function canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfill
     );
     if (
       matrixVersion !== null
-      && matrixVersion !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
+      && (
+        matrixVersion > JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
+        || readJunctionExtendedTimeseriesHistoryCoverageMatrix(metadata[metadataKey]) === null
+      )
     ) {
       return false;
     }
@@ -676,15 +694,19 @@ function encodeJunctionLegacyExtendedTimeseriesHistoryCoverage(
 function readJunctionExtendedTimeseriesHistoryCoverageMatrix(
   value: unknown,
 ): JunctionExtendedTimeseriesHistoryCoverageMatrix | null {
+  const version = readJunctionExtendedTimeseriesHistoryCoverageMatrixVersion(value);
+  if (typeof value !== "string" || version === null) {
+    return null;
+  }
+  const prefix = `m${version}|`;
   if (
-    typeof value !== "string"
-    || !value.startsWith(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX)
-    || value.length !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length
+    !value.startsWith(prefix)
+    || value.length !== prefix.length
       + JUNCTION_EXTENDED_TIMESERIES_HISTORY_MATRIX_BYTE_LENGTH * 2
   ) {
     return null;
   }
-  const hex = value.slice(JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX.length);
+  const hex = value.slice(prefix.length);
   if (!/^[0-9a-f]+$/u.test(hex)) {
     return null;
   }
@@ -694,7 +716,7 @@ function readJunctionExtendedTimeseriesHistoryCoverageMatrix(
   }
   return {
     bytes,
-    version: JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION,
+    version,
   };
 }
 
@@ -733,7 +755,9 @@ function readJunctionExtendedTimeseriesHistoryCoverageFacts(
   const coverage = createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix();
   for (const metadataKey of JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS) {
     const matrix = readJunctionExtendedTimeseriesHistoryCoverageMatrix(metadata[metadataKey]);
-    if (matrix) {
+    if (
+      matrix?.version === JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
+    ) {
       unionJunctionExtendedTimeseriesHistoryCoverage(coverage.bytes, matrix.bytes);
       continue;
     }
@@ -835,8 +859,12 @@ function isJunctionExtendedTimeseriesHistoryCoverageSlotWritable(
   if (value === undefined) {
     return true;
   }
-  if (readJunctionExtendedTimeseriesHistoryCoverageMatrix(value)) {
-    return true;
+  const matrix = readJunctionExtendedTimeseriesHistoryCoverageMatrix(value);
+  if (matrix) {
+    return matrix.version <= JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION;
+  }
+  if (readJunctionExtendedTimeseriesHistoryCoverageMatrixVersion(value) !== null) {
+    return false;
   }
   const legacy = readJunctionLegacyExtendedTimeseriesHistoryCoverage(value);
   const resource = metadataKey === JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY
@@ -867,7 +895,8 @@ function selectJunctionExtendedTimeseriesHistoryCoverageMetadataKey(
     );
   return candidates.find((metadataKey) =>
     metadataSources.some((metadata) =>
-      readJunctionExtendedTimeseriesHistoryCoverageMatrix(metadata[metadataKey]) !== null
+      readJunctionExtendedTimeseriesHistoryCoverageMatrix(metadata[metadataKey])?.version
+        === JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
     )
   )
     ?? candidates.find((metadataKey) =>

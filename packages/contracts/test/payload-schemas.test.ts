@@ -84,6 +84,42 @@ test("activity session records preserve structured workouts when duration is unk
   assert.equal(record.workout.exercises[0]?.sets[0]?.reps, 5);
 });
 
+test("derived observation evidence accepts only bounded scalar qualifiers", () => {
+  const base = {
+    schemaVersion: "murph.event.v1",
+    id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F1",
+    kind: "observation",
+    occurredAt: "2026-03-15T22:00:00.000Z",
+    recordedAt: "2026-03-15T22:01:00.000Z",
+    dayKey: "2026-03-15",
+    source: "device",
+    title: "Derived stress variation",
+    metric: "stress-mean-absolute-successive-difference",
+    observationGrain: "summary",
+    unit: "score",
+    value: 12.5,
+    qualifiers: {
+      derived: true,
+      evidenceConfidence: "medium",
+      evidenceMethod: "distinct-instant-mean-median-gap-2.5x-absolute-cap.v2",
+      maxAdjacentGapSeconds: 900,
+      qualifyingPairCount: 3,
+      sampleCount: 4,
+      sampleIntervalSeconds: 300,
+    },
+  };
+
+  assert.equal(eventRecordSchema.safeParse(base).success, true);
+  assert.equal(eventRecordSchema.safeParse({
+    ...base,
+    qualifiers: { ...base.qualifiers, sampleCount: 5_001 },
+  }).success, false);
+  assert.equal(eventRecordSchema.safeParse({
+    ...base,
+    qualifiers: { ...base.qualifiers, timestamps: ["2026-03-15T22:00:00.000Z"] },
+  }).success, false);
+});
+
 test("condition and blood-test scaffolds validate against import payload schemas", () => {
   const condition = healthEntityDefinitionByKind.get("condition");
   const bloodTest = healthEntityDefinitionByKind.get("blood_test");
@@ -382,20 +418,22 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     }).success,
     true,
   );
+  const validNote = {
+    kind: "note",
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Experiment context",
+    note: "Started evening protocol.",
+    experimentSlug: "evening-protocol",
+    externalRef: {
+      system: "manual-import",
+      resourceType: "note",
+      resourceId: "note-2026-03-12",
+    },
+  };
+  assert.equal(safeParseContract(noteSchema, validNote).success, true);
   assert.equal(
-    safeParseContract(noteSchema, {
-      kind: "note",
-      occurredAt: "2026-03-12T11:15:00.000Z",
-      title: "Experiment context",
-      note: "Started evening protocol.",
-      experimentSlug: "evening-protocol",
-      externalRef: {
-        system: "manual-import",
-        resourceType: "note",
-        resourceId: "note-2026-03-12",
-      },
-    }).success,
-    true,
+    safeParseContract(noteSchema, { ...validNote, reportedGender: "other" }).success,
+    false,
   );
   assert.equal(
     safeParseContract(clinicalAssertionSchema, {

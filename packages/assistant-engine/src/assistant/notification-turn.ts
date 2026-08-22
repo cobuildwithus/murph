@@ -135,6 +135,14 @@ const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
+const ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
 const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -194,6 +202,7 @@ export type AssistantNotificationTurnPolicy =
     }
 
 export type AssistantNotificationPromptProfile =
+  | 'context-handoff'
   | 'creative-response'
   | 'creative-response-text'
 
@@ -251,6 +260,8 @@ export interface AssistantNotificationInput
       | 'operatorAuthority'
       | 'reviewedAssistantAskCompletionExpiresAt'
       | 'outboxAutomationAuthority'
+      | 'outboxAutomationContextReferences'
+      | 'outboxPlannedOccurrenceAt'
       | 'outboxExternalThreadRouteAuthority'
       | 'assistantTargetOverride'
       | 'scheduledAutomationAuthority'
@@ -674,6 +685,7 @@ export async function sendAssistantNotificationLocal(
             response: null,
           })
           const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptStandaloneContext: true,
             assistantTranscriptText: null,
             input: messageInput,
             plan: sharedPlan,
@@ -738,6 +750,7 @@ export async function sendAssistantNotificationLocal(
         if (input.deferCommitUntilDeliveryAccepted !== true) {
           await createNotificationReceipt(providerResult.session)
           const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptStandaloneContext: true,
             assistantTranscriptText: transcriptText,
             input: messageInput,
             plan: sharedPlan,
@@ -847,6 +860,7 @@ export async function sendAssistantNotificationLocal(
             }
             await createNotificationReceipt(deliveryOutcome.session)
             const savedSession = await persistAssistantTurnAndSession({
+              assistantTranscriptStandaloneContext: true,
               assistantTranscriptText: transcriptText,
               input: messageInput,
               plan: sharedPlan,
@@ -1222,6 +1236,7 @@ async function persistAssistantExactTextNotificationSession(input: {
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: input.responseText,
         createdAt: input.turnCreatedAt,
       },
@@ -1511,6 +1526,9 @@ function buildAssistantNotificationMessageInput(
     onTraceEvent: input.onTraceEvent,
     operatorAuthority: input.operatorAuthority,
     outboxAutomationAuthority: input.outboxAutomationAuthority ?? null,
+    outboxAutomationContextReferences:
+      input.outboxAutomationContextReferences ?? null,
+    outboxPlannedOccurrenceAt: input.outboxPlannedOccurrenceAt ?? null,
     outboxExternalThreadRouteAuthority:
       input.outboxExternalThreadRouteAuthority ?? null,
     participantId: input.participantId,
@@ -1595,6 +1613,10 @@ async function deliverAssistantNotificationMessage(input: {
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
+    automationContextReferences:
+      input.input.outboxAutomationContextReferences ?? null,
+    plannedOccurrenceAt: input.input.outboxPlannedOccurrenceAt ?? null,
+    scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,
     turnId: input.turnId,
@@ -1744,6 +1766,9 @@ function resolveAssistantNotificationTurnProfile(
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
   }
+  if (input.notificationPromptProfile === 'context-handoff') {
+    return ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE
+  }
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE
   }
@@ -1785,9 +1810,24 @@ function assistantMaintenanceRawEventsIncludeMutation(
 ): boolean {
   return rawEvents.some((rawEvent) => {
     const event = normalizeCodexEvent(rawEvent)
+    const dynamicMutationActions = profile === 'group-room-model'
+      ? ['delete', 'upsert'] as const
+      : profile === 'member-memory'
+        ? ['update', 'upsert'] as const
+        : null
+    const dynamicMutationTool = profile === 'group-room-model'
+      ? 'group_room_model'
+      : profile === 'member-memory'
+        ? 'member_memory'
+        : null
     if (
-      profile === 'group-room-model' &&
-      assistantGroupRoomModelDynamicMutationCompleted(event)
+      dynamicMutationActions &&
+      dynamicMutationTool &&
+      assistantMaintenanceDynamicMutationCompleted({
+        actions: dynamicMutationActions,
+        event,
+        toolName: dynamicMutationTool,
+      })
     ) {
       return true
     }
@@ -1809,22 +1849,23 @@ function isAssistantMaintenanceMutationCommand(
   if (normalized === null) {
     return false
   }
-  if (profile === 'group-room-model') {
+  if (profile !== 'habitat-voice') {
     return false
   }
-  return profile === 'habitat-voice'
-    ? /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
-    : /\bvault-cli\b[\s\S]*\bmemory\s+(?:upsert|update)\b/u.test(normalized)
+  return /\bvault-cli\b[\s\S]*\bhabitat\s+save\b/u.test(normalized)
 }
 
-function assistantGroupRoomModelDynamicMutationCompleted(
-  event: ReturnType<typeof normalizeCodexEvent>,
-): boolean {
+function assistantMaintenanceDynamicMutationCompleted(input: {
+  actions: readonly string[]
+  event: ReturnType<typeof normalizeCodexEvent>
+  toolName: string
+}): boolean {
+  const { actions, event, toolName } = input
   if (
     event.kind !== 'tool_call' ||
     event.itemState !== 'completed' ||
     event.toolServer !== 'murph' ||
-    event.toolName !== 'group_room_model'
+    event.toolName !== toolName
   ) {
     return false
   }
@@ -1835,7 +1876,8 @@ function assistantGroupRoomModelDynamicMutationCompleted(
   const args = readAssistantNotificationRecord(item?.arguments)
   return (
     item?.success === true &&
-    (args?.action === 'upsert' || args?.action === 'delete')
+    typeof args?.action === 'string' &&
+    actions.includes(args.action)
   )
 }
 

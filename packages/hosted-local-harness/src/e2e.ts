@@ -57,6 +57,7 @@ interface HostedLocalE2eRunnerCleanupOptions {
 
 export type HostedLocalE2eScenarioName =
   | "all"
+  | "analyze-video-roundtrip"
   | "active-turn-latency"
   | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
@@ -77,6 +78,7 @@ export type HostedLocalE2eScenarioName =
   | "foreground-reply-priority"
   | "hosted-web-browser-smoke"
   | "idle-checkpoint-deferred-progress"
+  | "imessage-member-action-timestamp"
   | "junction-link-connect"
   | "junction-wearable-fixture"
   | "mailbox-platform-env"
@@ -234,6 +236,11 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-mailbox-platform-env-e2e.test.ts",
     name: "mailbox-platform-env",
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-imessage-member-action-timestamp-e2e.test.ts",
+    manualOnly: true,
+    name: "imessage-member-action-timestamp",
   },
   {
     file: "apps/cloudflare/test/hosted-local-temporal-orchestration-e2e.test.ts",
@@ -411,6 +418,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-vault-file-approval-resume-e2e.test.ts",
     name: "vault-file-approval-resume",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-analyze-video-roundtrip-e2e.test.ts",
+    name: "analyze-video-roundtrip",
+    requiresParserToolchain: true,
     testControls: true,
   },
   {

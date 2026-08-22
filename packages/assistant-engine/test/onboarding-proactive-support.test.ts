@@ -8,9 +8,6 @@ import {
 import {
   buildAssistantSystemPrompt,
 } from '../src/assistant/system-prompt.js'
-import {
-  MURPH_GENERATE_SONG_TOOL,
-} from '../src/assistant-codex/dynamic-tools/generate-song.js'
 
 describe('proactive onboarding support', () => {
   it('makes the first reminder-and-review package proactive but keeps the launch text-only', () => {
@@ -57,9 +54,6 @@ describe('proactive onboarding support', () => {
     expect(prompt).toContain(
       'put no text or later bubble after it. An owning skill may still require attached response media',
     )
-    expect(MURPH_GENERATE_SONG_TOOL.description).toContain(
-      'onboarding never triggers music automatically',
-    )
   })
 
   it('requires schedule resolution, modality matching, and a text-only onboarding close', async () => {
@@ -69,7 +63,6 @@ describe('proactive onboarding support', () => {
       onboardingRoot,
       onboardingAspiration,
       onboardingReturn,
-      musicRaw,
     ] = await Promise.all([
       readFile(
         path.join(skillsRoot, 'behavior-followthrough', 'SKILL.md'),
@@ -97,10 +90,6 @@ describe('proactive onboarding support', () => {
         ),
         'utf8',
       ),
-      readFile(
-        path.join(skillsRoot, 'music-generation', 'SKILL.md'),
-        'utf8',
-      ),
     ])
     const behavior = behaviorRaw.replace(/\s+/gu, ' ')
     const onboarding = [
@@ -108,7 +97,6 @@ describe('proactive onboarding support', () => {
       onboardingAspiration,
       onboardingReturn,
     ].join('\n').replace(/\s+/gu, ' ')
-    const music = musicRaw.replace(/\s+/gu, ' ')
 
     expect(behavior).toContain('"Any day you have time" is unresolved.')
     expect(behavior).toContain(
@@ -156,12 +144,6 @@ describe('proactive onboarding support', () => {
     expect(onboarding).toContain(
       'the named support writes succeeded or an explicit opt-out or real blocker is recorded',
     )
-    expect(music).toContain(
-      'Onboarding does not automatically trigger music.',
-    )
-    expect(music).toContain(
-      'Use this skill during onboarding only when the user explicitly asks for a song',
-    )
     expect(onboarding).toContain(
       'You can type it out instead — either works just as well.',
     )
@@ -185,11 +167,7 @@ describe('proactive onboarding support', () => {
     )
     expect(onboarding).not.toContain('Read `music-generation` and call `generate_song`')
 
-    expect(music).toContain(
-      "The song is the reply's only media item, but it may accompany text.",
-    )
     expect(behavior).not.toContain('automatic launch-song eligibility')
     expect(onboarding).not.toContain('launch-song eligibility')
-    expect(music).not.toContain('first-onboarding launch song')
   })
 })

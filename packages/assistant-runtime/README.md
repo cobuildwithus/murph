@@ -18,6 +18,7 @@ Current responsibilities:
 - before provider execution for a direct user-action turn, compare the resident session with the session ids restored from the published snapshot; when absent, including a session created earlier in the same invocation by deterministic welcome output, stop foreground mailbox watching and pause detached work while the existing full `idle_shutdown` checkpoint makes the origin durable
 - accept a committed valid checkpoint's optional `conversationInputAhead` observation, import that durable conversation input immediately while the invocation remains live, and avoid post-upload snapshot discard or metadata-only shutdown resnapshot
 - collect and deliver due hosted side effects from live container state without waiting for foreground hosted workspace checkpointing
+- project a saved outbox retry as `assistant_delivery`, distinct from model-capable `assistant` work, so Web can admit delivery reconciliation after managed AI usage is exhausted while the existing assistant phase remains the sole delivery owner
 - release foreground ownership after terminal reply delivery, abort in-flight provider cleanup when later conversation input is staged, and reserve exact automation reconciliation for canonical automation writes or maintenance wakes
 - keep foreground pending-input checks read-only; incomplete indexes schedule bounded maintenance while compaction and legacy backfill remain maintenance-owned
 - apply every Web-approved sparse `member.preferences.updated` delta with that event's own cross-lane mailbox sequence, so the canonical preference owner preserves approved event order while stale-no-oping only affected fields; bounded per-field watermarks in `bank/assistant-preference-mutations.json` make replay idempotent without reservation or receipt retention
@@ -62,9 +63,18 @@ cursor, so an earlier unresolved sequence cannot starve later terminal rows.
 V1 migration preserves recorded pending IDs and recovers omitted events only
 when terminal evidence proves they are safe to acknowledge; ambiguous omitted
 nonterminal history stays nonreplyable instead of becoming stale work after a
-channel is enabled. Once an accepted snapshot contains the v2 envelope, its
-runner bundle is a hard rollback floor because the preceding v1-only reader
-cannot restore that state.
+channel is enabled. V2 also carries the conservative derived
+`hasImageCompletionCandidate` projection. A missing projection reads as
+positive, enqueue classifies only the newly added immutable event, and existing
+maintenance compaction recomputes the exact value. A negative projection lets
+ordinary foreground selection skip pending-event hydration; a positive value
+still exposes the complete cohort to the existing route and ordering selector.
+Once an accepted snapshot contains the v2 envelope, its runner bundle is a hard
+rollback floor because the preceding v1-only reader cannot restore that state.
+The first snapshot containing the additive projection similarly requires the
+projection-aware runner because the preceding v2 value reader is strict; deploy
+this runner with immediate container rollout and use a forward fix below that
+floor rather than adding a second compatibility owner for a derived hint.
 
 For hosted conversation traffic, the mailbox importer is the source adapter. It
 stages bounded `AssistantInputEvent` records in the warm live workspace.

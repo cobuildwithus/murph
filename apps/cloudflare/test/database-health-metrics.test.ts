@@ -7,6 +7,7 @@ import {
   evaluateDatabaseMetricSnapshot,
   parsePlanetScaleDatabaseMetricObservation,
   parsePlanetScaleDatabaseMetrics,
+  readMissingConnectionErrorPorts,
 } from "../src/database-health/metrics.ts";
 import { buildMetricsBody } from "./helpers/database-health.ts";
 
@@ -230,7 +231,7 @@ describe("PlanetScale database health metrics", () => {
     });
   });
 
-  it("keeps one missing expected port unknown while retaining the other baseline", () => {
+  it("accepts one observed port while retaining the other baseline", () => {
     const body = buildMetricsBody({
       branchId: BRANCH_ID,
       directErrors: 5,
@@ -245,12 +246,16 @@ describe("PlanetScale database health metrics", () => {
       BRANCH_ID,
     );
 
-    expect(observation.missingMetrics).toContain(
+    expect(observation.missingMetrics).not.toContain(
       "planetscale_edge_postgres_connection_errors_total",
     );
     expect(observation.snapshot.connectionErrorCounters).toEqual({
       '["5432","us-east"]': 5,
     });
+    expect(readMissingConnectionErrorPorts(
+      observation.snapshot.connectionErrorCounters,
+    )).toEqual(["6432"]);
+    expect(readMissingConnectionErrorPorts(null)).toEqual(["5432", "6432"]);
     expect(calculateConnectionErrorDeltas(
       observation.snapshot.connectionErrorCounters ?? {},
       {
@@ -261,6 +266,7 @@ describe("PlanetScale database health metrics", () => {
       "5432": 2,
       "6432": null,
     });
+    expect(() => parsePlanetScaleDatabaseMetrics(body, BRANCH_ID)).not.toThrow();
   });
 
   it("emits a distinct pooled application condition for positive port 6432 deltas", () => {

@@ -183,7 +183,7 @@ Visual rules:
   Make it reusable and simple.
 - Register each production item visual in the page's `VISUALS` map by stable
   item ID.
-- Update `/design?tab=sections#changelog-archive` with the real archive
+- Update `/screenshots/ops#changelog-archive` with the real archive
   component and synthetic props. If a genuinely new reusable production
   component is introduced, register it in the components catalog too.
 

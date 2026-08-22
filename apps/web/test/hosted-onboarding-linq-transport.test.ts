@@ -1872,6 +1872,67 @@ describe("hosted Linq webhook transport", () => {
     ).not.toHaveBeenCalled();
   });
 
+  it("replays a usage-limit rich-link partial with the same provider keys", async () => {
+    const expectedIdempotencyKey = buildHostedAiUsageGateNoticeIdempotencyKey({
+      memberId: "member-1",
+      periodStart: "2026-03-01T00:00:00.000Z",
+      usageCreditLedgerVersion: 0n,
+    });
+    vi.mocked(startHostedAiUsageLimitNoticeDispatchTx).mockResolvedValueOnce({
+      idempotencyKey: expectedIdempotencyKey,
+      providerIdempotencyKey: "ai-usage-attempt:hld_usage_notice",
+      replayingRichLinkPartial: true,
+      status: "claimed",
+    });
+    vi.mocked(sendHostedLinqChatMessage).mockResolvedValueOnce({
+      chatId: "chat-1",
+      messageId: "provider-message-link",
+      providerMessageIds: [
+        "provider-message-text",
+        "provider-message-link",
+      ],
+    });
+    const effect = createHostedWebhookLinqMessageSideEffect({
+      chatId: "chat-1",
+      claimToken: {
+        periodStart: "2026-03-01T00:00:00.000Z",
+        sentAt: "2026-03-26T12:00:01.000Z",
+        usageCreditLedgerVersion: "0",
+      },
+      memberId: "member-1",
+      message: "usage-limit\n\nhttps://murph.example.test/usage",
+      noticeCode: "pulse_upgrade_edge",
+      occurredAt: "2026-03-26T12:00:00.000Z",
+      replyToMessageId: "message-1",
+      sourceEventId: "event-ai-usage",
+      template: "ai_usage_quota",
+    });
+
+    await expect(
+      drainHostedLinqSideEffectsDirect({
+        prisma: usagePrisma as never,
+        sideEffects: [effect],
+      }),
+    ).resolves.toBeDefined();
+
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        idempotencyKey: "ai-usage-attempt:hld_usage_notice",
+      }),
+    );
+    expect(markHostedLinqDeliveryAcceptedTx).toHaveBeenCalledWith({
+      idempotencyKey: expectedIdempotencyKey,
+      linqChatId: "chat-1",
+      messageId: "provider-message-link",
+      messageIds: [
+        "provider-message-text",
+        "provider-message-link",
+      ],
+      prisma: expect.anything(),
+      replayingRichLinkPartial: true,
+    });
+  });
+
   it("consumes legacy persisted AI usage claims without a ledger version as epoch zero", async () => {
     const effect = {
       effectId: buildHostedAiUsageGateNoticeIdempotencyKey({

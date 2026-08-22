@@ -2,17 +2,38 @@
 
 Hosted integration control plane for Vercel deployments.
 
-## Frontend design proof
+## Frontend evidence
 
-The live design catalog is available at `/design`. Every pull request that
-changes user-facing frontend UI must render the real production component on
-`/design?tab=components`, or the complete composed section or flow on
-`/design?tab=sections`. Include hosted desktop and mobile screenshots captured
-from that catalog surface in the PR so reviewers can judge the UI without
-reconstructing the state locally. Capture lossless PNGs at 2x device scale or
-higher, crop to the changed component or section, and verify both local and
-hosted images at native resolution. The `Frontend design proof` workflow
-enforces the catalog update and PR evidence contract.
+The public design reference is available at `/design` with Brand, Components,
+and Consent tabs. Composed-section studies live under `/screenshots/<category>`.
+Reuse the component catalog before creating a near-duplicate. The canonical
+catalog and PR-proof contract lives in `agent-docs/FRONTEND.md`.
+
+Unlinked, noindex presentation studies live under `/screenshots`. Add a study
+only for a difficult or reusable state. It must render the real production
+component with synthetic props, no live data, no live requests, and inert
+controls. A study proves presentation only. Use the real product path to prove
+behavior and value. The unlinked and noindex route is not a security boundary;
+never place private member data or credentials there.
+
+Match evidence to the changed visual, state, interaction, and responsive risk.
+A change can need no screenshots, one screenshot, or many. Inspect phone and
+desktop when responsive behavior can change. The `Pull request evidence`
+workflow requires a dedicated design proof with a supported absolute anchored
+link plus Evidence and Coverage. The preliminary frontend review verifies that
+the destination is repository-owned, reachable, current, and representative.
+Add or update the representation only when no existing route and anchor render
+the changed state. The workflow does not impose a screenshot count.
+
+Render an OG metadata-image route directly for visual inspection with:
+
+```bash
+pnpm --dir apps/web og-assets:render -- apps/web/app/opengraph-image.tsx /tmp/murph-og.png
+```
+
+Pass a JSON object as the optional third argument for a dynamic route's params.
+The command accepts only `opengraph-image.tsx` modules under `apps/web/app` and
+requires the result to be a 1200x630 PNG.
 
 `apps/web` is the canonical hosted control plane. Hosted product meaning lives
 in Postgres here, not in Cloudflare worker control storage. In particular,
@@ -377,7 +398,13 @@ The hosted Prisma schema keeps ownership sharp and nested:
   with a bounded call brief, provider call id, status, and final analysis
   result. Briefs and results use member/table/row/field/scope-bound hosted
   secure-box ciphertext; new writes never populate the nullable legacy JSON
-  columns. Retell credentials stay in web env, transfer destinations are resolved
+  columns. Direct Linq and Telegram calls additionally persist only the bounded
+  initiating channel enum. Web resolves that exact current direct-member route
+  before provider dispatch and again when the result is ready; it never stores
+  a phone number or thread id as call-result routing. Group calls leave the
+  discriminator null and retain their existing thread-container authority.
+  Exact request-key replay requires the stored discriminator, including null,
+  to match. Retell credentials stay in web env, transfer destinations are resolved
   from verified member identity, and raw transcripts/audio are not stored in
   Murph. The call row persists the exact initiating resident-session id for
   request-key idempotency. The reserved `phone_call_scheduled_` request-key
@@ -400,6 +427,11 @@ The hosted Prisma schema keeps ownership sharp and nested:
   so the durable row remains blocking authority while the bounded Workflow
   reconciles ambiguous starts, provider-id binding failures, unsafe cleanup,
   and terminal provider usage after callback loss.
+  Stored-result finalization and terminal Retell usage are sibling obligations
+  in that reconciliation pass: a ready result is finalized while usage lookup
+  or persistence is still pending, and the Workflow completes only after every
+  applicable obligation settles. A known terminal transfer continues through
+  its transfer-specific result finalizer independently of usage persistence.
   Immediately before Retell dispatch, web advances the reservation epoch; a
   reconciliation attempt may mutate only the exact epoch it read, preventing an
   older no-match result from releasing a newly dispatched call. Recovery resolves
@@ -439,6 +471,67 @@ caller and prove runner convergence before deploying a web build that uses the
 build; a 30-second caller does not remain compatible with the 40-second web
 deadline, so do not roll Cloudflare back below 45 seconds while that web build
 is active.
+
+The direct result-channel and durable completion-policy rollout is
+consumer-first. The reader-only completion-policy release must be current before
+this change can activate any writer. To activate the first reader-plus-writer
+release, pause all new phone-call admission and wait the platform's full
+configured start-route lifetime so every previously admitted request either
+exits or exposes its durable call and Workflow. Keep analyzed-result webhook
+ingress live while every result-capable provider call and every phone-call
+reconciliation Workflow pinned to a pre-writer deployment settles. Then freeze
+that result ingress, wait its full configured route lifetime, and re-prove zero
+provider calls, pre-writer Workflows, or other legacy-producer executions before
+the writer activates. Vercel Workflow runs retain the deployment that started
+them, so elapsed route lifetime alone is not Workflow drain proof. Apply the
+additive `result_notification_channel` migration and deploy Web before rolling
+out the hosted assistant runner with immediate container rollout. Resume result
+ingress and phone-call admission only after the reader-plus-writer Web release is
+current. No execution capable of invoking a legacy result producer may survive
+the first policy write.
+
+An old runner omits the optional result channel and remains compatible with new
+Web. A new runner against old strict Web is rejected before Retell dispatch.
+Tracked and generationless manual direct transfers share the durable
+completion-policy writer; group normalization disables transfer authority and
+is outside this policy evolution. For tracked result delivery, the runner keeps
+the existing outbox intent retryable after any provider-terminal outcome until
+Web acknowledges the signed terminal callback. Callback retry derives from the
+persisted provider receipt or failure, never re-enters Telegram, and repeats
+Web's idempotent next-result re-arm when the first response is lost.
+
+Web keeps its generation boundary stronger than the runtime's generic outbox
+state: queued ambiguity returns to pending, sending ambiguity is terminal, and
+an exact route failure with cumulative no-effect proof returns either queued or
+sending to pending. A different definitive runtime failure terminalizes a
+queued generation as failed, and provider success from queued is rejected.
+After the first durable policy write, this reader-plus-writer Web release is the
+operational rollback floor even when no tracked row has a result channel. A
+lower reader may accept an existing policy-bearing result, but it must not
+produce a new transfer result. Generation-aware Web is an additional rollback
+floor while any call stores a non-null result channel: terminal rows still
+suppress duplicate analyzed webhooks under generation-scoped keys, while older
+Web uses a different key and channel-agnostic routing. The following query
+proves only whether generation state exists; a zero count does not prove
+encrypted-result compatibility:
+
+```sql
+SELECT count(*) AS tracked_phone_call_rows
+FROM hosted_phone_call
+WHERE result_notification_channel IS NOT NULL;
+```
+
+A nonzero result requires continued generation-compatible Web or a separately
+reviewed forward migration. Terminal delivery is not authority to delete the
+row or declare older Web safe. For an emergency rollback below either floor,
+pause all new phone-call admission and drain the full configured start-route
+lifetime. Keep analyzed-result webhook ingress live while every result-capable
+provider call and deployment-pinned reconciliation run settles. Then freeze and
+drain result ingress, re-prove zero legacy-producer execution, and transition.
+Prefer a compatible forward deployment. Before rolling the runner below
+callback support, also drain every nonterminal tracked call. Post-deploy proof
+must cover one consented private Telegram scheduled call, same-channel result
+delivery, a route-loss retry, and unchanged group behavior.
 
 - `HostedComputerRun` and `HostedComputerHandoff`
   own member-scoped Kernel profile names, resumable run state, and durable
@@ -722,7 +815,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients when Stripe reconciliation accepts a hosted signup or trial activation. Leave it unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
@@ -824,7 +917,12 @@ Hosted onboarding extras:
   The monitor reports aggregate runtime,
   lane, age, and pending-item counts only. It has its own singleton incident
   row, so an active reply-latency incident cannot suppress a newly discovered
-  progress stall; recovery silently rearms each monitor independently.
+  progress stall. While one progress incident remains anomalous, the same row
+  sends a fresh aggregate reminder every six hours plus stable jitter, outside
+  quiet hours. Each fresh reminder claim persists a new generation identity
+  before Resend, while an ambiguous retry reuses that identity and the exact
+  body. The latency monitor remains one email per continuous incident. Recovery
+  silently rearms each monitor independently and sends no recovery email.
 - `HOSTED_EXECUTION_CONTROL_URL`
 - `HOSTED_DEVICE_WEBHOOK_QUEUE_PROVIDERS` is an optional comma-separated
   provider rollout gate for the encrypted Cloudflare Queue transport. Leave it
@@ -903,10 +1001,10 @@ Hosted AI usage metering:
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
-- Settings keeps the aggregate usage meter as the only current-capacity view. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
+- Settings keeps the aggregate usage meter as the only current-capacity view. Personal and owner-seat Family checkout success returns reconcile and refresh the authenticated beneficiary's present meter without a confirmation modal or messaging handoff, while one pre-mounted visually hidden polite status region announces fulfillment; only a failed or unresolved return opens compact payment recovery. A personal return with unavailable usage status, another active Family member, and former-member recovery retain one compact close-owned result because their meter is not present; the personal copy confirms durable account credit without claiming current availability. The Family roster owns an exact active-member return without requiring its Manage dialog to open, and closing an off-meter result owns terminal refresh so it cannot disappear before dismissal. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
-- Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows. Murph stores no raw card data and never charges from amount selection alone.
+- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. A no-navigation pending recovery keeps one focused live status region, performs bounded authenticated management reads, transitions to explicit confirmation, and falls back to a read-only status recheck without starting another payment. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
+- Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows, but ordinary one-time purchases do not force that choice. Monthly sponsorship activation and recovery retain future-use setup and explicitly accept only Stripe card methods, including wallets that materialize as card methods, because automatic refills derive the exact reusable card from the latest provider-verified explicit sponsorship payment: the ordinal-zero direct activation or a Checkout-backed activation or recovery. One-time contributions retain Dashboard-managed dynamic payment methods. A legacy sponsorship method outside the reusable-card domain returns to explicit recovery without substituting an attached method, and an unbound legacy failed refill upgrades to the current card-only request before opening recovery Checkout. Sessionless automatic refills, card fingerprints, attached-method count, and separate one-time contributions never replace that authority. Murph stores no raw card data and never charges from amount selection alone.
 - Family conversion reuses an exact active direct paid or Trial Subscription in place under the owner lock; a Trial ends immediately and Trial-only metadata is cleared. Web and the private Family tool both disclose the current server-owned immediate-conversion terms and require fresh explicit confirmation before ending an active Trial. Automatic phone/email invite capacity carries its normalized target into the capacity owner, which repeats the active-member check under the same lock immediately before Stripe; acceptance repeats admission checks transactionally, while Telegram remains open-seat-only. An accepting member's exact never-paid, owner-only draft is removed only after the invite is claimed and the destination membership is written in the same transaction. A draft with a live Checkout remains a conflict until the authenticated owner uses Settings to retrieve and expire that exact Session outside the transaction; locked revalidation preserves any concurrent completion, replacement, invite, membership, capacity, or billing authority. Suspended direct members retain exact-customer Portal management, inactive Family billing projects a Portal recovery action, and sponsorship payers retain cancellation-only management after beneficiary authority disappears. The first event that recognizes a competing Family-sponsored direct subscription performs exact cancel/refund inspection before local terminalization; complex refund shapes remain support-required.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
 - The purchase schema freezes payer and beneficiary separately. Personal, Family-member, and hosted-group purchases converge on the same append-only beneficiary ledger, Stripe verification, refund/dispute adjustments, status/expire routes, and webhook-only grant path. Family top-ups reuse the active group billing customer; they do not create a personal customer, Family wallet, second ledger, or second credit projection. One payer-wide nonterminal purchase is the ambiguity fence: a conflicting Family target receives no payable URL or retry action, and former-member recovery remains payable only when Settings can show an owner-recognizable frozen beneficiary.
@@ -1167,15 +1265,20 @@ production build. Keep deployment-protection bypass secrets and share links
 out of the cutover verification path.
 
 Freeze production deploys and rollbacks for the cutover. Record the exact
-strict-v2 commit, deploy it, and prove the production alias points at that
-commit with `apps/web/scripts/resolve-vercel-production-alias-sha.ts` and the
-secure `HOSTED_WEB_VERCEL_*` operator environment. Wait the configured
+strict-v2 commit and exact ready deployment URL, deploy it, and prove every
+configured production custom domain points at that deployment with
+`pnpm --dir apps/web release:production:verify-exact-deployment`, `DEPLOYED_SHA`,
+`HOSTED_WEB_VERCEL_DEPLOYMENT_URL`, and the secure `HOSTED_WEB_VERCEL_*`
+operator environment. The verifier enumerates the project domain set, excludes
+branch/custom-environment domains, requires the configured production base host,
+and compares every remaining alias by deployment id without logging domain
+names. Wait the configured
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` prior-function interval, then
-resolve the alias again. If it changed, select a strict-v2 commit and restart
-the full drain. A completion response from an old function can set a legacy
-cookie during this window; rejection is intentional, and the user must retry
-sign-in after the drain to receive a v2 cookie. Verify that retry, authenticated
-browser-vault access, expiry, and logout before ending the freeze.
+run the exact-deployment proof again. If it changed, select a strict-v2 commit
+and restart the full drain. A completion response from an old function can set
+a legacy cookie during this window; rejection is intentional, and the user must
+retry sign-in after the drain to receive a v2 cookie. Verify that retry,
+authenticated browser-vault access, expiry, and logout before ending the freeze.
 
 The first strict-v2 production deployment is the app-session rollback floor.
 Do not roll back to an older build: it accepts the database-forgeable legacy
@@ -1278,10 +1381,16 @@ Generate the client and apply migrations with Prisma:
 
 ```bash
 pnpm --dir apps/web prisma:generate
+pnpm --dir apps/web prisma:validate
 pnpm --dir apps/web prisma:migrate:deploy
 pnpm --dir apps/web release:production:migrate
 pnpm --dir apps/web release:production:contract-migrate
 ```
+
+Use `prisma:validate` for focused schema verification. It checks the schema
+without rewriting it. Run `prisma format` only when a repository-wide schema
+layout change is intentional, and review that mechanical diff separately from
+the migration change.
 
 The checked-in Vercel build command runs the guarded production migration
 wrapper before building. That wrapper generates the Prisma client because the
@@ -1443,12 +1552,18 @@ Destructive contract cleanup belongs under
 `Hosted Web Contract Migrations` GitHub workflow after Vercel reports a
 successful production deployment. That workflow only accepts Vercel-originated
 completed production deployment statuses, checks out the exact deployed commit,
-verifies it is reachable from `origin/main`, waits
+verifies it is reachable from `origin/main`, and requires the current main tip
+to be the deployment serving the configured production base domain. A stale
+current-main release fails instead of being reported as a successful no-op;
+late events for older main ancestors remain safe no-op candidates. The workflow
+then enumerates and proves every production custom domain against the event's
+exact deployment id, waits
 `HOSTED_WEB_CONTRACT_MIGRATION_DRAIN_SECONDS` seconds for prior production
-function executions to drain, then verifies the configured Vercel production
-alias still points at that commit before exposing the database secret. It can
-also be manually dispatched with `deployed_sha` set to the current Vercel
-production commit; the same drain and alias proof still apply before SQL runs.
+function executions to drain, then repeats the current-commit and complete
+domain-set proof before exposing the database secret. It can also be manually
+dispatched with `deployed_sha` and `deployment_url` set to the current exact
+Vercel production deployment; the same drain and exact-domain proof apply before
+SQL runs.
 It requires
 `HOSTED_WEB_VERCEL_TOKEN`, `HOSTED_WEB_VERCEL_PROJECT_ID`,
 `HOSTED_WEB_PRODUCTION_BASE_URL`, and `HOSTED_WEB_DIRECT_DATABASE_URL` in
@@ -1458,6 +1573,17 @@ does not use GitHub Actions concurrency for this lane; the final alias check and
 the contract migration advisory lock make stale or duplicate runs skip safely
 without letting stale events replace valid pending runs. After those gates, it calls
 `pnpm --dir apps/web release:production:contract-migrate` with explicit opt-in.
+The public workflow is verification-only: it does not assign aliases, promote a
+deployment, or roll production back.
+Because the workflow checks out and executes the deployed revision, the first
+production Web deployment containing
+`scripts/verify-vercel-production-deployment.ts` is the postdeploy verification
+rollback floor. A manual retry against an older pre-floor deployment fails
+closed on the missing verifier before database authority or contract SQL is
+available. Incident recovery may still route traffic to an older deployment,
+but the protected postdeploy lane becomes operable again only after rolling
+forward to that floor or a newer revision; do not use an older workflow revision
+to bypass the complete-domain proof.
 The shared production migration URL resolver strips Prisma-style
 `sslcert=system`, `sslkey=system`, and `sslrootcert=system` markers before
 handing Postgres URLs to raw `pg` clients, while preserving real SSL file paths.
@@ -1587,31 +1713,39 @@ machine: 4 vCPUs, 8 GB RAM, and 32 GB disk. The CI guard currently observes the
 production `next build` in a root-level cgroup-v2 child for accounting only. It
 does not write `memory.max`, `memory.swap.max`, or `memory.oom.group`.
 
-The production build launches the parent Next process explicitly through Node
-with `--max-old-space-size=1024` while appending
-`--max-old-space-size=3072` to `NODE_OPTIONS`. Node gives the direct CLI flag
-precedence in the parent. Next 16.3 reconstructs its non-isolated TypeScript
-worker options from the parent arguments followed by `NODE_OPTIONS`, so the
-mandatory generated-contract validation receives the 3 GiB limit. Next removes
-that option from its isolated static workers. The existing caller options are
-preserved. The shared script is used by the Vercel package build and the CI
-memory-observation lane. This bounds the compile parent without starving the
-later validation worker or changing the compiled application. Repeated
-forced-cold Standard previews remain the direct acceptance evidence, and a Next
-upgrade must revalidate this worker boundary.
+The production runner first performs route type generation and an explicit
+app-local generated-contract TypeScript check with a 3.5 GiB limit. It marks
+only that prepared check complete before starting Webpack. Compilation then
+runs in the Next CLI process with a 3 GiB old-space limit; the runner preserves
+unrelated inherited Node options while replacing inherited old-space flags.
+These phases are sequential, so their limits do not compose. The same runner is
+used by the Vercel package build and the CI memory-observation lane. Forced-cold
+Standard previews remain the direct acceptance evidence, and a Next upgrade
+must revalidate the heap boundary.
 
 Production builds use Next 16.3's supported Webpack fallback. The production
-script passes `--webpack`, and the Next config explicitly enables
-`webpackBuildWorker` plus `webpackMemoryOptimizations` because the Workflow
-integration contributes Webpack configuration that otherwise prevents Next
-from selecting the isolated build worker automatically. The hosted local-
-development wrapper remains on Turbopack and rejects an explicit Webpack flag.
-The production runner also owns a versioned cache epoch inside `.next/cache`.
+script passes `--webpack` and enables `webpackMemoryOptimizations`. The Workflow
+integration contributes custom Webpack configuration, so Next's canonical
+default is to compile in the CLI process. Do not force `webpackBuildWorker`:
+that creates a second compiler-process owner and previously left Standard
+deployments stuck inside an opaque worker after compilation stopped making
+progress. The hosted local-development wrapper remains on Turbopack and rejects
+an explicit Webpack flag. The production runner also owns a versioned cache
+epoch inside `.next/cache`.
 When that stamp is absent or differs, it removes the incompatible cache before
-compilation and writes the epoch only after Next succeeds. This gives the
-Turbopack-to-Webpack rollout one cold build without permanently disabling warm
-Webpack caching; bump the epoch only when a proven compiler/cache transition
-requires another invalidation.
+compilation and writes the epoch only after Next succeeds. Production Webpack
+compiles are additionally cold-cache by policy: the runner removes
+`.next/cache/webpack` before every compile, and because that removal precedes
+the only Next invocation and aborts the build on failure, a restored warm
+Webpack cache can never reach the compiler regardless of what an earlier
+deployment uploaded. Warm restored Webpack caches on Vercel's 8 GB Standard builder
+were the trigger for the August 2026 steady-state OOM kills and silent
+compile hangs; only the cold path is proven. Other cache subtrees such as SWC
+remain warm. Vercel owns cancellation and build deadlines. The production
+package script therefore runs directly instead of passing through the local
+shared-host verification slot or adding a second watchdog and process-group
+reaper. Bump the epoch only when a proven compiler/cache transition requires
+another full invalidation.
 
 Next 16.3 no longer exposes `experimental.turbopackMemoryLimit`. Its replacement,
 `experimental.turbopackMemoryEviction`, is documented for development sessions
@@ -1851,6 +1985,11 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
 
+The signed device-sync reconcile request includes only `connectionId`. Web
+places the request on the existing manual-reconcile wake and carries no
+canonical health-event identities or overwrite policy; the vault event spine
+keeps member revisions live while connected-source baselines advance.
+
 The old staged-payload and deleted import completion/release callback routes
 are gone. Cloudflare no longer round-trips through broad mirror CRUD routes,
 deleted sharing CRUD, local-vault import callbacks, or an outbox drain route. It
@@ -1933,22 +2072,69 @@ Current hosted billing assumptions:
 - `/ops/usage` is the operator-only allowance inspection and recovery surface.
   It derives personal-member and synthetic-group message activity from retained
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
-  rows, and labels the mailbox retention boundary. The table and reset reuse the
-  runtime's canonical allowance gate. A row reset verifies the displayed
-  current-period and usage-credit versions, then atomically clears current
-  included spend and the block while releasing only that capacity epoch's
-  logical notice claim. It preserves immutable usage, usage credit, billing
-  state, mailbox rows, and delivery history, and refuses to race an in-flight
-  notice dispatch. After commit it signals the existing runtime recheck; a
-  rejected or bounded-timeout wake is returned as a committed partial result
-  with a wake-only retry. The table reads its decision and reset version from
-  one repeatable database snapshot, and derives blocked/available only from
-  that canonical decision rather than the potentially stale persisted marker.
-  Historical notice status is displayed independently from current admission.
-  A later crossing reuses the logical claim key but receives a fresh durable
-  delivery ID and provider idempotency key. Generic runtime and webhook
+  rows, and labels the mailbox retention boundary. The ordinary list keeps its
+  25-row primary-key cursor pages. URL-backed search has no page controls and
+  accepts only one complete hosted ID, one exact verified email, or four final
+  phone digits. Email lookup uses the existing blind-index read candidates and
+  never selects or decrypts the encrypted address; phone lookup uses only the
+  persisted masked hint. Search hydrates at most 100 ID-ordered matches and
+  explicitly asks the operator to narrow the query when a 101st match proves
+  overflow. Capped or multi-member email/phone candidates are discovery-only;
+  row mutations remain locked until exact hosted-ID lookup resolves one target.
+  Submitting or clearing a query closes any open row confirmation and locks the
+  old result set's row mutation paths until the new server render arrives.
+  Whole-population summary totals remain unfiltered.
+- The table and reset reuse the runtime's canonical allowance gate. A row reset
+  verifies the displayed current-period and usage-credit versions. Paid,
+  Family, and container resets atomically clear current included spend and the
+  block. An exhausted canonical Starter reset instead appends one fresh $4.50
+  grant under the beneficiary lock, keyed to the displayed ledger version, then
+  clears the derived period. The distinct Ops grant source is excluded from
+  Starter enrollment and conversion metrics. Both paths release only that
+  capacity epoch's logical notice claim, preserve immutable usage, prior grants
+  and debits, purchased and referral credit, billing state, mailbox rows, and
+  delivery history, and refuse to race an in-flight notice dispatch. After
+  commit the route signals the existing runtime recheck; a rejected or
+  bounded-timeout wake is returned as a committed partial result with a
+  wake-only retry. For Starter recovery, the page reconstructs that wake-only
+  action after close or reload from the active Ops grant and unconsumed mailbox
+  work previously denied for usage. The table reads its decision and reset
+  version in one short repeatable-read transaction per admitted row, processed
+  sequentially, and derives blocked/available only from that canonical decision
+  rather than the potentially stale persisted
+  marker. Historical notice status is displayed independently from current
+  admission. A later crossing reuses the logical claim key but receives a fresh
+  durable delivery ID and provider idempotency key. Generic runtime and webhook
   delivery fences keep deterministic durable IDs for latency and receipt
   correlation.
+- `Reset everyone` requires the exact typed phrase, ignores any active search,
+  and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Members are reset sequentially through the same canonical transaction; one
+  stale re-read is allowed, the batch stops before acknowledging a remaining
+  failure, and each runtime wake begins only after that member commits. The page
+  reports processed/reset/unchanged/skipped/pending-wake/failed outcomes, loops
+  one request at a time while open, records the unfiltered starting population
+  as a reference, and makes clear that the live population can change. An
+  operator-requested pause takes effect after the current acknowledged batch
+  and resumes the same operation from that cursor. Known failures use the same
+  resume boundary. Ambiguous population responses may rewalk from the
+  beginning with the same browser-generated operation UUID. Pending-wake
+  recovery instead pages only that UUID's existing receipts and never re-enters
+  population mutation. It can be hidden without locking ordinary search or row
+  recovery, remains hidden across remounts and search navigation until the
+  operator explicitly reopens it under the same UUID, or is cleared after a
+  transient warned abandonment. One append-only
+  per-member receipt is written atomically with the first reset outcome; replay
+  returns that outcome without clearing later included usage or duplicating a
+  consumed Starter grant, and can repeat only a required post-commit runtime
+  wake. The same locked transaction reads the live gate and exact period: a
+  valid included allowance with no materialized zero-usage row commits a skip
+  and advances, while accounting that commits first leaves a period for the
+  reset to observe. The dialog claims completion only after a pass has no
+  pending wake. It
+  does not snapshot the population, pause usage, overlap interactive
+  transactions, or add a campaign, queue, scheduler, or duplicate usage read
+  model.
 - Delayed legacy Stripe trial objects remain eligible only for exact bounded
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.

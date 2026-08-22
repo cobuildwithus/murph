@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   assistantDeliveryErrorSchema,
   type AssistantChannelDelivery,
@@ -38,6 +38,10 @@ type AssistantMessageChannelDelivery = Extract<
   AssistantChannelDelivery,
   { kind?: 'message' }
 >
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 it('distinguishes physical media ownership in delivery equality', () => {
   const delivery = {
@@ -366,6 +370,8 @@ describe('assistant outbox dispatch-state', () => {
   })
 
   it('reschedules confirmation retries from the reconciliation time', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2030-04-13T00:05:00.000Z'))
     await withTempVault(async (vault) => {
       const sending = await createSendingIntent({
         attemptCount: 2,
@@ -373,15 +379,12 @@ describe('assistant outbox dispatch-state', () => {
         vault,
       })
       const paths = resolveAssistantStatePaths(vault)
-      const scheduledAt = new Date('2030-04-13T00:05:00.000Z')
-
       const retryIntent = await rescheduleAssistantOutboxConfirmationRetry({
         error: assistantDeliveryErrorSchema.parse({
           code: 'ASSISTANT_DELIVERY_CONFIRMATION_PENDING',
           message: 'delivery must be reconciled before resend',
         }),
         intentPath: resolveAssistantOutboxIntentPath(paths.outboxDirectory, sending.intentId),
-        scheduledAt,
         sending,
         vault,
       })

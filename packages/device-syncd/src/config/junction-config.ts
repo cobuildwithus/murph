@@ -3,6 +3,7 @@ import { JUNCTION_ALLOWED_TIMESERIES_RESOURCES } from "@murphai/contracts";
 import {
   JUNCTION_API_BASE_URL_ENV_KEYS,
   JUNCTION_API_KEY_ENV_KEYS,
+  JUNCTION_CLIENT_USER_ID_NAMESPACE_ENV_KEYS,
   JUNCTION_CLIENT_USER_ID_SECRET_ENV_KEYS,
   JUNCTION_ENV_ENV_KEYS,
   JUNCTION_PROVIDER_FILTER_ENV_KEYS,
@@ -33,7 +34,7 @@ import type {
 } from "./provider-types.ts";
 
 // Production sets the exhaustive code-owned list explicitly. Omitted runtime
-// configuration resolves to the same registry, while explicit subsets remain
+// configuration resolves to the curated defaults, while explicit lists remain
 // exact and cannot be widened by member or environment data.
 export const JUNCTION_PRODUCTION_TIMESERIES_RESOURCES =
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES;
@@ -59,6 +60,7 @@ export function readConfiguredJunctionDeviceSyncProviderConfig(
 
   const config = {
     apiKey,
+    clientUserIdNamespace: optionalEnv(env, JUNCTION_CLIENT_USER_ID_NAMESPACE_ENV_KEYS),
     clientUserIdSecret,
     environment: parseJunctionEnvironment(environment),
     region: parseJunctionRegion(region),

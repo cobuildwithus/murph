@@ -56,8 +56,8 @@ function createHarness() {
 set -euo pipefail
 if [[ "$*" == "pr view --json number --jq .number" ]]; then
   printf '%s\\n' '42'
-elif [[ "$*" == "pr view 42 --json headRefOid --jq .headRefOid" ]]; then
-  printf '%s\\n' "\${STUB_PR_HEAD}"
+elif [[ "$*" == "pr view 42 --json baseRefName,baseRefOid,headRefOid --jq [.baseRefName, .baseRefOid, .headRefOid] | @tsv" ]]; then
+  printf 'main\\t%s\\t%s\\n' "\${STUB_PR_BASE}" "\${STUB_PR_HEAD}"
 else
   printf 'unexpected gh invocation: %s\\n' "$*" >&2
   exit 2
@@ -95,6 +95,7 @@ set -euo pipefail
     REVIEW_GPT_PR_URL: '',
     REVIEW_GPT_REVIEW_PHASE: '',
     REVIEW_GPT_TEST_CAPTURE: capturePath,
+    STUB_PR_BASE: head,
     STUB_PR_HEAD: head,
   }
   return { capturePath, env, harnessRoot, head }
@@ -181,6 +182,26 @@ describe('ReviewGPT PR context guard', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('assembled completion-specialists prompt is')
     expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
+  })
+
+  it.each([
+    ['--idle-draft-timeout', '30m'],
+    ['--idleDraftTimeout', '30m'],
+    ['--minimum-marked-response-time', '5m'],
+    ['--minimumMarkedResponseTime', '5m'],
+  ])('keeps PR context guarded when %s precedes the preset', (option, value) => {
+    const harness = createHarness()
+    const result = runHarness(harness, [
+      option,
+      value,
+      'completion-specialists',
+      '--dry-run',
+    ])
+
+    expect(result.status).toBe(0)
+    expect(readFileSync(harness.capturePath, 'utf8')).toBe(
+      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} ${value} completion-specialists --dry-run\n`,
+    )
   })
 
   it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {

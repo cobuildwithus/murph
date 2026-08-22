@@ -4,6 +4,12 @@ import type { CodexNormalizedEvent } from '../assistant-codex-events.js'
 import type {
   AssistantRuntimeIssueInput,
 } from '../assistant/issue-reporting.js'
+import {
+  resolveCodexCommandFamily,
+} from './command-family.js'
+import {
+  isCodexActionStructurallyFailed,
+} from './action-outcome.js'
 
 export const CODEX_ACTION_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-action-diagnostics.v1'
@@ -18,11 +24,8 @@ const TRACKED_ACTION_LIMIT = 256
 const TOOL_DIAGNOSTIC_LIMIT = 16
 const COMMAND_RUNTIME_ISSUE_TRACK_LIMIT = 256
 const COMMAND_RUNTIME_ISSUE_RECOVERY_LIMIT = 8
-const COMMAND_CLASSIFICATION_SCAN_LIMIT = 4096
 const COMMAND_ORDINAL_MAX = 10_000
 const TOOL_IDENTIFIER_PART_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u
-const DIRECT_SEARCH_COMMAND_PATTERN = /^(?:grep|rg)(?:\s|$)/u
-const UNQUOTED_SHELL_CONTROL_PATTERN = /[\r\n;&|<>`$(){}]/u
 
 type CodexActionKind =
   | 'command.execution'
@@ -472,7 +475,10 @@ export function createCodexActionDiagnosticsReducer(): CodexActionDiagnosticsRed
         return
       }
       completedCount += 1
-      if (isFailedAction(item, input.normalizedEvent)) {
+      if (isCodexActionStructurallyFailed({
+        item,
+        normalizedExitCode: readNormalizedExitCode(input.normalizedEvent),
+      })) {
         failedCount += 1
       }
 
@@ -515,7 +521,10 @@ function buildRuntimeIssueInputForFailedCodexAction(input: {
   }
 
   const item = readEventItem(input.rawEvent)
-  if (!isFailedAction(item, input.normalizedEvent)) {
+  if (!isCodexActionStructurallyFailed({
+    item,
+    normalizedExitCode: readNormalizedExitCode(input.normalizedEvent),
+  })) {
     return null
   }
 
@@ -601,71 +610,12 @@ function resolveDirectSearchCommandFamily(
   }
 
   const command = normalizedEvent.commandLabel.trim()
-  return DIRECT_SEARCH_COMMAND_PATTERN.test(command)
-    && !hasExecutableShellControl(command)
+  return resolveCodexCommandFamily({
+    commandLabel: command,
+    source: 'display',
+  }) === 'search'
     ? 'search'
     : 'unknown'
-}
-
-/**
- * Codex serializes command argv with shell quoting for display. Keep this scan
- * transient and bounded: quoted or escaped regex syntax is argument data, while
- * unquoted control syntax means the displayed command is not provably a direct
- * `rg` or `grep` invocation. No token or argument content leaves this helper.
- */
-function hasExecutableShellControl(command: string): boolean {
-  if (command.length > COMMAND_CLASSIFICATION_SCAN_LIMIT) {
-    return true
-  }
-
-  let quote: 'double' | 'single' | null = null
-  let escaped = false
-  for (let index = 0; index < command.length; index += 1) {
-    const character = command[index] ?? ''
-    if (character === '\r' || character === '\n') {
-      return true
-    }
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (character === '\\' && quote !== 'single') {
-      escaped = true
-      continue
-    }
-    if (quote === 'single') {
-      if (character === "'") {
-        quote = null
-      }
-      continue
-    }
-    if (quote === 'double') {
-      if (character === '"') {
-        quote = null
-        continue
-      }
-      if (
-        character === '`'
-        || (character === '$' && command[index + 1] === '(')
-      ) {
-        return true
-      }
-      continue
-    }
-    if (character === "'") {
-      quote = 'single'
-      continue
-    }
-    if (character === '"') {
-      quote = 'double'
-      continue
-    }
-    if (UNQUOTED_SHELL_CONTROL_PATTERN.test(character)) {
-      return true
-    }
-  }
-
-  return escaped || quote !== null
 }
 
 function readCommandExitCode(input: {
@@ -1024,23 +974,8 @@ function readItemDurationMs(item: Record<string, unknown> | null): number | null
   return readNonnegativeInteger(item.durationMs, item.duration_ms)
 }
 
-function isFailedAction(
-  item: Record<string, unknown> | null,
-  normalized: CodexNormalizedEvent,
-): boolean {
-  if (normalized.kind === 'status_item' && normalized.exitCode !== null) {
-    return normalized.exitCode !== 0
-  }
-  const status = normalizeIdentifier(readFirstString(item?.status))
-  if (status === 'failed' || status === 'errored') {
-    return true
-  }
-  const success = item?.success
-  if (typeof success === 'boolean') {
-    return !success
-  }
-  const exitCode = readInteger(item?.exitCode, item?.exit_code)
-  return exitCode !== null ? exitCode !== 0 : false
+function readNormalizedExitCode(normalized: CodexNormalizedEvent): number | null {
+  return normalized.kind === 'status_item' ? normalized.exitCode : null
 }
 
 function measureActionOutput(item: Record<string, unknown> | null): ActionOutputMetrics {

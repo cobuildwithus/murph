@@ -953,7 +953,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
     description:
       'Import many canonical events from JSON Lines input in one transactional batch.',
     hint:
-      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry explicit id or eventId fields. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Runs as a dry-run count report by default; re-run with --apply to write. Rows with externalRef are retry-safe and dedupe by system + resourceType + resourceId + facet; rows without externalRef are append-only and create fresh events on each apply. Any invalid line rejects the whole batch.',
+      'Each line is one canonical event payload in the same shape as import-json, except payloads must not carry explicit id or eventId fields. Run event payload-schema --for import-jsonl --kind <kind> --format json for the exact per-line contract. Runs as a dry-run count report by default; re-run with --apply to write. Rows with externalRef dedupe by system + resourceType + resourceId + facet; rows without externalRef are append-only and create fresh events on each apply. --source-raw-ref-once gives a source-backed workout batch one atomic first-import precondition. Any invalid or rejected-source line rejects the whole batch.',
     args: z.object({}),
     options: withBaseOptions({
       input: inputFileOptionSchema.describe('JSON Lines input in @file.jsonl form or - for stdin.'),
@@ -961,12 +961,18 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .boolean()
         .default(false)
         .describe('Apply the import. Without this flag the command only reports what it would create, skip, or update.'),
+      sourceRawRefOnce: z
+        .string()
+        .regex(/^raw\/[A-Za-z0-9._/-]+$/u, 'Expected a vault-relative raw/* path.')
+        .optional()
+        .describe('Reject the whole batch if any workout has ever referenced this raw source. Every row must be an externalRef-free activity_session that references the same source.'),
     }),
     output: eventImportJsonlResultSchema,
     async run({ options }) {
       return importEventRecordsFromJsonl({
         vault: options.vault,
         inputFile: options.input,
+        rejectIfSourceRawRefAlreadyImported: options.sourceRawRefOnce,
         apply: options.apply,
       })
     },

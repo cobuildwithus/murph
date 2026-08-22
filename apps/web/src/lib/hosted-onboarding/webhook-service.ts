@@ -64,6 +64,9 @@ import {
   sendPendingHostedLinqAlertsBestEffort,
 } from "./linq-alert-email";
 import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import {
   ingestHostedLinqProviderEventTx,
 } from "./linq-provider-event-store";
 import {
@@ -137,6 +140,9 @@ import {
 import {
   startHostedRuntimeShellPrewarmBestEffort,
 } from "../hosted-execution/direct-runtime-wake";
+import {
+  signalHostedPhoneCallResultNotificationRecovery,
+} from "../phone-calls/reconciliation-workflow-start";
 import {
   assertHostedThreadRouteEgressAuthority,
   markHostedLinqThreadRouteParticipantAdditionPendingTx,
@@ -704,6 +710,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           },
           prisma,
         });
+        if (planned.postCommitSignupNotificationMemberIds?.length) {
+          scheduleHostedSignupNotificationEmails({
+            activationSurface: "imessage",
+            memberIds: planned.postCommitSignupNotificationMemberIds,
+            prisma,
+          });
+        }
         if (
           planned.nextRequiredPendingGroupSetupCandidateId !== undefined
         ) {
@@ -1978,6 +1991,13 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
     },
     prisma,
   });
+  if (plan.postCommitSignupNotificationMemberIds?.length) {
+    scheduleHostedSignupNotificationEmails({
+      activationSurface: "telegram",
+      memberIds: plan.postCommitSignupNotificationMemberIds,
+      prisma,
+    });
+  }
 
   if (plan.desiredSideEffects.length > 0) {
     throw new Error(
@@ -2007,8 +2027,25 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       referralIds: plan.postCommitUsageReferralIds ?? [],
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
+    await rearmHostedPhoneCallResultRecoveriesAfterCommitRequired({
+      memberIds: plan.postCommitPhoneCallResultRecoveryMemberIds ?? [],
+      prisma,
+    });
   }
   return plan.response;
+}
+
+async function rearmHostedPhoneCallResultRecoveriesAfterCommitRequired(input: {
+  prisma: PrismaClient;
+  memberIds: readonly string[];
+}): Promise<void> {
+  const memberIds = [...new Set(input.memberIds)];
+  for (const memberId of memberIds) {
+    await signalHostedPhoneCallResultNotificationRecovery({
+      memberId,
+      prisma: input.prisma,
+    });
+  }
 }
 
 async function reconcileHostedUsageReferralRewardsAfterCommitBestEffort(input: {

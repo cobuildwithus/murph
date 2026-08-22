@@ -20,8 +20,12 @@ import { getPrisma } from "../prisma";
 import { readActiveHostedMemberAccessIds } from "../hosted-onboarding/member-access";
 import {
   isHostedRuntimeInactiveAccessError,
-  requireHostedRuntimeActiveAccessForUpdateTx,
+  requireHostedRuntimeMembersActiveAccessForUpdateTx,
 } from "../hosted-mailbox/runtime-access";
+import {
+  hostedOnboardingError,
+  isHostedOnboardingError,
+} from "../hosted-onboarding/errors";
 import { encryptHostedVaultShareProjectionSnapshot } from "./projection-snapshot";
 import { parseHostedVaultShareRowProjectionScope } from "./row-projection-scope";
 
@@ -41,6 +45,12 @@ export interface ActiveHostedVaultShare {
   projectionScopeKey: string;
 }
 
+/**
+ * Reads every legally admitted share plus one invariant-check row. The sole
+ * production grant owner atomically caps the exact grantor/scope cohort at 25;
+ * a 26th row is corruption and fails closed rather than being silently
+ * truncated or normalized into another delivery lifecycle.
+ */
 export async function findActiveHostedVaultShares(input: {
   grantorMemberId: string;
   prisma?: PrismaClient;
@@ -52,7 +62,7 @@ export async function findActiveHostedVaultShares(input: {
     input.projectionScope,
   );
   const rows = await prisma.hostedVaultShare.findMany({
-    orderBy: { createdAt: "asc" },
+    orderBy: { destinationMemberId: "asc" },
     select: {
       destinationMemberId: true,
       grantorMemberId: true,
@@ -242,7 +252,12 @@ function assertHostedVaultShareCandidateBound(
   maximum: number,
 ): void {
   if (count > maximum) {
-    throw new Error("Hosted vault-share candidate read exceeded its admitted bound.");
+    throw hostedOnboardingError({
+      code: "HOSTED_VAULT_SHARE_GRANT_LIMIT_INVARIANT_VIOLATION",
+      httpStatus: 503,
+      message: "Hosted vault-share candidate read exceeded its admitted bound.",
+      retryable: false,
+    });
   }
 }
 
@@ -279,14 +294,7 @@ export async function replaceHostedVaultShareProjectionSnapshot(input: {
   );
   return prisma.$transaction(async (tx) => {
     if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-      input.share.grantorMemberId,
-      tx,
-    )) {
-      return "no-active-share";
-    }
-
-    if (!await hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-      input.share.destinationMemberId,
+      [input.share.grantorMemberId, input.share.destinationMemberId],
       tx,
     )) {
       return "no-active-share";
@@ -351,16 +359,22 @@ async function lockCurrentHostedVaultShareSourceWorkspaceTx(input: {
 }
 
 async function hasHostedVaultShareRuntimeActiveAccessForUpdateTx(
-  memberId: string,
+  memberIds: readonly string[],
   tx: Prisma.TransactionClient,
 ): Promise<boolean> {
   try {
-    await requireHostedRuntimeActiveAccessForUpdateTx(memberId, {
+    await requireHostedRuntimeMembersActiveAccessForUpdateTx(memberIds, {
       prisma: tx,
     });
     return true;
   } catch (error) {
-    if (isHostedRuntimeInactiveAccessError(error)) {
+    if (
+      isHostedRuntimeInactiveAccessError(error)
+      || (
+        isHostedOnboardingError(error)
+        && error.code === "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED"
+      )
+    ) {
       return false;
     }
     throw error;

@@ -1,4 +1,5 @@
 import {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
   type AssistantResponseCard,
   type DailyNutritionResponseCard,
@@ -697,12 +698,20 @@ function parseHostedAssistantDeliveryPayload(
     `${label}.channel`,
   );
   if (card?.kind === "challenge_standings") {
-    if (channel !== "linq" || threadIsDirect !== false) {
+    if (!assistantResponseCardMatchesConversationAudience({
+      card,
+      channel,
+      threadIsDirect,
+    })) {
       throw new TypeError(
         `${label}.card requires an authenticated Linq group conversation.`,
       );
     }
-  } else if (card !== null && threadIsDirect !== true) {
+  } else if (card !== null && !assistantResponseCardMatchesConversationAudience({
+    card,
+    channel,
+    threadIsDirect,
+  })) {
     throw new TypeError(`${label}.card requires a private direct conversation.`);
   }
   if (record.newsletterAuthorizationProof !== undefined) {

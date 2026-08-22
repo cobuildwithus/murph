@@ -9,6 +9,7 @@ import {
 } from "@murphai/contracts";
 import {
   listHostedAiUsageForTest,
+  seedHostedWorkspaceWakeForTest,
   type HostedAiUsageForTestRow,
 } from "#hosted-web-testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -152,6 +153,20 @@ describe("hosted local Linq scheduled reminder e2e", () => {
     const scheduledChatId = requireLinqStub().requireObservedChatId(userId);
     const reminderPath = `/chats/${encodeURIComponent(scheduledChatId)}/messages`;
     const setupReplyBaselineCount = requireLinqStub().countObservedSends(reminderPath);
+
+    // Incident precondition (2026-08-15): the workspace holds a stale,
+    // already-past device-sync.reconcile wake persisted by an earlier
+    // session. The reminder scheduled below must supersede it at import
+    // reconciliation; before the provenance-aware projection, the stale
+    // carried timestamp won earliest-wins and the armed reminder wake never
+    // reached the durable workspace row.
+    const staleDeviceSyncWakeAt =
+      new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
+    await seedHostedWorkspaceWakeForTest({
+      userId,
+      wakeAt: staleDeviceSyncWakeAt,
+      wakeReason: "device-sync.reconcile",
+    });
     const scheduledReminderTimes = resolveScheduledReminderTimes();
     requireScenario().queueAssistantResponses(
       buildHostedAssistantAutomationSaveResponses({
@@ -832,8 +847,8 @@ async function assertScheduledReminderCronUsagePricingMatchedProviderRequest(inp
   expect(cronRows.length).toBeGreaterThan(0);
 
   const expectedPricingVersion = input.expectedTokenPricingBasis === "openai-flex"
-    ? "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex"
-    : "openai-api-pricing-2026-07-30-gpt-5.6-standard";
+    ? "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex"
+    : "openai-api-pricing-2026-08-21-gpt-5.6-standard";
   const expectedAdjustmentDenominator =
     input.expectedTokenPricingBasis === "openai-flex" ? "2" : "1";
 

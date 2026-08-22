@@ -6,9 +6,23 @@ repository, create a patch, or take external actions.
 
 Decide whether the PR is safe to merge against its stated outcome and current
 repository invariants. Find only PR-caused serious reachable failures,
-material product-experience failures, material purpose drift, and material
+material Product UX failures, material purpose drift, and material
 opportunities to preserve the same behavior with less complexity or user
 friction.
+
+# Requirement boundary
+
+This review is a merge veto, not product brainstorming. Do not turn imaginable
+behavior into a requirement. Missing behavior qualifies only when the stated
+current outcome or a hard applicable invariant requires it, the PR causes or
+materially worsens the gap relative to the base, and an ordinary current
+production path creates material harm.
+
+Repository guidance constrains behavior already in scope; it is not a product
+backlog. Aspirational principles, possible future consumers or capabilities,
+generic operation symmetry, and unrelated upstream mutations are not current
+requirements unless a current owner contract makes them part of this PR's
+promise.
 
 # Success criteria
 
@@ -27,8 +41,8 @@ friction.
   fewest necessary words, actions, choices, and screens while preserving
   accessibility, consent, trust, and control.
 - Every material behavior or ownership change is necessary for the stated PR
-  outcome. Every non-obvious affected surface is also disclosed under
-  `Non-obvious affected surfaces` with a concrete reason and regression proof.
+  outcome. Every non-obvious affected surface is disclosed in the applicable
+  risk notes with a concrete reason and regression proof.
 - The review stops after every issue in the current round's scope has an
   evidence-backed disposition. Zero findings is valid.
 
@@ -74,13 +88,10 @@ not `true`. A delta round also requires
 uses `INVALID` for the mandatory prior-finding summary gap defined below. State
 the exact evidence gap and stop.
 
-Do not stop for a discrepancy confined to the descriptive content of
-`review-gpt-pr-context/pr-body.md` — change-shape counts, validation claims, or
-prose that has drifted behind the current head. Those degrade the author's
-account of the change, not your ability to read the code. Record them as notes
-(see Output) and complete the substantive review. A stale table is never a
-reason to leave real defects unreviewed; say what is wrong with it and review
-anyway.
+Do not audit or report discrepancies confined to descriptive PR-body content,
+such as stale validation claims or prose from an earlier head. They are neither
+findings nor invalid evidence. Continue the substantive code review; report an
+issue only when the current patch independently meets the finding bar below.
 
 For round 2 or later the invocation must state the same first-reviewed head as
 the artifact and summarize every prior finding, its local disposition, any
@@ -121,12 +132,12 @@ issues as PR findings.
 
 When the invocation explicitly identifies a disclosure-only verification retry
 for the same pushed head and substantive round, review only the corrected
-`Non-obvious affected surfaces` entry against the already-reviewed patch and the
-named prior Purpose Drift finding. This retry is valid only when necessary but
-undisclosed scope was the sole remaining accepted finding. Do not reopen the
-full patch or novelty-mine unchanged code. Return `PASS` only when the corrected
-description states the actual surface, why it is necessary, and its regression
-proof; otherwise keep the finding unresolved.
+applicable `Risks` entry against the already-reviewed patch and the named prior
+Purpose Drift finding. This retry is valid only when necessary but undisclosed
+scope was the sole remaining accepted finding. Do not reopen the full patch or
+novelty-mine unchanged code. Return `PASS` only when the corrected description
+states the actual surface, why it is necessary, and its regression proof;
+otherwise keep the finding unresolved.
 
 A prior accepted finding that the remediation delta claims to correct but does
 not actually resolve counts as `REVIEW_INDUCED`. Verify every claimed correction
@@ -141,57 +152,39 @@ If the converged implementation still prevents the stated outcome from
 shipping, report the reachable correctness failure; do not infer that the
 intended behavior should be deleted.
 
-## Product experience audit
+## Product UX audit
 
 When the PR is user-facing, first state its irreducible user purpose and the
-smallest complete experience that fulfills it. Then trace the actual production
-journey rather than reviewing isolated components or internal completion:
+smallest complete experience that fulfills it. Trace the ordinary current
+production journey from its entry and promise through the existing owners to
+the timely result and intended destination. Internal completion is not success
+when the current journey loses, misroutes, or never delivers that result.
+Require production-faithful evidence only for the changed claims and boundaries.
 
-- the initiating person, entry point, intent, immediate acknowledgement, and
-  whether that acknowledgement makes a truthful promise;
-- every queue, runtime, provider, workflow, permission, or asynchronous handoff,
-  including the existing owner that starts or wakes the next step;
-- the expected timing class and longest normal wait through cold, busy, dirty,
-  backlogged, retry, restart, and concurrent-input states;
-- progress, completion, and the exact place and audience that receive the
-  result without requiring an unrelated new inbound action; and
-- denial, timeout, cancellation, revocation, failure, recovery, and what the
-  person experiences next.
-
-`Asynchronous` is not a complete experience or latency contract. Durable
-acceptance or internal completion is not success when work waits behind
-unrelated idle or maintenance activity, receives misleading or absent feedback,
-arrives too late to be useful, reaches the wrong context, or never closes the
-loop with its initiator. Require production-faithful evidence for cross-runtime
-wakeups, timing, and final delivery; unit mocks and internal state alone do not
-prove them. Calibrate latency to the interaction and the PR's stated timing
-class instead of inventing a universal budget.
+Inspect an exceptional state only when the diff changes it, the current product
+supports it as part of this journey, or concrete evidence shows a realistically
+frequent, material, or irreversible failure. Do not infer a new feature,
+control, cascade, or lifecycle from an imaginable state. Calibrate timing to the
+declared interaction instead of inventing a universal budget.
 
 For frontend-facing changes, audit the interaction economy from the changed
 source and PR flow. Inspect rendered states only when readable visual artifacts
 are present inside `codebase.zip`; otherwise state the exact rendered-evidence
-gap and do not infer visual quality. Make every word, click, field, choice,
-confirmation, setting, screen, and visual element earn its place. Prefer one
-clear primary action, strong defaults, inference, direct manipulation, and
-progressive disclosure. Delete copy that repeats labels, narrates an avoidable
-interaction, or compensates for weak hierarchy; preserve words and controls
-needed for safety, consent, accessibility, trust, undo, revocation, or recovery.
-Judge loading, empty, success, partial, delayed, error, and recovery states as
-carefully as the happy path. When rendered evidence is available, the result
-should feel coherent, calm, intentional, and finished—not like generic
-dashboard furniture or ornamental polish competing with the feature's purpose.
+gap and do not infer visual quality. Make each changed element earn its place
+and prefer one clear primary action, strong defaults, and progressive
+disclosure. Inspect only states touched by the diff or required by the declared
+outcome; do not infer optional controls for generic completeness. Preserve
+in-scope accessibility, consent, trust, authority, and recovery. When rendered
+evidence is available, the result should feel coherent, calm, intentional, and
+finished.
 
 Report only reachable, material gaps between that experience and the
 implementation. Treat the PR's UX outline as an intent contract, never as proof
 that the journey, timing, delivery, or rendered quality works.
 
-Use the PR description's change-shape breakdown only to orient the review. Verify
-its classifications and implications against the changed-file list and diff; raw
-line counts are not evidence that a change is safe, risky, simple, or over-tested.
-
 Build an independent affected-surface inventory from the diff, shared callers,
-and runtime owners. Compare it with the stated PR purpose and the description's
-`Non-obvious affected surfaces` section. A material user-visible, ordering,
+and runtime owners. Compare it with the stated PR purpose and any applicable
+risk notes. A material user-visible, ordering,
 state, authority, workflow, or deploy/runtime change outside the stated purpose
 is purpose drift when it is unnecessary or undisclosed. Disclosure does not make
 an unsafe or needless change acceptable. Delete or split unnecessary scope. When
@@ -249,6 +242,11 @@ test, production-faithful reachable scenario, measured bottleneck, applicable
 security, privacy, or repository invariant, or concrete product need proves
 that the simpler design is insufficient.
 
+An added persisted field or state must have a current writer, current consumer,
+and present-day outcome or hard invariant. An added control or ownership path
+must be required by a current supported journey. Otherwise recommend deletion;
+composability means a small clear owner, not speculative surface area.
+
 Simplicity constrains every finding and correction. Do not recommend a
 correction that adds a durable state owner, state machine, lifecycle state,
 queue, scheduler, lease, fence, manager, reconciliation loop, compatibility
@@ -260,13 +258,12 @@ machinery, return `RETROSPECTIVE_REQUIRED`; do not prescribe another
 compensating patch. Findings caused by one mechanism must share one root-cause
 correction instead of accumulating guards.
 
-# Change-shape anomaly
+# Patch-size anomaly
 
-The PR description's change-shape breakdown is both reviewer orientation and a
-scope-anomaly signal. Raw counts are not a quality verdict, but they must not be
-ignored. For this gate, authored source excludes tests, fixtures, docs,
-generated files, and config/tooling; source churn is authored-source additions
-plus deletions.
+Compute the patch shape from `pr.diff`. Raw counts are not a quality verdict,
+but they remain a useful scope-anomaly signal. For this gate, authored source
+excludes tests, fixtures, docs, generated files, and config/tooling; source
+churn is authored-source additions plus deletions.
 
 Return `RETROSPECTIVE_REQUIRED` before ordinary finding-by-finding remediation
 when any of these is true and the invocation does not contain a completed
@@ -297,7 +294,11 @@ Report only:
   reachable path to data loss or corruption, auth/privacy/security exposure,
   race/retry/idempotency failure, deploy/runtime breakage, billing or other
   irreversible effects, broken core flows, or another serious user-visible
-  failure. A theoretical interleaving or contract mismatch alone is not High.
+  failure. For this category, only report a finding when merging the PR would
+  cause concrete, realistically reachable, material production harm. A contract
+  mismatch or theoretical concern is evidence, not a finding, unless it
+  establishes that harm. A theoretical interleaving or contract mismatch alone
+  is not High.
   State the ordinary runtime sequence or externally controllable path and the
   material impact.
 - **Complexity Collapse**: the same required behavior can be implemented with
@@ -396,21 +397,11 @@ For an Experience Collapse, also state the removed words, actions, screens,
 choices, concepts, or waits and the clarity, accessibility, consent, trust, and
 control that the smaller experience preserves.
 
-When `pr-body.md` describes the change inaccurately — a change-shape table that
-does not match your count of `pr.diff`, a validation claim contradicted by the
-snapshot, or prose describing an earlier head — add `Body discrepancy: <claimed
-value> vs <counted value>, counted by <method>` after the findings and before
-the outcome, one line per discrepancy. Report every one you find. These are
-notes, not qualifying findings, and they do not prevent `PASS`: they tell the
-author what to correct in the document without withholding the review of the
-code. Apply the same treatment when the invocation omits its prior-round
-summary.
-
 When a user-facing frontend change has no readable rendered artifacts inside
 `codebase.zip`, add `Rendered evidence gap: <exact gap>` after the findings and
 before the outcome. The gap is not independently a qualifying finding and does
 not prevent `PASS` because the completed preliminary specialist ReviewGPT pass
-and its applicable frontend and product-experience lenses own rendered proof.
+and its applicable frontend and Product UX lenses own rendered proof.
 Never claim that this final gate independently proved rendered craft.
 
 For `RETROSPECTIVE_REQUIRED`, do not invent tactical fixes. State the trigger,
@@ -426,12 +417,11 @@ End with exactly one of these lines:
 `ROUND_OUTCOME: INVALID`
 
 Use `PASS` only when there are no qualifying findings and every claimed prior
-correction is proven effective; body discrepancies and rendered evidence gaps
-are notes and do not withhold it. Use `INVALID` only when the code evidence will
+correction is proven effective; rendered evidence gaps are notes and do not
+withhold it. Use `INVALID` only when the code evidence will
 not support a review or a later full audit lacks its mandatory prior-finding
 summary, as defined in Evidence and round scope; it does not count as a
-substantive round. An inaccurate PR body is never grounds for `INVALID`. Put
-the selected outcome immediately before this exact final line, and do not use
-the token elsewhere:
+substantive round. Put the selected outcome immediately before this exact final
+line, and do not use the token elsewhere:
 
 REVIEW_COMPLETE

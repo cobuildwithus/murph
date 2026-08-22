@@ -13,13 +13,89 @@ release_artifacts_pattern="^(${escaped_release_package_jsons}|packages/cli/CHANG
 changed_files=""
 compare_source=""
 compare_range=""
+exact_base_sha=""
+
+read_pull_request_event_sha() {
+  local field="$1"
+
+  if [[ -z "${GITHUB_EVENT_PATH:-}" || ! -f "${GITHUB_EVENT_PATH}" ]]; then
+    return 0
+  fi
+
+  node - "${GITHUB_EVENT_PATH}" "$field" <<'NODE'
+const fs = require("node:fs");
+const [eventPath, field] = process.argv.slice(2);
+const event = JSON.parse(fs.readFileSync(eventPath, "utf8"));
+const pullRequest = event.pull_request;
+const value = field === "base" ? pullRequest?.base?.sha : pullRequest?.head?.sha;
+if (typeof value === "string") process.stdout.write(value);
+NODE
+}
+
+require_exact_commit_sha() {
+  local label="$1"
+  local sha="$2"
+
+  if [[ ! "$sha" =~ ^([0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$ ]]; then
+    echo "::error::Docs drift CI mode requires a valid exact ${label} commit SHA." >&2
+    return 1
+  fi
+}
+
+prepare_exact_ci_comparison() {
+  local event_base_sha=""
+  local event_head_sha=""
+  local exact_candidate_sha=""
+  local current_head_sha=""
+
+  event_base_sha="$(read_pull_request_event_sha base)"
+  event_head_sha="$(read_pull_request_event_sha head)"
+  exact_base_sha="${MURPH_DOCS_DRIFT_BASE_SHA:-${MURPH_PR_BASE_SHA:-$event_base_sha}}"
+  exact_candidate_sha="${MURPH_DOCS_DRIFT_CANDIDATE_SHA:-${GITHUB_SHA:-${MURPH_PR_HEAD_SHA:-$event_head_sha}}}"
+
+  if [[ -z "$exact_base_sha" ]]; then
+    echo "::error::Docs drift CI mode requires an exact base SHA from MURPH_DOCS_DRIFT_BASE_SHA, MURPH_PR_BASE_SHA, or GITHUB_EVENT_PATH." >&2
+    return 1
+  fi
+  if [[ -z "$exact_candidate_sha" ]]; then
+    exact_candidate_sha="$(git rev-parse HEAD)"
+  fi
+
+  require_exact_commit_sha "base" "$exact_base_sha"
+  require_exact_commit_sha "candidate" "$exact_candidate_sha"
+
+  current_head_sha="$(git rev-parse HEAD)"
+  if [[ "$current_head_sha" != "$exact_candidate_sha" ]]; then
+    echo "::error::Docs drift CI candidate ${exact_candidate_sha} does not match checked-out HEAD ${current_head_sha}." >&2
+    return 1
+  fi
+
+  if ! git cat-file -e "${exact_candidate_sha}^{commit}" 2>/dev/null; then
+    echo "::error::Docs drift CI candidate ${exact_candidate_sha} is not available as a commit." >&2
+    return 1
+  fi
+
+  if ! git cat-file -e "${exact_base_sha}^{commit}" 2>/dev/null; then
+    # Fetch only the immutable event commit when a depth-one checkout omitted it.
+    # Never rewrite the mutable origin/<base> ref or shorten existing shallow proof.
+    if ! git fetch --quiet --no-tags --no-write-fetch-head --depth=1 origin "$exact_base_sha"; then
+      echo "::error::Unable to fetch exact docs drift base ${exact_base_sha}." >&2
+      return 1
+    fi
+  fi
+  if ! git cat-file -e "${exact_base_sha}^{commit}" 2>/dev/null; then
+    echo "::error::Docs drift CI base ${exact_base_sha} is not available as a commit." >&2
+    return 1
+  fi
+
+  compare_source="ci-exact"
+  compare_range="${exact_base_sha}..${exact_candidate_sha}"
+  changed_files="$(git diff --name-only "$compare_range")"
+}
 
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
-    git fetch --quiet origin "${GITHUB_BASE_REF}" --depth=1 || true
-    compare_source="range"
-    compare_range="origin/${GITHUB_BASE_REF}...HEAD"
-    changed_files="$(git diff --name-only "$compare_range" || true)"
+    prepare_exact_ci_comparison
   else
     staged_changes="$(git diff --name-only --cached | sed '/^[[:space:]]*$/d' | sort -u)"
     working_tree_changes="$({
@@ -64,7 +140,7 @@ package_jsons_version_only() {
       working-tree)
         diff_lines="$(git diff --unified=0 --no-color -- "$path" 2>/dev/null || true)"
         ;;
-      range)
+      range|ci-exact)
         diff_lines="$(git diff --unified=0 --no-color "$compare_range" -- "$path" 2>/dev/null || true)"
         ;;
       *)
@@ -107,4 +183,26 @@ then
 fi
 
 source scripts/repo-tools.config.sh
-exec "$(cobuild_repo_tool_bin cobuild-check-agent-docs-drift)" "$@"
+docs_drift_tool="$(cobuild_repo_tool_bin cobuild-check-agent-docs-drift)"
+
+if [[ "$compare_source" == "ci-exact" ]]; then
+  exact_index_dir="$(mktemp -d "${TMPDIR:-/tmp}/murph-docs-drift-index.XXXXXX")"
+  exact_index="$exact_index_dir/index"
+  trap 'rm -rf -- "$exact_index_dir"' EXIT
+
+  # The upstream policy's staged comparison is path-equivalent to base..candidate.
+  # An alternate index lets it evaluate the exact candidate without fetching or
+  # rewriting a mutable base ref and without changing the caller's real index.
+  GIT_INDEX_FILE="$exact_index" git read-tree "$exact_base_sha"
+  if GITHUB_BASE_REF= GIT_INDEX_FILE="$exact_index" "$docs_drift_tool" "$@"; then
+    docs_drift_status=0
+  else
+    docs_drift_status=$?
+  fi
+
+  rm -rf -- "$exact_index_dir"
+  trap - EXIT
+  exit "$docs_drift_status"
+fi
+
+exec "$docs_drift_tool" "$@"

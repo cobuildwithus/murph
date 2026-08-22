@@ -54,7 +54,7 @@ vi.mock("@/src/lib/http", () => ({
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: mocks.getPrisma }));
 
-import { POST } from "@/app/api/groups/fund/[joinCode]/sponsorship/route";
+import { GET, POST } from "@/app/api/groups/fund/[joinCode]/sponsorship/route";
 
 describe("group sponsorship management route", () => {
   beforeEach(() => {
@@ -77,6 +77,40 @@ describe("group sponsorship management route", () => {
       runtimeMemberId: "member_group_runtime",
     });
     mocks.manageHostedGroupSponsorshipAuthorization.mockResolvedValue(null);
+  });
+
+  it("reads the exact payer management projection without starting recovery again", async () => {
+    const management = {
+      authorizationId: "hgsa_abcdefghijklmnop",
+      status: "active",
+    };
+    mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValue(
+      management,
+    );
+
+    await expect(GET(new Request(
+      "https://join.example.test/api/groups/fund/group_join_code_1234/sponsorship",
+    ), {
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }) as Promise<unknown>).resolves.toEqual({ management });
+
+    expect(
+      mocks.readHostedGroupUsageFundingManagementTargetByLocator,
+    ).toHaveBeenCalledWith({
+      locator: "group_join_code_1234",
+      prisma: { label: "prisma" },
+    });
+    expect(
+      mocks.readHostedGroupSponsorshipManagementProjection,
+    ).toHaveBeenCalledWith({
+      beneficiaryMemberId: "member_group_runtime",
+      payerMemberId: "member_payer",
+      prisma: { label: "prisma" },
+    });
+    expect(
+      mocks.recoverHostedGroupSponsorshipUsageCreditCheckout,
+    ).not.toHaveBeenCalled();
+    expect(mocks.assertHostedOnboardingMutationOrigin).not.toHaveBeenCalled();
   });
 
   it("allows the exact suspended payer to cancel through an inactive target", async () => {
@@ -136,5 +170,79 @@ describe("group sponsorship management route", () => {
 
     expect(mocks.readHostedGroupUsageFundingTargetByLocator).not.toHaveBeenCalled();
     expect(mocks.manageHostedGroupSponsorshipAuthorization).not.toHaveBeenCalled();
+  });
+
+  it.each(["payment_pending", "fulfilled"] as const)(
+    "returns the current management projection with a no-URL %s recovery",
+    async (status) => {
+      const action = {
+        action: "recover",
+        authorizationId: "hgsa_abcdefghijklmnop",
+      } as const;
+      const checkout = {
+        purchaseId: "hucp_recovery_abcdefghijkl",
+        status,
+      };
+      const management = {
+        authorizationId: action.authorizationId,
+        status: status === "fulfilled" ? "active" : "recovery_required",
+      };
+      mocks.parseHostedGroupSponsorshipManagementAction.mockReturnValue(action);
+      mocks.recoverHostedGroupSponsorshipUsageCreditCheckout.mockResolvedValue(
+        checkout,
+      );
+      mocks.readHostedGroupSponsorshipManagementProjection.mockResolvedValue(
+        management,
+      );
+
+      await expect(POST(new Request(
+        "https://join.example.test/api/groups/fund/group_join_code_1234/sponsorship",
+        {
+          body: JSON.stringify(action),
+          headers: { "content-type": "application/json" },
+          method: "POST",
+        },
+      ), {
+        params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+      }) as Promise<unknown>).resolves.toEqual({ checkout, management });
+
+      expect(
+        mocks.readHostedGroupSponsorshipManagementProjection,
+      ).toHaveBeenCalledWith({
+        beneficiaryMemberId: "member_group_runtime",
+        payerMemberId: "member_payer",
+        prisma: { label: "prisma" },
+      });
+    },
+  );
+
+  it("does not project management for a recovery that still needs Checkout", async () => {
+    const action = {
+      action: "recover",
+      authorizationId: "hgsa_abcdefghijklmnop",
+    } as const;
+    const checkout = {
+      purchaseId: "hucp_recovery_abcdefghijkl",
+      status: "reconciling",
+    };
+    mocks.parseHostedGroupSponsorshipManagementAction.mockReturnValue(action);
+    mocks.recoverHostedGroupSponsorshipUsageCreditCheckout.mockResolvedValue(
+      checkout,
+    );
+
+    await expect(POST(new Request(
+      "https://join.example.test/api/groups/fund/group_join_code_1234/sponsorship",
+      {
+        body: JSON.stringify(action),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      },
+    ), {
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    }) as Promise<unknown>).resolves.toEqual({ checkout });
+
+    expect(
+      mocks.readHostedGroupSponsorshipManagementProjection,
+    ).not.toHaveBeenCalled();
   });
 });

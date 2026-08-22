@@ -469,6 +469,13 @@ function hasReachedRestoredTerminalBoundary(
         status,
         naturalIdleSnapshotAtMs,
       )
+    )
+    || (
+      !status.inFlight
+      && hasEmptyMailboxImportAtOrAfter(
+        status,
+        naturalIdleSnapshotAtMs,
+      )
     );
 }
 
@@ -481,6 +488,20 @@ function hasIdleShutdownSnapshotWithoutRuntimeWakeAt(
     && entry.redactedJson?.checkpointReason === "idle_shutdown"
     && entry.redactedJson.runtimeWakePendingAtCheckpoint === false
     && Date.parse(entry.at) === expectedAtMs
+  );
+}
+
+function hasEmptyMailboxImportAtOrAfter(
+  status: HostedRunnerStatusResponse,
+  expectedAtMs: number,
+): boolean {
+  return (status.recentLogs ?? []).some((entry) =>
+    entry.eventCode === "mailbox.imported"
+    && Date.parse(entry.at) >= expectedAtMs
+    && entry.redactedJson?.fetchedCount === 0
+    && entry.redactedJson.importedCount === 0
+    && entry.redactedJson.blockedCount === 0
+    && entry.redactedJson.stateChanged === false
   );
 }
 

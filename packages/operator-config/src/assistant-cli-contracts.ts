@@ -2,6 +2,7 @@ import { isIP } from 'node:net'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   assistantReasoningEffortValues as contractAssistantReasoningEffortValues,
+  automationContextReferencesSchema,
   automationRouteSchema,
   automationScheduleAtSchema,
   automationScheduleCronSchema,
@@ -43,6 +44,7 @@ import {
   looksLikePrivateAssistantRoutePlaceholder,
 } from './assistant/current-delivery-route.js'
 import {
+  assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
 } from './assistant-response-cards.js'
 
@@ -349,6 +351,13 @@ export const assistantExternalThreadRouteAuthoritySchema = z
 export const assistantOutboxAutomationAuthoritySchema = z
   .object({
     automationId: z.string().trim().min(1),
+    supportSeriesId: z.string().trim().min(1).optional(),
+    // Legacy parse-only fields retained for one 14-day terminal-outbox
+    // retention window after all writers stopped emitting them. They are inert:
+    // current delivery uses expectedUpdatedAt, while historical replies use
+    // supportSeriesId plus the delivered occurrence.
+    automationRelativePath: z.string().trim().min(1).optional(),
+    expectedSemanticRevision: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
     expectedUpdatedAt: isoTimestampSchema,
   })
   .strict()
@@ -369,7 +378,19 @@ const assistantImageResponseMediaSchema = z
     url: z
       .string()
       .url()
-      .transform((value) => normalizeAssistantResponseMediaUrl(value)),
+      .transform((value, context) => {
+        try {
+          return normalizeAssistantResponseMediaUrl(value)
+        } catch {
+          context.addIssue({
+            code: 'custom',
+            message:
+              'Assistant response media URLs must be valid public HTTPS image URLs.',
+            params: { murphExpectedShape: 'public_https_image_url' },
+          })
+          return z.NEVER
+        }
+      }),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
@@ -403,6 +424,20 @@ const assistantVaultImageResponseMediaSchema = z
     source: z.string().trim().min(1).max(200).nullable().default(null),
   })
   .strict()
+
+export const assistantAuthoredResponseMediaSchema = z.preprocess(
+  (value) =>
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !Object.hasOwn(value, 'kind')
+      ? { ...value, kind: 'image' }
+      : value,
+  z.discriminatedUnion('kind', [
+    assistantImageResponseMediaSchema,
+    assistantVaultImageResponseMediaSchema,
+  ]),
+)
 
 export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
   z
@@ -762,6 +797,11 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // True when an assistant entry begins a conversation turn without an
+  // originating member entry in this transcript and remains meaningful as
+  // context for the member's next reply. Omission is the ordinary dependent
+  // assistant-reply case and keeps existing persisted entries compatible.
+  standaloneAssistantContext: z.literal(true).optional(),
   // Stable provenance for replay-safe imports that originate from a durable
   // outbox delivery rather than a provider turn.
   sourceOutboxIntentId: assistantOutboxIntentIdSchema.optional(),
@@ -989,6 +1029,14 @@ export const assistantOutboxIntentSchema = z
     automationAuthority: assistantOutboxAutomationAuthoritySchema
       .nullable()
       .optional(),
+    // Persisted delivery context only. These exact canonical references grant
+    // no mutation authority; later turns must use ordinary domain tools.
+    automationContextReferences: automationContextReferencesSchema
+      .nullable()
+      .optional(),
+    scheduledOccurrenceAt: isoTimestampSchema.nullable().optional(),
+    // Exact event time derived from the durable automation lead at fire time.
+    plannedOccurrenceAt: isoTimestampSchema.nullable().optional(),
     externalThreadRouteAuthority: assistantExternalThreadRouteAuthoritySchema
       .nullable()
       .optional(),
@@ -996,6 +1044,12 @@ export const assistantOutboxIntentSchema = z
     explicitTarget: z.string().min(1).nullable(),
     delivery: assistantChannelDeliverySchema.nullable(),
     deliveryConfirmationPending: z.boolean().default(false),
+    // Undefined means the delivery predates outbound message-volume cutover
+    // or is not an eligible conversational Telegram/email message. Null is a
+    // durable pending receipt; a timestamp confirms the anonymous Web-side
+    // receipt was recorded. The delivery owner keeps this marker so a crash
+    // cannot lose or duplicate accounting without changing send behavior.
+    messageVolumeReceiptRecordedAt: isoTimestampSchema.nullable().optional(),
     deliveryIdempotencyKey: z.string().min(1).nullable().default(null),
     deliveryTransportIdempotent: z.boolean().default(false),
     groupEmailAuthorizationProof: z
@@ -1034,13 +1088,13 @@ export const assistantOutboxIntentSchema = z
       })
     }
 
-    if (
-      intent.card?.kind === 'challenge_standings' &&
-      !(
-        intent.threadIsDirect === false &&
-        intent.channel?.trim().toLowerCase() === 'linq'
-      )
-    ) {
+    if (intent.card?.kind === 'challenge_standings' && !(
+      assistantResponseCardMatchesConversationAudience({
+        card: intent.card,
+        channel: intent.channel,
+        threadIsDirect: intent.threadIsDirect,
+      })
+    )) {
       context.addIssue({
         code: 'custom',
         message:
@@ -1051,7 +1105,11 @@ export const assistantOutboxIntentSchema = z
     if (
       intent.card !== null &&
       intent.card.kind !== 'challenge_standings' &&
-      intent.threadIsDirect !== true
+      !assistantResponseCardMatchesConversationAudience({
+        card: intent.card,
+        channel: intent.channel,
+        threadIsDirect: intent.threadIsDirect,
+      })
     ) {
       context.addIssue({
         code: 'custom',

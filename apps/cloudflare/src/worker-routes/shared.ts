@@ -47,6 +47,7 @@ export interface UserRunnerDurableObjectStubLike extends WorkerUserRunnerStubLik
   ): Promise<HostedPrivateMediaPublishResult>;
   ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & {
+      commandStartedAtEpochMs?: number;
       commandTimeoutMs?: number;
       orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
       userId: string;

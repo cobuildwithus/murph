@@ -14,13 +14,12 @@ import { readConfiguredDeviceSyncConnectTargetConfigs } from "../src/connect-con
 import { HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT } from "../src/hosted-runtime.ts";
 
 test("configured Junction source authority fits one runtime connection snapshot", () => {
+  const routeEntries = listJunctionDeviceConnectRouteEntries();
   const sourceProviderSlugs = new Set(
-    listJunctionDeviceConnectRouteEntries().map(
-      ({ route }) => route.sourceProviderSlug,
-    ),
+    routeEntries.map(({ route }) => route.sourceProviderSlug),
   );
 
-  assert.equal(sourceProviderSlugs.size, 33);
+  assert.equal(sourceProviderSlugs.size, routeEntries.length);
   assert.ok(
     sourceProviderSlugs.size
       <= HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_CONNECTION_SOURCE_LIMIT,
@@ -53,7 +52,7 @@ test("connect targets prefer direct providers except Junction-backed WHOOP", () 
       { connectSourceId: "oura", connectTarget: "oura", provider: "oura", sourceProviderSlug: null },
       { connectSourceId: "strava", connectTarget: "strava", provider: "strava", sourceProviderSlug: null },
       { connectSourceId: "whoop", connectTarget: "whoop", provider: "junction", sourceProviderSlug: "whoop_v2" },
-      { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "fitbit" },
+      { connectSourceId: "fitbit", connectTarget: "fitbit", provider: "junction", sourceProviderSlug: "google_health" },
     ],
   );
 

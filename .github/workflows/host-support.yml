@@ -102,6 +102,8 @@ jobs:
           node --check scripts/pack-publishables.mjs
           node --check scripts/publish-publishables.mjs
           node --test scripts/release-artifact-secret-guard.test.mjs
+          node --test scripts/check-runner-bundle-budget-ci.test.mjs
+          node scripts/check-runner-bundle-budget-ci.mjs
           node scripts/verify-release-target.mjs
 
       - name: Clean workspace build
@@ -285,6 +287,93 @@ jobs:
       - name: Run app verification
         run: pnpm test:apps
 
+  production-runner-bundle-budget-linux:
+    name: Production runner bundle budget (ubuntu)
+    runs-on: ubuntu-24.04
+    env:
+      MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+
+      - name: Require deployment runner platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -s)" = "Linux"
+          test "$(uname -m)" = "x86_64"
+
+      - name: Bind exact PR head to current base
+        if: github.event_name == 'pull_request'
+        id: candidate
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_base="$(
+            git ls-remote --exit-code --refs origin "refs/heads/${PR_BASE_REF}" \
+              | awk 'NR == 1 { print $1 }'
+          )"
+          candidate_base="$(git rev-parse HEAD^1)"
+          candidate_head="$(git rev-parse HEAD^2)"
+
+          [[ "$current_base" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Could not resolve current base branch ${PR_BASE_REF}." >&2
+            exit 1
+          }
+          [[ "$candidate_head" == "$PR_HEAD_SHA" ]] || {
+            echo "Runner bundle candidate does not contain the exact PR head." >&2
+            echo "candidate head: ${candidate_head}" >&2
+            echo "expected head:  ${PR_HEAD_SHA}" >&2
+            exit 1
+          }
+          [[ "$candidate_base" == "$current_base" ]] || {
+            echo "Runner bundle candidate is not based on current ${PR_BASE_REF}." >&2
+            echo "candidate base: ${candidate_base}" >&2
+            echo "current base:   ${current_base}" >&2
+            exit 1
+          }
+          echo "base_sha=${current_base}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Measure production Linux runner bundle budget
+        run: pnpm --dir apps/cloudflare runner:bundle
+
+      - name: Require base to remain current
+        if: github.event_name == 'pull_request'
+        env:
+          MEASURED_BASE_SHA: ${{ steps.candidate.outputs.base_sha }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current_base="$(
+            git ls-remote --exit-code --refs origin "refs/heads/${PR_BASE_REF}" \
+              | awk 'NR == 1 { print $1 }'
+          )"
+          [[ "$current_base" == "$MEASURED_BASE_SHA" ]] || {
+            echo "${PR_BASE_REF} moved while the runner bundle was measured." >&2
+            echo "measured base: ${MEASURED_BASE_SHA}" >&2
+            echo "current base:  ${current_base}" >&2
+            exit 1
+          }
+
   release-fixture-coverage-linux:
     name: Release fixture coverage (ubuntu)
     runs-on: ubuntu-24.04
@@ -318,6 +407,7 @@ jobs:
       - release-package-coverage-linux
       - release-app-verification-linux
       - release-fixture-coverage-linux
+      - production-runner-bundle-budget-linux
     if: ${{ always() }}
     steps:
       - name: Check release shards
@@ -336,5 +426,9 @@ jobs:
           fi
           if [[ "${{ needs.release-fixture-coverage-linux.result }}" != "success" ]]; then
             echo "Release fixture coverage shard failed or did not complete."
+            exit 1
+          fi
+          if [[ "${{ needs.production-runner-bundle-budget-linux.result }}" != "success" ]]; then
+            echo "Production runner bundle budget failed or did not complete."
             exit 1
           fi

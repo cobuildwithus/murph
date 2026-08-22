@@ -1311,6 +1311,20 @@
                             "weekly_digest"
                           ]
                         },
+                        "plannedOccurrenceOffsetMs": {
+                          "description": "Milliseconds from this reminder to the planned session occurrence.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "contextReference": {
+                          "description": "Exact canonical record in <entity-kind>=<entity-id> form. Repeat for multiple records; routing and interpretation context only.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 3
+                          }
+                        },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
                           "type": "string",
@@ -1534,6 +1548,20 @@
                             "weekly_digest"
                           ]
                         },
+                        "plannedOccurrenceOffsetMs": {
+                          "description": "Milliseconds from this reminder to the planned session occurrence.",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "contextReference": {
+                          "description": "Exact canonical record in <entity-kind>=<entity-id> form. Repeat for multiple records; routing and interpretation context only.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 3
+                          }
+                        },
                         "continuityPolicy": {
                           "description": "Optional continuity policy for scheduled assistant context.",
                           "type": "string",
@@ -1673,6 +1701,14 @@
                         },
                         "clearSupportKind": {
                           "description": "Clear persisted plan-support consent metadata.",
+                          "type": "boolean"
+                        },
+                        "clearPlannedOccurrenceOffset": {
+                          "description": "Clear the planned session occurrence offset.",
+                          "type": "boolean"
+                        },
+                        "clearContextReferences": {
+                          "description": "Clear all canonical routing and interpretation references.",
                           "type": "boolean"
                         },
                         "clearAssistantTargetOverride": {
@@ -3675,6 +3711,11 @@
                             "device",
                             "derived"
                           ]
+                        },
+                        "reuseExact": {
+                          "default": false,
+                          "description": "Reuse one live document with verified identical bytes instead of creating another document.",
+                          "type": "boolean"
                         }
                       }
                     }
@@ -3734,6 +3775,24 @@
                   }
                 },
                 "manifest": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "options": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "requestId": {
+                          "description": "Optional caller-supplied request id for audit correlation.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        }
+                      }
+                    }
+                  }
+                },
+                "workout-import-status": {
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
@@ -4173,6 +4232,14 @@
                       "properties": {
                         "indicator": {
                           "description": "Indicator assignment like night_temp_c=19 or co2_meter=declined. Repeat --indicator for multiple values.",
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 3
+                          }
+                        },
+                        "indicatorNote": {
+                          "description": "Concise context like sauna_type=Dry home sauna, up to 100°C, Harvia heater. Repeat --indicator-note for multiple values; use null to clear.",
                           "type": "array",
                           "items": {
                             "type": "string",
@@ -5867,6 +5934,16 @@
                           "type": "string",
                           "minLength": 1
                         },
+                        "exercise": {
+                          "description": "Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.",
+                          "maxItems": 100,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          }
+                        },
                         "type": {
                           "description": "Optional activity type override. Defaults to strength-training.",
                           "type": "string",
@@ -5889,29 +5966,6 @@
                     }
                   }
                 },
-                "active": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "options": {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "requestId": {
-                          "description": "Optional caller-supplied request id for audit correlation.",
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 128
-                        },
-                        "workoutId": {
-                          "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
-                          "type": "string",
-                          "pattern": "^evt_[0-9A-Za-z]+$"
-                        }
-                      }
-                    }
-                  }
-                },
                 "finish": {
                   "type": "object",
                   "additionalProperties": false,
@@ -5927,9 +5981,9 @@
                           "maxLength": 128
                         },
                         "workoutId": {
-                          "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                           "type": "string",
-                          "pattern": "^evt_[0-9A-Za-z]+$"
+                          "pattern": "^evt_[0-9A-Za-z]+$",
+                          "description": "Canonical workout id returned by workout start or workout show."
                         },
                         "endedAt": {
                           "description": "Optional finish timestamp. Defaults to now.",
@@ -5964,9 +6018,9 @@
                                   "maxLength": 128
                                 },
                                 "workoutId": {
-                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                                   "type": "string",
-                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
                                 },
                                 "sourceExerciseId": {
                                   "description": "Optional stable source exercise id, such as an exercise catalog id.",
@@ -5978,7 +6032,7 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991,
-                                  "description": "One-based exercise order within the live workout."
+                                  "description": "One-based exercise order within the exact workout."
                                 },
                                 "groupId": {
                                   "description": "Optional superset or circuit group id.",
@@ -6010,11 +6064,55 @@
                                   "maxLength": 4000
                                 },
                                 "sets": {
-                                  "default": 1,
-                                  "description": "Number of unlogged set placeholders to create. Defaults to 1.",
+                                  "description": "Explicit finite planned set count. Omit it to create one targetless set.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 150
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "set-reps": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "options": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "properties": {
+                                "requestId": {
+                                  "description": "Optional caller-supplied request id for audit correlation.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "workoutId": {
+                                  "type": "string",
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
+                                },
+                                "exerciseId": {
+                                  "description": "Optional stable source exercise id, such as an exercise catalog id.",
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "exerciseOrder": {
+                                  "description": "Optional one-based exercise order within the exact workout.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "reps": {
+                                  "description": "Exact member-stated repetitions for every set.",
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 999
+                                },
+                                "clear": {
+                                  "description": "Clear the stored member repetition count.",
+                                  "type": "boolean"
                                 }
                               }
                             }
@@ -6047,9 +6145,9 @@
                                   "maxLength": 128
                                 },
                                 "workoutId": {
-                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                                   "type": "string",
-                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
                                 },
                                 "exerciseId": {
                                   "description": "Optional stable source exercise id, such as an exercise catalog id.",
@@ -6058,7 +6156,7 @@
                                   "maxLength": 200
                                 },
                                 "exerciseOrder": {
-                                  "description": "Optional one-based exercise order within the live workout.",
+                                  "description": "Optional one-based exercise order within the exact workout.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991
@@ -6067,7 +6165,7 @@
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991,
-                                  "description": "One-based set order. Read the active workout and pass it explicitly."
+                                  "description": "One-based set order from the exact workout record."
                                 },
                                 "requireExistingSet": {
                                   "description": "Fail instead of appending when the selected set no longer exists.",
@@ -6148,9 +6246,9 @@
                                   "maxLength": 128
                                 },
                                 "workoutId": {
-                                  "description": "Optional canonical workout id. Omit it only when exactly one live workout is active.",
                                   "type": "string",
-                                  "pattern": "^evt_[0-9A-Za-z]+$"
+                                  "pattern": "^evt_[0-9A-Za-z]+$",
+                                  "description": "Canonical workout id returned by workout start or workout show."
                                 },
                                 "exerciseId": {
                                   "description": "Optional stable source exercise id, such as an exercise catalog id.",
@@ -6159,7 +6257,7 @@
                                   "maxLength": 200
                                 },
                                 "exerciseOrder": {
-                                  "description": "Optional one-based exercise order within the live workout.",
+                                  "description": "Optional one-based exercise order within the exact workout.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 9007199254740991
@@ -6704,6 +6802,12 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "expectedRevision": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "description": "Exact lifecycle revision observed when deletion was approved."
                         }
                       }
                     }
@@ -9108,6 +9212,11 @@
                           "default": false,
                           "description": "Apply the import. Without this flag the command only reports what it would create, skip, or update.",
                           "type": "boolean"
+                        },
+                        "sourceRawRefOnce": {
+                          "description": "Reject the whole batch if any workout has ever referenced this raw source. Every row must be an externalRef-free activity_session that references the same source.",
+                          "type": "string",
+                          "pattern": "^raw\\/[A-Za-z0-9._/-]+$"
                         }
                       }
                     }
@@ -12177,6 +12286,10 @@
                                   "type": "string",
                                   "minLength": 1,
                                   "maxLength": 128
+                                },
+                                "reminderIntentId": {
+                                  "description": "Provider-accepted private reminder intent id from trusted ordered conversation context. The canonical writer derives and deduplicates the occurrence from it.",
+                                  "type": "string"
                                 },
                                 "date": {
                                   "description": "Optional intended local session date in YYYY-MM-DD form.",

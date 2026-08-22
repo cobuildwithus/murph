@@ -20,7 +20,11 @@ import {
   createHostedStripeSubscriptionScheduleLookupKey,
   createHostedStripeSubscriptionScheduleLookupKeyReadCandidates,
 } from "./contact-privacy";
-import { hostedOnboardingError } from "./errors";
+import {
+  hostedOnboardingError,
+  HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+} from "./errors";
 import {
   buildHostedMemberBillingCheckoutSessionPrivateColumn,
   buildHostedMemberBillingPrivateColumns,
@@ -169,6 +173,106 @@ export class HostedMemberStripeMutationLockBusyError extends Error {
     super("Hosted member Stripe mutation lock is busy.");
     this.name = "HostedMemberStripeMutationLockBusyError";
   }
+}
+
+export function assertHostedStripeEffectClaimAbsent(
+  claimId: string | null | undefined,
+): void {
+  if (claimId === null || claimId === undefined) {
+    return;
+  }
+  throw hostedOnboardingError({
+    code: HOSTED_STRIPE_EFFECT_PENDING_ERROR_CODE,
+    httpStatus: 409,
+    message: HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+    retryable: true,
+  });
+}
+
+export async function assertNoHostedMemberStripeEffectTx(input: {
+  memberId: string;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const billingRef = await input.tx.hostedMemberBillingRef.findUnique({
+    select: { stripeEffectClaimId: true },
+    where: { memberId: input.memberId },
+  });
+  assertHostedStripeEffectClaimAbsent(billingRef?.stripeEffectClaimId);
+}
+
+/**
+ * Guards an exact direct Subscription against both of its possible future
+ * effect owners. A member-owned effect lives on the direct billing row, while
+ * direct-to-Family conversion is owned by the member's Family group and names
+ * the same direct Subscription by lookup key. Callers already hold this
+ * member's Stripe mutation lock, which is also the Family owner lock.
+ */
+export async function assertNoHostedDirectSubscriptionStripeEffectTx(input: {
+  memberId: string;
+  stripeSubscriptionId: string | null | undefined;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  const directSubscriptionLookupKeys =
+    createHostedStripeSubscriptionLookupKeyReadCandidates(
+      input.stripeSubscriptionId,
+    );
+  const memberClaim = await input.tx.hostedMemberBillingRef.findUnique({
+    select: { stripeEffectClaimId: true },
+    where: { memberId: input.memberId },
+  });
+  await assertNoHostedDirectSubscriptionStripeEffectByLookupKeysTx({
+    directSubscriptionLookupKeys,
+    memberId: input.memberId,
+    stripeEffectClaimId: memberClaim?.stripeEffectClaimId,
+    tx: input.tx,
+  });
+}
+
+/**
+ * Bounded variant for callers that already selected the direct billing row
+ * under the member lock. This avoids decrypting the Subscription merely to
+ * rebuild the lookup key used by the Family conversion claim.
+ */
+export async function assertNoHostedDirectSubscriptionStripeEffectByLookupKeyTx(
+  input: {
+    memberId: string;
+    stripeEffectClaimId: string | null | undefined;
+    stripeSubscriptionLookupKey: string | null | undefined;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  await assertNoHostedDirectSubscriptionStripeEffectByLookupKeysTx({
+    directSubscriptionLookupKeys: input.stripeSubscriptionLookupKey
+      ? [input.stripeSubscriptionLookupKey]
+      : [],
+    memberId: input.memberId,
+    stripeEffectClaimId: input.stripeEffectClaimId,
+    tx: input.tx,
+  });
+}
+
+async function assertNoHostedDirectSubscriptionStripeEffectByLookupKeysTx(
+  input: {
+    directSubscriptionLookupKeys: readonly string[];
+    memberId: string;
+    stripeEffectClaimId: string | null | undefined;
+    tx: Prisma.TransactionClient;
+  },
+): Promise<void> {
+  assertHostedStripeEffectClaimAbsent(input.stripeEffectClaimId);
+  const familyClaim = input.directSubscriptionLookupKeys.length === 0
+    ? null
+    : await input.tx.hostedAccountGroupBillingRef.findFirst({
+        select: { stripeEffectClaimId: true },
+        where: {
+          group: { ownerMemberId: input.memberId },
+          stripeEffectClaimId: { not: null },
+          stripeEffectDirectSubscriptionLookupKey: {
+            in: [...input.directSubscriptionLookupKeys],
+          },
+        },
+      });
+  assertHostedStripeEffectClaimAbsent(familyClaim?.stripeEffectClaimId);
 }
 
 export async function withHostedMemberStripeMutationLock<TResult>(input: {

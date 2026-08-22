@@ -274,13 +274,8 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
     } as never);
     const now = "2026-04-13T12:30:00.000Z";
 
-    await expect(store.deleteExpiredOAuthStates(now)).resolves.toBe(3);
-    expect(deleteMany).toHaveBeenCalledWith({
-      where: {
-        consumedAt: null,
-        expiresAt: { lte: new Date(now) },
-      },
-    });
+    await expect(store.deleteExpiredOAuthStates(now)).resolves.toBe(0);
+    expect(deleteMany).not.toHaveBeenCalled();
   });
 
   it("resolves a lost consume race as a replay instead of doing the work twice", async () => {
@@ -387,6 +382,27 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         consumedAt: null,
       },
     });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
+    const lockSql = String(tx.$queryRaw.mock.calls[0]?.[0].join("?"));
+    expect(lockSql).toContain(
+      'FROM "device_oauth_session" AS oauth_session',
+    );
+    expect(lockSql).toContain('WHERE oauth_session."state" = ?');
+    expect(lockSql).toContain("FOR UPDATE OF oauth_session");
+    expect(tx.$queryRaw.mock.calls[0]?.slice(1)).toEqual([record.state]);
+    expect(
+      tx.$queryRaw.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.deviceOauthSession.findUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      tx.deviceOauthSession.findUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      tx.deviceOauthSession.updateMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
@@ -406,7 +422,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
         record.userId ?? undefined,
       ),
     ).resolves.toEqual({ status: "missing" });
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(tx.deviceOauthSession.updateMany).not.toHaveBeenCalled();
     expect(tx.deviceOauthSession.deleteMany).toHaveBeenCalledWith({
       where: {
@@ -434,7 +450,7 @@ describe("PrismaHostedOAuthSessionStore.consumeOAuthState", () => {
       consumedAt: consumedAt.toISOString(),
       status: "replayed",
     });
-    expect(tx.$queryRaw).not.toHaveBeenCalled();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
   });
 
@@ -541,3 +557,15 @@ function createStore(tx: ReturnType<typeof createTransaction>) {
     ) => callback(tx),
   } as never);
 }
+
+describe("PrismaHostedOAuthSessionStore.deleteExpiredOAuthStates", () => {
+  it("leaves hosted expiry deletion to the background retention owner", async () => {
+    const tx = createTransaction({});
+    const store = createStore(tx);
+
+    await expect(
+      store.deleteExpiredOAuthStates(),
+    ).resolves.toBe(0);
+    expect(tx.deviceOauthSession.deleteMany).not.toHaveBeenCalled();
+  });
+});

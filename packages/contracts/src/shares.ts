@@ -142,7 +142,7 @@ function uniqueArray<TSchema extends z.ZodTypeAny>(
 }
 
 const SLUG_PATTERN = "^[a-z0-9]+(?:-[a-z0-9]+)*$";
-const UNIT_PATTERN = "^[A-Za-z0-9._/%-]+$";
+const UNIT_PATTERN = "^[A-Za-z0-9._/%^-]+$";
 const GROUP_PATTERN = "^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$";
 
 const slugSchema = patternedString(SLUG_PATTERN);

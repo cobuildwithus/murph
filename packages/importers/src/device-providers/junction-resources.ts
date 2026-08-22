@@ -1,3 +1,59 @@
+import { JUNCTION_ALLOWED_TIMESERIES_RESOURCES } from "@murphai/contracts";
+
+const JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES: ReadonlySet<string> = new Set([
+  "activity",
+  "body",
+  "menstrual_cycle",
+  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES.filter((resource) =>
+    resource !== "blood_pressure" && resource !== "note"
+  ),
+]);
+
+export function isJunctionDailyCanonicalCoverageResource(resource: string): boolean {
+  return JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource);
+}
+
+export function normalizeJunctionCanonicalCoverageBoundary(
+  resource: string,
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (isJunctionDailyCanonicalCoverageResource(resource)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+      return null;
+    }
+    const timestampMs = Date.parse(`${value}T00:00:00.000Z`);
+    return Number.isFinite(timestampMs)
+        && new Date(timestampMs).toISOString().slice(0, 10) === value
+      ? value
+      : null;
+  }
+
+  const timestampMs = Date.parse(value);
+  return Number.isFinite(timestampMs)
+      && new Date(timestampMs).toISOString() === value
+    ? value
+    : null;
+}
+
+export function maxJunctionCanonicalCoverageBoundary(
+  resource: string,
+  left: string,
+  right: string,
+): string {
+  const normalizedLeft = normalizeJunctionCanonicalCoverageBoundary(resource, left);
+  const normalizedRight = normalizeJunctionCanonicalCoverageBoundary(resource, right);
+  if (!normalizedLeft) {
+    return normalizedRight ?? left;
+  }
+  if (!normalizedRight) {
+    return normalizedLeft;
+  }
+  return normalizedRight > normalizedLeft ? normalizedRight : normalizedLeft;
+}
+
 export {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -424,9 +480,9 @@ export const JUNCTION_SLEEP_SUMMARY_NUMBER_PATHS = Object.freeze([
   ...JUNCTION_SLEEP_LIGHT_SECOND_PATHS,
   ...JUNCTION_SLEEP_AWAKE_MINUTE_PATHS,
   ...JUNCTION_SLEEP_AWAKE_SECOND_PATHS,
-  ...JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
   ...JUNCTION_SLEEP_LATENCY_MINUTE_PATHS,
   ...JUNCTION_SLEEP_LATENCY_SECOND_PATHS,
+  ...JUNCTION_SLEEP_EFFICIENCY_RATIO_PATHS,
   ...JUNCTION_SLEEP_HRV_PATHS,
   ...JUNCTION_SLEEP_AVERAGE_HEART_RATE_PATHS,
   ...JUNCTION_SLEEP_LOWEST_HEART_RATE_PATHS,

@@ -36,6 +36,7 @@ export {
   bindHostedActiveLinqHomeChat,
   bindHostedActiveTelegramMember,
   issueHostedAppSessionForTest,
+  issueHostedIMessageMiniAppCredentialForTest,
   readHostedDeviceSyncConnectionForTest,
   readHostedLinqFirstContactMemberState,
   readHostedJunctionDeviceSyncReplayDrainStatus,
@@ -47,6 +48,8 @@ export {
   seedHostedActiveMember,
   type HostedAppSessionForTest,
   type HostedAppSessionForTestInput,
+  type HostedIMessageMiniAppCredentialForTest,
+  type HostedIMessageMiniAppCredentialForTestInput,
   type HostedDeviceSyncConnectionForTest,
   type HostedDeviceSyncConnectionForTestInput,
   type HostedDeviceSyncConnectionSourceForTest,
@@ -321,6 +324,7 @@ interface HostedIngressLatencyForTestPrismaClient {
       runtimeAttemptId: string | null;
       runtimePhaseStartedAt: Date | null;
       source: string;
+      temporalSignalAcceptedAt: Date | null;
       workspaceRestoreDoneAt: Date | null;
     }>;
     update(args: unknown): Promise<{
@@ -560,6 +564,20 @@ interface HostedMailboxAppendForTestStoreModule {
   }): Promise<Array<{ consumedSeq: string; lane: string }>>;
   appendHostedMailboxEnvelopeTx(input: {
     envelope: HostedExecutionWake;
+    tx: unknown;
+  }): Promise<{
+    duplicate: boolean;
+    inserted: boolean;
+    item: {
+      dedupeKey: string;
+      id: string;
+      laneSeq: bigint | number | string;
+    };
+  }>;
+  appendHostedMailboxEnvelopeWithIdentityTx(input: {
+    envelope: HostedExecutionWake;
+    expiresAt: Date | string | null;
+    itemId: string;
     tx: unknown;
   }): Promise<{
     duplicate: boolean;
@@ -858,6 +876,7 @@ export interface HostedIngressLatencyTraceForTest {
   runnerJobAcceptedAt: string | null;
   runtimeAttemptId: string | null;
   runtimePhaseStartedAt: string | null;
+  temporalSignalAcceptedAt: string | null;
   workspaceRestoreDoneAt: string | null;
 }
 
@@ -868,10 +887,18 @@ export async function appendHostedExecutionWakeForTest(input: {
   const wake = parseHostedExecutionWake(input.wake);
   return withHostedWebTestkitDeps(input.environment, async (deps) => {
     const append = await deps.prisma.$transaction(async (tx) =>
-      deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
-        envelope: wake,
-        tx,
-      }));
+      wake.kind === "assistant.ask.requested"
+        || wake.kind === "assistant.ask.completed"
+        ? deps.hostedMailboxStore.appendHostedMailboxEnvelopeWithIdentityTx({
+            envelope: wake,
+            expiresAt: wake.ask.expiresAt,
+            itemId: wake.eventId,
+            tx,
+          })
+        : deps.hostedMailboxStore.appendHostedMailboxEnvelopeTx({
+            envelope: wake,
+            tx,
+          }));
     return {
       duplicate: append.duplicate,
       inserted: append.inserted,
@@ -1417,6 +1444,11 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         throw new Error("Hosted-local group email participant workspace was not created.");
       }
       if (participant.verifiedEmail) {
+        // Verified-email authorization and projection snapshots both encrypt
+        // with Web-owned crypto. Restore this scenario's resolved environment
+        // immediately before each crypto boundary because asynchronous store
+        // imports may have changed process.env.
+        applyHostedWebTestkitEnvironment(deps.environment);
         await memberStore.syncHostedMemberVerifiedEmailAuthorization({
           address: participant.verifiedEmail,
           memberId: participant.memberId,
@@ -1425,19 +1457,19 @@ export async function seedHostedGroupEmailAuthorizationForTest(input: {
         });
       }
       for (const projectionScope of input.projectionScopes) {
-        const share = (await projectionStore.findActiveHostedVaultShares({
+        const shares = await projectionStore.findActiveHostedVaultShares({
           grantorMemberId: participant.memberId,
           prisma: deps.prisma,
           projectionScope,
-        })).find((candidate) =>
+        });
+        const share = shares.find((candidate) =>
           candidate.destinationMemberId === input.runtimeMemberId
         );
         if (!share) {
           throw new Error("Hosted-local group email share was not created.");
         }
-        // Snapshot encryption reads the Web-owned crypto configuration from
-        // process.env, so restore this scenario's resolved environment after
-        // the asynchronous store imports above.
+        // Snapshot encryption also reads the Web-owned crypto configuration
+        // from process.env.
         applyHostedWebTestkitEnvironment(deps.environment);
         const replaced = await projectionStore.replaceHostedVaultShareProjectionSnapshot({
           prisma: deps.prisma,
@@ -1472,6 +1504,30 @@ export async function readHostedVaultShareProjectionCiphertextForTest(input: {
       },
     });
     return share?.projectionSnapshotCiphertext ?? null;
+  });
+}
+
+export async function seedHostedWorkspaceWakeForTest(input: {
+  environment?: NodeJS.ProcessEnv;
+  userId: string;
+  wakeAt: Date | string;
+  wakeReason: string;
+}): Promise<void> {
+  return withHostedWebTestkitDeps(input.environment, async (deps) => {
+    const result = await deps.prisma.hostedWorkspace.updateMany({
+      data: {
+        nextWakeAt: new Date(input.wakeAt),
+        nextWakeReason: input.wakeReason,
+      },
+      where: {
+        userId: input.userId,
+      },
+    });
+    if (result.count !== 1) {
+      throw new Error(
+        "Hosted-local workspace wake seed requires exactly one existing workspace.",
+      );
+    }
   });
 }
 
@@ -2042,6 +2098,8 @@ export async function readHostedIngressLatencyTraceForTest(input: {
       runnerJobAcceptedAt: parsed.runnerJobAcceptedAt ?? null,
       runtimeAttemptId: parsed.runtimeAttemptId ?? null,
       runtimePhaseStartedAt: parsed.runtimePhaseStartedAt ?? null,
+      temporalSignalAcceptedAt:
+        row.temporalSignalAcceptedAt?.toISOString() ?? null,
       workspaceRestoreDoneAt: parsed.workspaceRestoreDoneAt ?? null,
     };
   });
@@ -2274,6 +2332,8 @@ async function loadHostedMailboxAppendForTestModules(): Promise<HostedMailboxApp
     advanceHostedMailboxConsumedSeqByLane:
       typedHostedMailboxStoreModule.advanceHostedMailboxConsumedSeqByLane,
     appendHostedMailboxEnvelopeTx: typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeTx,
+    appendHostedMailboxEnvelopeWithIdentityTx:
+      typedHostedMailboxStoreModule.appendHostedMailboxEnvelopeWithIdentityTx,
   };
 }
 

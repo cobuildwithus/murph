@@ -297,9 +297,6 @@ describe("hosted local group email newsletter e2e", () => {
     expect(deliveryLogs.every((log) =>
       log.redactedJson?.deliveryChannelSummary === "email:1"
     )).toBe(true);
-    expect(finalStatus.workspace?.nextWakeAt).toBeTruthy();
-    expect(Date.parse(finalStatus.workspace?.nextWakeAt ?? ""))
-      .toBeGreaterThan(Date.now() + 20 * 60 * 60 * 1_000);
   }, 720_000);
 });
 

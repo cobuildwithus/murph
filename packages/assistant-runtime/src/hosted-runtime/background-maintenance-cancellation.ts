@@ -1,34 +1,57 @@
 const HOSTED_BACKGROUND_MAINTENANCE_PREEMPTION_POLL_MS = 25;
 
+export type HostedBackgroundMaintenanceCancellationReason =
+  | "container_destroyed"
+  | "foreground"
+  | "invocation_preempted"
+  | "outer_signal"
+  | "timeout";
+
 export function createHostedBackgroundMaintenanceCancellation(input: {
   signal: AbortSignal | null;
   shouldYield: (() => boolean) | null;
   timeoutMs: number | null;
 }): {
   dispose(): void;
+  readReason(): HostedBackgroundMaintenanceCancellationReason | null;
   signal: AbortSignal | null;
 } {
   if (!input.signal && !input.shouldYield && !input.timeoutMs) {
     return {
       dispose: () => undefined,
+      readReason: () => null,
       signal: null,
     };
   }
 
   const controller = new AbortController();
-  const abort = (reason: unknown) => {
+  let cancellationReason: HostedBackgroundMaintenanceCancellationReason | null = null;
+  const abort = (
+    reasonCode: HostedBackgroundMaintenanceCancellationReason,
+    reason: unknown,
+  ) => {
     if (!controller.signal.aborted) {
+      cancellationReason = reasonCode;
       controller.abort(reason);
     }
   };
   const abortForOuterSignal = () => {
-    abort(readHostedBackgroundMaintenanceAbortReason(input.signal));
+    abort(
+      classifyHostedBackgroundMaintenanceOuterCancellation(input.signal),
+      readHostedBackgroundMaintenanceAbortReason(input.signal),
+    );
   };
   const abortForForeground = () => {
-    abort(new DOMException("Background maintenance yielded to foreground input.", "AbortError"));
+    abort(
+      "foreground",
+      new DOMException("Background maintenance yielded to foreground input.", "AbortError"),
+    );
   };
   const abortForTimeout = () => {
-    abort(new DOMException("Background maintenance exceeded its time budget.", "AbortError"));
+    abort(
+      "timeout",
+      new DOMException("Background maintenance exceeded its time budget.", "AbortError"),
+    );
   };
 
   input.signal?.addEventListener("abort", abortForOuterSignal, { once: true });
@@ -60,6 +83,7 @@ export function createHostedBackgroundMaintenanceCancellation(input: {
         clearTimeout(timeoutTimer);
       }
     },
+    readReason: () => cancellationReason,
     signal: controller.signal,
   };
 }
@@ -68,4 +92,19 @@ function readHostedBackgroundMaintenanceAbortReason(signal: AbortSignal | null):
   return signal?.reason instanceof Error
     ? signal.reason
     : new DOMException("Background maintenance was aborted.", "AbortError");
+}
+
+function classifyHostedBackgroundMaintenanceOuterCancellation(
+  signal: AbortSignal | null,
+): HostedBackgroundMaintenanceCancellationReason {
+  const message = signal?.reason instanceof Error
+    ? signal.reason.message
+    : null;
+  if (message === "workspace invocation preempted") {
+    return "invocation_preempted";
+  }
+  if (message === "workspace invocation container destroyed") {
+    return "container_destroyed";
+  }
+  return "outer_signal";
 }

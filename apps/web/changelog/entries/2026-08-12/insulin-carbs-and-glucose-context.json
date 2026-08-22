@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-12",
+  "order": 500,
+  "item": {
+    "id": "insulin-carbs-and-glucose-context",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Glucose with insulin and carbohydrate context",
+    "summary": "Murph can now retain timed insulin and carbohydrate records alongside a more useful daily glucose summary from connected sources.",
+    "details": "Glucose stays aggregate-only: Murph keeps bounded variability summaries, not the full provider timeline or raw samples.",
+    "relevanceTags": ["wearables", "glucose", "nutrition", "medications", "privacy"],
+    "sourcePullRequests": [1700]
+  }
+}

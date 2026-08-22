@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 
 import { renderToReadableStream } from "react-dom/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -256,6 +257,35 @@ describe("action approval page", () => {
     assert.match(markup, /Murph will not continue with this action\./);
     assert.equal(markup.includes("I denied the request."), false);
     assert.equal(markup.includes("and send:"), false);
+  });
+
+  it("keeps generic metadata and uses the dedicated Open Graph image", async () => {
+    const metadata = await actionApprovalPage.generateMetadata({
+      params: Promise.resolve({ approvalId: "haa_test" }),
+    });
+
+    const expectedImage = expect.objectContaining({
+      alt: "Murph needs your OK. Tap to review the request before it expires.",
+      height: 630,
+      type: "image/png",
+      url: "/approve/haa_test/opengraph-image",
+      width: 1200,
+    });
+
+    expect(metadata.title).toBe("Murph needs your OK");
+    expect(metadata.description).toBe(
+      "Review the request, then approve or deny it. Approval links expire after a short time.",
+    );
+    expect(metadata.openGraph?.images).toEqual([expectedImage]);
+    expect(metadata.twitter?.images).toEqual([expectedImage]);
+    expect(
+      existsSync(
+        new URL(
+          "../app/approve/[approvalId]/opengraph-image.tsx",
+          import.meta.url,
+        ),
+      ),
+    ).toBe(true);
   });
 
 });

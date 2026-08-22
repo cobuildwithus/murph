@@ -4,6 +4,7 @@ import { test } from "vitest";
 
 import {
   METRIC_POINT_SCHEMA_VERSION,
+  canonicalizeWearableProviderSlug,
   assessExperimentPrimaryMetricCapture,
   buildMetricSeries,
   createCustomMetricDefinition,
@@ -22,6 +23,7 @@ import {
   resolveExperimentSessionMetricSpecForBiomarker,
   experimentSessionMetricIsDeclared,
   resolveWearableCanonicalMetricKey,
+  resolveWearableProviderDescriptor,
   validateExperimentSessionMetricValue,
   selectMetricGoalProgress,
   selectMetricSeries,
@@ -145,6 +147,12 @@ import {
   type MurphAgeOrdinaryLabWearableAutoresearchSourcePriority,
   type MurphAgeSourceRoute,
 } from "@murphai/health-metrics/murph-age-source-routes";
+
+test("keeps Google Health as a distinct wearable origin with a readable label", () => {
+  assert.equal(canonicalizeWearableProviderSlug("google_health"), "google-health");
+  assert.equal(resolveWearableProviderDescriptor("google-health")?.displayName, "Google Health");
+  assert.notEqual(canonicalizeWearableProviderSlug("google_health"), "fitbit");
+});
 
 test("resolves metric aliases, biomarker primary metrics, and normalized metric keys", () => {
   assert.equal(normalizeMetricKey("restingHeartRate"), "resting-heart-rate");

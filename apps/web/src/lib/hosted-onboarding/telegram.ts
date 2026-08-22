@@ -78,6 +78,9 @@ export function buildHostedTelegramMessagePayload(
   const attachments = buildHostedTelegramAttachmentPayloads(message);
   const mediaGroupId = normalizeNullableString(message.media_group_id ?? null);
   const replyContextPreview = buildTelegramReplyContextPreview(message);
+  const replyToMessageId = message.reply_to_message
+    ? String(message.reply_to_message.message_id)
+    : null;
   const text = resolveHostedTelegramMessageText(message);
 
   return {
@@ -85,6 +88,7 @@ export function buildHostedTelegramMessagePayload(
     ...(attachments.length > 0 ? { attachments } : {}),
     messageId: String(message.message_id),
     ...(replyContextPreview === null ? {} : { replyContextPreview }),
+    ...(replyToMessageId === null ? {} : { replyToMessageId }),
     schema: HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
     ...(text === null ? {} : { text }),
     threadId: buildTelegramThreadId(message),

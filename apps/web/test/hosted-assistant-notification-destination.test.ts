@@ -14,6 +14,7 @@ import {
   assertHostedDirectAssistantNotificationRouteAuthority,
   bindHostedAssistantNotificationDestination,
   isHostedThreadContainerNotificationDestination,
+  requireHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination,
 } from "../src/lib/hosted-routing/assistant-notification-destination";
 import {
@@ -210,7 +211,7 @@ describe("hosted assistant notification destination", () => {
       memberId: "direct-member",
       prisma,
     });
-    const frozen = await resolveHostedAssistantNotificationDestination({
+    const frozen = await requireHostedAssistantNotificationDestination({
       directChannel: "telegram",
       memberId: "direct-member",
       prisma,
@@ -221,6 +222,28 @@ describe("hosted assistant notification destination", () => {
       channel: "telegram",
       delivery: { kind: "thread", target: "telegram-direct-chat" },
       threadIsDirect: true,
+    });
+  });
+
+  it("rejects a thread-container route when an exact direct channel is required", async () => {
+    const row = await buildRouteRow({
+      accountLookupKey: HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY,
+      channel: "telegram",
+      containerMemberId: "container-member",
+      threadId: "-100987654321",
+    });
+    const prisma = createPrisma({
+      containerMemberId: "container-member",
+      rows: [row],
+    });
+
+    await expect(requireHostedAssistantNotificationDestination({
+      directChannel: "telegram",
+      memberId: "container-member",
+      prisma,
+    })).rejects.toMatchObject({
+      code: "HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED",
+      retryable: true,
     });
   });
 

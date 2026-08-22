@@ -12,7 +12,10 @@ import {
 import type { ExperimentOutcome } from "@murphai/contracts";
 import { describe, expect, it } from "vitest";
 
-import { ExperimentSchedule } from "@/src/components/experiments/experiment-detail/experiment-schedule";
+import {
+  ExperimentSchedule,
+  ExperimentScheduleSidebar,
+} from "@/src/components/experiments/experiment-detail/experiment-schedule";
 import { ExperimentSummaryTiles } from "@/src/components/experiments/experiment-detail/experiment-summary-tiles";
 import { ResultsSummary } from "@/src/components/experiments/experiment-detail/results-summary";
 import { ResultsTab } from "@/src/components/experiments/experiment-detail/results-tab";
@@ -2006,6 +2009,138 @@ describe("experiment detail private-run composition", () => {
     expect(scheduleMarkup).not.toContain("1 missed");
   });
 
+  it("renders repeated-session Results from occurrence counts instead of date cells", async () => {
+    const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
+
+    expect(protocol).not.toBeNull();
+
+    const experimentId = "exp_repeated_results";
+    const experimentSlug = "finnish-sauna";
+    const privateRun = resolveBrowserVaultExperimentRun({
+      client: await createClient({
+        additionalEntities: [
+          createSessionEntity({
+            date: "2026-04-04",
+            experimentId,
+            experimentSlug,
+            id: "evt_repeated_results_1",
+            occurredAt: "2026-04-04T13:00:00.000Z",
+            sessionStatus: "completed",
+          }),
+          createSessionEntity({
+            date: "2026-04-04",
+            experimentId,
+            experimentSlug,
+            id: "evt_repeated_results_2",
+            occurredAt: "2026-04-04T15:00:00.000Z",
+            sessionStatus: "completed",
+          }),
+          createSessionEntity({
+            date: "2026-04-04",
+            experimentId,
+            experimentSlug,
+            id: "evt_repeated_results_3",
+            occurredAt: "2026-04-04T17:00:00.000Z",
+            sessionStatus: "completed",
+          }),
+        ],
+        generatedAt: "2026-04-05T12:00:00.000Z",
+        trackedExperiments: [{
+          frontmatter: createExperimentFrontmatter({
+            id: experimentId,
+            runPlan: {
+              baselineEnd: "2026-04-03",
+              baselineStart: "2026-04-01",
+              interventionEnd: "2026-04-04",
+              interventionStart: "2026-04-04",
+              minimumUsefulSessions: 4,
+              targetSessions: 8,
+              adherenceTargets: [{
+                targetId: "strength-set",
+                label: "Strength set",
+                phase: "intervention",
+                calendar: {
+                  kind: "daily",
+                  targetCountPerDay: 8,
+                  timeZone: "America/New_York",
+                },
+                evidence: {
+                  kind: "linkedEventCount",
+                  eventKind: "intervention_session",
+                  missing: "missed_after_grace",
+                },
+                grace: { hours: 0 },
+                rollup: {
+                  minimumUsefulCompletions: 4,
+                  targetCompletions: 8,
+                },
+              }],
+            },
+            slug: experimentSlug,
+            startedOn: "2026-04-01",
+            status: "active",
+            title: "Repeated Results run",
+          }),
+          id: experimentId,
+          slug: experimentSlug,
+          startedOn: "2026-04-01",
+          status: "active",
+          summary: "Repeated occurrences stay visible in Results.",
+          tags: ["sauna"],
+          title: "Repeated Results run",
+        }],
+      }),
+      protocol: protocol!,
+    });
+
+    const interventionCells = privateRun?.schedule?.weeks
+      .flatMap((week) => week.cells)
+      .filter((cell) => cell.kind !== "baseline");
+
+    expect(privateRun?.schedule?.loggedSessions).toBe(3);
+    expect(interventionCells).toEqual([
+      expect.objectContaining({
+        detail: "3 of 8",
+        occurrences: {
+          assumed: 0,
+          completed: 3,
+          expected: 8,
+          failed: 0,
+          missed: 5,
+          partial: 0,
+          scheduled: 0,
+          unknown: 0,
+        },
+      }),
+    ]);
+
+    const scheduleMarkup = renderToStaticMarkup(
+      <ExperimentSchedule schedule={privateRun!.schedule!} />,
+    );
+    const summaryMarkup = renderToStaticMarkup(
+      <ExperimentSummaryTiles
+        experiment={{
+          baselineDays: privateRun!.baselineDays ?? 0,
+          day: privateRun!.day,
+          durationDays: privateRun!.durationDays,
+          schedule: privateRun!.schedule,
+        }}
+      />,
+    );
+    const sidebarMarkup = renderToStaticMarkup(
+      <ExperimentScheduleSidebar schedule={privateRun!.schedule!} />,
+    );
+
+    expect(scheduleMarkup).toContain("3 of 8");
+    expect(scheduleMarkup).toContain("3 done");
+    expect(scheduleMarkup).toContain("5 not logged");
+    expect(summaryMarkup).toContain("3 of 8 done");
+    expect(summaryMarkup).toContain("5 not logged");
+    expect(sidebarMarkup).toContain("3/8");
+    expect(sidebarMarkup).toContain("3 of 8 due");
+    expect(sidebarMarkup).toContain("38%");
+  });
+
   it("renders all-assumed schedule cells as done with assumed detail copy", async () => {
     const protocol = resolveHealthCommonsExperimentProtocol("finnish-sauna");
 
@@ -3171,12 +3306,15 @@ function createSessionEntity(input: {
   date: string;
   experimentId: string;
   experimentSlug: string;
+  id?: string;
   note?: string;
+  occurredAt?: string;
   sessionStatus: string;
   source?: string;
   symptoms?: string[];
 }): BrowserVaultEntity {
-  return createEntity("event", `evt_${input.date}_${input.sessionStatus}`, {
+  const id = input.id ?? `evt_${input.date}_${input.sessionStatus}`;
+  return createEntity("event", id, {
     attributes: {
       afterExercise: input.afterExercise,
       confounders: input.confounders,
@@ -3191,8 +3329,8 @@ function createSessionEntity(input: {
     experimentSlug: input.experimentSlug,
     kind: "intervention_session",
     links: [{ targetId: input.experimentId, type: "related_to" }],
-    lookupIds: [`evt_${input.date}_${input.sessionStatus}`],
-    occurredAt: `${input.date}T13:00:00.000Z`,
+    lookupIds: [id],
+    occurredAt: input.occurredAt ?? `${input.date}T13:00:00.000Z`,
     recordClass: "ledger",
     title: "Sauna session",
   });

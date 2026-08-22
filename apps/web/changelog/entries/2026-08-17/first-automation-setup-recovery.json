@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-17",
+  "order": 100,
+  "item": {
+    "id": "first-automation-setup-recovery",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "First-time schedules can start cleanly",
+    "summary": "Murph can now continue creating a routine or reminder after confirming that no matching automation exists yet.",
+    "details": "A missing lookup is treated as a clean starting point. Real operation failures still stop safely, and group health-data sharing still requires its existing scoped approval.",
+    "relevanceTags": ["assistant", "automations", "groups", "reliability"],
+    "sourcePullRequests": [1936]
+  }
+}

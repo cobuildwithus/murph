@@ -150,6 +150,7 @@ describe("hosted runtime event coverage", () => {
 
   it("runs the device-sync runtime lane for device-sync wakes", async () => {
     const runtime = createRuntime();
+    const signal = new AbortController().signal;
     const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
       eventId: "evt_wake",
       occurredAt: "2026-04-08T00:10:00.000Z",
@@ -162,7 +163,13 @@ describe("hosted runtime event coverage", () => {
         wake: deviceSyncWake,
         executionContext,
         runtime,
+        runtimeLogContext: {
+          attemptId: "attempt_device_sync_event",
+          leaseGeneration: "11",
+          workspaceVersion: "12",
+        },
         runtimeEnv: {},
+        signal,
         vaultRoot: "/tmp/assistant-runtime-events-coverage",
       }),
     ).resolves.toEqual({
@@ -178,16 +185,23 @@ describe("hosted runtime event coverage", () => {
       deviceSyncPort: null,
       platformEnv: {},
       retainFollowUpWakeUntilCheckpoint: true,
+      runtimeLogContext: {
+        attemptId: "attempt_device_sync_event",
+        leaseGeneration: "11",
+        workspaceVersion: "12",
+      },
       runtimeLogPlatform: runtime.platform,
       resolvedConfig: runtime.resolvedConfig,
-      timeoutMs: null,
+      signal,
+      timeoutMs: 90_000,
       vaultRoot: "/tmp/assistant-runtime-events-coverage",
       wake: deviceSyncWake,
     });
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(
-      expect.objectContaining({
+      {
+        signal,
         vault: "/tmp/assistant-runtime-events-coverage",
-      }),
+      },
     );
   });
 
@@ -218,6 +232,55 @@ describe("hosted runtime event coverage", () => {
         signal,
       }),
     );
+    expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule device activity automation after device-sync yields", async () => {
+    const runtime = createRuntime();
+    const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "evt_wake_skipped",
+      occurredAt: "2026-04-08T00:10:00.000Z",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+    mocks.runHostedDeviceSyncWakeLane.mockResolvedValueOnce({
+      deviceSyncProcessed: 0,
+      deviceSyncSkipped: true,
+      nextWakeAt: "2026-04-08T00:10:30.000Z",
+      parserProcessed: 0,
+    });
+
+    await executeHostedMailboxEvent({
+      wake: deviceSyncWake,
+      executionContext,
+      runtime,
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events-coverage-skipped",
+    });
+
+    expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule device activity automation after invocation aborts", async () => {
+    const runtime = createRuntime();
+    const controller = new AbortController();
+    controller.abort();
+    const deviceSyncWake = buildHostedExecutionDeviceSyncWake({
+      eventId: "evt_wake_aborted",
+      occurredAt: "2026-04-08T00:10:00.000Z",
+      reason: "webhook_hint",
+      userId: "member_123",
+    });
+
+    await executeHostedMailboxEvent({
+      wake: deviceSyncWake,
+      executionContext,
+      runtime,
+      runtimeEnv: {},
+      signal: controller.signal,
+      vaultRoot: "/tmp/assistant-runtime-events-coverage-aborted",
+    });
+
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).not.toHaveBeenCalled();
   });
 

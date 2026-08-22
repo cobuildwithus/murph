@@ -1,7 +1,7 @@
 # Hosted Usage Top-Ups
 
 Status: Implemented personal, Family-member, and hosted-group funding
-Last verified: 2026-08-10
+Last verified: 2026-08-20
 
 ## Decision
 
@@ -101,10 +101,13 @@ An eligible paid Pulse or Edge member can:
 4. Explicitly authorize the selected amount. Murph charges one canonical saved
    card when available; otherwise Stripe Checkout collects card details or
    verification.
-5. Return to Settings with an honest pending state while webhook fulfillment
-   completes.
-6. See fulfilled credit move that same usage bar immediately without exposing
-   an exact balance.
+5. Return to Settings while bounded browser reconciliation observes webhook
+   fulfillment; the browser never treats the success URL as payment proof.
+6. For personal and owner-seat Family credit, see fulfilled credit move the
+   authenticated beneficiary's existing usage bar without a success dialog or
+   exact balance when that bar is present. If personal usage status is
+   unavailable, or for another active or former Family member, see one concise
+   close-owned result because no beneficiary meter is present.
 7. If usage was blocked, have pending accepted work become runnable after the
    verified grant restores capacity.
 8. Continue using that credit after an included-usage reset until the credit is
@@ -146,7 +149,10 @@ An active Family owner can use the same dialog from an exact active member row
 in Settings. The fixed pack is credited only to that selected member. A
 sponsored member cannot buy a personal pack, and Family credit is neither
 shared nor transferable. The same conservative saved-card selection and
-Checkout fallback apply.
+Checkout fallback apply. A sessionless saved-card fulfillment initiated inside
+Manage keeps its verified result visible in that dialog until the payer closes
+it; the page meter does not replace feedback while the broader Manage dialog is
+still active.
 
 ## Capped Monthly Group Sponsorship
 
@@ -175,6 +181,13 @@ charge still fits under the current cap. If the payer has since reduced the cap
 to fulfilled spend, recovery leaves the failed purchase as immutable history
 and returns the authorization to active-at-cap without starting Stripe.
 
+When recovery returns no Checkout URL because the exact payment is pending,
+the payer page keeps one focused live status region and performs a bounded,
+authenticated read of the existing management projection. The same region
+transitions to explicit confirmation when the authorization becomes active. If
+the bounded reads cannot establish completion, it offers a read-only status
+recheck; it does not submit recovery again or invite a second payment.
+
 Periods roll forward lazily from the successful activation anchor with
 calendar-month and end-of-month semantics. The cap resets, but unused credit
 remains available in the existing ledger. An increase requires explicit payer
@@ -187,12 +200,12 @@ Ordinary participants see only whether the chat is sponsored. They do not see
 the payer, maximum, amount charged or pending, credit, percentage, message
 count, or automatic refill events. The exact payer privately sees the current
 period's fulfilled and pending amounts, maximum, period end, status, and
-management controls. A near-cap notice is private and revalidated against the
-current authorization. The room is notified only when the existing usage gate
-actually pauses work. Every exhausted room receives the ordinary pause copy and
-the current first-party funding link. The message does not branch on or expose
-the current funding setup; the funding page separately preserves any active
-automatic sponsor and the single-sponsor billing invariant.
+management controls. Automatic refill fulfillment does not send a near-cap
+notice. The room is notified only when the existing usage gate actually pauses
+work. Every exhausted room receives the ordinary pause copy and the current
+first-party funding link. The message does not branch on or expose the current
+funding setup; the funding page separately preserves any active automatic
+sponsor and the single-sponsor billing invariant.
 
 ## Group Sponsorship Moment
 
@@ -283,9 +296,9 @@ fulfilled group purchase, Web idempotently:
 Permanent schema validation failure in a decrypted optional creative envelope
 projects as no creative request at this notification boundary. Activation,
 including an otherwise valid running bit, commits and Stripe receipt completion
-continues through the independent near-cap owner. Creator recovery stays strict,
-and secure-box, decryption, database, and other operational failures continue to
-propagate for ordinary retry rather than being mislabeled as quiet content.
+continues. Creator recovery stays strict, and secure-box, decryption, database,
+and other operational failures continue to propagate for ordinary retry rather
+than being mislabeled as quiet content.
 
 A monthly activation is the actual `$5` purchase eligible for the optional
 social response. Its private monthly maximum never changes the public
@@ -463,6 +476,21 @@ The browser renders only server-read status:
 | Fulfilled | **Usage added.** |
 | Payment failed | **The payment did not complete. No usage was added.** |
 | Reconciliation delayed | **Your payment is still being confirmed. You can safely leave this page.** |
+
+Personal and owner-seat Family success returns keep the dialog visually quiet
+while the authenticated beneficiary's existing usage meter refreshes. Their
+fulfilled transition updates one visually hidden polite status region that was
+already mounted before reconciliation, but shows no visible success modal or
+post-purchase messaging handoff. Failed or exhausted reconciliation opens the
+compact recovery dialog. If personal usage status is unavailable, the existing
+off-meter host instead keeps a compact result visible until Close and confirms
+only that durable credit reached the account. Another active Family member and
+former-member recovery use the same close-owned pattern because Settings does
+not render that beneficiary's usage meter. The Family roster mounts the exact
+active member's returned-purchase owner independently of its Manage dialog;
+the result's Close action owns terminal refresh so the confirmation cannot
+disappear before the payer dismisses it. Group funding retains its separately
+owned receipt and Messages handoff.
 
 A success query parameter is never proof of payment. Settings polls a bounded
 authenticated purchase-status endpoint and refreshes its server projection. It
@@ -997,9 +1025,12 @@ The Stripe Session uses:
 - Session metadata containing only purchase ID, purpose, and policy version;
 - the same opaque purchase ID in `payment_intent_data.metadata` for later
   refund/dispute correlation;
-- `setup_future_usage=off_session` for current-policy personal, Family, and
-  group Checkout, so the collected card can be reused for a later explicit
-  top-up;
+- `setup_future_usage=off_session` for current-policy monthly sponsorship
+  activation and recovery Checkout, so the exact approved method can fund
+  later automatic refills; ordinary one-time Checkout does not force saving;
+- `payment_method_types=["card"]` for current-policy monthly sponsorship
+  activation and recovery Checkout, including wallets that materialize as card
+  methods; ordinary one-time Checkout retains Dashboard-managed dynamic methods;
 - `saved_payment_method_options.payment_method_save=enabled` for current-policy
   Checkout, so the payer can let Stripe present the method again in later
   Checkout flows;
@@ -1037,24 +1068,36 @@ without card saving so an in-flight idempotent Checkout request never changes
 shape. Version two remains reconstructible with future-use saving and direct
 saved-card payment for group purchases only. New purchases freeze
 version three with both behaviors for personal, Family, and group targets.
-New purchases freeze `hosted-usage-credit-checkout-v4`, which retains those
-targets, adds Stripe's explicit payment-method save choice to Checkout, and
+Version four remains reconstructible with forced future-use saving for every
+target, adds Stripe's explicit payment-method save choice to Checkout, and
 binds personal and Family card selection to the target's exact Murph billing
 Subscription. It uses that Subscription's explicit default or inherited
 Customer default regardless of whether Stripe may redisplay the card in
 Checkout. Group funding remains Customer-scoped because it has no required
 Murph billing Subscription. Legacy default Sources are unsupported for direct
-v4 reuse and stay in Checkout.
-Versions one through three retain their original request and selection shapes.
+v4 reuse and stay in Checkout. New purchases freeze
+`hosted-usage-credit-checkout-v5`, which retains the explicit save choice but
+forces future-use saving and card-only Checkout only for monthly sponsorship
+activation and recovery. Ordinary one-time Checkout retains Dashboard-managed
+dynamic payment methods. A legacy explicit sponsorship method outside the
+reusable-card domain is unavailable to automatic refill and returns to explicit
+recovery without substituting an attached method; an unbound legacy failed
+refill upgrades to the current request policy before opening recovery Checkout.
+Automatic sponsorship refills derive their exact reusable method from the
+latest verified explicit sponsorship payment: either the ordinal-zero direct
+activation or a Checkout-backed activation or recovery. Sessionless automatic
+refills, attached-method count, card fingerprints, and one-time contributions
+never become a new payment authority. Versions one through four retain
+their original request and selection shapes.
 Every retry and Stripe proof check uses the purchase's frozen policy version
 rather than the latest global version.
 
-After production persists its first v4 purchase, a v4-capable Web bundle is the
+After production persists its first v5 purchase, a v5-capable Web bundle is the
 minimum compatible consumer for status, cancellation, Stripe reconciliation,
-and account deletion involving retained v4 financial state. A safe rollback
-first disables new Add usage and group-funding intake, keeps v4-compatible
+and account deletion involving retained v5 financial state. A safe rollback
+first disables new Add usage and group-funding intake, keeps v5-compatible
 consumers running, and forward-fixes. Rolling Web below that floor requires
-proof that no v4 purchase or retained v4 financial state exists.
+proof that no v5 purchase or retained v5 financial state exists.
 
 ## Stripe Catalog And Payment Configuration
 
@@ -1074,10 +1117,12 @@ is the exact active one-time, per-unit, single-currency amount frozen on the
 purchase. Do not use custom unit amounts, transformed quantity, or extra
 currency options for v1.
 
-Use Dashboard-managed dynamic payment methods unless a reviewed requirement
-limits the top-up configuration to immediately confirmed methods. Delayed
-methods are safe only because the UI and fulfillment model include
-`payment_pending`; Checkout completion alone never grants credit.
+Use Dashboard-managed dynamic payment methods for ordinary one-time top-ups.
+Current-policy monthly sponsorship activation and recovery explicitly use the
+card-method domain required by automatic refills; delayed methods stay outside
+that recurring authority. Delayed methods remain safe for one-time top-ups only
+because the UI and fulfillment model include `payment_pending`; Checkout
+completion alone never grants credit.
 
 Before live launch, finance/counsel must classify the prepaid service credit
 and confirm the Product tax code and Price tax behavior. V1 does not enable

@@ -1,6 +1,6 @@
 # Hosted Plan Usage And Subscription Actions
 
-Last verified: 2026-08-12
+Last verified: 2026-08-18
 Status: Implemented current-state contract
 
 ## Goal
@@ -185,6 +185,30 @@ disclose current terms before seeking an explicit choice. The read-only
 `murph.plan_usage` tool cannot start checkout, upgrade a plan, grant credit, or
 claim that a billing change happened.
 
+When authenticated Settings opens the exact usage-recovery destination, its
+existing plan visibility and eligibility facts may promote the next eligible
+recurring tier as the primary recovery action. Starter chooses the first
+visible paid plan, direct Group, Pulse, and Edge choose the next eligible tier,
+and Max has no higher recurring action. A Family owner may likewise be offered
+the next eligible tier for their own seat. Settings derives these actions from
+its plan-card authority rather than from `subscriptionActionQuote`; the quote
+remains disclosure for an exact assistant-mediated choice, not a
+recommendation. An eligible one-time usage purchase remains secondary when a
+higher recurring tier exists and becomes primary only when none exists.
+The recovery query requests presentation; it is not proof that usage remains
+exhausted. Authenticated Settings auto-opens recovery only while the live usage
+projection is `exhausted`. An exact returned or nonterminal usage purchase owns
+presentation before plan or Family recovery, preserving its frozen-target
+resume, cancel, retry, polling, failure, and completion surfaces across later
+billing-relationship changes. While the live projection remains exhausted, an
+exact successful return keeps that purchase dialog visibly open through
+confirmation and completion; Settings may use quiet successful-return handling
+only beside a recovered, non-exhausted meter. Active, unavailable, reset, or
+otherwise recovered usage ignores a stale recovery query.
+An eligible Family-owner recovery banner follows that same current exhausted
+state during both ordinary and message-linked Settings visits; the exact query
+controls only whether its confirmation dialog opens initially.
+
 Family Settings may expose the same fixed-pack dialog beside each active member
 to the current active owner. That owner pays through the Family billing
 customer and the selected member alone receives the credit. This is account
@@ -332,6 +356,24 @@ for those same IDs. Whole-population member/container counts, seven-day active
 entity count, and all-time counted usage sum remain scalar set-based aggregates;
 they never materialize one aggregate result per lifetime member.
 
+Search is URL-backed and replaces ordinary pagination for that render. A query
+must be one complete hosted member/container ID, one exact verified email, or
+exactly the final four phone digits. Member ID lookup remains in the
+hosted-member owner. Exact email lookup derives the existing current-and-read
+blind-index candidates and selects only verified authorization rows; it never
+selects or decrypts the encrypted email column. Final-four lookup uses only the
+persisted plaintext masked-phone hint. Each search reads one ID-ordered
+cap-plus-one candidate set, hydrates at most 100 matches through the same usage
+read, and shows no page controls. If the 101st match exists, the page says the
+set is capped and requires the operator to narrow the query rather than claiming
+the first 100 are complete. A verified-email or phone-derived result is
+actionable only when that uncapped candidate set resolves to exactly one member;
+otherwise every row mutation stays locked until the operator searches by exact
+hosted ID. Whole-population summary totals stay unfiltered.
+Submitting or clearing a search closes any open row confirmation and locks the
+old result set's row controls and mutation handler until the new server render
+arrives.
+
 Token allowance pricing is provider-aware at ingestion time. OpenAI rows use
 the OpenAI GPT-5.6 rate table, while rows with recorded provider `venice` use
 Venice's documented regular GPT-5.6 input, cache-read, cache-write, and output
@@ -339,22 +381,106 @@ rates for the canonical Luna/Terra/Sol tier. The immutable pricing snapshot
 records the provider source and matching provider model id. Historical rows
 are not repriced when provider pricing changes.
 
-A reset targets exactly one current allowance period. The table and reset both
-resolve that period through the canonical allowance gate, so Family-sponsored,
-trial, direct-billing, thread-container, inactive-access, plan-change, and
-no-persisted-row behavior cannot drift from runtime admission. The server locks
-the member and period in the same order as usage accounting, verifies the
-period timestamp and usage-credit ledger version shown to the operator, then
-clears current included spend and its blocked state. In the same serializable
-transaction it releases only the matching period-and-credit-version notice
-claim by clearing that delivery row's unique lookup key. The delivery row
-remains as history. A recent pre-provider dispatch makes the operation
-retryable instead of permitting a concurrent duplicate send.
+A reset resolves exactly one current allowance state through the canonical
+gate, so Family-sponsored, Starter, direct-billing, thread-container,
+inactive-access, plan-change, and no-persisted-row behavior cannot drift from
+runtime admission. For recurring included allowance, it targets the current
+period and clears included spend and its blocked state. For a fully exhausted
+direct Starter member with zero total credit, it appends one fresh policy-sized
+recovery grant keyed to the locked pre-grant ledger version, then clears the
+derived lifetime-period block. A later operator recovery is eligible only after
+that credit is consumed and the current canonical gate is fully exhausted
+again; this is discretionary support recovery, not an automatic or member-owned
+refill promise.
+
+`Reset everyone` is an explicit destructive recovery walk, not a bulk database
+mutation. It always ignores the active search query, requires the operator to
+type `RESET EVERYONE`, and explains that the population is not snapshotted and
+ongoing usage is not paused. Each authenticated same-origin request reads at
+most 11 hosted IDs in ascending order, admits 10, and processes those members
+one at a time through the canonical single-member reset. A stale member is
+re-read once before the request stops; notice-claim contention and any remaining
+failure stop the batch before the failed member is acknowledged. No interactive
+transactions overlap, and runtime recheck happens only after that member's reset
+transaction commits.
+
+The response reports processed, reset, unchanged, skipped, pending-wake, and
+failed outcomes plus the last acknowledged member ID. The client issues only
+one bounded request at a time. Confirmation records the current unfiltered
+member-plus-container count as a starting reference while explaining that the
+live population can change. The operator may pause after the current request;
+the client waits for that request's acknowledgment, saves its cursor and
+counts, and resumes the same operation strictly after that cursor. It also
+pauses on a known or ambiguous failure. Hiding a paused dialog
+preserves the operation while keeping conflicting row and search mutations
+locked. Once population mutation is fully acknowledged, wake-only recovery can
+instead be hidden without locking ordinary search or single-row recovery; the
+saved Reset-everyone entry reopens that same receipt-only operation. Hidden
+wake-only recovery stays hidden across remounts and search navigation until the
+operator explicitly reopens it. A validated, operator-bound `sessionStorage`
+locator preserves the
+browser-created UUID, starting population count, cursor, counts, failure, and
+recovery phase for one
+authenticated browser-tab session, including component remounts, same-tab
+navigation, reload, and browser-provided restoration of that tab session. An
+operator identity mismatch discards it, and it deliberately does not promise
+recovery in another tab or a new or closed tab session. The client synchronously
+writes this locator before the first or any next mutation; if that write fails,
+it pauses without sending the request. The operator must pass a separate,
+transient warning that clears the locator before starting another operation;
+the abandonment presentation itself is not persisted as a recovery phase. The
+locator is not reset authority; immutable per-member receipts remain the sole
+effect and replay owner. Starting again after abandonment creates a new UUID and may process
+previously committed members from their then-current state.
+When a population response is unknown, recovery may rewalk from the beginning
+with the same browser-created operation UUID. After the population is fully
+acknowledged, runtime-wake recovery has a narrower owner: it pages only that
+UUID's existing wake-required receipts in member-ID order and invokes only the
+bounded post-commit runtime recheck. It never reads the current member
+population or enters a reset transaction, so members created after the original
+typed confirmation cannot be admitted to that operation. The dialog does not
+claim completion until a full receipt-owned wake pass reports no pending wake.
+The operator may defer or explicitly abandon this latency recovery because the
+database reset is already committed; retry continues to use only the retained
+operation UUID and its receipts.
+Terminal non-retryable inactive-runtime results count as no longer applicable;
+retryable runtime and transport failures remain pending.
+The walk owns no campaign row, queue, scheduler, or second usage projection;
+its tab-session locator is non-authoritative browser recovery state.
+
+Every reset-everyone member outcome has one append-only receipt keyed by the
+operation UUID and member ID. The first serializable member transaction inserts
+the receipt atomically with any included-usage reset, Starter grant, or stable
+unchanged/skipped decision. A replay therefore cannot clear included usage
+accrued after an earlier committed reset, and it cannot append another Starter
+grant after the first was fully consumed. Starter grants also retain the UUID
+in their immutable semantic source key for append-time uniqueness only; the
+receipt is the sole replay authority. A concurrent same-operation request
+that loses the receipt race receives one bounded serialization retry. Receipts
+contain no decrypted contact value and are deleted with their member.
+
+That transaction is also the sole outcome authority: after the member lock and
+receipt check it reads the live gate and the exact current-period row. An
+allowed paid, Family-sponsored, or group-container member whose zero-usage
+period has not been materialized records a stable skipped receipt without
+creating a usage row, so the population walk acknowledges that member and
+continues. If canonical accounting commits the period first, the same locked
+owner observes and resets it; if the skip commits first, later accounting is
+new usage and same-operation replay preserves it.
+
+The server locks the member and period in the same order as usage accounting
+and verifies the period timestamp and usage-credit ledger version shown to the
+operator. In the same serializable transaction it releases only the matching
+period-and-credit-version notice claim by clearing that delivery row's unique
+lookup key. The delivery row remains as history. A recent pre-provider dispatch
+makes the operation retryable instead of permitting a concurrent duplicate
+send.
 
 For each displayed row, the table reads the canonical gate decision and exact
 persisted-period concurrency timestamp inside one short repeatable-read
-transaction. Those transactions run sequentially and the page cap bounds them
-at 25; no transaction spans multiple members or the whole dashboard render.
+transaction. Those transactions run sequentially and are bounded by the
+ordinary 25-row page or the 100-row search cap; no transaction spans multiple
+members or the whole dashboard render.
 Its blocked/available label comes from the canonical gate decision, never from
 the persisted `blocked_at` marker, because a plan change can make that storage
 marker stale until the mutating gate reconciles it. A historical notice claim
@@ -363,17 +489,23 @@ commit, the route signals the existing hosted runtime recheck so accepted
 mailbox work is reconsidered immediately. That signal uses the existing bounded
 handoff deadline and forwards its abort signal. A rejection or timeout reports
 the reset as committed and exposes a wake-only retry instead of replaying the
-reset or claiming complete recovery. Reusing the logical notice key still
+reset or claiming complete recovery. For Starter recovery, that affordance is
+reconstructed after close or reload from the active Ops recovery grant plus
+unconsumed mailbox work previously denied for AI usage; it is not owned only by
+component state. Reusing the logical notice key still
 permits only one active claim, while each explicitly re-released notice gets a
 fresh durable attempt ID and Linq provider idempotency key. Generic runtime and
 webhook delivery fences retain their deterministic durable IDs. This prevents a
 retained history row or provider deduplication from suppressing the next real
 limit crossing without changing unrelated delivery correlation.
 
-Reset never deletes or rewrites immutable usage rows, usage-credit entries, the
-usage-credit balance or version, billing state, mailbox rows, or delivery
-history. It creates no second usage ledger or message counter. A stale
-table row fails closed and must be refreshed before retrying.
+Reset never deletes or rewrites immutable usage rows, usage-credit entries,
+billing state, mailbox rows, or delivery history. The Starter branch is the
+only credit mutation: it appends one immutable recovery grant and advances the
+existing balance/version projection under the beneficiary lock. It never
+replenishes an old grant or changes purchased/referral credit. Reset creates no
+second usage ledger or message counter. A stale table row fails closed and must
+be refreshed before retrying.
 
 Every proactive billing action in Settings, Home, or `murph.plan_usage` comes
 only from the projection's thresholded `recommendedAction`. A notice code, plan

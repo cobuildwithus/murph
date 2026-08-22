@@ -118,7 +118,9 @@ vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
-import GroupFundingPage from "@/app/groups/fund/[joinCode]/page";
+import GroupFundingPage, {
+  generateMetadata as generateGroupFundingMetadata,
+} from "@/app/groups/fund/[joinCode]/page";
 
 const PURCHASE_ID = "hucp_abcdefghijklmnop";
 
@@ -164,6 +166,20 @@ describe("hosted group funding page", () => {
       purchaseId: PURCHASE_ID,
       status: "fulfilled",
     });
+  });
+
+  it("exposes the sponsor share card through the page module", async () => {
+    // Proves the route-owner re-export, not just the metadata helper module.
+    const metadata = await generateGroupFundingMetadata({
+      params: Promise.resolve({ joinCode: "group_join_code_1234" }),
+    });
+
+    expect(metadata.title).toBe("Sponsor Murph in this chat");
+    expect(metadata.openGraph?.images).toEqual([
+      expect.objectContaining({
+        url: "/groups/fund/group_join_code_1234/opengraph-image",
+      }),
+    ]);
   });
 
   it("passes a checkout return only after payer and group beneficiary validation", async () => {

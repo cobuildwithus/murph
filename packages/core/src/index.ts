@@ -146,6 +146,7 @@ export {
   repairJunctionWorkoutHeartRateZones,
   repairExperimentMedia,
   repairVault,
+  resolveWorkoutSourceImportStatus,
   saveEncounterBundle,
   stopExperiment,
   stopRegimen,
@@ -177,6 +178,10 @@ export type {
   RepairExperimentMediaInput,
   RepairExperimentMediaResult,
 } from "./experiment-media-repair.ts";
+export {
+  readEvent,
+  readOwnedEvent,
+} from "./domains/events.ts";
 export {
   listHabitatAspects,
   readHabitatAspect,
@@ -243,6 +248,7 @@ export {
   listProtectedCanonicalPaths,
   listWriteOperationMetadataPaths,
   listWriteOperationMetadataPathsWithStageDirectories,
+  persistHostedRuntimeStateAtCanonicalBoundary,
   pruneTerminalWriteOperationRecords,
   readRecoverableStoredWriteOperation,
   readStoredWriteOperation,
@@ -333,6 +339,12 @@ export {
   buildSupplementIntakeEventDraft,
   buildSymptomEventDraft,
 } from "./domains/events.ts";
+export {
+  WORKOUT_SOURCE_IMPORT_STATUS_VALUES,
+} from "./mutations.ts";
+export type {
+  WorkoutSourceImportStatus,
+} from "./mutations.ts";
 export type {
   AddActivitySessionInput,
   AddActivitySessionResult,
@@ -351,6 +363,9 @@ export type {
   FindEventsByRawRefsInput,
   PublicEventDraft,
   PublicWritableEventKind,
+  ReadEventInput,
+  ReadEventResult,
+  ReadOwnedEventInput,
   RemoveAutomaticMealPhotoInput,
   RemoveAutomaticMealPhotoResult,
   RunGeneratedImageCaptureRetentionInput,

@@ -1,5 +1,6 @@
 import {
   HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES,
+  type HostedMailboxKind,
   type HostedMailboxLane,
   type HostedMailboxLaneLag,
   type HostedWorkspaceInvocationProcessingMode,
@@ -15,6 +16,9 @@ export const HOSTED_USER_RUNTIME_SIGNAL_NAME = "runtimeSignal" as const;
 
 export const HOSTED_USER_RUNTIME_STATUS_QUERY_NAME =
   "runtimeWorkflowStatus" as const;
+
+export const HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON =
+  "assistant_delivery" as const;
 
 export const HOSTED_RUNTIME_SIGNAL_KINDS = [
   "mailbox_appended",
@@ -65,11 +69,44 @@ export const HOSTED_RUNTIME_PROCESSING_MODES =
 
 export type HostedRuntimeProcessingMode = HostedWorkspaceInvocationProcessingMode;
 
+export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
+  "assistant.notification.requested",
+  "device-sync.wake",
+  "runtime.browser-vault-refresh-requested",
+  "runtime.maintenance-requested",
+] as const satisfies readonly HostedMailboxKind[];
+
+export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
+  ["assistant.notification.requested:group-join:"] as const;
+
+export function isHostedSystemMailboxModelFreeNotification(input: {
+  dedupeKey: string | null | undefined;
+  kind: string;
+}): boolean {
+  if (input.kind !== "assistant.notification.requested") {
+    return false;
+  }
+
+  const dedupeKey = input.dedupeKey?.trim() ?? "";
+  return HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES.some(
+    (prefix) => dedupeKey.length > prefix.length && dedupeKey.startsWith(prefix),
+  );
+}
+
+export const HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES = [
+  "default_owned",
+  "model_free",
+] as const;
+
+export type HostedRuntimeSystemMailboxFrontierClass =
+  (typeof HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES)[number];
+
 export interface HostedRuntimeReconciliationFactsWorkspace {
   hostedMailboxSystemHandledThroughSeq?: string;
   inboxMediaRetentionWakeAt: string | null;
   nextWakeAt: string | null;
   nextWakeReason: string | null;
+  systemMailboxFrontier?: HostedRuntimeSystemMailboxFrontierClass | null;
   version: string | null;
 }
 
@@ -80,11 +117,13 @@ export interface HostedRuntimeReconciliationFactsBlocked {
 
 export interface HostedRuntimeReconciliationFacts {
   blocked: HostedRuntimeReconciliationFactsBlocked | null;
+  environmentInterviewPending: boolean;
   mailboxLag: HostedMailboxLaneLag[];
   workspace: HostedRuntimeReconciliationFactsWorkspace | null;
 }
 
 export interface HostedRuntimeEnsureProcessingRequest {
+  assistantExecutionBlocked?: true;
   orchestrationAttemptId: string;
   processingMode?: HostedRuntimeProcessingMode | null;
 }

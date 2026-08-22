@@ -858,6 +858,7 @@ test('normalized Junction categorical facts survive canonical import and query',
         gender: 'other',
         height: 181,
         source_device_id: 'profile-source-instance-proof',
+        created_at: '2026-07-01T08:00:00Z',
         updated_at: '2026-07-09T08:30:00Z',
         source: { provider: 'apple_health', type: 'phone' },
       },
@@ -866,7 +867,7 @@ test('normalized Junction categorical facts survive canonical import and query',
         period_start: '2026-07-01',
         home_progesterone_test: [{
           date: '2026-07-12',
-          test_result: 'indeterminate',
+          test_result: 'positive',
         }],
         sexual_activity: [{
           date: '2026-07-11',
@@ -878,7 +879,7 @@ test('normalized Junction categorical facts survive canonical import and query',
   })
   const normalizedEvents = [
     normalized.events?.find((event) => event.title === 'Junction gender'),
-    normalized.events?.find((event) => event.title === 'Junction home progesterone test'),
+    normalized.events?.find((event) => event.title === 'Junction progesterone test'),
     normalized.events?.find((event) => event.title === 'Junction sexual activity'),
   ]
   const profileArtifact = normalized.evidenceParts?.find(
@@ -901,40 +902,34 @@ test('normalized Junction categorical facts survive canonical import and query',
     secondReplay.events?.find((event) => event.title === 'Junction gender'),
   ]
   assert.ok(profileArtifact)
+  assert.equal(
+    (profileArtifact.content as { createdAt?: string }).createdAt,
+    '2026-07-01T08:00:00.000Z',
+  )
+  assert.equal(
+    (profileArtifact.content as { updatedAt?: string }).updatedAt,
+    '2026-07-09T08:30:00.000Z',
+  )
   assert.deepEqual(firstReplayArtifact?.content, profileArtifact.content)
   assert.deepEqual(
     genderReplayEvents.map((event) => event?.externalRef),
     genderReplayEvents.map(() => genderReplayEvents[0]?.externalRef),
   )
+  assert.equal(
+    genderReplayEvents[0]?.dataOrigin?.normalizerVersion,
+    'junction-no-id-profile.v1',
+  )
   assert.deepEqual(
-    genderReplayEvents.map((event) => event?.dataOrigin),
-    genderReplayEvents.map(() => genderReplayEvents[0]?.dataOrigin),
+    genderReplayEvents.slice(1).map((event) => event?.dataOrigin),
+    genderReplayEvents.slice(1).map(() => genderReplayEvents[1]?.dataOrigin),
   )
   assert.equal(new Set(genderReplayEvents.map((event) => event?.occurredAt)).size, 1)
+  assert.equal(genderReplayEvents[0]?.occurredAt, '2026-07-01T08:00:00.000Z')
+  assert.equal(genderReplayEvents[0]?.dayKey, '2026-07-01')
   const accountId = 'junction-profile-replay-proof'
   const currentHeightEvent = normalized.events?.find((event) => event.title === 'Junction height')
-  const legacyHeightRef = currentHeightEvent?.legacyExternalRefs?.[0]
   assert.ok(currentHeightEvent)
-  assert.ok(legacyHeightRef)
-  assert.notEqual(legacyHeightRef.resourceId, currentHeightEvent.externalRef?.resourceId)
-  const historicalHeightImport = await importDeviceBatch({
-    vaultRoot,
-    provider: 'junction',
-    accountId,
-    importedAt: '2026-06-13T12:00:00.000Z',
-    events: [{
-      ...currentHeightEvent,
-      dataOrigin: currentHeightEvent.dataOrigin
-        ? { ...currentHeightEvent.dataOrigin, observedAtRaw: '2026-07-09T08:30:00Z' }
-        : undefined,
-      evidenceRoles: undefined,
-      externalRef: legacyHeightRef,
-      fields: currentHeightEvent.fields
-        ? { ...currentHeightEvent.fields, value: 180 }
-        : undefined,
-      legacyExternalRefs: undefined,
-    }],
-  })
+  assert.equal(currentHeightEvent.legacyExternalRefs, undefined)
   const currentImport = await importDeviceBatch({
     vaultRoot,
     provider: 'junction',
@@ -958,13 +953,6 @@ test('normalized Junction categorical facts survive canonical import and query',
   const currentCanonicalHeight = await readCanonicalProfileEvent(currentHeightEvent)
   const currentCanonicalGender = await readCanonicalProfileEvent(currentGenderEvent)
   assert.equal(currentCanonicalHeight?.kind === 'observation' ? currentCanonicalHeight.value : null, 181)
-  assert.equal(await findEventByExternalRef({
-    vaultRoot,
-    system: legacyHeightRef.system,
-    resourceType: legacyHeightRef.resourceType,
-    resourceId: legacyHeightRef.resourceId,
-    facet: legacyHeightRef.facet,
-  }), null)
   const firstReplayImport = await importDeviceBatch({
     vaultRoot,
     provider: 'junction',
@@ -989,13 +977,12 @@ test('normalized Junction categorical facts survive canonical import and query',
 
   const genderEventId = importedEventIds.get('Junction gender')
   const heightEventId = importedEventIds.get('Junction height')
-  const progesteroneEventId = importedEventIds.get('Junction home progesterone test')
+  const progesteroneEventId = importedEventIds.get('Junction progesterone test')
   const sexualActivityEventId = importedEventIds.get('Junction sexual activity')
   assert.ok(genderEventId)
   assert.ok(heightEventId)
   assert.ok(progesteroneEventId)
   assert.ok(sexualActivityEventId)
-  assert.equal(historicalHeightImport.events[0]?.id, heightEventId)
   const firstReplayEvents = new Map(firstReplayImport.events.map((event) => [event.title, event]))
   const secondReplayEvents = new Map(secondReplayImport.events.map((event) => [event.title, event]))
   assert.equal(firstReplayEvents.get('Junction gender')?.id, genderEventId)
@@ -1014,9 +1001,7 @@ test('normalized Junction categorical facts survive canonical import and query',
         '--vault',
         vaultRoot,
         '--metric',
-        'gender',
-        '--metric',
-        'home-progesterone-test',
+        'progesterone-test',
         '--metric',
         'sexual-activity',
         '--from',
@@ -1030,7 +1015,7 @@ test('normalized Junction categorical facts survive canonical import and query',
   )
 
   assert.deepEqual(entries.filters, {
-    metric: ['gender', 'home-progesterone-test', 'sexual-activity'],
+    metric: ['progesterone-test', 'sexual-activity'],
     from: '2026-07-01',
     to: '2026-07-31',
     limit: 200,
@@ -1041,10 +1026,10 @@ test('normalized Junction categorical facts survive canonical import and query',
     measurementIndex: 0,
     occurredAt: '2026-07-12T00:00:00.000Z',
     source: 'device',
-    metric: 'home-progesterone-test',
+    metric: 'progesterone-test',
     value: 1,
-    unit: 'recording',
-    qualifiers: { result: 'indeterminate' },
+    unit: 'result',
+    qualifiers: { result: 'positive' },
   }, {
     eventId: sexualActivityEventId,
     recordKind: 'measurement',
@@ -1053,20 +1038,10 @@ test('normalized Junction categorical facts survive canonical import and query',
     source: 'device',
     metric: 'sexual-activity',
     value: 1,
-    unit: 'recording',
+    unit: 'event',
     qualifiers: { 'protection-used': false },
-  }, {
-    eventId: genderEventId,
-    recordKind: 'measurement',
-    measurementIndex: 0,
-    occurredAt: '2026-07-09T08:30:00.000Z',
-    source: 'device',
-    metric: 'gender',
-    value: 1,
-    unit: 'recording',
-    qualifiers: { gender: 'other' },
   }])
-  assert.equal(entries.count, 3)
+  assert.equal(entries.count, 2)
   assert.equal(entries.nextCursor, null)
 })
 

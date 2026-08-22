@@ -174,10 +174,29 @@ function shouldResumeCurrentAuthUrl(payload: HostedPrivyCompletionPayload): bool
     || shouldResumeCurrentIntegrationsConnectUrl(payload)
     || shouldResumeCurrentSettingsDataPrivacyUrl()
     || shouldResumeCurrentSettingsFamilyInviteReturnUrl(payload)
+    || shouldResumeCurrentSettingsFamilyRecoveryUrl(payload)
     || shouldResumeCurrentSettingsGroupPaymentUrl(payload)
     || shouldResumeCurrentSettingsPlanChangeUrl(payload)
     || shouldResumeCurrentSettingsUsageCreditReturnUrl(payload)
+    || shouldResumeCurrentSettingsUsageRecoveryUrl(payload)
   );
+}
+
+function shouldResumeCurrentSettingsFamilyRecoveryUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return Array.from(params.keys()).length === 1
+    && params.getAll("familyRecovery").length === 1
+    && params.get("familyRecovery") === "true"
+    && window.location.hash === "#family";
 }
 
 function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
@@ -196,6 +215,23 @@ function shouldResumeCurrentSettingsFamilyInviteReturnUrl(
   );
   return returnValues.length === 1
     && parseHostedFamilyInviteReturnPath(returnValues[0]) !== null;
+}
+
+function shouldResumeCurrentSettingsUsageRecoveryUrl(
+  payload: HostedPrivyCompletionPayload,
+): boolean {
+  if (!isHostedOnboardingAccessibleStage(payload.stage)) {
+    return false;
+  }
+  if (typeof window === "undefined" || window.location.pathname !== SETTINGS_PATH) {
+    return false;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  return Array.from(params.keys()).length === 1
+    && params.getAll("usageRecovery").length === 1
+    && params.get("usageRecovery") === "true"
+    && window.location.hash === "#subscription";
 }
 
 function shouldResumeCurrentSettingsUsageCreditReturnUrl(

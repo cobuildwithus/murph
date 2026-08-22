@@ -106,10 +106,14 @@ describe("MeasurementMethodPage", () => {
         measurementMethodId: "home-image-analysis",
       }),
     })).resolves.toEqual(expect.objectContaining({
+      alternates: {
+        canonical: "/measurement-methods/home-image-analysis",
+      },
       description: "At-home image analysis keeps the photo method separate from the outcome.",
       openGraph: expect.objectContaining({
         type: "article",
       }),
+      robots: { follow: true, index: true },
       title: "Home Image Analysis | Murph Measurement Methods",
     }));
   });

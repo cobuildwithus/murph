@@ -151,6 +151,7 @@ export interface AssistantProviderTurn {
   generateSongPolicy?: AssistantGenerateSongTurnPolicy | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  memberMemoryMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent
   ) => Promise<void> | void) | null

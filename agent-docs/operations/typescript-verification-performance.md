@@ -35,7 +35,16 @@ Root acceptance checks hosted-web source with TypeScript 7 before app
 verification. Only after that succeeds may the acceptance lane skip the
 duplicate app-local TypeScript 7 source pass. A direct
 `pnpm --dir apps/web verify` remains self-contained and still runs its source
-check. Next's TypeScript 5 contract check is never skipped by this reuse.
+check. Next's TypeScript 5 contract check is never replaced by this reuse.
+
+The production Next runner generates route declarations and runs the app-local
+TypeScript 5 contract check explicitly before compilation. That check has its
+own heap budget; only after it succeeds does the runner set its private,
+exact-value build flag and let the ordinary Next build skip the duplicate
+internal invocation. The runner clears any inherited flag before checking, and
+direct `next build` invocations remain fail-closed with Next's internal check.
+This phase split keeps the TypeScript 5 route/page contract authoritative
+without forcing Webpack workers to inherit the larger TypeScript heap.
 
 ## Shared-Host Profile
 

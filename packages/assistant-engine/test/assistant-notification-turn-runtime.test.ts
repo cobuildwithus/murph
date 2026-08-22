@@ -1019,6 +1019,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: 'Fixed welcome text',
         createdAt: expect.any(String),
       },
@@ -1253,6 +1254,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: 'Fixed welcome text',
         createdAt: expect.any(String),
       },
@@ -2410,6 +2412,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
+      assistantTranscriptStandaloneContext: true,
       providerResumeStateAction: 'persist-from-provider-turn',
     }),
   )
@@ -2571,9 +2574,23 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     providerTurn: {
       ...createProviderResult({
         rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli memory upsert --vault "$VAULT" --section context --text "prefers morning summaries"',
-          ),
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: {
+                  action: 'upsert',
+                  section: 'Context',
+                  text: 'Prefers morning summaries.',
+                },
+                id: 'member-memory-write',
+                namespace: 'murph',
+                success: true,
+                tool: 'member_memory',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
         ],
         response: JSON.stringify({
           kind: 'send_message',
@@ -2680,9 +2697,19 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
     providerTurn: {
       ...createProviderResult({
         rawEvents: [
-          createCodexCommandCompletedEvent(
-            'vault-cli memory show --vault "$VAULT" --format json',
-          ),
+          {
+            method: 'item/completed',
+            params: {
+              item: {
+                arguments: { action: 'show' },
+                id: 'member-memory-read',
+                namespace: 'murph',
+                success: true,
+                tool: 'member_memory',
+                type: 'dynamicToolCall',
+              },
+            },
+          },
         ],
         response: JSON.stringify({
           kind: 'send_message',
@@ -3608,6 +3635,41 @@ test.each(['linq', 'telegram', 'email'] as const)(
   },
 )
 
+test('sendAssistantNotificationLocal maps context handoff to a conversation-shaped output-only turn', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Share the bounded context in the room.',
+      text: 'Sunny just pulled 405. Huge day.',
+    }),
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-context-handoff',
+    })
+
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Use the bounded handoff context in this group.',
+    notificationPromptProfile: 'context-handoff',
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/context-handoff',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'output-only-turn',
+      },
+    }),
+  )
+})
+
 test.each([
   {
     expectedToolProfile: 'provider-turn',
@@ -3900,6 +3962,8 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
         automationId: 'automation_sleep_reminder',
         expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
       },
+      outboxPlannedOccurrenceAt: '2026-07-16T13:30:00.000Z',
+      scheduledOccurrenceAt: '2026-07-16T13:00:00.000Z',
       vault: '/vaults/deferred-queue',
     }),
   ).rejects.toBe(commitError)
@@ -3910,6 +3974,8 @@ test('sendAssistantNotificationLocal defers queue-only notification commit until
       automationId: 'automation_sleep_reminder',
       expectedUpdatedAt: '2026-07-16T12:00:00.000Z',
     },
+    plannedOccurrenceAt: '2026-07-16T13:30:00.000Z',
+    scheduledOccurrenceAt: '2026-07-16T13:00:00.000Z',
   }))
   expect(mocks.persistAssistantTurnAndSession).not.toHaveBeenCalled()
   const runtimeState = mocks.createAssistantRuntimeStateService.mock.results[0]?.value

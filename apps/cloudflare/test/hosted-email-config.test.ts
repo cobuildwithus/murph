@@ -7,6 +7,7 @@ describe("readHostedEmailConfig", () => {
     expect(readHostedEmailConfig({})).toMatchObject({
       defaultSubject: "Murph update",
       localPart: "assistant",
+      publicAddress: "mail@mail.withmurph.ai",
     });
   });
 
@@ -30,6 +31,7 @@ describe("readHostedEmailConfig", () => {
       domain: "reply.example.com",
       fromAddress: "murph@reply.example.com",
       localPart: "murph",
+      publicAddress: "mail@mail.withmurph.ai",
       signingSecret: "secret",
     });
   });

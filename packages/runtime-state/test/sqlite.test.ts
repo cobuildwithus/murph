@@ -72,6 +72,21 @@ describe("runtime-state sqlite", () => {
       expect(
         database.prepare("SELECT value FROM entries ORDER BY rowid").all() as Array<{ value: string }>,
       ).toEqual([{ value: "committed" }]);
+
+      const operationError = Object.assign(new Error("operation corruption"), {
+        code: "ERR_SQLITE_ERROR",
+        errcode: 11,
+      });
+      let caught: unknown;
+      try {
+        withImmediateTransaction(database, () => {
+          database.exec("ROLLBACK");
+          throw operationError;
+        });
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBe(operationError);
     } finally {
       database.close();
     }

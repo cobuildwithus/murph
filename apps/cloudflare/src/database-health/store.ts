@@ -3,9 +3,13 @@ import type {
   DurableObjectSqlValue,
 } from "../user-runner/types.js";
 import {
+  DATABASE_CONNECTION_ERROR_METRIC_NAME,
+  DATABASE_CONNECTION_ERROR_PORTS,
   DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
-  type DatabaseHealthRequiredMetricName,
+  type DatabaseConnectionErrorCollectionEvidence,
+  type DatabaseConnectionErrorPort,
   type DatabaseHealthCondition,
+  type DatabaseHealthRequiredMetricName,
   type DatabaseMetricObservationSnapshot,
   type DatabaseMetricSnapshot,
 } from "./metrics.js";
@@ -16,12 +20,14 @@ export interface DatabaseHealthMonitoringAlertObligation {
   checkedAtMs: number;
   failures: number;
   incompleteChecks: number;
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence | null;
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
   unavailableChecks: number;
 }
 
 export interface DatabaseHealthMonitoringEvidence {
   availability: "incomplete" | "unavailable";
+  connectionErrorEvidence: DatabaseConnectionErrorCollectionEvidence | null;
   missingMetrics: readonly DatabaseHealthRequiredMetricName[];
 }
 
@@ -432,6 +438,7 @@ export class DatabaseHealthStore {
       availability: row.failure_code === "required_metrics_missing"
         ? "incomplete"
         : "unavailable",
+      connectionErrorEvidence: null,
       missingMetrics: [],
     };
   }
@@ -669,6 +676,7 @@ function parseMonitoringAlertObligation(
   const checkedAtMs = parsed.checkedAtMs;
   const failures = parsed.failures;
   const incompleteChecks = parsed.incompleteChecks;
+  const connectionErrorEvidence = parsed.connectionErrorEvidence;
   const missingMetrics = parsed.missingMetrics;
   const unavailableChecks = parsed.unavailableChecks;
   const allowedMetrics = new Set<string>(
@@ -695,6 +703,11 @@ function parseMonitoringAlertObligation(
   const normalizedUnavailableChecks = unavailableChecks === undefined
     ? (missingMetrics.length > 0 ? 0 : failures)
     : unavailableChecks;
+  const normalizedConnectionErrorEvidence = parseConnectionErrorEvidence(
+    connectionErrorEvidence,
+    failures * 2,
+    true,
+  );
   if (
     typeof normalizedIncompleteChecks !== "number"
     || !Number.isSafeInteger(normalizedIncompleteChecks)
@@ -703,11 +716,38 @@ function parseMonitoringAlertObligation(
     || !Number.isSafeInteger(normalizedUnavailableChecks)
     || normalizedUnavailableChecks < 0
     || normalizedIncompleteChecks + normalizedUnavailableChecks !== failures
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && (
+        normalizedIncompleteChecks === 0
+          ? normalizedConnectionErrorEvidence.parsedAttempts !== 0
+          : (
+            normalizedConnectionErrorEvidence.parsedAttempts === 0
+            || normalizedConnectionErrorEvidence.parsedAttempts
+              > normalizedIncompleteChecks * 2
+          )
+      )
+    )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+      && !missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+    )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+      && !hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+    )
   ) {
     throw new Error("Stored database monitoring alert obligation is invalid.");
   }
   return {
     checkedAtMs,
+    connectionErrorEvidence: normalizedConnectionErrorEvidence,
     failures,
     incompleteChecks: normalizedIncompleteChecks,
     missingMetrics,
@@ -728,6 +768,7 @@ function parseMonitoringEvidence(
     throw new Error("Stored database monitoring evidence is invalid.");
   }
   const availability = parsed.availability;
+  const connectionErrorEvidence = parsed.connectionErrorEvidence;
   const missingMetrics = parsed.missingMetrics;
   const allowedMetrics = new Set<string>(
     DATABASE_HEALTH_REQUIRED_METRIC_NAMES,
@@ -743,7 +784,104 @@ function parseMonitoringEvidence(
   ) {
     throw new Error("Stored database monitoring evidence is invalid.");
   }
-  return { availability, missingMetrics };
+  const normalizedConnectionErrorEvidence = parseConnectionErrorEvidence(
+    connectionErrorEvidence,
+    2,
+    false,
+  );
+  if (
+    (
+      availability === "unavailable"
+      && normalizedConnectionErrorEvidence !== null
+      && normalizedConnectionErrorEvidence.parsedAttempts > 0
+    )
+    || (
+      availability === "incomplete"
+      && connectionErrorEvidence !== undefined
+      && (
+        normalizedConnectionErrorEvidence === null
+        || normalizedConnectionErrorEvidence.parsedAttempts === 0
+      )
+    )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+      && !missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+    )
+    || (
+      normalizedConnectionErrorEvidence !== null
+      && missingMetrics.includes(DATABASE_CONNECTION_ERROR_METRIC_NAME)
+      && !hasMissingConnectionErrorPortAttempts(
+        normalizedConnectionErrorEvidence,
+      )
+    )
+  ) {
+    throw new Error("Stored database monitoring evidence is invalid.");
+  }
+  return {
+    availability,
+    connectionErrorEvidence: normalizedConnectionErrorEvidence,
+    missingMetrics,
+  };
+}
+
+function parseConnectionErrorEvidence(
+  value: unknown,
+  maximumParsedAttempts: number,
+  allowUnknownMarker: boolean,
+): DatabaseConnectionErrorCollectionEvidence | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (value === null && allowUnknownMarker) {
+    return null;
+  }
+  if (!isObjectRecord(value)) {
+    throw new Error("Stored database monitoring port evidence is invalid.");
+  }
+  const missingPortAttempts = value.missingPortAttempts;
+  const parsedAttempts = value.parsedAttempts;
+  if (
+    typeof parsedAttempts !== "number"
+    || !Number.isSafeInteger(parsedAttempts)
+    || parsedAttempts < 0
+    || parsedAttempts > maximumParsedAttempts
+    || !isObjectRecord(missingPortAttempts)
+    || Object.keys(missingPortAttempts).length
+      !== DATABASE_CONNECTION_ERROR_PORTS.length
+  ) {
+    throw new Error("Stored database monitoring port evidence is invalid.");
+  }
+  const normalizedMissingPortAttempts: Record<
+    DatabaseConnectionErrorPort,
+    number
+  > = { "5432": 0, "6432": 0 };
+  for (const port of DATABASE_CONNECTION_ERROR_PORTS) {
+    const attempts = missingPortAttempts[port];
+    if (
+      typeof attempts !== "number"
+      || !Number.isSafeInteger(attempts)
+      || attempts < 0
+      || attempts > parsedAttempts
+    ) {
+      throw new Error("Stored database monitoring port evidence is invalid.");
+    }
+    normalizedMissingPortAttempts[port] = attempts;
+  }
+  return {
+    missingPortAttempts: normalizedMissingPortAttempts,
+    parsedAttempts,
+  };
+}
+
+function hasMissingConnectionErrorPortAttempts(
+  evidence: DatabaseConnectionErrorCollectionEvidence,
+): boolean {
+  return DATABASE_CONNECTION_ERROR_PORTS.some(
+    (port) => evidence.missingPortAttempts[port] > 0,
+  );
 }
 
 function parseNumberRecord(value: string): Record<string, number> {

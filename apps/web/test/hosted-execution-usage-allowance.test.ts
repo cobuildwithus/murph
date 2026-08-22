@@ -3,6 +3,7 @@ import {
   HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
 } from "@murphai/hosted-execution/runtime-control";
 import {
+  buildHostedGeminiVideoAnalysisUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
   parseAssistantUsageRecord,
@@ -390,7 +391,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
     });
   });
 
@@ -409,7 +410,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
     });
   });
 
@@ -435,7 +436,7 @@ describe("hosted AI usage allowance pricing", () => {
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -462,7 +463,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
     });
   });
 
@@ -472,7 +473,7 @@ describe("hosted AI usage allowance pricing", () => {
       requestedModel: "gpt-5.6-luna",
       servedModel: "gpt-5.6-sol",
     })).toMatchObject({
-      costUsdMicros: 1_896n,
+      costUsdMicros: 1_337n,
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-sol",
@@ -562,38 +563,69 @@ describe("hosted AI usage allowance pricing", () => {
     }
   });
 
-  it("prices GPT-5.6 cache-write tokens at the official write rate", () => {
+  it("prices GPT-5.6 Sol tokens at the current Standard and Flex rates", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      cacheWriteTokens: 1_000,
-      cachedInputTokens: 0,
-      inputTokens: 1_000,
-      outputTokens: 0,
+      cacheWriteTokens: 1_000_000,
+      cachedInputTokens: 1_000_000,
+      inputTokens: 3_000_000,
+      outputTokens: 1_000_000,
       requestedModel: "gpt-5.6-sol",
       servedModel: "gpt-5.6-sol",
-      totalTokens: 1_000,
+      totalTokens: 4_000_000,
     })).toMatchObject({
-      costUsdMicros: 6_250n,
+      costUsdMicros: 29_400_000n,
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-sol",
         ratesUsdMicrosPerMillionTokens: {
-          cachedInput: "500000",
-          cacheWrite: "6250000",
-          input: "5000000",
-          output: "30000000",
+          cachedInput: "400000",
+          cacheWrite: "5000000",
+          input: "4000000",
+          output: "20000000",
         },
-        standardCostUsdMicros: "6250",
+        standardCostUsdMicros: "29400000",
         tokenPricingBasis: "standard",
         tokens: {
-          billableInput: "0",
-          cacheWrite: "1000",
-          cachedInput: "0",
-          input: "1000",
-          output: "0",
+          billableInput: "1000000",
+          cacheWrite: "1000000",
+          cachedInput: "1000000",
+          input: "3000000",
+          output: "1000000",
         },
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cacheWriteTokens: 1_000_000,
+      cachedInputTokens: 1_000_000,
+      inputTokens: 3_000_000,
+      outputTokens: 1_000_000,
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-sol",
+      tokenPricingBasis: "openai-flex",
+      totalTokens: 4_000_000,
+    })).toMatchObject({
+      costUsdMicros: 14_700_000n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-sol",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "400000",
+          cacheWrite: "5000000",
+          input: "4000000",
+          output: "20000000",
+        },
+        standardCostUsdMicros: "29400000",
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
     });
   });
 
@@ -957,6 +989,164 @@ describe("hosted AI usage allowance pricing", () => {
         modelSource: "served",
         requestedModel: "gpt-unpriced",
         servedModel: "openai/gpt-5.6-terra",
+      },
+    });
+  });
+
+  it("prices Gemini 3.7 Flash video analysis with thinking in the output bucket", () => {
+    const usage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      providerRequestId: "gemini_request_123",
+      usage: {
+        cachedContentTokenCount: 16,
+        candidatesTokenCount: 80,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 24,
+        totalTokenCount: 424,
+      },
+    });
+
+    expect(priceHostedAiUsageForAllowance(usage)).toEqual({
+      costUsdMicros: 620n,
+      counted: true,
+      pricingSnapshot: {
+        credentialSource: "platform",
+        model: "gemini-3.7-flash",
+        modelSource: "requested",
+        pricingSource: "https://ai.google.dev/gemini-api/docs/pricing",
+        pricingWindow: {
+          effectiveFrom: null,
+          effectiveThrough: "2026-12-31T23:59:59.999Z",
+        },
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "75000",
+          input: "750000",
+          outputIncludingThinking: "3750000",
+        },
+        requestedModel: "gemini-3.7-flash",
+        schema: "murph.hosted-ai-usage-allowance-pricing.v1",
+        servedModel: null,
+        standardCostUsdMicros: "620",
+        tokenPricingBasis: "standard",
+        tokens: {
+          billableCachedInput: "16",
+          billableNonCachedInput: "304",
+          billableOutputIncludingThinking: "104",
+          cachedInput: "16",
+          cachedInputIncludedInPromptInput: "16",
+          cacheWrite: "0",
+          input: "320",
+          output: "80",
+          providerTotal: "424",
+          reasoning: "24",
+          total: "424",
+        },
+      },
+      pricingVersion:
+        "gemini-3.7-flash-video-pricing-through-2026-12-31",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...usage,
+      occurredAt: "2027-01-01T00:00:00.000Z",
+    })).toMatchObject({
+      costUsdMicros: 1_239n,
+      pricingSnapshot: {
+        pricingWindow: {
+          effectiveFrom: "2027-01-01T00:00:00.000Z",
+          effectiveThrough: null,
+        },
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "150000",
+          input: "1500000",
+          outputIncludingThinking: "7500000",
+        },
+      },
+      pricingVersion: "gemini-3.7-flash-video-pricing-from-2027-01-01",
+    });
+  });
+
+  it("fails closed when Gemini video usage drifts from its Worker-authored shape", () => {
+    const usage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      usage: {
+        candidatesTokenCount: 80,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 24,
+        totalTokenCount: 424,
+      },
+    });
+
+    for (const malformed of [
+      {
+        ...usage,
+        requestedModel: "gemini-3.7-pro",
+      },
+      {
+        ...usage,
+        rawUsageJson: {
+          candidatesTokenCount: 80,
+          promptTokenCount: 320,
+          thoughtsTokenCount: 25,
+          totalTokenCount: 424,
+        },
+      },
+      {
+        ...usage,
+        rawUsageJson: {
+          candidatesTokenCount: 80,
+          promptTokenCount: 320,
+          thoughtsTokenCount: 24,
+          totalTokenCount: 425,
+        },
+        totalTokens: 425,
+      },
+      {
+        ...usage,
+        rawUsageJson: {
+          candidatesTokenCount: 80,
+          promptTokenCount: 320,
+          thoughtsTokenCount: 24,
+        },
+      },
+    ] satisfies AssistantUsageRecord[]) {
+      expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
+        "pricing is missing",
+      );
+    }
+
+    expect(() => priceHostedAiUsageForAllowance({
+      ...usage,
+      tokenPricingBasis: "openai-flex",
+    })).toThrow(
+      "Gemini video-analysis hosted AI usage must use standard token pricing basis",
+    );
+  });
+
+  it("prices Gemini input-only usage when a blocked response omits candidates", () => {
+    const usage = buildHostedGeminiVideoAnalysisUsageRecord({
+      memberId: "member_123",
+      model: "gemini-3.7-flash",
+      occurredAt: "2026-08-20T12:00:00.000Z",
+      usage: {
+        promptTokenCount: 320,
+        totalTokenCount: 320,
+      },
+    });
+
+    expect(usage.outputTokens).toBeNull();
+    expect(priceHostedAiUsageForAllowance(usage)).toMatchObject({
+      costUsdMicros: 240n,
+      counted: true,
+      pricingSnapshot: {
+        tokens: {
+          billableNonCachedInput: "320",
+          billableOutputIncludingThinking: "0",
+        },
       },
     });
   });
@@ -2145,7 +2335,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
-        allowancePricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+        allowancePricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
       }),
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
@@ -2186,7 +2376,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
-        allowancePricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+        allowancePricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
       }),
     }));
     expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
@@ -2378,7 +2568,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("identifies Max when an active Max member exhausts the combined allowance", async () => {
+  it("routes an exhausted Max member to the stable Settings recovery handoff", async () => {
     const prisma = createGatePrisma({
       billingPlanCode: "launch_max_monthly",
       limitUsdMicros: DIRECT_MAX_ALLOWANCE_USD_MICROS,
@@ -2403,8 +2593,10 @@ describe("resolveHostedAiUsageGate", () => {
     if (decision.allowed || !decision.userNotice) {
       throw new Error("Expected exhausted Max usage to return a user notice");
     }
-    expect(decision.userNotice.message).toMatch(/Max/iu);
-    expect(decision.userNotice.message).not.toMatch(/Pulse|Edge/iu);
+    expect(decision.userNotice.message).toContain(
+      "https://withmurph.ai/settings?usageRecovery=true#subscription",
+    );
+    expect(decision.userNotice.message).not.toMatch(/Pulse|Edge|addUsage=true/iu);
   });
 
   it("gives an exhausted group gate the deterministic refill admission seam before denial", async () => {
@@ -2638,7 +2830,7 @@ describe("resolveHostedAiUsageGate", () => {
     });
   });
 
-  it("uses starter-specific copy when non-expiring starter credit is exhausted", async () => {
+  it("routes exhausted non-expiring starter credit to Settings recovery", async () => {
     const prisma = createGatePrisma({
       billingPhase: "trial",
       checkoutOffer: "pulse_trial_7d",
@@ -2662,7 +2854,9 @@ describe("resolveHostedAiUsageGate", () => {
       reason: "ai_usage_limit_exceeded",
       userNotice: {
         code: "starter_usage_limit_reached",
-        message: expect.stringContaining("https://withmurph.ai/home"),
+        message: expect.stringContaining(
+          "https://withmurph.ai/settings?usageRecovery=true#subscription",
+        ),
       },
     });
   });

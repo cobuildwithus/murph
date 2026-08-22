@@ -83,4 +83,20 @@ describe("hosted Web Vitest entrypoint", () => {
       webTestFile,
     ]);
   });
+
+  it("forwards native shard selection without narrowing the workspace", () => {
+    expect(
+      buildHostedWebVitestArgs(
+        ["--", "--shard=1/4", "--passWithNoTests=false"],
+        repoRoot,
+      ),
+    ).toEqual([
+      "run",
+      "--config",
+      "apps/web/vitest.workspace.ts",
+      "--no-coverage",
+      "--shard=1/4",
+      "--passWithNoTests=false",
+    ]);
+  });
 });

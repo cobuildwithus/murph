@@ -37,6 +37,7 @@ import {
 } from "@murphai/hosted-execution/workspace-snapshot-v2";
 import {
   createAssistantOutboxIntent,
+  markAssistantOutboxIntentSentById,
 } from "@murphai/assistant-engine/assistant-outbox";
 import {
   readAssistantInputEvent,
@@ -77,6 +78,9 @@ import {
   type HostedWorkspaceSnapshotArchiveBuilder,
 } from "../src/hosted-runtime/snapshot-bridge.ts";
 import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "../src/hosted-runtime/runtime-logs.ts";
+import {
   enqueueHostedPendingAssistantInputId,
 } from "../src/hosted-runtime/pending-input-index.ts";
 
@@ -93,6 +97,7 @@ const WRITE_OPERATION_SCHEMA_VERSION = "murph.write-operation.v1";
 const cleanupPaths: string[] = [];
 
 afterEach(async () => {
+  await drainHostedRuntimeLogWritesBestEffort();
   vi.restoreAllMocks();
   await Promise.all(cleanupPaths.splice(0).map(async (target) => {
     await rm(target, { force: true, recursive: true });
@@ -182,6 +187,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.startSnapshotSession).not.toHaveBeenCalled();
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.logWrite).not.toHaveBeenCalled();
   });
 
   it("retains background work across checkpoint interruption before publishing the retry", async () => {
@@ -281,6 +287,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.putSnapshotObjectDirect).not.toHaveBeenCalled();
     expect(calls.completeSnapshotSession).not.toHaveBeenCalled();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    expect(calls.logWrite).not.toHaveBeenCalled();
   });
 
   const staleLeaseMutations = [
@@ -394,6 +401,227 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }
   }
 
+  it("emits one bounded failure record at each fixed snapshot lifecycle stage", async () => {
+    const failureCases = [
+      { stage: "plan" },
+      { sessionPhase: "session_start_request", stage: "session" },
+      { sessionPhase: "session_start_response_decode", stage: "session" },
+      { stage: "archive" },
+      { stage: "upload" },
+      { stage: "checkpoint" },
+    ] as const;
+
+    for (const failureCase of failureCases) {
+      const expectedStage = failureCase.stage;
+      const vaultRoot = await createVaultRoot();
+      const { calls, platform } = createRuntimePlatform();
+      const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+      const failure = new Error(
+        expectedStage === "plan"
+          ? "Hosted bundle archive is invalid."
+          : `Synthetic ${expectedStage} failure.`,
+      );
+      if (expectedStage === "session") {
+        Object.assign(failure, {
+          phase: failureCase.sessionPhase,
+          timeoutMs: 6_000,
+        });
+      } else if (expectedStage === "checkpoint") {
+        Object.assign(failure, {
+          phase: "session_complete_request",
+          timeoutMs: 30_000,
+        });
+      }
+
+      if (expectedStage === "plan") {
+        platform.workspacePort = {
+          checkpoint: async () => {
+            throw new Error("Unexpected workspace checkpoint call.");
+          },
+          read: async () => {
+            throw failure;
+          },
+        };
+      } else if (expectedStage === "session") {
+        calls.startSnapshotSession.mockRejectedValueOnce(failure);
+      } else if (expectedStage === "archive") {
+        vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot)
+          .mockRejectedValueOnce(failure);
+      } else if (expectedStage === "upload") {
+        calls.putSnapshotObjectDirect.mockRejectedValueOnce(failure);
+      } else {
+        calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+      }
+
+      const options = createBridgeOptions({
+        platform,
+        snapshotArchiveBuilder,
+        vaultRoot,
+      });
+
+      await expect(options.createCheckpointSnapshot(
+        createCheckpointInput("idle_shutdown"),
+      )).rejects.toBe(failure);
+
+      const lifecycleEntries = calls.logWrite.mock.calls
+        .flatMap(([request]) => request.entries)
+        .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+      expect(lifecycleEntries).toEqual([
+        expect.objectContaining({
+          eventCode: "checkpoint.snapshot_failed",
+          redactedJson: expect.objectContaining({
+            snapshotMode: "workspace_snapshot_v2",
+            ...(expectedStage === "session"
+              ? {
+                  snapshotSessionStartElapsedMs: expect.any(Number),
+                  snapshotSessionStartFailurePhase: failureCase.sessionPhase,
+                  snapshotSessionStartTimeoutMs: 6_000,
+                }
+              : expectedStage === "checkpoint"
+                ? {
+                    snapshotSessionCompleteElapsedMs: expect.any(Number),
+                    snapshotSessionCompleteFailurePhase: "session_complete_request",
+                    snapshotSessionCompleteTimeoutMs: 30_000,
+                  }
+              : {}),
+            snapshotStage: expectedStage,
+          }),
+        }),
+      ]);
+      expect(lifecycleEntries.some((entry) =>
+        entry.eventCode === "checkpoint.snapshot_plan"
+        || entry.eventCode === "checkpoint.snapshot_started"
+      )).toBe(false);
+    }
+  });
+
+  it("retains local checkpoint-recording failure provenance without inventing a timeout", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const recordFailureCause = Object.freeze(
+      new Error("Synthetic local checkpoint recording cause."),
+    );
+    const failure = Object.assign(
+      new Error("Hosted workspace snapshot session start failed.", {
+        cause: recordFailureCause,
+      }),
+      { phase: "session_complete_record_checkpoint" },
+    );
+    calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    expect(failure.cause).toBe(recordFailureCause);
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        redactedJson: expect.objectContaining({
+          snapshotSessionCompleteElapsedMs: expect.any(Number),
+          snapshotSessionCompleteFailurePhase: "session_complete_record_checkpoint",
+          snapshotStage: "checkpoint",
+        }),
+      }),
+    ]);
+    expect(lifecycleEntries[0]?.redactedJson).not.toHaveProperty(
+      "snapshotSessionCompleteTimeoutMs",
+    );
+  });
+
+  it("does not wait for the queued finished record before returning a checkpoint", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    let releaseFinishedLog!: () => void;
+    const finishedLogGate = new Promise<void>((resolve) => {
+      releaseFinishedLog = resolve;
+    });
+    let finishedLogSettled = false;
+    calls.logWrite.mockImplementationOnce(async (request) => {
+      await finishedLogGate;
+      finishedLogSettled = true;
+      return { loggedCount: request.entries.length };
+    });
+    const options = createBridgeOptions({
+      platform,
+      vaultRoot,
+    });
+    let checkpointSettled = false;
+    const checkpoint = Promise.resolve(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).then((result) => {
+      checkpointSettled = true;
+      return result;
+    });
+
+    try {
+      await vi.waitFor(() => {
+        expect(calls.logWrite).toHaveBeenCalledOnce();
+      });
+      await vi.waitFor(() => {
+        expect(checkpointSettled).toBe(true);
+      }, { timeout: 250 });
+      expect(finishedLogSettled).toBe(false);
+      await expect(checkpoint).resolves.toMatchObject({
+        snapshotRef: {
+          snapshotId: "snapshot_bridge",
+        },
+      });
+    } finally {
+      releaseFinishedLog();
+      await checkpoint;
+    }
+
+    await vi.waitFor(() => {
+      expect(finishedLogSettled).toBe(true);
+    });
+  });
+
+  it("keeps snapshot outcomes independent from an unavailable log port", async () => {
+    const successfulVaultRoot = await createVaultRoot();
+    const successfulRuntime = createRuntimePlatform();
+    successfulRuntime.platform.logPort = null;
+    const successfulOptions = createBridgeOptions({
+      platform: successfulRuntime.platform,
+      vaultRoot: successfulVaultRoot,
+    });
+
+    await expect(successfulOptions.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).resolves.toMatchObject({
+      snapshotRef: {
+        snapshotId: "snapshot_bridge",
+      },
+    });
+    expect(successfulRuntime.calls.logWrite).not.toHaveBeenCalled();
+
+    const failedVaultRoot = await createVaultRoot();
+    const failedRuntime = createRuntimePlatform();
+    failedRuntime.platform.logPort = null;
+    const failure = new Error("Synthetic archive failure without logging.");
+    const failedOptions = createBridgeOptions({
+      platform: failedRuntime.platform,
+      snapshotArchiveBuilder: {
+        buildEncryptedSnapshot: vi.fn(async () => {
+          throw failure;
+        }),
+      },
+      vaultRoot: failedVaultRoot,
+    });
+
+    await expect(failedOptions.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBeInstanceOf(Error);
+    expect(failedRuntime.calls.logWrite).not.toHaveBeenCalled();
+  });
+
   it("aborts the snapshot session when archive construction fails before checkpoint", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
@@ -498,9 +726,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         .toBe(true);
     });
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
-    const preemptionEntry = entries.find(
-      (entry) => entry.eventCode === "checkpoint.snapshot_preempted",
-    );
+    const lifecycleEntries = entries.filter((entry) =>
+      entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toHaveLength(1);
+    const [preemptionEntry] = lifecycleEntries;
     expect(preemptionEntry).toMatchObject({
       errorCode: "runtime_wake_during_checkpoint",
       eventCode: "checkpoint.snapshot_preempted",
@@ -510,10 +739,9 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         snapshotInterruptedBeforeCommit: true,
         snapshotOutcomeKind: "expected_preemption",
         snapshotPreemptionKind: "runtime_wake",
+        snapshotStage: "archive",
       }),
     });
-    expect(entries.some((entry) => entry.eventCode === "checkpoint.snapshot_failed"))
-      .toBe(false);
     expect(JSON.stringify(preemptionEntry)).not.toContain(
       "private checkpoint wake detail",
     );
@@ -1062,7 +1290,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(canonicalWriterEntered).toBe(true);
   });
 
-  it("carries idle checkpoint trigger metadata through the production bridge snapshot path", async () => {
+  it("retains one finished lifecycle record with checkpoint and plan metadata", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const options = createBridgeOptions({
@@ -1070,13 +1298,28 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       vaultRoot,
     });
 
-    await options.createCheckpointSnapshot({
+    const result = await options.createCheckpointSnapshot({
       ...createCheckpointInput("idle_shutdown"),
       handledConversationFrontierSelected: true,
       handledConversationMailboxItemIds: ["item_terminal_7"],
       idleCheckpointTrigger: "shutdown_signal",
       runtimeWakePendingAtCheckpoint: false,
     });
+
+    expect(result).toMatchObject({
+      checkpoint: {
+        checkpointed: true,
+      },
+      localWorkspaceCleanForWarmReuse: true,
+      snapshotRef: {
+        snapshotId: "snapshot_bridge",
+      },
+    });
+    expect(result.checkpoint).toEqual(createCheckpointResponse({
+      snapshotRef: result.snapshotRef,
+      userId: TEST_REQUEST.userId,
+      version: TEST_REQUEST.workspaceVersion,
+    }));
 
     const checkpointRequest =
       calls.completeSnapshotSession.mock.calls[0]?.[0].checkpointRequest;
@@ -1091,26 +1334,88 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(JSON.stringify(entries)).not.toContain("item_terminal_7");
-    for (const eventCode of [
-      "checkpoint.snapshot_plan",
-      "checkpoint.snapshot_started",
-      "checkpoint.snapshot_finished",
-    ]) {
-      const entry = entries.find((candidate) => candidate.eventCode === eventCode);
-      expect(entry?.redactedJson).toMatchObject({
-        handledConversationFrontierSelected: true,
-        handledConversationMailboxItemCount: 1,
-        idleCheckpointTrigger: "shutdown_signal",
-        runtimeWakePendingAtCheckpoint: false,
-      });
-      if (eventCode === "checkpoint.snapshot_finished") {
-        expect(entry?.redactedJson).toMatchObject({
+    const lifecycleEntries = entries.filter((entry) =>
+      entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_finished",
+        redactedJson: expect.objectContaining({
+          currentSnapshotRefPresent: false,
+          handledConversationFrontierSelected: true,
+          handledConversationMailboxItemCount: 1,
+          idleCheckpointTrigger: "shutdown_signal",
+          legacyBundleRefPresent: false,
+          nextWakeAtPresent: false,
+          nextWakeReasonPresent: false,
+          preservedInlineFileCount: 0,
+          redactedStatusPresent: true,
+          runtimeWakePendingAtCheckpoint: false,
+          skippedInlineFileCount: 0,
+          snapshotArchiveBuildElapsedMs: expect.any(Number),
+          snapshotDirectR2PresignElapsedMs: 1,
+          snapshotDirectR2PutElapsedMs: 2,
+          snapshotDirectR2UploadElapsedMs: expect.any(Number),
+          snapshotElapsedMs: expect.any(Number),
+          snapshotMode: "workspace_snapshot_v2",
+          snapshotSessionCompleteElapsedMs: expect.any(Number),
+          snapshotSessionStartElapsedMs: expect.any(Number),
           webCheckpointAccepted: true,
-        });
-      } else {
-        expect(entry?.redactedJson).not.toHaveProperty("webCheckpointAccepted");
-      }
-    }
+          workspaceSnapshotEncryptedBytes: 18,
+          workspaceSnapshotFileCount: expect.any(Number),
+          workspaceSnapshotPlainBytes: 9,
+        }),
+      }),
+    ]);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_plan"
+      || entry.eventCode === "checkpoint.snapshot_started"
+    )).toBe(false);
+  });
+
+  it("keeps snapshot elapsed time scoped after legacy planning", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const realDateNow = Date.now.bind(Date);
+    let clockOffsetMs = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => realDateNow() + clockOffsetMs);
+    platform.workspacePort = {
+      checkpoint: async () => {
+        throw new Error("Unexpected workspace checkpoint call.");
+      },
+      read: async () => {
+        clockOffsetMs += 60_000;
+        return {
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: null,
+        };
+      },
+    };
+    let postPlanTimeAdvanced = false;
+    const options = createBridgeOptions({
+      platform,
+      readCurrentLease: () => {
+        if (!postPlanTimeAdvanced) {
+          clockOffsetMs += 5_000;
+          postPlanTimeAdvanced = true;
+        }
+        return createLease();
+      },
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode.startsWith("checkpoint.snapshot_"));
+    expect(lifecycleEntries).toHaveLength(1);
+    expect(lifecycleEntries[0]).toMatchObject({
+      eventCode: "checkpoint.snapshot_finished",
+    });
+    const snapshotElapsedMs = lifecycleEntries[0]?.redactedJson?.snapshotElapsedMs;
+    expect(snapshotElapsedMs).toEqual(expect.any(Number));
+    expect(snapshotElapsedMs).toBeGreaterThanOrEqual(5_000);
+    expect(snapshotElapsedMs).toBeLessThan(60_000);
   });
 
   it("uses the current checkpoint expected workspace version for bridge snapshots", async () => {
@@ -1310,17 +1615,237 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     )).toBe(true);
   });
 
-  it("continues checkpoint publication when assistant runtime residue pruning fails", async () => {
+  it("materializes skipped-inline deliveries before quiescent cleanup", async () => {
+    const vaultRoot = await createVaultRoot();
+    const workspaceRoot = path.dirname(path.dirname(vaultRoot));
+    const sourceVaultRoot = path.join(workspaceRoot, "legacy-delivery-source");
+    const terminalRef =
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/terminal.zip`;
+    const activeRef =
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.zip`;
+    const terminalContents = Buffer.from("terminal generated delivery\n");
+    const activeContents = Buffer.from("active generated delivery\n");
+    await mkdir(path.dirname(path.join(sourceVaultRoot, terminalRef)), {
+      recursive: true,
+    });
+    await writeFile(path.join(sourceVaultRoot, terminalRef), terminalContents);
+    await writeFile(path.join(sourceVaultRoot, activeRef), activeContents);
+    const baseBundle = await snapshotHostedBundleRoots({
+      kind: "vault",
+      roots: [{
+        root: sourceVaultRoot,
+        rootKey: "vault",
+      }],
+    });
+    expect(baseBundle).not.toBeNull();
+    if (!baseBundle) {
+      throw new Error("Expected a legacy hosted workspace bundle.");
+    }
+    const baseHash = sha256HostedBundleHex(baseBundle);
+    const legacySnapshotRef = {
+      hash: baseHash,
+      key: `legacy/${baseHash}.bundle`,
+      size: baseBundle.byteLength,
+      updatedAt: "2026-05-01T00:00:00.000Z",
+    };
+    await writeHostedWorkspaceSkippedInlineFiles({
+      files: [
+        {
+          path: terminalRef,
+          root: "vault",
+          sha256: sha256HostedBundleHex(terminalContents),
+          size: terminalContents.byteLength,
+        },
+        {
+          path: activeRef,
+          root: "vault",
+          sha256: sha256HostedBundleHex(activeContents),
+          size: activeContents.byteLength,
+        },
+      ],
+      vaultRoot,
+    });
+    const terminalIntent = await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-terminal-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/zip",
+        filename: "terminal.zip",
+        kind: "vault_file",
+        ref: terminalRef,
+        sha256: sha256HostedBundleHex(terminalContents),
+        sizeBytes: terminalContents.byteLength,
+      }],
+      message: "Terminal generated delivery",
+      sessionId: "session-terminal-delivery",
+      threadId: "thread-terminal-delivery",
+      threadIsDirect: true,
+      turnId: "turn-terminal-delivery",
+      vault: vaultRoot,
+    });
+    const sentTerminalIntent = await markAssistantOutboxIntentSentById({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "terminal-delivery",
+        messageLength: terminalIntent.message.length,
+        providerMessageId: "provider-terminal-delivery",
+        providerThreadId: "thread-terminal-delivery",
+        sentAt: "2026-05-01T00:00:00.000Z",
+        target: "thread-terminal-delivery",
+        targetKind: "thread",
+      },
+      intentId: terminalIntent.intentId,
+      vault: vaultRoot,
+    });
+    expect(sentTerminalIntent?.status).toBe("sent");
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-active-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/zip",
+        filename: "active.zip",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: sha256HostedBundleHex(activeContents),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Active generated delivery",
+      sessionId: "session-active-delivery",
+      threadId: "thread-active-delivery",
+      threadIsDirect: true,
+      turnId: "turn-active-delivery",
+      vault: vaultRoot,
+    });
+
+    const { calls, platform: basePlatform } = createRuntimePlatform();
+    const legacyWorkspace = createCheckpointResponse({
+      snapshotRef: legacySnapshotRef,
+      userId: TEST_REQUEST.userId,
+      version: TEST_REQUEST.workspaceVersion,
+    }).workspace;
+    const platform: HostedRuntimePlatform = {
+      ...basePlatform,
+      artifactStore: {
+        get: async (sha256) => sha256 === baseHash ? baseBundle : null,
+        put: async () => {},
+      },
+      workspacePort: {
+        checkpoint: async () => ({
+          checkpointed: true,
+          workspace: legacyWorkspace,
+        }),
+        read: async () => ({
+          fetchedAt: "2026-05-01T00:00:00.000Z",
+          workspace: legacyWorkspace,
+        }),
+      },
+    };
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === terminalRef))
+      .toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === activeRef))
+      .toBe(true);
+    await expectMissing(path.join(vaultRoot, terminalRef));
+    await expectPresent(path.join(vaultRoot, activeRef));
+    expect(await readHostedWorkspaceSkippedInlineFiles({ vaultRoot })).toEqual([]);
+
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === terminalContents.byteLength
+    )).toBe(true);
+  });
+
+  it("prunes terminal deliveries when unrelated assistant residue cleanup fails", async () => {
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
-    const pendingInputsPath = path.join(
-      vaultRoot,
-      ".runtime",
-      "operations",
-      "assistant",
-      "hosted-pending-inputs.json",
-    );
+    const terminalRef =
+      `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/terminal.pdf`;
+    const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/active.pdf`;
+    const terminalContents = Buffer.from("terminal generated delivery\n");
+    const activeContents = Buffer.from("active generated delivery\n");
+    await mkdir(path.dirname(path.join(vaultRoot, terminalRef)), {
+      recursive: true,
+    });
+    await writeFile(path.join(vaultRoot, terminalRef), terminalContents);
+    await writeFile(path.join(vaultRoot, activeRef), activeContents);
+    const terminalIntent = await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-terminal-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "terminal.pdf",
+        kind: "vault_file",
+        ref: terminalRef,
+        sha256: createHash("sha256").update(terminalContents).digest("hex"),
+        sizeBytes: terminalContents.byteLength,
+      }],
+      message: "Terminal generated delivery",
+      sessionId: "session-terminal-generated-delivery",
+      threadId: "thread-terminal-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-terminal-generated-delivery",
+      vault: vaultRoot,
+    });
+    await expect(markAssistantOutboxIntentSentById({
+      delivery: {
+        channel: "linq",
+        idempotencyKey: "terminal-generated-delivery",
+        messageLength: terminalIntent.message.length,
+        providerMessageId: "message-terminal-generated-delivery",
+        providerThreadId: "thread-terminal-generated-delivery",
+        sentAt: "2026-06-10T00:00:00.000Z",
+        target: "thread-terminal-generated-delivery",
+        targetKind: "thread",
+      },
+      intentId: terminalIntent.intentId,
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      deliveryConfirmationPending: false,
+      status: "sent",
+    });
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-active-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "active.pdf",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: createHash("sha256").update(activeContents).digest("hex"),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Active generated delivery",
+      sessionId: "session-active-generated-delivery",
+      threadId: "thread-active-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-active-generated-delivery",
+      vault: vaultRoot,
+    });
+    const pendingInputsRef =
+      ".runtime/operations/assistant/hosted-pending-inputs.json";
+    const pendingInputsPath = path.join(vaultRoot, pendingInputsRef);
     await mkdir(path.dirname(pendingInputsPath), { recursive: true });
     await writeFile(pendingInputsPath, "{ not-json", "utf8");
     const options = createBridgeOptions({
@@ -1332,10 +1857,76 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
 
     await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
 
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) => entry.relativePath === terminalRef))
+      .toBe(false);
+    expect(archiveEntries.some((entry) => entry.relativePath === activeRef))
+      .toBe(true);
+    expect(archiveEntries.some((entry) => entry.relativePath === pendingInputsRef))
+      .toBe(true);
+    await expectMissing(path.join(vaultRoot, terminalRef));
+    await expectPresent(path.join(vaultRoot, activeRef));
     expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
     expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryFileCount === 1
+      && entry.redactedJson?.prunedAssistantRuntimeGeneratedDeliveryBytes
+        === terminalContents.byteLength
+      && entry.redactedJson?.prunedAssistantRuntimeResidueFileCount === 1
+    )).toBe(true);
+  });
+
+  it("continues checkpoint publication when generated-delivery cleanup fails", async () => {
+    const vaultRoot = await createVaultRoot();
+    const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing.pdf`;
+    const activeContents = Buffer.from("missing active generated delivery\n");
+    await createAssistantOutboxIntent({
+      channel: "linq",
+      identityId: "identity-missing-generated-delivery",
+      media: [{
+        approvalGeneration: null,
+        approvalId: null,
+        contentType: "application/pdf",
+        filename: "missing.pdf",
+        kind: "vault_file",
+        ref: activeRef,
+        sha256: createHash("sha256").update(activeContents).digest("hex"),
+        sizeBytes: activeContents.byteLength,
+      }],
+      message: "Missing active generated delivery",
+      sessionId: "session-missing-generated-delivery",
+      threadId: "thread-missing-generated-delivery",
+      threadIsDirect: true,
+      turnId: "turn-missing-generated-delivery",
+      vault: vaultRoot,
+    });
+    const { calls, platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    expect(snapshotArchiveBuilder.buildEncryptedSnapshot).toHaveBeenCalledOnce();
+    expect(calls.putSnapshotObjectDirect).toHaveBeenCalledOnce();
+    expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
+    expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
+    await drainHostedRuntimeLogWritesBestEffort();
+    const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
+    expect(entries.some((entry) =>
+      entry.eventCode === "checkpoint.snapshot_finished"
+      && entry.redactedJson?.assistantRuntimeGeneratedDeliveryPruneFailed === true
+    )).toBe(true);
   });
 
   it("continues checkpoint publication when terminal write-operation pruning fails", async () => {
@@ -1401,6 +1992,43 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     }))).resolves.toEqual({
       reasonCode: "cloudflare_bridge.unhandled_mailbox_route",
       status: "deferred",
+    });
+  });
+
+  it("matches mailbox occurred-at identity by instant across ISO precision", async () => {
+    const equivalentVaultRoot = await createVaultRoot();
+    const { platform } = createRuntimePlatform();
+    const equivalentOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: createMemberChannelsWake({
+          occurredAt: "2026-05-01T00:00:00Z",
+        }),
+      }),
+      platform,
+      vaultRoot: equivalentVaultRoot,
+    });
+
+    await expect(equivalentOptions.importItem(
+      createSystemMailboxImportItem(),
+    )).resolves.toMatchObject({ status: "imported" });
+
+    const mismatchedOptions = createBridgeOptions({
+      mailboxPayloadDecoder: createMailboxPayloadDecoder({
+        status: "decoded",
+        wake: createMemberChannelsWake({
+          occurredAt: "2026-05-01T00:00:01Z",
+        }),
+      }),
+      platform,
+      vaultRoot: await createVaultRoot(),
+    });
+    await expect(mismatchedOptions.importItem(
+      createSystemMailboxImportItem(),
+    )).resolves.toEqual({
+      reasonCode: "payload.decode_mismatch",
+      retryable: false,
+      status: "blocked",
     });
   });
 

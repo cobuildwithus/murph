@@ -566,7 +566,7 @@ describe("public routes WAF preflight", () => {
       "check-public-routes-waf.ts",
     );
     expect(packageJson.scripts?.build).toMatch(
-      /-- bash -c 'pnpm public-routes:waf-check &&/u,
+      /^pnpm public-routes:waf-check &&/u,
     );
     expect(packageJson.scripts?.["companion-auth-diagnostics:waf-check"]).toBeUndefined();
   });

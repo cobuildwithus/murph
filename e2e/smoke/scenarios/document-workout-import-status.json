@@ -1,0 +1,8 @@
+{
+  "id": "document-workout-import-status",
+  "command": "vault-cli document workout-import-status <raw-ref> --vault <path> [--request-id <id>]",
+  "vaultFixture": "fixtures/minimal-vault",
+  "inputs": [],
+  "goldenOutput": "fixtures/golden-outputs/document-import",
+  "purpose": "Registers the exact-source workout completion query; historical edit, deletion, retry, and atomic first-import behavior is executable in focused core and CLI tests."
+}

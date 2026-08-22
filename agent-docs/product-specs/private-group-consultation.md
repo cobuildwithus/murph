@@ -41,6 +41,36 @@ Do not add a context projection, agent registry, general message bus, database
 table, workflow, timer, second container, cross-workspace mount, or
 same-process Codex multiplexer.
 
+## Separate target-authored group handoff
+
+Assistant Ask remains the read-only consultation primitive above. A member may
+also explicitly ask their private Murph to **post bounded verified context into
+one joined group**. That is a separate `murph.group(action="handoff")` action,
+not a result-routing mode for Assistant Ask.
+
+Web binds one fresh accepted private input to one exact current membership
+generation and the synthetic group runtime's current thread route. It appends
+one expiring, deterministic `assistant.notification.requested` wake to that
+group. The target group Murph receives the context as quoted untrusted data,
+uses its own committed group conversation and tone, and authors one ordinary
+group message through the existing notification and outbox owners.
+
+The model supplies only `context` and an optional visible `groupLabel`. It never
+supplies member, membership, runtime, thread, route, provider, callback,
+idempotency, or mailbox identifiers. Exact replay reuses one global event/item
+identity derived from the authenticated member and accepted input. Changed
+context, membership generation, target group, or route conflicts instead of
+redirecting. `accepted` proves only that the target mailbox item is durable.
+
+The target turn uses the conversation prompt with an isolated output-only
+provider thread. It has no tools, private-vault access, filesystem capability,
+follow-up effect, recursion, or second delivery protocol. Fresh foreground
+conversation input still preempts it, while the exact bounded handoff family may
+run before the normal idle-checkpoint floor so it cannot starve indefinitely.
+
+Do not add a table, queue, workflow, callback registry, delivery ledger, target
+selector API, or generalized cross-context message type for this action.
+
 ## Smallest complete contract
 
 The model-facing action is:
@@ -305,9 +335,10 @@ by the App Server. On the pinned Codex version, request-level `permissions`
 becomes the session `default_permissions` override even when the lower hosted
 config retains its ordinary legacy sandbox default. The isolated request never
 passes legacy `sandbox`, because request-level `permissions` and `sandbox` do
-not compose. Assert the effective profile, roots, working directory,
-instruction sources, and approval policy before model work, and fail closed on
-any mismatch.
+not compose. The request supplies the exact profile, roots, working directory,
+disabled instruction sources, and approval policy. Do not treat echoed
+thread-start metadata as a security boundary; prove the named profile's actual
+Linux behavior before enabling the feature.
 
 The named profile must OS-enforce read access only to Codex's `:minimal`
 runtime and the exact `:workspace_roots`, no writes, explicit denial of

@@ -291,6 +291,7 @@ test("minimizeTelegramUpdate stores only minimal telegram capture metadata with 
     media_group_id: "album_123",
     message_id: 5,
     reply_context_preview: "Replying to: Earlier message",
+    reply_to_message_id: 4,
     schema: "murph.telegram-capture.v1",
   });
 });
@@ -330,6 +331,7 @@ test("minimizeTelegramUpdate keeps poll context without persisting actor identit
     message_id: 6,
     reply_context_preview:
       "Replying to: Poll Lunch? [Sushi | Soup]\nQuoted text: Which option did you mean?",
+    reply_to_message_id: 5,
     schema: "murph.telegram-capture.v1",
   });
 });
@@ -364,6 +366,7 @@ test("minimizeTelegramUpdate sanitizes venue reply context without leaking addre
   assert.deepEqual(minimizeTelegramUpdate(update), {
     message_id: 7,
     reply_context_preview: "Replying to: Shared venue Cafe 123",
+    reply_to_message_id: 6,
     schema: "murph.telegram-capture.v1",
   });
 });
@@ -399,6 +402,7 @@ test("minimizeTelegramUpdate caps the final assembled reply preview", () => {
   const minimized = minimizeTelegramUpdate(update);
   assert.equal(minimized.schema, "murph.telegram-capture.v1");
   assert.equal(minimized.message_id, 8);
+  assert.equal(minimized.reply_to_message_id, 7);
   const preview = minimized.reply_context_preview;
   assert.equal(typeof preview, "string");
   assert.equal((preview as string).length, 240);

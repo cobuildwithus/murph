@@ -65,6 +65,7 @@ import {
 } from "./types.ts";
 
 import { compareMetricCandidateByDateDesc, compareSleepWindowByDateDesc } from "./selection.ts";
+import { collectJunctionWorkoutFeatures } from "./workout-features.ts";
 
 const APPLE_HEALTH_KIT_PROVIDER = "apple-health-kit";
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
@@ -89,6 +90,13 @@ const INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS = new Map<WearableMetricKey, st
   ["remMinutes", "rem-sleep-minutes"],
 ]);
 const INVALID_ZERO_SLEEP_METRICS = new Set<string>(INVALID_ZERO_SLEEP_METRIC_SUPPRESSION_KEYS.keys());
+const SPARSE_BODY_OBSERVATION_METRICS = new Set<WearableMetricKey>([
+  "bmi",
+  "bodyFatPercentage",
+  "leanBodyMassKg",
+  "waistCircumference",
+  "weightKg",
+]);
 
 export function collectWearableDataset(
   vault: VaultReadModel,
@@ -230,6 +238,7 @@ export function collectWearableDataset(
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
     sleepWindows: filteredSleepWindows,
+    workoutFeatures: collectJunctionWorkoutFeatures(vault.events, filters),
   };
 }
 
@@ -1606,22 +1615,6 @@ function buildObservationMetricCandidates(
     return [];
   }
 
-  // An explicit event-grain observation is a point-in-time fact, not a
-  // provider day summary. Keep it in the canonical metric-point lane without
-  // promoting it into synthetic sleep/recovery summaries. Missing grain stays
-  // compatible with legacy provider observations whose resource type carries
-  // the summary semantics.
-  const observationGrain = normalizeLowercaseString(entity.attributes.observationGrain)
-    ?.replace(/_/gu, "-");
-  if (observationGrain && ![
-    "summary",
-    "day",
-    "daily-summary",
-    "daily-timeseries-aggregate",
-  ].includes(observationGrain)) {
-    return [];
-  }
-
   const rawMetric = normalizeLowercaseString(entity.attributes.metric);
   const rawValue = readNumber(entity.attributes.value);
   const date = deriveWearableObservationEffectiveDate(entity, externalRef);
@@ -1643,6 +1636,25 @@ function buildObservationMetricCandidates(
 
   const mapped = mapScalarMetric(rawMetric, rawValue, normalizeUnit(entity.attributes.unit));
   if (!mapped) {
+    return [];
+  }
+
+  // Explicit point observations remain outside day summaries except for the
+  // five sparse body measurements. Those facts are naturally day-addressable
+  // and must share the same candidate selection owner as curated body rows so
+  // mixed provider history is resolved by canonical date and provenance.
+  const observationGrain = normalizeLowercaseString(entity.attributes.observationGrain)
+    ?.replace(/_/gu, "-");
+  const isDaySummaryGrain = !observationGrain || [
+    "summary",
+    "day",
+    "daily-summary",
+    "daily-timeseries-aggregate",
+  ].includes(observationGrain);
+  const isSparseBodySample = observationGrain === "sample"
+    && SPARSE_BODY_OBSERVATION_METRICS.has(mapped.metric);
+
+  if (!isDaySummaryGrain && !isSparseBodySample) {
     return [];
   }
 

@@ -15,6 +15,7 @@ import type {
   DeviceProviderDescriptor,
   NamedDeviceProviderRegistry,
 } from "@murphai/importers/device-providers/provider-descriptors";
+import type { CompleteDeviceProviderSourceDay } from "@murphai/importers";
 
 export type { DeviceSyncAccountStatus } from "./client.ts";
 export type { DeviceSyncAccountSetupPhase } from "./client.ts";
@@ -27,8 +28,13 @@ export type { ListDeviceConnectionSourcesInput } from "./client.ts";
 export type { ListDeviceSyncAccountsInput } from "./client.ts";
 export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
+export type { DeviceSyncCanonicalImportReceipt } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+export const DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT = 100;
+// Shared between the Junction provider's temporal resource/day dedupe keys and
+// the store's bounded terminal-history retention for those coordinates.
+export const JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX = "junction-temporal-authority:";
 export const DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED = {
   webhookTraceCompleted: true,
 } as const;
@@ -56,11 +62,38 @@ export interface DeviceSyncServiceConfig {
   shouldYieldJobExecution?: (() => boolean) | null;
 }
 
+export type DeviceSyncJobFailureDisposition = "queued" | "dead";
+
+export interface DeviceSyncJobFailureTransition {
+  attempts: number;
+  disposition: DeviceSyncJobFailureDisposition;
+  maxAttempts: number;
+  remainingAttempts: number;
+}
+
+export type DeviceSyncJobFailureEventOrigin =
+  | "canonical_apply"
+  | "checkpoint"
+  | "device_activity_automation"
+  | "idle_maintenance"
+  | "worker_attempt";
+
+export type DeviceSyncProviderRequestCandidateAliasSource =
+  | "id"
+  | "multiple_equal"
+  | "workoutId"
+  | "workout_id";
+
 export interface DeviceSyncJobFailureDiagnosticDetails {
   failureCauseCode?: string;
   failureCauseName?: string;
   failureErrorCause?: string;
   failureErrorName?: string;
+  normalizationFailureReason?: string;
+  normalizationRowOrdinal?: number;
+  normalizationSourceProvider?: string;
+  normalizationTimestampKind?: string;
+  normalizationTimestampSemantics?: string;
   providerHttpStatus?: number;
   providerHttpStatusText?: string;
   providerRequestAuthKind?: string;
@@ -68,6 +101,9 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   providerRequestBodyFieldCount?: number;
   providerRequestBodyFieldNames?: string;
   providerRequestBodyKind?: string;
+  providerRequestCandidateAliasSource?: DeviceSyncProviderRequestCandidateAliasSource;
+  providerRequestCandidateCount?: number;
+  providerRequestCandidateOrdinal?: number;
   providerRequestContentType?: string;
   providerRequestCredentialPresent?: boolean;
   providerRequestEndpointKind?: string;
@@ -113,9 +149,15 @@ export interface DeviceSyncJobFailureDiagnostic {
   attempts?: number;
   code: string;
   details: DeviceSyncJobFailureDiagnosticDetails;
+  /** Actual committed queue transition for this failed attempt, when known. */
+  jobDisposition?: DeviceSyncJobFailureDisposition;
   /** Job kind of the failing job (for example `resource`, `reconcile`), when known. */
   jobKind?: string;
+  /** Maximum attempt budget committed on the failing job row, when known. */
+  maxAttempts?: number;
   provider?: string;
+  /** Attempts still available after the committed failure transition, when known. */
+  remainingAttempts?: number;
   /** Provider resource name from the failing job payload, when known. */
   resource?: string;
   retryable: boolean;
@@ -150,7 +192,10 @@ export interface OAuthStateRecord {
 
 export type PublicDeviceSyncAccount = DeviceSyncAccountRecord;
 export type PublicDeviceConnectionSource = DeviceConnectionSourceRecord;
-export type StoredDeviceConnectionSource = PublicDeviceConnectionSource;
+export type StoredDeviceConnectionSource = Omit<
+  PublicDeviceConnectionSource,
+  "lifecycleEpoch"
+> & { lifecycleEpoch: number };
 
 export interface StoredDeviceSyncAccount extends PublicDeviceSyncAccount {
   externalAccountId: string;
@@ -443,8 +488,20 @@ export interface DeviceSyncPublicIngressStore {
     provider: string,
     externalAccountId: string,
   ): PublicDeviceSyncAccount | null | Promise<PublicDeviceSyncAccount | null>;
+  /**
+   * Webhook-only account resolution. The store derives the owner from the same
+   * exact connection row as the blind-index lookup; callers cannot supply or
+   * override this authority.
+   */
+  getWebhookConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): DeviceSyncPublicIngressWebhookConnectionLookupResult
+    | null
+    | Promise<DeviceSyncPublicIngressWebhookConnectionLookupResult | null>;
   upsertConnectionSource(
     input: UpsertDeviceConnectionSourceInput,
+    options?: { fenceActiveWorkOnReconnect?: boolean },
   ): Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">
     | Promise<Pick<PublicDeviceConnectionSource, "connectionId" | "sourceProviderSlug" | "status">>;
   listConnectionSources(
@@ -453,6 +510,7 @@ export interface DeviceSyncPublicIngressStore {
     PublicDeviceConnectionSource,
     | "connectionId"
     | "lastErrorCode"
+    | "lifecycleEpoch"
     | "lastSeenAt"
     | "sourceInstanceKey"
     | "sourceProviderSlug"
@@ -462,11 +520,21 @@ export interface DeviceSyncPublicIngressStore {
       PublicDeviceConnectionSource,
       | "connectionId"
       | "lastErrorCode"
+      | "lifecycleEpoch"
       | "lastSeenAt"
       | "sourceInstanceKey"
       | "sourceProviderSlug"
       | "status"
     >>>;
+  resolveConnectionSourceAdmissionCandidate(
+    input: {
+      connectionId: string;
+      sourceInstanceKey?: string;
+      sourceProviderSlug: string;
+    },
+  ): DeviceSyncPublicIngressSourceAdmissionCandidate
+    | null
+    | Promise<DeviceSyncPublicIngressSourceAdmissionCandidate | null>;
   getConnectionOwnerId?(accountId: string): string | null | Promise<string | null>;
   claimWebhookTrace(input: ClaimDeviceSyncWebhookTraceInput): DeviceSyncWebhookTraceClaimResult | Promise<DeviceSyncWebhookTraceClaimResult>;
   completeWebhookTrace(provider: string, traceId: string, claimToken: string): boolean | Promise<boolean>;
@@ -483,6 +551,23 @@ export interface DeviceSyncPublicIngressStore {
     sourceProviderSlug: string;
   }): number | Promise<number>;
 }
+
+export interface DeviceSyncPublicIngressWebhookConnectionLookupResult {
+  account: PublicDeviceSyncAccount;
+  connectionOwnerId: string | null;
+}
+
+export type DeviceSyncPublicIngressSourceAdmissionCandidate = Pick<
+  PublicDeviceConnectionSource,
+  | "lastErrorCode"
+  | "lastErrorMessage"
+  | "sourceInstanceKey"
+  | "sourceProviderSlug"
+  | "status"
+> & {
+  /** Public stores may expose ISO text; transaction-owned stores retain Date. */
+  lastSeenAt: Date | string;
+};
 
 export interface DeviceSyncJobInput {
   kind: string;
@@ -720,6 +805,12 @@ export interface DeviceSyncPublicIngressConnectionSourceObservedInput {
 export interface DeviceSyncPublicIngressWebhookAcceptedInput {
   account: PublicDeviceSyncAccount;
   claimToken: string;
+  /** Store-derived from the exact blind-index lookup; never caller-selected. */
+  connectionOwnerId: string | null;
+  /** Delivery-attempt instant; do not use as provider event or receipt time. */
+  processingAttemptedAt: string;
+  /** True only when hosted admission must finish exact-source recovery. */
+  sourceAdmissionDeferred: boolean;
   traceId: string;
   webhook: DeviceSyncIngressWebhook;
   provider: DeviceSyncProvider;
@@ -776,9 +867,9 @@ export interface DeviceSyncPublicIngressHooks {
   onConnectionSourceAdmissionRejected?(
     input: DeviceSyncPublicIngressConnectionSourceAdmissionRejectedInput,
   ): void | Promise<void>;
-  // Native SDK sources have no browser callback. A current provider-authored
-  // event may commit their pending exact-source epoch; passive traffic cannot
-  // clear a completed disconnect fence.
+  // A current provider-authored event may trigger exact-source verification
+  // when a native or browser callback is absent. Passive traffic cannot clear
+  // a completed disconnect fence because the runtime owns final admission.
   onConnectionSourceObserved?(
     input: DeviceSyncPublicIngressConnectionSourceObservedInput,
   ): void
@@ -803,12 +894,24 @@ export interface ProviderScheduleResult {
   nextReconcileAt?: string | null;
 }
 
+export interface ProviderScheduleContext {
+  findActiveDedupeKeys(dedupeKeys: readonly string[]): ReadonlySet<string>;
+}
+
 export interface ProviderSnapshotImportReceipt {
   canonicalEventCount: number;
   canonicalEventDayKeys?: readonly string[];
   canonicalEventExternalRefResourceIds?: readonly string[];
   canonicalSparseCalendarTargets?: readonly ProviderSparseCalendarTarget[];
   durableDeliveryAccepted: boolean;
+  junctionCanonicalCoverage?: readonly ProviderSnapshotCanonicalCoverageEvidence[];
+}
+
+export interface ProviderSnapshotCanonicalCoverageEvidence {
+  coverageBoundary: string;
+  coverageFinalizedAt?: string;
+  resource: string;
+  sourceProviderSlug: string;
 }
 
 export interface ProviderSparseCalendarTarget {
@@ -821,6 +924,7 @@ export interface ProviderSparseCalendarTarget {
 export interface ProviderJobConnectionSource {
   displayName: string | null;
   firstSeenAt?: string;
+  lifecycleEpoch?: number;
   lastDataAt: string | null;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
@@ -834,6 +938,8 @@ export interface ProviderJobConnectionSource {
 export interface ProviderJobContext {
   account: DeviceSyncAccount;
   now: string;
+  /** Vault-local IANA timezone used by closed-day schedulers and importers. */
+  vaultTimeZone?: string;
   signal?: AbortSignal;
   // Standalone sync discovers provider sub-sources from the provider API.
   // Hosted sync must treat the Web projection as the admission authority.
@@ -842,9 +948,15 @@ export interface ProviderJobContext {
   throwIfAborted?(): void;
   // Providers must route job-time side effects through this context instead of
   // reaching into service/store internals directly.
-  importSnapshot(snapshot: unknown): Promise<unknown>;
+  importSnapshot(
+    snapshot: unknown,
+    options?: { completeSourceDay?: CompleteDeviceProviderSourceDay },
+  ): Promise<unknown>;
   upsertConnectionSource?(
-    input: Omit<UpsertDeviceConnectionSourceInput, "connectionId">,
+    input: Omit<
+      UpsertDeviceConnectionSourceInput,
+      "connectionId" | "replaceFirstSeenAt"
+    >,
   ): DeviceConnectionSourceRecord | Promise<DeviceConnectionSourceRecord>;
   listConnectionSources?(
     input?: Omit<ListDeviceConnectionSourcesInput, "connectionId">,
@@ -922,10 +1034,26 @@ export interface DeviceSyncProviderDiagnostics {
 export interface DeviceConnectionHandler {
   beginConnection(input: ProviderBeginConnectionContext): Promise<ProviderBeginConnectionResult>;
   completeConnection(input: ProviderCompleteConnectionContext): Promise<ProviderConnectionResult>;
+  buildSourceConnectionWork?(input: {
+    historicalProofAuthorization?: {
+      firstSeenAt: string;
+      sourceProviderSlug: string;
+    };
+    now: string;
+    sourceProviderSlug: string;
+  }): Pick<ProviderConnectionResult, "initialJobs" | "nextReconcileAt">;
   refreshTokens?(account: DeviceSyncAccount, options?: { signal?: AbortSignal | null }): Promise<ProviderAuthTokens>;
   revokeAccess?(account: DeviceSyncAccount): Promise<void>;
-  revokeSourceAccess?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<void>;
-  isSourceAccessActive?(account: DeviceSyncAccount, sourceProviderSlug: string): Promise<boolean>;
+  revokeSourceAccess?(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+    options?: { requiredActiveSourceProviderSlug?: string },
+  ): Promise<void>;
+  isSourceAccessActive?(
+    account: DeviceSyncAccount,
+    sourceProviderSlug: string,
+    options?: { requireDefinitive?: boolean },
+  ): Promise<boolean>;
 }
 
 export interface DeviceSdkSignInToken {
@@ -955,7 +1083,11 @@ export interface DeviceWebhookHandler {
 }
 
 export interface DeviceJobExecutor {
-  createScheduledJobs?(account: StoredDeviceSyncAccount, now: string): ProviderScheduleResult;
+  createScheduledJobs?(
+    account: StoredDeviceSyncAccount,
+    now: string,
+    context?: ProviderScheduleContext,
+  ): ProviderScheduleResult;
   executeJob(context: ProviderJobContext, job: DeviceSyncJobRecord): Promise<ProviderJobResult>;
   batch?: DeviceJobBatchExecutor;
 }
@@ -1080,10 +1212,14 @@ export interface DeviceSyncServiceSummary {
 
 export interface DeviceSyncImporterPort {
   importDeviceProviderSnapshot(input: {
+    completeSourceDay?: CompleteDeviceProviderSourceDay;
     provider: string;
     snapshot: unknown;
     vaultRoot?: string;
   }): Promise<unknown>;
+  resolveDeviceProviderSnapshotDefaultTimeZone?(input: {
+    vaultRoot?: string;
+  }): Promise<string | undefined>;
 }
 
 export interface NodeServerHandle {

@@ -371,9 +371,9 @@ describe("Frog autofix guards", () => {
 
   it("keeps every ReviewGPT prompt authority in the trusted parent control inventory", () => {
     const specialistPromptPaths = [
+      "agent-docs/operations/product-ux.md",
       "agent-docs/prompts/coverage-write.md",
       "agent-docs/prompts/frontend-review.md",
-      "agent-docs/prompts/product-experience-review.md",
       "agent-docs/prompts/prompt-review.md",
     ];
     expect(trustedReviewControlPaths).toContain("scripts/chatgpt-review-presets");
@@ -388,6 +388,7 @@ describe("Frog autofix guards", () => {
     const presetDirectory = path.join(root, "scripts", "chatgpt-review-presets");
     const skillDirectory = path.join(root, ".agents", "skills", "frog");
     const promptDirectory = path.join(root, "agent-docs", "prompts");
+    const operationsDirectory = path.join(root, "agent-docs", "operations");
     const git = (...args: string[]) => {
       const result = spawnSync("git", args, { cwd: root, encoding: "utf8" });
       if (result.status !== 0) {
@@ -399,6 +400,7 @@ describe("Frog autofix guards", () => {
       mkdirSync(presetDirectory, { recursive: true });
       mkdirSync(skillDirectory, { recursive: true });
       mkdirSync(promptDirectory, { recursive: true });
+      mkdirSync(operationsDirectory, { recursive: true });
       mkdirSync(path.join(root, "scripts"), { recursive: true });
       mkdirSync(path.join(root, "nested"), { recursive: true });
       writeFileSync(path.join(presetDirectory, "pr-deep-review.md"), "trusted\n");

@@ -29,7 +29,6 @@ import {
   normalizeHostedTelegramUsernameForLookup,
 } from "@/src/lib/hosted-onboarding/contact-normalization";
 import { normalizePhoneNumberForCountry } from "@/src/lib/hosted-onboarding/phone";
-import type { MurphContactOption } from "@/src/lib/murph-contact-routing";
 
 import { toErrorMessage } from "./hosted-settings-sync-helpers";
 import {
@@ -112,6 +111,7 @@ type PendingAction =
       isOwner: boolean;
       kind: "change-plan";
       label: string;
+      recovery?: true;
       targetLocked: boolean;
       to: HostedFamilyPlanCode;
     };
@@ -146,6 +146,47 @@ function resolveInvitePhoneCountryOption(value: string | null | undefined) {
   return option;
 }
 
+function resolveFamilyOwnerRecoveryAction(input: {
+  billingActive: boolean;
+  members: FamilyManagerMember[];
+  tiers: FamilyManagerTier[];
+}): Extract<PendingAction, { kind: "change-plan" }> | null {
+  if (!input.billingActive) {
+    return null;
+  }
+  const owner = input.members.find((member) => member.isOwner);
+  if (!owner || owner.pendingPlanCode !== null) {
+    return null;
+  }
+  const currentTier = input.tiers.find(
+    (tier) => tier.planCode === owner.planCode,
+  );
+  if (!currentTier) {
+    return null;
+  }
+  const targetTier = input.tiers
+    .filter(
+      (tier) => tier.recurringAmountUsdCents > currentTier.recurringAmountUsdCents,
+    )
+    .sort(
+      (left, right) => left.recurringAmountUsdCents - right.recurringAmountUsdCents,
+    )[0];
+  if (!targetTier) {
+    return null;
+  }
+  return {
+    canRemove: false,
+    from: owner.planCode,
+    id: owner.memberId,
+    isOwner: true,
+    kind: "change-plan",
+    label: "you",
+    recovery: true,
+    targetLocked: true,
+    to: targetTier.planCode,
+  };
+}
+
 export function HostedFamilyManager(props: {
   billingActive: boolean;
   invites: FamilyManagerInvite[];
@@ -170,12 +211,17 @@ export function HostedFamilyManager(props: {
   tiers: FamilyManagerTier[];
   usageTopUpActiveMemberId?: string | null;
   usageTopUpActivePurchase?: HostedUsageTopUpActivePurchase | null;
-  usageTopUpContactOptions?: readonly MurphContactOption[];
   usageTopUpOffers?: readonly HostedUsageTopUpOffer[];
   usageTopUpPurchaseReturn?: HostedUsageTopUpReturn | null;
   usageTopUpReturnMemberId?: string | null;
+  usageRecoveryAvailable?: boolean;
+  usageRecoveryInitialOpen?: boolean;
 }) {
   const router = useRouter();
+  const familyRecoveryAction = resolveFamilyOwnerRecoveryAction(props);
+  const visibleFamilyRecoveryAction = props.usageRecoveryAvailable
+    ? familyRecoveryAction
+    : null;
   const [inviteOpen, setInviteOpen] = useState(false);
   const phoneCountryCodeHint = usePhoneCountryCode();
   const [phoneCountryCode, setPhoneCountryCode] = useState(() =>
@@ -191,11 +237,20 @@ export function HostedFamilyManager(props: {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [createdInvite, setCreatedInvite] = useState<CreatedFamilyInvite | null>(null);
   const [createdInviteCopied, setCreatedInviteCopied] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(() =>
+    props.usageRecoveryInitialOpen ? visibleFamilyRecoveryAction : null
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isActing, setIsActing] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const returnedActiveMember = props.usageTopUpReturnMemberId
+    ? props.members.find(
+        (member) =>
+          member.memberId === props.usageTopUpReturnMemberId &&
+          member.memberId !== props.payerMemberId,
+      ) ?? null
+    : null;
 
   const invitePlan = props.tiers.find((tier) => tier.planCode === invitePlanCode)
     ?? props.tiers[0];
@@ -253,6 +308,16 @@ export function HostedFamilyManager(props: {
       createdInvite?.targetPhoneHint ||
       createdInvite?.targetTelegramUsername,
   );
+  const familyRecoveryTargetTier = visibleFamilyRecoveryAction
+    ? props.tiers.find(
+        (tier) => tier.planCode === visibleFamilyRecoveryAction.to,
+      ) ?? null
+    : null;
+  const familyRecoverySourceTier = visibleFamilyRecoveryAction
+    ? props.tiers.find(
+        (tier) => tier.planCode === visibleFamilyRecoveryAction.from,
+      ) ?? null
+    : null;
   const pendingTargetTier = pendingAction?.kind === "change-plan"
     ? props.tiers.find((tier) => tier.planCode === pendingAction.to) ?? null
     : null;
@@ -433,6 +498,27 @@ export function HostedFamilyManager(props: {
 
   return (
     <div className="flex flex-col gap-4">
+      {visibleFamilyRecoveryAction && familyRecoverySourceTier && familyRecoveryTargetTier ? (
+        <div className="flex flex-col gap-4 rounded-2xl border border-primary/25 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div>
+            <p className="font-serif text-xl font-semibold tracking-tight text-foreground">
+              Get more included usage each month
+            </p>
+            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+              Move your access from {familyRecoverySourceTier.name} to {familyRecoveryTargetTier.name}
+              {" "}for more included usage each month. You can still add usage when you need it.
+            </p>
+          </div>
+          <Button
+            className="min-h-12 w-full sm:w-auto"
+            onClick={() => setPendingAction(visibleFamilyRecoveryAction)}
+            size="lg"
+            type="button"
+          >
+            Upgrade to {familyRecoveryTargetTier.name}
+          </Button>
+        </div>
+      ) : null}
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -632,6 +718,23 @@ export function HostedFamilyManager(props: {
         </tbody>
       </table>
       </div>
+
+      {returnedActiveMember ? (
+        <HostedUsageTopUpDialog
+          activePurchase={
+            props.usageTopUpActiveMemberId === returnedActiveMember.memberId
+              ? props.usageTopUpActivePurchase
+              : null
+          }
+          checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(returnedActiveMember.memberId)}/usage-credit/checkout`}
+          deferTerminalRefreshUntilClose
+          offers={[]}
+          payerMemberId={props.payerMemberId}
+          purchaseReturn={props.usageTopUpPurchaseReturn}
+          scope="family"
+          targetLabel={returnedActiveMember.label ?? "your family member"}
+        />
+      ) : null}
 
       {[props.usageTopUpActiveMemberId, props.usageTopUpReturnMemberId]
         .filter((memberId, index, memberIds): memberId is string => Boolean(
@@ -885,16 +988,20 @@ export function HostedFamilyManager(props: {
               {pendingAction?.kind === "remove-member"
                 ? "Remove family member"
                 : pendingAction?.kind === "change-plan"
-                  ? pendingAction.isOwner ? "Manage your plan" : `Manage ${pendingAction.label}`
-                    : "Cancel invite"}
+                  ? pendingAction.recovery
+                    ? "Upgrade your Family access"
+                    : pendingAction.isOwner ? "Manage your plan" : `Manage ${pendingAction.label}`
+                  : "Cancel invite"}
             </DialogTitle>
             <DialogDescription className="text-sm leading-6 text-[#736a58]">
               {pendingAction?.kind === "remove-member"
                 ? `Remove ${pendingAction.label}? They keep their own Murph account and data, but their access through your Family plan ends.`
                 : pendingAction?.kind === "change-plan"
-                  ? pendingPlanChangeDirection === "upgrade"
-                    ? `Upgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. The prorated difference will appear on your next invoice.`
-                    : `Downgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. Any prorated credit will apply to your next invoice.`
+                  ? pendingAction.recovery
+                    ? `Move your Family access from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. ${pendingTargetTier?.name} includes more usage each month.`
+                    : pendingPlanChangeDirection === "upgrade"
+                      ? `Upgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. The prorated difference will appear on your next invoice.`
+                      : `Downgrade ${pendingAction.isOwner ? "your plan" : pendingAction.label} from ${pendingSourceTier?.name} to ${pendingTargetTier?.name} at ${pendingTargetTier?.priceLabel}. Any prorated credit will apply to your next invoice.`
                   : `Cancel the invite for ${pendingAction?.label ?? "this person"}? The invite link stops working.`}
             </DialogDescription>
           </DialogHeader>
@@ -953,24 +1060,29 @@ export function HostedFamilyManager(props: {
               <HostedUsageTopUpDialog
                 key={pendingAction.id}
                 activePurchase={
-                  props.usageTopUpActiveMemberId === pendingAction.id
+                  props.usageTopUpActiveMemberId === pendingAction.id &&
+                  returnedActiveMember?.memberId !== pendingAction.id
                     ? props.usageTopUpActivePurchase
                     : null
                 }
                 checkoutUrl={`/api/settings/billing/family/members/${encodeURIComponent(pendingAction.id)}/usage-credit/checkout`}
-                contactOptions={props.usageTopUpContactOptions}
+                deferTerminalRefreshUntilClose={
+                  pendingAction.id !== props.payerMemberId
+                }
                 offers={props.usageTopUpActivePurchase ? [] : props.usageTopUpOffers ?? []}
                 payerMemberId={props.payerMemberId}
                 purchaseReturn={
-                  props.usageTopUpReturnMemberId === pendingAction.id
+                  props.usageTopUpReturnMemberId === pendingAction.id &&
+                  returnedActiveMember?.memberId !== pendingAction.id
                     ? props.usageTopUpPurchaseReturn
                     : null
                 }
                 scope="family"
                 targetLabel={pendingAction.label}
                 triggerClassName="w-full"
+                triggerLabel={pendingAction.recovery ? "Add usage" : undefined}
                 triggerSize="xl"
-                triggerVariant="secondary"
+                triggerVariant={pendingAction.recovery ? "outline" : "secondary"}
               />
             ) : null}
             {pendingAction?.kind === "change-plan" && pendingAction.canRemove ? (

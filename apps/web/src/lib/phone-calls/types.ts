@@ -46,6 +46,10 @@ export type HostedPhoneCallProviderUsageResolution =
       usage: HostedPhoneCallProviderUsage;
     };
 
+export type PhoneCallRuntimeStopDisposition =
+  | "already_terminal"
+  | "stopped";
+
 const phoneCallRuntimeNoActiveEffectErrors = new WeakSet<object>();
 
 export function markPhoneCallRuntimeNoActiveEffect<TError>(error: TError): TError {
@@ -76,5 +80,5 @@ export interface PhoneCallRuntime {
   stopIfActive(
     providerCallId: string,
     options?: { signal?: AbortSignal },
-  ): Promise<void>;
+  ): Promise<PhoneCallRuntimeStopDisposition>;
 }

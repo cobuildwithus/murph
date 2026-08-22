@@ -77,12 +77,50 @@ jobs:
           FROG_APP_BOT_LOGIN: ${{ vars.FROG_APP_BOT_LOGIN }}
           FROG_BASE_BRANCH: ${{ github.event.repository.default_branch }}
           FROG_PR_BODY_FOOTER: |-
+            ## Why and outcome
+
+            Reconcile committed developer-friction metadata with its linked GitHub issues.
+
+            ## Product UX
+
+            - Effort: Not applicable — internal developer tooling only.
+            - Result: Not applicable
+            - Walkthrough: No member-facing path changes.
+
+            ## Evidence
+
+            - Direct: The Frog reconciliation workflow reports the linked issue and pull-request state.
+            - Coverage: The workflow guard checks the generated body, deployment disposition, and changelog declaration.
+
+            ## Non-obvious affected surfaces
+
+            None — the pull request only reconciles developer-friction metadata and linked issue state.
+
             ## Architecture and reuse
 
-            - **Existing systems reused:** The existing Frog reconciliation workflow, linked issues, and `frog/sync` branch remain the owners.
-            - **New logic:** This pull request only reconciles committed developer-friction metadata with its linked GitHub issues.
-            - **New abstractions:** None; the existing Frog workflow remains the sole synchronization owner.
-            - **Complexity intentionally avoided:** No product runtime, second reconciliation system, direct-main write, approval, or merge automation is added.
+            - Existing systems reused: The existing Frog reconciliation workflow, linked issues, and `frog/sync` branch remain the owners.
+            - New logic: The pull request only reconciles committed developer-friction metadata with its linked GitHub issues.
+            - New abstractions: None; the existing Frog workflow remains the sole synchronization owner.
+            - Complexity intentionally avoided: No product runtime, second reconciliation system, direct-main write, approval, or merge automation is added.
+
+            ## Hot reply path impact
+
+            - Path status: Not applicable — developer-friction bookkeeping does not change conversation reply handling.
+            - Database calls: None.
+            - Network/provider calls: None.
+            - Other awaited latency: None.
+            - Before/after proof: The diff is limited to developer-friction metadata.
+
+            ## Murph initial provider input impact
+
+            - Individual Murph: Not applicable — no provider-input surface changes.
+            - Group Murph: Not applicable — no provider-input surface changes.
+            - Measurement method: Not run — the diff changes only developer-friction metadata.
+
+            ## Deployment concerns
+
+            - Deployment: not applicable
+            - Reason: This bookkeeping-only pull request does not change code, configuration, or runtime deploy boundaries.
 
             ## Changelog
 

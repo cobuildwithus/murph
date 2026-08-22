@@ -276,6 +276,7 @@ test("normalizeHostedTelegramMessage stores only minimal durable Telegram captur
       mediaGroupId: "album-7",
       messageId: "17",
       replyContextPreview: "Replying to: Earlier message",
+      replyToMessageId: "16",
       text: "[shared location]",
       threadId: "-100555:dm-topic:9",
     },
@@ -295,6 +296,7 @@ test("normalizeHostedTelegramMessage stores only minimal durable Telegram captur
     media_group_id: "album-7",
     message_id: "17",
     reply_context_preview: "Replying to: Earlier message",
+    reply_to_message_id: "16",
     schema: "murph.telegram-capture.v1",
   });
   assert.equal(capture.attachments.length, 1);
@@ -444,6 +446,7 @@ test("normalizeTelegramUpdate allowlists raw update metadata and drops secret-be
     media_group_id: "album-7",
     message_id: 18,
     reply_context_preview: "Replying to: Earlier message",
+    reply_to_message_id: 17,
     schema: "murph.telegram-capture.v1",
   });
 });

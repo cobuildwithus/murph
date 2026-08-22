@@ -8,6 +8,7 @@ import {
   createDeviceProviderRegistry,
   defaultDeviceProviderAdapters,
   importDeviceProviderSnapshot,
+  resolveDeviceProviderSnapshotDefaultTimeZone,
 } from "./device-providers/index.ts";
 import { addMeal } from "./meal-importer.ts";
 import { createSamplePresetRegistry } from "./preset-registry.ts";
@@ -57,6 +58,9 @@ export function createImporters({
         corePort: writer,
         providerRegistry: providers,
       });
+    },
+    resolveDeviceProviderSnapshotDefaultTimeZone(input: { vaultRoot?: string }) {
+      return resolveDeviceProviderSnapshotDefaultTimeZone(input, writer);
     },
   };
 }

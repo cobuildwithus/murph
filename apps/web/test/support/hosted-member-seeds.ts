@@ -54,6 +54,10 @@ const hostedAppSessionModuleSpecifier = new URL(
   "../../src/lib/hosted-onboarding/app-session.ts",
   import.meta.url,
 ).href;
+const hostedIMessageMiniAppServiceModuleSpecifier = new URL(
+  "../../src/lib/imessage-mini-app/service.ts",
+  import.meta.url,
+).href;
 const hostedMemberSeedHostOnlyEnv = {
   DOCKER_BUILDKIT: process.env.DOCKER_BUILDKIT,
   DOCKER_CONFIG: process.env.DOCKER_CONFIG,
@@ -190,6 +194,16 @@ export interface HostedAppSessionForTest {
   cookieValue: string;
   secureCookieMode: boolean;
   sessionId: string;
+}
+
+export interface HostedIMessageMiniAppCredentialForTestInput {
+  environment?: NodeJS.ProcessEnv;
+  memberId: string;
+}
+
+export interface HostedIMessageMiniAppCredentialForTest {
+  expiresAt: string;
+  token: string;
 }
 
 export interface HostedDeviceSyncConnectionForTestInput {
@@ -477,6 +491,16 @@ interface HostedAppSessionModule {
     now?: Date;
     privyUserId: string;
   }): Promise<{ cookie: string; sessionId: string }>;
+}
+
+interface HostedIMessageMiniAppServiceModule {
+  issueIMessageMiniAppEnrollment(input: {
+    memberId: string;
+    prisma: HostedMemberSeedPrismaClient;
+  }): Promise<{
+    credential: HostedIMessageMiniAppCredentialForTest;
+    schemaVersion: 1;
+  }>;
 }
 
 export async function seedHostedActiveMember(
@@ -1106,6 +1130,33 @@ export async function issueHostedAppSessionForTest(
       secureCookieMode: input.secureCookieMode,
       sessionId: issued.sessionId,
     };
+  });
+}
+
+/** Issues the production Messages mini-app credential against the harness database. */
+export async function issueHostedIMessageMiniAppCredentialForTest(
+  input: HostedIMessageMiniAppCredentialForTestInput,
+): Promise<HostedIMessageMiniAppCredentialForTest> {
+  if (!input.memberId.trim()) {
+    throw new Error("Hosted Messages credential issuance requires a member id.");
+  }
+
+  return await withHostedMemberSeedEnvironment(input.environment, async (environment) => {
+    const modules = await loadHostedMemberSeedModules(environment);
+    const prisma = createHostedMemberSeedPrisma({ environment, modules });
+
+    try {
+      const miniAppModule = await import(
+        hostedIMessageMiniAppServiceModuleSpecifier
+      ) as HostedIMessageMiniAppServiceModule;
+      const issued = await miniAppModule.issueIMessageMiniAppEnrollment({
+        memberId: input.memberId,
+        prisma,
+      });
+      return issued.credential;
+    } finally {
+      await prisma.$disconnect();
+    }
   });
 }
 

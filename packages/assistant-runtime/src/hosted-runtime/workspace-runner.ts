@@ -280,6 +280,10 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   // ran the foreground assistant reply phase; selected-prefix repair uses it
   // to distinguish clean completion from retryable reply work.
   foregroundReplyFailed?: number | null;
+  // Ephemeral provenance for one successfully processed, foreground-priority
+  // system completion in this pass. The outer runtime combines this with the
+  // pass dirty bit before advancing its idle-checkpoint activity ordinal.
+  foregroundPrioritySystemCompletionProcessed?: true;
   // Ephemeral provenance for an assistant wake created by work selected in
   // this invocation. This is never persisted; the runner and outer hot-wake
   // gate use it instead of inferring ownership from a merged wake timestamp.
@@ -311,6 +315,7 @@ export interface HostedWorkspaceRunnerAssistantPhasePostCheckpoint {
 export interface HostedWorkspaceDurableCheckpointEffectResult {
   nextWakeAt?: string | null;
   nextWakeReason?: string | null;
+  redactedStatus?: HostedRuntimeRedactedJson | null;
   requiresFollowUpCheckpoint?: boolean;
 }
 
@@ -1323,6 +1328,13 @@ export async function runHostedWorkspaceCanonicalWriteAtBoundary<TResult>(input:
   const port: HostedCanonicalWritePort = {
     async persistCanonicalWrite(writeInput) {
       await canonicalWritePort.persistCanonicalWrite(writeInput);
+      canonicalWritePersisted = true;
+    },
+    async persistRuntimeState() {
+      if (!canonicalWritePort.persistRuntimeState) {
+        throw new TypeError("Hosted runtime state checkpoint requires canonical write port support.");
+      }
+      await canonicalWritePort.persistRuntimeState();
       canonicalWritePersisted = true;
     },
   };
@@ -2725,6 +2737,60 @@ function createHostedWorkspaceCanonicalWritePort(input: {
         if (assistantAutomationScheduleChanged) {
           input.onAssistantAutomationScheduleChanged?.();
         }
+      };
+      const withPersistence = input.input.withCanonicalWritePersistence;
+      if (withPersistence) {
+        await withPersistence(persist);
+        return;
+      }
+
+      await persist();
+    },
+    async persistRuntimeState() {
+      const persist = async () => {
+        if (!input.input.checkpointRuntimeRedactedStatus) {
+          throw new TypeError("Hosted runtime state checkpoint requires runtime status checkpoint support.");
+        }
+        const workspace =
+          input.checkpointRequestBuilder.latestWorkspace()
+          ?? input.input.workspace;
+        const now = resolveHostedWorkspaceRunnerNowIso(input.input.now);
+        const systemMailboxWake = await resolveHostedSystemMailboxNextWakeCandidate({
+          now: () => now,
+          vaultRoot: input.input.vaultRoot,
+        });
+        const nextWake = selectHostedRuntimeWakeCandidate([
+          createHostedRuntimeWakeCandidate(
+            workspace?.nextWakeAt,
+            workspace?.nextWakeReason ?? null,
+          ),
+          systemMailboxWake,
+        ]);
+        const checkpoint = await input.input.checkpointRuntimeRedactedStatus({
+          nextWakeAt: nextWake.at,
+          nextWakeReason: nextWake.reason,
+          reason: "canonical_runtime_commit",
+          redactedStatus: input.readPreviousRedactedStatus(),
+          workspace,
+        });
+        if (checkpoint.workspace.userId !== input.input.expectedUserId) {
+          throw new HostedMailboxImportCheckpointUserMismatchError({
+            actualUserId: checkpoint.workspace.userId,
+            expectedUserId: input.input.expectedUserId,
+          });
+        }
+        if (!checkpoint.checkpointed) {
+          throw new HostedMailboxImportCheckpointConflictError(checkpoint);
+        }
+        input.checkpointRequestBuilder.recordStatusCheckpoint(checkpoint);
+        input.checkpointRequestBuilder.markRuntimeStateDirty();
+        await writeHostedForegroundCheckpointDeferredLog({
+          checkpointPhase: "canonical_write",
+          now: input.input.now,
+          platform: input.input.platform,
+          reason: "canonical_runtime_commit",
+          runtimeLogContext: input.input.runtimeLogContext,
+        });
       };
       const withPersistence = input.input.withCanonicalWritePersistence;
       if (withPersistence) {

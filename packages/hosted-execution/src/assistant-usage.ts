@@ -9,6 +9,8 @@ const HOSTED_MEMBER_AI_CREDENTIAL_ENV_KEYS = new Set<string>(["OPENAI_API_KEY"])
 const ASSISTANT_USAGE_REPORTING_USER_ID_HMAC_CONTEXT =
   "murph.assistant-usage.reporting-user.v1";
 const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
+  "cachedContentTokenCount",
+  "candidatesTokenCount",
   "cacheWriteInputTokens",
   "cacheWriteTokens",
   "cache_write_tokens",
@@ -20,11 +22,14 @@ const ASSISTANT_USAGE_RAW_TOKEN_KEYS = new Set<string>([
   "input_tokens",
   "outputTokens",
   "output_tokens",
+  "promptTokenCount",
   "promptTokens",
   "prompt_tokens",
   "reasoningTokens",
   "reasoning_tokens",
   "reasoningOutputTokens",
+  "thoughtsTokenCount",
+  "totalTokenCount",
   "totalTokens",
   "total_tokens",
 ]);
@@ -54,7 +59,8 @@ const ASSISTANT_USAGE_RAW_TTS_KEYS = new Set<string>([
 const ASSISTANT_USAGE_RAW_COST_KEYS = new Set<string>([
   "cost_in_usd_ticks",
 ]);
-export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v1";
+export const ASSISTANT_TURN_PROFILE_SCHEMA_V1 = "murph.assistant-turn-profile.v1";
+export const ASSISTANT_TURN_PROFILE_SCHEMA = "murph.assistant-turn-profile.v2";
 export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH = 64;
@@ -62,6 +68,97 @@ const ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/ -]*
 const ASSISTANT_TURN_PROFILE_MAX_REASONING_EFFORT_LENGTH = 32;
 const ASSISTANT_TURN_PROFILE_REASONING_EFFORT_PATTERN =
   /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+const ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+const ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_MAX_LENGTH = 48;
+const ASSISTANT_TURN_PROFILE_TOOL_KINDS = new Set([
+  "command",
+  "dynamic_tool",
+  "mcp_tool",
+]);
+export const ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES = [
+  "cat",
+  "command",
+  "curl",
+  "food.search-labels",
+  "food.search-labels-batch",
+  "goal.list",
+  "goal.show",
+  "head",
+  "jq",
+  "meal.add",
+  "meal.edit",
+  "meal.nutrients",
+  "meal.show",
+  "meal.totals",
+  "node",
+  "other",
+  "printf",
+  "python",
+  "python3",
+  "search",
+  "sed",
+  "tail",
+  "vault-cli audit",
+  "vault-cli automation",
+  "vault-cli blood-test",
+  "vault-cli event",
+  "vault-cli exercise",
+  "vault-cli food",
+  "vault-cli knowledge",
+  "vault-cli meal",
+  "vault-cli batch",
+  "vault-cli memory show",
+  "vault-cli wearables",
+  "vault-cli workout",
+] as const;
+export type AssistantTurnProfileCommandFamily =
+  (typeof ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES)[number];
+const ASSISTANT_TURN_PROFILE_COMMAND_FAMILY_SET = new Set<string>(
+  ASSISTANT_TURN_PROFILE_COMMAND_FAMILIES,
+);
+
+export function isAssistantTurnProfileCommandFamily(
+  value: unknown,
+): value is AssistantTurnProfileCommandFamily {
+  return typeof value === "string"
+    && ASSISTANT_TURN_PROFILE_COMMAND_FAMILY_SET.has(value);
+}
+
+export function buildAssistantTurnProfileToolIdentityLabel(input: {
+  kind: "dynamic_tool" | "mcp_tool";
+  tool: string | null;
+}): string {
+  const genericLabel = input.kind;
+  if (
+    input.tool === null
+    || !isAssistantTurnProfileIdentifierComponent(input.tool)
+  ) {
+    return genericLabel;
+  }
+
+  const label = `t_${input.tool}`;
+  return label.length <= ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+    ? label
+    : genericLabel;
+}
+
+function isAssistantTurnProfileIdentifierComponent(value: string): boolean {
+  return value.length <= ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_MAX_LENGTH
+    && ASSISTANT_TURN_PROFILE_IDENTIFIER_COMPONENT_PATTERN.test(value);
+}
+
+function isAssistantTurnProfileToolIdentityLabel(
+  kind: "dynamic_tool" | "mcp_tool",
+  label: string,
+): boolean {
+  if (label === kind) {
+    return true;
+  }
+
+  return label.startsWith("t_")
+    && isAssistantTurnProfileIdentifierComponent(label.slice(2));
+}
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 export type AssistantProviderRequestOutcome =
@@ -591,6 +688,90 @@ export function buildHostedElevenLabsMusicUsageRecord(input: {
   });
 }
 
+// Usage record for Worker-mediated Gemini video analysis. The tool runs
+// outside the primary assistant model request, so each completed provider call
+// receives a synthetic turn id while retaining the provider's exact token
+// counters when available.
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH =
+  "gemini.generateContent.usageMetadata";
+export const HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION =
+  "gemini-video-analysis-v1";
+
+export function buildHostedGeminiVideoAnalysisUsageRecord(input: {
+  memberId: string;
+  model: string;
+  occurredAt: string;
+  providerRequestId?: string | null;
+  usage?: Record<string, unknown> | null;
+}): AssistantUsageRecord {
+  const turnId = `turn_gemini_video_${randomUUID().replaceAll("-", "")}`;
+  const inputTokens = readNonNegativeInteger(input.usage?.promptTokenCount);
+  const outputTokens = readNonNegativeInteger(input.usage?.candidatesTokenCount);
+  const totalTokens = readNonNegativeInteger(input.usage?.totalTokenCount);
+  const cachedInputTokens = readNonNegativeInteger(
+    input.usage?.cachedContentTokenCount,
+  );
+  const reasoningTokens = readNonNegativeInteger(input.usage?.thoughtsTokenCount);
+  const rawUsageJson = compactHostedGeminiUsage(input.usage);
+
+  return parseAssistantUsageRecord({
+    apiKeyEnv: "GEMINI_API_KEY",
+    attemptCount: 1,
+    baseUrl: "https://generativelanguage.googleapis.com",
+    cachedInputTokens,
+    credentialSource: "platform",
+    featureKey: "video-analysis",
+    inputTokens,
+    memberId: input.memberId,
+    occurredAt: input.occurredAt,
+    outputTokens,
+    provider: "gemini",
+    providerName: "Google Gemini",
+    providerRequestId: input.providerRequestId ?? null,
+    ...(rawUsageJson ? { rawUsageJson } : {}),
+    reasoningTokens,
+    requestedModel: input.model,
+    schema: ASSISTANT_USAGE_SCHEMA,
+    sessionId: turnId,
+    surface: "hosted-runner",
+    totalTokens,
+    triggerKind: "analyze-video",
+    turnId,
+    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
+    usageExtractionSourcePath:
+      HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_SOURCE_PATH,
+    usageExtractionVersion:
+      HOSTED_GEMINI_VIDEO_ANALYSIS_USAGE_EXTRACTION_VERSION,
+  });
+}
+
+const HOSTED_GEMINI_USAGE_KEYS = [
+  "cachedContentTokenCount",
+  "candidatesTokenCount",
+  "promptTokenCount",
+  "thoughtsTokenCount",
+  "totalTokenCount",
+] as const;
+
+function compactHostedGeminiUsage(
+  usage: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  const output: Record<string, unknown> = {};
+  for (const key of HOSTED_GEMINI_USAGE_KEYS) {
+    const value = readNonNegativeInteger(usage?.[key]);
+    if (value !== null) {
+      output[key] = value;
+    }
+  }
+  return Object.keys(output).length > 0 ? output : null;
+}
+
+function readNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
 // Exact usage for Codex-native memory work intercepted outside the foreground
 // app-server turn. Provider response ids make re-observation idempotent while
 // the provider timestamp keeps the immutable record stable across retries.
@@ -1117,8 +1298,13 @@ function requireValidTurnProfileJson(
   }
 
   const record = requireRecord(value, label);
-  if (record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${ASSISTANT_TURN_PROFILE_SCHEMA}.`);
+  if (
+    record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA_V1
+    && record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA
+  ) {
+    throw new TypeError(
+      `${label}.schema must be ${ASSISTANT_TURN_PROFILE_SCHEMA_V1} or ${ASSISTANT_TURN_PROFILE_SCHEMA}.`,
+    );
   }
   if (!isNonNegativeInteger(record.requestCount)) {
     throw new TypeError(`${label}.requestCount must be a non-negative integer.`);
@@ -1152,6 +1338,49 @@ function requireValidTurnProfileJson(
     throw new TypeError(`${label}.reasoningEffort must be a short sanitized value.`);
   }
 
+  const isV2 = record.schema === ASSISTANT_TURN_PROFILE_SCHEMA;
+  if (
+    isV2
+    && (
+      record.requestCount < record.requests.length
+      || (
+        record.requestsTruncated
+          ? (
+            record.requests.length !== ASSISTANT_TURN_PROFILE_MAX_REQUESTS
+            || record.requestCount <= record.requests.length
+          )
+          : record.requestCount !== record.requests.length
+      )
+    )
+  ) {
+    throw new TypeError(`${label} request count and truncation fields are inconsistent.`);
+  }
+
+  const seenV2Tools = new Set<string>();
+  const tools = record.tools.map((entry, index) => {
+    const toolLabel = `${label}.tools[${index}]`;
+    const tool = requireRecord(entry, toolLabel);
+    if (record.schema === ASSISTANT_TURN_PROFILE_SCHEMA_V1) {
+      if (
+        typeof tool.label !== "string"
+        || tool.label.length === 0
+        || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+        || !ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN.test(tool.label)
+      ) {
+        throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
+      }
+      return normalizeTurnProfileV1Tool(tool, toolLabel);
+    }
+
+    const normalized = normalizeTurnProfileV2Tool(tool, toolLabel);
+    const identity = JSON.stringify([normalized.kind, normalized.label]);
+    if (seenV2Tools.has(identity)) {
+      throw new TypeError(`${toolLabel} duplicates an existing kind and label.`);
+    }
+    seenV2Tools.add(identity);
+    return normalized;
+  });
+
   return {
     modelContextWindow: record.modelContextWindow,
     requestCount: record.requestCount,
@@ -1164,43 +1393,116 @@ function requireValidTurnProfileJson(
     ),
     requestsTruncated: record.requestsTruncated,
     ...(reasoningEffort === null ? {} : { reasoningEffort }),
-    schema: ASSISTANT_TURN_PROFILE_SCHEMA,
-    tools: record.tools.map((entry, index) => {
-      const toolLabel = `${label}.tools[${index}]`;
-      const tool = requireRecord(entry, toolLabel);
-      if (
-        typeof tool.label !== "string"
-        || tool.label.length === 0
-        || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
-        || !ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN.test(tool.label)
-      ) {
-        throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
-      }
-      if (tool.failedCalls !== undefined && !isNonNegativeInteger(tool.failedCalls)) {
-        throw new TypeError(`${toolLabel}.failedCalls must be a non-negative integer.`);
-      }
-      if (
-        typeof tool.failedCalls === "number"
-        && typeof tool.calls === "number"
-        && tool.failedCalls > tool.calls
-      ) {
-        throw new TypeError(`${toolLabel}.failedCalls must not exceed calls.`);
-      }
-
-      return {
-        ...normalizeTurnProfileIntegerRecord(tool, toolLabel, [
-          "calls",
-          "durationMs",
-          "outputChars",
-        ]),
-        ...(tool.failedCalls === undefined
-          ? {}
-          : { failedCalls: tool.failedCalls }),
-        label: tool.label,
-      };
-    }),
+    schema: record.schema,
+    tools,
     toolsTruncated: record.toolsTruncated,
   };
+}
+
+function normalizeTurnProfileV1Tool(
+  tool: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
+  validateTurnProfileFailedCalls(tool, label, false);
+  return {
+    ...normalizeTurnProfileIntegerRecord(tool, label, [
+      "calls",
+      "durationMs",
+      "outputChars",
+    ]),
+    ...(tool.failedCalls === undefined
+      ? {}
+      : { failedCalls: tool.failedCalls }),
+    label: tool.label,
+  };
+}
+
+function normalizeTurnProfileV2Tool(
+  tool: Record<string, unknown>,
+  label: string,
+): Record<string, unknown> {
+  if (
+    typeof tool.kind !== "string"
+    || !ASSISTANT_TURN_PROFILE_TOOL_KINDS.has(tool.kind)
+  ) {
+    throw new TypeError(`${label}.kind must be a supported tool kind.`);
+  }
+  if (
+    tool.kind === "command"
+    && !isAssistantTurnProfileCommandFamily(tool.label)
+  ) {
+    throw new TypeError(`${label}.label must be a supported command family.`);
+  }
+  if (
+    (tool.kind === "dynamic_tool" || tool.kind === "mcp_tool")
+    && (
+      typeof tool.label !== "string"
+      || tool.label.length === 0
+      || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
+      || !isAssistantTurnProfileToolIdentityLabel(tool.kind, tool.label)
+    )
+  ) {
+    throw new TypeError(`${label}.label must be a canonical tool identity label.`);
+  }
+  validateTurnProfileFailedCalls(tool, label, true);
+  const normalized = normalizeTurnProfileIntegerRecord(tool, label, [
+    "calls",
+    "durationKnownCalls",
+    "durationMs",
+    "failedCalls",
+    "outputBytesMax",
+    "outputBytesTotal",
+  ]);
+  if (normalized.durationKnownCalls > normalized.calls) {
+    throw new TypeError(`${label}.durationKnownCalls must not exceed calls.`);
+  }
+  if (normalized.calls < 1) {
+    throw new TypeError(`${label}.calls must be at least one.`);
+  }
+  if (normalized.durationKnownCalls === 0 && normalized.durationMs !== 0) {
+    throw new TypeError(`${label}.durationMs must be zero when no durations are known.`);
+  }
+  if (normalized.outputBytesMax > normalized.outputBytesTotal) {
+    throw new TypeError(`${label}.outputBytesMax must not exceed outputBytesTotal.`);
+  }
+  if (
+    normalized.outputBytesMax > 0
+    && normalized.calls > Math.floor(
+      Number.MAX_SAFE_INTEGER / normalized.outputBytesMax,
+    )
+  ) {
+    throw new TypeError(`${label} output byte capacity must be a safe integer.`);
+  }
+  const outputByteCapacity = normalized.calls * normalized.outputBytesMax;
+  if (normalized.outputBytesTotal > outputByteCapacity) {
+    throw new TypeError(`${label}.outputBytesTotal exceeds calls times outputBytesMax.`);
+  }
+
+  return {
+    ...normalized,
+    kind: tool.kind,
+    label: tool.label,
+  };
+}
+
+function validateTurnProfileFailedCalls(
+  tool: Record<string, unknown>,
+  label: string,
+  required: boolean,
+): void {
+  if (
+    (required && tool.failedCalls === undefined)
+    || (tool.failedCalls !== undefined && !isNonNegativeInteger(tool.failedCalls))
+  ) {
+    throw new TypeError(`${label}.failedCalls must be a non-negative integer.`);
+  }
+  if (
+    typeof tool.failedCalls === "number"
+    && typeof tool.calls === "number"
+    && tool.failedCalls > tool.calls
+  ) {
+    throw new TypeError(`${label}.failedCalls must not exceed calls.`);
+  }
 }
 
 function normalizeTurnProfileIntegerRecord(

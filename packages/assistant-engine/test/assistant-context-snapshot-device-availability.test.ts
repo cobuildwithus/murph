@@ -666,8 +666,18 @@ describe('assistant context snapshot device availability', () => {
           'Body/scale measurement history is present (latest 2026-08-09)',
         )
         expect(prompt).toContain(
-          'measurement list --from 2026-08-09 --to 2026-08-09',
+          'vault-cli wearables body list --limit 30 --format json',
         )
+        expect(prompt).toContain(
+          'vault-cli wearables metric latest <canonical-body-metric> --format json',
+        )
+        expect(prompt).toContain(
+          'vault-cli wearables metric trend <canonical-body-metric> --format json',
+        )
+        expect(prompt).toContain(
+          'vault-cli measurement entry list --metric <canonical-body-metric> --from 2026-08-09 --to 2026-08-09 --format json',
+        )
+        expect(prompt).not.toContain('vault-cli measurement list ')
         expect(prompt).not.toContain('73.1')
         expect(prompt).not.toContain('74.2')
         await expect(access(queryProjectionPath)).rejects.toMatchObject({
@@ -680,9 +690,10 @@ describe('assistant context snapshot device availability', () => {
             vault: vaultRoot,
           })
         expect(bodyRead.count).toBe(2)
-        expect(bodyRead.items[0]).toMatchObject({
-          date: '2026-08-09',
-        })
+        expect(bodyRead.items.map((item) => item.date)).toEqual([
+          '2026-08-09',
+          '2026-08-07',
+        ])
       } finally {
         await rm(parentRoot, {
           force: true,

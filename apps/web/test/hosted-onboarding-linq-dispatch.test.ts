@@ -194,6 +194,7 @@ const mocks = vi.hoisted(() => {
     appendHostedMailboxEnvelopeWithSourceMessageTx: vi.fn(),
     appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
     materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
+    scheduleHostedSignupNotificationEmails: vi.fn(),
     acceptHostedFamilyInviteFromPhoneTx: vi.fn(),
     prepareHostedFamilyOwnerNotification: vi.fn(),
     buildHostedFamilyInviteAcceptedReplyText: vi.fn(() => "Welcome to Murph Family."),
@@ -292,6 +293,11 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
+  scheduleHostedSignupNotificationEmails:
+    mocks.scheduleHostedSignupNotificationEmails,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-daily-state", async () => {
@@ -6572,8 +6578,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       timeoutMs: expect.any(Number),
     });
+    expect(mocks.scheduleHostedSignupNotificationEmails).toHaveBeenCalledWith({
+      activationSurface: "imessage",
+      memberIds: ["member_family"],
+      prisma,
+    });
     expect(hostedMemberRoutingUpsert.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0],
+    );
+    expect(
+      mocks.scheduleHostedSignupNotificationEmails.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]
+      ?? Number.POSITIVE_INFINITY,
     );
     expect(mocks.signalHostedMailboxAppendRuntime.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.materializePendingHostedGroupJoinConfirmationsBestEffort.mock.invocationCallOrder[0],
@@ -6712,6 +6729,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       occurredAt: "2026-03-26T12:00:00.000Z",
       prisma,
     });
+    expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_home",
       idempotencyKey: "linq-message:evt_family_sparse_saved_home",
@@ -7256,6 +7274,60 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
     expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
     expect(mocks.claimHostedLinqOnboardingLinkNotice).not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("classifies an accepted-member Stripe effect as visible Family recovery", async () => {
+    mocks.acceptHostedFamilyInviteFromPhoneTx.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        httpStatus: 409,
+        message: "Billing is already changing. Try again shortly.",
+        retryable: true,
+      }),
+    );
+
+    const prismaMocks = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedInvite: { create: vi.fn() },
+      hostedMember: {
+        create: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      hostedWebhookReceipt: {
+        create: vi.fn().mockResolvedValue({}),
+        findUnique: vi.fn().mockResolvedValue({
+          payloadJson: {
+            eventType: "message.received",
+            receiptAttemptCount: 1,
+            receiptStatus: "processing",
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    const prisma = asPrismaTransactionClient(prismaMocks);
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody: buildHostedLinqWebhookBody({
+        data: {
+          parts: [{ type: "text", value: "family_pending_effect" }],
+        },
+        eventId: "evt_family_linq_pending_effect",
+        service: "iMessage",
+      }),
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "stripe-effect-pending",
+    });
+
+    expect(prismaMocks.hostedMember.create).not.toHaveBeenCalled();
+    expect(prismaMocks.hostedInvite.create).not.toHaveBeenCalled();
+    expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 

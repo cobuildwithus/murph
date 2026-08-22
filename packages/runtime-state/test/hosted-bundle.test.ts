@@ -2133,6 +2133,7 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await mkdir(path.join(assistantRuntimeRoot, "state", "secrets"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "state", ".quarantine"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "state", ".locks"), { recursive: true });
+    await mkdir(path.join(assistantRuntimeRoot, "state", ".tmp"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "state", "onboarding", "first-contact"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "transcripts"), { recursive: true });
     await mkdir(path.join(assistantRuntimeRoot, "usage", "pending"), { recursive: true });
@@ -2234,6 +2235,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
     await writeFile(path.join(assistantRuntimeRoot, "state", "secrets", "token.json"), "{\"secret\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "state", ".quarantine", "payload.json"), "{\"repair\":true}\n");
     await writeFile(path.join(assistantRuntimeRoot, "state", ".locks", "owner.json"), "{\"pid\":1234}\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", ".tmp", "session-routing.sqlite.rebuild"), "rebuild\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", ".tmp", "session-routing.sqlite.rebuild-journal"), "journal\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", ".tmp", "session-routing.sqlite.rebuild-shm"), "shm\n");
+    await writeFile(path.join(assistantRuntimeRoot, "state", ".tmp", "session-routing.sqlite.rebuild-wal"), "wal\n");
     await writeFile(
       path.join(assistantRuntimeRoot, "state", "onboarding", "conversation.json"),
       "{\"schemaVersion\":\"murph.assistant-onboarding.v1\",\"createdAt\":\"2026-04-23T00:00:00.000Z\",\"updatedAt\":\"2026-04-23T00:05:00.000Z\",\"completedAt\":\"2026-04-23T00:05:00.000Z\",\"completedReason\":\"user_answered\"}\n",
@@ -2542,6 +2547,10 @@ test("hosted execution snapshots collapse into one workspace bundle and external
       { expected: null, path: ".runtime/operations/assistant/state/secrets/token.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/state/.quarantine/payload.json", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/state/.locks/owner.json", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/.tmp/session-routing.sqlite.rebuild", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/.tmp/session-routing.sqlite.rebuild-journal", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/.tmp/session-routing.sqlite.rebuild-shm", root: "vault" },
+      { expected: null, path: ".runtime/operations/assistant/state/.tmp/session-routing.sqlite.rebuild-wal", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/socket.sock", root: "vault" },
       { expected: null, path: ".runtime/operations/assistant/worker.pid", root: "vault" },
       { expected: null, path: ".runtime/operations/inbox/secrets/token.json", root: "vault" },
@@ -2960,6 +2969,7 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
     await mkdir(path.join(hotAssistantRoot, "accepted-turn-inputs"), { recursive: true });
     await mkdir(path.join(hotAssistantRoot, "sessions"), { recursive: true });
     await mkdir(path.join(hotAssistantRoot, "state", "accepted-turn-inputs"), { recursive: true });
+    await mkdir(path.join(hotAssistantRoot, "state", ".tmp"), { recursive: true });
     await mkdir(path.join(hotAssistantRoot, "diagnostics"), { recursive: true });
     await writeFile(
       path.join(hotAssistantRoot, "accepted-turn-inputs", "turn_old.json"),
@@ -2981,6 +2991,13 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
       "{\"schema\":\"murph.assistant-active-turn-input-state.v1\"}\n",
       "utf8",
     );
+    for (const suffix of ["", "-journal", "-shm", "-wal"]) {
+      await writeFile(
+        path.join(hotAssistantRoot, "state", ".tmp", `session-routing.sqlite.rebuild${suffix}`),
+        "interrupted rebuild\n",
+        "utf8",
+      );
+    }
     await writeFile(
       path.join(hotAssistantRoot, "diagnostics", "debug.json"),
       "{\"debug\":true}\n",
@@ -3006,6 +3023,17 @@ test("hosted assistant hot-state snapshots restore as authoritative latest state
       }),
       "{\"schema\":\"murph.assistant-active-turn-input-state.v1\"}\n",
     );
+    for (const suffix of ["", "-journal", "-shm", "-wal"]) {
+      assert.equal(
+        readHostedBundleTextFile({
+          bytes: hotSnapshot.bundle,
+          expectedKind: "vault",
+          path: `.runtime/operations/assistant/state/.tmp/session-routing.sqlite.rebuild${suffix}`,
+          root: "vault",
+        }),
+        null,
+      );
+    }
     assert.equal(
       readHostedBundleTextFile({
         bytes: hotSnapshot.bundle,
@@ -4707,6 +4735,29 @@ test("runtime-state portability defaults operational paths to machine-local unle
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state")).toMatchObject({
     classification: "operational",
     portability: "portable",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/outbox-dedupe.sqlite")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+    rebuildable: true,
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/outbox-dedupe.sqlite-wal")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/hosted-pending-image-completion-hint.json")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+    rebuildable: true,
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/session-routing.sqlite")).toMatchObject({
+    classification: "operational",
+    portability: "portable",
+    rebuildable: true,
+  });
+  expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/session-routing/route.json")).toMatchObject({
+    classification: "operational",
+    portability: "machine_local",
   });
   expect(describeVaultLocalStateRelativePath(".runtime/operations/assistant/state/onboarding")).toMatchObject({
     classification: "operational",

@@ -4,8 +4,8 @@
 # CI ("Release package coverage (cli)") fails when
 # packages/cli/config.schema.json, packages/cli/src/incur.generated.ts, or
 # packages/cli/src/vault-cli-skill-hash.generated.ts drift from the generator
-# output. When a commit touches packages/cli/, regenerate those artifacts and
-# re-stage them so a stale copy can never be committed.
+# output. When a commit touches the CLI generator inputs, regenerate those
+# artifacts and re-stage them so a stale copy can never be committed.
 #
 # Installed by the root `prepare` script from the branch-independent primary checkout.
 set -euo pipefail
@@ -23,16 +23,26 @@ guard_root="$(
 MURPH_WORKTREE_GUARD_CURRENT_WORKTREE="$repo_root" \
   "$guard_root/scripts/worktree-storage-guard"
 
-# Fast no-op unless the staged change touches the CLI package. A path-scoped
-# tree comparison remains correct for rename-outs, quoted paths, and large
-# diffs under pipefail.
-if git diff --cached --quiet -- packages/cli/; then
+cli_generator_inputs=(
+  packages/cli/config.schema.json
+  packages/cli/package.json
+  packages/cli/scripts/generate-incur-config-schema.ts
+  packages/cli/scripts/incur-config-schema.ts
+  packages/cli/src/
+  packages/cli/tsconfig.build.json
+)
+
+# Fast no-op unless the staged change can affect a generated CLI artifact. A
+# path-scoped tree comparison remains correct for rename-outs, quoted paths,
+# and large diffs under pipefail while test-only changes avoid an unnecessary
+# standalone package build.
+if git diff --cached --quiet -- "${cli_generator_inputs[@]}"; then
   exit 0
 fi
 
 merge_head="$(git rev-parse --verify --quiet MERGE_HEAD 2>/dev/null || true)"
 if [[ -n "$merge_head" ]] \
-  && git diff --cached --quiet "$merge_head" -- packages/cli/; then
+  && git diff --cached --quiet "$merge_head" -- "${cli_generator_inputs[@]}"; then
   echo "pre-commit: skipped CLI config-schema generation for base-only merge changes." >&2
   exit 0
 fi

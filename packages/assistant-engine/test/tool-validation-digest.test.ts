@@ -2,11 +2,211 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildToolCallValidationFeedback,
+} from '../src/assistant/tool-validation-feedback.ts'
+import {
   buildSafeToolCallValidationDigest,
+  collectSafeJsonSchemaValidationPaths,
   isSafeSchemaLikeKey,
 } from '../src/assistant/tool-validation-digest.ts'
 
 describe('buildSafeToolCallValidationDigest', () => {
+  it('formats only bounded value-free repair hints', () => {
+    const schema = z.object({
+      alpha: z.string(),
+      beta: z.string(),
+      delta: z.string(),
+      epsilon: z.string(),
+      gamma: z.string(),
+    }).strict()
+    const rawInput = {
+      alpha: { marker: 'synthetic-private-alpha' },
+      beta: { marker: 'synthetic-private-beta' },
+      delta: { marker: 'synthetic-private-delta' },
+      epsilon: { marker: 'synthetic-private-epsilon' },
+      gamma: { marker: 'synthetic-private-gamma' },
+      privateField: 'synthetic-private-root',
+    }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    const feedback = buildToolCallValidationFeedback(
+      buildSafeToolCallValidationDigest({
+        error: parsed.error,
+        rawInput,
+        schemaPaths: collectSafeJsonSchemaValidationPaths(
+          z.toJSONSchema(schema, { io: 'input' }),
+        ),
+        schemaRootKeys: Object.keys(schema.shape),
+        toolName: 'murph.synthetic',
+      }),
+      { error: 'invalid_synthetic_arguments' },
+    )
+
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_synthetic_arguments',
+      hints: [
+        { field: 'alpha', code: 'invalid_type', expected: 'string' },
+        { field: 'beta', code: 'invalid_type', expected: 'string' },
+        { field: 'delta', code: 'invalid_type', expected: 'string' },
+        { field: 'epsilon', code: 'invalid_type', expected: 'string' },
+      ],
+    })
+    expect(feedback.length).toBeLessThanOrEqual(1_600)
+    expect(feedback).not.toContain('received')
+    expect(feedback).not.toContain('privateField')
+    expect(feedback).not.toContain('synthetic-private')
+  })
+
+  it('does not reveal submitted or allowed enum values in repair hints', () => {
+    const submittedEnum = 'synthetic-private-enum'
+    const allowedEnums = ['first_allowed', 'second_allowed'] as const
+    const schema = z.object({
+      mode: z.enum(allowedEnums),
+    }).strict()
+    const rawInput = { mode: submittedEnum }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    const feedback = buildToolCallValidationFeedback(
+      buildSafeToolCallValidationDigest({
+        error: parsed.error,
+        rawInput,
+        schemaPaths: collectSafeJsonSchemaValidationPaths(
+          z.toJSONSchema(schema, { io: 'input' }),
+        ),
+        schemaRootKeys: Object.keys(schema.shape),
+        toolName: 'murph.synthetic',
+      }),
+      { error: 'invalid_synthetic_arguments' },
+    )
+
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_synthetic_arguments',
+      hints: [{ field: 'mode', code: 'invalid_value' }],
+    })
+    expect(feedback).not.toContain(submittedEnum)
+    for (const allowedEnum of allowedEnums) {
+      expect(feedback).not.toContain(allowedEnum)
+    }
+    expect(feedback).not.toContain('received')
+  })
+
+  it('keeps mutually exclusive union failures coarse', () => {
+    const schema = z.object({
+      card: z.union([
+        z.object({ kind: z.literal('first'), firstField: z.string() }).strict(),
+        z.object({ kind: z.literal('second'), secondField: z.string() }).strict(),
+      ]),
+    }).strict()
+    const rawInput = {
+      card: {
+        kind: 'synthetic-private-family',
+        privateField: 'synthetic-private-value',
+      },
+    }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected union validation to fail')
+    }
+
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaPaths: collectSafeJsonSchemaValidationPaths({
+        type: 'object',
+        properties: {
+          card: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  kind: { const: 'first' },
+                  firstField: { type: 'string' },
+                },
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { const: 'second' },
+                  secondField: { type: 'string' },
+                },
+              },
+            ],
+          },
+        },
+      }),
+      schemaRootKeys: ['card'],
+      toolName: 'murph.synthetic',
+    })
+
+    expect(digest.pathIssues).toEqual([{
+      path: 'card',
+      code: 'invalid_union',
+      received: 'object.count_1_10',
+    }])
+    const serialized = JSON.stringify(digest)
+    expect(serialized).not.toContain('firstField')
+    expect(serialized).not.toContain('secondField')
+    expect(serialized).not.toContain('synthetic-private-family')
+    expect(serialized).not.toContain('synthetic-private-value')
+    expect(serialized).not.toContain('privateField')
+  })
+
+  it('forwards only bounded safe custom expected-shape tokens', () => {
+    const schema = z.object({ card: z.string() }).superRefine((_value, context) => {
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic safe relation.',
+        params: { murphExpectedShape: 'static_safe_relation' },
+        path: ['card'],
+      })
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic unsafe relation.',
+        params: { murphExpectedShape: 'unsafe relation marker!' },
+        path: ['card'],
+      })
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic mixed-case relation.',
+        params: { murphExpectedShape: 'mixedCase_relation' },
+        path: ['card'],
+      })
+    })
+    const rawInput = { card: 'neutral synthetic value' }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaRootKeys: ['card'],
+      toolName: 'murph.synthetic',
+    })
+    expect(digest.pathIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        code: 'custom',
+        expected: 'static_safe_relation',
+        path: 'card',
+      }),
+    ]))
+    const serialized = JSON.stringify(digest)
+    expect(serialized).not.toContain('unsafe relation marker')
+    expect(serialized).not.toContain('mixedCase_relation')
+    expect(serialized).not.toContain('neutral synthetic value')
+  })
+
   it('records structural Zod validation facts without raw argument values', () => {
     const schema = z.object({
       brand: z.string(),
@@ -165,6 +365,109 @@ describe('buildSafeToolCallValidationDigest', () => {
     expect(firstDigest.validationFingerprint).toBe(secondDigest.validationFingerprint)
     expect(JSON.stringify(firstDigest)).not.toContain('clientAcmeCancerReport')
     expect(JSON.stringify(secondDigest)).not.toContain('privateProjectPhoenix')
+  })
+
+  it('preserves only nested paths owned by the supplied JSON schema', () => {
+    const jsonSchema = {
+      type: 'object',
+      properties: {
+        card: {
+          type: 'object',
+          properties: {
+            rows: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  values: { type: 'array', minItems: 2 },
+                },
+              },
+            },
+          },
+        },
+      },
+    }
+    const schemaPaths = collectSafeJsonSchemaValidationPaths(jsonSchema)
+    const schema = z.object({
+      card: z.object({
+        rows: z.array(z.object({
+          values: z.array(z.string()).min(2),
+        }).strict()),
+      }).strict(),
+    }).strict().superRefine((_value, context) => {
+      context.addIssue({
+        code: 'custom',
+        message: 'Synthetic rejected path.',
+        path: ['card', 'privateNote'],
+      })
+    })
+    const rawInput = {
+      card: {
+        privateNote: 'neutral synthetic value',
+        rows: [{ values: [] }],
+      },
+    }
+    const parsed = schema.safeParse(rawInput)
+    expect(parsed.success).toBe(false)
+    if (parsed.success) {
+      throw new Error('expected schema validation to fail')
+    }
+
+    expect(schemaPaths).toEqual([
+      'card',
+      'card.rows',
+      'card.rows[]',
+      'card.rows[].values',
+    ])
+    const digest = buildSafeToolCallValidationDigest({
+      error: parsed.error,
+      rawInput,
+      schemaPaths,
+      schemaRootKeys: ['card'],
+      toolName: 'murph.attach_response_card',
+    })
+
+    expect(digest.pathIssues).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'card.rows[].values',
+        code: 'too_small',
+        expected: 'array.min_2',
+      }),
+    ]))
+    const serialized = JSON.stringify(digest)
+    expect(serialized).not.toContain('privateNote')
+    expect(serialized).not.toContain('neutral synthetic value')
+
+    const smuggledPathDigest = buildSafeToolCallValidationDigest({
+      error: new z.ZodError([
+        {
+          code: 'custom',
+          message: 'Synthetic rejected path.',
+          path: ['card', 'rows[]', 'values'],
+        },
+        {
+          code: 'custom',
+          message: 'Synthetic rejected path.',
+          path: ['card', 'rows', '[]', 'values'],
+        },
+      ]),
+      rawInput: {
+        card: {
+          rows: {
+            '[]': { values: 'neutral synthetic value' },
+          },
+        },
+      },
+      schemaPaths,
+      schemaRootKeys: ['card'],
+      toolName: 'murph.attach_response_card',
+    })
+    expect(smuggledPathDigest.pathIssues).toBeUndefined()
+    expect(smuggledPathDigest.invalidPaths).toBeUndefined()
+    expect(JSON.stringify(smuggledPathDigest)).not.toContain('rows[]')
+    expect(JSON.stringify(smuggledPathDigest)).not.toContain(
+      'neutral synthetic value',
+    )
   })
 })
 

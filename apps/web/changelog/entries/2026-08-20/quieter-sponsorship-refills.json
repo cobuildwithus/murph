@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 100,
+  "item": {
+    "id": "quieter-sponsorship-refills",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Quieter sponsorship refills",
+    "summary": "Monthly group sponsorships no longer send a private heads-up when one automatic refill remains before the monthly maximum.",
+    "details": "Current spending and controls remain on the private management page, and Murph still reaches out privately when a payment actually needs attention.",
+    "relevanceTags": ["groups", "billing"],
+    "sourcePullRequests": [2038]
+  }
+}

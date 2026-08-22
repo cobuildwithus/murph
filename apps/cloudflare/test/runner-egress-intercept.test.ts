@@ -4,6 +4,10 @@ import {
   buildExaResearchScoutBatchLaneRequest,
   MAX_RESEARCH_SCOUT_CANDIDATES,
 } from "@murphai/contracts";
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION,
+} from "@murphai/hosted-execution/assistant-capabilities";
 
 const mocks = vi.hoisted(() => ({
   emitHostedExecutionStructuredLog: vi.fn(),
@@ -24,6 +28,7 @@ import {
   handleHostedRunnerCustomInferenceOutbound,
   handleHostedRunnerElevenLabsOutbound,
   handleHostedRunnerExaOutbound,
+  handleHostedRunnerGeminiOutbound,
   handleHostedRunnerInternalOutbound,
   handleHostedRunnerLinqOutbound,
   handleHostedRunnerMapboxOutbound,
@@ -78,6 +83,9 @@ import {
   HOSTED_VENICE_RESPONSES_MAX_BODY_BYTES,
 } from "../src/runner-egress-venice.ts";
 import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
+import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
+} from "../src/runner-egress-gemini.ts";
 import {
   sealHostedInferenceRuntimeTarget,
 } from "../src/hosted-inference-target-envelope.ts";
@@ -218,6 +226,34 @@ function createHostedXaiResponsesRequestBody(
   };
 }
 
+function createHostedGeminiVideoAnalysisRequestBody(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    contents: [{
+      parts: [
+        {
+          inlineData: {
+            data: Buffer.from("video-bytes").toString("base64"),
+            mimeType: "video/mp4",
+          },
+          videoMetadata: { fps: 1 },
+        },
+        { text: "Count the visible push-ups." },
+      ],
+      role: "user",
+    }],
+    generationConfig: {
+      maxOutputTokens: 1_800,
+      thinkingConfig: { thinkingLevel: "low" },
+    },
+    systemInstruction: {
+      parts: [{ text: HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION }],
+    },
+    ...overrides,
+  };
+}
+
 function createDeploySmokeOpenAiRequestBody(input: {
   model?: string;
 } = {}): Record<string, unknown> {
@@ -306,6 +342,28 @@ function parseDiagnosticRuntimeLog(redactedJson: Record<string, unknown>): void 
   });
 }
 
+function readDiagnosticInputMetric(
+  diagnostic: Record<string, unknown>,
+  kind: string,
+): { bytes: number; count: number } | null {
+  const kinds = diagnostic.inputNestedMetricKinds;
+  const counts = diagnostic.inputNestedMetricCounts;
+  const bytes = diagnostic.inputNestedMetricBytes;
+  if (!Array.isArray(kinds) || !Array.isArray(counts) || !Array.isArray(bytes)) {
+    throw new TypeError("Expected aligned input diagnostic metric arrays.");
+  }
+  const index = kinds.indexOf(kind);
+  if (index < 0) {
+    return null;
+  }
+  const count = counts[index];
+  const byteCount = bytes[index];
+  if (typeof count !== "number" || typeof byteCount !== "number") {
+    throw new TypeError("Expected numeric input diagnostic metrics.");
+  }
+  return { bytes: byteCount, count };
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.clearAllMocks();
@@ -339,6 +397,10 @@ describe("hostedRunnerIntercept", () => {
     expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai).toBe("api.x.ai");
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.xai])
       .toBe(handleHostedRunnerXaiOutbound);
+    expect(HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini)
+      .toBe("generativelanguage.googleapis.com");
+    expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.gemini])
+      .toBe(handleHostedRunnerGeminiOutbound);
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST["graph.facebook.com"]).toBeUndefined();
     expect(HOSTED_RUNNER_OUTBOUND_BY_HOST[HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.webControlPlane])
       .toBe(handleHostedRunnerInternalOutbound);
@@ -1951,6 +2013,392 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("injects Gemini credentials, preserves the fixed request, and records token usage", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        cachedContentTokenCount: 4,
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        thoughtsTokenCount: 7,
+        totalTokenCount: 345,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (target, init) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        const usage = (JSON.parse(String(init?.body)) as {
+          usage: { usageId: string };
+        }).usage;
+        return Response.json({ recorded: true, usageId: usage.usageId });
+      }
+      return Response.json(upstreamPayload, {
+        headers: { "x-goog-request-id": "gemini-req-1" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const validateRuntimeWriteFence = vi.fn(async () => true);
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const requestBody = createHostedGeminiVideoAnalysisRequestBody();
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(requestBody),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            cookie: "session=user-supplied-cookie",
+            "proxy-authorization": "Bearer user-supplied-proxy-token",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence,
+      }),
+      {
+        containerId: "member_123--v-version_1",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const forwarded = findFetchCall(fetchMock, "generativelanguage.googleapis.com")?.[0];
+    expect(forwarded).toBeInstanceOf(Request);
+    const forwardedRequest = forwarded as Request;
+    expect(forwardedRequest.headers.get("x-goog-api-key"))
+      .toBe("gemini-worker-secret");
+    expect(forwardedRequest.redirect).toBe("manual");
+    expect(forwardedRequest.headers.has("cookie")).toBe(false);
+    expect(forwardedRequest.headers.has("proxy-authorization")).toBe(false);
+    expect(await forwardedRequest.clone().json()).toEqual(requestBody);
+    expect(await response.clone().json()).toEqual(upstreamPayload);
+
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    const usageCall = findFetchCall(fetchMock, "web.example.test");
+    expect(usageCall).toBeDefined();
+    const usageBody = JSON.parse(String(usageCall?.[1]?.body)) as {
+      usage: Record<string, unknown>;
+    };
+    expect(usageBody.usage).toMatchObject({
+      apiKeyEnv: "GEMINI_API_KEY",
+      cachedInputTokens: 4,
+      featureKey: "video-analysis",
+      inputTokens: 320,
+      memberId: "member_123",
+      outputTokens: 18,
+      provider: "gemini",
+      providerName: "Google Gemini",
+      providerRequestId: "gemini-req-1",
+      reasoningTokens: 7,
+      requestedModel: "gemini-3.7-flash",
+      totalTokens: 345,
+      triggerKind: "analyze-video",
+      usageExtractionSourcePath: "gemini.generateContent.usageMetadata",
+      usageExtractionVersion: "gemini-video-analysis-v1",
+    });
+  });
+
+  it("keeps a successful Gemini response when durable usage recording fails", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        return Response.json({ recorded: false, usageId: "usage_rejected" });
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: RUNNER_CONTAINER_NAME,
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(upstreamPayload);
+    expect(waitUntilPromises).toHaveLength(1);
+    await Promise.all(waitUntilPromises);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeDefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: expect.objectContaining({ providerKind: "gemini" }),
+        level: "warn",
+        message: "Hosted Gemini video usage recording failed; response delivery unaffected.",
+      }),
+    );
+  });
+
+  it("returns the buffered Gemini response without awaiting slow accounting when waitUntil is unavailable", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: { parts: [{ text: "Eight repetitions are visible." }], role: "model" },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    let markAccountingStarted: (() => void) | undefined;
+    const accountingStarted = new Promise<void>((resolve) => {
+      markAccountingStarted = resolve;
+    });
+    let finishAccounting: ((response: Response) => void) | undefined;
+    const pendingAccounting = new Promise<Response>((resolve) => {
+      finishAccounting = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      if (new URL(readFetchTargetUrl(target)).hostname === "web.example.test") {
+        markAccountingStarted?.();
+        return await pendingAccounting;
+      }
+      return Response.json(upstreamPayload);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await Promise.race([
+        hostedRunnerIntercept(
+          new Request(
+            `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+            {
+              body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+              headers: {
+                ...BOUND_USER_WRITE_FENCE_HEADERS,
+                "content-type": "application/json",
+                "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+              },
+              method: "POST",
+            },
+          ),
+          createInterceptEnv({
+            GEMINI_API_KEY: "gemini-worker-secret",
+            validateRuntimeWriteFence: async () => true,
+          }),
+          { containerId: RUNNER_CONTAINER_NAME },
+        ),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error("Gemini delivery waited for the accounting callback"));
+          }, 1_000);
+        }),
+      ]);
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(upstreamPayload);
+      await accountingStarted;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      finishAccounting?.(Response.json({ recorded: true, usageId: "usage_1" }));
+    }
+  });
+
+  it("rejects an oversized Gemini response without widening the delivery buffer", async () => {
+    const upstreamPayload = {
+      candidates: [{
+        content: {
+          parts: [{
+            text: "x".repeat(HOSTED_GEMINI_VIDEO_ANALYSIS_MAX_RESPONSE_BODY_BYTES),
+          }],
+          role: "model",
+        },
+        finishReason: "STOP",
+      }],
+      usageMetadata: {
+        candidatesTokenCount: 18,
+        promptTokenCount: 320,
+        totalTokenCount: 338,
+      },
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => Response.json(upstreamPayload));
+    vi.stubGlobal("fetch", fetchMock);
+    const waitUntilPromises: Promise<unknown>[] = [];
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: RUNNER_CONTAINER_NAME,
+        waitUntil: (promise) => {
+          waitUntilPromises.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.text()).toBe("Hosted Gemini response too large.");
+    expect(waitUntilPromises).toHaveLength(0);
+    expect(findFetchCall(fetchMock, "web.example.test")).toBeUndefined();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        details: {
+          providerKind: "gemini",
+          responseStatus: 200,
+        },
+        level: "warn",
+        message: "Hosted Gemini response exceeded the delivery body limit; no usage recorded.",
+      }),
+    );
+  });
+
+  it("does not follow Gemini redirects with the injected credential", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const request = target as Request;
+      expect(request.redirect).toBe("manual");
+      return new Response(null, {
+        headers: { location: "https://redirected.example.test/capture" },
+        status: 302,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await hostedRunnerIntercept(
+      new Request(
+        `https://generativelanguage.googleapis.com${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`,
+        {
+          body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody()),
+          headers: {
+            ...BOUND_USER_WRITE_FENCE_HEADERS,
+            "content-type": "application/json",
+            "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+          },
+          method: "POST",
+        },
+      ),
+      createInterceptEnv({
+        GEMINI_API_KEY: "gemini-worker-secret",
+        validateRuntimeWriteFence: async () => true,
+      }),
+      { containerId: RUNNER_CONTAINER_NAME },
+    );
+
+    expect(response.status).toBe(302);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects Gemini path, credential, model-shape, and FPS drift before upstream egress", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+    const baseUrl = "https://generativelanguage.googleapis.com";
+    const valid = createHostedGeminiVideoAnalysisRequestBody();
+    const cases = [
+      new Request(`${baseUrl}/v1beta/models/gemini-other:generateContent`, {
+        body: JSON.stringify(valid),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+      new Request(`${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`, {
+        body: JSON.stringify(valid),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "x-goog-api-key": "caller-key",
+        },
+        method: "POST",
+      }),
+      new Request(`${baseUrl}${HOSTED_GEMINI_VIDEO_ANALYSIS_PATH}`, {
+        body: JSON.stringify(createHostedGeminiVideoAnalysisRequestBody({
+          contents: [{
+            parts: [
+              {
+                inlineData: {
+                  data: Buffer.from("video-bytes").toString("base64"),
+                  mimeType: "video/mp4",
+                },
+                videoMetadata: { fps: 5 },
+              },
+              { text: "Count reps." },
+            ],
+            role: "user",
+          }],
+        })),
+        headers: {
+          ...BOUND_USER_WRITE_FENCE_HEADERS,
+          "content-type": "application/json",
+          "x-goog-api-key": HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
+        },
+        method: "POST",
+      }),
+    ];
+
+    for (const request of cases) {
+      const response = await hostedRunnerIntercept(
+        request,
+        createInterceptEnv({
+          GEMINI_API_KEY: "gemini-worker-secret",
+          validateRuntimeWriteFence: async () => true,
+        }),
+        { containerId: RUNNER_CONTAINER_NAME },
+      );
+      expect(response.status).toBe(403);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("injects xAI credentials and records x_search usage with the provider-reported cost", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
@@ -2737,7 +3185,7 @@ describe("hostedRunnerIntercept", () => {
       codexTurnFingerprintPresent: true,
       codexTurnMetadataStatus: "valid",
       codexWindowFingerprintPresent: true,
-      diagnosticVersion: 2,
+      diagnosticVersion: 3,
       endpointKind: "responses",
       modelKind: "gpt-5.6-terra",
       providerKind: "venice",
@@ -2784,6 +3232,132 @@ describe("hostedRunnerIntercept", () => {
     expect(serializedLogs).not.toContain("private-provider-router-header");
     expect(serializedLogs).not.toContain("diagnostic-fingerprint-secret");
     expect(serializedLogs).not.toContain("venice-worker-secret");
+  });
+
+  it("keeps the maximal provider diagnostic ingestible with key-count headroom", async () => {
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const fetchMock = vi.fn<typeof fetch>(async (target) => {
+      const url = new URL(readFetchTargetUrl(target));
+      if (url.hostname === "web.example.test") {
+        return Response.json({ loggedCount: 1 });
+      }
+      return new Response("synthetic provider response", {
+        headers: {
+          "cf-ray": "230b030023ae2822-SJC",
+          "content-type": "text/event-stream; charset=utf-8",
+          "x-retry-count": "2",
+          "x-venice-model-id": "openai-gpt-56-terra",
+        },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const credential = await createTestProviderEgressCredential({
+      providerKind: "venice",
+    });
+
+    const deepContent: Record<string, unknown> = {};
+    let deepCursor = deepContent;
+    for (let depth = 0; depth < 140; depth += 1) {
+      const child: Record<string, unknown> = {};
+      deepCursor.content = child;
+      deepCursor = child;
+    }
+    deepCursor.text = "synthetic large diagnostic content ".repeat(10_000);
+
+    const sharedOutput = { state: "shared" };
+    const requestBody = {
+      generate: false,
+      include: ["reasoning.encrypted_content"],
+      input: [
+        { call_id: "call_a", name: "exec_command", type: "function_call" },
+        { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
+        { call_id: "call_b", name: "wait", type: "function_call" },
+        { call_id: "call_b", output: "different", type: "function_call_output" },
+        { call_id: "call_b", output: sharedOutput, type: "function_call_output" },
+        { content: deepContent, role: "user", type: "message" },
+      ],
+      instructions: "synthetic bounded instructions",
+      model: "gpt-5.6-terra",
+      previous_response_id: "response-synthetic-max-shape",
+      prompt_cache_key: "cache-synthetic-max-shape",
+      prompt_cache_retention: "24h",
+      store: true,
+      stream: true,
+      tools: [{ type: "web_search_preview" }],
+    };
+    const encodedRequestBody = TEST_TEXT_ENCODER.encode(JSON.stringify(requestBody));
+    expect(encodedRequestBody.byteLength).toBeGreaterThan(256 * 1024);
+    expect(encodedRequestBody.byteLength).toBeLessThan(6 * 1024 * 1024);
+
+    const response = await hostedRunnerIntercept(
+      new Request("https://api.venice.ai/api/v1/responses", {
+        body: encodedRequestBody,
+        headers: {
+          authorization: `Bearer ${credential}`,
+          "content-type": "application/json",
+          "x-codex-turn-metadata": JSON.stringify({
+            compaction: {
+              implementation: "responses_compaction_v2",
+              phase: "mid_turn",
+              reason: "context_limit",
+              trigger: "auto",
+            },
+            request_kind: "memory",
+            session_id: "session-synthetic-max-shape",
+            thread_id: "thread-synthetic-max-shape",
+            turn_id: "turn-synthetic-max-shape",
+            window_id: "window-synthetic-max-shape",
+          }),
+        },
+        method: "POST",
+      }),
+      createInterceptEnv({
+        HOSTED_LOG_FINGERPRINT_SECRET: "diagnostic-fingerprint-secret",
+        VENICE_API_KEY: "venice-worker-secret",
+        validateRuntimeProviderEgressCredential: async (input) =>
+          createProviderEgressCredentialValidationResult(input),
+        validateRuntimeWriteFence: async () => true,
+      }),
+      {
+        containerId: "opaque-container-id",
+        waitUntil: (promise) => {
+          waitUntilPromises.push(Promise.resolve(promise));
+        },
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await Promise.all(waitUntilPromises);
+
+    const runtimeLogCall = findFetchCall(fetchMock, "web.example.test");
+    expect(runtimeLogCall).toBeDefined();
+    const runtimeLogBody = JSON.parse(String(runtimeLogCall?.[1]?.body ?? "{}")) as {
+      entries?: Array<{ redactedJson?: Record<string, unknown> }>;
+    };
+    const diagnostic = runtimeLogBody.entries?.[0]?.redactedJson;
+    expect(diagnostic).toEqual(expect.objectContaining({
+      codexCompactionImplementationKind: "responses_compaction_v2",
+      inputShapeTraversalTruncated: true,
+      inputTailItemShapeTraversalTruncated: true,
+      providerResponseOutcomeKind: "accepted",
+      requestFullFingerprintSkipped: true,
+    }));
+    expect(readDiagnosticInputMetric(
+      diagnostic ?? {},
+      "function_output.repeated",
+    )).toEqual({ bytes: testJsonByteLength(sharedOutput), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic ?? {},
+      "function_output.equivalent",
+    )).toEqual({ bytes: testJsonByteLength(sharedOutput), count: 1 });
+    expect(Object.keys(diagnostic ?? {})).toHaveLength(95);
+    expect(Object.keys(diagnostic ?? {}).length).toBeLessThan(96);
+    expect(parseHostedRuntimeLogRequest(runtimeLogBody).entries).toHaveLength(1);
+
+    const serializedDiagnostic = JSON.stringify(diagnostic);
+    expect(serializedDiagnostic).not.toContain("session-synthetic-max-shape");
+    expect(serializedDiagnostic).not.toContain("synthetic large diagnostic content");
+    expect(serializedDiagnostic).not.toContain('"state":"shared"');
   });
 
   it("returns rejected Venice memory responses unchanged and persists bounded warning metadata", async () => {
@@ -5155,9 +5729,31 @@ describe("hostedRunnerIntercept", () => {
         "none",
       ],
     }));
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.command.execution",
+    )).toEqual({ bytes: testJsonByteLength(matchedOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.dynamic.tool.call",
+    )).toBeNull();
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.mcp.tool.call",
+    )).toEqual({ bytes: testJsonByteLength(exactNameOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.other",
+    )).toEqual({
+      bytes: testJsonByteLength(unsafeNameOutput.output)
+        + testJsonByteLength(unmatchedOutput.output),
+      count: 2,
+    });
     parseDiagnosticRuntimeLog(diagnostic);
 
     const diagnosticJson = JSON.stringify(diagnostic);
+    expect(readDiagnosticInputMetric(diagnostic, "function_output.repeated")).toBeNull();
+    expect(readDiagnosticInputMetric(diagnostic, "function_output.equivalent")).toBeNull();
     expect(diagnosticJson).not.toContain("call_private");
     expect(diagnosticJson).not.toContain("synthetic-sensitive-tool-output");
     expect(diagnosticJson).not.toContain("synthetic-sensitive-function-arguments");
@@ -5165,6 +5761,184 @@ describe("hostedRunnerIntercept", () => {
     expect(diagnosticJson).not.toContain("synthetic-exact-function-arguments");
     expect(diagnosticJson).not.toContain("synthetic-private-message");
     expect(diagnosticJson).not.toContain("private/tool-name");
+  });
+
+  it("counts repeated action identities and exactly equivalent serialized outputs independently", async () => {
+    const repeatedFirst = {
+      call_id: "call_repeat",
+      output: "first repeated-call output",
+      type: "function_call_output",
+    };
+    const repeatedSecond = {
+      call_id: "call_repeat",
+      output: "second repeated-call output",
+      type: "function_call_output",
+    };
+    const equivalentOutput = {
+      status: "waiting",
+      waitMs: 1_000,
+    };
+    const equivalentFirst = {
+      call_id: "call_equivalent_1",
+      output: equivalentOutput,
+      type: "function_call_output",
+    };
+    const equivalentSecond = {
+      call_id: "call_equivalent_2",
+      output: equivalentOutput,
+      type: "function_call_output",
+    };
+    const reorderedOutput = {
+      waitMs: 1_000,
+      status: "waiting",
+    };
+    const reordered = {
+      call_id: "call_reordered",
+      output: reorderedOutput,
+      type: "function_call_output",
+    };
+    const commandOutput = {
+      call_id: "call_command",
+      output: "command output",
+      type: "function_call_output",
+    };
+    const mcpOutput = {
+      call_id: "call_mcp",
+      output: "mcp output",
+      type: "function_call_output",
+    };
+    const overlappingOutput = {
+      state: "shared",
+    };
+    const overlapFirst = {
+      call_id: "call_overlap_a",
+      output: overlappingOutput,
+      type: "function_call_output",
+    };
+    const overlapOther = {
+      call_id: "call_overlap_b",
+      output: "different output for the repeated identity",
+      type: "function_call_output",
+    };
+    const overlapRepeatedEquivalent = {
+      call_id: "call_overlap_b",
+      output: overlappingOutput,
+      type: "function_call_output",
+    };
+    const input = [
+      { call_id: "call_repeat", name: "wait", type: "function_call" },
+      repeatedFirst,
+      repeatedSecond,
+      { call_id: "call_equivalent_1", name: "wait", type: "function_call" },
+      equivalentFirst,
+      { call_id: "call_equivalent_2", name: "wait", type: "function_call" },
+      equivalentSecond,
+      { call_id: "call_reordered", name: "wait", type: "function_call" },
+      reordered,
+      { call_id: "call_command", name: "exec_command", type: "function_call" },
+      commandOutput,
+      { call_id: "call_mcp", name: "mcp__calendar__read", type: "function_call" },
+      mcpOutput,
+      { call_id: "call_overlap_a", name: "wait", type: "function_call" },
+      overlapFirst,
+      { call_id: "call_overlap_b", name: "wait", type: "function_call" },
+      overlapOther,
+      overlapRepeatedEquivalent,
+    ] as const;
+
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input,
+        model: "gpt-5.6-terra",
+      })),
+    });
+
+    expect(diagnostic).toEqual(expect.objectContaining({
+      diagnosticVersion: 3,
+    }));
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.command.execution",
+    )).toEqual({ bytes: testJsonByteLength(commandOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.dynamic.tool.call",
+    )).toEqual({
+      bytes: testJsonByteLength(repeatedFirst.output)
+        + testJsonByteLength(repeatedSecond.output)
+        + testJsonByteLength(equivalentFirst.output)
+        + testJsonByteLength(equivalentSecond.output)
+        + testJsonByteLength(reordered.output)
+        + testJsonByteLength(overlapFirst.output)
+        + testJsonByteLength(overlapOther.output)
+        + testJsonByteLength(overlapRepeatedEquivalent.output),
+      count: 8,
+    });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.action.mcp.tool.call",
+    )).toEqual({ bytes: testJsonByteLength(mcpOutput.output), count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.repeated",
+    )).toEqual({
+      bytes: testJsonByteLength(repeatedSecond.output)
+        + testJsonByteLength(overlapRepeatedEquivalent.output),
+      count: 2,
+    });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.equivalent",
+    )).toEqual({
+      bytes: testJsonByteLength(equivalentSecond.output)
+        + testJsonByteLength(overlapRepeatedEquivalent.output),
+      count: 2,
+    });
+    parseDiagnosticRuntimeLog(diagnostic);
+
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain("call_repeat");
+    expect(diagnosticJson).not.toContain("first repeated-call output");
+    expect(diagnosticJson).not.toContain("second repeated-call output");
+    expect(diagnosticJson).not.toContain("command output");
+    expect(diagnosticJson).not.toContain("mcp output");
+    expect(diagnosticJson).not.toContain('"status":"waiting"');
+  });
+
+  it("counts equivalent output reuse when serialization returns to the first call identity", async () => {
+    const sharedOutput = { state: "shared" };
+    const sharedOutputBytes = testJsonByteLength(sharedOutput);
+    const diagnostic = await buildHostedOpenAiCacheDiagnostic({
+      endpointKind: "responses",
+      method: "POST",
+      requestBytes: TEST_TEXT_ENCODER.encode(JSON.stringify({
+        input: [
+          { call_id: "call_a", name: "wait", type: "function_call" },
+          { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
+          { call_id: "call_b", name: "wait", type: "function_call" },
+          { call_id: "call_b", output: sharedOutput, type: "function_call_output" },
+          { call_id: "call_a", output: sharedOutput, type: "function_call_output" },
+        ],
+        model: "gpt-5.6-terra",
+      })),
+    });
+
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.repeated",
+    )).toEqual({ bytes: sharedOutputBytes, count: 1 });
+    expect(readDiagnosticInputMetric(
+      diagnostic,
+      "function_output.equivalent",
+    )).toEqual({ bytes: sharedOutputBytes * 2, count: 2 });
+    parseDiagnosticRuntimeLog(diagnostic);
+
+    const diagnosticJson = JSON.stringify(diagnostic);
+    expect(diagnosticJson).not.toContain("call_a");
+    expect(diagnosticJson).not.toContain("call_b");
+    expect(diagnosticJson).not.toContain('"state":"shared"');
   });
 
   it("uses safe deterministic function-call categories for unusual call IDs", async () => {
@@ -9033,6 +9807,7 @@ function createInterceptEnv(input: {
   AI?: RunnerOutboundEnvironmentSource["AI"];
   ELEVENLABS_API_KEY?: string;
   EXA_API_KEY?: string;
+  GEMINI_API_KEY?: string;
   HOSTED_EXECUTION_RUNNER_HOST_ALIAS?: string;
   HOSTED_LOG_FINGERPRINT_SECRET?: string;
   HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET?: string;
@@ -9075,6 +9850,7 @@ function createInterceptEnv(input: {
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
     ELEVENLABS_API_KEY: input.ELEVENLABS_API_KEY,
     EXA_API_KEY: input.EXA_API_KEY,
+    GEMINI_API_KEY: input.GEMINI_API_KEY,
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: input.HOSTED_EXECUTION_RUNNER_HOST_ALIAS,
     HOSTED_LOG_FINGERPRINT_SECRET: input.HOSTED_LOG_FINGERPRINT_SECRET,
     HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:

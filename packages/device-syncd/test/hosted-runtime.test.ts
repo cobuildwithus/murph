@@ -7,6 +7,7 @@ import {
   canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage,
   hasJunctionExtendedTimeseriesHistoryBackfillCoverage,
   readJunctionHistoricalBackfillEvidence,
+  resolveJunctionExtendedTimeseriesHistoryBackfillVersion,
 } from "../src/junction-historical-backfill-progress.ts";
 import { DEVICE_SYNC_METADATA_MAX_STRING_LENGTH } from "../src/metadata.ts";
 import {
@@ -33,6 +34,14 @@ import {
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
 } from "../src/hosted-runtime.ts";
 import { isJunctionCredentialIndependentInlineImportJob } from "../src/junction-inline-authority.ts";
+
+function historyCoverageVersion(resource: string): number {
+  const version = resolveJunctionExtendedTimeseriesHistoryBackfillVersion(resource);
+  if (version === null) {
+    throw new TypeError(`Expected an extended-history version for ${resource}.`);
+  }
+  return version;
+}
 
 function isDeviceSyncCredentialIndependentImportJob(input: {
   kind?: string | null;
@@ -240,7 +249,9 @@ describe("hosted device-sync reconcile contract", () => {
   it("accepts only the bounded request and queued response shapes", () => {
     expect(parseHostedExecutionDeviceSyncReconcileRequest({
       connectionId: "dsc_123",
-    })).toEqual({ connectionId: "dsc_123" });
+    })).toEqual({
+      connectionId: "dsc_123",
+    });
     expect(parseHostedExecutionDeviceSyncReconcileResponse({
       connectionId: "dsc_123",
       occurredAt: "2026-07-15T12:00:00.000Z",
@@ -254,6 +265,10 @@ describe("hosted device-sync reconcile contract", () => {
       action: "disconnect",
       connectionId: "dsc_123",
     })).toThrow(/action is not supported/u);
+    expect(() => parseHostedExecutionDeviceSyncReconcileRequest({
+      connectionId: "dsc_123",
+      unexpected: "value",
+    })).toThrow(/unexpected is not supported/u);
     expect(() => parseHostedExecutionDeviceSyncReconcileResponse({
       connectionId: "dsc_123",
       occurredAt: "2026-07-15T12:00:00.000Z",
@@ -300,12 +315,12 @@ describe("serializeHostedExecutionDeviceSyncDirtyPayloadIdentity", () => {
 
 describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("keeps newer blood-pressure source-coverage semantics immutable to older runtimes", () => {
-    const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v2|withings" };
+    const metadata = { junctionBloodPressureHistoryBackfillCoverage: "v3|withings" };
     const coverage = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata,
       providerSlug: "omron",
       resource: "blood_pressure",
-      version: 1,
+      version: historyCoverageVersion("blood_pressure"),
     });
 
     expect(coverage).toBeNull();
@@ -313,18 +328,18 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       metadata,
       "omron",
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(false);
     expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
       metadata,
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(false);
     expect(addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: {},
       providerSlug: "__proto__",
       resource: "blood_pressure",
-      version: 1,
+      version: historyCoverageVersion("blood_pressure"),
     })).toBeNull();
   });
 
@@ -333,8 +348,10 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
-        junctionNoteHistoryBackfillCoverage: "v1|oura",
+        junctionBloodPressureHistoryBackfillCoverage:
+          `v${historyCoverageVersion("blood_pressure")}|omron`,
+        junctionNoteHistoryBackfillCoverage:
+          `v${historyCoverageVersion("note") - 1}|oura`,
       },
     });
 
@@ -344,13 +361,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       result.metadata,
       "omron",
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       result.metadata,
       "oura",
       "note",
-      2,
+      historyCoverageVersion("note"),
     )).toBe(false);
     expect(result.preservedLocalProgress).toBe(true);
   });
@@ -360,7 +377,8 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       hostedMetadata: { hostedOnly: true },
       localConnectionStateUnpublished: false,
       localMetadata: {
-        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        junctionBloodPressureHistoryBackfillCoverage:
+          `v${historyCoverageVersion("blood_pressure")}|omron`,
       },
     });
 
@@ -373,11 +391,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   it("unions hosted and unpublished local source coverage", () => {
     const result = mergeHostedDeviceSyncConnectionMetadata({
       hostedMetadata: {
-        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        junctionBloodPressureHistoryBackfillCoverage:
+          `v${historyCoverageVersion("blood_pressure")}|omron`,
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
-        junctionBloodPressureHistoryBackfillCoverage: "v1|withings",
+        junctionBloodPressureHistoryBackfillCoverage:
+          `v${historyCoverageVersion("blood_pressure")}|withings`,
       },
     });
 
@@ -385,13 +405,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       result.metadata,
       "omron",
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       result.metadata,
       "withings",
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(true);
     expect(result.preservedLocalProgress).toBe(true);
   });
@@ -404,7 +424,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       metadata: sharedMetadata,
       providerSlug: "omron",
       resource: "caffeine",
-      version: 1,
+      version: historyCoverageVersion("caffeine"),
     });
     expect(coverage).not.toBeNull();
     if (!coverage) {
@@ -430,7 +450,7 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       result.metadata,
       "omron",
       "caffeine",
-      1,
+      historyCoverageVersion("caffeine"),
     )).toBe(true);
     for (const [key, value] of Object.entries(sharedMetadata)) {
       expect(result.metadata[key]).toBe(value);
@@ -445,13 +465,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
       metadata: {},
       providerSlug: "omron",
       resource: "blood_pressure",
-      version: 1,
+      version: historyCoverageVersion("blood_pressure"),
     });
     const noteMatrix = addJunctionExtendedTimeseriesHistoryBackfillCoverage({
       metadata: {},
       providerSlug: "oura",
       resource: "note",
-      version: 2,
+      version: historyCoverageVersion("note"),
     });
     expect(bloodPressureMatrix).not.toBeNull();
     expect(noteMatrix).not.toBeNull();
@@ -461,19 +481,34 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
 
     const cases = [
       {
-        hostedCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
-        localCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+        hostedCoverage: {
+          junctionNoteHistoryBackfillCoverage: `v${historyCoverageVersion("note")}|oura`,
+        },
+        localCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage:
+            `v${historyCoverageVersion("blood_pressure")}|omron`,
+        },
       },
       {
-        hostedCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
-        localCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+        hostedCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage:
+            `v${historyCoverageVersion("blood_pressure")}|omron`,
+        },
+        localCoverage: {
+          junctionNoteHistoryBackfillCoverage: `v${historyCoverageVersion("note")}|oura`,
+        },
       },
       {
         hostedCoverage: { junctionNoteHistoryBackfillCoverage: noteMatrix.value },
-        localCoverage: { junctionBloodPressureHistoryBackfillCoverage: "v1|omron" },
+        localCoverage: {
+          junctionBloodPressureHistoryBackfillCoverage:
+            `v${historyCoverageVersion("blood_pressure")}|omron`,
+        },
       },
       {
-        hostedCoverage: { junctionNoteHistoryBackfillCoverage: "v2|oura" },
+        hostedCoverage: {
+          junctionNoteHistoryBackfillCoverage: `v${historyCoverageVersion("note")}|oura`,
+        },
         localCoverage: {
           junctionBloodPressureHistoryBackfillCoverage: bloodPressureMatrix.value,
         },
@@ -511,13 +546,13 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
             result.metadata,
             "omron",
             "blood_pressure",
-            1,
+            historyCoverageVersion("blood_pressure"),
           )).toBe(true);
           expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
             result.metadata,
             "oura",
             "note",
-            2,
+            historyCoverageVersion("note"),
           )).toBe(true);
           for (const [key, value] of Object.entries(sharedMetadata)) {
             expect(result.metadata[key]).toBe(value);
@@ -528,11 +563,11 @@ describe("mergeHostedDeviceSyncConnectionMetadata", () => {
   });
 
   it("keeps published source coverage when a bounded union cannot fit", () => {
-    const hostedCoverage = `v1|${Array.from(
+    const hostedCoverage = `v${historyCoverageVersion("blood_pressure")}|${Array.from(
       { length: 12 },
       (_, index) => `h${index.toString().padStart(9, "0")}`,
     ).join(",")}`;
-    const localCoverage = `v1|${Array.from(
+    const localCoverage = `v${historyCoverageVersion("blood_pressure")}|${Array.from(
       { length: 12 },
       (_, index) => `l${index.toString().padStart(9, "0")}`,
     ).join(",")}`;
@@ -985,7 +1020,8 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
   it("preserves blood-pressure source coverage during guarded replacement", () => {
     const result = mergeGuardedJunctionHistoricalBackfillMetadata({
       existingMetadata: {
-        junctionBloodPressureHistoryBackfillCoverage: "v1|omron",
+        junctionBloodPressureHistoryBackfillCoverage:
+          `v${historyCoverageVersion("blood_pressure")}|omron`,
         seedOnlyState: "discard",
       },
       replacementMetadata: {
@@ -997,7 +1033,7 @@ describe("mergeGuardedJunctionHistoricalBackfillMetadata", () => {
       result,
       "omron",
       "blood_pressure",
-      1,
+      historyCoverageVersion("blood_pressure"),
     )).toBe(true);
   });
 
@@ -1162,6 +1198,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(
       parseHostedExecutionDeviceSyncDirtyAckRequest(
         {
+          completedImports: [{
+            dirtyPayloadId: "dsp_current",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "heart_rate",
+            sourceProviderSlug: "apple_health_kit",
+          }],
           connectionId: "dsc_current",
           processedDirtyPayloadIds: ["dsp_current"],
           processedRevision: "21",
@@ -1177,6 +1219,12 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         "trusted-user",
       ),
     ).toEqual({
+      completedImports: [{
+        dirtyPayloadId: "dsp_current",
+        importCompletedAt: "2026-08-20T09:00:00.000Z",
+        resource: "heart_rate",
+        sourceProviderSlug: "apple_health_kit",
+      }],
       connectionId: "dsc_current",
       processedDirtyPayloadIds: ["dsp_current"],
       processedRevision: "21",
@@ -1189,6 +1237,54 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       ],
       userId: "trusted-user",
     });
+  });
+
+  it("rejects canonical import receipts outside the exact processed payload set", () => {
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          completedImports: [{
+            dirtyPayloadId: "dsp_other",
+            importCompletedAt: "2026-08-20T09:00:00.000Z",
+            resource: "steps",
+            sourceProviderSlug: "apple_health_kit",
+          }],
+          connectionId: "dsc_current",
+          processedDirtyPayloadIds: ["dsp_current"],
+          processedRevision: "21",
+          userId: "trusted-user",
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/must reference processed dirty payload ids/u);
+  });
+
+  it("rejects duplicate and unnormalized canonical import receipts", () => {
+    const receipt = {
+      dirtyPayloadId: "dsp_current",
+      importCompletedAt: "2026-08-20T09:00:00.000Z",
+      resource: "steps",
+      sourceProviderSlug: "apple_health_kit",
+    };
+    const request = {
+      completedImports: [receipt, receipt],
+      connectionId: "dsc_current",
+      processedDirtyPayloadIds: ["dsp_current"],
+      processedRevision: "21",
+      userId: "trusted-user",
+    };
+
+    expect(() => parseHostedExecutionDeviceSyncDirtyAckRequest(request, "trusted-user"))
+      .toThrowError(/must not repeat a dirty payload id/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncDirtyAckRequest(
+        {
+          ...request,
+          completedImports: [{ ...receipt, resource: "Heart Rate" }],
+        },
+        "trusted-user",
+      )
+    ).toThrowError(/resource must be a normalized device-sync key/u);
   });
 
   it("parses hosted runtime link and snapshot payloads with normalized timestamps", () => {
@@ -1448,6 +1544,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       buildSnapshot(legacySource),
     );
     expect(parsed.connections[0]?.sources?.[0]?.lastDataAt).toBeNull();
+    expect(parsed.connections[0]?.sources?.[0]?.lifecycleEpoch).toBeUndefined();
 
     // A present-but-malformed value is still a contract violation.
     expect(() =>
@@ -1455,6 +1552,16 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
         buildSnapshot({ ...legacySource, lastDataAt: "not-a-timestamp" }),
       )
     ).toThrow();
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+        buildSnapshot({ ...legacySource, lifecycleEpoch: null }),
+      )
+    ).toThrow(/lifecycleEpoch must be a positive integer/u);
+    expect(() =>
+      parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
+        buildSnapshot({ ...legacySource, lifecycleEpoch: 0 }),
+      )
+    ).toThrow(/lifecycleEpoch must be a positive integer/u);
 
     const withArrival = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(
       buildSnapshot({ ...legacySource, lastDataAt: "2026-07-01T07:59:00+00:00" }),
@@ -2973,7 +3080,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(normalizeHostedDeviceSyncJobHints(null)).toEqual([]);
   });
 
-  it("parses the hosted wake hint owner shape once", () => {
+  it("parses the hosted wake hint shape once", () => {
     const parsed = parseHostedExecutionDeviceSyncWakeHint({
       eventType: "sleep.updated",
       jobs: [
@@ -3037,7 +3144,7 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
   });
 
-  it("feeds the parsed owner shape into job-hint normalization", () => {
+  it("feeds the parsed wake shape into job-hint normalization", () => {
     const hint = parseHostedExecutionDeviceSyncWakeHint({
       jobs: [
         {
@@ -3093,11 +3200,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
             historicalBackfillVersion: 2,
+            historicalProofFirstSeenAt: "2026-04-01T12:00:00Z",
+            historicalProofSourceProviderSlug: "google_health",
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
             historicalUnresolvedProviderRecordCount: 65,
             historicalWindowStart: "2026-03-01T00:00:00Z",
+            summaryPhaseComplete: true,
+            summaryResourceCursor: "sleep",
             timeseriesCursor: "2026-04-02T00:00:00Z",
             timeseriesResourceCursor,
             workoutStreamCursor,
@@ -3127,11 +3238,15 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
       historicalBackfillVersion: 2,
+      historicalProofFirstSeenAt: "2026-04-01T12:00:00.000Z",
+      historicalProofSourceProviderSlug: "google_health",
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
       historicalUnresolvedProviderRecordCount: 65,
       historicalWindowStart: "2026-03-01T00:00:00.000Z",
+      summaryPhaseComplete: true,
+      summaryResourceCursor: "sleep",
       timeseriesCursor: "2026-04-02T00:00:00.000Z",
       timeseriesResourceCursor,
       workoutStreamCursor,

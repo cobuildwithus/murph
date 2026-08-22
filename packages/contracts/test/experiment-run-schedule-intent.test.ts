@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   effectiveProtocolSnapshotSchema,
   experimentAdherenceTargetSchema,
+  experimentAdherenceTargetsAuthoringSchema,
   experimentAdherenceTargetsSchema,
   experimentRunPlanSchema,
   experimentRunScheduleIntentSchema,
@@ -283,6 +284,40 @@ describe("experiment adherence targets", () => {
         expect.objectContaining({
           message: "assumed_after_grace requires intervention_session evidence.",
           path: ["evidence", "missing"],
+        }),
+      ]),
+    );
+  });
+
+  it("rejects assumed missing evidence for repeated daily occurrences", () => {
+    const target = {
+      targetId: "micro-set",
+      label: "Micro set",
+      phase: "intervention",
+      calendar: {
+        kind: "daily",
+        timeZone: "America/New_York",
+        targetCountPerDay: 8,
+      },
+      evidence: {
+        kind: "linkedEventCount",
+        eventKind: "intervention_session",
+        missing: "assumed_after_grace",
+      },
+    };
+    expect(experimentAdherenceTargetSchema.safeParse(target).success).toBe(true);
+
+    const result = experimentAdherenceTargetsAuthoringSchema.safeParse([target]);
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("expected repeated assumed target to fail validation");
+    }
+    expect(result.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          message: "Repeated adherence occurrences must use explicit missing evidence.",
+          path: [0, "evidence", "missing"],
         }),
       ]),
     );

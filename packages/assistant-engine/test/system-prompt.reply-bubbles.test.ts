@@ -24,42 +24,36 @@ describe('assistant reply bubble prompt guidance', () => {
 
       expect(layers.threadContextPrompt).toContain(TEXTING_RHYTHM_PROMPT)
       expect(layers.threadContextPrompt).toContain(
-        "use the current channel's available presentation",
-      )
-      expect(layers.threadContextPrompt).toContain(
-        'A semantic card that carries the complete answer replaces final text.',
+        "use the current channel's presentation",
       )
       if (channel === 'telegram') {
         expect(layers.threadContextPrompt).toContain(
-          'A private Telegram movement routine keeps its exercise-routine card when the member repeats it or improves its layout',
+          'prefer a Rich Message when structure makes the answer easier to read or use',
         )
         expect(layers.threadContextPrompt).toContain(
-          'Text styling is not a Rich Message.',
+          'This applies in direct and group conversations.',
         )
         expect(layers.threadContextPrompt).toContain(
-          'use it only for a complete structured guide, checklist, detailed comparison, or multi-section summary',
+          'Normal conversation can remain ordinary text, even when it needs several paragraphs.',
         )
         expect(layers.threadContextPrompt).toContain(
-          'Keep short or simple replies as text.',
+          'presentation options and examples, not exclusive content owners',
         )
         expect(layers.threadContextPrompt).toContain(
-          'Nutrition, compact-table, tracked-workout, and catalog exercise content must use its owning card',
+          'compose a generic Rich Message when a custom or mixed layout is clearer',
         )
         expect(layers.threadContextPrompt).toContain(
-          'If the owning card cannot attach, use ordinary text, never generic rich content',
+          'images are optional',
         )
       } else {
         expect(layers.threadContextPrompt).not.toContain(
-          'Telegram rich-content tool',
+          'prefer a Rich Message when structure makes the answer easier to read or use',
         )
       }
       expect(layers.threadContextPrompt).toContain(
         'Response media accompanies concise semantic text; do not recreate its visual content as long prose.',
       )
       expect(layers.threadContextPrompt).not.toContain('response media alone')
-      expect(layers.threadContextPrompt).toContain(
-        'If no owned presentation fits, send concise text.',
-      )
       expect(layers.threadContextPrompt).toContain(
         'Telegram and iMessage have different capabilities',
       )
@@ -76,19 +70,19 @@ describe('assistant reply bubble prompt guidance', () => {
     },
   )
 
-  it('does not demand a private exercise card in Telegram groups', () => {
+  it('uses the same Rich Message preference in Telegram groups', () => {
     const layers = buildAssistantSystemPromptLayers(
       createPromptInput({ channel: 'telegram', conversationScope: 'group' }),
     )
 
-    expect(layers.threadContextPrompt).not.toContain(
-      'keeps its exercise-routine card',
-    )
-    expect(layers.threadContextPrompt).not.toContain(
-      'Telegram rich-content tool',
+    expect(layers.threadContextPrompt).toContain(
+      'prefer a Rich Message when structure makes the answer easier to read or use',
     )
     expect(layers.threadContextPrompt).toContain(
-      'If no owned presentation fits, send concise text.',
+      'This applies in direct and group conversations.',
+    )
+    expect(layers.threadContextPrompt).toContain(
+      'Normal conversation can remain ordinary text, even when it needs several paragraphs.',
     )
   })
 

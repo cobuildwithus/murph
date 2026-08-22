@@ -3803,6 +3803,65 @@ test("experiment follow-up due skips assumed calendar missed-log dates only afte
   assert.equal(dueDecision.window.sessionDate, "2026-04-10");
 });
 
+test("legacy repeated assumed targets are missed and retain missed-log follow-up", () => {
+  const slug = "legacy-repeated-assumed-followup";
+  const experiment = makeExperiment("active", {
+    slug,
+    runPlan: {
+      interventionStart: "2026-04-10",
+      interventionEnd: "2026-04-10",
+      modality: "Micro set",
+      schedule: {
+        kind: "dailyLocal",
+        localTime: "08:00",
+        timeZone: "America/New_York",
+      },
+      targetSessions: 8,
+      minimumUsefulSessions: 6,
+      adherenceTargets: [{
+        targetId: "micro-set",
+        label: "Micro set",
+        phase: "intervention",
+        calendar: {
+          kind: "daily",
+          timeZone: "America/New_York",
+          localTime: "08:00",
+          targetCountPerDay: 8,
+        },
+        evidence: {
+          kind: "linkedEventCount",
+          eventKind: "intervention_session",
+          missing: "assumed_after_grace",
+        },
+      }],
+    },
+    assistantSupport: {
+      remindersEnabled: true,
+      missedLogFollowup: "default_on",
+      weeklyDigestEnabled: false,
+    },
+  });
+  const vault = createVaultReadModel({
+    vaultRoot: "/virtual/legacy-repeated-assumed-followup",
+    metadata: { timezone: "America/New_York" },
+    entities: [experiment],
+  });
+
+  const progress = summarizeExperimentProgress(vault, slug, {
+    asOf: "2026-04-12",
+  });
+  const decision = decideExperimentFollowupDue(vault, slug, {
+    kind: "missed-log",
+    date: "2026-04-10",
+  });
+
+  assert.equal(progress.adherence.assumedSessions ?? 0, 0);
+  assert.equal(progress.adherence.completedSessions, 0);
+  assert.equal(progress.adherence.expectedSessionsByNow, 8);
+  assert.equal(decision.action, "notify");
+  assert.equal(decision.reason, "planned_session_log_missing");
+});
+
 test("experiment follow-up due assumes only dates where all planned calendar targets are assumed", () => {
   const experiment = makeExperiment("active", {
     experimentId: "exp_01JNV4458HYPP53JDQCBP1MXTG",

@@ -11,30 +11,26 @@ import {
   MURPH_DEFAULT_METADATA_DESCRIPTION,
   MURPH_DEFAULT_METADATA_TITLE,
   MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
+  MURPH_PUBLIC_SITE_URL,
 } from "@/src/lib/site-metadata";
 
 import "./globals.css";
 import { cn } from "@/src/lib/utils";
 import { dmMono, dmSans, fraunces } from "./font-assets";
 
-const DEFAULT_METADATA_BASE_URL = "https://www.withmurph.ai";
-
-const metadataBase = resolveMetadataBase() ?? new URL(DEFAULT_METADATA_BASE_URL);
-const defaultMetadata = createMurphPageMetadata({
-  description: MURPH_DEFAULT_METADATA_DESCRIPTION,
-  openGraph: {
-    description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
-    type: "website",
-  },
-  title: MURPH_DEFAULT_METADATA_TITLE,
-  twitter: {
-    description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
-  },
-});
-
 export const metadata: Metadata = {
-  ...defaultMetadata,
-  metadataBase,
+  ...createMurphPageMetadata({
+    description: MURPH_DEFAULT_METADATA_DESCRIPTION,
+    openGraph: {
+      description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
+      type: "website",
+    },
+    title: MURPH_DEFAULT_METADATA_TITLE,
+    twitter: {
+      description: MURPH_DEFAULT_OPEN_GRAPH_DESCRIPTION,
+    },
+  }),
+  metadataBase: resolveMetadataBase() ?? new URL(MURPH_PUBLIC_SITE_URL),
 };
 
 export default async function RootLayout(input: { children: React.ReactNode }) {

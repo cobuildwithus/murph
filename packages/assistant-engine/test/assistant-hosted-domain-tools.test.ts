@@ -847,6 +847,43 @@ describe('hosted domain dynamic tools', () => {
     }
   })
 
+  it('returns schema-owned automation repair hints without calling the port', async () => {
+    const privateMarker = 'synthetic-private-automation-marker'
+    const request = readToolRequest('automation', {
+      action: 'inspect',
+      lookup: { privateMarker },
+    })
+    expect(request).toMatchObject({ kind: 'invalid-automation-arguments' })
+    if (!request || request.kind !== 'invalid-automation-arguments') {
+      throw new Error('Expected invalid automation arguments.')
+    }
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('Automation port must not be called for invalid arguments.')
+    })
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: { request: automationRequest },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(result.rpcResult.success).toBe(false)
+    expect(feedback).toContain('"error":"invalid_automation_arguments"')
+    expect(feedback).toContain(
+      '"field":"lookup","code":"invalid_type","expected":"string"',
+    )
+    expect(feedback).not.toContain(privateMarker)
+    expect(feedback).not.toContain('privateMarker')
+    expect(feedback).not.toContain('"received"')
+    expect(automationRequest).not.toHaveBeenCalled()
+  })
+
   it('keeps privileged and generic execution fields out of both schemas', () => {
     const propertyKeys = new Set([
       ...collectJsonSchemaPropertyKeys(MURPH_AUTOMATION_TOOL.inputSchema),
@@ -886,7 +923,18 @@ describe('hosted domain dynamic tools', () => {
     expect(readToolRequest('automation', {
       action: 'save',
       activeUntil: '2026-08-01T00:00:00.000Z',
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+        {
+          entityKind: 'experiment',
+          entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+        },
+      ],
       instructions: 'Send a short reminder to wind down.',
+      plannedOccurrenceOffsetMs: 900_000,
       schedule: { kind: 'dailyLocal', localTime: '22:30' },
       status: 'paused',
       supportKind: 'reminder',
@@ -897,7 +945,18 @@ describe('hosted domain dynamic tools', () => {
       request: {
         action: 'save',
         activeUntil: '2026-08-01T00:00:00.000Z',
+        contextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+          {
+            entityKind: 'experiment',
+            entityId: 'exp_01JQ8PWXP5A68SQM1W0GYM41WB',
+          },
+        ],
         instructions: 'Send a short reminder to wind down.',
+        plannedOccurrenceOffsetMs: 900_000,
         schedule: { kind: 'dailyLocal', localTime: '22:30' },
         status: 'paused',
         supportKind: 'reminder',
@@ -1065,6 +1124,48 @@ describe('hosted domain dynamic tools', () => {
       kind: 'automation',
       request: { schedule: { at: '2026-11-01T06:30:00.000Z', kind: 'at' } },
     })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send one plan-owned reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      supportKind: 'reminder',
+      title: 'Unowned plan reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Send one plan-owned reminder.',
+      schedule: { kind: 'dailyLocal', localTime: '22:30' },
+      supportSeriesId: 'experiment:exp_synthetic_owner',
+      title: 'Untyped plan reminder',
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+      lookup: 'evening-wind-down',
+      supportKind: 'reminder',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        lookup: 'evening-wind-down',
+        supportKind: 'reminder',
+      },
+    })
+    expect(readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+      lookup: 'evening-wind-down',
+      supportSeriesId: 'habit:sleep-wind-down',
+    })).toEqual({
+      kind: 'automation',
+      request: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        lookup: 'evening-wind-down',
+        supportSeriesId: 'habit:sleep-wind-down',
+      },
+    })
 
     expect(readToolRequest('automation', {
       action: 'reconcile',
@@ -1134,6 +1235,11 @@ describe('hosted domain dynamic tools', () => {
       },
     })
     expect(readToolRequest('device', {
+      accountId: 'device-account-1',
+      action: 'reconcile',
+      token: 'not-allowed',
+    })).toMatchObject({ kind: 'invalid-device-arguments' })
+    expect(readToolRequest('device', {
       action: 'connect',
       password: 'not-allowed',
       provider: 'whoop',
@@ -1148,6 +1254,12 @@ describe('hosted domain dynamic tools', () => {
         action: 'save' as const,
         automationId: 'automation-1',
         created: true,
+        contextReferences: [
+          {
+            entityKind: 'workout_format',
+            entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+          },
+        ],
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
         nextOccurrenceAt: null,
@@ -1165,6 +1277,12 @@ describe('hosted domain dynamic tools', () => {
     }
     const request = readToolRequest('automation', {
       action: 'save',
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+      ],
       instructions: 'Send a short reminder to wind down.',
       schedule: {
         kind: 'dailyLocal',
@@ -1190,6 +1308,12 @@ describe('hosted domain dynamic tools', () => {
 
     expect(automationTool.request).toHaveBeenCalledWith({
       action: 'save',
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+      ],
       instructions: 'Send a short reminder to wind down.',
       schedule: {
         kind: 'dailyLocal',
@@ -1203,6 +1327,12 @@ describe('hosted domain dynamic tools', () => {
       action: 'save',
       automationId: 'automation-1',
       created: true,
+      contextReferences: [
+        {
+          entityKind: 'workout_format',
+          entityId: 'wfmt_01JQ8PWXP5A68SQM1W0GYM41WA',
+        },
+      ],
       effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
       nextOccurrenceAt: null,
@@ -1313,6 +1443,91 @@ describe('hosted domain dynamic tools', () => {
       timingVerified: true,
       timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
+    })
+  })
+
+  it('treats only a missing automation inspection as a successful absent read', async () => {
+    const lookup = 'weekly-summary'
+    const missingError = Object.assign(
+      new Error('private automation lookup detail'),
+      { code: 'automation_not_found' as const },
+    )
+    const missingTool = {
+      request: vi.fn(async () => {
+        throw missingError
+      }),
+    }
+    const inspectRequest = readToolRequest('automation', {
+      action: 'inspect',
+      lookup,
+    })
+    if (!inspectRequest) {
+      throw new Error('Expected a missing automation inspection request.')
+    }
+
+    const missingInspection = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool: missingTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: inspectRequest,
+    })
+
+    expect(missingInspection.rpcResult.success).toBe(true)
+    expect(readResultPayload(missingInspection)).toEqual({
+      action: 'inspect',
+      found: false,
+    })
+    expect(missingInspection.rpcResult.contentItems[0]?.text).not.toContain(
+      'private automation lookup detail',
+    )
+
+    const patchRequest = readToolRequest('automation', {
+      action: 'patch',
+      expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+      lookup,
+      status: 'paused',
+    })
+    if (!patchRequest) {
+      throw new Error('Expected a missing automation patch request.')
+    }
+    const missingPatch = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({ automationTool: missingTool }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: patchRequest,
+    })
+    expect(missingPatch.rpcResult).toEqual({
+      contentItems: [{
+        text: 'automation operation is unavailable',
+        type: 'inputText',
+      }],
+      success: false,
+    })
+
+    const failedInspection = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: {
+          request: vi.fn(async () => {
+            throw new Error('private storage failure')
+          }),
+        },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request: inspectRequest,
+    })
+    expect(failedInspection.rpcResult).toEqual({
+      contentItems: [{
+        text: 'automation operation is unavailable',
+        type: 'inputText',
+      }],
+      success: false,
     })
   })
 

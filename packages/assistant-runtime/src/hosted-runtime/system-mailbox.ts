@@ -2,7 +2,10 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 
 import {
+  buildHostedExecutionSafeErrorDiagnostics,
+  deriveHostedExecutionErrorCode,
   readHostedRuntimeSafeErrorText,
+  sanitizeHostedExecutionStructuredLogText,
 } from "@murphai/hosted-execution";
 import {
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -39,6 +42,7 @@ import type {
 import {
   findNextHostedSystemMailboxQueueItem,
   mergeHostedSystemMailboxRollbackItems,
+  projectHostedSystemMailboxModelFreeNotificationFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
@@ -61,6 +65,10 @@ import {
   selectHostedRuntimeWakeCandidate,
   type HostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import {
+  type HostedRuntimeLogContext,
+  writeHostedRuntimeLogBestEffort,
+} from "./runtime-logs.ts";
 
 const HOSTED_CODEX_HOME_DIR_NAME = ".codex-hosted";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";
@@ -283,6 +291,7 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   executionContext?: AssistantExecutionContext | null;
   now?: () => string;
   operatorHomeRoot?: string | null;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: HostedSystemMailboxRuntime;
   runtimeEnv: Readonly<Record<string, string>>;
   retainProcessedItemUntilRecorded?: boolean;
@@ -300,8 +309,21 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
+      const notificationProjectedState =
+        input.allowedRouteActions?.includes(
+          "dispatch-assistant-notification",
+        ) === true
+        && (
+          input.allowedRouteActions?.includes("apply-runtime-control-request") === true
+          || input.allowedRouteActions?.includes("run-device-sync-wake") === true
+        )
+        && input.allowedWakeKinds?.includes(
+          "assistant.notification.requested",
+        ) === true
+          ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
+          : state;
       const selectionState = {
-        pending: state.pending.filter((item) =>
+        pending: notificationProjectedState.pending.filter((item) =>
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"
@@ -391,11 +413,23 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
       operatorHomeRoot: input.operatorHomeRoot ?? undefined,
       pendingItem: prepared,
       runtime: input.runtime,
+      runtimeLogContext: input.runtimeLogContext ?? null,
       runtimeEnv: input.runtimeEnv,
       signal: input.signal ?? null,
       shouldYieldBackgroundMaintenance: input.shouldYieldBackgroundMaintenance ?? null,
       vaultRoot: input.vaultRoot,
     });
+    if (
+      prepared.routeAction === "run-device-sync-wake"
+      && metrics.backgroundMaintenanceYielded === true
+      && metrics.postCheckpointRecord == null
+      && input.shouldYieldBackgroundMaintenance?.() === true
+    ) {
+      return await retainHostedSystemMailboxPreparedItemAfterForegroundPreemption({
+        prepared,
+        vaultRoot: input.vaultRoot,
+      });
+    }
     const postCheckpointRecord = metrics.postCheckpointRecord ?? null;
     if (postCheckpointRecord || input.retainProcessedItemUntilRecorded === true) {
       const processedItem: HostedSystemMailboxPendingItem = {
@@ -657,6 +691,8 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
   vaultRoot: string;
 }): Promise<{
+  errorCode?: string | null;
+  errorMessage?: string | null;
   failed: number;
   nextWakeAt: string | null;
   nextWakeReason?: string | null;
@@ -742,10 +778,18 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
       },
       vaultRoot: input.vaultRoot,
     });
+    if (isHostedDeviceSyncDirtyPostCheckpointRecord(input.item.postCheckpointRecord)) {
+      await writeHostedDeviceSyncDirtyAckPersistenceFailureLog({
+        error,
+        runtime: input.runtime,
+      });
+    }
     const nextWakeAt = await resolveHostedSystemMailboxNextWakeAt({
       vaultRoot: input.vaultRoot,
     });
     return {
+      errorCode: normalized.code,
+      errorMessage: normalized.message,
       failed: 1,
       nextWakeAt: nextWakeAt ?? retryAt,
       nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(input.item),
@@ -813,6 +857,23 @@ export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailu
   );
 }
 
+export async function retainHostedSystemMailboxItemUntilDeliveryWake(input: {
+  item: HostedSystemMailboxPendingItem;
+  nextWakeAt: string;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxPendingItem> {
+  const retainedItem: HostedSystemMailboxPendingItem = {
+    ...input.item,
+    nextAttemptAt: input.nextWakeAt,
+    status: "recording",
+  };
+  await updateHostedSystemMailboxPendingItem({
+    item: retainedItem,
+    vaultRoot: input.vaultRoot,
+  });
+  return retainedItem;
+}
+
 function isHostedDeviceSyncDirtyPostCheckpointRecord(
   record: HostedSystemMailboxPostCheckpointRecord,
 ): boolean {
@@ -857,6 +918,7 @@ async function executePendingHostedSystemMailboxItem(input: {
   operatorHomeRoot?: string | null;
   pendingItem: HostedSystemMailboxPendingItem;
   runtime: HostedSystemMailboxRuntime;
+  runtimeLogContext: HostedRuntimeLogContext | null;
   runtimeEnv: Readonly<Record<string, string>>;
   signal: AbortSignal | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
@@ -911,6 +973,7 @@ async function executePendingHostedSystemMailboxItem(input: {
     preferenceAppliedAt: input.pendingItem.lastAttemptAt ?? undefined,
     preferenceCausalSeq: input.pendingItem.preferenceCausalSeq ?? "0",
     runtime: input.runtime,
+    runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
     ...(input.shouldYieldBackgroundMaintenance
@@ -957,6 +1020,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
+    || item.route.action === "run-environment-interview"
     || item.route.action === "run-environment-voice"
     || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"
@@ -1164,6 +1228,9 @@ async function recordHostedDeviceSyncDirtyProcessedRecords(input: {
       .slice(index + 1)
       .map(toHostedDeviceSyncStagedDirtyAck);
     const response = await port.ackDirtyStateProcessed({
+      ...(record.completedImports
+        ? { completedImports: record.completedImports }
+        : {}),
       connectionId: record.connectionId,
       ...(record.processedDirtyPayloadIds
         ? { processedDirtyPayloadIds: record.processedDirtyPayloadIds }
@@ -1248,4 +1315,37 @@ function normalizeHostedSystemMailboxError(error: unknown): {
     code: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
     message: readHostedRuntimeSafeErrorText(error) ?? "Hosted system mailbox effect failed.",
   };
+}
+
+async function writeHostedDeviceSyncDirtyAckPersistenceFailureLog(input: {
+  error: unknown;
+  runtime: HostedSystemMailboxRuntime;
+}): Promise<void> {
+  const diagnostics = buildHostedExecutionSafeErrorDiagnostics(input.error);
+  const diagnosticErrorCode = typeof diagnostics?.errorCode === "string"
+    ? diagnostics.errorCode
+    : null;
+  const diagnosticErrorMessage = typeof diagnostics?.errorMessage === "string"
+    ? diagnostics.errorMessage
+    : null;
+  const errorCode = diagnosticErrorCode ?? deriveHostedExecutionErrorCode(input.error);
+  const safeErrorMessage = sanitizeHostedExecutionStructuredLogText(
+    diagnosticErrorMessage ?? "Hosted device-sync dirty checkpoint ack failed.",
+  ) ?? "Hosted execution runtime failed.";
+
+  await writeHostedRuntimeLogBestEffort({
+    entry: {
+      component: "device-sync",
+      errorCode,
+      eventCode: "device-sync.dirty_ack_persistence_failed",
+      level: "warn",
+      phase: "checkpoint",
+      redactedJson: {
+        errorCode,
+        nextWakeAtPresent: true,
+        safeErrorMessage,
+      },
+    },
+    platform: input.runtime.platform,
+  });
 }

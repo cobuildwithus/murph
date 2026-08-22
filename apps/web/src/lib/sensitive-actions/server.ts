@@ -11,7 +11,6 @@ import {
 } from "@/src/lib/hosted-onboarding/privy-wallet-mfa";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { readHostedPrivyUserById } from "@/src/lib/hosted-onboarding/privy";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "@/src/lib/hosted-onboarding/shared";
 import { resolveHostedPublicOrigin } from "@/src/lib/hosted-web/public-url";
 
 import {
@@ -48,24 +47,16 @@ export async function createSensitiveActionChallenge(input: {
     origin,
   });
 
-  await input.prisma.$transaction(async (tx) => {
-    await tx.hostedSensitiveActionChallenge.deleteMany({
-      where: {
-        approvalKey: null,
-        expiresAt: { lte: now },
-      },
-    });
-    await tx.hostedSensitiveActionChallenge.create({
-      data: {
-        bindingHash: input.bindingHash,
-        createdAt: now,
-        expiresAt,
-        kind: input.kind,
-        memberId: input.memberId,
-        tokenHash: challenge.tokenHash,
-      },
-    });
-  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  await input.prisma.hostedSensitiveActionChallenge.create({
+    data: {
+      bindingHash: input.bindingHash,
+      createdAt: now,
+      expiresAt,
+      kind: input.kind,
+      memberId: input.memberId,
+      tokenHash: challenge.tokenHash,
+    },
+  });
 
   return challenge.response;
 }

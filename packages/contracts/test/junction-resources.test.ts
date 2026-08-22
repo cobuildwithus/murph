@@ -39,23 +39,38 @@ const EXPECTED_DEFAULTS = [
 
 const EXPECTED_NEW_SPARSE_OPT_INS = [
   "body_mass_index",
+  "fat",
+  "lean_body_mass",
+  "waist_circumference",
+];
+
+const EXPECTED_METABOLIC_DEFAULTS = [
+  "carbohydrates",
+  "insulin_injection",
+];
+
+const EXPECTED_WIDE_CHUNK_IN_POLICY_ORDER = [
+  "body_mass_index",
   "carbohydrates",
   "fat",
+  "insulin_injection",
+  "lean_body_mass",
+  "waist_circumference",
+];
+
+const EXPECTED_SPARSE_CLINICAL_DEFAULTS = [
   "forced_expiratory_volume_1",
   "forced_vital_capacity",
   "heart_rate_alert",
   "inhaler_usage",
-  "insulin_injection",
-  "lean_body_mass",
   "peak_expiratory_flow_rate",
   "sleep_apnea_alert",
-  "waist_circumference",
+  "fall",
 ];
 
 const EXPECTED_NEXT_OPT_INS = [
   "calories_basal",
   "daylight_exposure",
-  "fall",
   "floors_climbed",
   "handwashing",
   "stand_duration",
@@ -95,24 +110,45 @@ const EXPECTED_OPT_IN = [
   ...EXPECTED_DENSE_FEATURE_OPT_INS,
 ];
 
+const EXPECTED_ALLOWED_IN_PARENT_ORDER = [
+  ...EXPECTED_DEFAULTS,
+  "body_mass_index",
+  "carbohydrates",
+  "fat",
+  "forced_expiratory_volume_1",
+  "forced_vital_capacity",
+  "heart_rate_alert",
+  "inhaler_usage",
+  "insulin_injection",
+  "lean_body_mass",
+  "peak_expiratory_flow_rate",
+  "sleep_apnea_alert",
+  "waist_circumference",
+  "calories_basal",
+  "daylight_exposure",
+  "fall",
+  ...EXPECTED_NEXT_OPT_INS.slice(2),
+  ...EXPECTED_DENSE_FEATURE_OPT_INS,
+];
+
+const EXPECTED_DEFAULTS_IN_POLICY_ORDER = EXPECTED_ALLOWED_IN_PARENT_ORDER.filter(
+  (resource) => !EXPECTED_OPT_IN.includes(resource),
+);
+
 describe("Junction timeseries resource policy", () => {
   it("derives unique exact known/default/opt-in/allowed projections", () => {
     const names = JUNCTION_TIMESERIES_RESOURCE_POLICIES.map((entry) => entry.resource);
     expect(new Set(names).size).toBe(names.length);
     expect(JUNCTION_KNOWN_TIMESERIES_RESOURCES).toEqual(names);
-    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual(EXPECTED_DEFAULTS);
+    expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toEqual(EXPECTED_DEFAULTS_IN_POLICY_ORDER);
     expect(JUNCTION_OPT_IN_TIMESERIES_RESOURCES).toEqual(EXPECTED_OPT_IN);
-    expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual([
-      ...EXPECTED_DEFAULTS,
-      ...EXPECTED_OPT_IN,
-    ]);
+    expect(JUNCTION_ALLOWED_TIMESERIES_RESOURCES).toEqual(EXPECTED_ALLOWED_IN_PARENT_ORDER);
   });
 
-  it("keeps the new slice off by default and gives it extended bounded history", () => {
-    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual([
-      ...EXPECTED_NEW_SPARSE_OPT_INS,
-      "fall",
-    ]);
+  it("keeps sparse policy explicit and bounded", () => {
+    expect(JUNCTION_WIDE_CHUNK_TIMESERIES_RESOURCES).toEqual(
+      EXPECTED_WIDE_CHUNK_IN_POLICY_ORDER,
+    );
     for (const resource of EXPECTED_NEW_SPARSE_OPT_INS) {
       expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).not.toContain(resource);
       expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
@@ -120,6 +156,28 @@ describe("Junction timeseries resource policy", () => {
         enabledByDefault: false,
         fetchChunkDays: 30,
         historyWindow: "summary_history",
+      });
+    }
+    for (const resource of EXPECTED_SPARSE_CLINICAL_DEFAULTS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toContain(resource);
+      expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: true,
+        fetchChunkDays: 1,
+        historyWindow: "summary_history",
+        maxCanonicalRecordsPerWindow: 100,
+        maxSamplesPerWindow: 128,
+      });
+    }
+    for (const resource of EXPECTED_METABOLIC_DEFAULTS) {
+      expect(JUNCTION_DEFAULT_TIMESERIES_RESOURCES).toContain(resource);
+      expect(JUNCTION_LONG_HISTORY_TIMESERIES_RESOURCES).toContain(resource);
+      expect(resolveJunctionTimeseriesResourcePolicy(resource)).toMatchObject({
+        enabledByDefault: true,
+        fetchChunkDays: 30,
+        historyWindow: "summary_history",
+        maxCanonicalRecordsPerWindow: 3_000,
+        maxSamplesPerWindow: 3_840,
       });
     }
     expect(resolveJunctionTimeseriesResourcePolicy("blood_oxygen")).toMatchObject({
@@ -172,9 +230,11 @@ describe("Junction timeseries resource policy", () => {
       });
     }
     expect(resolveJunctionTimeseriesResourcePolicy("fall")).toMatchObject({
-      enabledByDefault: false,
-      fetchChunkDays: 30,
+      enabledByDefault: true,
+      fetchChunkDays: 1,
       historyWindow: "summary_history",
+      maxCanonicalRecordsPerWindow: 100,
+      maxSamplesPerWindow: 128,
       normalizationMode: "sparse_alert",
     });
     expect(usesJunctionTimeseriesIntervalStartOwnership(

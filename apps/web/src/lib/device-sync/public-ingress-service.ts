@@ -3,6 +3,8 @@ import {
   resolveDeviceSyncWebhookPreflightResponse,
 } from "@murphai/device-syncd/public-ingress";
 import {
+  canonicalizeJunctionProviderSlug,
+  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
   normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
@@ -48,6 +50,7 @@ import {
   acceptHostedCompanionHrvRmssdObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
+  buildHostedJunctionSourceEstablishmentWork,
   captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
@@ -55,8 +58,10 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
+  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
+import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 import {
@@ -101,15 +106,12 @@ export class HostedDeviceSyncPublicIngressService {
       registry: input.registry,
       store: input.store,
       hooks: {
-        // Hosted source lifecycle is admitted under the same consent/app/
-        // connection transaction as receipt, dirty state, and trace completion.
-        onConnectionSourceObserved: ({ eventType, sourceProviderSlug }) =>
-          normalizeJunctionProviderSlug(sourceProviderSlug)
-            === COMPANION_APPLE_HEALTH_SOURCE_PROVIDER
-            && (
-              eventType === "provider.connection.created"
-              || eventType === "provider.connection.updated"
-            )
+        // Provider-authored Junction events can trigger exact-source
+        // verification. Hosted admission still commits only after the provider
+        // confirms access under the consent/app/connection/source fences.
+        onConnectionSourceObserved: ({ account, sourceProviderSlug }) =>
+          account.provider === "junction"
+            && canonicalizeJunctionProviderSlug(sourceProviderSlug) !== null
             ? { sourceAdmissionDeferred: true }
             : undefined,
         onConnectionEstablished: async ({
@@ -129,9 +131,29 @@ export class HostedDeviceSyncPublicIngressService {
             });
           }
 
+          const isGoogleHealthSource =
+            account.provider === "junction"
+            && normalizeJunctionProviderSlug(sourceProviderSlug)
+              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
+          const legacySources = isGoogleHealthSource
+            ? await this.context.store.listConnectionSources(account.id)
+            : [];
+          const buildSourceConnectionWork =
+            provider.connectionHandler?.buildSourceConnectionWork;
+          const connectionWork = isGoogleHealthSource && buildSourceConnectionWork
+            ? buildHostedJunctionSourceEstablishmentWork({
+                buildSourceConnectionWork,
+                connectionWork: connection,
+                hasAuthorizedLegacyFitbitBackfillSource:
+                  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(legacySources),
+                now,
+                sourceProviderSlug,
+              })
+            : connection;
+
           await handleHostedDeviceSyncConnectionEstablished({
             account,
-            connection,
+            connection: connectionWork,
             connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,
@@ -161,18 +183,21 @@ export class HostedDeviceSyncPublicIngressService {
         onWebhookAccepted: async ({
           account,
           claimToken,
+          connectionOwnerId,
+          processingAttemptedAt,
+          sourceAdmissionDeferred,
           traceId,
           webhook,
-          provider,
           now,
         }) => {
-          const ownerId = await this.context.store.getConnectionOwnerId(account.id);
           await handleHostedDeviceSyncWebhookAccepted({
             account,
             claimToken,
             now,
-            ownerId,
+            ownerId: connectionOwnerId,
+            processingAttemptedAt,
             registry: input.registry,
+            sourceAdmissionDeferred,
             store: this.context.store,
             traceId,
             webhook,
@@ -714,6 +739,30 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  async completeGoogleHealthFitbitMigration(
+    userId: string,
+    connectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const registry = await this.resolveRegistryForConnection(userId, connectionId);
+    return completeHostedGoogleHealthFitbitMigration({
+      connectionId,
+      registry,
+      store: this.context.store,
+      userId,
+    });
+  }
+
+  async completeBrowserGoogleHealthFitbitMigration(
+    userId: string,
+    publicConnectionId: string,
+  ): Promise<{ connectionId: string; status: "complete" | "pending" }> {
+    const connection = await this.requireOwnedBrowserConnection(
+      userId,
+      publicConnectionId,
+    );
+    return this.completeGoogleHealthFitbitMigration(userId, connection.id);
+  }
+
   async disconnectAllConnections(userId: string): Promise<{
     attemptedCount: number;
     disconnectedCount: number;
@@ -837,7 +886,7 @@ function buildPreparedSourceLifecycleKey(
   provider: string,
   sourceProviderSlug: string | null,
 ): string | null {
-  const normalizedSourceProviderSlug = normalizeJunctionProviderSlug(sourceProviderSlug);
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(sourceProviderSlug);
   return provider === "junction" && normalizedSourceProviderSlug
     ? `${userId}\u0000${normalizedSourceProviderSlug}`
     : null;

@@ -104,11 +104,11 @@ describe('repeated workout tally guidance', () => {
     )
   })
 
-  it('documents the fail-closed structured workout replacement guard', async () => {
+  it('documents the fail-closed structured workout edit guard', async () => {
     const trackedTable = await readSkill('tracked-table')
 
     expect(trackedTable).toContain(
-      'refuses a structured replacement that omits a saved exercise or set',
+      'refuses a structured replacement that omits, ambiguously matches, or semantically replaces a saved exercise',
     )
     expect(trackedTable).toContain('Use `--clear-workout` only')
     expect(trackedTable).toContain('remove the entire record')

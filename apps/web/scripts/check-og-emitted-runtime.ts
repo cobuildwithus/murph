@@ -24,6 +24,7 @@ import {
   resolveMurphTestTempBaseDirectory,
 } from "../../../config/vitest-temp-lifecycle";
 import { resolveHostedWebDistDir } from "../next-artifacts";
+import { assertUnhashedOgImageRoutes } from "./check-og-route-manifest";
 
 /**
  * Post-build proof that OG images still render from the *emitted* serverless
@@ -89,6 +90,31 @@ const probeRoutes: ProbeRoute[] = [
     expectedWidth: 1200,
     params: {},
     url: "http://localhost/opengraph-image",
+  },
+  // The three cards whose routes once lived inside the (dashboard) route
+  // group, where metadata images get hash-suffixed URLs that 404 the exact
+  // URL pages advertise. Pinning the unhashed emitted entries makes any
+  // return of the suffix fail the build instead of shipping broken previews.
+  {
+    entry: "server/app/connect/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
+    params: {},
+    url: "http://localhost/connect/opengraph-image",
+  },
+  {
+    entry: "server/app/biomarkers/[biomarkerId]/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
+    params: { biomarkerId: "biomarker-probe" },
+    url: "http://localhost/biomarkers/biomarker-probe/opengraph-image",
+  },
+  {
+    entry: "server/app/experiments/[experimentId]/opengraph-image/route.js",
+    expectedHeight: 630,
+    expectedWidth: 1200,
+    params: { experimentId: "experiment-probe" },
+    url: "http://localhost/experiments/experiment-probe/opengraph-image",
   },
   createIMessageCardProbe(),
 ];
@@ -189,6 +215,7 @@ main().catch((error) => {
 `;
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const appDirectory = path.join(appRoot, "app");
 const repoRoot = path.resolve(appRoot, "../..");
 const distDirName = resolveHostedWebDistDir(PHASE_PRODUCTION_BUILD);
 const distDir = path.join(appRoot, distDirName);
@@ -205,6 +232,15 @@ main().catch((error: unknown) => {
 });
 
 async function main(): Promise<void> {
+  const appPathRoutesManifestPath = path.join(distDir, "app-path-routes-manifest.json");
+  if (!existsSync(appPathRoutesManifestPath)) {
+    throw new Error(`Next build output is missing ${appPathRoutesManifestPath}.`);
+  }
+  const appPathRoutesManifest = JSON.parse(
+    await readFile(appPathRoutesManifestPath, "utf8"),
+  ) as Record<string, string>;
+  assertUnhashedOgImageRoutes(appDirectory, appPathRoutesManifest);
+
   const temporaryRoot = await createMarkedTemporaryRoot();
   try {
     for (const route of probeRoutes) {

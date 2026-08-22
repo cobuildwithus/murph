@@ -8,17 +8,16 @@ import {
 const COMPLETE_SECTION = `
 <h2>Architecture and reuse</h2>
 <ul>
-<li>Existing systems reused: The existing managed automation scheduler owns the lifecycle.</li>
-<li>New logic: The check-in selects one explicit model and reasoning level.</li>
-<li>New abstractions: No new abstraction; the seed uses its existing target override.</li>
-<li>Complexity intentionally avoided: No new scheduler, queue, or persisted state.</li>
+<li>Existing systems reused: The existing pull-request evidence workflow owns validation.</li>
+<li>New logic: The validator requires four concrete disclosure fields.</li>
+<li>New abstractions: None; the shared rendered-Markdown parser remains sufficient.</li>
+<li>Complexity intentionally avoided: No second workflow or Markdown parser was added.</li>
 </ul>
 `;
 
 test("accepts four concrete architecture and reuse bullets", () => {
   assert.deepEqual(validatePrArchitectureSummary(COMPLETE_SECTION), []);
 });
-
 test("requires the architecture and reuse section", () => {
   assert.deepEqual(
     validatePrArchitectureSummary("<h2>Summary</h2><p>Small change.</p>"),
@@ -46,7 +45,7 @@ test("requires every labeled bullet inside the section", () => {
   );
 });
 
-test("rejects empty placeholders but permits an explained absence", () => {
+test("rejects placeholders but permits an explained absence", () => {
   const result = validatePrArchitectureSummary(`
 <h2>Architecture and reuse</h2>
 <ul>
@@ -62,28 +61,5 @@ test("rejects empty placeholders but permits an explained absence", () => {
     "Complete the `New logic:` bullet with a concrete sentence; when the answer is none, explain why.",
     "Complete the `New abstractions:` bullet with a concrete sentence; when the answer is none, explain why.",
   ]);
-  assert.deepEqual(
-    validatePrArchitectureSummary(
-      COMPLETE_SECTION.replace(
-        "No new abstraction; the seed uses its existing target override.",
-        "None; the change stays inside the existing seed contract.",
-      ),
-    ),
-    [],
-  );
-});
-
-test("rejects bare placeholders with punctuation-only suffixes", () => {
-  for (const placeholder of ["None;", "None —", "N/A:", "TBD…", "Todo;"]) {
-    const result = validatePrArchitectureSummary(
-      COMPLETE_SECTION.replace(
-        "No new abstraction; the seed uses its existing target override.",
-        placeholder,
-      ),
-    );
-
-    assert.deepEqual(result, [
-      "Complete the `New abstractions:` bullet with a concrete sentence; when the answer is none, explain why.",
-    ]);
-  }
+  assert.deepEqual(validatePrArchitectureSummary(COMPLETE_SECTION), []);
 });

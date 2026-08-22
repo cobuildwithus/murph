@@ -8,12 +8,10 @@ const mocks = vi.hoisted(() => ({
   activateMoment: vi.fn(),
   appendMailbox: vi.fn(),
   hasCustomizationAuthority: vi.fn(),
-  isNearCapCurrent: vi.fn(),
   lockHostedMemberRow: vi.fn(),
   projectTarget: vi.fn(),
   readMailboxItem: vi.fn(),
   readAuthorizationByPurchase: vi.fn(),
-  readCommittedMinor: vi.fn(),
   readMoment: vi.fn(),
   resolveDestination: vi.fn(),
   signalRuntime: vi.fn(),
@@ -69,18 +67,14 @@ vi.mock(
     >();
     return {
       ...actual,
-      isHostedGroupSponsorshipNearCapNotificationCurrentTx:
-        mocks.isNearCapCurrent,
       readHostedGroupSponsorshipAuthorizationByPurchase:
         mocks.readAuthorizationByPurchase,
-      readHostedGroupSponsorshipCommittedMinor: mocks.readCommittedMinor,
     };
   },
 );
 
 import {
   materializeHostedGroupSponsorshipIfApplicable,
-  materializeHostedGroupSponsorshipNearCapNotification,
   materializeHostedGroupSponsorshipRecoveryNotification,
 } from "@/src/lib/hosted-groups/group-sponsorship-notification";
 
@@ -125,11 +119,9 @@ beforeEach(() => {
     item: { id: "mailbox_item" },
   });
   mocks.hasCustomizationAuthority.mockResolvedValue(true);
-  mocks.isNearCapCurrent.mockResolvedValue(true);
   mocks.lockHostedMemberRow.mockResolvedValue(undefined);
   mocks.projectTarget.mockReturnValue({ kind: "group" });
   mocks.readAuthorizationByPurchase.mockResolvedValue(null);
-  mocks.readCommittedMinor.mockResolvedValue(0);
   mocks.readMailboxItem.mockResolvedValue(null);
   mocks.readMoment.mockResolvedValue({
     celebrationScale: "medium",
@@ -431,7 +423,7 @@ describe("group sponsorship notification", () => {
     expect(mocks.appendMailbox).not.toHaveBeenCalled();
   });
 
-  it("keeps automatic refill fulfillment silent in the group", async () => {
+  it("keeps automatic refill fulfillment silent", async () => {
     const prisma = createPrismaHarness({
       chargeOrdinal: 1,
       hasMoment: false,
@@ -446,120 +438,7 @@ describe("group sponsorship notification", () => {
 
     expect(mocks.activateMoment).not.toHaveBeenCalled();
     expect(mocks.appendMailbox).not.toHaveBeenCalled();
-  });
-
-  it("sends one period-scoped near-cap notice only to the payer", async () => {
-    const prisma = createPrismaHarness({
-      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
-    });
-    mocks.readAuthorizationByPurchase.mockResolvedValue({
-      authorizationId: "hgsa_abcdefghijklmnop",
-      chargeOrdinal: 1,
-      monthlyCapMinor: 1_000,
-      payerMemberId: "member_sponsor",
-      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
-    });
-    mocks.readCommittedMinor.mockResolvedValue(500);
-    mocks.resolveDestination.mockResolvedValueOnce(DIRECT_DESTINATION);
-
-    await expect(materializeHostedGroupSponsorshipNearCapNotification({
-      now: new Date("2026-07-27T12:05:00.000Z"),
-      prisma: prisma as never,
-      purchaseId: "purchase_private_123",
-    })).resolves.toBe(true);
-
-    const envelope = mocks.appendMailbox.mock.calls[0]?.[0]?.envelope;
-    expect(envelope).toMatchObject({
-      kind: "assistant.notification.requested",
-      userId: "member_sponsor",
-      notification: {
-        deliveryDedupeToken: expect.stringMatching(
-          /^group-sponsorship-private:v1:[a-f0-9]{40}$/u,
-        ),
-        externalThreadRouteAuthority: null,
-        route: DIRECT_DESTINATION.route,
-      },
-    });
-    expect(envelope.notification.instructions).toContain(
-      "One more $5 usage-credit refill",
-    );
-    expect(envelope.notification.instructions).toContain("$10 monthly maximum");
-    expect(envelope.notification.instructions).toContain("sponsor only");
-    expect(JSON.stringify(envelope)).not.toContain("member_group_runtime");
-  });
-
-  it("uses a fresh near-cap notice identity after the payer raises the cap", async () => {
-    const prisma = createPrismaHarness({
-      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
-    });
-    mocks.resolveDestination.mockResolvedValue(DIRECT_DESTINATION);
-    mocks.readAuthorizationByPurchase
-      .mockResolvedValueOnce({
-        authorizationId: "hgsa_abcdefghijklmnop",
-        chargeOrdinal: 1,
-        monthlyCapMinor: 1_000,
-        payerMemberId: "member_sponsor",
-        periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
-      })
-      .mockResolvedValueOnce({
-        authorizationId: "hgsa_abcdefghijklmnop",
-        chargeOrdinal: 3,
-        monthlyCapMinor: 2_000,
-        payerMemberId: "member_sponsor",
-        periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
-      });
-
-    await materializeHostedGroupSponsorshipNearCapNotification({
-      prisma: prisma as never,
-      purchaseId: "purchase_cap_10",
-    });
-    await materializeHostedGroupSponsorshipNearCapNotification({
-      prisma: prisma as never,
-      purchaseId: "purchase_cap_20",
-    });
-
-    const keys = new Set(mocks.readMailboxItem.mock.calls.map(
-      ([input]) => input.dedupeKey,
-    ));
-    expect(keys.size).toBe(2);
-    for (const key of keys) {
-      expect(key).toMatch(/^assistant\.notification\.requested:/u);
-    }
-  });
-
-  it.each([
-    "a canceled authorization",
-    "a delayed prior-period fulfillment",
-  ])("drops a near-cap notice after locked revalidation finds %s", async () => {
-    const prisma = createPrismaHarness({
-      authorizationStatus: HostedGroupSponsorshipAuthorizationStatus.active,
-    });
-    mocks.readAuthorizationByPurchase.mockResolvedValue({
-      authorizationId: "hgsa_abcdefghijklmnop",
-      chargeOrdinal: 1,
-      monthlyCapMinor: 1_000,
-      payerMemberId: "member_sponsor",
-      periodStartedAt: new Date("2026-07-27T12:00:00.000Z"),
-    });
-    mocks.resolveDestination.mockResolvedValueOnce(DIRECT_DESTINATION);
-    mocks.isNearCapCurrent.mockResolvedValueOnce(false);
-
-    await expect(materializeHostedGroupSponsorshipNearCapNotification({
-      now: new Date("2026-08-27T12:05:00.000Z"),
-      prisma: prisma as never,
-      purchaseId: "purchase_private_123",
-    })).resolves.toBe(false);
-
-    expect(mocks.isNearCapCurrent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authorizationId: "hgsa_abcdefghijklmnop",
-        beneficiaryMemberId: "member_group_runtime",
-        payerMemberId: "member_sponsor",
-        purchaseId: "purchase_private_123",
-        tx: prisma,
-      }),
-    );
-    expect(mocks.appendMailbox).not.toHaveBeenCalled();
+    expect(mocks.resolveDestination).not.toHaveBeenCalled();
   });
 
   it("sends payment recovery privately and never to a thread container", async () => {

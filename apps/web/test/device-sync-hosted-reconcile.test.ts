@@ -77,7 +77,9 @@ describe("hosted device-sync reconcile", () => {
 
     const result = await requestHostedDeviceSyncReconcile({
       request: new Request("https://control.example.test/api/internal/device-sync/reconcile", {
-        body: JSON.stringify({ connectionId: "dsc_123" }),
+        body: JSON.stringify({
+          connectionId: "dsc_123",
+        }),
         method: "POST",
       }),
       trustedUserId: "member_123",

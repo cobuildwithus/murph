@@ -53,3 +53,34 @@ test('listFilterSchema surfaces query family loading failures', async () => {
     message: /query families unavailable/u,
   })
 })
+
+test('workout result contracts retain exercise-owned live tracking facts', async () => {
+  vi.resetModules()
+  const { workoutAddResultSchema } = await import('../src/vault-cli-contracts.ts')
+  const parsed = workoutAddResultSchema.parse({
+    activityType: 'strength-training',
+    created: true,
+    distanceKm: null,
+    durationMinutes: 30,
+    eventId: 'evt_workout',
+    kind: 'activity_session',
+    ledgerFile: 'events.ndjson',
+    lookupId: 'evt_workout',
+    note: 'Eight set workout',
+    occurredAt: '2026-08-13T14:00:00.000Z',
+    title: 'Eight set workout',
+    vault: './vault',
+    workout: {
+      exercises: [{
+        memberRepsPerSet: 9,
+        name: 'Seated cable curl',
+        order: 1,
+        setPlanIsFinite: true,
+        sets: [{ order: 1 }],
+      }],
+    },
+  })
+
+  assert.equal(parsed.workout?.exercises[0]?.memberRepsPerSet, 9)
+  assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
+})

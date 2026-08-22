@@ -1490,45 +1490,65 @@ describe('assistant channels runtime seam', () => {
     expect(fetchImplementation).toHaveBeenCalledTimes(1)
   })
 
-  it('projects a frozen Telegram response card into the rich-message path', async () => {
-    const sendTelegramRich = vi.fn().mockResolvedValue({
-      providerMessageId: 'rich-card-1',
-      target: '123',
-    })
-    const sendTelegram = vi.fn()
+  it.each([
+    [
+      'direct rich content',
+      true,
+      TELEGRAM_RICH_CONTENT_CARD,
+      TELEGRAM_RICH_CONTENT_CARD_TEXT,
+    ],
+    [
+      'group rich content',
+      false,
+      TELEGRAM_RICH_CONTENT_CARD,
+      TELEGRAM_RICH_CONTENT_CARD_TEXT,
+    ],
+    ['group exercise routine', false, ROUTINE_CARD, ROUTINE_CARD_TEXT],
+  ] as const)(
+    'projects a frozen %s card into the Telegram rich-message path',
+    async (_label, threadIsDirect, card, message) => {
+      const sendTelegramRich = vi.fn().mockResolvedValue({
+        providerMessageId: 'rich-card-1',
+        target: '123',
+      })
+      const sendTelegram = vi.fn()
 
-    await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
-      actorId: null,
-      bindingDelivery: createAssistantBindingDelivery('thread', '123'),
-      card: TELEGRAM_RICH_CONTENT_CARD,
-      explicitTarget: null,
-      idempotencyKey: 'rich-card-idempotency',
-      identityId: null,
-      media: [],
-      message: TELEGRAM_RICH_CONTENT_CARD_TEXT,
-      replyToMessageId: '42',
-      threadIsDirect: true,
-    }, {
-      sendTelegram,
-      sendTelegramRich,
-    })).resolves.toMatchObject({
-      channel: 'telegram',
-      providerMessageId: 'rich-card-1',
-      target: '123',
-    })
+      await expect(ASSISTANT_CHANNEL_ADAPTERS.telegram.send({
+        actorId: null,
+        bindingDelivery: createAssistantBindingDelivery('thread', '123'),
+        card,
+        explicitTarget: null,
+        idempotencyKey: 'rich-card-idempotency',
+        identityId: null,
+        media: [],
+        message,
+        replyToMessageId: '42',
+        threadIsDirect,
+      }, {
+        sendTelegram,
+        sendTelegramRich,
+      })).resolves.toMatchObject({
+        channel: 'telegram',
+        providerMessageId: 'rich-card-1',
+        target: '123',
+      })
 
-    expect(sendTelegramRich).toHaveBeenCalledWith(expect.objectContaining({
-      fallbackMessage: TELEGRAM_RICH_CONTENT_CARD_TEXT,
-      idempotencyKey: 'rich-card-idempotency',
-      replyToMessageId: '42',
-      richMessage: expect.objectContaining({
-        html: TELEGRAM_RICH_CONTENT_CARD.html,
-        skip_entity_detection: true,
-      }),
-      target: '123',
-    }))
-    expect(sendTelegram).not.toHaveBeenCalled()
-  })
+      const richMessage = card.kind === 'telegram_rich_content'
+        ? expect.objectContaining({
+            html: card.html,
+            skip_entity_detection: true,
+          })
+        : expect.objectContaining({ html: expect.any(String) })
+      expect(sendTelegramRich).toHaveBeenCalledWith(expect.objectContaining({
+        fallbackMessage: message,
+        idempotencyKey: 'rich-card-idempotency',
+        replyToMessageId: '42',
+        richMessage,
+        target: '123',
+      }))
+      expect(sendTelegram).not.toHaveBeenCalled()
+    },
+  )
 
   it('projects every exercise in an expanded workout through Telegram rich messages', async () => {
     const sendTelegramRich = vi.fn().mockResolvedValue({
@@ -2065,6 +2085,7 @@ describe('assistant channels runtime seam', () => {
   })
 
   it('rejects Telegram sends without runtime support or with invalid targets', async () => {
+    const missingTokenFetch = vi.fn<typeof fetch>()
     await expect(
       sendTelegramMessage(
         {
@@ -2073,12 +2094,13 @@ describe('assistant channels runtime seam', () => {
         },
         {
           env: {},
-          fetchImplementation: createQueuedFetch([]),
+          fetchImplementation: missingTokenFetch,
         },
       ),
     ).rejects.toMatchObject({
       code: 'ASSISTANT_TELEGRAM_TOKEN_REQUIRED',
     })
+    expect(missingTokenFetch).not.toHaveBeenCalled()
 
     vi.stubGlobal('fetch', undefined)
     await expect(

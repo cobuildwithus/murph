@@ -44,6 +44,7 @@ import {
   filterHostedNonGroupUsageCreditOfferCodes,
   getHostedUsageCreditOfferDefinition,
   hostedUsageCreditPolicySupportsSavedCardTarget,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
   parseHostedUsageCreditCheckoutRequestPolicyVersion,
   parseHostedGroupSponsorshipOfferCode,
@@ -1095,6 +1096,10 @@ async function hostedGroupSponsorshipCheckoutSelectionMatchesTx(input: {
 }
 
 export async function continueHostedUsageCreditCheckout(input: {
+  groupSponsorshipRecovery?: {
+    authorizationId: string;
+    purchaseId: string;
+  };
   now: Date;
   prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
@@ -1116,10 +1121,15 @@ export async function continueHostedUsageCreditCheckout(input: {
   if (!policyVersion) {
     throw buildHostedUsageCreditInvariantError("checkout_policy_mismatch");
   }
-  const canRetryCheckoutCreate = canRetryHostedUsageCreditCheckoutCreate({
-    now: input.now,
-    purchase,
-  });
+  const canRetryCheckoutCreate =
+    canRetryHostedUsageCreditCheckoutCreate({
+      now: input.now,
+      purchase,
+    }) || canCreateExplicitGroupSponsorshipRecoveryCheckout({
+      authority: input.groupSponsorshipRecovery,
+      now: input.now,
+      purchase,
+    });
   const canStartSavedCardPayment =
     canRetryCheckoutCreate &&
     hostedUsageCreditPolicySupportsSavedCardTarget({
@@ -1162,7 +1172,10 @@ export async function continueHostedUsageCreditCheckout(input: {
   const billingAuthority =
     canStartSavedCardPayment &&
       !purchase.stripePaymentIntentLookupKey &&
-      policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      (
+        policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 ||
+        policyVersion === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      )
       ? await resolveHostedUsageCreditSavedCardBillingAuthority({
           payerMemberId: requireHostedUsageCreditPurchasePayerMemberId(purchase),
           prisma: input.prisma,
@@ -1215,10 +1228,16 @@ export async function continueHostedUsageCreditCheckout(input: {
     });
     if (
       checkoutPurchase.status !== HostedUsageCreditPurchaseStatus.created ||
-      !canRetryHostedUsageCreditCheckoutCreate({
-        now: input.now,
-        purchase: checkoutPurchase,
-      })
+      !(
+        canRetryHostedUsageCreditCheckoutCreate({
+          now: input.now,
+          purchase: checkoutPurchase,
+        }) || canCreateExplicitGroupSponsorshipRecoveryCheckout({
+          authority: input.groupSponsorshipRecovery,
+          now: input.now,
+          purchase: checkoutPurchase,
+        })
+      )
     ) {
       const projection = await projectHostedUsageCreditCheckoutForCurrentTarget({
         now: input.now,
@@ -1332,6 +1351,10 @@ export async function recoverHostedGroupSponsorshipUsageCreditCheckout(input: {
   }
   try {
     return await continueHostedUsageCreditCheckout({
+      groupSponsorshipRecovery: {
+        authorizationId: input.authorizationId,
+        purchaseId: prepared.purchase.id,
+      },
       now,
       prisma,
       purchase: prepared.purchase,
@@ -1340,6 +1363,27 @@ export async function recoverHostedGroupSponsorshipUsageCreditCheckout(input: {
     reportHostedUsageCreditCheckoutActionFailure(error, prepared.purchase);
     throw error;
   }
+}
+
+function canCreateExplicitGroupSponsorshipRecoveryCheckout(input: {
+  authority:
+    | { authorizationId: string; purchaseId: string }
+    | undefined;
+  now: Date;
+  purchase: HostedUsageCreditPurchase;
+}): boolean {
+  return Boolean(
+    input.authority &&
+    input.authority.purchaseId === input.purchase.id &&
+    input.authority.authorizationId ===
+      input.purchase.groupSponsorshipAuthorizationId &&
+    input.purchase.groupSponsorshipChargeOrdinal !== null &&
+    input.purchase.groupSponsorshipChargeOrdinal > 0 &&
+    input.purchase.status === HostedUsageCreditPurchaseStatus.created &&
+    !input.purchase.stripeCheckoutSessionLookupKey &&
+    !input.purchase.stripePaymentIntentLookupKey &&
+    input.now.getTime() < input.purchase.checkoutExpiresAt.getTime(),
+  );
 }
 
 export function buildHostedGroupSponsorshipPaymentAuthority(input: {

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PrismaDeviceSyncControlPlaneStore } from "@/src/lib/device-sync/prisma-store";
 
@@ -39,5 +39,32 @@ describe("PrismaDeviceSyncControlPlaneStore connection mutation locks", () => {
         values: ["dsc_123"],
       },
     ]);
+  });
+
+  it("advances the parent version at the exact source-start boundary", async () => {
+    const update = vi.fn(async () => ({ id: "dsc_123" }));
+    const store = new PrismaDeviceSyncControlPlaneStore({
+      prisma: {} as never,
+      codec: {
+        keyVersion: "v1",
+        encrypt: (value: string) => value,
+        decrypt: (value: string) => value,
+      },
+    });
+    const tx = {
+      deviceConnection: { update },
+    };
+
+    await store.advanceConnectionSourceStartBoundary({
+      connectionId: "dsc_123",
+      updatedAt: "2026-03-26T12:00:00.001Z",
+      tx: tx as never,
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "dsc_123" },
+      data: { updatedAt: new Date("2026-03-26T12:00:00.001Z") },
+      select: { id: true },
+    });
   });
 });

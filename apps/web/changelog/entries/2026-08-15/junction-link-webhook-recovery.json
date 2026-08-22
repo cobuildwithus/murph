@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-15",
+  "order": 200,
+  "item": {
+    "id": "junction-link-webhook-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Connected health setup can recover",
+    "summary": "A connected health source can now continue syncing when its provider connection succeeds but the browser return does not reach Murph.",
+    "details": "Murph waits for a signed source update and verifies that exact source with the provider before normal sync work continues. Existing consent and disconnect safeguards still apply.",
+    "relevanceTags": ["connected-health", "wearables", "connections", "reliability"],
+    "sourcePullRequests": [1902]
+  }
+}

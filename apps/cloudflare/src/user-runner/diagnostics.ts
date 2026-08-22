@@ -27,7 +27,10 @@ export type RuntimeProcessingRetryReason =
 
 export type RuntimeProcessingStartFailureRetryReason = Extract<
   RuntimeProcessingRetryReason,
-  "container_rpc_error" | "container_rpc_timeout" | "missing_container_binding"
+  | "command_budget_exhausted"
+  | "container_rpc_error"
+  | "container_rpc_timeout"
+  | "missing_container_binding"
 >;
 
 export function buildRunnerRecordTimingLogDetails(

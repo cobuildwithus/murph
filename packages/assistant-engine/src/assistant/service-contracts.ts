@@ -174,6 +174,8 @@ export interface AssistantMessageInput extends AssistantSessionResolutionFields 
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   operatorAuthority?: AssistantOperatorAuthority
   outboxAutomationAuthority?: AssistantOutboxIntent['automationAuthority']
+  outboxAutomationContextReferences?: AssistantOutboxIntent['automationContextReferences']
+  outboxPlannedOccurrenceAt?: string | null
   outboxExternalThreadRouteAuthority?: AssistantOutboxIntent['externalThreadRouteAuthority']
   persistUserPromptOnFailure?: boolean
   /** Engine-resolved once for this turn so every prompt layer shares one time authority. */

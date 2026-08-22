@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 
 import type {
   ContractSchema,
@@ -23,7 +24,9 @@ import type {
   IntegrationIngestRecord,
 } from "@murphai/contracts";
 import {
+  auditRecordSchema,
   assertContractId,
+  collectEventRawReferencePaths,
   compareIsoTimestampsAscending,
   deviceDataOriginSchema,
   experimentFrontmatterSchema,
@@ -32,6 +35,7 @@ import {
   eventRecordSchema,
   eventImportDecisionSchema,
   isWritableIsoDateTime,
+  resolveFloatingIsoTimestampInTimeZone,
   safeParseContract,
   sampleRecordSchema,
 } from "@murphai/contracts";
@@ -91,12 +95,25 @@ import {
 import {
   normalizeMealNutrition,
 } from "./nutrition.ts";
-import { stageRawImportManifest } from "./operations/raw-manifests.ts";
-import { runCanonicalWrite, type WriteBatch } from "./operations/write-batch.ts";
+import {
+  parseRawImportManifest,
+  resolveRawManifestPath,
+  stageRawImportManifest,
+} from "./operations/raw-manifests.ts";
+import {
+  runCanonicalWrite,
+  type CommittedPayloadReceipt,
+  type WriteBatch,
+} from "./operations/write-batch.ts";
 import { assertCanonicalWriteLockScope } from "./operations/canonical-write-lock.ts";
 import { resolveVaultPath } from "./path-safety.ts";
 import { sanitizePathSegment } from "./path-safety.ts";
-import { prepareInlineRawArtifact, prepareRawArtifact, resolveRawAssetDirectory } from "./raw.ts";
+import {
+  prepareInlineRawArtifact,
+  prepareRawArtifact,
+  rawDirectoryMatchesOwner,
+  resolveRawAssetDirectory,
+} from "./raw.ts";
 import {
   buildIntegrationEvidencePart,
   buildIntegrationIngestAppendPlan,
@@ -117,6 +134,7 @@ import {
   toLocalDayKey,
 } from "./time.ts";
 import { loadVault } from "./vault.ts";
+import { statAndHashVaultFile } from "./raw-artifact-integrity.ts";
 
 import type { PreparedEventAttachment } from "./event-attachments.ts";
 import type { RawArtifact } from "./raw.ts";
@@ -127,6 +145,7 @@ type LooseRecord = Record<string, unknown>;
 
 const DENSE_DEVICE_TELEMETRY_NOT_ALLOWED_CODE = "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED";
 const DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE = "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED";
+const MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS = 64;
 
 const RESERVED_DEVICE_EVENT_FIELD_NAMES = new Set([
   "schemaVersion",
@@ -189,14 +208,16 @@ interface ImportDocumentInput {
   title?: string;
   note?: string;
   source?: string;
+  reuseExact?: boolean;
 }
 
 interface ImportDocumentResult {
+  created: boolean;
   documentId: string;
   raw: RawArtifact;
   event: DocumentEventRecord;
   eventPath: string;
-  auditPath: string;
+  auditPath: string | null;
   manifestPath: string;
 }
 
@@ -310,6 +331,15 @@ interface DeviceSampleInput extends LooseRecord {
   sample?: unknown;
 }
 
+interface DeviceAuthoritativeEventSetInput extends LooseRecord {
+  system?: unknown;
+  resourceType?: unknown;
+  resourceId?: unknown;
+  version?: unknown;
+  facetPrefixes?: unknown;
+  currentFacets?: unknown;
+}
+
 interface ImportDeviceBatchInput {
   vaultRoot: string;
   provider: string;
@@ -319,6 +349,7 @@ interface ImportDeviceBatchInput {
   events?: readonly DeviceEventInput[];
   samples?: readonly DeviceSampleInput[];
   evidenceParts?: readonly DeviceEvidencePartInput[];
+  authoritativeEventSets?: readonly DeviceAuthoritativeEventSetInput[];
   ingestReceipt?: Record<string, unknown>;
   provenance?: Record<string, unknown>;
 }
@@ -395,6 +426,16 @@ interface NormalizedDeviceBatchInputs {
   events: NormalizedDeviceEvent[];
   samples: NormalizedDeviceSample[];
   evidenceParts: NormalizedDeviceEvidencePart[];
+  authoritativeEventSets: NormalizedDeviceAuthoritativeEventSet[];
+}
+
+interface NormalizedDeviceAuthoritativeEventSet {
+  system: string;
+  resourceType: string;
+  resourceId: string;
+  version: string;
+  facetPrefixes: readonly string[];
+  currentFacets: ReadonlySet<string>;
 }
 
 interface PreparedJsonlEntry<RecordType extends { id: string }> {
@@ -428,9 +469,13 @@ interface DeviceBatchPlan {
   evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
   preparedSamples: PreparedJsonlEntry<SampleRecord>[];
   preparedEvidenceParts: IntegrationEvidencePart[];
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[];
 }
 
 const MAX_DEVICE_PROVIDER_SAMPLE_ROWS_DEFAULT = 1_000;
+// Junction menstrual resources admit 512 dated non-BBT facts plus the
+// period-length and cycle-length scalar facets for the same resource version.
+const MAX_DEVICE_AUTHORITATIVE_CURRENT_FACETS = 514;
 
 interface BuildEventRecordInput<K extends EventKind> {
   kind: K;
@@ -1297,7 +1342,8 @@ function normalizeDeviceEventInputs(
       inputDayKey &&
         !inputTimeZone &&
         (
-          isJunctionSleepStageExternalRefInput(eventInput.externalRef)
+          context.provider === "junction"
+          || isJunctionSleepStageExternalRefInput(eventInput.externalRef)
           || isDateOnlyFloatingProviderDayInput(inputDayKey, eventInput.dataOrigin)
         ),
     );
@@ -1491,6 +1537,104 @@ function normalizeDeviceBatchObjectArray<T extends LooseRecord>(input: {
   );
 }
 
+function normalizeDeviceAuthoritativeEventSets(
+  inputs: readonly DeviceAuthoritativeEventSetInput[],
+  events: readonly NormalizedDeviceEvent[],
+): NormalizedDeviceAuthoritativeEventSet[] {
+  if (inputs.length > 128) {
+    throw new VaultError(
+      "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SETS",
+      "Device batch authoritativeEventSets exceeds 128 resources.",
+    );
+  }
+
+  const sets = inputs.map((input, index): NormalizedDeviceAuthoritativeEventSet => {
+    const parsedRef = safeParseContract(externalRefSchema, {
+      system: input.system,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      version: input.version,
+    });
+    if (!parsedRef.success || !parsedRef.data.version || !isWritableIsoDateTime(parsedRef.data.version)) {
+      throw new VaultError(
+        "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+        `Device authoritative event set ${index + 1} requires a valid versioned externalRef identity.`,
+      );
+    }
+    const facetPrefixes = normalizeUniqueTextList(
+      input.facetPrefixes,
+      `authoritativeEventSets[${index}].facetPrefixes`,
+      32,
+      200,
+    );
+    const currentFacets = normalizeUniqueTextList(
+      input.currentFacets,
+      `authoritativeEventSets[${index}].currentFacets`,
+      MAX_DEVICE_AUTHORITATIVE_CURRENT_FACETS,
+      200,
+    ) ?? [];
+    if (!facetPrefixes || facetPrefixes.length === 0) {
+      throw new VaultError(
+        "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+        `Device authoritative event set ${index + 1} requires at least one facet prefix.`,
+      );
+    }
+    const ownsFacet = (facet: string): boolean => facetPrefixes.some((prefix) =>
+      facet === prefix || facet.startsWith(`${prefix}-`)
+    );
+    if (currentFacets.some((facet) => !ownsFacet(facet))) {
+      throw new VaultError(
+        "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+        `Device authoritative event set ${index + 1} contains a current facet outside its owned prefixes.`,
+      );
+    }
+
+    return {
+      system: parsedRef.data.system,
+      resourceType: parsedRef.data.resourceType,
+      resourceId: parsedRef.data.resourceId,
+      version: parsedRef.data.version,
+      facetPrefixes: [...facetPrefixes].sort(),
+      currentFacets: new Set(currentFacets),
+    };
+  });
+  const identityKeys = sets.map((set) => stableStringify({
+    system: set.system,
+    resourceType: set.resourceType,
+    resourceId: set.resourceId,
+  }));
+  if (new Set(identityKeys).size !== identityKeys.length) {
+    throw new VaultError(
+      "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SETS",
+      "Device batch authoritativeEventSets contains duplicate resource identities.",
+    );
+  }
+
+  for (const set of sets) {
+    for (const facet of set.currentFacets) {
+      // Unversioned members follow complete-set reconciliation: the set's
+      // version orders only retraction tombstones, while member events collapse
+      // by semantic content and reassert through the serialized set seam.
+      const hasCurrentEvent = events.some(({ seed }) =>
+        seed.externalRef?.system === set.system
+        && seed.externalRef.resourceType === set.resourceType
+        && seed.externalRef.resourceId === set.resourceId
+        && (seed.externalRef.version === set.version
+          || seed.externalRef.version === undefined)
+        && seed.externalRef.facet === facet
+      );
+      if (!hasCurrentEvent) {
+        throw new VaultError(
+          "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+          `Device authoritative event set current facet "${facet}" has no matching current event.`,
+        );
+      }
+    }
+  }
+
+  return sets;
+}
+
 function normalizeDeviceBatchInputs({
   provider,
   accountId,
@@ -1500,6 +1644,7 @@ function normalizeDeviceBatchInputs({
   events = [],
   samples = [],
   evidenceParts = [],
+  authoritativeEventSets = [],
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -1542,6 +1687,13 @@ function normalizeDeviceBatchInputs({
     itemCode: "VAULT_INVALID_RAW_ARTIFACT",
     itemLabel: "Device raw artifact",
   });
+  const authoritativeEventSetInputs = normalizeDeviceBatchObjectArray<DeviceAuthoritativeEventSetInput>({
+    value: authoritativeEventSets,
+    code: "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SETS",
+    message: "Device batch authoritativeEventSets must be an array when provided.",
+    itemCode: "VAULT_INVALID_DEVICE_AUTHORITATIVE_EVENT_SET",
+    itemLabel: "Device authoritative event set",
+  });
 
   if (
     eventInputs.length === 0
@@ -1555,6 +1707,14 @@ function normalizeDeviceBatchInputs({
     );
   }
 
+  const normalizedEvents = normalizeDeviceEventInputs(eventInputs, {
+    provider: normalizedProvider,
+    accountId: normalizedAccountId,
+    importedAt: normalizedImportedAt,
+    source: normalizedSource,
+    defaultTimeZone,
+  });
+
   return {
     provider: normalizedProvider,
     accountId: normalizedAccountId,
@@ -1564,13 +1724,7 @@ function normalizeDeviceBatchInputs({
     provenance: normalizedProvenance,
     ingestReceipt: normalizedIngestReceipt,
     legacyIngestReceipt,
-    events: normalizeDeviceEventInputs(eventInputs, {
-      provider: normalizedProvider,
-      accountId: normalizedAccountId,
-      importedAt: normalizedImportedAt,
-      source: normalizedSource,
-      defaultTimeZone,
-    }),
+    events: normalizedEvents,
     samples: normalizeDeviceSampleInputs(sampleInputs, {
       provider: normalizedProvider,
       accountId: normalizedAccountId,
@@ -1578,6 +1732,10 @@ function normalizeDeviceBatchInputs({
       defaultTimeZone,
     }),
     evidenceParts: normalizeDeviceEvidencePartInputs(evidencePartInputs, normalizedProvider),
+    authoritativeEventSets: normalizeDeviceAuthoritativeEventSets(
+      authoritativeEventSetInputs,
+      normalizedEvents,
+    ),
   };
 }
 
@@ -1653,6 +1811,7 @@ interface EventExternalRefReconciliation {
   retainedPreparedIds: ReadonlySet<string>;
   skippedDuplicateCount: number;
   supersededCount: number;
+  retractedCount: number;
 }
 
 // externalRef.version is intentionally NOT part of the reconcile identity:
@@ -1795,8 +1954,12 @@ function junctionSparseAffectedDayKeys(
 
 // Device-sync content equality ignores per-import identity (id, lifecycle,
 // recordedAt) AND rawRefs, because device imports mint fresh raw-artifact
-// paths on every sync run.
-function deviceEventContentKey(record: EventRecord): string {
+// paths on every sync run. Member-edit comparison additionally excludes the
+// immutable provider attribution fields while retaining every public edit.
+function eventContentKey(
+  record: EventRecord,
+  options: { includeProviderAttribution: boolean },
+): string {
   const {
     id: _id,
     rawRefs: _rawRefs,
@@ -1804,7 +1967,53 @@ function deviceEventContentKey(record: EventRecord): string {
     recordedAt: _recordedAt,
     ...content
   } = record;
-  return stableStringify(content);
+  if (options.includeProviderAttribution) {
+    return stableStringify(content);
+  }
+
+  const {
+    dataOrigin: _dataOrigin,
+    externalRef: _externalRef,
+    ...memberMutableContent
+  } = content;
+  return stableStringify(memberMutableContent);
+}
+
+function deviceEventContentKey(record: EventRecord): string {
+  const {
+    id: _id,
+    rawRefs: _rawRefs,
+    lifecycle: _lifecycle,
+    recordedAt: _recordedAt,
+    externalRef,
+    dataOrigin,
+    ...semanticContent
+  } = record;
+  return stableStringify({
+    ...semanticContent,
+    // Identity and source ordering are enforced independently. Keeping them
+    // out of semantic equality prevents a newer provider capture/version from
+    // masquerading as a health-data change over a member-authored revision.
+    externalRef: externalRef
+      ? {
+          system: externalRef.system,
+          resourceType: externalRef.resourceType,
+          resourceId: externalRef.resourceId,
+          facet: externalRef.facet ?? null,
+        }
+      : null,
+    dataOrigin: dataOrigin
+      ? {
+          // This is the fixed data-origin schema discriminator, not the
+          // provider resource version used for ordering.
+          version: dataOrigin.version,
+          aggregatorProvider: dataOrigin.aggregatorProvider ?? null,
+          sourceProviderSlug: dataOrigin.sourceProviderSlug ?? null,
+          sourceType: dataOrigin.sourceType ?? null,
+          sourceInstanceId: dataOrigin.sourceInstanceId ?? null,
+        }
+      : null,
+  });
 }
 
 function deviceEventContentFingerprint(record: EventRecord): string {
@@ -1952,6 +2161,10 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  aliasRepairContaminatedEventIds: Set<string>;
+  aliasRepairContaminatedRefKeys: Set<string>;
+  aliasRepairHistoryById: Map<string, EventSpineEntry<EventRecord>[]>;
+  liveOwnerIdsByRefKey: Map<string, Set<string>>;
   junctionSparseDayHistoryById: Map<string, {
     latest: { dayKey: string; revision: number };
     previous?: { dayKey: string; revision: number };
@@ -1959,6 +2172,10 @@ interface EventExternalRefIndex {
   deviceOwnerRevisionsByRefKeyAndFingerprint: Map<
     string,
     Map<string, Map<string, Set<number>>>
+  >;
+  junctionNoIdProfilePredecessorsByScope: Map<
+    string,
+    IndexedEventExternalRefMatch[]
   >;
   latestByRefKey: Map<string, IndexedEventExternalRefMatch>;
   latestById: Map<string, EventRecord>;
@@ -1984,12 +2201,15 @@ async function indexLatestEventsByExternalRef(
   relativePaths: readonly string[],
   signal?: AbortSignal | null,
 ): Promise<EventExternalRefIndex> {
+  const aliasRepairContaminatedEventIds = new Set<string>();
+  const aliasRepairContaminatedRefKeys = new Set<string>();
   const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
     string,
     Map<string, Map<string, Set<number>>>
   >();
   const junctionSparseDayHistoryById: EventExternalRefIndex["junctionSparseDayHistoryById"] =
     new Map();
+  const liveOwnerIdsByRefKey = new Map<string, Set<string>>();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
@@ -2013,6 +2233,15 @@ async function indexLatestEventsByExternalRef(
         const parsed = safeParseContract(eventRecordSchema, raw);
 
         if (!parsed.success) {
+          if (isLooseRecordValue(raw)) {
+            if (typeof raw.id === "string" && raw.id.length > 0) {
+              aliasRepairContaminatedEventIds.add(raw.id);
+            }
+            const rejectedRefKey = readRejectedEventExternalRefKey(raw.externalRef);
+            if (rejectedRefKey) {
+              aliasRepairContaminatedRefKeys.add(rejectedRefKey);
+            }
+          }
           return;
         }
         const entry = { relativePath, record: parsed.data };
@@ -2105,13 +2334,19 @@ async function indexLatestEventsByExternalRef(
     const indexedExternalRefEntry =
       state.latestDeviceExternalRefEntryByRefKey.get(refKey) ?? externalRefEntry;
     const refGroup = groupedByRefKey.get(refKey) ?? [];
-    refGroup.push({
+    const indexedMatch = {
       indexedExternalRef: indexedExternalRefEntry.record.externalRef ?? externalRefEntry.record.externalRef,
       indexedRecord: indexedExternalRefEntry.record,
       relativePath: latestForId.relativePath,
       record: latestForId.record,
-    });
+    };
+    refGroup.push(indexedMatch);
     groupedByRefKey.set(refKey, refGroup);
+    if (!isDeletedEventSpineRecord(latestForId.record)) {
+      const liveOwnerIds = liveOwnerIdsByRefKey.get(refKey) ?? new Set<string>();
+      liveOwnerIds.add(latestForId.record.id);
+      liveOwnerIdsByRefKey.set(refKey, liveOwnerIds);
+    }
   }
 
   for (const [refKey, group] of groupedByRefKey) {
@@ -2125,14 +2360,53 @@ async function indexLatestEventsByExternalRef(
     }
   }
 
+  const junctionNoIdProfilePredecessorsByScope =
+    indexJunctionNoIdProfilePredecessors(latestByRefKey.values());
+
   return {
+    aliasRepairContaminatedEventIds,
+    aliasRepairContaminatedRefKeys,
+    aliasRepairHistoryById: new Map(),
     deviceOwnerRevisionsByRefKeyAndFingerprint,
+    junctionNoIdProfilePredecessorsByScope,
     junctionSparseDayHistoryById,
     latestByRefKey,
     latestById,
+    liveOwnerIdsByRefKey,
     maxRevisionById,
     revisionsById,
   };
+}
+
+async function loadBoundedAliasRepairHistories(
+  vaultRoot: string,
+  relativePaths: readonly string[],
+  eventIds: ReadonlySet<string>,
+): Promise<Map<string, EventSpineEntry<EventRecord>[]>> {
+  const histories = new Map<string, EventSpineEntry<EventRecord>[]>();
+  for (const relativePath of relativePaths) {
+    await visitJsonlRecordsInterruptible({
+      vaultRoot,
+      relativePath,
+      visit(raw) {
+        const parsed = safeParseContract(eventRecordSchema, raw);
+        if (!parsed.success || !eventIds.has(parsed.data.id)) {
+          return;
+        }
+        const history = histories.get(parsed.data.id) ?? [];
+        if (history.length <= MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS) {
+          history.push({ relativePath, record: parsed.data });
+          histories.set(parsed.data.id, history);
+        }
+      },
+    });
+  }
+  for (const history of histories.values()) {
+    history.sort((left, right) =>
+      eventSpineRevision(left.record) - eventSpineRevision(right.record)
+    );
+  }
+  return histories;
 }
 
 function isSameObservationFacet(existing: EventRecord, incoming: EventRecord): boolean {
@@ -2158,6 +2432,9 @@ const JUNCTION_SLEEP_STAGE_METRIC_FACETS = new Set([
 ]);
 const JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION = "junction-sleep-stage-summary.v1";
 const JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION = "junction-sleep-stage-cycle-fallback.v1";
+const JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION = "junction-no-id-profile.v1";
+const JUNCTION_STABLE_PROFILE_CREATED_AT_NORMALIZER_VERSION =
+  "junction-stable-profile-created-at.v1";
 
 function deviceDataOriginSourceMatches(
   existing: DeviceDataOrigin | undefined,
@@ -2183,6 +2460,254 @@ function deviceDataOriginSourceMatches(
   }
 
   return compared;
+}
+
+function junctionNoIdProfileScopeKey(
+  externalRef: ExternalRef | undefined,
+  origin: DeviceDataOrigin | undefined,
+): string | null {
+  if (
+    externalRef?.system !== "junction"
+    || !externalRef.resourceType.endsWith("-profile")
+    || typeof externalRef.facet !== "string"
+    || !/^profile-[a-f0-9]{16}$/u.test(externalRef.resourceId)
+    || origin?.sourceProviderSlug === undefined
+  ) {
+    return null;
+  }
+
+  return stableStringify({
+    resourceType: externalRef.resourceType,
+    facet: externalRef.facet,
+    aggregatorProvider: origin.aggregatorProvider,
+    sourceProviderSlug: origin.sourceProviderSlug,
+    sourceType: origin.sourceType,
+    sourceInstanceId: origin.sourceInstanceId,
+  });
+}
+
+function junctionNoIdProfileResourceId(
+  origin: DeviceDataOrigin,
+  occurredAt: string,
+): string {
+  return `profile-${createHash("sha256")
+    .update(JSON.stringify([
+      "profile",
+      origin.sourceProviderSlug,
+      origin.sourceType,
+      origin.sourceInstanceId,
+      occurredAt,
+    ]))
+    .digest("hex")
+    .slice(0, 16)}`;
+}
+
+function junctionNoIdProfileProviderBaselineRevision(
+  match: IndexedEventExternalRefMatch,
+): string | null {
+  const externalRef = match.indexedExternalRef;
+  const providerRecord = match.indexedRecord;
+  const origin = providerRecord.dataOrigin;
+  const isCurrentNoIdProfile = origin?.normalizerVersion
+    === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION;
+  const isLegacyNoIdProfile = origin?.normalizerVersion === "junction-normalizer.v1";
+  const persistedRevision = isCurrentNoIdProfile
+    ? externalRef.version
+    : externalRef.version ?? providerRecord.occurredAt;
+  if (
+    (!isCurrentNoIdProfile && !isLegacyNoIdProfile)
+    || !junctionNoIdProfileScopeKey(externalRef, origin)
+    || persistedRevision === undefined
+    || !isWritableIsoDateTime(persistedRevision)
+    || !isWritableIsoDateTime(providerRecord.occurredAt)
+    || origin?.observedAtRaw !== providerRecord.occurredAt
+    || (isLegacyNoIdProfile && providerRecord.occurredAt !== persistedRevision)
+  ) {
+    return null;
+  }
+
+  const expectedResourceId = junctionNoIdProfileResourceId(origin, providerRecord.occurredAt);
+  return externalRef.resourceId === expectedResourceId ? persistedRevision : null;
+}
+
+function junctionNoIdProfilePredecessorRevision(
+  match: IndexedEventExternalRefMatch,
+): string | null {
+  return isDeletedEventSpineRecord(match.record)
+    ? null
+    : junctionNoIdProfileProviderBaselineRevision(match);
+}
+
+function isJunctionNoIdProfilePredecessor(
+  match: IndexedEventExternalRefMatch,
+): boolean {
+  return junctionNoIdProfileProviderBaselineRevision(match) !== null;
+}
+
+function indexJunctionNoIdProfilePredecessors(
+  matches: Iterable<IndexedEventExternalRefMatch>,
+): Map<string, IndexedEventExternalRefMatch[]> {
+  const byScope = new Map<string, IndexedEventExternalRefMatch[]>();
+  for (const match of matches) {
+    if (!isJunctionNoIdProfilePredecessor(match)) {
+      continue;
+    }
+
+    const scopeKey = junctionNoIdProfileScopeKey(
+      match.indexedExternalRef,
+      match.indexedRecord.dataOrigin,
+    );
+    if (!scopeKey) {
+      continue;
+    }
+
+    const scopedMatches = byScope.get(scopeKey) ?? [];
+    scopedMatches.push(match);
+    byScope.set(scopeKey, scopedMatches);
+  }
+  return byScope;
+}
+
+function isIncomingJunctionNoIdProfile(record: EventRecord): boolean {
+  return record.dataOrigin?.normalizerVersion === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION
+    && junctionNoIdProfileScopeKey(record.externalRef, record.dataOrigin) !== null;
+}
+
+function isIncomingJunctionStableProfileCreatedAt(record: EventRecord): boolean {
+  return record.dataOrigin?.normalizerVersion === JUNCTION_STABLE_PROFILE_CREATED_AT_NORMALIZER_VERSION
+    && junctionNoIdProfileScopeKey(record.externalRef, record.dataOrigin) !== null;
+}
+
+function isExactJunctionProfileCreatedAtTimestampReplay(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  const existingOrigin = existing.dataOrigin;
+  const incomingOrigin = incoming.dataOrigin;
+  const existingRevision = existingRef?.version ?? existing.occurredAt;
+  const existingScopeKey = junctionNoIdProfileScopeKey(existingRef, existingOrigin);
+  const incomingScopeKey = junctionNoIdProfileScopeKey(incomingRef, incomingOrigin);
+  if (
+    !existingOrigin
+    || !incomingOrigin
+    || existingScopeKey === null
+    || existingScopeKey !== incomingScopeKey
+    || !existingRef
+    || !incomingRef?.version
+    || !isWritableIsoDateTime(existingRevision)
+    || !isWritableIsoDateTime(incomingRef.version)
+    || !isWritableIsoDateTime(existing.occurredAt)
+    || !isWritableIsoDateTime(existing.recordedAt)
+    || !isWritableIsoDateTime(incoming.occurredAt)
+    || !isWritableIsoDateTime(incoming.recordedAt)
+    || compareIsoTimestampsAscending(incomingRef.version, existingRevision) !== 0
+    || (
+      !isDeletedEventSpineRecord(existing)
+      && compareIsoTimestampsAscending(existing.recordedAt, existing.occurredAt) !== 0
+    )
+    || (
+      isDeletedEventSpineRecord(existing)
+      && compareIsoTimestampsAscending(existing.recordedAt, existing.occurredAt) < 0
+    )
+    || existing.dayKey !== toIsoTimestamp(existing.occurredAt, "existing.occurredAt").slice(0, 10)
+    || compareIsoTimestampsAscending(incoming.occurredAt, existing.occurredAt) >= 0
+    || compareIsoTimestampsAscending(incoming.recordedAt, incoming.occurredAt) !== 0
+    || incoming.dayKey !== toIsoTimestamp(incoming.occurredAt, "incoming.occurredAt").slice(0, 10)
+    || existingOrigin.observedAtRaw !== existing.occurredAt
+    || incomingOrigin.observedAtRaw !== incoming.occurredAt
+    || !deviceDataOriginSourceMatches(existingOrigin, incomingOrigin)
+    || existingOrigin.timeZoneOffsetMinutes !== incomingOrigin.timeZoneOffsetMinutes
+    || existingOrigin.timestampSemantics !== incomingOrigin.timestampSemantics
+    || existingOrigin.originConfidence !== incomingOrigin.originConfidence
+  ) {
+    return false;
+  }
+
+  return deviceEventContentKey({
+    ...existing,
+    occurredAt: incoming.occurredAt,
+    recordedAt: incoming.recordedAt,
+    dayKey: incoming.dayKey,
+    externalRef: incomingRef,
+    dataOrigin: incomingOrigin,
+  }) === deviceEventContentKey(incoming);
+}
+
+// One released Junction normalizer pinned stable-profile occurrence to the
+// mutable updated-at revision. The successor pins occurrence to created-at but
+// deliberately keeps updated-at as source ordering. Admit only that exact,
+// one-way timestamp-only replay so the generic equal-revision guard remains
+// fail-closed for health-data changes.
+function isJunctionStableProfileCreatedAtTimestampMigration(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  return isIncomingJunctionStableProfileCreatedAt(incoming)
+    && existing.dataOrigin?.normalizerVersion === "junction-normalizer.v1"
+    && existingRef?.version !== undefined
+    && incomingRef !== undefined
+    && eventExternalRefKey(existingRef) === eventExternalRefKey(incomingRef)
+    && isExactJunctionProfileCreatedAtTimestampReplay(existing, incoming);
+}
+
+// Revision-2 admission is account-wide, so a released no-ID profile can be
+// replayed after created_at becomes available while updated_at (the provider
+// revision) is unchanged. Its timestamp-derived resource identity changes,
+// but the replay must not split a member edit or bypass a deletion. Retain the
+// old identity only for this exact timestamp-only transition; changed health
+// data at the same source revision remains a conflict.
+function isJunctionNoIdProfileEqualRevisionTimestampReplay(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  const existingOrigin = existing.dataOrigin;
+  const incomingOrigin = incoming.dataOrigin;
+  if (
+    !isIncomingJunctionNoIdProfile(incoming)
+    || !existingRef
+    || !incomingRef
+    || !existingOrigin
+    || !incomingOrigin
+    || eventExternalRefKey(existingRef) === eventExternalRefKey(incomingRef)
+    || junctionNoIdProfileResourceId(existingOrigin, existing.occurredAt)
+      !== existingRef.resourceId
+    || junctionNoIdProfileResourceId(incomingOrigin, incoming.occurredAt)
+      !== incomingRef.resourceId
+    || !(
+      existingOrigin.normalizerVersion === "junction-normalizer.v1"
+      || existingOrigin.normalizerVersion === JUNCTION_NO_ID_PROFILE_NORMALIZER_VERSION
+    )
+  ) {
+    return false;
+  }
+
+  return isExactJunctionProfileCreatedAtTimestampReplay(existing, incoming);
+}
+
+function isMemberDeletedJunctionStableProfile(
+  existing: EventRecord,
+  incoming: EventRecord,
+): boolean {
+  const existingRef = existing.externalRef;
+  const incomingRef = incoming.externalRef;
+  if (!existingRef || !incomingRef) {
+    return false;
+  }
+  return isDeletedEventSpineRecord(existing)
+    && isIncomingJunctionStableProfileCreatedAt(incoming)
+    && junctionNoIdProfileScopeKey(existingRef, existing.dataOrigin) !== null
+    && eventExternalRefKey(existingRef) === eventExternalRefKey(incomingRef)
+    && deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
+    && existingRef?.version !== undefined
+    && isWritableIsoDateTime(existingRef.version)
+    && isWritableIsoDateTime(existing.recordedAt)
+    && compareIsoTimestampsAscending(existing.recordedAt, existingRef.version) > 0;
 }
 
 function isDateLikeWhoopBodyMeasurementResourceId(resourceId: string): boolean {
@@ -2275,6 +2800,130 @@ function shouldKeepExistingJunctionSleepStageSummaryObservation(
 
 const JUNCTION_COMPANION_HEALTH_METADATA_SOURCE_TYPE =
   "companion-whoop-metadata-unverified";
+const JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION =
+  "junction-sparse-timeseries.floating-fallback.v2";
+
+function resolveJunctionFloatingFallbackTime(
+  existing: EventRecord | undefined,
+  incoming: EventRecord,
+): EventRecord | null {
+  if (
+    incoming.externalRef?.system !== "junction"
+    || incoming.dataOrigin?.normalizerVersion
+      !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+    || incoming.dataOrigin.timestampSemantics !== "floating"
+  ) {
+    return incoming;
+  }
+
+  if (!incoming.timeZone) {
+    return incoming;
+  }
+
+  // Junction documents Libre's +00:00 values as wall clocks, not instants.
+  // The importer carries those raw wall values through a schema-valid transient
+  // event. Resolve them only after stable external identity lookup, so a matched
+  // row uses its event spine's accepted zone while a new row uses the incoming
+  // fallback zone. Each endpoint resolves independently across DST transitions.
+  const acceptedExisting = existing?.externalRef?.system === "junction"
+    && existing.dataOrigin?.timestampSemantics === "floating"
+    && deviceDataOriginSourceMatches(existing.dataOrigin, incoming.dataOrigin)
+    ? existing
+    : undefined;
+  const targetTimeZone = acceptedExisting?.timeZone ?? incoming.timeZone;
+  const startRaw = incoming.dataOrigin.observedAtRaw;
+  if (typeof startRaw !== "string") {
+    return incoming;
+  }
+  const resolvedOccurrence = resolveFloatingIsoTimestampInTimeZone(
+    startRaw,
+    targetTimeZone,
+  );
+  const resolvedStart = incoming.kind === "intervention_session"
+    && typeof incoming.fields?.["start-at"] === "string"
+    ? resolveFloatingIsoTimestampInTimeZone(
+        incoming.fields["start-at"],
+        targetTimeZone,
+      )
+    : undefined;
+  const resolvedStartAt = resolvedStart?.timestamp;
+  const resolvedEndAt = incoming.kind === "intervention_session"
+    && typeof incoming.fields?.["end-at"] === "string"
+    ? resolveFloatingIsoTimestampInTimeZone(
+        incoming.fields["end-at"],
+        targetTimeZone,
+      )?.timestamp
+    : undefined;
+  if (
+    !resolvedOccurrence
+    || (
+      incoming.kind === "intervention_session"
+      && (
+        !resolvedStartAt
+        || !resolvedEndAt
+        || Date.parse(resolvedEndAt) < Date.parse(resolvedStartAt)
+      )
+    )
+  ) {
+    return null;
+  }
+  const resolvedInterventionFields = incoming.kind === "intervention_session"
+    && incoming.fields
+    ? {
+        ...incoming.fields,
+        ...(resolvedStartAt ? { "start-at": resolvedStartAt } : {}),
+        ...(resolvedEndAt ? { "end-at": resolvedEndAt } : {}),
+      }
+    : undefined;
+  const canonicalOccurrence = incoming.kind === "intervention_session"
+    && resolvedStartAt
+    ? resolvedStartAt
+    : resolvedOccurrence.timestamp;
+  const canonicalDayKey = incoming.kind === "intervention_session"
+    && resolvedStart
+    ? resolvedStart.dayKey
+    : resolvedOccurrence.dayKey;
+  return {
+    ...incoming,
+    occurredAt: canonicalOccurrence,
+    recordedAt: acceptedExisting?.recordedAt ?? incoming.recordedAt,
+    dayKey: canonicalDayKey,
+    timeZone: targetTimeZone,
+    ...(incoming.kind === "intervention_session" && resolvedInterventionFields
+      ? { fields: resolvedInterventionFields }
+      : {}),
+  };
+}
+
+function resolveJunctionFloatingFallbackEntries(
+  entries: readonly PreparedDeviceEventEntry[],
+  context: DeviceEventIdentityContext,
+): PreparedDeviceEventEntry[] {
+  return entries.flatMap((entry) => {
+    if (
+      entry.record.externalRef?.system !== "junction"
+      || entry.record.dataOrigin?.normalizerVersion
+        !== JUNCTION_SPARSE_FLOATING_FALLBACK_NORMALIZER_VERSION
+    ) {
+      return [entry];
+    }
+    const resolved = resolveDeviceEventIdentity(entry, context, { strict: true });
+    const indexedProviderMatch = resolved?.matchedEntries.find(
+      (match) => match.indexedMatch.record.id === resolved.latest?.id,
+    )?.indexedMatch ?? resolved?.matchedEntries[0]?.indexedMatch;
+    const canonicalRecord = resolveJunctionFloatingFallbackTime(
+      indexedProviderMatch?.indexedRecord,
+      entry.record,
+    );
+    return canonicalRecord
+      ? [{
+          ...entry,
+          relativePath: toEventLedgerFile(canonicalRecord.occurredAt),
+          record: canonicalRecord,
+        }]
+      : [];
+  });
+}
 
 function parseJunctionCompanionSyncVersion(version: string | undefined): number | undefined {
   if (!version || !/^(?:0|[1-9]\d*)$/u.test(version)) {
@@ -2459,11 +3108,7 @@ interface CurrentDeviceEventOwners {
 }
 
 function userAuthoredEventStateKey(record: EventRecord): string {
-  return stableStringify({
-    links: record.links ?? [],
-    note: record.note ?? null,
-    tags: record.tags ?? [],
-  });
+  return eventContentKey(record, { includeProviderAttribution: false });
 }
 
 function hasHistoricalExternalRefUserAuthoredChanges(match: IndexedEventExternalRefMatch): boolean {
@@ -2477,6 +3122,25 @@ function buildLegacyExternalRefReservations(
 ): Map<string, LegacyExternalRefReservation> {
   const reservations = new Map<string, LegacyExternalRefReservation>();
 
+  const reserve = (
+    entry: PreparedDeviceEventEntry,
+    refKey: string,
+    indexedMatch: IndexedEventExternalRefMatch,
+  ): void => {
+    const existing = reservations.get(refKey);
+    if (existing && existing.entry !== entry) {
+      const externalRef = indexedMatch.indexedExternalRef;
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Event legacy externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple incoming device events; ambiguous legacy cleanup must be repaired explicitly.",
+      );
+    }
+
+    reservations.set(refKey, { entry, indexedMatch });
+  };
+
   for (const entry of entries) {
     const externalRef = entry.record.externalRef;
     if (!externalRef) {
@@ -2484,28 +3148,98 @@ function buildLegacyExternalRefReservations(
     }
 
     const primaryRefKey = eventExternalRefKey(externalRef);
+    const dailyAliasOwnerSplit = resolveJunctionDailyAggregateAliasOwnerSplit(
+      entry,
+      index,
+    );
     for (const legacyExternalRef of entry.legacyExternalRefs) {
       const legacyRefKey = eventExternalRefKey(legacyExternalRef);
       if (legacyRefKey === primaryRefKey) {
         continue;
       }
 
-      const indexedMatch = index.latestByRefKey.get(legacyRefKey);
-      if (!indexedMatch || !isCompatibleLegacyExternalRefMatch(indexedMatch, entry.record, legacyExternalRef)) {
+      const persistedAliasMatch = dailyAliasOwnerSplit?.legacyRefKey === legacyRefKey
+        ? dailyAliasOwnerSplit.legacyOwner
+        : undefined;
+      const indexedMatch = persistedAliasMatch ?? index.latestByRefKey.get(legacyRefKey);
+      if (
+        !indexedMatch
+        || (
+          !persistedAliasMatch
+          && !isCompatibleLegacyExternalRefMatch(
+            indexedMatch,
+            entry.record,
+            legacyExternalRef,
+          )
+        )
+      ) {
         continue;
       }
 
-      const existing = reservations.get(legacyRefKey);
-      if (existing && existing.entry !== entry) {
+      reserve(entry, legacyRefKey, indexedMatch);
+    }
+
+    if (!isIncomingJunctionNoIdProfile(entry.record)) {
+      continue;
+    }
+
+    const scopeKey = junctionNoIdProfileScopeKey(externalRef, entry.record.dataOrigin);
+    const incomingRevision = externalRef.version;
+    if (!scopeKey || !incomingRevision || !isWritableIsoDateTime(incomingRevision)) {
+      continue;
+    }
+    const scopedMatches = (index.junctionNoIdProfilePredecessorsByScope.get(scopeKey) ?? [])
+      .filter((match) => eventExternalRefKey(match.indexedExternalRef) !== primaryRefKey);
+    const equalRevisionMatches = scopedMatches.filter((match) => {
+      const predecessorRevision = junctionNoIdProfileProviderBaselineRevision(match);
+      return predecessorRevision !== null
+        && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) === 0;
+    });
+    if (equalRevisionMatches.length > 1) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple persisted identities at the same provider revision; nothing was imported.",
+      );
+    }
+    const equalRevisionMatch = equalRevisionMatches[0];
+    if (equalRevisionMatch) {
+      if (!isJunctionNoIdProfileEqualRevisionTimestampReplay(
+        equalRevisionMatch.indexedRecord,
+        entry.record,
+      )) {
         throw new VaultError(
-          "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-          `Event legacy externalRef "${legacyExternalRef.system}/${legacyExternalRef.resourceType}/` +
-            `${legacyExternalRef.resourceId}${legacyExternalRef.facet ? `#${legacyExternalRef.facet}` : ""}" ` +
-            "matched multiple incoming device events; ambiguous legacy cleanup must be repaired explicitly.",
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+            `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+            `has conflicting content for source revision "${incomingRevision}"; nothing was imported.`,
         );
       }
+      reserve(
+        entry,
+        eventExternalRefKey(equalRevisionMatch.indexedExternalRef),
+        equalRevisionMatch,
+      );
+      continue;
+    }
 
-      reservations.set(legacyRefKey, { entry, indexedMatch });
+    const predecessorMatches = scopedMatches.filter((match) => {
+      const predecessorRevision = junctionNoIdProfilePredecessorRevision(match);
+      return predecessorRevision !== null
+        && compareIsoTimestampsAscending(incomingRevision, predecessorRevision) > 0;
+    });
+    if (predecessorMatches.length > 1) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Junction profile externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+          `${externalRef.resourceId}${externalRef.facet ? `#${externalRef.facet}` : ""}" ` +
+          "matched multiple persisted predecessor identities; nothing was imported.",
+      );
+    }
+    const predecessor = predecessorMatches[0];
+    if (predecessor) {
+      reserve(entry, eventExternalRefKey(predecessor.indexedExternalRef), predecessor);
     }
   }
 
@@ -2515,14 +3249,20 @@ function buildLegacyExternalRefReservations(
 async function buildDeviceEventIdentityContext(
   vaultRoot: string,
   entries: readonly PreparedDeviceEventEntry[],
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
 ): Promise<DeviceEventIdentityContext> {
-  if (entries.length === 0) {
+  if (entries.length === 0 && authoritativeEventSets.length === 0) {
     return {
       index: {
+        aliasRepairContaminatedEventIds: new Set(),
+        aliasRepairContaminatedRefKeys: new Set(),
+        aliasRepairHistoryById: new Map(),
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+        junctionNoIdProfilePredecessorsByScope: new Map(),
         junctionSparseDayHistoryById: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
+        liveOwnerIdsByRefKey: new Map(),
         maxRevisionById: new Map(),
         revisionsById: new Map(),
       },
@@ -2533,10 +3273,32 @@ async function buildDeviceEventIdentityContext(
     extension: ".jsonl",
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
-  return {
-    index,
-    legacyReservations: buildLegacyExternalRefReservations(entries, index),
-  };
+  const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
+  // A legitimate primary spine may advance before the duplicate is repaired.
+  // Load only structural candidates first so reservations can use the bounded
+  // common-initial-history proof instead of latest-record equality.
+  const aliasRepairOwnerIds = new Set<string>();
+  for (const entry of entries) {
+    const ownerSplit = resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+      entry,
+      index,
+    );
+    if (!ownerSplit) {
+      continue;
+    }
+    assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
+    aliasRepairOwnerIds.add(ownerSplit.primaryOwner.record.id);
+    aliasRepairOwnerIds.add(ownerSplit.legacyOwner.record.id);
+  }
+  if (aliasRepairOwnerIds.size > 0) {
+    index.aliasRepairHistoryById = await loadBoundedAliasRepairHistories(
+      vaultRoot,
+      shardPaths,
+      aliasRepairOwnerIds,
+    );
+  }
+  context.legacyReservations = buildLegacyExternalRefReservations(entries, index);
+  return context;
 }
 
 function cloneDeviceEventIdentityContext(
@@ -2544,13 +3306,29 @@ function cloneDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   return {
     index: {
+      aliasRepairContaminatedEventIds: new Set(
+        context.index.aliasRepairContaminatedEventIds,
+      ),
+      aliasRepairContaminatedRefKeys: new Set(
+        context.index.aliasRepairContaminatedRefKeys,
+      ),
+      aliasRepairHistoryById: new Map(
+        [...context.index.aliasRepairHistoryById].map(([id, history]) => [id, [...history]]),
+      ),
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
+      junctionNoIdProfilePredecessorsByScope:
+        context.index.junctionNoIdProfilePredecessorsByScope,
       junctionSparseDayHistoryById: context.index.junctionSparseDayHistoryById,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
+      liveOwnerIdsByRefKey: new Map(
+        [...context.index.liveOwnerIdsByRefKey].map(([key, ids]) => [key, new Set(ids)]),
+      ),
       maxRevisionById: new Map(context.index.maxRevisionById),
-      revisionsById: new Map(context.index.revisionsById),
+      revisionsById: new Map(
+        [...context.index.revisionsById].map(([id, revisions]) => [id, new Set(revisions)]),
+      ),
     },
     legacyReservations: new Map(context.legacyReservations),
   };
@@ -2560,10 +3338,15 @@ function buildEmptyDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
+    aliasRepairContaminatedEventIds: new Set(),
+    aliasRepairContaminatedRefKeys: new Set(),
+    aliasRepairHistoryById: new Map(),
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
+    junctionNoIdProfilePredecessorsByScope: new Map(),
     junctionSparseDayHistoryById: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
+    liveOwnerIdsByRefKey: new Map(),
     maxRevisionById: new Map(),
     revisionsById: new Map(),
   };
@@ -2583,6 +3366,728 @@ function eventSpineRevisionsAreComplete(
     && maxRevision > 0
     && revisions !== undefined
     && revisions.size === maxRevision;
+}
+
+interface DeviceEventAliasRepairContext {
+  evidenceByRole: ReadonlyMap<string, IntegrationEvidencePart>;
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
+}
+
+interface JunctionDailyAggregateAliasEvidence {
+  dayKey: string;
+  legacyDayKey: string;
+  resource: string;
+}
+
+interface JunctionDailyAggregateAliasOverlay {
+  links: NonNullable<EventRecord["links"]>;
+  memberAuthored: boolean;
+  note?: string;
+  tags: NonNullable<EventRecord["tags"]>;
+}
+
+interface JunctionDailyAggregateAliasOwnerSplit {
+  legacyOwner: IndexedEventExternalRefMatch;
+  legacyRefKey: string;
+  primaryOwner: IndexedEventExternalRefMatch;
+  primaryRefKey: string;
+  resource: string;
+}
+
+interface JunctionDailyAggregateAliasHistoryProof
+  extends JunctionDailyAggregateAliasOwnerSplit {
+  legacyOverlay: JunctionDailyAggregateAliasOverlay;
+  primaryOverlay: JunctionDailyAggregateAliasOverlay;
+}
+
+interface JunctionDailyAggregateAliasRepairPlan {
+  legacyRefKey: string;
+  loserPath: string;
+  loserTombstone: EventRecord;
+  overlaySurvivor?: EventRecord;
+  primaryExternalRef: ExternalRef;
+  primaryRefKey: string;
+  providerSurvivor: EventRecord;
+  survivorPath: string;
+}
+
+function buildDeviceEventAliasRepairContext(
+  plan: Pick<DeviceBatchPlan, "evidenceRolesByPreparedRecordId" | "preparedEvidenceParts">,
+): DeviceEventAliasRepairContext {
+  return {
+    evidenceByRole: new Map(plan.preparedEvidenceParts.map((part) => [part.role, part])),
+    evidenceRolesByPreparedRecordId: plan.evidenceRolesByPreparedRecordId,
+  };
+}
+
+function isLooseRecordValue(value: unknown): value is LooseRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRejectedEventExternalRefKey(value: unknown): string | undefined {
+  if (!isLooseRecordValue(value)) {
+    return undefined;
+  }
+  const parsed = safeParseContract(externalRefSchema, {
+    system: value.system,
+    resourceType: value.resourceType,
+    resourceId: value.resourceId,
+    ...(value.facet === undefined ? {} : { facet: value.facet }),
+    ...(value.version === undefined ? {} : { version: value.version }),
+  });
+  return parsed.success ? eventExternalRefKey(parsed.data) : undefined;
+}
+
+function junctionDailyAggregateAliasRefShape(externalRef: ExternalRef): string {
+  return stableStringify({
+    facet: externalRef.facet ?? null,
+    resourceType: externalRef.resourceType,
+    system: externalRef.system,
+    version: externalRef.version ?? null,
+  });
+}
+
+function junctionDailyAggregateAliasOriginKey(
+  origin: DeviceDataOrigin | undefined,
+): string | null {
+  if (!origin) {
+    return null;
+  }
+  const { observedAtRaw: _observedAtRaw, ...stableOrigin } = origin;
+  return stableStringify(stableOrigin);
+}
+
+function junctionDailyAggregateAliasHistoricalOriginMatches(
+  historical: DeviceDataOrigin | undefined,
+  current: DeviceDataOrigin,
+): boolean {
+  if (!historical) {
+    return false;
+  }
+  if (junctionDailyAggregateAliasOriginKey(historical)
+    === junctionDailyAggregateAliasOriginKey(current)) {
+    return true;
+  }
+  if (historical.timeZoneOffsetMinutes !== undefined) {
+    return false;
+  }
+  const {
+    observedAtRaw: _historicalObservedAtRaw,
+    timeZoneOffsetMinutes: _historicalOffset,
+    ...stableHistorical
+  } = historical;
+  const {
+    observedAtRaw: _currentObservedAtRaw,
+    timeZoneOffsetMinutes: _currentOffset,
+    ...stableCurrent
+  } = current;
+  return stableStringify(stableHistorical) === stableStringify(stableCurrent);
+}
+
+function junctionDailyAggregateProviderStateKey(record: EventRecord): string {
+  const {
+    dataOrigin: _dataOrigin,
+    dayKey: _dayKey,
+    externalRef: _externalRef,
+    id: _id,
+    lifecycle: _lifecycle,
+    links: _links,
+    note: _note,
+    recordedAt: _recordedAt,
+    source: _source,
+    tags: _tags,
+    ...providerState
+  } = record;
+  return stableStringify(providerState);
+}
+
+function isJunctionDailyAggregateAliasCandidate(entry: PreparedDeviceEventEntry): boolean {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  return externalRef !== undefined
+    && legacyExternalRef !== undefined
+    && entry.legacyExternalRefs.length === 1
+    && entry.record.kind === "observation"
+    && entry.record.source === "device"
+    && entry.record.dataOrigin?.aggregatorProvider === "junction"
+    && entry.record.dataOrigin.normalizerVersion === "junction-normalizer.v1"
+    && externalRef.system === "junction"
+    && externalRef.version === undefined
+    && legacyExternalRef.version === undefined
+    && eventExternalRefKey(externalRef) !== eventExternalRefKey(legacyExternalRef)
+    && junctionDailyAggregateAliasRefShape(externalRef)
+      === junctionDailyAggregateAliasRefShape(legacyExternalRef)
+    && entry.record.note === undefined
+    && entry.record.tags === undefined
+    && entry.record.links === undefined
+    && entry.record.rawRefs === undefined
+    && entry.record.evidence === undefined
+    && entry.record.attachments === undefined;
+}
+
+function resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): JunctionDailyAggregateAliasOwnerSplit | null {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (
+    !externalRef
+    || !legacyExternalRef
+    || !isJunctionDailyAggregateAliasCandidate(entry)
+  ) {
+    return null;
+  }
+  const primaryRefKey = eventExternalRefKey(externalRef);
+  const legacyRefKey = eventExternalRefKey(legacyExternalRef);
+  const primaryOwnerIds = index.liveOwnerIdsByRefKey.get(primaryRefKey)
+    ?? new Set<string>();
+  const legacyOwnerIds = index.liveOwnerIdsByRefKey.get(legacyRefKey)
+    ?? new Set<string>();
+  if (primaryOwnerIds.size === 0 || legacyOwnerIds.size === 0) {
+    return null;
+  }
+
+  const primaryOwner = index.latestByRefKey.get(primaryRefKey);
+  const legacyOwner = index.latestByRefKey.get(legacyRefKey);
+  if (!primaryOwner || !legacyOwner) {
+    return null;
+  }
+
+  const primaryProviderRecord = primaryOwner.indexedRecord;
+  const legacyProviderRecord = legacyOwner.indexedRecord;
+  const primaryOrigin = primaryProviderRecord.dataOrigin;
+  const legacyOrigin = legacyProviderRecord.dataOrigin;
+  const incomingOrigin = entry.record.dataOrigin;
+  const observedAtRaw = incomingOrigin?.observedAtRaw;
+  const observedAtRawPrefix = `${entry.record.dayKey}:`;
+  const resource = observedAtRaw?.startsWith(observedAtRawPrefix)
+    && observedAtRaw.endsWith(":daily")
+    ? observedAtRaw.slice(observedAtRawPrefix.length, -":daily".length)
+    : "";
+  if (
+    primaryProviderRecord.dayKey !== entry.record.dayKey
+    || !isSameObservationFacet(primaryProviderRecord, entry.record)
+    || !isSameObservationFacet(primaryProviderRecord, legacyProviderRecord)
+    || junctionDailyAggregateAliasRefShape(primaryOwner.indexedExternalRef)
+      !== junctionDailyAggregateAliasRefShape(externalRef)
+    || junctionDailyAggregateAliasRefShape(legacyOwner.indexedExternalRef)
+      !== junctionDailyAggregateAliasRefShape(legacyExternalRef)
+    || !primaryOrigin
+    || !legacyOrigin
+    || !incomingOrigin
+    || resource.length === 0
+    || !deviceDataOriginSourceMatches(primaryOrigin, incomingOrigin)
+    || !deviceDataOriginSourceMatches(legacyOrigin, incomingOrigin)
+  ) {
+    return null;
+  }
+
+  const distinctOwnerIds = new Set([...primaryOwnerIds, ...legacyOwnerIds]);
+  if (distinctOwnerIds.size < 2) {
+    return null;
+  }
+  if (
+    primaryOwnerIds.size !== 1
+    || legacyOwnerIds.size !== 1
+    || distinctOwnerIds.size !== 2
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      "Junction daily aggregate alias repair requires exactly one live owner per claimed reference.",
+    );
+  }
+  if (
+    !primaryOwnerIds.has(primaryOwner.record.id)
+    || !legacyOwnerIds.has(legacyOwner.record.id)
+    || primaryOwner.record.id === legacyOwner.record.id
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      "Junction daily aggregate alias repair could not prove the two live reference owners.",
+    );
+  }
+
+  return { legacyOwner, legacyRefKey, primaryOwner, primaryRefKey, resource };
+}
+
+function assertJunctionDailyAggregateAliasHistoryIsUncontaminated(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+): void {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (!externalRef || !legacyExternalRef) {
+    return;
+  }
+  const primaryRefKey = eventExternalRefKey(externalRef);
+  const legacyRefKey = eventExternalRefKey(legacyExternalRef);
+  const ownerIds = new Set([
+    ...(context.index.liveOwnerIdsByRefKey.get(primaryRefKey) ?? []),
+    ...(context.index.liveOwnerIdsByRefKey.get(legacyRefKey) ?? []),
+  ]);
+  if (
+    [...ownerIds].some((id) => context.index.aliasRepairContaminatedEventIds.has(id))
+    || context.index.aliasRepairContaminatedRefKeys.has(primaryRefKey)
+    || context.index.aliasRepairContaminatedRefKeys.has(legacyRefKey)
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair found a schema-rejected candidate revision.",
+    );
+  }
+}
+
+function parseJunctionDailyAggregateAliasEvidence(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventAliasRepairContext,
+): JunctionDailyAggregateAliasEvidence {
+  const roles = context.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [];
+  const part = roles.length === 1 ? context.evidenceByRole.get(roles[0]!) : undefined;
+  const metadata = part?.metadata;
+  if (
+    !part
+    || !isLooseRecordValue(metadata)
+    || metadata.artifactClass !== "compact_provider_timeseries_aggregate"
+    || metadata.provider !== "junction"
+    || metadata.resourceCategory !== "timeseries_daily_aggregate"
+    || metadata.retentionClass !== "provider_evidence"
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair requires one exact compact provider evidence role.",
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(part.content);
+  } catch {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair evidence was not valid JSON.",
+    );
+  }
+  if (!isLooseRecordValue(parsed)) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair evidence did not contain an object.",
+    );
+  }
+
+  const legacyDayKeys = parsed.legacyDayKeys;
+  const origin = entry.record.dataOrigin;
+  if (
+    parsed.schema !== "junction.timeseries_daily_aggregate.v1"
+    || parsed.provider !== "junction"
+    || typeof parsed.resource !== "string"
+    || parsed.resource.length === 0
+    || metadata.resource !== parsed.resource
+    || typeof parsed.dayKey !== "string"
+    || !/^\d{4}-\d{2}-\d{2}$/u.test(parsed.dayKey)
+    || parsed.dayKey !== entry.record.dayKey
+    || typeof parsed.sourceProviderSlug !== "string"
+    || parsed.sourceProviderSlug.length === 0
+    || typeof parsed.sampleCount !== "number"
+    || !Number.isSafeInteger(parsed.sampleCount)
+    || parsed.sampleCount <= 0
+    || !Array.isArray(legacyDayKeys)
+    || legacyDayKeys.length !== 1
+    || typeof legacyDayKeys[0] !== "string"
+    || !/^\d{4}-\d{2}-\d{2}$/u.test(legacyDayKeys[0])
+    || legacyDayKeys[0] === parsed.dayKey
+    || (parsed.sourceType !== undefined && typeof parsed.sourceType !== "string")
+    || (
+      parsed.sourceInstanceId !== undefined
+      && parsed.sourceInstanceId !== null
+      && typeof parsed.sourceInstanceId !== "string"
+    )
+    || origin?.sourceProviderSlug !== parsed.sourceProviderSlug
+    || (origin.sourceType ?? null) !== (parsed.sourceType ?? null)
+    || (origin.sourceInstanceId ?? null) !== (parsed.sourceInstanceId ?? null)
+    || origin.observedAtRaw !== `${parsed.dayKey}:${parsed.resource}:daily`
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair evidence did not prove one normalized primary and legacy day split.",
+    );
+  }
+
+  return {
+    dayKey: parsed.dayKey,
+    legacyDayKey: legacyDayKeys[0],
+    resource: parsed.resource,
+  };
+}
+
+function readCompleteJunctionDailyAggregateAliasHistory(
+  index: EventExternalRefIndex,
+  eventId: string,
+): readonly EventSpineEntry<EventRecord>[] {
+  const history = index.aliasRepairHistoryById.get(eventId) ?? [];
+  const maxRevision = index.maxRevisionById.get(eventId) ?? 0;
+  const revisions = index.revisionsById.get(eventId);
+  if (
+    maxRevision < 1
+    || maxRevision > MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS
+    || !revisions
+    || revisions.size !== maxRevision
+    || history.length !== maxRevision
+    || history.some((entry, historyIndex) =>
+      eventSpineRevision(entry.record) !== historyIndex + 1
+    )
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair requires a complete bounded event history.",
+    );
+  }
+  return history;
+}
+
+function junctionDailyAggregateAliasPersistedOriginsMatch(
+  left: DeviceDataOrigin | undefined,
+  right: DeviceDataOrigin | undefined,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return junctionDailyAggregateAliasHistoricalOriginMatches(left, right)
+    || junctionDailyAggregateAliasHistoricalOriginMatches(right, left);
+}
+
+function junctionDailyAggregateAliasInitialRecordMatches(
+  record: EventRecord | undefined,
+  input: {
+    expectedDayKey: string;
+    expectedExternalRef: ExternalRef;
+    expectedObservedAtRaw: string;
+  },
+): record is EventRecord {
+  return record !== undefined
+    && record.source === "device"
+    && !isDeletedEventSpineRecord(record)
+    && record.dayKey === input.expectedDayKey
+    && record.dataOrigin?.observedAtRaw === input.expectedObservedAtRaw
+    && record.externalRef !== undefined
+    && eventExternalRefKey(record.externalRef)
+      === eventExternalRefKey(input.expectedExternalRef)
+    && junctionDailyAggregateAliasRefShape(record.externalRef)
+      === junctionDailyAggregateAliasRefShape(input.expectedExternalRef);
+}
+
+function analyzeJunctionDailyAggregateAliasHistoryEvolution(input: {
+  allowProviderEvolution: boolean;
+  expectedDayKey: string;
+  expectedExternalRef: ExternalRef;
+  expectedOrigin: DeviceDataOrigin;
+  expectedObservedAtRaw: string;
+  history: readonly EventSpineEntry<EventRecord>[];
+  initialProviderStateKey: string;
+  initialRecord: EventRecord;
+}): JunctionDailyAggregateAliasOverlay {
+  const expectedRefKey = eventExternalRefKey(input.expectedExternalRef);
+  let providerStateKey = input.initialProviderStateKey;
+  let memberCarrierStateKey: string | undefined;
+  for (const { record } of input.history) {
+    const recordProviderStateKey = junctionDailyAggregateProviderStateKey(record);
+    const providerRecord = record.source === "device";
+    const manualMatchesProvider = recordProviderStateKey === providerStateKey;
+    const manualMatchesCarrier = memberCarrierStateKey !== undefined
+      && recordProviderStateKey === memberCarrierStateKey;
+    if (
+      isDeletedEventSpineRecord(record)
+      || (record.source !== "device" && record.source !== "manual")
+      || record.dayKey !== input.expectedDayKey
+      || !isSameObservationFacet(input.initialRecord, record)
+      || (
+        providerRecord
+        && (
+          !record.externalRef
+          || !record.dataOrigin
+        )
+      )
+      || (
+        record.externalRef !== undefined
+        && (
+          eventExternalRefKey(record.externalRef) !== expectedRefKey
+          || junctionDailyAggregateAliasRefShape(record.externalRef)
+            !== junctionDailyAggregateAliasRefShape(input.expectedExternalRef)
+        )
+      )
+      || (
+        record.dataOrigin !== undefined
+        && (
+          record.dataOrigin.observedAtRaw !== input.expectedObservedAtRaw
+          || !junctionDailyAggregateAliasHistoricalOriginMatches(
+            record.dataOrigin,
+            input.expectedOrigin,
+          )
+        )
+      )
+      || (
+        providerRecord
+          ? !input.allowProviderEvolution
+            && recordProviderStateKey !== input.initialProviderStateKey
+          : !manualMatchesProvider && !manualMatchesCarrier
+      )
+    ) {
+      throw new VaultError(
+        "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+        "Junction daily aggregate alias repair found unsupported or divergent historical state.",
+      );
+    }
+    if (providerRecord) {
+      providerStateKey = recordProviderStateKey;
+    } else if (manualMatchesProvider) {
+      memberCarrierStateKey = recordProviderStateKey;
+    }
+  }
+
+  const latest = input.history.at(-1)?.record;
+  if (!latest) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair requires a complete bounded event history.",
+    );
+  }
+  const links = [...(latest.links ?? [])];
+  const tags = [...(latest.tags ?? [])];
+  return {
+    links,
+    memberAuthored: latest.source === "manual"
+      || latest.note !== undefined
+      || tags.length > 0
+      || links.length > 0,
+    ...(latest.note ? { note: latest.note } : {}),
+    tags,
+  };
+}
+
+function resolveJunctionDailyAggregateAliasOwnerSplit(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): JunctionDailyAggregateAliasHistoryProof | null {
+  const ownerSplit = resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+    entry,
+    index,
+  );
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (!ownerSplit || !externalRef || !legacyExternalRef || !entry.record.dataOrigin) {
+    return null;
+  }
+
+  const primaryInitial = index.aliasRepairHistoryById.get(
+    ownerSplit.primaryOwner.record.id,
+  )?.[0]?.record;
+  const legacyInitial = index.aliasRepairHistoryById.get(
+    ownerSplit.legacyOwner.record.id,
+  )?.[0]?.record;
+  const legacyDayKey = ownerSplit.legacyOwner.indexedRecord.dayKey;
+  // Divergent initial baselines are ordinary adjacent-day owners. Once the
+  // baselines match, every later revision must satisfy the bounded evolution
+  // rules before this pair can reserve or mutate either identity.
+  if (
+    !junctionDailyAggregateAliasInitialRecordMatches(primaryInitial, {
+      expectedDayKey: entry.record.dayKey,
+      expectedExternalRef: externalRef,
+      expectedObservedAtRaw: `${entry.record.dayKey}:${ownerSplit.resource}:daily`,
+    })
+    || !junctionDailyAggregateAliasInitialRecordMatches(legacyInitial, {
+      expectedDayKey: legacyDayKey,
+      expectedExternalRef: legacyExternalRef,
+      expectedObservedAtRaw: `${legacyDayKey}:${ownerSplit.resource}:daily`,
+    })
+    || !isSameObservationFacet(primaryInitial, legacyInitial)
+    || junctionDailyAggregateProviderStateKey(primaryInitial)
+      !== junctionDailyAggregateProviderStateKey(legacyInitial)
+    || !junctionDailyAggregateAliasPersistedOriginsMatch(
+      primaryInitial.dataOrigin,
+      legacyInitial.dataOrigin,
+    )
+  ) {
+    return null;
+  }
+
+  const primaryHistory = readCompleteJunctionDailyAggregateAliasHistory(
+    index,
+    ownerSplit.primaryOwner.record.id,
+  );
+  const legacyHistory = readCompleteJunctionDailyAggregateAliasHistory(
+    index,
+    ownerSplit.legacyOwner.record.id,
+  );
+
+  const primaryOverlay = analyzeJunctionDailyAggregateAliasHistoryEvolution({
+    allowProviderEvolution: true,
+    expectedDayKey: entry.record.dayKey,
+    expectedExternalRef: externalRef,
+    expectedOrigin: entry.record.dataOrigin,
+    expectedObservedAtRaw: `${entry.record.dayKey}:${ownerSplit.resource}:daily`,
+    history: primaryHistory,
+    initialProviderStateKey: junctionDailyAggregateProviderStateKey(primaryInitial),
+    initialRecord: primaryInitial,
+  });
+  const legacyOverlay = analyzeJunctionDailyAggregateAliasHistoryEvolution({
+    allowProviderEvolution: false,
+    expectedDayKey: legacyDayKey,
+    expectedExternalRef: legacyExternalRef,
+    expectedOrigin: entry.record.dataOrigin,
+    expectedObservedAtRaw: `${legacyDayKey}:${ownerSplit.resource}:daily`,
+    history: legacyHistory,
+    initialProviderStateKey: junctionDailyAggregateProviderStateKey(legacyInitial),
+    initialRecord: legacyInitial,
+  });
+  return { ...ownerSplit, legacyOverlay, primaryOverlay };
+}
+
+function hasJunctionDailyAggregateAliasSplit(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+): boolean {
+  return resolveJunctionDailyAggregateAliasOwnerSplit(entry, context.index) !== null;
+}
+
+function mergeJunctionDailyAggregateAliasOverlays(
+  primary: JunctionDailyAggregateAliasOverlay,
+  legacy: JunctionDailyAggregateAliasOverlay,
+): JunctionDailyAggregateAliasOverlay {
+  if (primary.note && legacy.note && primary.note !== legacy.note) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_OVERLAY_REFUSED",
+      "Junction daily aggregate alias repair found conflicting member notes.",
+    );
+  }
+  const linksByKey = new Map<string, NonNullable<EventRecord["links"]>[number]>();
+  for (const link of [...primary.links, ...legacy.links]) {
+    linksByKey.set(stableStringify(link), link);
+  }
+  return {
+    links: [...linksByKey.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, link]) => link),
+    memberAuthored: primary.memberAuthored || legacy.memberAuthored,
+    ...(primary.note || legacy.note ? { note: primary.note ?? legacy.note } : {}),
+    tags: [...new Set([...primary.tags, ...legacy.tags])].sort(),
+  };
+}
+
+function buildJunctionDailyAggregateAliasRepairPlan(input: {
+  aliasRepairContext?: DeviceEventAliasRepairContext;
+  context: DeviceEventIdentityContext;
+  entry: PreparedDeviceEventEntry;
+}): JunctionDailyAggregateAliasRepairPlan | null {
+  const { aliasRepairContext, context, entry } = input;
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  const ownerSplit = resolveJunctionDailyAggregateAliasOwnerSplit(
+    entry,
+    context.index,
+  );
+  if (
+    !aliasRepairContext
+    || !externalRef
+    || !legacyExternalRef
+    || !ownerSplit
+  ) {
+    return null;
+  }
+  assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
+
+  const {
+    legacyOverlay,
+    legacyOwner,
+    legacyRefKey,
+    primaryOverlay,
+    primaryOwner,
+    primaryRefKey,
+  } = ownerSplit;
+
+  const evidence = parseJunctionDailyAggregateAliasEvidence(entry, aliasRepairContext);
+  if (
+    primaryOwner.record.dayKey !== evidence.dayKey
+    || legacyOwner.record.dayKey !== evidence.legacyDayKey
+    || ownerSplit.resource !== evidence.resource
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair owner days did not match the normalized evidence.",
+    );
+  }
+
+  const overlay = mergeJunctionDailyAggregateAliasOverlays(primaryOverlay, legacyOverlay);
+  const primaryRevision = (context.index.maxRevisionById.get(primaryOwner.record.id) ?? 0) + 1;
+  const legacyRevision = (context.index.maxRevisionById.get(legacyOwner.record.id) ?? 0) + 1;
+  const providerSurvivor: EventRecord = {
+    ...entry.record,
+    id: primaryOwner.record.id,
+    lifecycle: buildEventSpineLifecycle(primaryRevision),
+  };
+  const loserTombstone: EventRecord = {
+    ...entry.record,
+    id: legacyOwner.record.id,
+    lifecycle: buildEventSpineLifecycle(legacyRevision, "deleted"),
+  };
+  const overlaySurvivor: EventRecord | undefined = overlay.memberAuthored
+    ? {
+        ...providerSurvivor,
+        source: "manual",
+        ...(overlay.note ? { note: overlay.note } : {}),
+        ...(overlay.tags.length > 0 ? { tags: overlay.tags } : {}),
+        ...(overlay.links.length > 0 ? { links: overlay.links } : {}),
+        lifecycle: buildEventSpineLifecycle(primaryRevision + 1),
+      }
+    : undefined;
+
+  return {
+    legacyRefKey,
+    loserPath: legacyOwner.relativePath || toEventLedgerFile(legacyOwner.record.occurredAt),
+    loserTombstone,
+    ...(overlaySurvivor ? { overlaySurvivor } : {}),
+    primaryExternalRef: externalRef,
+    primaryRefKey,
+    providerSurvivor,
+    survivorPath: entry.relativePath,
+  };
+}
+
+function applyJunctionDailyAggregateAliasRepairToIndex(
+  plan: JunctionDailyAggregateAliasRepairPlan,
+  index: EventExternalRefIndex,
+): void {
+  const survivor = plan.overlaySurvivor ?? plan.providerSurvivor;
+  index.latestByRefKey.set(plan.primaryRefKey, {
+    indexedExternalRef: plan.primaryExternalRef,
+    indexedRecord: plan.providerSurvivor,
+    relativePath: plan.survivorPath,
+    record: survivor,
+  });
+  index.latestByRefKey.delete(plan.legacyRefKey);
+  index.latestById.set(survivor.id, survivor);
+  index.latestById.set(plan.loserTombstone.id, plan.loserTombstone);
+  index.liveOwnerIdsByRefKey.set(plan.primaryRefKey, new Set([survivor.id]));
+  index.liveOwnerIdsByRefKey.delete(plan.legacyRefKey);
+
+  for (const record of [
+    plan.providerSurvivor,
+    ...(plan.overlaySurvivor ? [plan.overlaySurvivor] : []),
+    plan.loserTombstone,
+  ]) {
+    const revision = eventSpineRevision(record);
+    index.maxRevisionById.set(record.id, revision);
+    const revisions = index.revisionsById.get(record.id) ?? new Set<number>();
+    revisions.add(revision);
+    index.revisionsById.set(record.id, revisions);
+    const history = index.aliasRepairHistoryById.get(record.id) ?? [];
+    history.push({
+      relativePath: record.id === plan.loserTombstone.id
+        ? plan.loserPath
+        : plan.survivorPath,
+      record,
+    });
+    index.aliasRepairHistoryById.set(record.id, history);
+  }
 }
 
 function whoopSleepTypeProviderBaselineRevision(
@@ -2643,6 +4148,9 @@ function resolveDeviceEventIdentity(
   const primaryMatch = reservedForLegacyClaim && reservedForLegacyClaim.entry !== entry
     ? undefined
     : index.latestByRefKey.get(refKey);
+  const explicitLegacyRefKeys = new Set(
+    entry.legacyExternalRefs.map((legacyExternalRef) => eventExternalRefKey(legacyExternalRef)),
+  );
   const legacyMatchedEntries = entry.legacyExternalRefs
     .map((legacyExternalRef) => ({
       legacyExternalRef,
@@ -2671,9 +4179,20 @@ function resolveDeviceEventIdentity(
       return (!reservation || reservation.entry === entry)
         && isCompatibleLegacyExternalRefMatch(match.indexedMatch, entry.record, match.legacyExternalRef);
     });
+  const implicitReservedEntries = [...legacyReservations.entries()]
+    .filter(([reservedRefKey, reservation]) =>
+      reservation.entry === entry
+      && reservedRefKey !== refKey
+      && !explicitLegacyRefKeys.has(reservedRefKey)
+    )
+    .map(([reservedRefKey, reservation]) => ({
+      refKey: reservedRefKey,
+      indexedMatch: reservation.indexedMatch,
+    }));
   const matchedEntries = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
+    ...implicitReservedEntries,
   ];
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
@@ -2809,6 +4328,8 @@ function mapCurrentDeviceEventOwners(
     const incomingHasEqualOrNewerComparableVersion = sourceVersionComparisons.some(
       (comparison) => comparison >= 0,
     );
+    const incomingHasOnlyOlderComparableVersions = sourceVersionComparisons.length > 0
+      && !incomingHasEqualOrNewerComparableVersion;
     if (sourceVersionComparisons.some((comparison) => comparison > 0)) {
       incomingNewerPreparedIds.add(entry.record.id);
     }
@@ -2821,6 +4342,7 @@ function mapCurrentDeviceEventOwners(
     }
     if (
       resolved.associationSafe
+      && !incomingHasOnlyOlderComparableVersions
       && !isDeletedEventSpineRecord(current)
       && deviceEventContentKey(current) === deviceEventContentKey(entry.record)
     ) {
@@ -2851,19 +4373,79 @@ async function reconcileDeviceEventEntriesByExternalRef(
   entries: readonly PreparedDeviceEventEntry[],
   existingContext?: DeviceEventIdentityContext,
   preferredCanonicalIdByPreparedId: ReadonlyMap<string, string> = new Map(),
+  authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
+  aliasRepairContext?: DeviceEventAliasRepairContext,
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
   const context = existingContext ?? await buildDeviceEventIdentityContext(vaultRoot, entries);
   const { index } = context;
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const appendRecordIdByPreparedRecordId = new Map<string, string>();
-  const records: EventRecord[] = [];
+  const recordsByEntryIndex = new Map<number, EventRecord>();
   const forceAppendIds = new Set<string>();
   const retainedPreparedIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
+  let retractedCount = 0;
 
-  for (const entry of entries) {
+  const aliasRepairByEntryIndex = new Map<number, JunctionDailyAggregateAliasRepairPlan>();
+  for (const [entryIndex, entry] of entries.entries()) {
+    const aliasRepair = buildJunctionDailyAggregateAliasRepairPlan({
+      aliasRepairContext,
+      context,
+      entry,
+    });
+    if (aliasRepair) {
+      aliasRepairByEntryIndex.set(entryIndex, aliasRepair);
+    }
+  }
+  const aliasRepairOwnerIds = new Set<string>();
+  for (const aliasRepair of aliasRepairByEntryIndex.values()) {
+    for (const ownerId of [
+      aliasRepair.providerSurvivor.id,
+      aliasRepair.loserTombstone.id,
+    ]) {
+      if (aliasRepairOwnerIds.has(ownerId)) {
+        throw new VaultError(
+          "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+          "Junction daily aggregate alias repair operations cannot share persisted owners.",
+        );
+      }
+      aliasRepairOwnerIds.add(ownerId);
+    }
+  }
+  for (const [entryIndex, aliasRepair] of aliasRepairByEntryIndex) {
+    const entry = entries[entryIndex]!;
+    appendEntries.push(
+      { relativePath: aliasRepair.survivorPath, record: aliasRepair.providerSurvivor },
+      { relativePath: aliasRepair.loserPath, record: aliasRepair.loserTombstone },
+    );
+    if (aliasRepair.overlaySurvivor) {
+      appendEntries.push({
+        relativePath: aliasRepair.survivorPath,
+        record: aliasRepair.overlaySurvivor,
+      });
+    }
+    appendRecordIdByPreparedRecordId.set(
+      entry.record.id,
+      aliasRepair.providerSurvivor.id,
+    );
+    forceAppendIds.add(aliasRepair.providerSurvivor.id);
+    forceAppendIds.add(aliasRepair.loserTombstone.id);
+    recordsByEntryIndex.set(
+      entryIndex,
+      aliasRepair.overlaySurvivor ?? aliasRepair.providerSurvivor,
+    );
+    applyJunctionDailyAggregateAliasRepairToIndex(aliasRepair, index);
+    supersededCount += 1;
+    retractedCount += 1;
+  }
+
+  for (const [entryIndex, originalEntry] of entries.entries()) {
+    if (aliasRepairByEntryIndex.has(entryIndex)) {
+      continue;
+    }
+    let entry = originalEntry;
     const externalRef = entry.record.externalRef;
 
     if (!externalRef) {
@@ -2875,12 +4457,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
       ) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(current);
+        recordsByEntryIndex.set(entryIndex, current);
         continue;
       }
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
-      records.push(entry.record);
+      recordsByEntryIndex.set(entryIndex, entry.record);
       continue;
     }
 
@@ -2891,8 +4473,16 @@ async function reconcileDeviceEventEntriesByExternalRef(
         "Device event identity unexpectedly lost its externalRef during reconciliation.",
       );
     }
+    if (resolved.latest && aliasRepairOwnerIds.has(resolved.latest.id)) {
+      throw new VaultError(
+        "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+        "Junction daily aggregate alias repair operations cannot share persisted owners.",
+      );
+    }
     const { matchedEntries, refKey } = resolved;
     let latest = resolved.latest;
+    const migratesJunctionNoIdProfileIdentity = isIncomingJunctionNoIdProfile(entry.record)
+      && matchedEntries.some((match) => match.refKey !== refKey);
 
     if (!latest) {
       const canonicalRecordId = preferredCanonicalIdByPreparedId.get(entry.record.id)
@@ -2903,8 +4493,88 @@ async function reconcileDeviceEventEntriesByExternalRef(
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(canonicalRecord, externalRef));
       appendEntries.push({ relativePath: entry.relativePath, record: canonicalRecord });
       appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
-      records.push(canonicalRecord);
+      recordsByEntryIndex.set(entryIndex, canonicalRecord);
       continue;
+    }
+
+    const indexedProviderMatch = matchedEntries.find(
+      (match) => match.indexedMatch.record.id === latest.id,
+    )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
+    const replaysJunctionNoIdProfileTimestamp = indexedProviderMatch !== undefined
+      && isJunctionNoIdProfileEqualRevisionTimestampReplay(
+        indexedProviderMatch.indexedRecord,
+        entry.record,
+      );
+    if (replaysJunctionNoIdProfileTimestamp) {
+      skippedDuplicateCount += 1;
+      retainedPreparedIds.add(entry.record.id);
+      recordsByEntryIndex.set(entryIndex, latest);
+      continue;
+    }
+    const matchesIndexedProviderContent = indexedProviderMatch !== undefined
+      && deviceEventContentKey(indexedProviderMatch.indexedRecord)
+        === deviceEventContentKey(entry.record);
+    const indexedSourceVersionComparison = indexedProviderMatch
+      ? compareIncomingExternalRefVersion(
+          indexedProviderMatch.indexedExternalRef,
+          externalRef,
+        )
+      : null;
+    const migratesJunctionStableProfileTimestamp = indexedProviderMatch !== undefined
+      && isJunctionStableProfileCreatedAtTimestampMigration(
+        indexedProviderMatch.indexedRecord,
+        entry.record,
+      );
+    const retainsDeletedJunctionStableProfile = isMemberDeletedJunctionStableProfile(
+      latest,
+      entry.record,
+    );
+    if (
+      isDeletedEventSpineRecord(latest)
+      && (migratesJunctionStableProfileTimestamp || retainsDeletedJunctionStableProfile)
+    ) {
+      skippedDuplicateCount += 1;
+      retainedPreparedIds.add(entry.record.id);
+      recordsByEntryIndex.set(entryIndex, latest);
+      continue;
+    }
+
+    const authoritativeSet = authoritativeEventSets.find((set) =>
+      externalRef.system === set.system
+      && externalRef.resourceType === set.resourceType
+      && externalRef.resourceId === set.resourceId
+      && externalRef.facet !== undefined
+      && set.currentFacets.has(externalRef.facet)
+    );
+    if (authoritativeSet) {
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        matchedEntries.find((match) => match.refKey === refKey)?.indexedMatch.indexedExternalRef
+          ?? matchedEntries[0]?.indexedMatch.indexedExternalRef
+          ?? latest.externalRef
+          ?? externalRef,
+        externalRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+        skippedDuplicateCount += 1;
+        recordsByEntryIndex.set(entryIndex, latest);
+        continue;
+      }
+      if (
+        sourceVersionComparison === 0
+        && (
+          isDeletedEventSpineRecord(latest)
+          || deviceEventContentKey(latest) !== deviceEventContentKey(entry.record)
+        )
+        && !matchesIndexedProviderContent
+        && !migratesJunctionStableProfileTimestamp
+      ) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Authoritative device event externalRef "${externalRef.system}/${externalRef.resourceType}/` +
+            `${externalRef.resourceId}#${externalRef.facet}" has conflicting content for source revision ` +
+            `"${authoritativeSet.version}"; nothing was imported.`,
+        );
+      }
     }
 
     // externalRef identity does not include kind. Event spines are kind-stable,
@@ -2919,25 +4589,93 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
     }
 
-    if (deviceEventContentKey(latest) === deviceEventContentKey(entry.record)) {
-      skippedDuplicateCount += 1;
-      retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
-      continue;
-    }
-
-    const indexedProviderMatch = matchedEntries.find(
-      (match) => match.indexedMatch.record.id === latest.id,
-    )?.indexedMatch ?? matchedEntries[0]?.indexedMatch;
+    // An unversioned member declared current by this batch's authoritative set
+    // reasserts a retracted facet in serialized arrival order rather than
+    // treating the tombstone's identical content as an exact replay. Ordinary
+    // versionless deliveries without complete-set authority never resurrect.
+    // Only provider-owned authoritative-set retractions may be reasserted.
+    // Their tombstones carry the set's explicit version marker on the external
+    // reference, while a member deletion preserves the member's unversioned
+    // reference and must stay deleted under authoritative replay.
+    const reassertsUnversionedSetMember = Boolean(
+      authoritativeSet
+      && indexedSourceVersionComparison === null
+      && isDeletedEventSpineRecord(latest)
+      && latest.source === "device"
+      && latest.externalRef?.version !== undefined,
+    );
     if (
-      indexedProviderMatch
-      && deviceEventContentKey(indexedProviderMatch.indexedRecord)
-        === deviceEventContentKey(entry.record)
+      deviceEventContentKey(latest) === deviceEventContentKey(entry.record)
+      && (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0)
+      && !reassertsUnversionedSetMember
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
+    }
+
+    if (matchesIndexedProviderContent && !reassertsUnversionedSetMember) {
+      const historicalUserEditMatch = matchedEntries.find((match) =>
+        hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
+      );
+      if (
+        historicalUserEditMatch
+        && indexedSourceVersionComparison !== null
+        && indexedSourceVersionComparison > 0
+      ) {
+        const providerRevision = Math.max(
+          eventSpineRevision(latest),
+          index.maxRevisionById.get(latest.id) ?? 0,
+        ) + 1;
+        const providerBaseline: EventRecord = {
+          ...entry.record,
+          id: latest.id,
+          lifecycle: buildEventSpineLifecycle(providerRevision),
+        };
+        const retainedMemberRevision: EventRecord = {
+          ...latest,
+          ...(migratesJunctionNoIdProfileIdentity
+            ? { externalRef, dataOrigin: entry.record.dataOrigin }
+            : {}),
+          lifecycle: buildEventSpineLifecycle(providerRevision + 1),
+        };
+        const retainedMemberPath = historicalUserEditMatch.indexedMatch.relativePath
+          || toEventLedgerFile(latest.occurredAt);
+        forceAppendIds.add(latest.id);
+        index.latestByRefKey.set(refKey, {
+          indexedExternalRef: externalRef,
+          indexedRecord: providerBaseline,
+          relativePath: retainedMemberPath,
+          record: retainedMemberRevision,
+        });
+        for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
+          const currentMatch = index.latestByRefKey.get(matchedRefKey);
+          if (
+            matchedRefKey !== refKey
+            && indexedMatch.record.id === latest.id
+            && currentMatch?.record.id === latest.id
+          ) {
+            index.latestByRefKey.delete(matchedRefKey);
+          }
+        }
+        index.maxRevisionById.set(latest.id, providerRevision + 1);
+        appendEntries.push({ relativePath: entry.relativePath, record: providerBaseline });
+        appendEntries.push({
+          relativePath: retainedMemberPath,
+          record: retainedMemberRevision,
+        });
+        appendRecordIdByPreparedRecordId.set(entry.record.id, providerBaseline.id);
+        recordsByEntryIndex.set(entryIndex, retainedMemberRevision);
+        supersededCount += 1;
+        continue;
+      }
+      if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        recordsByEntryIndex.set(entryIndex, latest);
+        continue;
+      }
     }
 
     if (entry.externalRefUpdatePolicy === "immutable") {
@@ -2978,7 +4716,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       if (sourceVersionComparison === 0) {
@@ -3003,7 +4741,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       const sleepTypeBaselineRevision = sourceVersionComparison === 0
@@ -3040,7 +4778,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
     }
@@ -3052,37 +4790,55 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
-    if (isDeletedEventSpineRecord(latest)) {
+    const replaysProviderOwnedRetractionWithoutSetAuthority = Boolean(
+      isDeletedEventSpineRecord(latest)
+      && latest.source === "device"
+      && latest.externalRef?.version !== undefined
+      && externalRef.version === undefined
+      && !authoritativeSet,
+    );
+    if (replaysProviderOwnedRetractionWithoutSetAuthority) {
+      skippedDuplicateCount += 1;
+      retainedPreparedIds.add(entry.record.id);
+      recordsByEntryIndex.set(entryIndex, latest);
+      continue;
+    }
+
+    if (isDeletedEventSpineRecord(latest) && !reassertsUnversionedSetMember) {
+      // A member-authored deletion tombstone (unversioned reference) stays
+      // dead under authoritative replay: no append, no index change, so a
+      // later empty-then-populated cadence cannot launder the deletion away.
+      if (authoritativeSet && indexedSourceVersionComparison === null) {
+        skippedDuplicateCount += 1;
+        retainedPreparedIds.add(entry.record.id);
+        recordsByEntryIndex.set(entryIndex, latest);
+        continue;
+      }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
-      records.push(entry.record);
+      recordsByEntryIndex.set(entryIndex, entry.record);
       continue;
     }
+    // A member declared current by this batch's authoritative set falls
+    // through to the superseding append below, so the reassertion lands as
+    // the next serialized event-spine revision over the retraction tombstone.
 
     if (shouldKeepExistingJunctionSleepStageSummaryObservation(latest, entry.record)) {
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
     const historicalUserEditMatch = matchedEntries.find((match) =>
       hasHistoricalExternalRefUserAuthoredChanges(match.indexedMatch)
     );
-    if (historicalUserEditMatch) {
-      throw new VaultError(
-        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-        `Event externalRef "${externalRef.system}/${externalRef.resourceType}/${externalRef.resourceId}` +
-          `${externalRef.facet ? `#${externalRef.facet}` : ""}" matched a historical provider identity ` +
-          "whose latest event revision contains user-authored changes; merge must be repaired explicitly.",
-      );
-    }
 
     const revision = Math.max(
       eventSpineRevision(latest),
@@ -3093,9 +4849,41 @@ async function reconcileDeviceEventEntriesByExternalRef(
       id: latest.id,
       lifecycle: buildEventSpineLifecycle(revision),
     };
+    const migratesRetainedMemberOccurrence = migratesJunctionStableProfileTimestamp
+      && indexedProviderMatch !== undefined
+      && latest.occurredAt === indexedProviderMatch.indexedRecord.occurredAt
+      && latest.dayKey === indexedProviderMatch.indexedRecord.dayKey;
+    const retainedMemberRevision = historicalUserEditMatch
+      ? {
+          ...latest,
+          ...(migratesJunctionStableProfileTimestamp
+            ? {
+                ...(migratesRetainedMemberOccurrence
+                  ? { occurredAt: entry.record.occurredAt, dayKey: entry.record.dayKey }
+                  : {}),
+                externalRef,
+                dataOrigin: entry.record.dataOrigin,
+              }
+            : migratesJunctionNoIdProfileIdentity
+              ? { externalRef, dataOrigin: entry.record.dataOrigin }
+              : {}),
+          lifecycle: buildEventSpineLifecycle(revision + 1),
+        }
+      : null;
+    const retainedMemberPath = migratesRetainedMemberOccurrence
+      ? entry.relativePath
+      : historicalUserEditMatch?.indexedMatch.relativePath
+        || toEventLedgerFile(latest.occurredAt);
 
     forceAppendIds.add(latest.id);
-    index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(superseding, externalRef));
+    index.latestByRefKey.set(refKey, retainedMemberRevision
+      ? {
+          indexedExternalRef: externalRef,
+          indexedRecord: superseding,
+          relativePath: retainedMemberPath,
+          record: retainedMemberRevision,
+        }
+      : toIndexedExternalRefMatch(superseding, externalRef));
     for (const { refKey: matchedRefKey, indexedMatch } of matchedEntries) {
       const currentMatch = index.latestByRefKey.get(matchedRefKey);
       if (
@@ -3106,12 +4894,111 @@ async function reconcileDeviceEventEntriesByExternalRef(
         index.latestByRefKey.delete(matchedRefKey);
       }
     }
-    index.maxRevisionById.set(latest.id, revision);
+    index.maxRevisionById.set(latest.id, retainedMemberRevision ? revision + 1 : revision);
     appendEntries.push({ relativePath: entry.relativePath, record: superseding });
+    if (retainedMemberRevision) {
+      appendEntries.push({ relativePath: retainedMemberPath, record: retainedMemberRevision });
+    }
     appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
-    records.push(superseding);
+    recordsByEntryIndex.set(entryIndex, retainedMemberRevision ?? superseding);
     supersededCount += 1;
   }
+
+  for (const set of authoritativeEventSets) {
+    const ownsFacet = (facet: string): boolean => set.facetPrefixes.some((prefix) =>
+      facet === prefix || facet.startsWith(`${prefix}-`)
+    );
+    const candidates = [...index.latestByRefKey.entries()].filter(([, match]) => {
+      const externalRef = match.record.externalRef;
+      return externalRef?.system === set.system
+        && externalRef.resourceType === set.resourceType
+        && externalRef.resourceId === set.resourceId
+        && typeof externalRef.facet === "string"
+        && ownsFacet(externalRef.facet)
+        && !set.currentFacets.has(externalRef.facet)
+        && !isDeletedEventSpineRecord(match.record);
+    });
+
+    for (const [refKey, latestMatch] of candidates) {
+      const latest = latestMatch.record;
+      const latestRef = latest.externalRef;
+      if (!latestRef?.facet) {
+        continue;
+      }
+      const incomingRef: ExternalRef = { ...latestRef, version: set.version };
+      const sourceVersionComparison = compareIncomingExternalRefVersion(
+        latestMatch.indexedExternalRef,
+        incomingRef,
+      );
+      if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
+        continue;
+      }
+      if (
+        sourceVersionComparison === 0
+        && isDeletedEventSpineRecord(latestMatch.indexedRecord)
+      ) {
+        continue;
+      }
+      if (sourceVersionComparison === 0) {
+        throw new VaultError(
+          "EVENT_SOURCE_REVISION_CONFLICT",
+          `Authoritative device event externalRef "${set.system}/${set.resourceType}/` +
+            `${set.resourceId}#${latestRef.facet}" has conflicting membership for source revision ` +
+            `"${set.version}"; nothing was imported.`,
+        );
+      }
+      const hasMemberEdit = hasHistoricalExternalRefUserAuthoredChanges(latestMatch);
+
+      const revision = Math.max(
+        eventSpineRevision(latest),
+        index.maxRevisionById.get(latest.id) ?? 0,
+      ) + 1;
+      const tombstone: EventRecord = {
+        ...latestMatch.indexedRecord,
+        source: "device",
+        recordedAt: set.version,
+        externalRef: incomingRef,
+        lifecycle: buildEventSpineLifecycle(revision, "deleted"),
+      };
+      const retainedMemberRevision = hasMemberEdit
+        ? {
+            ...latest,
+            lifecycle: buildEventSpineLifecycle(revision + 1),
+          }
+        : null;
+      const latestPath = latestMatch.relativePath || toEventLedgerFile(latest.occurredAt);
+
+      forceAppendIds.add(latest.id);
+      index.latestByRefKey.set(
+        refKey,
+        retainedMemberRevision
+          ? {
+              indexedExternalRef: incomingRef,
+              indexedRecord: tombstone,
+              relativePath: latestPath,
+              record: retainedMemberRevision,
+            }
+          : toIndexedExternalRefMatch(tombstone, incomingRef, latestPath),
+      );
+      index.maxRevisionById.set(latest.id, retainedMemberRevision ? revision + 1 : revision);
+      appendEntries.push({ relativePath: latestPath, record: tombstone });
+      if (retainedMemberRevision) {
+        appendEntries.push({ relativePath: latestPath, record: retainedMemberRevision });
+      }
+      retractedCount += 1;
+    }
+  }
+
+  const records = entries.map((entry, entryIndex) => {
+    const record = recordsByEntryIndex.get(entryIndex);
+    if (!record) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Device event reconciliation did not produce a result for "${entry.record.id}".`,
+      );
+    }
+    return record;
+  });
 
   return {
     appendEntries,
@@ -3121,6 +5008,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     retainedPreparedIds,
     skippedDuplicateCount,
     supersededCount,
+    retractedCount,
   };
 }
 
@@ -3624,6 +5512,7 @@ function buildDeviceBatchAuditSummary(input: {
   sampleCount: number;
   skippedDuplicateCount: number;
   supersededCount: number;
+  retractedCount: number;
 }): string {
   const dedupeNotes: string[] = [];
 
@@ -3633,6 +5522,10 @@ function buildDeviceBatchAuditSummary(input: {
 
   if (input.supersededCount > 0) {
     dedupeNotes.push(`${input.supersededCount} event(s) updated in place by externalRef`);
+  }
+
+  if (input.retractedCount > 0) {
+    dedupeNotes.push(`${input.retractedCount} omitted authoritative event(s) retracted`);
   }
 
   const dedupeSuffix = dedupeNotes.length > 0 ? ` (${dedupeNotes.join(", ")})` : "";
@@ -3692,6 +5585,7 @@ function prepareDeviceBatchPlan({
   events = [],
   samples = [],
   evidenceParts = [],
+  authoritativeEventSets = [],
   ingestReceipt,
   provenance,
 }: Omit<ImportDeviceBatchInput, "vaultRoot"> & {
@@ -3706,6 +5600,7 @@ function prepareDeviceBatchPlan({
     events,
     samples,
     evidenceParts,
+    authoritativeEventSets,
     ingestReceipt,
     provenance,
   });
@@ -3748,6 +5643,18 @@ function prepareDeviceBatchPlan({
       receipt: compactedIngestReceipt ?? null,
       eventIds: normalizedInputs.events.map(({ recordId }) => recordId),
       sampleIds: normalizedInputs.samples.map(({ recordId }) => recordId),
+      ...(normalizedInputs.authoritativeEventSets.length === 0
+        ? {}
+        : {
+            authoritativeEventSets: normalizedInputs.authoritativeEventSets.map((set) => ({
+              system: set.system,
+              resourceType: set.resourceType,
+              resourceId: set.resourceId,
+              version: set.version,
+              facetPrefixes: set.facetPrefixes,
+              currentFacets: [...set.currentFacets].sort(),
+            })),
+          }),
       evidenceParts: fingerprint,
     }),
   );
@@ -3771,7 +5678,496 @@ function prepareDeviceBatchPlan({
     evidenceRolesByPreparedRecordId: eventPlan.evidenceRolesByPreparedRecordId,
     preparedSamples,
     preparedEvidenceParts,
+    authoritativeEventSets: normalizedInputs.authoritativeEventSets,
   };
+}
+
+async function hashSourceFile(sourcePath: string): Promise<CommittedPayloadReceipt> {
+  const hash = createHash("sha256");
+  let byteLength = 0;
+  await new Promise<void>((resolve, reject) => {
+    const stream = createReadStream(sourcePath);
+    stream.on("data", (chunk) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      byteLength += bytes.byteLength;
+      hash.update(bytes);
+    });
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+  return { byteLength, sha256: hash.digest("hex") };
+}
+
+interface ExactDocumentSource {
+  result: ImportDocumentResult & { created: false };
+  rawRef: string;
+}
+
+const DOCUMENT_SOURCE_AUDIT_COMMAND = "core.importDocument";
+const WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND = "core.importEventBatch.sourceRawRefOnce";
+
+function buildRawSourceReceiptTarget(
+  sourceReceipt: CommittedPayloadReceipt,
+): string {
+  return `raw-source-v1:sha256:${sourceReceipt.sha256}:bytes:${sourceReceipt.byteLength}`;
+}
+
+interface ExactDocumentSourceSet {
+  activityEventIdsByRawRef: ReadonlyMap<string, ReadonlySet<string>>;
+  completionAuditEventIds: ReadonlySet<string>;
+  deletedExactSourceExists: boolean;
+  liveSources: ExactDocumentSource[];
+}
+
+function rejectDamagedExactDocumentEvidence(input: {
+  documentId: string;
+  manifestPath?: string;
+  reason: string;
+}): never {
+  throw new VaultError(
+    "RAW_MANIFEST_INVALID",
+    "Preserved exact source evidence is incomplete or damaged. Exact reuse will not create a replacement identity.",
+    {
+      documentId: input.documentId,
+      ...(input.manifestPath ? { manifestPath: input.manifestPath } : {}),
+      reason: input.reason,
+    },
+  );
+}
+
+async function inspectExactSourceAuditEvidence(input: {
+  vaultRoot: string;
+  sourceReceipt: CommittedPayloadReceipt;
+}): Promise<{
+  completionTargetEventIds: ReadonlySet<string>;
+  documentIdsByEventId: ReadonlyMap<string, string>;
+}> {
+  const targetId = buildRawSourceReceiptTarget(input.sourceReceipt);
+  const auditPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.auditDirectory, {
+    extension: ".jsonl",
+  });
+  const completionTargetEventIds = new Set<string>();
+  const documentIdsByEventId = new Map<string, string>();
+
+  for (const relativePath of auditPaths) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const parsed = safeParseContract(auditRecordSchema, rawRecord);
+      if (
+        !parsed.success
+        || parsed.data.status !== "success"
+        || parsed.data.targetIds?.includes(targetId) !== true
+      ) {
+        continue;
+      }
+      const targetIds = parsed.data.targetIds;
+      if (parsed.data.commandName === DOCUMENT_SOURCE_AUDIT_COMMAND) {
+        let documentId: string;
+        let eventId: string;
+        try {
+          if (targetIds.length !== 3 || targetIds[0] !== targetId) {
+            throw new TypeError("source receipt audit must retain exactly one owner");
+          }
+          documentId = assertContractId(targetIds[1], ID_PREFIXES.document, "documentId");
+          eventId = assertContractId(targetIds[2], ID_PREFIXES.event, "eventId");
+        } catch {
+          rejectDamagedExactDocumentEvidence({
+            documentId: typeof targetIds[1] === "string" ? targetIds[1] : "unknown",
+            reason: "source receipt audit does not retain one valid document owner",
+          });
+        }
+        const existing = documentIdsByEventId.get(eventId);
+        if (existing && existing !== documentId) {
+          rejectDamagedExactDocumentEvidence({
+            documentId,
+            reason: "source receipt audit assigns one event to multiple document owners",
+          });
+        }
+        documentIdsByEventId.set(eventId, documentId);
+        continue;
+      }
+      if (parsed.data.commandName === WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND) {
+        for (const candidate of targetIds.slice(1)) {
+          try {
+            completionTargetEventIds.add(assertContractId(candidate, ID_PREFIXES.event, "eventId"));
+          } catch {
+            // The bounded audit target list may contain non-event context.
+          }
+        }
+      }
+    }
+  }
+
+  return { completionTargetEventIds, documentIdsByEventId };
+}
+
+async function inspectExactDocumentSourceSet(input: {
+  vaultRoot: string;
+  sourceReceipt: CommittedPayloadReceipt;
+}): Promise<ExactDocumentSourceSet> {
+  const auditEvidence = await inspectExactSourceAuditEvidence(input);
+  const emptyActivityIndex = new Map<string, ReadonlySet<string>>();
+  if (
+    auditEvidence.documentIdsByEventId.size === 0
+    && auditEvidence.completionTargetEventIds.size === 0
+  ) {
+    return {
+      activityEventIdsByRawRef: emptyActivityIndex,
+      completionAuditEventIds: new Set<string>(),
+      deletedExactSourceExists: false,
+      liveSources: [],
+    };
+  }
+
+  const shardPaths = await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, {
+    extension: ".jsonl",
+  });
+  const entries: EventSpineEntry<DocumentEventRecord>[] = [];
+  const activityEventIds = new Set<string>();
+  const activityEventIdsByRawRef = new Map<string, Set<string>>();
+
+  for (const relativePath of shardPaths) {
+    for (const rawRecord of await readJsonlRecords({ vaultRoot: input.vaultRoot, relativePath })) {
+      const parsed = safeParseContract(eventRecordSchema, rawRecord);
+      const rawEventId = typeof rawRecord === "object"
+        && rawRecord !== null
+        && "id" in rawRecord
+        && typeof rawRecord.id === "string"
+        ? rawRecord.id
+        : null;
+      if (!parsed.success) {
+        if (rawEventId && auditEvidence.documentIdsByEventId.has(rawEventId)) {
+          rejectDamagedExactDocumentEvidence({
+            documentId: auditEvidence.documentIdsByEventId.get(rawEventId) ?? "unknown",
+            reason: "source receipt audit points to a contract-invalid document event",
+          });
+        }
+        continue;
+      }
+      if (
+        parsed.data.kind === "document"
+        && auditEvidence.documentIdsByEventId.has(parsed.data.id)
+      ) {
+        entries.push({ relativePath, record: parsed.data });
+      }
+      if (parsed.data.kind === "activity_session") {
+        activityEventIds.add(parsed.data.id);
+        for (const rawRef of collectEventRawReferencePaths(parsed.data)) {
+          const ids = activityEventIdsByRawRef.get(rawRef) ?? new Set<string>();
+          ids.add(parsed.data.id);
+          activityEventIdsByRawRef.set(rawRef, ids);
+        }
+      }
+    }
+  }
+
+  const completionAuditEventIds = new Set(
+    [...auditEvidence.completionTargetEventIds].filter((eventId) => activityEventIds.has(eventId)),
+  );
+  if (auditEvidence.documentIdsByEventId.size === 0) {
+    if (completionAuditEventIds.size > 0) {
+      rejectDamagedExactDocumentEvidence({
+        documentId: "unknown",
+        reason: "whole-source completion survives without its source receipt owner",
+      });
+    }
+    return {
+      activityEventIdsByRawRef,
+      completionAuditEventIds,
+      deletedExactSourceExists: false,
+      liveSources: [],
+    };
+  }
+
+  // Exact-source identity needs the latest revision even when it is a
+  // tombstone. The ordinary collapse helper intentionally removes deleted
+  // records, which would make a deleted source look like it never existed.
+  const latestDocuments = new Map<string, EventSpineEntry<DocumentEventRecord>>();
+  for (const entry of entries) {
+    const current = latestDocuments.get(entry.record.id);
+    if (!current || compareEventSpineEntries(current, entry) < 0) {
+      latestDocuments.set(entry.record.id, entry);
+    }
+  }
+  // The content-derived import audit owns source recreation identity. Its
+  // document/event targets select the lifecycle row; that row derives the one
+  // manifest and raw artifact to verify. No vault-wide manifest discovery or
+  // compatibility reader participates in the decision.
+  const claims = new Map<string, {
+    entry: EventSpineEntry<DocumentEventRecord>;
+    raw: EventAttachment;
+  }>();
+  for (const [eventId, documentId] of auditEvidence.documentIdsByEventId) {
+    let origin: EventSpineEntry<DocumentEventRecord> | null = null;
+    let raw: EventAttachment | null = null;
+    for (const entry of entries) {
+      if (entry.record.id !== eventId || entry.record.documentId !== documentId) {
+        continue;
+      }
+      const candidateRaw = entry.record.attachments?.find((attachment) =>
+        attachment.role === "source_document"
+        && attachment.sha256 === input.sourceReceipt.sha256
+      );
+      if (
+        candidateRaw
+        && (!origin || compareEventSpineEntries(entry, origin) < 0)
+      ) {
+        origin = entry;
+        raw = candidateRaw;
+      }
+    }
+    if (!origin || !raw) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        reason: "source receipt audit has no matching canonical document event",
+      });
+    }
+    claims.set(eventId, { entry: origin, raw });
+  }
+
+  const verified = new Map<string, {
+    latest: EventSpineEntry<DocumentEventRecord>;
+    manifestPath: string;
+    raw: EventAttachment;
+  }>();
+  for (const claim of [...claims.values()]
+    .sort((left, right) => left.entry.record.id.localeCompare(right.entry.record.id))) {
+    const documentId = claim.entry.record.documentId;
+    const manifestPath = resolveRawManifestPath({
+      artifacts: [claim.raw],
+      importId: documentId,
+      importedAt: claim.entry.record.recordedAt,
+    });
+    const latest = latestDocuments.get(claim.entry.record.id);
+    if (
+      !latest
+      || latest.record.documentId !== documentId
+      || !claim.entry.record.rawRefs?.includes(claim.raw.relativePath)
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "canonical document history does not retain one stable source owner",
+      });
+    }
+
+    let manifestText: string;
+    try {
+      manifestText = await readUtf8File(input.vaultRoot, manifestPath);
+    } catch (error) {
+      if (error instanceof VaultError && error.code === "VAULT_FILE_MISSING") {
+        rejectDamagedExactDocumentEvidence({
+          documentId,
+          manifestPath,
+          reason: "required raw manifest is missing",
+        });
+      }
+      throw error;
+    }
+
+    let manifest: ReturnType<typeof parseRawImportManifest>;
+    try {
+      manifest = parseRawImportManifest(JSON.parse(manifestText));
+    } catch {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "required raw manifest is malformed",
+      });
+    }
+
+    const sourceArtifacts = manifest.artifacts.filter((artifact) =>
+      artifact.role === "source_document"
+    );
+    const artifact = sourceArtifacts[0];
+    let resolvedManifestPath: string | null = null;
+    try {
+      resolvedManifestPath = resolveRawManifestPath({
+        artifacts: manifest.artifacts,
+        rawDirectory: manifest.rawDirectory,
+        importId: manifest.importId,
+        importedAt: manifest.importedAt,
+      });
+    } catch {
+      // The shared resolver supplies the semantic owner/directory check below.
+    }
+    if (
+      manifest.importKind !== "document"
+      || manifest.importId !== documentId
+      || manifest.importedAt !== claim.entry.record.recordedAt
+      || manifest.owner.kind !== "document"
+      || manifest.owner.id !== documentId
+      || !rawDirectoryMatchesOwner(manifest.rawDirectory, manifest.owner)
+      || resolvedManifestPath !== manifestPath
+      || sourceArtifacts.length !== 1
+      || !artifact
+      || artifact.relativePath !== claim.raw.relativePath
+      || artifact.originalFileName !== claim.raw.originalFileName
+      || artifact.mediaType !== claim.raw.mediaType
+      || artifact.byteSize !== input.sourceReceipt.byteLength
+      || artifact.sha256 !== input.sourceReceipt.sha256
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "raw manifest does not match its canonical document owner",
+      });
+    }
+    const integrity = await statAndHashVaultFile(input.vaultRoot, artifact.relativePath);
+    if (!integrity) {
+      throw new VaultError(
+        "RAW_REFERENCE_MISSING",
+        "Preserved exact source evidence is missing its immutable raw artifact. Exact reuse will not create a replacement identity.",
+        { documentId, manifestPath, relativePath: artifact.relativePath },
+      );
+    }
+    if (
+      integrity.byteSize !== artifact.byteSize
+      || integrity.sha256 !== artifact.sha256
+    ) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "raw artifact bytes do not match the immutable manifest",
+      });
+    }
+
+    const latestRaw = latest.record.attachments?.find((attachment) =>
+      attachment.role === "source_document"
+      && attachment.relativePath === artifact.relativePath
+      && attachment.sha256 === artifact.sha256
+    );
+    if (!latest.record.rawRefs?.includes(artifact.relativePath) || !latestRaw) {
+      rejectDamagedExactDocumentEvidence({
+        documentId,
+        manifestPath,
+        reason: "latest document lifecycle no longer retains its source attachment",
+      });
+    }
+    verified.set(claim.entry.record.id, {
+      latest,
+      manifestPath,
+      raw: claim.raw,
+    });
+  }
+
+  // A deleted identity must fence the whole exact-byte equivalence set. An
+  // ordinary import may have created a live alias later, but returning that
+  // alias would reset raw-reference-scoped workout completion.
+  const deletedExactSourceExists = [...verified.values()].some(({ latest }) =>
+    isDeletedEventSpineRecord(latest.record)
+  );
+
+  const liveSources: ExactDocumentSource[] = [];
+  for (const stored of verified.values()) {
+    const entry = stored.latest;
+    if (isDeletedEventSpineRecord(entry.record)) {
+      continue;
+    }
+    liveSources.push({
+      rawRef: stored.raw.relativePath,
+      result: {
+        created: false,
+        documentId: entry.record.documentId,
+        raw: {
+          relativePath: stored.raw.relativePath,
+          originalFileName: stored.raw.originalFileName,
+          mediaType: stored.raw.mediaType,
+        },
+        event: entry.record,
+        eventPath: entry.relativePath,
+        auditPath: null,
+        manifestPath: stored.manifestPath,
+      },
+    });
+  }
+
+  return {
+    activityEventIdsByRawRef,
+    completionAuditEventIds,
+    deletedExactSourceExists,
+    liveSources,
+  };
+}
+
+async function findExactDocumentImport(input: {
+  vaultRoot: string;
+  sourceReceipt: CommittedPayloadReceipt;
+}): Promise<(ImportDocumentResult & { created: false }) | null> {
+  const exactSources = await inspectExactDocumentSourceSet(input);
+  if (exactSources.deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Exact reuse will not create a replacement identity.",
+    );
+  }
+  return exactSources.liveSources[0]?.result ?? null;
+}
+
+export const WORKOUT_SOURCE_IMPORT_STATUS_VALUES = [
+  "not_imported",
+  "completed",
+  "partial_conflict",
+] as const;
+
+export type WorkoutSourceImportStatus =
+  (typeof WORKOUT_SOURCE_IMPORT_STATUS_VALUES)[number];
+
+async function inspectWorkoutSourceImportStatus(input: {
+  vaultRoot: string;
+  rawRef: string;
+}): Promise<{ status: WorkoutSourceImportStatus; completionTargetId: string }> {
+  const sourceIntegrity = await statAndHashVaultFile(input.vaultRoot, input.rawRef);
+  if (sourceIntegrity === null) {
+    throw new VaultError(
+      "EVENT_BATCH_SOURCE_RAW_REF_MISSING",
+      "The workout source does not exist as a vault file.",
+    );
+  }
+
+  const sourceReceipt = {
+    byteLength: sourceIntegrity.byteSize,
+    sha256: sourceIntegrity.sha256,
+  };
+  const exactSources = await inspectExactDocumentSourceSet({
+    vaultRoot: input.vaultRoot,
+    sourceReceipt,
+  });
+  if (!exactSources.liveSources.some((source) => source.rawRef === input.rawRef)) {
+    throw new VaultError(
+      "EVENT_BATCH_SOURCE_DOCUMENT_NOT_LIVE",
+      "The workout source is no longer owned by a live source document.",
+    );
+  }
+  if (exactSources.deletedExactSourceExists) {
+    throw new VaultError(
+      "DOCUMENT_EXACT_SOURCE_DELETED",
+      "An exact source document existed but was deleted. Workout import will not reuse a replacement identity.",
+    );
+  }
+
+  const completionTargetId = buildRawSourceReceiptTarget(sourceReceipt);
+  const exactRawRefs = new Set(exactSources.liveSources.map((source) => source.rawRef));
+  const sourceEventIds = new Set<string>();
+  for (const rawRef of exactRawRefs) {
+    for (const eventId of exactSources.activityEventIdsByRawRef.get(rawRef) ?? []) {
+      sourceEventIds.add(eventId);
+    }
+  }
+  if ([...exactSources.completionAuditEventIds].some((eventId) => sourceEventIds.has(eventId))) {
+    return { status: "completed", completionTargetId };
+  }
+
+  return {
+    status: sourceEventIds.size > 0 ? "partial_conflict" : "not_imported",
+    completionTargetId,
+  };
+}
+
+export async function resolveWorkoutSourceImportStatus(input: {
+  vaultRoot: string;
+  rawRef: string;
+}): Promise<WorkoutSourceImportStatus> {
+  return (await inspectWorkoutSourceImportStatus(input)).status;
 }
 
 export async function importDocument({
@@ -3781,8 +6177,26 @@ export async function importDocument({
   title,
   note,
   source = "import",
+  reuseExact = false,
 }: ImportDocumentInput): Promise<ImportDocumentResult> {
   const vault = await loadVault({ vaultRoot });
+  const sourceReceipt = await hashSourceFile(sourcePath);
+  if (reuseExact) {
+    const existing = await findExactDocumentImport({ vaultRoot, sourceReceipt });
+    if (existing) {
+      const verifiedSourceReceipt = await hashSourceFile(sourcePath);
+      if (
+        verifiedSourceReceipt.byteLength !== sourceReceipt.byteLength
+        || verifiedSourceReceipt.sha256 !== sourceReceipt.sha256
+      ) {
+        throw new VaultError(
+          "DOCUMENT_SOURCE_CHANGED",
+          "Document source changed while exact reuse was being verified.",
+        );
+      }
+      return existing;
+    }
+  }
   const documentId = generateRecordId(ID_PREFIXES.document);
   const eventId = generateRecordId(ID_PREFIXES.event);
   const preparedAttachments = prepareEventAttachments({
@@ -3794,6 +6208,7 @@ export async function importDocument({
         role: "source_document",
         kind: "document",
         sourcePath,
+        expectedSourceReceipt: sourceReceipt,
       },
     ],
   });
@@ -3842,6 +6257,19 @@ export async function importDocument({
       if (!stagedAttachments) {
         throw new VaultError("EVENT_ATTACHMENTS_MISSING", "Document import expected one staged attachment.");
       }
+      const stagedSourceAttachment = stagedAttachments.attachments.find((attachment) =>
+        attachment.role === "source_document"
+      );
+      if (!stagedSourceAttachment) {
+        throw new VaultError(
+          "EVENT_ATTACHMENTS_MISSING",
+          "Document import expected one source attachment receipt.",
+        );
+      }
+      const sourceTargetId = buildRawSourceReceiptTarget({
+        byteLength: sourceReceipt.byteLength,
+        sha256: stagedSourceAttachment.sha256,
+      });
       const event = prepareStoredEventLedgerEntry(
         {
           ...eventSeed,
@@ -3863,10 +6291,11 @@ export async function importDocument({
         summary: `Imported document ${raw.originalFileName}.`,
         occurredAt,
         files: [raw.relativePath, manifestPath, event.relativePath],
-        targetIds: [documentId, event.record.id],
+        targetIds: [sourceTargetId, documentId, event.record.id],
       });
 
       return {
+        created: true,
         documentId,
         raw,
         event: event.record,
@@ -4519,7 +6948,8 @@ function preparedDeviceEventRetainsCurrentOutput(input: {
   return current !== undefined && (
     isDeletedEventSpineRecord(current)
     || (
-      eventSpineRevision(current) > eventSpineRevision(input.entry.record)
+      current.source !== "device"
+      && eventSpineRevision(current) > eventSpineRevision(input.entry.record)
       && userAuthoredEventStateKey(current) !== userAuthoredEventStateKey(input.entry.record)
     )
   );
@@ -4723,6 +7153,7 @@ export async function importDeviceBatch({
   events = [],
   samples = [],
   evidenceParts = [],
+  authoritativeEventSets = [],
   ingestReceipt,
   provenance,
 }: ImportDeviceBatchInput): Promise<ImportDeviceBatchResult> {
@@ -4737,20 +7168,34 @@ export async function importDeviceBatch({
     events,
     samples,
     evidenceParts,
+    authoritativeEventSets,
     ingestReceipt,
     provenance,
   });
-  const eventTargetShardPaths = [
-    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
-  ].sort();
   const sampleRecords = deviceBatchPlan.preparedSamples.map((entry) => entry.record);
   const sampleAppendPlan = await buildJsonlAppendPlan(vaultRoot, deviceBatchPlan.preparedSamples, {
     dedupeWithinPlan: true,
   });
-  const eventIdentityContext = await buildDeviceEventIdentityContext(
+  const initialEventIdentityContext = await buildDeviceEventIdentityContext(
     vaultRoot,
     deviceBatchPlan.preparedEvents,
+    deviceBatchPlan.authoritativeEventSets,
   );
+  deviceBatchPlan.preparedEvents = resolveJunctionFloatingFallbackEntries(
+    deviceBatchPlan.preparedEvents,
+    initialEventIdentityContext,
+  );
+  const eventIdentityContext: DeviceEventIdentityContext = {
+    index: initialEventIdentityContext.index,
+    legacyReservations: buildLegacyExternalRefReservations(
+      deviceBatchPlan.preparedEvents,
+      initialEventIdentityContext.index,
+    ),
+  };
+  const aliasRepairContext = buildDeviceEventAliasRepairContext(deviceBatchPlan);
+  const eventTargetShardPaths = [
+    ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
+  ].sort();
   const currentEventOwners = mapCurrentDeviceEventOwners(
     deviceBatchPlan.preparedEvents,
     eventIdentityContext,
@@ -4778,6 +7223,7 @@ export async function importDeviceBatch({
     deviceBatchPlan.preparedEvents
       .filter((entry) =>
         baselineRetainedPreparedIds.has(entry.record.id)
+        && !hasJunctionDailyAggregateAliasSplit(entry, eventIdentityContext)
         && (
           currentEventOwners.historicallyDeliveredPreparedIds.has(entry.record.id)
           || (
@@ -4798,6 +7244,9 @@ export async function importDeviceBatch({
     vaultRoot,
     ordinaryReconciliationEntries,
     cloneDeviceEventIdentityContext(eventIdentityContext),
+    new Map(),
+    deviceBatchPlan.authoritativeEventSets,
+    aliasRepairContext,
   );
   const replayRetainedPreparedIds = new Set([
     ...protectedPreparedEventIds,
@@ -5256,6 +7705,9 @@ export async function importDeviceBatch({
           vaultRoot,
           persistenceReconciliationEntries,
           cloneDeviceEventIdentityContext(eventIdentityContext),
+          new Map(),
+          deviceBatchPlan.authoritativeEventSets,
+          aliasRepairContext,
         )
       : currentEventReconciliation;
     const reconciledRecordByPreparedId = new Map(
@@ -5355,7 +7807,7 @@ export async function importDeviceBatch({
       associablePreparedEventIds.has(entry.record.id)
       && persistenceEvidenceRolesByPreparedRecordId.has(entry.record.id)
     );
-    const hasAppendedOutputs = appendedPreparedEventIds.size > 0
+    const hasAppendedOutputs = eventAppendPlan.appendedRecordIds.length > 0
       || sampleAppendPlan.appendedRecordIds.length > 0;
     const eventIdsByEvidenceRole = new Map<string, Set<string>>();
     for (const entry of deviceBatchPlan.preparedEvents) {
@@ -5593,6 +8045,7 @@ export async function importDeviceBatch({
           sampleCount: sampleRecords.length,
           skippedDuplicateCount: eventReconciliation.skippedDuplicateCount,
           supersededCount: eventReconciliation.supersededCount,
+          retractedCount: eventReconciliation.retractedCount,
         }),
         occurredAt: deviceBatchPlan.importedAt,
         files: touchedPaths,
@@ -5611,7 +8064,12 @@ export async function importDeviceBatch({
         importedAt: deviceBatchPlan.importedAt,
         events: canonicalEventRecords,
         samples: sampleRecords,
-        eventShardPaths: eventTargetShardPaths,
+        eventShardPaths: [
+          ...new Set([
+            ...eventTargetShardPaths,
+            ...eventAppendPlan.targetShardPaths,
+          ]),
+        ].sort(),
         sampleShardPaths: sampleAppendPlan.targetShardPaths,
         evidencePartCount: deviceBatchPlan.preparedEvidenceParts.length,
         persistedEvidencePartCount: retainedEvidenceParts.length,
@@ -5625,6 +8083,7 @@ export interface ImportEventPayloadBatchInput {
   vaultRoot: string;
   payloads: readonly LooseRecord[];
   decisions?: never;
+  rejectIfSourceRawRefAlreadyImported?: string;
   apply?: boolean;
   signal?: AbortSignal | null;
 }
@@ -5633,6 +8092,7 @@ export interface ImportEventDecisionBatchInput {
   vaultRoot: string;
   decisions: readonly LooseRecord[];
   payloads?: never;
+  rejectIfSourceRawRefAlreadyImported?: never;
   apply?: boolean;
   signal?: AbortSignal | null;
 }
@@ -5726,6 +8186,15 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
       "Event batch must define exactly one of payloads or decisions.",
     );
   }
+  const sourceRawRef = usesPayloads
+    ? input.rejectIfSourceRawRefAlreadyImported?.trim()
+    : undefined;
+  if (usesPayloads && input.rejectIfSourceRawRefAlreadyImported !== undefined && !sourceRawRef) {
+    throw new VaultError(
+      "EVENT_BATCH_INVALID",
+      "Event batch source raw reference must not be empty.",
+    );
+  }
   const normalizedRows = usesDecisions
     ? normalizeImportEventBatchDecisions(input.decisions, signal)
     : normalizeImportEventBatchPayloads(input.payloads, signal);
@@ -5810,6 +8279,43 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
     );
   }
 
+  let sourceCompletionTargetId: string | null = null;
+  if (sourceRawRef) {
+    const invalidSourceIndexes = decisions.flatMap((decision, index) =>
+      decision.action === "upsert"
+      && decision.entry.record.kind === "activity_session"
+      && decision.entry.record.externalRef === undefined
+      && collectEventRawReferencePaths(decision.entry.record).includes(sourceRawRef)
+        ? []
+        : [index],
+    );
+    if (invalidSourceIndexes.length > 0) {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_ROW_INVALID",
+        "Every event in a source-guarded batch must be an externalRef-free activity session that references the guarded raw source; nothing was imported.",
+        { indexes: invalidSourceIndexes.slice(0, EVENT_BATCH_FAILURE_REPORT_LIMIT) },
+      );
+    }
+
+    const sourceState = await inspectWorkoutSourceImportStatus({
+      vaultRoot,
+      rawRef: sourceRawRef,
+    });
+    if (sourceState.status === "completed") {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_ALREADY_IMPORTED",
+        "The atomic workout import for this exact source already completed; nothing was imported.",
+      );
+    }
+    if (sourceState.status === "partial_conflict") {
+      throw new VaultError(
+        "EVENT_BATCH_SOURCE_PARTIAL_CONFLICT",
+        "This exact source has workout history without a whole-source completion receipt; nothing was imported. Resolve the partial import before retrying.",
+      );
+    }
+    sourceCompletionTargetId = sourceState.completionTargetId;
+  }
+
   signal?.throwIfAborted();
   const reconciliation = await reconcileEventImportDecisionsByExternalRef(
     vaultRoot,
@@ -5861,14 +8367,19 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         vaultRoot,
         batch,
         action: "event_upsert",
-        commandName: "core.importEventBatch",
+        commandName: sourceCompletionTargetId
+          ? WORKOUT_SOURCE_IMPORT_AUDIT_COMMAND
+          : "core.importEventBatch",
         summary: `Imported event batch: ${counts.createdCount} created, ` +
           `${counts.supersededCount} superseded, ` +
           `${counts.retractedCount} retracted, ` +
           `${counts.skippedExistingCount} skipped existing of ${counts.receivedCount} received.`,
         occurredAt,
         files: appendPlan.appendedShardPaths,
-        targetIds: [...new Set(appendPlan.appendedRecordIds)].slice(0, AUDIT_TARGET_ID_LIMIT),
+        targetIds: [
+          ...(sourceCompletionTargetId ? [sourceCompletionTargetId] : []),
+          ...new Set(appendPlan.appendedRecordIds),
+        ].slice(0, AUDIT_TARGET_ID_LIMIT),
       });
 
       return {

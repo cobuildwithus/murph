@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
+  assertNoHostedDirectSubscriptionStripeEffectTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   getPrisma: vi.fn(),
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId: vi.fn(),
@@ -58,6 +59,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/hosted-member-billing-store", () => ({
+  assertNoHostedDirectSubscriptionStripeEffectTx:
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx,
   lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId:
     mocks.lookupHostedMemberStripeBillingRefByStripeSubscriptionScheduleId,
   readHostedMemberStripeBillingRef: mocks.readHostedMemberStripeBillingRef,
@@ -88,6 +91,7 @@ import {
 describe("scheduleHostedBillingPlanSwitchToPulse", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockResolvedValue(undefined);
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
     mocks.requireHostedAppSessionFromRequest.mockResolvedValue({
@@ -164,6 +168,32 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
     mocks.stripe.subscriptionSchedules.update.mockResolvedValue(makeCompatibleSchedule());
     mocks.writeHostedMemberStripeBillingRefTx.mockResolvedValue({
       memberId: "member_123",
+    });
+  });
+
+  test("does not read Stripe while a future effect owns the direct subscription", async () => {
+    mocks.assertNoHostedDirectSubscriptionStripeEffectTx.mockRejectedValueOnce(
+      Object.assign(new Error("Billing is already changing."), {
+        code: "HOSTED_STRIPE_EFFECT_PENDING",
+        retryable: true,
+      }),
+    );
+
+    await expect(scheduleHostedBillingPlanSwitchToPulse({
+      memberId: "member_123",
+      now: new Date("2026-05-06T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "HOSTED_STRIPE_EFFECT_PENDING",
+      retryable: true,
+    });
+
+    expect(mocks.stripe.subscriptions.retrieve).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();
+    expect(mocks.stripe.subscriptionSchedules.update).not.toHaveBeenCalled();
+    expect(mocks.assertNoHostedDirectSubscriptionStripeEffectTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      stripeSubscriptionId: "sub_123",
+      tx: mocks.prismaClient,
     });
   });
 

@@ -72,6 +72,9 @@ import {
 } from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
+import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
+import { ABOUT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
+import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -157,13 +160,17 @@ import {
   DESIGN_USAGE_OFFERS,
   DESIGN_USAGE_MISSION_CONTACT_OPTION,
   GroupFundingSupportersStudy,
+  GroupSponsorshipManagementConfirmationStudy,
 } from "./group-usage-funding-study";
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
 import { ConnectCallbackErrorNotice } from "@/src/components/device-sync/connect-callback-error-notice";
-import { HostedAccountDeletionStatus } from "@/src/components/settings/hosted-data-privacy-settings";
+import {
+  HostedAccountDeletionErrorAlert,
+} from "@/src/components/settings/hosted-data-privacy-settings";
+import { HOSTED_STRIPE_EFFECT_PENDING_MESSAGE } from "@/src/lib/hosted-onboarding/errors";
 import { VitalConnectionDialog } from "../(dashboard)/connect/connect-page-dialogs";
 import {
   EnvironmentCaptureCard,
@@ -643,6 +650,20 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div data-design-component="public-trust-page" id="public-trust-page">
+          <Section title="Public trust page">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production About-page content and responsive editorial hierarchy.
+              The Contact page uses the same component with support-specific copy.
+            </p>
+            <div className="overflow-hidden border border-[#c4a882]/35">
+              <PublicTrustPageContent content={ABOUT_MURPH_CONTENT} />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Dashboard primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Production dashboard destinations in their standard visual hierarchy.
@@ -1003,19 +1024,27 @@ export function ComponentsContent() {
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "processing" }}
+                state={{ baselineValues: "{}", status: "processing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "refreshing" }}
+                state={{
+                  factsAdded: 3,
+                  factsChanged: true,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: true, status: "updated" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: false, status: "updated" }}
+                state={{
+                  factsAdded: 0,
+                  factsChanged: false,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
@@ -1392,10 +1421,11 @@ export function ComponentsContent() {
 
         <Separator />
 
-        <Section title="Account Deletion Status">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <HostedAccountDeletionStatus cleanupPending={false} />
-            <HostedAccountDeletionStatus cleanupPending />
+        <Section title="Account Deletion Recovery Alert">
+          <div className="max-w-md">
+            <HostedAccountDeletionErrorAlert
+              message={HOSTED_STRIPE_EFFECT_PENDING_MESSAGE}
+            />
           </div>
         </Section>
 
@@ -1608,7 +1638,9 @@ export function ComponentsContent() {
             and send card entry or verification to Stripe only when needed.
             Family owners reuse the standard amount dialog with an exact member
             label and status-only recovery when another target owns the active
-            checkout. Credit is added only after Stripe confirms payment.
+            checkout. Personal and Family success returns refresh the meter
+            quietly; only a failed or unresolved return opens compact recovery.
+            Credit is added only after Stripe confirms payment.
           </p>
           <div className="grid gap-6 xl:grid-cols-2 2xl:grid-cols-4">
             <div
@@ -1623,8 +1655,8 @@ export function ComponentsContent() {
                 Keep the conversation going
               </p>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Add one-time usage with a saved card or continue securely in
-                Stripe when needed.
+                Add usage with a saved card or continue securely in Stripe when
+                needed.
               </p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <HostedUsageTopUpDialog
@@ -1704,7 +1736,7 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                inert
+                initialSelectedMonthlyCapMinor={2_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,
@@ -1716,6 +1748,7 @@ export function ComponentsContent() {
                 }}
               />
             </div>
+            <GroupSponsorshipManagementConfirmationStudy />
             <div
               className="rounded-3xl border border-border bg-card p-6"
               data-design-component="family-member-usage-top-up"
@@ -1924,7 +1957,7 @@ export function ComponentsContent() {
                   </span>
                 </div>
                 <HostedEmailMurphContactDialog
-                  murphEmailAddress="murph@mail.withmurph.ai"
+                  murphEmailAddress={MURPH_CONTACT_EMAIL}
                   userEmailAddress={variant.userEmail}
                 />
               </div>

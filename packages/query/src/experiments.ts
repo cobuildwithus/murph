@@ -25,12 +25,14 @@ import {
   countCalendarAdherenceSessions,
   countCompletedAdherenceSessions,
   eventKindIsCandidateForEvidence,
+  expandExperimentAdherenceExpectations,
   experimentAdherenceTargetPlansDate,
   linkedEventObservationMatchesEvidence,
   resolveActivityEvidenceLocalDate,
   resolveAdherenceObservationActivityKind,
   resolveExperimentAdherenceRollupTarget,
   resolveExperimentAdherenceTargets,
+  resolveEffectiveExperimentLinkedEventMissingPolicy,
   resolveInterventionSessionLocalDate,
   type ExperimentAdherenceCalendarResult,
   type ExperimentAdherenceObservation,
@@ -797,6 +799,8 @@ function resolveAdherenceTargetsFromFrontmatter(
     protocolActivitySessionEvidence:
       frontmatter.effectiveProtocolSnapshot?.activitySessionEvidence,
     protocolKey: frontmatter.commonsProtocolRef?.key,
+    protocolSessionsPerDay:
+      frontmatter.effectiveProtocolSnapshot?.frequency?.sessionsPerDay,
     runPlan: frontmatter.runPlan,
   });
 }
@@ -1853,7 +1857,13 @@ function hasAssumedAfterGraceCalendarSessionTarget(
   return plannedCalendarTargets.length > 0 &&
     plannedCalendarTargets.every((target) =>
       target.evidence.kind === "linkedEventCount" &&
-      target.evidence.missing === "assumed_after_grace"
+      resolveEffectiveExperimentLinkedEventMissingPolicy({
+        evidence: target.evidence,
+        expectedCount:
+          expandExperimentAdherenceExpectations(target, windows)
+            .find((expectation) => expectation.localDate === date)
+            ?.expectedCount ?? 0,
+      }) === "assumed_after_grace"
     );
 }
 

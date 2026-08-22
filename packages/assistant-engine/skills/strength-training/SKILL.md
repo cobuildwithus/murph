@@ -54,7 +54,7 @@ Apply only modifiers that change the plan:
 - `references/coaching.md` — adherence friction, habits, reminders, missed sessions, motivation, or reducing dependence on Murph
 - `references/safety.md` — pain, symptoms, health uncertainty, maximal or high-skill work, special populations, competition, or body-composition risk
 - `references/evidence.md` — source-level justification, disputed claims, confidence calibration, or maintenance of defaults
-- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any private messaging request to start or resume a canonical live workout, put a workout log in a table, preserve set-by-set notation, or refresh its workout card. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
+- `$MURPH_ASSISTANT_SKILLS_ROOT/tracked-table/SKILL.md` — any private messaging request to start or resume a canonical live workout, update, finish, or correct it, or log or clear one of its sets. Read it again when the member continues one with a short follow-up, or asks to put a workout log in a table, preserve set-by-set notation, or refresh its workout card. On messaging routes, use its native compact-table flow instead of Markdown table syntax.
 
 When presenting a named exercise, unfamiliar variation, or movement walkthrough, read `$MURPH_ASSISTANT_SKILLS_ROOT/shared/exercise-catalog-runtime.md` and follow its list/show, image-media, progressive-disclosure, and catalog-gap rules. This skill still owns exercise choice, programming, dose, progression, substitutions, and safety. If catalog media is unavailable, give compact form cues rather than inventing an image workflow.
 

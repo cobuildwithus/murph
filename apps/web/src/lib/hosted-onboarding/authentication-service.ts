@@ -6,6 +6,9 @@ import {
 
 import { getPrisma } from "../prisma";
 import {
+  signalHostedPhoneCallResultNotificationRecovery,
+} from "../phone-calls/reconciliation-workflow-start";
+import {
   runWithFreshHostedDomainRootUnwrapCache,
   runWithHostedDomainRootUnwrapCache,
   runWithHostedDomainRootProviderCallsDisabled,
@@ -25,13 +28,15 @@ import {
 } from "./logging";
 import { isHostedMemberActivationPending } from "./activation-progress";
 import {
+  prepareHostedMemberVerifiedEmailReplyAlias,
   readHostedMemberMessagingSetupState,
   readHostedMemberEmailAuthorization,
+  type HostedMemberVerifiedEmailReplyAliasPreparation,
   type HostedMemberCoreState,
   syncHostedMemberVerifiedEmailAuthorization,
   updateHostedMemberPendingActivationTimeZoneIfActivationPending,
+  writeHostedMemberSignupNotificationContextIfPendingTx,
 } from "./hosted-member-store";
-import { createHostedMemberReplyAliasRoute } from "./hosted-email-reply-alias";
 import {
   projectHostedMemberRoutingState,
   readHostedMemberRoutingState,
@@ -70,6 +75,9 @@ import { readHostedMemberIdentity } from "./hosted-member-identity-store";
 import { readActiveHostedMemberAccess } from "./member-access";
 import type { HostedPostVerificationStage } from "./stage";
 import { hostedOnboardingError } from "./errors";
+import type {
+  HostedSignupNotificationContextV1,
+} from "./signup-notification-context";
 
 type HostedPrivyCompletionMemberResolution = {
   bindingAuthMethod: HostedPrivyAuthMethod;
@@ -86,6 +94,7 @@ export async function completeHostedPrivyVerification(input: {
   inviteCode?: string | null;
   now?: Date;
   prisma?: PrismaClient;
+  signupNotificationContext?: HostedSignupNotificationContextV1;
   timeZone?: string | null;
 }): Promise<{
   inviteCode: string;
@@ -126,11 +135,23 @@ export async function completeHostedPrivyVerification(input: {
       invite,
       now,
       prisma,
+      signupNotificationContext: input.signupNotificationContext,
       timeZone,
     });
     const member = memberResolution.member;
 
     assertHostedMemberNotSuspended(member);
+    if (memberResolution.identity.telegram?.telegramUserId) {
+      try {
+        await signalHostedPhoneCallResultNotificationRecovery({
+          memberId: member.id,
+          prisma,
+        });
+      } catch {
+        // The per-call Workflow timer owns eventual recovery. Authentication
+        // must not fail after its durable identity/routing work committed.
+      }
+    }
 
     const messagingSetupState = await readHostedMemberMessagingSetupState({
       memberId: member.id,
@@ -196,6 +217,7 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
   invite: Awaited<ReturnType<typeof requireHostedInviteForAuthentication>> | null;
   now: Date;
   prisma: PrismaClient;
+  signupNotificationContext?: HostedSignupNotificationContextV1;
   timeZone: string | null;
 }): Promise<HostedPrivyCompletionMemberResolution> {
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -220,6 +242,15 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
         memberId: preparedMemberId,
         prisma: input.prisma,
       });
+      const transactionalAuthMethod = invitePreparation?.authMethod ?? input.authMethod;
+      const preparedReplyAlias = transactionalAuthMethod === "email"
+        && liveIdentity.email?.verifiedAt
+        ? await prepareHostedMemberVerifiedEmailReplyAlias({
+            address: liveIdentity.email.address,
+            memberId: preparedMemberId,
+            prisma: input.prisma,
+          })
+        : null;
 
       if (input.invite) {
         if (!invitePreparation) {
@@ -250,12 +281,19 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
               identity: reconciled.identity,
               memberId: reconciled.member.id,
               preparedControlRoot: preparedRoot,
+              preparedReplyAlias,
               prisma: tx,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: reconciled.member.id,
               prisma: tx,
               timeZone: input.timeZone,
+            });
+            await syncHostedMemberSignupNotificationContextTx({
+              context: input.signupNotificationContext,
+              memberId: reconciled.member.id,
+              preparedControlRoot: preparedRoot,
+              prisma: tx,
             });
             return reconciled;
             })
@@ -299,12 +337,19 @@ async function resolvePreparedHostedPrivyCompletionMember(input: {
               identity: memberResolution.identity,
               memberId: memberResolution.member.id,
               preparedControlRoot: preparedRoot,
+              preparedReplyAlias,
               prisma: tx,
             });
             await syncHostedMemberPendingActivationTimeZoneTx({
               memberId: memberResolution.member.id,
               prisma: tx,
               timeZone: input.timeZone,
+            });
+            await syncHostedMemberSignupNotificationContextTx({
+              context: input.signupNotificationContext,
+              memberId: memberResolution.member.id,
+              preparedControlRoot: preparedRoot,
+              prisma: tx,
             });
             return {
               identity: memberResolution.identity,
@@ -473,6 +518,24 @@ async function syncHostedMemberPendingActivationTimeZoneTx(input: {
   });
 }
 
+async function syncHostedMemberSignupNotificationContextTx(input: {
+  context?: HostedSignupNotificationContextV1;
+  memberId: string;
+  preparedControlRoot: PreparedHostedDomainRootForWeb;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (!input.context) {
+    return;
+  }
+
+  await writeHostedMemberSignupNotificationContextIfPendingTx({
+    context: input.context,
+    memberId: input.memberId,
+    preparedControlRoot: input.preparedControlRoot,
+    prisma: input.prisma,
+  });
+}
+
 async function syncHostedPrivyBindings(input: {
   authMethod: HostedPrivyAuthMethod;
   identity: HostedPrivyIdentity;
@@ -487,15 +550,11 @@ async function syncHostedPrivyBindings(input: {
   ) {
     const email = input.identity.email;
     const syncEmailBinding = async () => {
-      const replyAlias = await createHostedMemberReplyAliasRoute({
-        memberId: input.memberId,
-      });
       await syncHostedMemberVerifiedEmailAuthorization({
         address: email.address,
         memberId: input.memberId,
         preparedControlRoot: input.preparedControlRoot,
         prisma: input.prisma,
-        replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
         verifiedAt: new Date(email.verifiedAt! * 1000),
       });
     };
@@ -572,18 +631,16 @@ async function syncHostedPrivyTransactionalBindingsTx(input: {
   identity: HostedPrivyIdentity;
   memberId: string;
   preparedControlRoot: PreparedHostedDomainRootForWeb;
+  preparedReplyAlias: HostedMemberVerifiedEmailReplyAliasPreparation | null;
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   if (input.authMethod === "email" && input.identity.email?.verifiedAt) {
-    const replyAlias = await createHostedMemberReplyAliasRoute({
-      memberId: input.memberId,
-    });
     await syncHostedMemberVerifiedEmailAuthorization({
       address: input.identity.email.address,
       memberId: input.memberId,
       preparedControlRoot: input.preparedControlRoot,
+      preparedReplyAlias: input.preparedReplyAlias ?? undefined,
       prisma: input.prisma,
-      replyAliasLookupKey: replyAlias?.replyAliasLookupKey ?? null,
       verifiedAt: new Date(input.identity.email.verifiedAt * 1000),
     }).catch(mapHostedPrivyPrimaryEmailBindingError);
   }

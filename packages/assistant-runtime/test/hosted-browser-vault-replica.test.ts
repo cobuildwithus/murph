@@ -690,6 +690,52 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
+  it("caps the refresh timeout at an earlier caller deadline", async () => {
+    const {
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const publishRef = vi.fn();
+    let resolveWriteStarted: (() => void) | null = null;
+    const writeStarted = new Promise<void>((resolve) => {
+      resolveWriteStarted = resolve;
+    });
+    const write = vi.fn(async () => {
+      resolveWriteStarted?.();
+      return await new Promise<HostedBrowserVaultReplicaRef>(() => {});
+    });
+
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    try {
+      const nowMs = Date.parse("2026-05-10T00:01:00.000Z");
+      vi.setSystemTime(new Date(nowMs));
+      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        deadlineMs: nowMs + 1_000,
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: {
+            publishRef,
+            write,
+          },
+        }),
+        timeoutMs: 60_000,
+        vaultRoot,
+        workspace: createWorkspaceState(),
+      });
+      await writeStarted;
+      await vi.advanceTimersByTimeAsync(1_000);
+      const result = await resultPromise;
+
+      expect(result).toMatchObject({ status: "deferred_timeout" });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not publish when a runtime wake arrives during refresh", async () => {
     const { VAULT_LAYOUT } = await import("@murphai/contracts");
     const {

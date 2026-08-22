@@ -730,7 +730,8 @@ function createLocalCaptureAssistantInputSourceMetadata(
   const replyContext = sanitizeLocalAssistantInputMetadataText(
     raw.reply_context_preview,
   )
-  if (!mediaGroupId && !replyContext) {
+  const replyToMessageId = readLocalTelegramCaptureReplyToMessageId(raw)
+  if (!mediaGroupId && !replyContext && !replyToMessageId) {
     return null
   }
 
@@ -738,7 +739,22 @@ function createLocalCaptureAssistantInputSourceMetadata(
     kind: 'telegram',
     mediaGroupId,
     replyContext,
+    ...(replyToMessageId ? { replyToMessageId } : {}),
   }
+}
+
+function readLocalTelegramCaptureReplyToMessageId(
+  raw: Record<string, unknown>,
+): string | null {
+  const value = raw.reply_to_message_id
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+    return String(value)
+  }
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = value.trim()
+  return /^\d+$/u.test(normalized) ? normalized : null
 }
 
 function readLocalLinqCaptureReplyToMessageId(
@@ -1103,6 +1119,21 @@ export async function runAssistantAutomationPass(
     ? (await buildAssistantOutboxSummary(input.vault)).nextAttemptAt
     : null
   const replies = scanResult.replies
+  const modelCapableNextWakeAt = earliestAssistantAutomationWakeAt(
+    replies.nextWakeAt,
+    scanResult.routing.nextWakeAt,
+    cronNextRunAt,
+  )
+  const nextWakeAt = earliestAssistantAutomationWakeAt(
+    modelCapableNextWakeAt,
+    outboxNextAttemptAt,
+  )
+  const outboxOnlyNextWakeAt =
+    nextWakeAt !== null
+    && nextWakeAt === earliestAssistantAutomationWakeAt(outboxNextAttemptAt)
+    && nextWakeAt !== modelCapableNextWakeAt
+      ? nextWakeAt
+      : null
   const progressed =
     stateProgressed ||
     outboxResult.attempted > 0 ||
@@ -1114,12 +1145,8 @@ export async function runAssistantAutomationPass(
     cronProcessed: cronResult.processed,
     currentTurnDeliveryIntentIds:
       scanResult.currentTurnDeliveryIntentIds,
-    nextWakeAt: earliestAssistantAutomationWakeAt(
-      replies.nextWakeAt,
-      scanResult.routing.nextWakeAt,
-      cronNextRunAt,
-      outboxNextAttemptAt,
-    ),
+    nextWakeAt,
+    ...(outboxOnlyNextWakeAt ? { outboxOnlyNextWakeAt } : {}),
     outboxAttempted: outboxResult.attempted,
     passTiming,
     progressed,

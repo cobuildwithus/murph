@@ -66,6 +66,14 @@ export function parseHostedExecutionTelegramMessage(
             ),
           ),
         }),
+    ...(record.replyToMessageId === undefined
+      ? {}
+      : {
+          replyToMessageId: requireString(
+            record.replyToMessageId,
+            "Hosted execution Telegram message telegramMessage.replyToMessageId",
+          ),
+        }),
     schema: parseHostedExecutionTelegramMessageSchema(record.schema),
     ...(record.senderDisplayName === undefined
       ? {}

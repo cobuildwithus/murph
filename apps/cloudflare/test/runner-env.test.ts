@@ -449,6 +449,7 @@ describe("buildHostedRunnerContainerEnv", () => {
       FFMPEG_COMMAND: "/usr/local/bin/ffmpeg",
       DEEPSEEK_API_KEY: "deepseek-user",
       EXA_API_KEY: "exa-user",
+      GEMINI_API_KEY: "gemini-user",
       HF_TOKEN: "hf-user",
       LINQ_API_TOKEN: "linq-user",
       MAPBOX_ACCESS_TOKEN: "mapbox-user",
@@ -1024,6 +1025,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
         JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
         JUNCTION_ENV: "sandbox",
         JUNCTION_PROVIDER_FILTER: "garmin,oura",
+        JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED: "true",
         JUNCTION_RECONCILE_DAYS: "14",
         JUNCTION_RECONCILE_INTERVAL_MS: "3600000",
         JUNCTION_REGION: "us",
@@ -1045,6 +1047,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
       JUNCTION_CLIENT_USER_ID_SECRET: "junction-client-user-id-secret",
       JUNCTION_ENV: "sandbox",
       JUNCTION_PROVIDER_FILTER: "garmin,oura",
+      JUNCTION_PUSH_SOURCE_RECOVERY_ENABLED: "true",
       JUNCTION_RECONCILE_DAYS: "14",
       JUNCTION_RECONCILE_INTERVAL_MS: "3600000",
       JUNCTION_REGION: "us",
@@ -1058,6 +1061,7 @@ describe("buildHostedRunnerJobRuntimeConfig", () => {
     expect(runtime.platformEnv).not.toHaveProperty("JUNCTION_TIMESERIES_RESOURCES");
     expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).toMatchObject({
       environment: "sandbox",
+      pushSourceRecoveryEnabled: true,
       region: "us",
     });
     expect(runtime.resolvedConfig?.deviceSync?.providerConfigs.junction).not.toHaveProperty("apiKey");
@@ -1181,6 +1185,7 @@ describe("hosted deploy automation device-sync surface", () => {
       expect.arrayContaining([
         "LINQ_API_TOKEN",
         "EXA_API_KEY",
+        "GEMINI_API_KEY",
         "MAPBOX_ACCESS_TOKEN",
         "TELEGRAM_BOT_TOKEN",
       ]),

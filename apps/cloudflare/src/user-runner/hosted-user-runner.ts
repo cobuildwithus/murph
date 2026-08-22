@@ -76,6 +76,12 @@ import {
   RuntimeProcessingController,
   type RuntimeProcessingInput,
 } from "./runtime-processing-controller.js";
+import {
+  createRuntimeProcessingCommandBudget,
+} from "./runtime-command-budget.js";
+import {
+  createRuntimeProcessingRetryLater,
+} from "./runtime-processing-responses.js";
 export type { DurableObjectStateLike } from "./types.js";
 
 export interface HostedRuntimeHealthDataConsentReconcileResult {
@@ -272,27 +278,99 @@ export class HostedUserRunner {
   async ensureRuntimeProcessingForUser(
     input: RuntimeProcessingInput,
   ): Promise<HostedRuntimeEnsureProcessingResponse> {
-    return await this.withRuntimeConsentMutationLock(async () => {
+    // The route supplies its server-derived auth/request start so parsing and
+    // Durable Object dispatch cannot grant this command a fresh budget.
+    const commandStartedAtEpochMs = input.commandStartedAtEpochMs ?? Date.now();
+    const commandBudget = createRuntimeProcessingCommandBudget({
+      commandTimeoutMs: input.commandTimeoutMs ?? null,
+      startedAtMs: commandStartedAtEpochMs,
+      webControlTimeoutMs: this.env.webControlTimeoutMs,
+    });
+    const preControllerDeadline = new AbortController();
+    const preControllerTimeout = setTimeout(() => {
+      preControllerDeadline.abort(
+        new DOMException(
+          "Hosted runtime ensure-processing pre-controller budget timed out.",
+          "TimeoutError",
+        ),
+      );
+    }, Math.max(1, commandBudget.deadlineAtMs - Date.now()));
+    let runtimeProcessingStarted = false;
+    let deadlineResponse: HostedRuntimeEnsureProcessingResponse | null = null;
+    const isPreControllerDeadlineExpired = (): boolean =>
+      preControllerDeadline.signal.aborted
+      || Date.now() >= commandBudget.deadlineAtMs;
+    const readDeadlineResponse = (): HostedRuntimeEnsureProcessingResponse => {
+      deadlineResponse ??= createRuntimeProcessingRetryLater({
+        analytics: this.runtimeRetryAnalytics,
+        orchestrationAttemptId: input.orchestrationAttemptId,
+        reason: "command_budget_exhausted",
+        userId: input.userId,
+      });
+      return deadlineResponse;
+    };
+    const lockedEnsure = this.withRuntimeConsentMutationLock(async () => {
+      if (isPreControllerDeadlineExpired()) {
+        return readDeadlineResponse();
+      }
       const lockInput = withRuntimeOrchestration(input, {
         runtimeConsentLockAcquiredAtEpochMs: Date.now(),
         healthDataAdmissionReadStartedAtEpochMs: Date.now(),
       });
-      const admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
-        lockInput.userId,
-      );
+      let admission: HostedRuntimeHealthDataAdmissionResponse;
+      try {
+        admission = await this.readHostedRuntimeHealthDataAdmissionFromWeb(
+          lockInput.userId,
+          { signal: preControllerDeadline.signal },
+        );
+      } catch (error) {
+        if (isPreControllerDeadlineExpired()) {
+          return readDeadlineResponse();
+        }
+        throw error;
+      }
       const processingInput = withRuntimeOrchestration(lockInput, {
         healthDataAdmissionReadFinishedAtEpochMs: Date.now(),
       });
+      if (isPreControllerDeadlineExpired()) {
+        return readDeadlineResponse();
+      }
       if (!admission.processingAllowed) {
         return {
-          kind: "retry_later",
+          kind: "retry_later" as const,
           retryAt: new Date(
             Date.now() + HOSTED_RUNTIME_WITHDRAWN_CONSENT_RETRY_MS,
           ).toISOString(),
         };
       }
-      return await this.runtimeProcessing.ensureForUser(processingInput);
+      runtimeProcessingStarted = true;
+      clearTimeout(preControllerTimeout);
+      return await this.runtimeProcessing.ensureForUser({
+        ...processingInput,
+        commandStartedAtEpochMs,
+      });
     });
+    const deadline = new Promise<HostedRuntimeEnsureProcessingResponse>((resolve) => {
+      const onAbort = () => {
+        if (!runtimeProcessingStarted) {
+          resolve(readDeadlineResponse());
+        }
+      };
+      preControllerDeadline.signal.addEventListener("abort", onAbort, {
+        once: true,
+      });
+      void lockedEnsure.finally(() => {
+        preControllerDeadline.signal.removeEventListener("abort", onAbort);
+      }).catch(() => undefined);
+    });
+
+    try {
+      const result = await Promise.race([lockedEnsure, deadline]);
+      void lockedEnsure.catch(() => undefined);
+      return result;
+    } finally {
+      clearTimeout(preControllerTimeout);
+    }
   }
 
   async prewarmRuntimeShellForUser(
@@ -629,7 +707,7 @@ export class HostedUserRunner {
 
   private async readHostedRuntimeHealthDataAdmissionFromWeb(
     userId: string,
-    input: { timeoutMs?: number } = {},
+    input: { signal?: AbortSignal; timeoutMs?: number } = {},
   ): Promise<HostedRuntimeHealthDataAdmissionResponse> {
     const response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(this.env.hostedWebAllowHttpHosts
@@ -640,6 +718,7 @@ export class HostedUserRunner {
       callbackSigning: this.env.webCallbackSigning,
       method: "GET",
       path: HOSTED_RUNTIME_HEALTH_DATA_ADMISSION_PATH,
+      signal: input.signal,
       timeoutMs: input.timeoutMs ?? this.env.webControlTimeoutMs,
     });
 

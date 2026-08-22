@@ -93,6 +93,12 @@ describe('workout action binding', () => {
         ],
       }],
     })).not.toBe(original)
+    expect(deriveWorkoutActionBinding('evt_workout', {
+      exercises: [{ ...BASE_EXERCISES[0]!, memberRepsPerSet: 12 }],
+    })).not.toBe(original)
+    expect(deriveWorkoutActionBinding('evt_workout', {
+      exercises: [{ ...BASE_EXERCISES[0]!, setPlanIsFinite: true }],
+    })).not.toBe(original)
   })
 
   it('preserves the binding across unrelated set result and annotation changes', () => {
@@ -131,6 +137,8 @@ describe('workout set-removal binding', () => {
     ['mode', { mode: 'duration' as const }],
     ['unit override', { unitOverride: 'kg' as const }],
     ['note', { note: 'Controlled tempo' }],
+    ['member repetitions', { memberRepsPerSet: 12 }],
+    ['finite set plan', { setPlanIsFinite: true }],
   ] satisfies Array<[string, Partial<WorkoutExercise>]>)(
     'changes when canonical exercise %s changes',
     (_label, patch) => {

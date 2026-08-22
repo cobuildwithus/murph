@@ -6,6 +6,7 @@ import {
   XCircle,
   type LucideIcon,
 } from "lucide-react";
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { ActionApprovalAuthRequiredState } from "@/src/components/sensitive-actions/action-approval-auth-required";
@@ -31,7 +32,10 @@ import type {
 import { requireActiveHostedAppSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { getPrisma } from "@/src/lib/prisma";
+import { createMurphPageMetadata } from "@/src/lib/site-metadata";
 import { cn } from "@/src/lib/utils";
+
+import { APPROVE_OG_ALT } from "./approve-share-card";
 
 type TerminalActionApprovalView = HostedActionApprovalView & {
   status: Exclude<HostedActionApprovalStatus, "pending">;
@@ -39,6 +43,31 @@ type TerminalActionApprovalView = HostedActionApprovalView & {
 
 const EXPIRED_APPROVAL_REPLY_BODY =
   "That approval link expired. Please send a new one.";
+
+const APPROVAL_METADATA_DESCRIPTION =
+  "Review the request, then approve or deny it. Approval links expire after a short time.";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ approvalId: string }>;
+}): Promise<Metadata> {
+  const { approvalId } = await params;
+  const ogImage = {
+    alt: APPROVE_OG_ALT,
+    height: 630,
+    type: "image/png",
+    url: `/approve/${encodeURIComponent(approvalId)}/opengraph-image`,
+    width: 1200,
+  } as const;
+
+  return createMurphPageMetadata({
+    title: "Murph needs your OK",
+    description: APPROVAL_METADATA_DESCRIPTION,
+    openGraph: { images: [ogImage] },
+    twitter: { images: [ogImage] },
+  });
+}
 
 export default async function ActionApprovalPage({
   params,

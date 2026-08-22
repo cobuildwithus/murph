@@ -25,6 +25,9 @@ import {
   loadHostedDeviceSyncMaintenanceModule,
 } from "./device-sync-maintenance-import.ts";
 import {
+  HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
+} from "./device-sync-maintenance-limits.ts";
+import {
   loadHostedClinicalRecordsMaintenanceModule,
 } from "./clinical-records-maintenance-import.ts";
 import type {
@@ -37,6 +40,9 @@ import {
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
+import type {
+  HostedRuntimeLogContext,
+} from "./runtime-logs.ts";
 
 export { emitHostedAssistantProviderTraceLog } from "./events/provider-trace-log.ts";
 
@@ -53,6 +59,7 @@ export async function executeHostedMailboxEvent(input: {
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId?: string | null;
+  runtimeLogContext?: HostedRuntimeLogContext | null;
   runtime: Pick<
     NormalizedHostedAssistantRuntimeConfig,
     "commitTimeoutMs" | "forwardedEnv" | "platform" | "platformEnv" | "resolvedConfig" | "userEnv"
@@ -99,6 +106,7 @@ export async function executeHostedMailboxEvent(input: {
     preferenceAppliedAt: input.preferenceAppliedAt,
     preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
+    runtimeLogContext: input.runtimeLogContext ?? null,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal ?? null,
     ...(input.shouldYieldClinicalRecords
@@ -115,6 +123,9 @@ export async function executeHostedMailboxEvent(input: {
   });
 
   return {
+    ...(mailboxEffect.backgroundMaintenanceYielded === true
+      ? { backgroundMaintenanceYielded: true as const }
+      : {}),
     bootstrapResult,
     conversationMetrics: mailboxEffect.conversationMetrics,
     ...(mailboxEffect.deliveryIntentIds === undefined
@@ -147,6 +158,7 @@ async function handleHostedMailboxEvent(input: {
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
+  runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   if (isHostedConversationMessageWake(input.wake)) {
@@ -161,6 +173,7 @@ async function handleHostedMailboxEvent(input: {
     preferenceAppliedAt: input.preferenceAppliedAt,
     preferenceCausalSeq: input.preferenceCausalSeq,
     runtime: input.runtime,
+    runtimeLogContext: input.runtimeLogContext,
     runtimeEnv: input.runtimeEnv,
     signal: input.signal,
     ...(input.shouldYieldClinicalRecords
@@ -194,6 +207,7 @@ async function executeHostedSystemWake(input: {
   shouldYieldClinicalRecords?: (() => boolean) | null;
   shouldYieldDeviceSync?: (() => boolean) | null;
   sourceMailboxItemId: string | null;
+  runtimeLogContext: HostedRuntimeLogContext | null;
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   switch (input.wake.kind) {
@@ -318,19 +332,26 @@ async function executeHostedSystemWake(input: {
         deviceSyncPort: input.runtime.platform.deviceSyncPort ?? null,
         platformEnv: input.runtime.platformEnv,
         retainFollowUpWakeUntilCheckpoint: true,
+        ...(input.runtimeLogContext
+          ? { runtimeLogContext: input.runtimeLogContext }
+          : {}),
         runtimeLogPlatform: input.runtime.platform,
         resolvedConfig: input.runtime.resolvedConfig,
         ...(input.shouldYieldDeviceSync
           ? { shouldYieldDeviceSync: input.shouldYieldDeviceSync }
           : {}),
         ...(input.signal ? { signal: input.signal } : {}),
-        timeoutMs: input.runtime.commitTimeoutMs,
+        timeoutMs: HOSTED_DEVICE_SYNC_PASS_TIMEOUT_MS,
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-      const activityAutomation = input.shouldYieldDeviceSync?.() === true
+      const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
+        || input.signal?.aborted === true
+        || input.shouldYieldDeviceSync?.() === true;
+      const activityAutomation = shouldSkipActivityAutomation
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({
+          ...(input.signal ? { signal: input.signal } : {}),
           vault: input.vaultRoot,
         }).catch((error: unknown) => {
           emitHostedDeviceActivityAutomationFailureLog({
@@ -350,6 +371,9 @@ async function executeHostedSystemWake(input: {
         ),
       ]);
       return createNoopMailboxEffect({
+        ...(deviceSyncMetrics.deviceSyncSkipped
+          ? { backgroundMaintenanceYielded: true as const }
+          : {}),
         conversationMetrics: null,
         mailboxLane: "device-sync",
         nextWakeAt: nextWake.at,
@@ -369,6 +393,15 @@ async function executeHostedSystemWake(input: {
           runtimeEnv: input.runtimeEnv,
           vaultRoot: input.vaultRoot,
         }),
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      });
+    }
+    case "environment-interview.completed": {
+      const { executeHostedEnvironmentInterviewWake } = await import(
+        "./events/environment-interview.ts"
+      );
+      return await executeHostedEnvironmentInterviewWake({
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });

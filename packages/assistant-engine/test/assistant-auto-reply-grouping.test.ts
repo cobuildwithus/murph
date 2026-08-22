@@ -5,6 +5,9 @@ import {
   shouldGroupAdjacentAssistantInputCandidates,
   shouldGroupAdjacentConversationInput,
 } from '../src/assistant/automation/grouping.ts'
+import {
+  assistantAutomationInputSummaryFromCandidate,
+} from '../src/assistant/automation/input-summary.ts'
 import type { AssistantInputCandidate } from '../src/assistant/input-source.ts'
 import type { AssistantAutomationInputSummary } from '../src/assistant/automation/input-summary.ts'
 
@@ -155,6 +158,40 @@ function createAuthenticatedGroupCandidate(input: {
   }
 }
 
+function createDirectTelegramCandidate(input: {
+  inputId: string
+  replyToMessageId: string
+}): AssistantInputCandidate {
+  const candidate = createAuthenticatedGroupCandidate({
+    inputId: input.inputId,
+  })
+  return {
+    ...candidate,
+    event: {
+      ...candidate.event,
+      conversation: {
+        ...candidate.event.conversation!,
+        source: 'telegram',
+        threadId: 'direct-telegram-thread',
+        threadIsDirect: true,
+      },
+      replyTarget: {
+        channel: 'telegram',
+        messageId: `telegram-message-${input.inputId}`,
+        threadId: 'direct-telegram-thread',
+      },
+      source: 'telegram',
+      sourceMetadata: {
+        externalThreadRouteAuthorityPresent: true,
+        kind: 'telegram',
+        mediaGroupId: null,
+        replyContext: null,
+        replyToMessageId: input.replyToMessageId,
+      },
+    },
+  }
+}
+
 describe('shouldGroupAdjacentConversationInput', () => {
   it('groups adjacent inputs from the same direct conversation lane', () => {
     const first = createInputSummary({
@@ -245,6 +282,43 @@ describe('shouldGroupAdjacentConversationInput', () => {
     })
 
     expect(shouldGroupAdjacentConversationInput(first, replyToM2)).toBe(false)
+  })
+
+  it('projects Telegram native reply targets before grouping direct inputs', async () => {
+    const first = createDirectTelegramCandidate({
+      inputId: 'ain_telegram_reply_a',
+      replyToMessageId: 'telegram-assistant-message-a',
+    })
+    const sameAnchor = createDirectTelegramCandidate({
+      inputId: 'ain_telegram_reply_b',
+      replyToMessageId: 'telegram-assistant-message-a',
+    })
+    const changedAnchor = createDirectTelegramCandidate({
+      inputId: 'ain_telegram_reply_c',
+      replyToMessageId: 'telegram-assistant-message-b',
+    })
+
+    expect(
+      assistantAutomationInputSummaryFromCandidate(first).replyToMessageId,
+    ).toBe('telegram-assistant-message-a')
+    expect(shouldGroupAdjacentAssistantInputCandidates(first, sameAnchor)).toBe(true)
+    expect(shouldGroupAdjacentAssistantInputCandidates(first, changedAnchor)).toBe(false)
+
+    const candidates = [first, sameAnchor, changedAnchor]
+    const grouped = await collectAssistantAutoReplyGroup({
+      inputCandidatesByInputId: new Map(
+        candidates.map((candidate) => [candidate.event.inputId, candidate]),
+      ),
+      inputSummaries: candidates.map(assistantAutomationInputSummaryFromCandidate),
+      startIndex: 0,
+      vault: '/vaults/test',
+    })
+
+    expect(grouped.items.map((item) => item.summary.inputId)).toEqual([
+      first.event.inputId,
+      sameAnchor.event.inputId,
+    ])
+    expect(grouped.endIndex).toBe(1)
   })
 
   it('separates a direct anchored reply from a preceding unanchored input', () => {

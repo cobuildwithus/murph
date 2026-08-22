@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 100,
+  "item": {
+    "id": "account-deletion-available-again",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Account deletion is available again",
+    "summary": "The temporary maintenance window for account deletion is over, so you can complete the existing deletion flow from Settings again.",
+    "details": "The confirmation step and the existing billing, connected-app, and provider-access recovery safeguards still apply when needed.",
+    "relevanceTags": ["account", "privacy", "settings"],
+    "sourcePullRequests": [2007]
+  }
+}

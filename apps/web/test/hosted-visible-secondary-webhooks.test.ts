@@ -23,6 +23,7 @@ import {
 
 describe("visible secondary webhook outcomes", () => {
   it.each([
+    ["stripe-effect-pending", "Billing is already changing"],
     ["family-invite-not-accepted", "Family invite"],
     ["signup-link-already-sent", "setup link"],
     ["home-line-capacity-exhausted", "connect this chat"],
@@ -198,6 +199,7 @@ describe("visible secondary webhook outcomes", () => {
   });
 
   it.each([
+    ["stripe-effect-pending", true, null, "Billing is already changing"],
     ["family-invite-not-accepted", true, null, "Family invite"],
     ["unlinked-telegram", true, "https://withmurph.ai/", "choose Telegram"],
     ["ambiguous-telegram-binding", true, null, "isn't linked cleanly"],
@@ -240,6 +242,83 @@ describe("visible secondary webhook outcomes", () => {
       signupUrl: null,
     })).toContain(
       "https://www.withmurph.ai/settings?familyInviteReturn=%2Ffamily%2Faccept%2Finvite_visible_recovery#subscription",
+    );
+  });
+
+  it("keeps Stripe-pending Telegram recovery private", () => {
+    expect(resolveHostedTelegramVisibleSecondaryReply({
+      isDirect: false,
+      reason: "stripe-effect-pending",
+      signupUrl: null,
+    })).toBeNull();
+  });
+
+  it("keeps a failed Linq Stripe-pending reply retryable", async () => {
+    const event = buildOperationalLinqEvent({
+      eventId: "evt_stripe_pending",
+      messageId: "msg_stripe_pending",
+      senderHandle: "+15551234567",
+      senderService: "sms",
+    });
+    const sendError = new Error("Linq reply failed");
+    const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(sendError);
+    const dependencies: HostedVisibleSecondaryLinqDependencies = {
+      getPrisma: vi.fn(() => ({}) as never),
+      lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
+      lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
+      parseHostedLinqWebhookEvent: vi.fn(() => event),
+      sendHostedLinqChatMessage,
+    };
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "stripe-effect-pending",
+    }));
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).rejects.toBe(sendError);
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Billing is already changing. Try again shortly.",
+      replyToMessageId: "msg_stripe_pending",
+    }));
+  });
+
+  it("keeps a failed Telegram Stripe-pending reply retryable", async () => {
+    const update = parseHostedTelegramWebhookUpdate(JSON.stringify({
+      message: {
+        chat: { id: 42, type: "private" },
+        date: 1_785_000_000,
+        from: { first_name: "Invitee", id: 42, is_bot: false },
+        message_id: 11,
+        text: "/start family_pending_effect",
+      },
+      update_id: 127,
+    }));
+    const sendError = new Error("Telegram reply failed");
+    const sendHostedTelegramTextMessage = vi.fn().mockRejectedValue(sendError);
+    const handler: HostedOnboardingTelegramWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "stripe-effect-pending",
+    }));
+
+    await expect(withHostedVisibleSecondaryTelegramOutcomes(handler, {
+      parseHostedTelegramWebhookUpdate: vi.fn(() => update),
+      requireHostedOnboardingPublicBaseUrl: vi.fn(() => "https://withmurph.ai"),
+      sendHostedTelegramTextMessage,
+      summarizeHostedTelegramWebhook,
+    })({
+      rawBody: JSON.stringify(update),
+      secretToken: "secret",
+    })).rejects.toBe(sendError);
+    expect(sendHostedTelegramTextMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Billing is already changing. Try again shortly.",
+        replyToMessageId: 11,
+      }),
     );
   });
 

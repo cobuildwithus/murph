@@ -398,13 +398,14 @@ app_verify_parallel_default="$(resolve_local_parallel_default)"
 app_verify_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 acceptance_app_verify_with_coverage="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
 test_lane_parallel="$(resolve_profile_controlled_value 1 "$app_verify_parallel_default")"
+package_coverage_shard="$(resolve_profile_controlled_value owners-a all)"
 
 log_acceptance_resource_plan
 `);
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toBe(
-      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh test_lanes=1 app_parallel=1\n",
+      "[workspace-verify] resources cpus=10 memory_mib=32768 composed_parallel=1 package_processes=3 cli_package_processes=2 package_workers=2 cli_workers=3 app_workers=1 app_overlap=1 profile=static-ssh package_shard=all test_lanes=1 app_parallel=1\n",
     );
   });
 
@@ -887,6 +888,45 @@ rm -rf -- "$ready_dir"
     expect(result.stdout).toBe("ready\n");
   });
 
+  it("derives every release package coverage assertion from its selected owner", () => {
+    const runAllPackageCoverage = extractWorkspaceVerifyFunction(
+      "run_all_package_coverage",
+    );
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+run_workspace_package_coverage() {
+  printf '%s|%s\n' "$1" "$2"
+}
+mark_acceptance_cli_coverage_complete() { return 0; }
+verify_log() { return 0; }
+
+package_coverage_concurrency_limit=1
+package_coverage_cli_active_concurrency_limit=1
+package_coverage_shard=all
+
+${runAllPackageCoverage}
+
+run_all_package_coverage 1
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    const pairs = result.stdout.trim().split("\n");
+    expect(pairs).toHaveLength(27);
+    expect(pairs).toContain(
+      "packages/hosted-execution|Package coverage for packages/hosted-execution",
+    );
+    expect(pairs).toContain(
+      "packages/health-commons|Package coverage for packages/health-commons",
+    );
+    expect(pairs).toContain(
+      "packages/hosted-local-harness|Package coverage for packages/hosted-local-harness",
+    );
+    expect(pairs).toContain(
+      "packages/vault-usecases|Package coverage for packages/vault-usecases",
+    );
+  });
+
   it("releases apps and expands package fanout after CLI success or failure", () => {
     const markCliCoverageComplete = extractWorkspaceVerifyFunction(
       "mark_acceptance_cli_coverage_complete",
@@ -1046,6 +1086,7 @@ exercise_interlock() {
 
 sandbox="$(mktemp -d)"
 trap 'rm -rf -- "$sandbox"' EXIT
+package_coverage_shard=all
 package_coverage_concurrency_limit=3
 package_coverage_cli_active_concurrency_limit=2
 
@@ -1088,6 +1129,38 @@ printf 'clean\\n'
     expect(result.stdout).toBe("clean\n");
     expect(runNextBuild!.indexOf("wait_for_acceptance_cli_coverage"))
       .toBeLessThan(runNextBuild!.indexOf('"${next_build_command[@]}"'));
+  });
+
+  it("gives only the Assistant Engine root project the repository-owned heap", () => {
+    const runRepoVitest = extractWorkspaceVerifyFunction("run_repo_vitest");
+    const result = runShellHarness(`#!/usr/bin/env bash
+set -euo pipefail
+
+pnpm() {
+  printf 'heap=%s command=%s\n' "\${NODE_OPTIONS-unset}" "$*"
+}
+
+unset NODE_OPTIONS
+
+${runRepoVitest}
+
+run_repo_vitest --no-coverage
+`);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(
+      "heap=unset command=exec vitest run --config vitest.config.ts --project=!assistant-engine --no-coverage\n" +
+        "heap=--max-old-space-size=6144 command=exec vitest run --config vitest.config.ts --project=assistant-engine --no-coverage\n",
+    );
+  });
+
+  it("keeps the release workflow free of a process-wide Node heap", () => {
+    const releaseWorkflow = readFileSync(
+      path.join(repoRoot, ".github", "workflows", "release.yml"),
+      "utf8",
+    );
+
+    expect(releaseWorkflow).not.toContain("NODE_OPTIONS");
   });
 
   it("gives only Assistant Engine package coverage the repository-owned heap", () => {

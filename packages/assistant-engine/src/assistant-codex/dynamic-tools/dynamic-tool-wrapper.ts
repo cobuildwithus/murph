@@ -10,6 +10,12 @@ import {
 import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js'
 
 export interface DynamicToolResult {
+  /**
+   * Trusted runtime-owned text that must be delivered when the model supplies
+   * no response text or card. Analyze-video uses this for the best completed
+   * tool outcome so successful observations cannot disappear behind no-reply.
+   */
+  requiredFinalResponseFallback?: string
   responseMediaPatch?: {
     media: AssistantResponseMedia[]
     op: 'append'
@@ -50,6 +56,7 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
   input: {
     schema: T
     schemaName?: string
+    schemaPaths?: readonly string[]
     /**
      * Root-key list used in the validation digest. Auto-derived from
      * `schema.shape` for plain ZodObject schemas. Should be passed explicitly
@@ -74,6 +81,7 @@ export function parseDynamicToolArguments<T extends z.ZodTypeAny>(
         rawInput: input.value,
         requestedToolName: input.toolName,
         schemaName: input.schemaName ?? `${input.toolName}.input`,
+        schemaPaths: input.schemaPaths,
         schemaRootKeys: input.schemaRootKeys ?? resolveSchemaRootKeys(input.schema),
         toolName: input.toolName,
       }),

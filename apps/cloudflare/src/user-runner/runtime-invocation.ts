@@ -14,6 +14,9 @@ import type {
   HostedAssistantCustomInferenceOverride,
 } from "@murphai/hosted-execution/assistant-inference";
 import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   HOSTED_RUNTIME_LOG_PATH,
   HOSTED_RUNTIME_OWNER_RELEASE_IMMEDIATE_RECHECK_QUERY,
   HOSTED_RUNTIME_OWNER_RELEASED_PATH,
@@ -156,6 +159,7 @@ const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_CONTEXT =
 const WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_TEXT_ENCODER = new TextEncoder();
 
 export type RuntimeInvocationInput = {
+  assistantExecutionBlocked?: true;
   orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
   orchestrationAttemptId: string;
   processingMode?: HostedWorkspaceInvocationProcessingMode | null;
@@ -253,6 +257,7 @@ export class RuntimeInvocationService {
         })
       : null;
     let platformAiUsageAllowed: boolean | null = null;
+    let assistantExecutionBlocked = input.input.assistantExecutionBlocked === true;
     let invocationProcessingMode = input.input.processingMode ?? null;
     if (hostedAssistantCustomInferenceOverride) {
       if (typeof workspaceRead.platformAiUsageAllowed !== "boolean") {
@@ -265,12 +270,24 @@ export class RuntimeInvocationService {
       // A payloadless direct wake can win the race with Temporal's usage-block
       // reconciliation. Keep that expected product block out of transport
       // failure state and keep restored assistant work out of provider-failure
-      // handling: the existing system-mailbox path exits before foreground
-      // assistant admission, while the bound fence rejects every metered
-      // provider egress if one is reached unexpectedly. Explicit retention-only
-      // work can also proceed because it needs no model call.
+      // handling. A due delivery-only wake must retain the default assistant
+      // phase because that phase owns outbox delivery, while the bound fence
+      // still rejects every metered provider egress if one is reached
+      // unexpectedly. Other default work remains narrowed to system-mailbox
+      // processing, and explicit retention-only work can proceed without a
+      // model call.
       platformAiUsageAllowed = false;
-      if ((invocationProcessingMode ?? "default") === "default") {
+      const isDefaultDeliveryOnlyWake =
+        (invocationProcessingMode ?? "default") === "default"
+        && isDueHostedAssistantDeliveryWake(
+          workspaceRead.workspace,
+          Date.now(),
+        );
+      assistantExecutionBlocked = !isDefaultDeliveryOnlyWake;
+      if (
+        !isDefaultDeliveryOnlyWake
+        && (invocationProcessingMode ?? "default") === "default"
+      ) {
         invocationProcessingMode = "system_mailbox";
       }
     }
@@ -299,6 +316,7 @@ export class RuntimeInvocationService {
         workspaceRead.hostedAssistantProviderOverride ?? null,
       hostedAssistantReasoningEffortOverride:
         workspaceRead.hostedAssistantReasoningEffortOverride ?? null,
+      assistantExecutionBlocked,
       processingMode: invocationProcessingMode,
       token,
       userId: input.input.userId,
@@ -820,6 +838,7 @@ export class RuntimeInvocationService {
   }
 
   private async prepareWorkspaceRunnerInvocation(input: {
+    assistantExecutionBlocked: boolean;
     commandBudget?: RuntimeProcessingCommandBudget;
     hostedAssistantCustomInferenceOverride:
       HostedAssistantCustomInferenceOverride | null;
@@ -998,6 +1017,9 @@ export class RuntimeInvocationService {
       kind: HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND,
       ...(preparedSnapshotRestore ? { preparedSnapshotRestore } : {}),
       request: {
+        ...(input.assistantExecutionBlocked
+          ? { assistantExecutionBlocked: true as const }
+          : {}),
         attemptId: input.token.attemptId,
         idleCheckpointDelayMs: this.input.env.idleCheckpointDelayMs,
         leaseGeneration: input.token.generation,
@@ -1236,6 +1258,20 @@ export class RuntimeInvocationService {
       return true;
     }
   }
+}
+
+function isDueHostedAssistantDeliveryWake(
+  workspace: HostedWorkspaceState | null,
+  nowMs: number,
+): boolean {
+  if (
+    workspace?.nextWakeReason !== HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+    || typeof workspace.nextWakeAt !== "string"
+  ) {
+    return false;
+  }
+  const nextWakeAtMs = Date.parse(workspace.nextWakeAt);
+  return Number.isFinite(nextWakeAtMs) && nextWakeAtMs <= nowMs;
 }
 
 // Budget-aware wrapper for `prepareHostedWorkspaceSnapshotRestore`. A

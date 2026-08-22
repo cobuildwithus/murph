@@ -538,13 +538,15 @@ export interface CompanionDeviceSyncStatusResponse {
  * Backend-confirmed sync evidence for the member's Junction connection,
  * sourced from existing read models only (no new persisted state):
  *
- * - Per-resource `lastReceivedAt` comes from durable webhook receipt signals
- *   (`device_sync_signal` rows with `kind: "webhook_hint"`, written once per
- *   durably accepted Junction webhook). The Junction resource name is parsed
- *   from the webhook event type (`daily.data.<resource>.*`); lifecycle events
- *   such as `provider.connection.created` carry no resource and are excluded.
+ * - Per-resource `lastReceivedAt` comes from durable webhook receipts and
+ *   canonical import receipts in `device_sync_signal`. A webhook receipt is
+ *   written once per durably accepted data webhook. An import receipt is
+ *   written only when an exact dirty payload reaches canonical success and is
+ *   acknowledged after checkpoint. The Junction resource name is parsed from
+ *   the event type; lifecycle events carry no resource and are excluded.
  * - `lastDataReceivedAt` is the max of those per-resource receipt times, so it
- *   only reflects actual data webhooks, never connection lifecycle events.
+ *   reflects data arrival or stronger canonical import evidence, never mere
+ *   connection lifecycle or data-less historical completion events.
  * - `observedAt` is the server time for this status snapshot. Native clients
  *   use it for setup age and receipt freshness so device clock changes cannot
  *   create or suppress a synced state.
@@ -554,11 +556,8 @@ export interface CompanionDeviceSyncStatusResponse {
  *   first receipt, so the app can render honest "waiting for first data"
  *   states per resource.
  *
- * Known limits, accepted for the MVP status surface: Junction is
- * push-primary, so webhook receipts are the delivery evidence; data imported
- * by the pull floor alone does not advance these timestamps, and receipt
- * evidence is bounded to the most recent webhook signals. No health values
- * are ever included - timestamps and resource names only.
+ * Receipt evidence is bounded to the most recent status signals. No health
+ * values are ever included - timestamps and resource names only.
  */
 export async function readCompanionDeviceSyncStatus(input: {
   memberId: string;
@@ -654,13 +653,16 @@ export async function readCompanionDeviceSyncStatus(input: {
   let lastDataReceivedAt: string | null = null;
 
   if (connections.length > 0) {
-    const signals = await input.store.listRecentConnectionWebhookSignals({
+    const signals = await input.store.listRecentConnectionStatusSignals({
       userId: input.memberId,
       connectionIds: connections.map((connection) => connection.id),
       ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
     });
 
     for (const signal of signals) {
+      const receivedAt = signal.kind === "canonical_import"
+        ? signal.occurredAt ?? signal.createdAt
+        : signal.createdAt;
       if (sourceProviderSlug !== null) {
         const connectionId = signal.connectionId;
         if (!connectionId || !sourceReceiptCutoffs.has(connectionId)) {
@@ -670,7 +672,7 @@ export async function readCompanionDeviceSyncStatus(input: {
         const cutoff = sourceReceiptCutoffs.get(connectionId) ?? null;
         if (
           cutoff
-          && Date.parse(signal.createdAt) <= Date.parse(cutoff)
+          && Date.parse(receivedAt) <= Date.parse(cutoff)
         ) {
           continue;
         }
@@ -684,7 +686,6 @@ export async function readCompanionDeviceSyncStatus(input: {
         continue;
       }
 
-      const receivedAt = signal.createdAt;
       const entry = (resources[resource] ??= { lastReceivedAt: null });
       entry.lastReceivedAt = maxIsoTimestamp(entry.lastReceivedAt, receivedAt);
       lastDataReceivedAt = maxIsoTimestamp(lastDataReceivedAt, receivedAt);

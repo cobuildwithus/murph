@@ -149,7 +149,7 @@ test("referral reward studies keep member link actions share-only", async ({
     }
   });
   const response = await page.goto(
-    "/design?tab=sections#referral-page-reward-states",
+    "/screenshots/home#referral-page-reward-states",
     { waitUntil: "networkidle" },
   );
   expect(response?.status()).toBe(200);
@@ -258,12 +258,12 @@ test.describe("homepage referral design proof", () => {
 
     for (const width of REFERRAL_STUDY_WIDTHS) {
       await page.setViewportSize({ width, height: 1000 });
-      const response = await page.goto("/design?tab=sections", {
+      const response = await page.goto("/screenshots/home", {
         waitUntil: "load",
       });
       expect(
         response?.status(),
-        `/design should respond 200 at ${width}px`,
+        `/screenshots/home should respond 200 at ${width}px`,
       ).toBe(200);
       await page.evaluate(async () => {
         await document.fonts?.ready;

@@ -10,7 +10,10 @@ import {
   resolveHealthCommonsExperimentShell,
 } from "@/src/lib/health-commons/experiment-projections";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
-import { createMurphPageMetadata } from "@/src/lib/site-metadata";
+import {
+  createMurphPageMetadata,
+  MURPH_INDEXABLE_PAGE_ROBOTS,
+} from "@/src/lib/site-metadata";
 import { ActiveRunSummaryClient } from "./active-run-summary-client";
 
 export async function generateMetadata({
@@ -34,6 +37,9 @@ export async function generateMetadata({
   } as const;
 
   return createMurphPageMetadata({
+    alternates: {
+      canonical: `/experiments/${encodeURIComponent(shell.id)}`,
+    },
     title: `${shell.title} | Murph Experiments`,
     description: shell.description,
     openGraph: {
@@ -43,6 +49,7 @@ export async function generateMetadata({
     twitter: {
       images: [ogImage],
     },
+    robots: MURPH_INDEXABLE_PAGE_ROBOTS,
   });
 }
 

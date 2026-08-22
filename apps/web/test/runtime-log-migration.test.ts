@@ -263,7 +263,7 @@ describe("hosted runtime log database migration", () => {
     );
   });
 
-  it("routes every live producer through the new owner and keeps hot status reads log-free", async () => {
+  it("routes live Web producers through the new owner and keeps device-sync apply and hot status reads log-free", async () => {
     const repoRoot = path.resolve(appRoot, "../..");
     const [
       callbackRoute,
@@ -300,10 +300,12 @@ describe("hosted runtime log database migration", () => {
         ), "utf8"),
       ]);
 
-    for (const producer of [callbackRoute, computerLog, deviceAuthority]) {
+    for (const producer of [callbackRoute, computerLog]) {
       expect(producer).toContain("hosted-runtime-log/write");
       expect(producer).not.toContain("recordHostedRuntimeLogTx");
     }
+    expect(deviceAuthority).not.toContain("hosted-runtime-log/write");
+    expect(deviceAuthority).not.toContain("device-sync.job_failed");
     expect(workspaceStore).not.toContain(
       "function recordHostedRuntimeLog(",
     );

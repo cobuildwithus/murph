@@ -363,6 +363,10 @@ function buildProgressMilestoneSeed(
 
   return {
     automationId: experimentProgressAutomationId(experiment.experimentId),
+    contextReferences: [{
+      entityId: experiment.experimentId,
+      entityKind: 'experiment',
+    }],
     slug: `experiment-progress-${experiment.slug}-day-${FIRST_PROGRESS_DAY}`,
     title: `First progress · ${experiment.title}`,
     summary: 'A grounded progress check after the first three scheduled intervention days.',
@@ -411,6 +415,10 @@ function buildFinalResultsSeed(
   return {
     // Preserve the original final-results id so existing seeds update in place.
     automationId: experimentFinalResultsAutomationId(experiment.experimentId),
+    contextReferences: [{
+      entityId: experiment.experimentId,
+      entityKind: 'experiment',
+    }],
     slug: `experiment-final-results-${experiment.slug}`,
     title: `Final results · ${experiment.title}`,
     summary: 'A celebratory final review after the experiment finishes.',

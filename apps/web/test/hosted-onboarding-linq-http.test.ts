@@ -911,6 +911,67 @@ describe("sendHostedLinqChatMessage", () => {
     ]);
   });
 
+  it("replays a rich-link partial through the same provider idempotency keys", async () => {
+    const requestBodies: unknown[] = [];
+    const providerMessageIds = ["msg_text", "msg_link"];
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        requestBodies.push(readJsonRequestBody(init));
+        return createJsonResponse({
+          chat_id: "chat_123",
+          message: {
+            id: providerMessageIds[(requestBodies.length - 1) % 2],
+          },
+        }, 200);
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sendInput = {
+      chatId: "chat_123",
+      idempotencyKey: "payment-message:evt_123",
+      message:
+        "Complete payment here:\nhttps://pay.example.test/checkout/session_123",
+    };
+    const expectedResult = {
+      chatId: "chat_123",
+      messageId: "msg_link",
+      providerMessageIds,
+    };
+
+    await expect(sendHostedLinqChatMessage(sendInput)).resolves.toEqual(
+      expectedResult,
+    );
+    await expect(sendHostedLinqChatMessage(sendInput)).resolves.toEqual(
+      expectedResult,
+    );
+
+    const expectedRequests = [
+      {
+        message: {
+          idempotency_key: "payment-message:evt_123",
+          parts: [{
+            type: "text",
+            value: "Complete payment here:",
+          }],
+        },
+      },
+      {
+        message: {
+          idempotency_key: "payment-message:evt_123:link",
+          parts: [{
+            type: "link",
+            value: "https://pay.example.test/checkout/session_123",
+          }],
+        },
+      },
+    ];
+    expect(requestBodies).toEqual([
+      ...expectedRequests,
+      ...expectedRequests,
+    ]);
+  });
+
   it("keeps a reaction-bound consent prompt and its terminal link in one text message", async () => {
     const requestBodies: unknown[] = [];
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

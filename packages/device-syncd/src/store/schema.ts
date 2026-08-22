@@ -5,8 +5,8 @@
 
 import type { DatabaseSync } from "node:sqlite";
 
-// v9: device_connection_source.last_data_at (per-source data-arrival signal).
-export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 9;
+// v11: exact canonical source/resource import receipts on completed jobs.
+export const DEVICE_SYNC_STORE_SQLITE_SCHEMA_VERSION = 11;
 
 interface SqliteTableColumn {
   name?: unknown;
@@ -48,6 +48,10 @@ function readConnectionSourceColumns(database: DatabaseSync): SqliteTableColumn[
 
 function readWebhookTraceColumns(database: DatabaseSync): SqliteTableColumn[] {
   return database.prepare("pragma table_info(webhook_trace)").all() as SqliteTableColumn[];
+}
+
+function readDeviceJobColumns(database: DatabaseSync): SqliteTableColumn[] {
+  return database.prepare("pragma table_info(device_job)").all() as SqliteTableColumn[];
 }
 
 function columnNames(columns: readonly SqliteTableColumn[]): Set<string> {
@@ -185,6 +189,16 @@ function ensureDeviceConnectionSetupColumns(database: DatabaseSync): void {
   }
 }
 
+function ensureDeviceJobCanonicalImportReceiptsColumn(database: DatabaseSync): void {
+  const names = columnNames(readDeviceJobColumns(database));
+
+  if (!names.has("canonical_import_receipts_json")) {
+    database.exec(
+      "alter table device_job add column canonical_import_receipts_json text not null default '[]'",
+    );
+  }
+}
+
 function ensureHostedConnectionIdentityColumn(database: DatabaseSync): void {
   const names = columnNames(readDeviceConnectionColumns(database));
 
@@ -215,6 +229,19 @@ function ensureConnectionSourceLastDataColumn(database: DatabaseSync): void {
   const names = columnNames(readConnectionSourceColumns(database));
   if (!names.has("last_data_at")) {
     database.exec("alter table device_connection_source add column last_data_at text");
+  }
+}
+
+function ensureConnectionSourceLifecycleEpochColumn(database: DatabaseSync): void {
+  if (!tableExists(database, "device_connection_source")) {
+    return;
+  }
+
+  const names = columnNames(readConnectionSourceColumns(database));
+  if (!names.has("lifecycle_epoch")) {
+    database.exec(
+      "alter table device_connection_source add column lifecycle_epoch integer not null default 1",
+    );
   }
 }
 
@@ -312,6 +339,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         resource_availability_summary_json text not null default '{}',
         last_error_code text,
         last_error_message text,
+        lifecycle_epoch integer not null default 1,
         first_seen_at text not null,
         last_seen_at text not null,
         last_data_at text,
@@ -367,7 +395,8 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
         created_at text not null,
         updated_at text not null,
         started_at text,
-        finished_at text
+        finished_at text,
+        canonical_import_receipts_json text not null default '[]'
       );
 
       create index if not exists device_job_claim_idx
@@ -402,5 +431,7 @@ export function ensureDeviceSyncStoreSchema(database: DatabaseSync): void {
   ensureHostedConnectionIdentityColumn(database);
   ensureWebhookTraceClaimTokenColumn(database);
   ensureConnectionSourceLastDataColumn(database);
+  ensureConnectionSourceLifecycleEpochColumn(database);
+  ensureDeviceJobCanonicalImportReceiptsColumn(database);
   clearLegacyEmptyTokenCredentials(database);
 }

@@ -5,6 +5,8 @@ import type {
   ConsumeOAuthStateResult,
   DiscardUnconsumedOAuthStateResult,
   DeviceSyncPublicIngressStore,
+  DeviceSyncPublicIngressSourceAdmissionCandidate,
+  DeviceSyncPublicIngressWebhookConnectionLookupResult,
   DeviceSyncWebhookTraceClaimResult,
   GetPublicDeviceSyncOAuthCleanupAccountInput,
   ListDeviceConnectionSourcesInput,
@@ -35,8 +37,8 @@ export class DeviceProviderApplicationIngressStore
     private readonly store: PrismaDeviceSyncControlPlaneStore,
   ) {}
 
-  deleteExpiredOAuthStates(now: string): Promise<number> {
-    return this.store.deleteExpiredOAuthStates(now);
+  deleteExpiredOAuthStates(): Promise<number> {
+    return this.store.deleteExpiredOAuthStates();
   }
 
   createOAuthState(input: OAuthStateRecord): Promise<OAuthStateRecord> {
@@ -133,6 +135,16 @@ export class DeviceProviderApplicationIngressStore
     );
   }
 
+  getWebhookConnectionByExternalAccount(
+    provider: string,
+    externalAccountId: string,
+  ): Promise<DeviceSyncPublicIngressWebhookConnectionLookupResult | null> {
+    return this.store.getWebhookConnectionByExternalAccount(
+      provider,
+      externalAccountId,
+    );
+  }
+
   upsertConnectionSource(
     input: UpsertDeviceConnectionSourceInput,
   ): Promise<
@@ -160,6 +172,14 @@ export class DeviceProviderApplicationIngressStore
     >
   > {
     return this.store.listConnectionSources(input);
+  }
+
+  resolveConnectionSourceAdmissionCandidate(input: {
+    connectionId: string;
+    sourceInstanceKey?: string;
+    sourceProviderSlug: string;
+  }): Promise<DeviceSyncPublicIngressSourceAdmissionCandidate | null> {
+    return this.store.resolveConnectionSourceAdmissionCandidate(input);
   }
 
   getConnectionOwnerId(accountId: string): Promise<string | null> {

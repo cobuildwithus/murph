@@ -119,6 +119,37 @@ const CHALLENGE_CARD: HostedAssistantResponseCard = {
   version: 1,
 };
 
+const EXERCISE_ROUTINE_CARD: HostedAssistantResponseCard = {
+  exercises: [{
+    dose: "8 repetitions",
+    estimatedSeconds: 45,
+    images: [],
+    instructions: ["Move slowly."],
+    name: "Shoulder circles",
+  }],
+  footer: null,
+  intensity: "Easy",
+  kind: "exercise_routine",
+  labels: {
+    dose: "Dose",
+    exercise: "Exercise",
+    time: "Time",
+    visualGuide: "Visual guide",
+  },
+  safety: "Stop if pain increases.",
+  subtitle: null,
+  title: "Short reset",
+  totalSeconds: 60,
+  transitionSeconds: 15,
+  version: 1,
+};
+
+const TELEGRAM_RICH_CONTENT_CARD: HostedAssistantResponseCard = {
+  html: "<h2>Travel prep</h2><ol><li>Pack the charger.</li></ol>",
+  kind: "telegram_rich_content",
+  version: 1,
+};
+
 const COMPACT_TABLE_CARD: HostedAssistantResponseCard = {
   columns: ["Completed"],
   footer: null,
@@ -229,7 +260,7 @@ describe("hosted assistant delivery contracts", () => {
     }).payload).not.toHaveProperty("card");
   });
 
-  it("admits challenge cards only for Linq groups and keeps other cards private", () => {
+  it("admits only the supported response cards in group conversations", () => {
     const challengeEffect = buildHostedAssistantDeliveryEffect({
       dedupeKey: "dedupe-group-challenge-card",
       effectId: "intent-group-challenge-card",
@@ -261,7 +292,28 @@ describe("hosted assistant delivery contracts", () => {
       })).toThrow(/requires an authenticated Linq group conversation/);
     }
 
-    for (const card of [NUTRITION_CARD, COMPACT_TABLE_CARD]) {
+    for (const card of [EXERCISE_ROUTINE_CARD, TELEGRAM_RICH_CONTENT_CARD]) {
+      expect(buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe-telegram-group-${card.kind}`,
+        effectId: `intent-telegram-group-${card.kind}`,
+        payload: createHostedAssistantDeliveryPayload({
+          card,
+          channel: "telegram",
+          threadIsDirect: false,
+        }),
+      }).payload.card).toEqual(card);
+      expect(() => buildHostedAssistantDeliveryEffect({
+        dedupeKey: `dedupe-linq-group-${card.kind}`,
+        effectId: `intent-linq-group-${card.kind}`,
+        payload: createHostedAssistantDeliveryPayload({
+          card,
+          channel: "linq",
+          threadIsDirect: false,
+        }),
+      })).toThrow(/requires a private direct conversation/);
+    }
+
+    for (const card of [NUTRITION_CARD, COMPACT_TABLE_CARD, WORKOUT_CARD]) {
       expect(buildHostedAssistantDeliveryEffect({
         dedupeKey: `dedupe-private-${card.kind}`,
         effectId: `intent-private-${card.kind}`,
@@ -276,7 +328,7 @@ describe("hosted assistant delivery contracts", () => {
         effectId: `intent-group-${card.kind}`,
         payload: createHostedAssistantDeliveryPayload({
           card,
-          channel: "linq",
+          channel: "telegram",
           threadIsDirect: false,
         }),
       })).toThrow(/requires a private direct conversation/);

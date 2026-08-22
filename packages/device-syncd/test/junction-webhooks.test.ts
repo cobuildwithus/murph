@@ -21,9 +21,16 @@ import path from "node:path";
 import { test } from "vitest";
 
 import { createDeviceSyncService } from "../src/service.ts";
+import { buildJunctionProviderSourceInstanceKey } from "../src/config/junction-connect-sources.ts";
+import { DeviceSyncError } from "../src/errors.ts";
 import { createJunctionDeviceSyncProvider } from "../src/providers/junction.ts";
+import { scopeWebhookTraceId } from "../src/shared.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
+import {
+  countJobsForAccountForTesting,
+  readWebhookTraceStatusForTesting,
+} from "./store-test-helpers.ts";
 
 import type { DeviceSyncImporterPort } from "../src/types.ts";
 
@@ -337,6 +344,128 @@ test("enriched activity webhooks direct-import and sleep webhooks with embedded 
       hasSleepImport(imports),
       `sleep webhook with embedded data should import sleep; imports=${JSON.stringify(summaryRecordCounts(imports))}, requests=${JSON.stringify(requests)}`,
     );
+  } finally {
+    fixture.close();
+  }
+});
+
+test("production service ranks canonical and legacy Junction sources consistently", async () => {
+  const fixture = await createWebhookFixture();
+  const { account, imports, nowMs, service, store } = fixture;
+  const canonicalSourceInstanceKey = buildJunctionProviderSourceInstanceKey({
+    connectionId: account.id,
+    sourceProviderSlug: "whoop_v2",
+  });
+  assert.ok(canonicalSourceInstanceKey);
+  const legacySourceInstanceKey = "legacy_whoop_v2_source";
+  let webhookIndex = 0;
+
+  const buildWebhook = () => {
+    webhookIndex += 1;
+    return {
+      messageId: `msg_source_admission_${webhookIndex}`,
+      webhook: buildEnrichedActivityWebhook(nowMs, {
+        calories: 600 + webhookIndex,
+        endOffsetMs: 60_000 + webhookIndex * 1_000,
+        messageId: `msg_source_admission_${webhookIndex}`,
+      }),
+    };
+  };
+  const expectAcceptedAndImported = async () => {
+    const jobsBefore = countJobsForAccountForTesting(store, account.id);
+    const importsBefore = imports.length;
+    const { messageId, webhook } = buildWebhook();
+
+    const accepted = await service.handleWebhook("junction", webhook.headers, webhook.rawBody);
+
+    assert.equal(accepted.accepted, true);
+    assert.equal(countJobsForAccountForTesting(store, account.id), jobsBefore + 1);
+    assert.equal(
+      readWebhookTraceStatusForTesting(
+        store,
+        "junction",
+        scopeWebhookTraceId("junction", account.externalAccountId, messageId),
+      ),
+      "processed",
+    );
+    await service.drainWorker(100);
+    assert.equal(imports.length, importsBefore + 1);
+  };
+  const expectRetriableSourceFailure = async () => {
+    const jobsBefore = countJobsForAccountForTesting(store, account.id);
+    const importsBefore = imports.length;
+    const { messageId, webhook } = buildWebhook();
+
+    await assert.rejects(
+      service.handleWebhook("junction", webhook.headers, webhook.rawBody),
+      (error: unknown) =>
+        error instanceof DeviceSyncError
+        && error.code === "WEBHOOK_SOURCE_NOT_READY"
+        && error.httpStatus === 503
+        && error.retryable === true,
+    );
+    assert.equal(countJobsForAccountForTesting(store, account.id), jobsBefore);
+    assert.equal(imports.length, importsBefore);
+    assert.equal(
+      readWebhookTraceStatusForTesting(
+        store,
+        "junction",
+        scopeWebhookTraceId("junction", account.externalAccountId, messageId),
+      ),
+      null,
+    );
+  };
+
+  try {
+    await expectAcceptedAndImported();
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: legacySourceInstanceKey,
+      sourceProviderSlug: "whoop_v2",
+      status: "connected",
+      firstSeenAt: iso(nowMs - 120_000),
+      lastSeenAt: iso(nowMs - 120_000),
+    });
+    await expectAcceptedAndImported();
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: legacySourceInstanceKey,
+      sourceProviderSlug: "whoop_v2",
+      status: "disconnected",
+      firstSeenAt: iso(nowMs - 120_000),
+      lastSeenAt: iso(nowMs - 90_000),
+    });
+    await expectRetriableSourceFailure();
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: legacySourceInstanceKey,
+      sourceProviderSlug: "whoop_v2",
+      status: "connected",
+      firstSeenAt: iso(nowMs - 120_000),
+      lastSeenAt: iso(nowMs - 60_000),
+    });
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: "whoop_v2",
+      status: "disconnected",
+      firstSeenAt: iso(nowMs - 180_000),
+      lastSeenAt: iso(nowMs - 180_000),
+    });
+    await expectRetriableSourceFailure();
+
+    store.upsertConnectionSource({
+      connectionId: account.id,
+      sourceInstanceKey: canonicalSourceInstanceKey,
+      sourceProviderSlug: "whoop_v2",
+      status: "connected",
+      firstSeenAt: iso(nowMs - 180_000),
+      lastSeenAt: iso(nowMs - 30_000),
+    });
+    await expectAcceptedAndImported();
   } finally {
     fixture.close();
   }

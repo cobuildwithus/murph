@@ -79,10 +79,14 @@ describe("ExperimentResearchPage", () => {
         experimentId: "finnish-sauna",
       }),
     })).resolves.toEqual(expect.objectContaining({
+      alternates: {
+        canonical: "/experiments/finnish-sauna/research",
+      },
       description: expect.stringContaining("steady, tolerable heat"),
       openGraph: expect.objectContaining({
         type: "article",
       }),
+      robots: { follow: true, index: true },
       title: "Finnish Dry Sauna research — Murph Experiments",
     }));
   });

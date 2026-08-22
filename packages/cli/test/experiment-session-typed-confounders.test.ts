@@ -114,6 +114,7 @@ test('experiment session log schema exposes typed confounder map entries', async
   ) as CommandSchema
 
   assert.equal('lookup' in schema.args.properties, true)
+  assert.equal('reminderIntentId' in schema.options.properties, true)
   assert.equal('confounders' in schema.options.properties, true)
   assert.equal('confounder' in schema.options.properties, true)
   assert.equal('field' in schema.options.properties, true)

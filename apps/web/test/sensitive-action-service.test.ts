@@ -165,6 +165,31 @@ describe("sensitive action challenges", () => {
     expect(prisma.__rows.size).toBe(1);
   });
 
+  it("leaves unrelated expired challenges for the bounded retention owner", async () => {
+    const prisma = createPrismaFake();
+    const bindingHash = buildSettingsSensitiveActionBinding({
+      kind: "vault.export",
+      memberId: "member_123",
+      sessionId: "session_123",
+    });
+    await createSensitiveActionChallenge({
+      bindingHash,
+      kind: "vault.export",
+      memberId: "member_123",
+      now,
+      prisma,
+    });
+    await createSensitiveActionChallenge({
+      bindingHash,
+      kind: "vault.export",
+      memberId: "member_123",
+      now: new Date(now.getTime() + 16 * 60 * 1000),
+      prisma,
+    });
+
+    expect(prisma.__rows.size).toBe(2);
+  });
+
   it("allows exactly one concurrent consume", async () => {
     const prisma = createPrismaFake();
     const bindingHash = buildSettingsSensitiveActionBinding({

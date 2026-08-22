@@ -106,6 +106,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/src/hooks/use-mobile", () => ({
+  useIsMobile: () => false,
+}));
+
 vi.mock("@/src/components/ui/dialog", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const noopOpenChange: (open: boolean) => void = () => {};
@@ -450,7 +454,7 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /mailto:support@withmurph\.ai/);
   });
 
-  test("says syncing continues when Core AI usage is exhausted", async () => {
+  test("makes the server-authorized recurring Core upgrade the recovery primary", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -458,6 +462,10 @@ describe("HostedBillingSettings", () => {
       HostedBillingSettings,
       {
         authenticated: true,
+        billingStatus: "active",
+        canUpgradeToPulse: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_group_monthly",
         usageStatus: buildUsageStatus({
           planCode: "launch_group_monthly",
           planName: "Group",
@@ -468,9 +476,10 @@ describe("HostedBillingSettings", () => {
       },
     ));
 
-    assert.match(markup, /wearable keeps syncing/);
-    assert.match(markup, /group activity stays current/);
+    assert.match(markup, /Keep Murph going/);
     assert.match(markup, /Core · Resets/);
+    assert.match(markup, /Pulse includes more usage each month/);
+    assert.match(markup, />Upgrade to Pulse</);
     assert.doesNotMatch(markup, /Group · Resets/);
   });
 
@@ -504,12 +513,13 @@ describe("HostedBillingSettings", () => {
     assert.match(markup, /Resets Aug 1, 2026/);
   });
 
-  test("shows the active Family owner their own Add usage action", async () => {
+  test("keeps a Family tier upgrade primary and owner top-up secondary", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
       payerMemberId: TEST_PAYER_MEMBER_ID,
       authenticated: true,
+      familyRecurringUpgradeAvailable: true,
       familyState: "owner",
       usageStatus: buildUsageStatus({
         accessKind: "family_sponsored",
@@ -528,9 +538,420 @@ describe("HostedBillingSettings", () => {
       usageTopUpTargetLabel: "you",
     }));
 
-    assert.match(markup, />Add usage</);
+    const upgradeIndex = markup.indexOf("Upgrade Family access");
+    const topUpIndex = markup.indexOf("Add usage");
+    assert.ok(upgradeIndex >= 0);
+    assert.ok(topUpIndex > upgradeIndex);
+    assert.match(markup, /Family plan can be upgraded for more included usage each month/);
     assert.match(markup, /aria-label="Add usage for you"/);
-    assert.match(markup, /Add usage to continue/);
+  });
+
+  test("makes the best paid recurring upgrade primary and top-up secondary", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "active",
+      canUpgradeToEdge: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_monthly",
+      usageStatus: buildUsageStatus({
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        offerCode: "usage_5_usd",
+      }],
+    }));
+
+    const upgradeIndex = markup.indexOf("Upgrade to Edge");
+    const topUpIndex = markup.indexOf("Add usage");
+    assert.ok(upgradeIndex >= 0);
+    assert.ok(topUpIndex > upgradeIndex);
+    assert.match(markup, /Edge includes more usage each month/);
+    assert.match(markup, /min-h-11 w-full sm:w-auto/);
+  });
+
+  test("keeps an exhausted top-up return visible through reconciliation", async () => {
+    vi.useFakeTimers();
+    mocks.requestHostedOnboardingJson
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "checkout_open",
+        url: "https://checkout.stripe.test/exhausted-return",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "payment_pending",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "reconciling",
+      })
+      .mockResolvedValueOnce({
+        purchaseId: "hucp_exhausted_return",
+        status: "fulfilled",
+      });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        billingStatus: "active",
+        canUpgradeToEdge: true,
+        currentBillingPhase: "paid",
+        currentBillingPlanCode: "launch_monthly",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageStatus: buildUsageStatus({
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+        usageTopUpOffers: [{
+          amountLabel: "$5",
+          offerCode: "usage_5_usd",
+        }],
+        usageTopUpPurchaseReturn: {
+          kind: "success",
+          purchaseId: "hucp_exhausted_return",
+        },
+      }),
+      {
+        location: {
+          href: "https://example.test/settings?usagePurchase=hucp_exhausted_return&usageCheckout=success#subscription",
+        },
+        requireButton: false,
+      },
+    );
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.ok(rendered.container.querySelector('[role="dialog"]'));
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Payment submitted\. We’re confirming it\./,
+      );
+
+      for (const expected of [
+        /Payment submitted\. We’re confirming it\./,
+        /We’re confirming your payment…/,
+        /Usage added/,
+      ]) {
+        await act(async () => {
+          vi.advanceTimersByTime(1_250);
+          await Promise.resolve();
+        });
+        assert.ok(rendered.container.querySelector('[role="dialog"]'));
+        assert.match(rendered.container.textContent ?? "", expected);
+      }
+
+      assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    } finally {
+      await rendered.cleanup();
+      vi.useRealTimers();
+    }
+  });
+
+  test("uses the Settings-owned Max eligibility for an Edge recovery", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canUpgradeToMax: true,
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_edge_monthly",
+      showMaxPlan: true,
+      usageStatus: buildUsageStatus({
+        planCode: "launch_edge_monthly",
+        planName: "Edge",
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+    }));
+
+    assert.match(markup, /Max includes more usage each month/);
+    assert.match(markup, />Upgrade to Max</);
+    assert.doesNotMatch(markup, /Add usage/);
+  });
+
+  test("promotes authorized one-time usage when no higher recurring plan exists", async () => {
+    const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
+
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      authenticated: true,
+      billingStatus: "active",
+      currentBillingPhase: "paid",
+      currentBillingPlanCode: "launch_max_monthly",
+      showMaxPlan: true,
+      usageStatus: buildUsageStatus({
+        planCode: "launch_max_monthly",
+        planName: "Max",
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+      usageTopUpOffers: [{
+        amountLabel: "$5",
+        offerCode: "usage_5_usd",
+      }],
+    }));
+
+    assert.match(markup, /No higher plan is available/);
+    assert.match(markup, />Add usage</);
+    assert.doesNotMatch(markup, /Upgrade to (?:Pulse|Edge|Max)/);
+  });
+
+  test("opens the sponsored Family owner handoff from the recovery route", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        familyState: "sponsored",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageRecoveryInitialOpen: true,
+        usageStatus: buildUsageStatus({
+          accessKind: "family_sponsored",
+          planName: "Family",
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+        usageTopUpOffers: [{
+          amountLabel: "$5",
+          offerCode: "usage_5_usd",
+        }],
+      }),
+      {
+        location: {
+          hash: "#subscription",
+          href: "https://app.murph.test/settings?usageRecovery=true#subscription",
+          origin: "https://app.murph.test",
+          pathname: "/settings",
+          search: "?usageRecovery=true",
+        },
+        requireButton: false,
+      },
+    );
+    try {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Your Family owner controls the plan/,
+      );
+      assert.match(
+        rendered.container.textContent ?? "",
+        /choose your account and review the available plan options/,
+      );
+      assert.doesNotMatch(rendered.container.textContent ?? "", /Add usage/);
+      findButtonByText(
+        rendered.window.document,
+        "Copy link for your Family owner",
+        rendered.window,
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("keeps a sponsored member's frozen purchase ahead of the Family owner handoff", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedBillingSettings, {
+        authenticated: true,
+        familyState: "sponsored",
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageRecoveryInitialOpen: true,
+        usageStatus: buildUsageStatus({
+          accessKind: "family_sponsored",
+          planName: "Family",
+          remainingPercent: 0,
+          status: "exhausted",
+          usedPercent: 100,
+        }),
+        usageTopUpActivePurchase: {
+          cancelAllowed: true,
+          offerCode: "usage_5_usd",
+          purchaseId: "purchase_pending",
+          retryAllowed: false,
+          status: "checkout_open",
+          url: "https://checkout.stripe.test/session",
+        },
+        usageTopUpInitialOpen: true,
+        usageTopUpOffers: [],
+      }),
+      { requireButton: false },
+    );
+    try {
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /Copy link for your Family owner|Your Family owner controls the plan/,
+      );
+      findButtonByText(
+        rendered.window.document,
+        "Resume checkout",
+        rendered.window,
+      );
+      findButtonByText(
+        rendered.window.document,
+        "Cancel checkout",
+        rendered.window,
+      );
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("ignores a stale sponsored recovery request after usage recovers", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      familyState: "sponsored",
+      payerMemberId: TEST_PAYER_MEMBER_ID,
+      usageRecoveryInitialOpen: true,
+      usageStatus: buildUsageStatus({
+        accessKind: "family_sponsored",
+        planName: "Family",
+      }),
+    }));
+
+    assert.match(markup, /aria-label="Family AI usage"/);
+    assert.doesNotMatch(
+      markup,
+      /Keep Murph going|Copy link for your Family owner|Send them this Family Settings link/,
+    );
+  });
+
+  test("copies only a generic Settings URL from the sponsored Family handoff", async () => {
+    const writeText = vi.fn((value: string) => {
+      void value;
+      return Promise.resolve();
+    });
+    const { HostedSponsoredFamilyRecoveryDialog } = await import(
+      "@/src/components/settings/hosted-sponsored-family-recovery-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedSponsoredFamilyRecoveryDialog, { initialOpen: true }),
+      {
+        location: {
+          hash: "#subscription",
+          href: "https://app.murph.test/settings?usageRecovery=true#subscription",
+          origin: "https://app.murph.test",
+          pathname: "/settings",
+          search: "?usageRecovery=true",
+        },
+        requireButton: false,
+      },
+    );
+    const navigatorWithClipboard = Object.create(
+      rendered.window.navigator,
+    ) as Navigator;
+    Object.defineProperty(navigatorWithClipboard, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.stubGlobal("navigator", navigatorWithClipboard);
+
+    try {
+      const copyButton = findButtonByText(
+        rendered.window.document,
+        "Copy link for your Family owner",
+        rendered.window,
+      );
+      await act(async () => {
+        copyButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+        await Promise.resolve();
+      });
+
+      assert.equal(
+        writeText.mock.calls[0]?.[0],
+        "https://app.murph.test/settings?familyRecovery=true#family",
+      );
+      const copiedUrl = new URL(String(writeText.mock.calls[0]?.[0]));
+      assert.equal(copiedUrl.pathname, "/settings");
+      assert.equal(copiedUrl.search, "?familyRecovery=true");
+      assert.equal(copiedUrl.hash, "#family");
+      assert.doesNotMatch(copiedUrl.toString(), /usageRecovery|payer|member|token/i);
+      assert.match(rendered.container.textContent ?? "", /Family Settings link copied/);
+      assert.match(rendered.container.textContent ?? "", /Link copied\. Send it to your Family owner/);
+    } finally {
+      await rendered.cleanup();
+    }
+  });
+
+  test("reports clipboard failure honestly in the sponsored Family handoff", async () => {
+    const writeText = vi.fn((value: string) => {
+      void value;
+      return Promise.reject(new Error("clipboard blocked"));
+    });
+    const { HostedSponsoredFamilyRecoveryDialog } = await import(
+      "@/src/components/settings/hosted-sponsored-family-recovery-dialog"
+    );
+    const rendered = await renderClientComponent(
+      createElement(HostedSponsoredFamilyRecoveryDialog, { initialOpen: true }),
+      {
+        location: {
+          hash: "#subscription",
+          href: "https://app.murph.test/settings?usageRecovery=true#subscription",
+          origin: "https://app.murph.test",
+          pathname: "/settings",
+          search: "?usageRecovery=true",
+        },
+        requireButton: false,
+      },
+    );
+    const navigatorWithClipboard = Object.create(
+      rendered.window.navigator,
+    ) as Navigator;
+    Object.defineProperty(navigatorWithClipboard, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.stubGlobal("navigator", navigatorWithClipboard);
+
+    try {
+      const copyButton = findButtonByText(
+        rendered.window.document,
+        "Copy link for your Family owner",
+        rendered.window,
+      );
+      await act(async () => {
+        copyButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+        await Promise.resolve();
+      });
+
+      const alert = rendered.container.querySelector('[role="alert"]');
+      assert.ok(alert instanceof rendered.window.HTMLElement);
+      assert.match(alert.textContent ?? "", /The link could not be copied/);
+      assert.match(
+        alert.textContent ?? "",
+        /https:\/\/app\.murph\.test\/settings\?familyRecovery=true#family/,
+      );
+      assert.doesNotMatch(alert.textContent ?? "", /usageRecovery|payer|member|token/i);
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("shows exhausted overall usage without inventing a forecast", async () => {
@@ -548,7 +969,11 @@ describe("HostedBillingSettings", () => {
 
     assert.match(markup, /100% used/);
     assert.match(markup, /0% remaining/);
-    assert.match(markup, /You&#x27;ve used all available usage\. Murph pauses new usage until more capacity is available/);
+    assert.match(
+      markup,
+      /Murph will resume when this allowance resets/,
+    );
+    assert.doesNotMatch(markup, /Upgrade to (?:Pulse|Edge|Max)/);
     assert.doesNotMatch(markup, /recent pace/);
   });
 
@@ -776,7 +1201,7 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /reconcil/iu);
   });
 
-  test("mounts an exact return without offers or an active purchase", async () => {
+  test("mounts an exact return controller without presenting payment status", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -797,8 +1222,10 @@ describe("HostedBillingSettings", () => {
       ),
     );
 
-    assert.match(markup, /Confirming payment for you/);
-    assert.match(markup, /We’re confirming your payment/);
+    assert.match(markup, /AI usage/);
+    assert.doesNotMatch(markup, /Confirming payment for you/);
+    assert.doesNotMatch(markup, /We’re confirming your payment/);
+    assert.doesNotMatch(markup, /Check payment/);
     assert.doesNotMatch(
       markup,
       /Other checkout|unfinished checkout|another usage destination/i,
@@ -810,7 +1237,7 @@ describe("HostedBillingSettings", () => {
     );
   });
 
-  test("offers Text Murph on a fulfilled top-up when a contact channel resolves", async () => {
+  test("keeps a fulfilled Settings top-up quiet beside the refreshed meter", async () => {
     const { HostedBillingSettings } = await import("@/src/components/settings/hosted-billing-settings");
 
     const fulfilledPurchase = {
@@ -827,36 +1254,83 @@ describe("HostedBillingSettings", () => {
         usedPercent: 55,
       }),
       usageTopUpActivePurchase: fulfilledPurchase,
-      usageTopUpContactOptions: [{
-        href: "sms:+15555550100?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage.",
-        kind: "text" as const,
-        label: "Messages",
-      }],
       usageTopUpInitialOpen: true,
     }));
 
-    assert.match(markup, /Usage added/);
-    assert.match(markup, /55% used/);
-    assert.match(markup, /45% remaining/);
-    assert.match(markup, /Text Murph/);
     assert.match(
       markup,
-      /sms:\+15555550100\?body=Hey%20Murph%2C%20I%20just%20added%20more%20usage\./,
+      /class="sr-only" role="status"[^>]*>Usage added\. Your available usage has been updated\.<\/p>/,
     );
-    assert.match(markup, /aria-label="Text Murph in Messages"/);
+    assert.doesNotMatch(markup, /role="dialog"/);
+    assert.match(markup, /55% used/);
+    assert.match(markup, /45% remaining/);
+    assert.doesNotMatch(markup, /Text Murph/);
+  });
 
-    const withoutContactMarkup = renderToStaticMarkup(
+  test("keeps an inactive Settings return visible until its durable credit receipt is closed", async () => {
+    mocks.requestHostedOnboardingJson.mockResolvedValueOnce({
+      purchaseId: "hucp_inactive_return",
+      status: "fulfilled",
+    });
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const rendered = await renderClientComponent(
       createElement(HostedBillingSettings, {
-        payerMemberId: TEST_PAYER_MEMBER_ID,
         authenticated: true,
-        usageStatus: buildUsageStatus(),
-        usageTopUpActivePurchase: fulfilledPurchase,
-        usageTopUpInitialOpen: true,
+        payerMemberId: TEST_PAYER_MEMBER_ID,
+        usageStatus: {
+          generatedAt: "2026-07-10T12:00:00.000Z",
+          reason: "hosted_access_inactive",
+          recommendedAction: null,
+          status: "unavailable",
+        },
+        usageTopUpPurchaseReturn: {
+          kind: "success",
+          purchaseId: "hucp_inactive_return",
+        },
       }),
+      {
+        location: {
+          href: "https://example.test/settings?usagePurchase=hucp_inactive_return&usageCheckout=success",
+        },
+        requireButton: false,
+      },
     );
 
-    assert.match(withoutContactMarkup, /Usage added/);
-    assert.doesNotMatch(withoutContactMarkup, /Text Murph/);
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      assert.equal(rendered.container.querySelector('[aria-label$="AI usage"]'), null);
+      assert.ok(rendered.container.querySelector('[role="dialog"]'));
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Usage added.*Your usage credit was added to your account\./s,
+      );
+      assert.doesNotMatch(
+        rendered.container.textContent ?? "",
+        /available usage has been updated|Text Murph|Purchase details/i,
+      );
+      assert.equal(mocks.routerRefresh.mock.calls.length, 0);
+
+      const closeButton = [...rendered.container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Close");
+      assert.ok(closeButton);
+      await act(async () => {
+        closeButton.dispatchEvent(
+          new rendered.window.Event("click", { bubbles: true }),
+        );
+        await Promise.resolve();
+      });
+
+      assert.equal(rendered.container.querySelector('[role="dialog"]'), null);
+      assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+    } finally {
+      await rendered.cleanup();
+    }
   });
 
   test("offers the same top-up primitive to a direct paid Edge member", async () => {
@@ -1903,6 +2377,7 @@ describe("HostedBillingSettings", () => {
       authenticated: true,
       billingStatus: "active",
       canStartDirectPlan: true,
+      showMaxPlan: true,
       usageStatus: buildStarterStatus(),
     }));
 
@@ -1912,10 +2387,14 @@ describe("HostedBillingSettings", () => {
     assert.doesNotMatch(markup, /Starter ·/);
     assert.match(markup, /Choose Pulse/);
     assert.match(markup, /Choose Edge/);
+    assert.match(markup, /Choose Max/);
+    // The usage meter above already states the Starter terms, so neither
+    // recurring card repeats them under its feature list.
+    assert.doesNotMatch(markup, /starter usage does not expire/i);
     assert.doesNotMatch(markup, /days? left|expires/i);
   });
 
-  test("explains Starter exhaustion without inventing a reset", async () => {
+  test("makes the eligible Starter recurring plan the exhaustion primary", async () => {
     const { HostedBillingSettings } = await import(
       "@/src/components/settings/hosted-billing-settings"
     );
@@ -1930,10 +2409,31 @@ describe("HostedBillingSettings", () => {
       }),
     }));
 
-    assert.match(markup, /used your starter usage/i);
-    assert.match(markup, /choose a monthly plan/i);
+    assert.match(markup, /Pulse includes more usage each month/);
+    assert.match(markup, />Upgrade to Pulse</);
     assert.doesNotMatch(markup, /Does not expire/);
     assert.doesNotMatch(markup, /resets? /i);
+  });
+
+  test("prefers the visible Core plan for an eligible Starter group member", async () => {
+    const { HostedBillingSettings } = await import(
+      "@/src/components/settings/hosted-billing-settings"
+    );
+    const markup = renderToStaticMarkup(createElement(HostedBillingSettings, {
+      authenticated: true,
+      billingStatus: "active",
+      canStartDirectPlan: true,
+      showGroupPlan: true,
+      usageStatus: buildStarterStatus({
+        remainingPercent: 0,
+        status: "exhausted",
+        usedPercent: 100,
+      }),
+    }));
+
+    assert.match(markup, /Core includes more usage each month/);
+    assert.match(markup, />Upgrade to Core</);
+    assert.doesNotMatch(markup, />Upgrade to Pulse</);
   });
 });
 

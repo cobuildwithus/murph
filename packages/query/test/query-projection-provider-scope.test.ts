@@ -77,6 +77,157 @@ test("automatic and manual projection rebuilds tolerate valid multiline activity
   }
 });
 
+test("activity runtime reads bounded workout features without hydrating query entities", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-workout-features-"));
+  const date = "2026-08-15";
+  const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-08.jsonl");
+  const featureEvents = Array.from({ length: 33 }, (_, workoutIndex) => {
+    const startedAt = `2026-08-15T${String(6 + Math.floor(workoutIndex / 60)).padStart(2, "0")}:${String(workoutIndex % 60).padStart(2, "0")}:00.000Z`;
+    const resourceId = `private-workout-resource-${workoutIndex}`;
+    const common = {
+      schemaVersion: "murph.event.v1",
+      recordedAt: "2026-08-15T23:00:00.000Z",
+      dayKey: date,
+      source: "device",
+      tags: ["workout-sport-cycling"],
+      dataOrigin: {
+        aggregatorProvider: "junction",
+        sourceProviderSlug: "garmin",
+        sourceType: "watch",
+        version: 1,
+      },
+    };
+    return [
+      {
+        ...common,
+        id: `evt_workout_feature_${workoutIndex}`,
+        kind: "measurement",
+        occurredAt: startedAt,
+        title: "Junction workout stream features",
+        measurements: [
+          { metric: "average-workout-power", unit: "watt", value: 220 },
+          { metric: "average-workout-speed", unit: "mps", value: 5 },
+        ],
+        externalRef: {
+          system: "junction",
+          resourceType: "garmin-workout-stream",
+          resourceId,
+          facet: "workout-stream-feature",
+        },
+      },
+      ...Array.from({ length: 65 }, (_, splitOffset) => ({
+        ...common,
+        id: `evt_workout_feature_${workoutIndex}_split_${splitOffset + 1}`,
+        kind: "measurement",
+        occurredAt: new Date(Date.parse(startedAt) + (splitOffset + 1) * 1_000).toISOString(),
+        title: `Junction workout split ${splitOffset + 1}`,
+        measurements: [
+          { metric: "workout-split-distance", unit: "meter", value: 1_000 },
+          { metric: "workout-split-duration", unit: "seconds", value: 300 },
+          { metric: "average-workout-split-power", unit: "watt", value: 225 },
+        ],
+        externalRef: {
+          system: "junction",
+          resourceType: "garmin-workout-stream",
+          resourceId,
+          facet: `workout-stream-split-${splitOffset + 1}`,
+        },
+      })),
+    ];
+  }).flat();
+  const unrelatedEvents = Array.from({ length: 500 }, (_, index) => ({
+    schemaVersion: "murph.event.v1",
+    id: `evt_unrelated_history_${index}`,
+    kind: "observation",
+    occurredAt: "2026-08-01T12:00:00.000Z",
+    recordedAt: "2026-08-15T23:00:00.000Z",
+    dayKey: "2026-08-01",
+    source: "manual",
+    title: "Unrelated history",
+    metric: "unrelated-history",
+    unit: "score",
+    value: index,
+  }));
+
+  try {
+    await mkdir(path.dirname(eventLedgerPath), { recursive: true });
+    await writeFile(
+      eventLedgerPath,
+      [
+        {
+          schemaVersion: "murph.event.v1",
+          id: "evt_workout_feature_day_steps",
+          kind: "observation",
+          occurredAt: "2026-08-15T12:00:00.000Z",
+          recordedAt: "2026-08-15T23:00:00.000Z",
+          dayKey: date,
+          source: "device",
+          title: "Garmin steps",
+          metric: "steps",
+          unit: "count",
+          value: 8_000,
+          dataOrigin: {
+            aggregatorProvider: "junction",
+            sourceProviderSlug: "garmin",
+            sourceType: "watch",
+            version: 1,
+          },
+          externalRef: {
+            system: "junction",
+            resourceType: "daily-activity",
+            resourceId: "daily-activity-2026-08-15",
+            facet: "steps",
+          },
+        },
+        ...featureEvents,
+        ...unrelatedEvents,
+      ].map((record) => JSON.stringify(record)).join("\n").concat("\n"),
+      "utf8",
+    );
+    await rebuildQueryProjection(vaultRoot);
+
+    const database = openSqliteRuntimeDatabase(path.join(vaultRoot, QUERY_DB_RELATIVE_PATH));
+    try {
+      const entityCount = database.prepare(
+        "SELECT COUNT(*) AS count FROM query_entities",
+      ).get() as { count: number };
+      assert.ok(entityCount.count > 2_000);
+      database.prepare("UPDATE query_entities SET entity_json = ?").run("{");
+    } finally {
+      database.close();
+    }
+
+    const activity = await summarizeWearableActivityRuntime(vaultRoot, {
+      date,
+      providers: ["garmin"],
+    });
+    assert.equal(activity.length, 1);
+    assert.equal(activity[0]?.workoutFeatures.length, 32);
+    assert.equal(activity[0]?.workoutFeatures[0]?.splits.length, 64);
+    assert.equal(activity[0]?.workoutFeatures[0]?.averagePowerWatts, 220);
+    assert.equal(activity[0]?.workoutFeatures[0]?.averageSpeedMps, 5);
+    assert.equal(activity[0]?.workoutFeatures[0]?.splits[0]?.averagePowerWatts, 225);
+    assert.equal(
+      Object.hasOwn(activity[0]?.workoutFeatures[0] ?? {}, "averagePower"),
+      false,
+    );
+    assert.equal(
+      Object.hasOwn(activity[0]?.workoutFeatures[0] ?? {}, "averageSpeed"),
+      false,
+    );
+    assert.equal(JSON.stringify(activity).includes("private-workout-resource"), false);
+    assert.deepEqual(
+      await summarizeWearableActivityRuntime(vaultRoot, {
+        date,
+        providers: ["absent-provider"],
+      }),
+      [],
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("runtime wearable provider filters do not fall back to all-provider summaries", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-provider-scope-"));
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl");

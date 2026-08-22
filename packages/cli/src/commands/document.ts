@@ -15,12 +15,41 @@ import {
   rawImportManifestResultSchema,
 } from '@murphai/vault-usecases/records'
 import { registerArtifactBackedEntityGroup } from './entity-command-groups.js'
-import { commonListLimitOptionSchema } from './command-factory-primitives.js'
+import {
+  commonListLimitOptionSchema,
+  type AnyFactoryCommandConfig,
+} from './command-factory-primitives.js'
 import {
   createEntityDeleteCommandConfig,
   createEventBackedEntityEditCommandConfig,
 } from './record-mutation-command-helpers.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+
+const workoutImportStatusResultSchema = z.object({
+  vault: pathSchema,
+  rawRef: pathSchema,
+  status: z.enum(['not_imported', 'completed', 'partial_conflict']),
+})
+
+function createWorkoutImportStatusCommand(services: VaultServices): AnyFactoryCommandConfig {
+  return {
+    name: 'workout-import-status',
+    description: 'Resolve whole-source workout import completion for one preserved raw source.',
+    args: z.object({
+      rawRef: z
+        .string()
+        .regex(/^raw\/[A-Za-z0-9._/-]+$/u, 'Expected a vault-relative raw/* path.'),
+    }),
+    output: workoutImportStatusResultSchema,
+    async run({ args, options, requestId }) {
+      return services.query.resolveWorkoutImportStatusForRawSource({
+        vault: String(options.vault ?? ''),
+        requestId,
+        rawRef: String(args.rawRef ?? ''),
+      })
+    },
+  }
+}
 
 export function registerDocumentCommands(
   cli: Cli.Cli,
@@ -48,6 +77,10 @@ export function registerDocumentCommands(
         source: eventSourceSchema
           .optional()
           .describe('Optional event source (`manual`, `import`, `device`, or `derived`).'),
+        reuseExact: z
+          .boolean()
+          .default(false)
+          .describe('Reuse one live document with verified identical bytes instead of creating another document.'),
       },
       output: documentImportResultSchema,
       async run({ args, options, requestId }) {
@@ -64,6 +97,7 @@ export function registerDocumentCommands(
           }),
           note: typeof options.note === 'string' ? options.note : undefined,
           source: sourceResult.success ? sourceResult.data : undefined,
+          reuseExact: options.reuseExact === true,
         })
       },
     },
@@ -108,6 +142,7 @@ export function registerDocumentCommands(
       },
     },
     additionalCommands: [
+      createWorkoutImportStatusCommand(services),
       createEventBackedEntityEditCommandConfig({
         arg: {
           name: 'id',

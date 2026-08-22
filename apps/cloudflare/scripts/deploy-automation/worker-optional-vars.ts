@@ -73,6 +73,6 @@ export const HOSTED_WORKER_OPTIONAL_VAR_DEFAULTS: Partial<
   // Device-sync stays worker-only and is serialized into resolvedConfig instead
   // of forwarding raw provider env into the hosted child runtime.
   HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "exa,hosted-email,linq,mapbox,telegram",
-  HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "1200000",
+  HOSTED_EXECUTION_RUNNER_IDLE_TTL_MS: "600000",
   HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
 };

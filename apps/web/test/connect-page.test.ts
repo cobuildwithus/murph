@@ -7,6 +7,8 @@ import { act, Children, createElement, isValidElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, test, vi } from "vitest";
 
+import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
+
 import { renderClientComponent } from "./render-client-component";
 
 vi.mock("next/image", () => ({
@@ -105,7 +107,17 @@ const mocks = vi.hoisted(() => ({
   getHostedPageAuthSnapshot: vi.fn(),
   resolveHostedMurphContactOption: vi.fn(),
   resolveHostedMurphContactOptions: vi.fn(),
+  routerRefresh: vi.fn(),
 }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+
+  return {
+    ...actual,
+    useRouter: () => ({ refresh: mocks.routerRefresh }),
+  };
+});
 
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({
   AuthDialog(props: { open?: boolean }) {
@@ -163,12 +175,20 @@ afterEach(() => {
 });
 
 test("ConnectPage renders source search, source names, and logo marks", async () => {
-  const { default: ConnectPage, metadata } = await import(
+  const { default: ConnectPage } = await import(
     "../app/(dashboard)/connect/connect-page-content"
   );
+  // Read metadata through the page module so the route-owner re-export is
+  // proven, not just the helper module.
+  const { metadata } = await import("../app/(dashboard)/connect/page");
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.equal(metadata.title, "Connect Devices — Murph");
+  const ogImages = metadata.openGraph?.images;
+  assert.ok(Array.isArray(ogImages));
+  const [ogImage] = ogImages;
+  assert.ok(typeof ogImage === "object" && ogImage !== null && "url" in ogImage);
+  assert.equal(String(ogImage.url), "/connect/opengraph-image");
   assert.match(markup, /Sync your biomarkers/);
   assert.match(markup, /Live Well/);
   assert.match(markup, /placeholder="Search sources"/);
@@ -308,7 +328,7 @@ test("ConnectPage renders source search, source names, and logo marks", async ()
     {
       assetPath: "/brand-logos/connect/fitbit.svg",
       description:
-        "Fitbit sleep, activity, heart rate, exercise, and daily readiness-style trends.",
+        "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
       name: "Fitbit",
     },
     {
@@ -1085,8 +1105,14 @@ test("ConnectSourcesGrid requires account authentication before opening the Zepp
 
   assert.ok(
     rendered.container.querySelector(
-      'button[aria-label="Log in or sign up to set up Zepp / Amazfit"]',
+      'button[aria-label="Sign in to Murph"]',
     ),
+  );
+  assert.equal(
+    rendered.container.querySelector(
+      'button[aria-label="Sign in to Murph"]',
+    )?.textContent,
+    "Sign in",
   );
   assert.equal(
     rendered.container.querySelector(
@@ -2679,8 +2705,8 @@ test("SourceCard shows modern Dexcom as coming soon without hiding existing-acco
   );
 
   assert.match(signedOutMarkup, /Dexcom connections are coming soon\./u);
-  assert.match(signedOutMarkup, />Coming soon<\/button>/u);
-  assert.doesNotMatch(signedOutMarkup, />Sign in<\/button>/u);
+  assert.match(signedOutMarkup, />Sign in<\/button>/u);
+  assert.doesNotMatch(signedOutMarkup, />Coming soon<\/button>/u);
   assert.doesNotMatch(signedOutMarkup, /aria-label="Connect Dexcom"/u);
 
   const connectedMarkup = renderToStaticMarkup(
@@ -2859,6 +2885,74 @@ test("SourceCard stacks Apple Health app content vertically at the base breakpoi
   );
 });
 
+test("SourceCard uses one sign-in action for every signed-out source type", async () => {
+  const { SourceCard } = await import(
+    "../app/(dashboard)/connect/connect-source-card"
+  );
+  const logo = {
+    className: "size-11 object-contain",
+    height: 44,
+    src: "/logo.png",
+    width: 44,
+  };
+  const sources = [
+    {
+      connectTarget: "oura",
+      description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+      id: "oura",
+      logo,
+      name: "Oura",
+    },
+    {
+      connectionAvailable: false,
+      description: "Amazfit activity, sleep, heart rate, and workouts through Apple Health.",
+      id: "zepp",
+      logo,
+      name: "Zepp / Amazfit",
+      setupGuideActionLabel: "Set up sync",
+      setupGuideId: "zepp-apple-health" as const,
+    },
+    {
+      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+      id: "apple-health",
+      logo,
+      name: "Apple Health",
+      unavailableActionLabel: "Download app",
+      unavailableActionUrl:
+        "https://apps.apple.com/us/app/murph-ai/id6786145859",
+    },
+    {
+      connectionAvailable: false,
+      description: "CGM glucose readings and trends.",
+      id: "dexcom",
+      logo,
+      name: "Dexcom",
+      unavailableActionLabel: "Coming soon",
+      unavailableMessage: "Dexcom connections are coming soon.",
+    },
+  ];
+
+  for (const source of sources) {
+    const markup = renderToStaticMarkup(
+      createElement(SourceCard, {
+        authenticated: false,
+        errorMessage: null,
+        onDisconnectTargetChange: () => {},
+        onStartConnection: async () => {},
+        pending: false,
+        pendingDisconnect: false,
+        source,
+      }),
+    );
+
+    assert.match(markup, /aria-label="Sign in to Murph"/u);
+    assert.equal(markup.match(/>Sign in<\/button>/gu)?.length, 1);
+    assert.doesNotMatch(markup, />Log in or sign up<\/button>/u);
+    assert.doesNotMatch(markup, />Download app<\/a>/u);
+    assert.doesNotMatch(markup, />Set up sync<\/button>/u);
+  }
+});
+
 test("connect source card design study renders the production action states", async () => {
   const { ConnectSourceCardStudy } = await import(
     "../app/design/connect-source-card-study"
@@ -2866,13 +2960,16 @@ test("connect source card design study renders the production action states", as
   const markup = renderToStaticMarkup(createElement(ConnectSourceCardStudy));
 
   assert.match(markup, /id="connect-source-card-actions"/u);
+  assert.match(markup, /data-design-state="signed-out-source-actions"/u);
   assert.match(markup, /aria-label="Disconnect Garmin"/u);
   assert.match(markup, /aria-label="Download app for Apple Health"/u);
   assert.match(markup, /aria-label="Connect Fitbit"/u);
-  assert.match(markup, /aria-label="Sign in to connect Oura"/u);
+  assert.doesNotMatch(markup, /aria-label="Disconnect Fitbit"/u);
+  assert.equal(markup.match(/aria-label="Sign in to Murph"/gu)?.length, 4);
+  assert.equal(markup.match(/role="status"/gu)?.length, 4);
+  assert.match(markup, /aria-label="Retry Fitbit migration now"/u);
+  assert.match(markup, />Retry now<\/button>/u);
   assert.match(markup, /Dexcom connections are coming soon\./u);
-  assert.match(markup, /aria-label="Dexcom web setup is not available yet"/u);
-  assert.doesNotMatch(markup, /aria-label="Sign in to connect Dexcom"/u);
   assert.match(markup, /Whoop needs a fresh connection/u);
   assert.match(markup, /aria-label="Disconnect account"/u);
   assert.match(markup, /Peloton could not open\. Please try again\./u);
@@ -3152,7 +3249,7 @@ test("ConnectPage keeps configured sources visible but renders sign-in actions w
   const markup = renderToStaticMarkup(await ConnectPage());
 
   assert.match(markup, />Sign in<\/button>/);
-  assert.match(markup, /Sign in to connect Garmin/);
+  assert.match(markup, /aria-label="Sign in to Murph"/u);
   assert.doesNotMatch(markup, /aria-label="Connect Garmin"/u);
   expectSettingResponseNotLoaded();
 });
@@ -3599,31 +3696,33 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          description: "Sleep, activity, heart rate, and daily readiness.",
-          id: "fitbit",
+          connectTarget: "oura",
+          description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+          id: "oura",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/oura.png",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Oura",
+          requiresVitalDisclosure: true,
         },
       ],
     }),
     {
       location: {
-        hash: `#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
-        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=fitbit&connectProvider=junction`,
+        hash: `#deviceConnectIntent=${claim}&connectSource=oura&connectProvider=junction`,
+        href: `https://join.example.test/connect#deviceConnectIntent=${claim}&connectSource=oura&connectProvider=junction`,
       },
     },
   );
 
   await vi.waitFor(() => {
-    assert.match(rendered.container.textContent ?? "", /Connect Fitbit to Murph/u);
+    assert.match(rendered.container.textContent ?? "", /Connect Oura to Murph/u);
   });
   const continueButton = [...rendered.container.querySelectorAll("button")]
-    .find((button) => button.textContent === "Continue to Fitbit");
+    .find((button) => button.textContent === "Continue to Oura");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
     continueButton.dispatchEvent(
@@ -3638,7 +3737,7 @@ test("ConnectSourcesGrid clears signed-intent progress when Vital redemption fai
     );
   });
   assert.equal(fetch.mock.calls.length, 1);
-  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Fitbit/u);
+  assert.doesNotMatch(rendered.container.textContent ?? "", /Connecting Oura/u);
   assert.equal(rendered.assign.mock.calls.length, 0);
 
   await rendered.cleanup();
@@ -4138,7 +4237,17 @@ test("ConnectSourcesGrid falls back to email when no preferred recovery contact 
   const contactLink = rendered.container.querySelector("a[href^='mailto:']");
   assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
   assert.equal(contactLink.textContent, "Email Murph");
-  assert.match(contactLink.href, /Fresh%20device%20connection%20link/);
+  assert.match(contactLink.href, /Start%20a%20private%20Murph%20conversation/);
+  assert.match(
+    decodeURIComponent(contactLink.href),
+    /Please send me a private Murph reply\./,
+  );
+  assert.doesNotMatch(contactLink.href, /Fresh%20device%20connection%20link/);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /receive a private reply, then ask for a fresh connection link/,
+  );
+  assert.match(rendered.container.textContent ?? "", /within a few minutes/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Set up contact/);
 
   await rendered.cleanup();
@@ -5751,7 +5860,7 @@ test("ConnectPage keeps successful callbacks free of failure recovery actions", 
   assert.doesNotMatch(markup, /Go to home/);
 });
 
-test("resolveConfiguredConnectSources marks only Vital-backed actions", async () => {
+test("resolveConfiguredConnectSources keeps Fitbit on its dedicated Junction disclosure", async () => {
   vi.stubEnv("WHOOP_CLIENT_ID", "whoop-client-id");
   vi.stubEnv("WHOOP_CLIENT_SECRET", "whoop-client-secret");
   vi.stubEnv("JUNCTION_API_KEY", "sk_us_junction-test");
@@ -5784,7 +5893,7 @@ test("resolveConfiguredConnectSources marks only Vital-backed actions", async ()
         source.requiresVitalDisclosure === true,
       ]),
     ),
-    { fitbit: true, whoop: false },
+    { fitbit: false, whoop: false },
   );
 });
 
@@ -5869,7 +5978,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
       void _input;
       void _init;
       return Response.json({
-        authorizationUrl: "https://junction.example.test/link/fitbit",
+        authorizationUrl: "https://junction.example.test/link/oura",
       });
     },
   );
@@ -5882,16 +5991,16 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "fitbit",
-          description: "Sleep, activity, heart rate, and daily readiness.",
-          id: "fitbit",
+          connectTarget: "oura",
+          description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+          id: "oura",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/oura.png",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Oura",
           requiresVitalDisclosure: true,
         },
       ],
@@ -5899,7 +6008,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
   );
 
   const connectButton = rendered.container.querySelector(
-    "button[aria-label='Connect Fitbit']",
+    "button[aria-label='Connect Oura']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
@@ -5911,7 +6020,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
   assert.equal(fetch.mock.calls.length, 0);
   assert.match(
     rendered.container.textContent ?? "",
-    /Connect Fitbit to Murph/u,
+    /Connect Oura to Murph/u,
   );
   assert.match(
     rendered.container.textContent ?? "",
@@ -5925,7 +6034,7 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
 
   const continueButton = [
     ...rendered.container.querySelectorAll("button"),
-  ].find((button) => button.textContent === "Continue to Fitbit");
+  ].find((button) => button.textContent === "Continue to Oura");
   assert.ok(continueButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
     continueButton.dispatchEvent(
@@ -5937,10 +6046,10 @@ test("ConnectSourcesGrid explains Vital before a Vital-backed authorization", as
     assert.equal(fetch.mock.calls.length, 1);
     assert.equal(
       rendered.assign.mock.calls[0]?.[0],
-      "https://junction.example.test/link/fitbit",
+      "https://junction.example.test/link/oura",
     );
   });
-  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/fitbit/start");
+  assert.equal(fetch.mock.calls[0]?.[0], "/api/connect-sources/oura/start");
 
   await rendered.cleanup();
 });
@@ -5956,16 +6065,16 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
     createElement(ConnectSourcesGrid, {
       sources: [
         {
-          connectTarget: "fitbit",
-          description: "Sleep, activity, heart rate, and daily readiness.",
-          id: "fitbit",
+          connectTarget: "oura",
+          description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+          id: "oura",
           logo: {
             className: "size-11 object-contain",
             height: 44,
-            src: "/brand-logos/connect/fitbit.svg",
+            src: "/brand-logos/connect/oura.png",
             width: 44,
           },
-          name: "Fitbit",
+          name: "Oura",
           requiresVitalDisclosure: true,
         },
       ],
@@ -5973,7 +6082,7 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
   );
 
   const connectButton = rendered.container.querySelector(
-    "button[aria-label='Connect Fitbit']",
+    "button[aria-label='Connect Oura']",
   );
   assert.ok(connectButton instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
@@ -5984,7 +6093,7 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
 
   assert.match(
     rendered.container.textContent ?? "",
-    /Connect Fitbit to Murph/u,
+    /Connect Oura to Murph/u,
   );
   const closeButton = rendered.container.querySelector(
     'button[aria-label="Close"]',
@@ -6000,10 +6109,10 @@ test("ConnectSourcesGrid dismisses a Vital handoff without starting a connection
   assert.equal(rendered.assign.mock.calls.length, 0);
   assert.doesNotMatch(
     rendered.container.textContent ?? "",
-    /Connect Fitbit to Murph/u,
+    /Connect Oura to Murph/u,
   );
   assert.ok(
-    rendered.container.querySelector("button[aria-label='Connect Fitbit']"),
+    rendered.container.querySelector("button[aria-label='Connect Oura']"),
   );
 
   await rendered.cleanup();
@@ -6104,4 +6213,266 @@ function expectSettingResponseNotLoaded() {
     mocks.buildHostedDeviceSyncSettingsResponse.mock.calls.length,
     0,
   );
+}
+
+test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", async () => {
+  const { resolveConnectSourceConnectionStates } = await import(
+    "../app/(dashboard)/connect/connect-page-content"
+  );
+  const legacy = {
+    firstSeenAt: "2026-07-01T00:00:00.000Z",
+    lastDataAt: "2026-08-10T00:00:00.000Z",
+    lastSeenAt: "2026-08-10T00:00:00.000Z",
+    providerLabel: "Fitbit",
+    resourceCount: 4,
+    sourceProviderSlug: "fitbit",
+    status: "connected" as const,
+  };
+  const successor = {
+    fitbitMigrationCoverageReady: true as const,
+    firstSeenAt: "2026-08-11T10:00:00.000Z",
+    historicalBackfillComplete: true as const,
+    lastDataAt: "2026-08-11T10:05:00.000Z",
+    lastSeenAt: "2026-08-11T10:06:00.000Z",
+    providerLabel: "Google Health",
+    resourceCount: 3,
+    sourceProviderSlug: "google_health",
+    status: "connected" as const,
+  };
+  const cases = [
+    {
+      expected: {
+        connectProvider: "junction",
+        connectTarget: "fitbit",
+        migrationState: "authorization_required",
+      },
+      name: "explicit Google authorization",
+      upstreamSources: [legacy],
+    },
+    {
+      expected: {
+        connectProvider: null,
+        connectTarget: null,
+        migrationState: "verifying_successor",
+      },
+      name: "legacy stays active while successor proof is incomplete",
+      upstreamSources: [
+        legacy,
+        { ...successor, fitbitMigrationCoverageReady: undefined },
+      ],
+    },
+    {
+      expected: {
+        connectProvider: null,
+        connectTarget: null,
+        disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        migrationState: "cutover_ready",
+      },
+      name: "targeted automatic cutover",
+      upstreamSources: [legacy, successor],
+    },
+    {
+      expected: {
+        connectProvider: null,
+        connectTarget: null,
+        disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        migrationRetryRequired: true,
+        migrationState: "cutover_ready",
+      },
+      name: "durable provider failure retry",
+      upstreamSources: [{
+        ...legacy,
+        lastErrorCode: "GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED",
+      }, successor],
+    },
+  ];
+
+  for (const value of cases) {
+    const states = resolveConnectSourceConnectionStates(
+      [{ id: "fitbit" }],
+      [{
+        connectionId: "dsc_junction_fitbit",
+        provider: "junction",
+        state: "active",
+        upstreamSources: value.upstreamSources,
+      }],
+    );
+    assert.equal(states.length, 1, value.name);
+    assert.deepEqual(states[0], {
+      connectionId: "dsc_junction_fitbit",
+      requiresReconnect: false,
+      sourceId: "fitbit",
+      state: "active",
+      ...value.expected,
+    }, value.name);
+  }
+});
+
+test("ConnectSourcesGrid keeps automatic Fitbit continuation live and accelerable", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const expectedCutoverUrl =
+    "/api/settings/device-sync/connections/dsc_junction_fitbit/fitbit-migration/cutover";
+  const expectedRequestInit = {
+    body: undefined,
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {},
+    keepalive: false,
+    method: "POST",
+  };
+  const fetch = vi.fn<typeof globalThis.fetch>()
+    .mockResolvedValueOnce(Response.json({
+      connectionId: "dsc_junction_fitbit",
+      status: "pending",
+    }))
+    .mockResolvedValueOnce(Response.json({
+      connectionId: "dsc_junction_fitbit",
+      status: "complete",
+    }));
+  vi.stubGlobal("fetch", fetch);
+  const { ConnectSourcesGrid } = await import(
+    "../app/(dashboard)/connect/connect-page-client"
+  );
+  const renderMigration = (input: {
+    migrationRetryRequired?: true;
+    migrationState: "verifying_successor" | "cutover_ready";
+  }) => createElement(ConnectSourcesGrid, {
+    sources: [createFitbitMigrationSource(input)],
+  });
+  const rendered = await renderClientComponent(
+    renderMigration({ migrationState: "verifying_successor" }),
+    { requireButton: false },
+  );
+
+  try {
+    const status = rendered.container.querySelector('[role="status"]');
+    assert.ok(status);
+    assert.equal(
+      rendered.container.querySelectorAll('[role="status"]').length,
+      1,
+    );
+    assert.equal(status.getAttribute("aria-live"), "polite");
+    assert.equal(status.getAttribute("aria-atomic"), "true");
+    assert.match(
+      status.textContent ?? "",
+      /new data can take a day to arrive\./u,
+    );
+    assert.match(status.textContent ?? "", /You can leave this page/u);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 1);
+
+    await rendered.rerender(renderMigration({
+      migrationRetryRequired: true,
+      migrationState: "cutover_ready",
+    }));
+    assert.equal(rendered.container.querySelector('[role="status"]'), status);
+    assert.match(
+      status.textContent ?? "",
+      /Murph is retrying the switch/u,
+    );
+    assert.match(status.textContent ?? "", /You can leave this page/u);
+    assert.equal(rendered.container.querySelector('[role="alert"]'), null);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 2);
+
+    const retryButton = rendered.container.querySelector(
+      'button[aria-label="Retry Fitbit migration now"]',
+    );
+    assert.ok(retryButton instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      retryButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    await vi.waitFor(() => {
+      assert.match(rendered.container.textContent ?? "", /Retry requested/u);
+    });
+    assert.deepEqual(fetch.mock.calls[0], [
+      expectedCutoverUrl,
+      expectedRequestInit,
+    ]);
+    assert.equal(rendered.container.querySelector('[role="status"]'), status);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Fitbit is still syncing while Murph retries the switch\./u,
+    );
+    assert.doesNotMatch(
+      rendered.container.textContent ?? "",
+      /Murph could not stop the legacy Fitbit connection/u,
+    );
+    assert.equal(mocks.routerRefresh.mock.calls.length, 3);
+
+    const retryAgainButton = rendered.container.querySelector(
+      'button[aria-label="Retry Fitbit migration now"]',
+    );
+    assert.ok(retryAgainButton instanceof rendered.window.HTMLButtonElement);
+    await act(async () => {
+      retryAgainButton.dispatchEvent(
+        new rendered.window.Event("click", { bubbles: true }),
+      );
+    });
+
+    await vi.waitFor(() => {
+      assert.match(
+        rendered.container.textContent ?? "",
+        /Fitbit migration complete/u,
+      );
+    });
+    assert.deepEqual(fetch.mock.calls, [
+      [expectedCutoverUrl, expectedRequestInit],
+      [expectedCutoverUrl, expectedRequestInit],
+    ]);
+    assert.match(
+      rendered.container.textContent ?? "",
+      /Fitbit now uses Google Health\. Your history is still saved\./u,
+    );
+    assert.equal(rendered.container.querySelector('[role="status"]'), null);
+    assert.equal(
+      rendered.container.querySelector(
+        'button[aria-label="Retry Fitbit migration now"]',
+      ),
+      null,
+    );
+    assert.ok(
+      rendered.container.querySelector('button[aria-label="Disconnect Fitbit"]'),
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    assert.equal(mocks.routerRefresh.mock.calls.length, 3);
+  } finally {
+    await rendered.cleanup();
+    vi.useRealTimers();
+  }
+});
+
+function createFitbitMigrationSource(input: {
+  migrationRetryRequired?: true;
+  migrationState: "verifying_successor" | "cutover_ready";
+}) {
+  return {
+    connected: true,
+    description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
+    disconnectConnectionId: "dsc_junction_fitbit",
+    ...(input.migrationState === "cutover_ready"
+      ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG }
+      : {}),
+    id: "fitbit",
+    logo: {
+      className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+      height: 36,
+      src: "/brand-logos/connect/fitbit.svg",
+      width: 128,
+    },
+    ...input,
+    name: "Fitbit",
+  };
 }

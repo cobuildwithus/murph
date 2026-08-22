@@ -1,6 +1,11 @@
-import type {
-  AssistantSession,
+import {
+  assistantReasoningEffortValues,
+  type AssistantReasoningEffort,
+  type AssistantSession,
 } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  DEFAULT_MURPH_CODEX_REASONING_EFFORT,
+} from '@murphai/operator-config/assistant/provider-config'
 import {
   resolveAssistantUsageCredentialSource,
 } from '@murphai/hosted-execution/assistant-usage'
@@ -11,7 +16,6 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -143,7 +147,7 @@ const ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG = {
   'features.request_permissions_tool': false,
   'skills.include_instructions': false,
 } as const
-const ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG = {
+const ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG,
   ...ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
@@ -392,6 +396,7 @@ function emitCodexPlanTraceEvent(input: {
   onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
   codexContinuation: string
   providerRequestOrdinal: number | null
+  reasoningEffort?: AssistantReasoningEffort | null
   routePlanningDiagnostics: AssistantRoutePlanningDiagnostics
   resumeCodexThreadIdPresent: boolean
   workingDirectory: string
@@ -408,6 +413,9 @@ function emitCodexPlanTraceEvent(input: {
         type: ASSISTANT_PROVIDER_PLAN_TRACE_TYPE,
         codexContinuation: input.codexContinuation,
         providerRequestOrdinal: input.providerRequestOrdinal,
+        ...(input.reasoningEffort === undefined
+          ? {}
+          : { reasoningEffort: input.reasoningEffort }),
         routePlanningElapsedMs: input.routePlanningDiagnostics.routePlanningElapsedMs,
         dynamicToolCount: input.routePlanningDiagnostics.dynamicToolCount,
         messageTargetingAvailable:
@@ -473,11 +481,18 @@ async function executeAssistantCodexAttempt(input: {
     rawToolEvents: [] as readonly unknown[],
     runtimeIssueInputs: [] as readonly AssistantRuntimeIssueInput[],
   }
+  const reasoningEffort =
+    normalizeNullableString(attemptPlan.route.providerOptions.reasoningEffort)
+    ?? DEFAULT_MURPH_CODEX_REASONING_EFFORT
+  const traceReasoningEffort = assistantReasoningEffortValues.find(
+    (candidate) => candidate === reasoningEffort,
+  )
 
   emitCodexPlanTraceEvent({
     onTraceEvent: executionPlan.input.onTraceEvent,
     codexContinuation: attemptPlan.routePlan.codexContinuation.kind,
     providerRequestOrdinal: input.providerRequestOrdinal ?? null,
+    reasoningEffort: traceReasoningEffort,
     routePlanningDiagnostics: attemptPlan.routePlan.planningDiagnostics,
     resumeCodexThreadIdPresent: attemptPlan.routePlan.resume !== null,
     workingDirectory: attemptPlan.routePlan.workingDirectory,
@@ -554,6 +569,8 @@ async function executeAssistantCodexAttempt(input: {
       executionPlan.input.maintenanceProfile === 'member-memory' &&
       executionPlan.input.scheduledInvocationAuthority?.automationId ===
         MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
+    const toolOnlyMaintenanceTurn =
+      groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
     const restrictedOneShotTurn =
       groupRoomModelMaintenanceTurn ||
       memberMemoryMaintenanceTurn ||
@@ -590,7 +607,7 @@ async function executeAssistantCodexAttempt(input: {
         oss: attemptPlan.route.providerOptions.oss,
         profile: attemptPlan.route.providerOptions.profile,
         provider: attemptPlan.route.provider,
-        reasoningEffort: attemptPlan.route.providerOptions.reasoningEffort,
+        reasoningEffort,
         sandbox:
           nativeCapabilitiesRestrictedTurn ||
           readOnlyAutomationTurn ||
@@ -620,15 +637,15 @@ async function executeAssistantCodexAttempt(input: {
           nativeCapabilitiesRestrictedTurn:
             hostedImageCompletionNativeCapabilitiesRestrictedTurn,
           shellPreservingCapabilitiesRestrictedTurn:
-            memberMemoryMaintenanceTurn || readOnlyAutomationTurn,
+            readOnlyAutomationTurn,
           requested: executionPlan.input.codexConfigOverrides ?? null,
         }),
         codexThreadConfig:
           nativeCapabilitiesRestrictedTurn
             ? ASSISTANT_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG
-            : groupRoomModelMaintenanceTurn
-              ? ASSISTANT_GROUP_ROOM_MODEL_MAINTENANCE_THREAD_CONFIG
-              : memberMemoryMaintenanceTurn || readOnlyAutomationTurn
+            : toolOnlyMaintenanceTurn
+              ? ASSISTANT_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
+              : readOnlyAutomationTurn
                 ? ASSISTANT_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG
                 : null,
         conversationHistoryMessages:
@@ -638,7 +655,9 @@ async function executeAssistantCodexAttempt(input: {
           ? []
           : attemptPlan.routePlan.dynamicTools,
         environments:
-          nativeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          nativeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? []
           : attemptPlan.routePlan.environments,
         env: attemptEnv,
@@ -650,12 +669,17 @@ async function executeAssistantCodexAttempt(input: {
           : {}),
         groupConversation,
         groupRoomModelMaintenanceAuthorized: groupRoomModelMaintenanceTurn,
+        memberMemoryMaintenanceAuthorized: memberMemoryMaintenanceTurn,
         hostedToolContext:
-          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.hostedToolContext ?? null,
         materializeWorkspaceArtifacts:
-          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.executionContext?.hosted?.materializeWorkspaceArtifacts ?? null,
         onboardingFirstReadCompletionTransitionAvailable:
@@ -694,15 +718,15 @@ async function executeAssistantCodexAttempt(input: {
           ? true
           : executionPlan.input.providerThreadEphemeral ?? null,
         progressDelivery:
-          hostedRuntimeCapabilitiesRestrictedTurn || readOnlyAutomationTurn
+          hostedRuntimeCapabilitiesRestrictedTurn ||
+          readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn
           ? null
           : executionPlan.progressDelivery ?? null,
         permissions:
           groupRoomModelMaintenanceTurn
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : memberMemoryMaintenanceTurn
-              ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
-              : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
                 ? hostedLocalTestProviderTurn
@@ -725,12 +749,14 @@ async function executeAssistantCodexAttempt(input: {
         publicInternetFetch:
           outputOnlyTurn ||
           readOnlyAutomationTurn ||
+          toolOnlyMaintenanceTurn ||
           hostedImageCompletionNativeCapabilitiesRestrictedTurn
           ? null
           : executionPlan.executionContext?.hosted?.publicInternetFetch ?? null,
         requireHostedPrivateImageDelivery:
           !hostedRuntimeCapabilitiesRestrictedTurn &&
           !readOnlyAutomationTurn &&
+          !toolOnlyMaintenanceTurn &&
           Boolean(executionPlan.executionContext?.hosted),
         runtimeWorkspaceRoots:
           restrictedOneShotTurn || ordinaryHostedWorkspaceTurn

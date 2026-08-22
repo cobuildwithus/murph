@@ -42,6 +42,7 @@ export async function lookupHostedMemberForPrivyPrincipal(input: {
   const memberByPrivyUserId = await lookupHostedMemberIdentityByPrivyUserId({
     privyUserId: input.identity.userId,
     prisma: input.prisma,
+    projection: "core",
   });
 
   return memberByPrivyUserId?.core ?? null;

@@ -15,6 +15,8 @@ let databaseHealthClientWaitSeconds = 8;
 let databaseHealthDiscoveryRequestCount = 0;
 let databaseHealthMetricsRequestCount = 0;
 let databaseHealthMissingConnectionErrorScrapesRemaining = 0;
+let databaseHealthMissingConnectionErrorPort: "5432" | "6432" | null = null;
+let databaseHealthMissingConnectionErrorPortScrapesRemaining = 0;
 let databaseHealthNowMs = Date.now();
 let databaseHealthPooledErrors = 0;
 let databaseHealthZeroEvidenceScrapesRemaining = 0;
@@ -43,6 +45,8 @@ export function resetDatabaseHealthMessageRequests(): void {
   databaseHealthDiscoveryRequestCount = 0;
   databaseHealthMetricsRequestCount = 0;
   databaseHealthMissingConnectionErrorScrapesRemaining = 0;
+  databaseHealthMissingConnectionErrorPort = null;
+  databaseHealthMissingConnectionErrorPortScrapesRemaining = 0;
   databaseHealthNowMs = Date.now();
   databaseHealthPooledErrors = 0;
   databaseHealthZeroEvidenceScrapesRemaining = 0;
@@ -60,6 +64,14 @@ export function setDatabaseHealthMissingConnectionErrorScrapesRemaining(
   value: number,
 ): void {
   databaseHealthMissingConnectionErrorScrapesRemaining = value;
+}
+
+export function setDatabaseHealthMissingConnectionErrorPortScrapes(input: {
+  port: "5432" | "6432";
+  scrapes: number;
+}): void {
+  databaseHealthMissingConnectionErrorPort = input.port;
+  databaseHealthMissingConnectionErrorPortScrapesRemaining = input.scrapes;
 }
 
 export function setDatabaseHealthZeroEvidenceScrapesRemaining(
@@ -135,6 +147,19 @@ export async function handleDatabaseHealthEgress(
       databaseHealthMissingConnectionErrorScrapesRemaining -= 1;
       return new Response(metricsBody.replace(
         /^planetscale_edge_postgres_connection_errors_total.*$/gmu,
+        "",
+      ));
+    }
+    if (
+      databaseHealthMissingConnectionErrorPort !== null
+      && databaseHealthMissingConnectionErrorPortScrapesRemaining > 0
+    ) {
+      databaseHealthMissingConnectionErrorPortScrapesRemaining -= 1;
+      return new Response(metricsBody.replace(
+        new RegExp(
+          `^planetscale_edge_postgres_connection_errors_total\\{[^\\n]*planetscale_port="${databaseHealthMissingConnectionErrorPort}".*$`,
+          "mu",
+        ),
         "",
       ));
     }
@@ -232,6 +257,9 @@ function readValidDatabaseHealthMessageRequest(input: {
       value.message.parts[0].value.includes("PgBouncer wait ")
       || value.message.parts[0].value.includes(
         "pooled application connection",
+      )
+      || value.message.parts[0].value.includes(
+        "Database monitor telemetry was incomplete",
       )
     )
     || !Array.isArray(value.to)

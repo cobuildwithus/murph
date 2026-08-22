@@ -510,7 +510,9 @@ function createAutomationSource(
   return {
     activeUntil: null,
     automationId: 'automation_invalid_email',
+    relativePath: 'bank/automations/invalid-email-reminder.md',
     continuityPolicy: 'fresh',
+    contextReferences: [],
     createdAt: '2026-04-08T07:00:00.000Z',
     instructions: 'Send the reminder.',
     kind: 'automation',
@@ -536,5 +538,6 @@ function createAutomationSource(
     updatedAt: '2026-04-08T07:00:00.000Z',
     ...overrides,
     supportKind: overrides.supportKind ?? null,
+    plannedOccurrenceOffsetMs: overrides.plannedOccurrenceOffsetMs ?? null,
   }
 }

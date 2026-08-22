@@ -1,4 +1,5 @@
 import {
+  type EventRecord,
   type EventSource,
   type ActivityStrengthExercise,
   type JsonObject,
@@ -606,28 +607,31 @@ function findReplacementExerciseIndex(
   replacement: WorkoutExercises,
   usedIndexes: ReadonlySet<number>,
 ): number | null {
-  const findUnused = (
+  const findUniqueUnused = (
     predicate: (candidate: WorkoutExercise) => boolean,
   ): number | null => {
-    const index = replacement.findIndex(
-      (candidate, candidateIndex) =>
-        !usedIndexes.has(candidateIndex) && predicate(candidate),
-    )
-    return index >= 0 ? index : null
+    let match: number | null = null
+    for (const [candidateIndex, candidate] of replacement.entries()) {
+      if (usedIndexes.has(candidateIndex) || !predicate(candidate)) {
+        continue
+      }
+      if (match !== null) {
+        return null
+      }
+      match = candidateIndex
+    }
+    return match
   }
 
   if (existing.sourceExerciseId) {
-    const sourceIndex = findUnused(
+    return findUniqueUnused(
       (candidate) => candidate.sourceExerciseId === existing.sourceExerciseId,
     )
-    if (sourceIndex !== null) {
-      return sourceIndex
-    }
   }
 
   const normalizedName = normalizeWorkoutExerciseName(existing.name)
   if (existing.groupId) {
-    const groupedNameIndex = findUnused(
+    const groupedNameIndex = findUniqueUnused(
       (candidate) =>
         candidate.groupId === existing.groupId &&
         normalizeWorkoutExerciseName(candidate.name) === normalizedName,
@@ -637,33 +641,28 @@ function findReplacementExerciseIndex(
     }
   }
 
-  const nameIndex = findUnused(
+  return findUniqueUnused(
     (candidate) => normalizeWorkoutExerciseName(candidate.name) === normalizedName,
   )
-  if (nameIndex !== null) {
-    return nameIndex
-  }
-
-  return findUnused((candidate) => candidate.order === existing.order)
 }
 
 const WORKOUT_STRUCTURE_REPAIR =
   'Re-read the workout and include every saved exercise and set. Use --clear-workout only when the member explicitly wants to remove all structured workout details while preserving the event, or workout delete only when they want the entire record removed.'
 
-async function assertWorkoutExerciseReplacementPreservesExistingStructure(input: {
+async function normalizeWorkoutExerciseReplacement(input: {
   vault: string
   lookup: string
   set?: string[]
-}, preserveSavedSets: boolean): Promise<void> {
+}): Promise<string[] | undefined> {
   const replacement = parseWorkoutExerciseReplacement(input.set)
   if (replacement === null) {
-    return
+    return input.set
   }
 
   const shown = await showWorkoutRecord(input.vault, input.lookup)
   const savedWorkout = shown.entity.data.workout
   if (savedWorkout === null || savedWorkout === undefined) {
-    return
+    return input.set
   }
 
   const current = workoutSessionSchema.safeParse(savedWorkout)
@@ -697,8 +696,17 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
       )
     }
 
-    if (!preserveSavedSets) {
-      continue
+    if (
+      replacementExercise.memberRepsPerSet === undefined
+      && existingExercise.memberRepsPerSet !== undefined
+    ) {
+      replacementExercise.memberRepsPerSet = existingExercise.memberRepsPerSet
+    }
+    if (
+      replacementExercise.setPlanIsFinite === undefined
+      && existingExercise.setPlanIsFinite !== undefined
+    ) {
+      replacementExercise.setPlanIsFinite = existingExercise.setPlanIsFinite
     }
 
     for (const existingSet of existingExercise.sets ?? []) {
@@ -712,6 +720,17 @@ async function assertWorkoutExerciseReplacementPreservesExistingStructure(input:
       }
     }
   }
+
+  const assignments = input.set?.slice() ?? []
+  for (let index = assignments.length - 1; index >= 0; index -= 1) {
+    if (assignments[index]?.startsWith(WORKOUT_EXERCISES_PATCH_PREFIX)) {
+      assignments[index] = `${WORKOUT_EXERCISES_PATCH_PREFIX}${
+        JSON.stringify(replacement)
+      }`
+      break
+    }
+  }
+  return assignments
 }
 
 interface EditWorkoutRecordInput {
@@ -721,16 +740,13 @@ interface EditWorkoutRecordInput {
   set?: string[]
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
+  validatedEvent?: {
+    event: EventRecord
+    ledgerFile: string
+  }
 }
 
-async function editWorkoutRecordWithStructurePolicy(
-  input: EditWorkoutRecordInput,
-  preserveSavedSets: boolean,
-) {
-  await assertWorkoutExerciseReplacementPreservesExistingStructure(
-    input,
-    preserveSavedSets,
-  )
+async function persistWorkoutRecordEdit(input: EditWorkoutRecordInput) {
   const result = await editEventRecord({
     vault: input.vault,
     lookup: input.lookup,
@@ -740,53 +756,70 @@ async function editWorkoutRecordWithStructurePolicy(
     clear: input.clear,
     dayKeyPolicy: input.dayKeyPolicy,
     expectedKinds: ['activity_session'],
+    validatedEvent: input.validatedEvent,
   })
 
-  return showWorkoutRecord(input.vault, result.lookupId)
+  return {
+    vault: input.vault,
+    entity: result.entity,
+  }
 }
 
-export function editWorkoutRecord(input: EditWorkoutRecordInput) {
-  return editWorkoutRecordWithStructurePolicy(input, true)
+export async function editWorkoutRecord(input: EditWorkoutRecordInput) {
+  const set = await normalizeWorkoutExerciseReplacement(input)
+  return persistWorkoutRecordEdit({ ...input, set })
 }
 
 /**
- * Persists a live-workout replacement after the member-action owner has
- * validated the exact canonical set snapshot and retained every exercise.
- * Other workout writes must use editWorkoutRecord so accidental set loss
- * remains fail-closed.
+ * Persists a validated complete exercise snapshot after its exact-record owner
+ * proves one targeted structural mutation. Generic workout edits must use
+ * editWorkoutRecord so omissions and ambiguous exercise identity fail closed.
  */
-export function editWorkoutRecordAfterValidatedSetRemoval(
+export function editWorkoutRecordAfterValidatedExerciseUpdate(
   input: {
     durationMinutes?: number
+    endedAt?: string
     exercises: WorkoutExercise[]
-    lastMemberActionId: string
+    lastMemberActionId?: string
     lookup: string
     vault: string
+    validatedEvent: {
+      event: EventRecord
+      ledgerFile: string
+    }
   },
 ) {
   const set = [
     `${WORKOUT_EXERCISES_PATCH_PREFIX}${JSON.stringify(input.exercises)}`,
   ]
+  if (input.endedAt !== undefined) {
+    set.push(`workout.endedAt=${JSON.stringify(input.endedAt)}`)
+  }
   if (input.durationMinutes !== undefined) {
     set.push(`durationMinutes=${input.durationMinutes}`)
   }
-  set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
-  return editWorkoutRecordWithStructurePolicy({
+  if (input.lastMemberActionId !== undefined) {
+    set.push(`workout.lastMemberActionId=${input.lastMemberActionId}`)
+  }
+  return persistWorkoutRecordEdit({
     lookup: input.lookup,
     set,
     vault: input.vault,
-  }, false)
+    validatedEvent: input.validatedEvent,
+  })
 }
 
 export async function deleteWorkoutRecord(input: {
   vault: string
   lookup: string
+  expectedRevision: number
 }) {
   return deleteEventRecord({
     vault: input.vault,
     lookup: input.lookup,
     entityLabel: 'workout',
     expectedKinds: ['activity_session'],
+    expectedRevision: input.expectedRevision,
   })
 }
 

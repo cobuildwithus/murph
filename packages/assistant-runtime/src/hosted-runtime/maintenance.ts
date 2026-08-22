@@ -257,6 +257,12 @@ export async function runHostedAssistantAutomationLane(input: {
     assistantAutomationCurrentTurnDeliveryIntentIds:
       assistantResult.currentTurnDeliveryIntentIds ?? [],
     assistantAutomationElapsedMs,
+    ...(assistantResult.outboxOnlyNextWakeAt
+      ? {
+          assistantAutomationOutboxOnlyNextWakeAt:
+            assistantResult.outboxOnlyNextWakeAt,
+        }
+      : {}),
     assistantAutomationPassElapsedMs: assistantResult.timings?.passElapsedMs ?? null,
     assistantAutomationCronProcessed: assistantResult.cronProcessed,
     assistantAutomationCronStatusDeferred:
@@ -308,6 +314,7 @@ export async function runHostedAssistantAutomation(
   currentTurnDeliveryIntentIds: string[];
   cronProcessed: number;
   nextWakeAt: string | null;
+  outboxOnlyNextWakeAt?: string;
   progressed: boolean;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   replyFailed: number;
@@ -650,6 +657,9 @@ export async function runHostedAssistantAutomation(
       currentTurnDeliveryIntentIds,
       cronProcessed: result.cronProcessed,
       nextWakeAt,
+      ...(result.outboxOnlyNextWakeAt
+        ? { outboxOnlyNextWakeAt: result.outboxOnlyNextWakeAt }
+        : {}),
       progressed: result.progressed,
       redactedLogEntries,
       replyFailed: replies.failed,

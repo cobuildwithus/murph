@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   hasHostedRuntimeActiveAccess: vi.fn(),
   isHostedRuntimeInactiveAccessError: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
+  requireHostedRuntimeMembersActiveAccessForUpdateTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -25,6 +26,8 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
   isHostedRuntimeInactiveAccessError: mocks.isHostedRuntimeInactiveAccessError,
   requireHostedRuntimeActiveAccessForUpdateTx:
     mocks.requireHostedRuntimeActiveAccessForUpdateTx,
+  requireHostedRuntimeMembersActiveAccessForUpdateTx:
+    mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx,
 }));
 
 import {
@@ -90,6 +93,7 @@ beforeEach(() => {
   mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
   mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
   mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
+  mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
 });
 
 afterEach(() => {

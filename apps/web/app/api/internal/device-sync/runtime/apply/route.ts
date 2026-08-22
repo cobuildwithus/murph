@@ -1,4 +1,3 @@
-import { after } from "next/server";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -31,7 +30,6 @@ export const POST = withJsonError(async (request: Request) => {
   });
   return jsonOk(await applyHostedDeviceSyncRuntimeResult({
     request,
-    scheduleFailureDiagnostics: after,
     trustedUserId: userId,
   }));
 });

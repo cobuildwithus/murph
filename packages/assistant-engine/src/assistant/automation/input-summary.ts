@@ -21,7 +21,7 @@ export interface AssistantAutomationInputSummary {
   deliveryTarget: string | null
   groupRoomBatchingEligible: boolean
   projectionReady: boolean
-  // Provider-level native reply target (Linq only today). Direct conversation
+  // Provider-level native reply target. Direct conversation
   // batching preserves this boundary; authenticated group-room batching keeps
   // each message's anchor in its own prompt entry instead.
   replyToMessageId: string | null
@@ -40,7 +40,9 @@ export function assistantAutomationInputSummaryFromCandidate(
   }
   const sourceMetadata = input.event.sourceMetadata
   const replyToMessageId =
-    sourceMetadata?.kind === 'linq' ? sourceMetadata.replyToMessageId ?? null : null
+    sourceMetadata?.kind === 'linq' || sourceMetadata?.kind === 'telegram'
+      ? sourceMetadata.replyToMessageId ?? null
+      : null
   const affirmativeReaction =
     sourceMetadata?.kind === 'linq' && sourceMetadata.affirmativeReaction === true
   const eventSource =

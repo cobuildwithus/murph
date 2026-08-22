@@ -225,7 +225,6 @@ describe("Retell ask_murph route", () => {
       call: expect.objectContaining({
         call_id: "retell_call_123",
       }),
-      requiresTransferFollowUp: false,
     });
     expect(mocks.finalizePreparedRetellCallResult).toHaveBeenNthCalledWith(2, {
       call: expect.objectContaining({
@@ -239,7 +238,7 @@ describe("Retell ask_murph route", () => {
         call_id: "retell_call_123",
         transfer_end_timestamp: 1_782_408_600_000,
       }),
-      requiresTransferFollowUp: true,
+      completionPolicy: "transfer_follow_up_required",
     });
     expect(mocks.handleRetellCallEnded).toHaveBeenCalledTimes(1);
     expect(mocks.finalizePreparedRetellCallResult).toHaveBeenCalledTimes(2);
@@ -303,7 +302,7 @@ describe("Retell ask_murph route", () => {
           }),
         }),
       }),
-      requiresTransferFollowUp: true,
+      completionPolicy: "transfer_follow_up_required",
     });
   });
 
@@ -424,7 +423,6 @@ describe("Retell ask_murph route", () => {
         call_id: "retell_call_123",
         transcript: expect.stringMatching(/^agent /u),
       }),
-      requiresTransferFollowUp: false,
     });
   });
 

@@ -91,11 +91,13 @@ describe("settings privacy delete route", () => {
     });
   }
 
-  it("pins the maintenance-bearing route lifetime", () => {
+  it("pins the account deletion route lifetime", () => {
     expect(settingsPrivacyDeleteRoute.maxDuration).toBe(300);
   });
 
-  it("uses member auth, not active-member auth, before deleting account data", async () => {
+  it("ignores the retired maintenance value and uses member auth before deleting account data", async () => {
+    vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
+
     const request = new Request("https://join.example.test/api/settings/privacy/delete", {
       body: JSON.stringify({
         authorization: {
@@ -222,52 +224,4 @@ describe("settings privacy delete route", () => {
     expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
   });
 
-  describe("bundles migration maintenance window", () => {
-    function maintenanceRequest(): Request {
-      return new Request("https://join.example.test/api/settings/privacy/delete", {
-        body: JSON.stringify({
-          authorization: {
-            signature: `0x${"11".repeat(65)}`,
-            token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
-          },
-          confirmationPhrase: "DELETE MY ACCOUNT",
-        }),
-        headers: {
-          "Content-Type": "application/json",
-          origin: "https://join.example.test",
-        },
-        method: "POST",
-      });
-    }
-
-    it("declines with a truthful message and spends nothing", async () => {
-      vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", "1");
-
-      const response = await settingsPrivacyDeleteRoute.POST(maintenanceRequest());
-
-      expect(response.status).toBe(503);
-      const body = await response.json();
-      expect(body.error.code).toBe("account_deletion_maintenance");
-      expect(body.error.message).toContain("scheduled maintenance");
-      expect(body.error.message).toContain("your request was not started");
-
-      // The member keeps an unspent authorization and loses no data.
-      expect(mocks.verifyAndConsumeSensitiveActionChallenge).not.toHaveBeenCalled();
-      expect(mocks.deleteHostedAccountData).not.toHaveBeenCalled();
-      expect(mocks.buildHostedAppSessionClearCookie).not.toHaveBeenCalled();
-    });
-
-    it("stays available whenever the window flag is not exactly set", async () => {
-      for (const value of ["", "0", "true", "yes"]) {
-        vi.clearAllMocks();
-        applyRouteDefaults();
-        vi.stubEnv("HOSTED_ACCOUNT_DELETION_MAINTENANCE", value);
-
-        const response = await settingsPrivacyDeleteRoute.POST(maintenanceRequest());
-
-        expect(response.status).toBe(200);
-        expect(mocks.deleteHostedAccountData).toHaveBeenCalled();
-      }
-    });
-  });
 });

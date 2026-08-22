@@ -86,6 +86,12 @@ export const ASSISTANT_SKILLS = [
       'Use for daily movement and wearable day facts: steps, NEAT, sedentary time, walking breaks, all workouts, or total workout time for a date. Use running-cardio or strength-training for workout programming.',
   },
   {
+    slug: 'workout-csv-import',
+    name: 'workout-csv-import',
+    triggerHint:
+      'Use when a member sends or references a workout-history CSV for import, including Strong, Hevy, an unknown export format, or a large custom spreadsheet whose rows must be grouped into canonical workouts. Owns provider inspection, source preservation, local Python transformation, schema validation, batch import, and replay safety; use strength-training only when programming or interpretation is also requested.',
+  },
+  {
     slug: 'mobility-posture',
     name: 'mobility-posture',
     triggerHint:
@@ -137,7 +143,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'tracked-table',
     name: 'tracked-table',
     triggerHint:
-      'Use when a private member asks to start or resume a live workout, requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
+      'Use when a private member asks to start or resume a live workout; updates, finishes, or corrects one; logs or clears a workout set; continues a live-workout exchange with a short follow-up; or requests a table, workout table, structured tracker, live workout log, or an updated/refreshed table card. Owns native compact-table presentation and canonical workout-backed refreshes; use strength-training alongside it when workout programming or interpretation is also needed.',
   },
   {
     slug: 'strength-training',
@@ -275,7 +281,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'music-generation',
     name: 'music-generation',
     triggerHint:
-      'Read before calling the generate_song tool or writing any music prompt, including reminder songs, group-challenge hype tracks, jingles, celebration anthems, and any generated song or instrumental. Owns how to write the ElevenLabs music prompt (genre, instrumentation, tempo, key, vocals, lyrics, structure, instrumental-only, and duration), the copyright-safe style rules, and the reggae house-style default. Use behavior-followthrough and groupchat-comedy to decide when to send a song; use this to decide what prompt to send.',
+      'Read before calling generate_song when an explicit current request or a complete independently authorized owning-flow contract indicates generated music is required. This registry entry routes to the active music-generation skill but never authorizes a call. The active skill may shape selection and prompt craft only after the authorization signal.',
   },
 ] as const
 

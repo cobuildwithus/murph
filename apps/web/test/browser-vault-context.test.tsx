@@ -2577,7 +2577,7 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
     init?: RequestInit,
   ) => {
     const url = typeof input === "string" ? input : input.toString();
-    if (url === "/api/environment/voice") {
+    if (url === "/api/environment/realtime/topics") {
       return jsonResponse({ processing });
     }
     assert.equal(url, "/api/browser-vault/session");
@@ -2643,13 +2643,13 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
       requireButton: false,
     },
   );
-  await waitForText(rendered.container, "Murph is processing your recording");
+  await waitForText(rendered.container, "Murph is saving your answers");
 
   processing = false;
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2_000);
   });
-  await waitForText(rendered.container, "Updating your environment report");
+  await waitForText(rendered.container, "Murph is saving your answers");
   const countForcedRefreshes = () => fetchMock.mock.calls.filter(([, init]) => {
     if (!init?.body) {
       return false;
@@ -2660,7 +2660,7 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
   assert.equal(countForcedRefreshes(), 1);
 
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(118_000);
   });
   await waitForText(rendered.container, "Murph is taking longer than usual");
   const firstCheckAgain = Array.from(
@@ -2677,57 +2677,29 @@ test("Environment keeps one refresh boundary through delayed checkpoint recovery
     await vi.advanceTimersByTimeAsync(240_000);
   });
   await waitForText(rendered.container, "Murph is taking longer than usual");
-  assert.equal(countForcedRefreshes(), 1);
+  assert.equal(countForcedRefreshes(), 2);
   const callsAtPollingBoundary = fetchMock.mock.calls.length;
 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(60_000);
   });
-  assert.equal(fetchMock.mock.calls.length, callsAtPollingBoundary);
+  assert.ok(fetchMock.mock.calls.length > callsAtPollingBoundary);
+  assert.equal(countForcedRefreshes(), 2);
 
   const recoveryCheckAgain = Array.from(
     rendered.window.document.querySelectorAll("button"),
   ).find((button) => button.textContent?.includes("Check again"));
   assert.ok(recoveryCheckAgain instanceof rendered.window.HTMLButtonElement);
-  const recoveryCallStart = fetchMock.mock.calls.length;
-  await act(async () => {
-    recoveryCheckAgain.click();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  assert.equal(countForcedRefreshes(), 2);
-  const recoveryBodies = fetchMock.mock.calls
-    .slice(recoveryCallStart)
-    .filter(([, init]) => init?.body)
-    .map(([, init]) => JSON.parse(String(init?.body)));
-  assert.equal(recoveryBodies.length, 2);
-  assert.equal(recoveryBodies[0]?.requestRefresh, undefined);
-  assert.equal(recoveryBodies[1]?.requestRefresh, true);
-
-  const repeatedCallStart = fetchMock.mock.calls.length;
-  await act(async () => {
-    recoveryCheckAgain.click();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-  assert.equal(countForcedRefreshes(), 2);
-  const repeatedBodies = fetchMock.mock.calls
-    .slice(repeatedCallStart)
-    .filter(([, init]) => init?.body)
-    .map(([, init]) => JSON.parse(String(init?.body)));
-  assert.equal(repeatedBodies.length, 1);
-  assert.equal(repeatedBodies[0]?.requestRefresh, undefined);
-
   replacementPublished = true;
-  const finalCheckAgain = Array.from(
-    rendered.window.document.querySelectorAll("button"),
-  ).find((button) => button.textContent?.includes("Check again"));
-  assert.ok(finalCheckAgain instanceof rendered.window.HTMLButtonElement);
   await act(async () => {
-    finalCheckAgain.click();
+    recoveryCheckAgain.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(15_000);
   });
+  assert.equal(countForcedRefreshes(), 3);
   await waitForText(rendered.container, "The report was not updated");
-  assert.equal(countForcedRefreshes(), 2);
+  assert.equal(countForcedRefreshes(), 3);
 
   await rendered.cleanup();
 });

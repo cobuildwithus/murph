@@ -19,6 +19,7 @@ import {
 } from "@murphai/hosted-execution/pending-group-setup";
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
 } from "@murphai/hosted-execution/runtime-control";
@@ -193,6 +194,7 @@ describe("murph.group dynamic tool", () => {
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
     expect(GROUP_TOOL_INPUT_PROPERTIES.action.enum).toEqual([
       "ask",
+      "handoff",
       "ask_current_sender",
       "clarify_current_sender",
       "continue_current_sender_in_group",
@@ -225,6 +227,15 @@ describe("murph.group dynamic tool", () => {
     expect(MURPH_GROUP_TOOL.inputSchema).not.toHaveProperty("required");
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].required).toEqual(["action"]);
     expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
+      maxProperties: 3,
+      properties: {
+        action: { enum: ["handoff"] },
+        context: {},
+        groupLabel: {},
+      },
+      required: ["action", "context"],
+    });
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
       maxProperties: 6,
       properties: {
         action: {
@@ -234,7 +245,7 @@ describe("murph.group dynamic tool", () => {
       },
       required: ["action", "date", "message_ref", "metric", "unit", "value"],
     });
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
+    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2]).toMatchObject({
       properties: {
         action: {
           enum: [
@@ -250,10 +261,13 @@ describe("murph.group dynamic tool", () => {
       required: ["action", "message_ref"],
     });
     expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[3].properties.action.enum,
+    ).not.toContain("handoff");
+    expect(
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[3].properties.action.enum,
     ).not.toContain("ask_current_sender");
     expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
+      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[3].properties.action.enum,
     ).not.toContain("record_current_sender_daily_metric");
     expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty(
       "response_destination",
@@ -344,6 +358,7 @@ describe("murph.group dynamic tool", () => {
       .toContain("Host binds member/group/route/input/occurrence");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("read_shared partial=incomplete");
+    expect(MURPH_GROUP_TOOL.description).toContain("ask returns privately");
     expect(MURPH_GROUP_TOOL.description).toContain("asks are async");
     expect(MURPH_GROUP_TOOL.description)
       .toContain("Scheduled ask_member exact replay");
@@ -2461,6 +2476,163 @@ describe("murph.group dynamic tool", () => {
         question: "What exercises are assigned today?",
       }))?.kind).toBe("invalid-group-arguments");
     }
+  });
+
+  it("parses one bounded context handoff without accepting model authority", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "  Sunny logged a 405 lb deadlift personal record today.  ",
+      groupLabel: "  Lifting Club  ",
+    }))).toMatchObject({
+      kind: "group",
+      request: {
+        action: "handoff",
+        context: "Sunny logged a 405 lb deadlift personal record today.",
+        groupLabel: "Lifting Club",
+      },
+    });
+
+    for (const field of [
+      "memberId",
+      "membershipId",
+      "runtimeMemberId",
+      "originAssistantInputId",
+      "requestId",
+      "route",
+      "authority",
+      "deliveryIdempotencyKey",
+    ] as const) {
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action: "handoff",
+        context: "A bounded fact.",
+        [field]: "model-supplied",
+      }))?.kind).toBe("invalid-group-arguments");
+    }
+  });
+
+  it("enforces context handoff bounds in Unicode code points", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "🏋️".repeat(
+        HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS / 2,
+      ),
+      groupLabel: "🏃".repeat(
+        HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+      ),
+    }))?.kind).toBe("group");
+
+    for (const invalid of [
+      { action: "handoff", context: " " },
+      {
+        action: "handoff",
+        context: "x".repeat(
+          HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS + 1,
+        ),
+      },
+      {
+        action: "handoff",
+        context: "A bounded fact.",
+        groupLabel: "x".repeat(
+          HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS + 1,
+        ),
+      },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
+        .toBe("invalid-group-arguments");
+    }
+  });
+
+  it("injects the latest fresh direct input as hidden handoff authority", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "Sunny logged a 405 lb deadlift personal record today.",
+      groupLabel: "Lifting Club",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "handoff",
+      result: { status: "accepted", targetLabel: "Lifting Club" },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [
+            EARLIER_ASSISTANT_INPUT_ID,
+            FRESH_ASSISTANT_INPUT_ID,
+          ],
+          conversationId: "conversation_private",
+          conversationScope: "direct",
+          inboundMailboxItemIds: ["mailbox_private"],
+          originSessionId: "session_private",
+          recipientKey: "recipient_private",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "handoff",
+      result: { status: "accepted", targetLabel: "Lifting Club" },
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "handoff",
+      context: "Sunny logged a 405 lb deadlift personal record today.",
+      groupLabel: "Lifting Club",
+      originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
+    });
+  });
+
+  it.each([
+    ["missing", () => null],
+    [
+      "group",
+      () => ({
+        acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+        conversationId: "conversation_group",
+        conversationScope: "group" as const,
+        inboundMailboxItemIds: ["mailbox_group"],
+        originSessionId: "session_group",
+        recipientKey: "recipient_group",
+      }),
+    ],
+  ])("does not admit a context handoff with %s private-user authority", async (
+    _case,
+    currentUserActionScope,
+  ) => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "A bounded fact.",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>();
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope,
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(groupRequest).not.toHaveBeenCalled();
   });
 
   it("enforces group ask bounds in Unicode code points", () => {

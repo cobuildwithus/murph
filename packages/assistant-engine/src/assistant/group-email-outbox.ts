@@ -29,6 +29,7 @@ type GroupEmailPreparation = {
 
 export function createAssistantGroupEmailOutboxTool(input: {
   automationAuthority?: AssistantOutboxIntent['automationAuthority']
+  automationContextReferences?: AssistantOutboxIntent['automationContextReferences']
   authority: HostedRuntimeGroupEmailScheduledAuthority | null
   groupTool: AssistantHostedGroupTool
   recordPendingDeliveryIntentId?: (intentId: string) => void
@@ -168,6 +169,11 @@ export function createAssistantGroupEmailOutboxTool(input: {
 
       const parentIntent = await createAssistantOutboxIntent({
         automationAuthority: input.automationAuthority ?? null,
+        automationContextReferences:
+          input.automationContextReferences?.map((reference) => ({
+            entityId: reference.entityId,
+            entityKind: reference.entityKind,
+          })) ?? null,
         channel: 'email',
         dedupeToken: [
           'group-email-parent',

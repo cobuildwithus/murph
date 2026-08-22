@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-19",
+  "order": 100,
+  "item": {
+    "id": "usage-recovery-links-finish-sending",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Usage recovery links finish sending",
+    "summary": "If a messaging provider accepts a usage recovery link but its confirmation is interrupted, Murph now finishes reconciling that delivery without sending duplicates.",
+    "details": "Later over-limit requests remain blocked, while real conversation and image retries keep their existing quiet recovery window.",
+    "relevanceTags": ["ai-usage", "messaging", "reliability"],
+    "sourcePullRequests": [2008]
+  }
+}

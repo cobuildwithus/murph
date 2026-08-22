@@ -1,10 +1,10 @@
 {
   "id": "event-import-jsonl",
-  "command": "vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--apply] [--request-id <id>]",
+  "command": "vault-cli event import-jsonl --vault <path> --input @file.jsonl|- [--source-raw-ref-once <raw/path>] [--apply] [--request-id <id>]",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/sample-imports/events/events.jsonl"
   ],
   "goldenOutput": "fixtures/golden-outputs/event-import-jsonl",
-  "purpose": "Documents the bulk canonical event import path: one JSONL line per import-json-shaped payload without explicit ids, externalRef as re-import identity, dry-run by default with --apply to write."
+  "purpose": "Documents the bulk canonical event import path: one JSONL line per import-json-shaped payload without explicit ids, dry-run by default with --apply to write, and an optional atomic first-import guard for workout rows sharing one preserved raw source."
 }

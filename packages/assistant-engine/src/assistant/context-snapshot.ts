@@ -769,7 +769,7 @@ function renderAssistantSnapshotBodyMeasurementsLine(
     return null
   }
 
-  return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`. For canonical measurement events, list candidates with \`vault-cli measurement list --from ${latestDate} --to ${latestDate} --limit 100 --format json\`, then read each candidate with \`vault-cli measurement show <event-id> --format json\`; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
+  return `- Body/scale measurement history is present (latest ${latestDate}). Start with \`vault-cli wearables body list --limit 30 --format json\`, then use \`vault-cli wearables metric latest <canonical-body-metric> --format json\` or \`vault-cli wearables metric trend <canonical-body-metric> --format json\`. For sparse canonical observations, use \`vault-cli measurement entry list --metric <canonical-body-metric> --from ${latestDate} --to ${latestDate} --format json\`; widen the date range when needed. Never substitute raw Junction artifacts for canonical history.`
 }
 
 function renderAssistantSnapshotBloodPressureMeasurementsLine(

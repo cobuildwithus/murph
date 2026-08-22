@@ -1,0 +1,63 @@
+name: Pull Request Evidence
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pr-evidence:
+    name: Pull request evidence
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Test pull-request body guards
+        run: >-
+          node --test
+          scripts/check-frontend-design-proof.test.mjs
+          scripts/check-pr-architecture-summary.test.mjs
+          scripts/check-pr-changelog.test.mjs
+          scripts/check-pr-deployment-concerns.test.mjs
+
+      - name: Require architecture and reuse summary
+        run: node scripts/check-pr-architecture-summary.mjs
+        env:
+          MURPH_GITHUB_TOKEN: ${{ github.token }}
+          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
+
+      - name: Require changelog disposition
+        run: node scripts/check-pr-changelog.mjs
+        env:
+          MURPH_GITHUB_TOKEN: ${{ github.token }}
+          MURPH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
+          MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+      - name: Require deployment concerns
+        run: node scripts/check-pr-deployment-concerns.mjs
+        env:
+          MURPH_GITHUB_TOKEN: ${{ github.token }}
+          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
+
+      - name: Require structured frontend design proof
+        run: node scripts/check-frontend-design-proof.mjs
+        env:
+          MURPH_GITHUB_TOKEN: ${{ github.token }}
+          MURPH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MURPH_PR_BODY: ${{ github.event.pull_request.body }}
+          MURPH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}

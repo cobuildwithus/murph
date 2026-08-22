@@ -185,16 +185,31 @@ async function recordHostedDirectEnsureWakeTimingBestEffort(timingRecord: {
         timingRecord.timing.directEnsureResponseReceivedAtEpochMs,
       directEnsureOrchestrationAttemptId:
         timingRecord.timing.orchestrationAttemptId,
+      directEnsureResultKind: timingRecord.timing.directEnsureResultKind,
+      ...(timingRecord.timing.directEnsureResultKind === "runtime_processing_accepted"
+        ? {
+            directEnsureAction: timingRecord.timing.directEnsureAction,
+            directEnsureRuntimeAttemptId:
+              timingRecord.timing.directEnsureRuntimeAttemptId,
+          }
+        : {}),
     },
   };
 
   try {
-    await recordHostedIngressDirectEnsureTiming({
+    const result = await recordHostedIngressDirectEnsureTiming({
       expectedUserId: timingRecord.userId,
       mailboxItemId: timingRecord.mailboxItemId,
       phaseBreakdown,
       source: timingRecord.source,
     });
+    if (!result.recorded) {
+      console.warn("Hosted direct ensure wake timing record did not match.", {
+        matchedCount: result.matchedCount,
+        source: timingRecord.source,
+        unmatchedCount: result.unmatchedCount,
+      });
+    }
   } catch (error) {
     console.warn("Hosted direct ensure wake timing record failed.", {
       errorName: deriveHostedOnboardingTimingErrorName(error),

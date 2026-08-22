@@ -6,6 +6,7 @@ import type {
   ScheduleCell,
   ScheduleCellKind,
 } from "@/src/types/experiments";
+import { countScheduleOccurrences } from "@/src/lib/experiments/schedule-occurrences";
 import { cn } from "@/src/lib/utils";
 
 interface ExperimentScheduleProps {
@@ -78,12 +79,12 @@ export function ExperimentScheduleSidebar({ schedule }: ExperimentScheduleProps)
 
 function tallyTargetStats(schedule: ExperimentSchedule) {
   const cells = schedule.weeks.flatMap((week) => week.cells);
-  const completed = cells.filter((c) => c.kind === "completed").length;
-  const assumed = cells.filter((c) => c.kind === "assumed").length;
-  const partial = cells.filter((c) => c.kind === "partial").length;
-  const missed = cells.filter((c) => c.kind === "missed").length;
-  const failed = cells.filter((c) => c.kind === "failed").length;
-  const unknown = cells.filter((c) => c.kind === "unknown").length;
+  const completed = countScheduleOccurrences(cells, "completed");
+  const assumed = countScheduleOccurrences(cells, "assumed");
+  const partial = countScheduleOccurrences(cells, "partial");
+  const missed = countScheduleOccurrences(cells, "missed");
+  const failed = countScheduleOccurrences(cells, "failed");
+  const unknown = countScheduleOccurrences(cells, "unknown");
   const hasToday = cells.some((c) => c.isToday);
   const due = completed + assumed + partial + missed + failed + unknown;
   const adherencePercent = due > 0 ? Math.round(((completed + assumed) / due) * 100) : 0;
@@ -127,6 +128,14 @@ function CompactCellView({ cell }: { cell: ScheduleCell }) {
 }
 
 function renderCompactCellBody(cell: ScheduleCell): ReactNode {
+  if (cell.occurrences && cell.occurrences.expected > 1) {
+    const logged =
+      cell.occurrences.completed +
+      cell.occurrences.assumed +
+      cell.occurrences.partial;
+    return <span className="font-mono text-[9px]">{logged}/{cell.occurrences.expected}</span>;
+  }
+
   switch (cell.kind) {
     case "completed":
     case "assumed":
@@ -251,11 +260,17 @@ function renderCellBody(cell: ScheduleCell): ReactNode {
         </span>
       );
     case "missed":
-      return <X aria-label="Not logged" className="size-3.5" strokeWidth={2} />;
+      return cell.occurrences && cell.occurrences.expected > 1 && cell.detail ? (
+        <span className="text-[11px] font-semibold">{cell.detail}</span>
+      ) : <X aria-label="Not logged" className="size-3.5" strokeWidth={2} />;
     case "failed":
-      return <X aria-label="Not met" className="size-3.5" strokeWidth={2} />;
+      return cell.occurrences && cell.occurrences.expected > 1 && cell.detail ? (
+        <span className="text-[11px] font-semibold">{cell.detail}</span>
+      ) : <X aria-label="Not met" className="size-3.5" strokeWidth={2} />;
     case "unknown":
-      return <span className="font-mono text-xs">?</span>;
+      return cell.occurrences && cell.occurrences.expected > 1 && cell.detail ? (
+        <span className="text-[11px] font-semibold">{cell.detail}</span>
+      ) : <span className="font-mono text-xs">?</span>;
     case "scheduled":
       return cell.detail ? (
         <span className="text-[11px] font-medium">{cell.detail}</span>

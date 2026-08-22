@@ -6,6 +6,7 @@ import type {
   ExperimentRunProjection,
   ExperimentSchedule,
 } from "@/src/types/experiments";
+import { countScheduleCellOccurrences } from "@/src/lib/experiments/schedule-occurrences";
 
 interface ExperimentSummaryTilesProps {
   experiment: ExperimentSummaryTilesExperiment;
@@ -243,13 +244,13 @@ function tallySchedule(schedule: ExperimentSchedule | undefined): ScheduleTallie
     .flatMap((week) => week.cells)
     .reduce(
       (acc, cell) => {
-        if (cell.kind === "completed") acc.completed += 1;
-        if (cell.kind === "assumed") acc.assumed += 1;
-        if (cell.kind === "partial") acc.partial += 1;
-        if (cell.kind === "missed") acc.missed += 1;
-        if (cell.kind === "failed") acc.failed += 1;
-        if (cell.kind === "unknown") acc.unknown += 1;
-        if (cell.kind === "scheduled") acc.scheduled += 1;
+        acc.completed += countScheduleCellOccurrences(cell, "completed");
+        acc.assumed += countScheduleCellOccurrences(cell, "assumed");
+        acc.partial += countScheduleCellOccurrences(cell, "partial");
+        acc.missed += countScheduleCellOccurrences(cell, "missed");
+        acc.failed += countScheduleCellOccurrences(cell, "failed");
+        acc.unknown += countScheduleCellOccurrences(cell, "unknown");
+        acc.scheduled += countScheduleCellOccurrences(cell, "scheduled");
         return acc;
       },
       { assumed: 0, completed: 0, partial: 0, missed: 0, failed: 0, unknown: 0, scheduled: 0 },

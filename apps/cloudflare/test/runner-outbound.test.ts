@@ -87,6 +87,8 @@ import {
   HOSTED_RUNTIME_LATENCY_TRACE_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
   HOSTED_RUNTIME_LINQ_EGRESS_ENGAGEMENT_PATH,
+  HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
+  HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
   HOSTED_RUNTIME_PRODUCT_FEEDBACK_RECORD_PATH,
   HOSTED_RUNTIME_PLAN_USAGE_TOOL_PATH,
   HOSTED_RUNTIME_SUBSCRIPTION_TOOL_PATH,
@@ -370,6 +372,23 @@ const ALLOWLISTED_WEB_CONTROL_CASES = [
     },
     name: "hosted Linq delivery outcome",
     path: HOSTED_RUNTIME_LINQ_EGRESS_DELIVERY_PATH,
+  },
+  {
+    body: {
+      generation: 2,
+      phoneCallId: "hpc_result_delivery",
+      status: "sent",
+    },
+    name: "hosted phone-call result delivery outcome",
+    path: HOSTED_RUNTIME_PHONE_CALL_RESULT_DELIVERY_PATH,
+  },
+  {
+    body: {
+      channel: "telegram",
+      dedupeKey: "a".repeat(40),
+    },
+    name: "hosted outbound message-volume receipt",
+    path: HOSTED_RUNTIME_OUTBOUND_MESSAGE_VOLUME_RECEIPT_PATH,
   },
   {
     body: {

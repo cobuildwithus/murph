@@ -377,15 +377,16 @@ export async function prepareHostedMailboxItemAppendCrypto(input: {
 
 /**
  * Owns the bounded preparation lifecycle for transaction-local mailbox
- * appends. Provider-capable work finishes before `append` opens its owner
- * transaction; exact root drift retries the whole preparation once with a
- * fresh request cache.
+ * appends. Provider-capable active-root work and any exact retained-root read
+ * finish before `append` opens its owner transaction; exact root drift retries
+ * the whole preparation once with a fresh request cache.
  */
 export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
   input: {
     append: (
       prepared: PreparedHostedMailboxItemAppendCrypto,
     ) => Promise<TResult>;
+    prepareExisting?: () => Promise<void>;
     prisma: PrismaClient;
     userId: string;
   },
@@ -401,6 +402,7 @@ export async function runWithPreparedHostedMailboxItemAppendCrypto<TResult>(
         prisma: input.prisma,
         userId,
       });
+      await input.prepareExisting?.();
       return input.append(prepared);
     };
 
@@ -823,12 +825,23 @@ export async function appendHostedMailboxEnvelopeTx(input: {
  */
 export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
   envelope: HostedMailboxProducerEnvelope;
+  expiresAt?: Date | string | null;
+  itemId?: string;
   prepared: PreparedHostedMailboxItemAppendCrypto;
   sourceMessageLookupKey?: string;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult> {
+  const itemId = input.itemId === undefined
+    ? undefined
+    : requireHostedMailboxItemId(input.itemId);
+  if (itemId !== undefined && itemId !== input.envelope.eventId) {
+    throw new TypeError(
+      "Hosted mailbox item identity must equal the envelope event id.",
+    );
+  }
   return appendHostedMailboxEnvelopeInternalTx({
     ...input,
+    ...(itemId === undefined ? {} : { itemId }),
     encryption: {
       mode: "prepared-root",
       prepared: input.prepared,
@@ -1134,6 +1147,7 @@ async function appendHostedMailboxEnvelopeInternalTx(input: {
 
 export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
   envelope: HostedExecutionMealPhotoCapturedWake;
+  prepared: PreparedHostedMailboxItemAppendCrypto;
   tx: HostedMailboxMutationTx;
 }): Promise<AppendHostedMailboxItemResult & { claimedMealPhotoKey: string }> {
   await acquireHostedMailboxDedupeAppendLockTx({
@@ -1150,8 +1164,9 @@ export async function appendHostedMealPhotoMailboxEnvelopeTx(input: {
     && hasSameMealPhotoCapture(existing, input.envelope)
     ? existing
     : input.envelope;
-  const appended = await appendHostedMailboxEnvelopeTx({
+  const appended = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
     envelope: canonicalEnvelope,
+    prepared: input.prepared,
     tx: input.tx,
   });
   return {
@@ -1768,6 +1783,50 @@ export async function readHostedMailboxMaxSeqByLane(input: {
   return result;
 }
 
+export async function readHostedMailboxFirstLiveSystemItemAfterSeq(input: {
+  afterSeq: bigint | number | string;
+  at: Date;
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<{
+  dedupeKey: string;
+  kind: HostedMailboxKind;
+  laneSeq: string;
+} | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const userId = requireNonEmptyString(input.userId, "Hosted mailbox userId");
+  const afterSeq = normalizeHostedMailboxSeq(
+    input.afterSeq,
+    "Hosted mailbox system frontier afterSeq",
+  );
+  const row = await prisma.hostedMailboxItem.findFirst({
+    orderBy: {
+      laneSeq: "asc",
+    },
+    select: {
+      dedupeKey: true,
+      kind: true,
+      laneSeq: true,
+    },
+    where: {
+      ...buildHostedMailboxLiveItemWhere(input.at),
+      lane: "system",
+      laneSeq: {
+        gt: afterSeq,
+      },
+      userId,
+    },
+  });
+
+  return row
+    ? {
+        dedupeKey: row.dedupeKey,
+        kind: requireHostedMailboxKind(row.kind),
+        laneSeq: row.laneSeq.toString(),
+      }
+    : null;
+}
+
 export async function readHostedMailboxConsumedSeqByLane(input: {
   lanes?: readonly (HostedMailboxLane | string)[];
   prisma?: HostedMailboxStoreClient;
@@ -2360,6 +2419,42 @@ export async function readHostedMailboxUserIdsByKind(input: {
   });
 
   return new Set(records.map((record) => record.userId));
+}
+
+export async function hasPendingHostedEnvironmentInterviewMailboxItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<boolean> {
+  return (await readPendingHostedEnvironmentInterviewMailboxItem(input)) !== null;
+}
+
+export async function readPendingHostedEnvironmentInterviewMailboxItem(input: {
+  prisma?: HostedMailboxStoreClient;
+  userId: string;
+}): Promise<{ id: string } | null> {
+  const prisma = input.prisma ?? getPrisma();
+  const laneCounter = await prisma.hostedMailboxLaneCounter.findUnique({
+    select: { consumedSeq: true },
+    where: {
+      userId_lane: {
+        lane: "system",
+        userId: input.userId,
+      },
+    },
+  });
+  const item = await prisma.hostedMailboxItem.findFirst({
+    orderBy: { laneSeq: "asc" },
+    select: { id: true },
+    where: {
+      kind: "environment-interview.completed",
+      lane: "system",
+      laneSeq: {
+        gt: laneCounter?.consumedSeq ?? 0n,
+      },
+      userId: input.userId,
+    },
+  });
+  return item;
 }
 
 export async function hasHostedMailboxItemByKind(input: {

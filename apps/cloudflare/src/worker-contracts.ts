@@ -332,6 +332,7 @@ export interface WorkerEnvironmentContract<
   HOSTED_EMAIL_FROM_ADDRESS?: string;
   HOSTED_EMAIL_LOCAL_PART?: string;
   HOSTED_EMAIL_SIGNING_SECRET?: string;
+  GEMINI_API_KEY?: string;
   EXA_API_KEY?: string;
   LINQ_ATTACHMENT_CDN_BASE_URL?: string;
   LINQ_API_BASE_URL?: string;

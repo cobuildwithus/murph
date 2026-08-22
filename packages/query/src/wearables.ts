@@ -1,5 +1,7 @@
 import type { VaultReadModel } from "./read-model.ts";
-import { resolveWearableCanonicalMetricKey } from "@murphai/health-metrics";
+import {
+  resolveWearableCanonicalMetricKey,
+} from "@murphai/health-metrics";
 
 import {
   buildActivitySessionMetricCandidate,
@@ -117,6 +119,7 @@ import type {
   ProjectedWearableSleepSummary,
   ProjectedWearableSourceHealthSummary,
 } from "./wearables/types.ts";
+import { compareWorkoutFeatures } from "./wearables/workout-features.ts";
 import {
   ACTIVITY_BRANCH_SCOPED_METRIC_KEYS,
   ACTIVITY_METRIC_KEYS,
@@ -193,6 +196,11 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
   const activitySessionDayRollupsByDate = groupActivitySessionAggregatesByDate(
     dataset.activitySessionDayRollups,
   );
+  const workoutFeaturesByDate = new Map<string, WearableDataset["workoutFeatures"]>();
+  for (const candidate of dataset.workoutFeatures) {
+    const candidates = workoutFeaturesByDate.get(candidate.date) ?? [];
+    workoutFeaturesByDate.set(candidate.date, [...candidates, candidate]);
+  }
   const dates = collectSortedDatesDesc([
     ...metricCandidatesByDate.keys(),
     ...activitySessionDayRollupsByDate.keys(),
@@ -256,6 +264,37 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const activityScore = resolveMetric("activityScore", selectMetricCandidates(explicitDateCandidates, "activityScore"), {
       metricFamily: "activity",
     });
+    const activityAverageHeartRate = withMetricFallback(
+      resolveMetric(
+        "activityAverageHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "activityAverageHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      resolveMetric(
+        "averageHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "averageHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      "Used the legacy activity average heart rate because no dedicated activity average was available.",
+    );
+    const walkingAverageHeartRate = resolveMetric(
+      "walkingAverageHeartRate",
+      selectMetricCandidates(explicitDateCandidates, "walkingAverageHeartRate"),
+      { metricFamily: "activity" },
+    );
+    const minimumHeartRate = withMetricFallback(
+      resolveMetric(
+        "minimumHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "minimumHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      resolveMetric(
+        "lowestHeartRate",
+        selectMetricCandidates(explicitDateCandidates, "lowestHeartRate"),
+        { metricFamily: "activity" },
+      ),
+      "Used the legacy activity minimum heart rate because no dedicated activity minimum was available.",
+    );
     const dayStrain = resolveMetric("dayStrain", selectMetricCandidates(explicitDateCandidates, "dayStrain"), {
       metricFamily: "activity",
     });
@@ -270,11 +309,6 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
     const averageHeartRate = resolveMetric(
       "averageHeartRate",
       selectMetricCandidates(explicitDateCandidates, "averageHeartRate"),
-      { metricFamily: "activity" },
-    );
-    const walkingAverageHeartRate = resolveMetric(
-      "walkingAverageHeartRate",
-      selectMetricCandidates(explicitDateCandidates, "walkingAverageHeartRate"),
       { metricFamily: "activity" },
     );
     const lowestHeartRate = resolveMetric(
@@ -317,11 +351,13 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       ["altitudeChangeMeters", altitudeChangeMeters],
       ["estimatedVo2Max", estimatedVo2Max],
       ["activityScore", activityScore],
+      ["activityAverageHeartRate", activityAverageHeartRate],
+      ["walkingAverageHeartRate", walkingAverageHeartRate],
+      ["minimumHeartRate", minimumHeartRate],
       ["dayStrain", dayStrain],
       ["workoutStrain", workoutStrain],
       ["maxHeartRate", maxHeartRate],
       ["averageHeartRate", averageHeartRate],
-      ["walkingAverageHeartRate", walkingAverageHeartRate],
       ["lowestHeartRate", lowestHeartRate],
       ["percentRecorded", percentRecorded],
       ["sessionMinutes", sessionMinutes],
@@ -335,8 +371,13 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       sessionMinutes,
       summaryConfidence,
     });
+    const workoutFeatures = (workoutFeaturesByDate.get(date) ?? [])
+      .map((candidate) => candidate.feature)
+      .sort(compareWorkoutFeatures)
+      .slice(0, 32);
 
     return {
+      activityAverageHeartRate,
       activityScore,
       activeCalories,
       activityMinutes,
@@ -354,6 +395,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       lowestHeartRate,
       maxHeartRate,
       mediumActivityMinutes,
+      minimumHeartRate,
       notes,
       percentRecorded,
       sessionCount,
@@ -363,6 +405,7 @@ function listWearableActivityDaysFromDataset(dataset: WearableDataset): Wearable
       totalCalories,
       totalElevationGainMeters,
       walkingAverageHeartRate,
+      workoutFeatures,
       workoutStrain,
     };
   });
@@ -1332,8 +1375,8 @@ const DEFAULT_WEARABLE_DRIFT_SIGNALS: ReadonlyArray<{
   { metric: "waistCircumference", summaryKind: "bodyState" },
 ];
 const WEARABLE_METRIC_ALIAS_FALLBACKS: Readonly<Record<string, WearableMetricKey>> = {
-  "activity-average-heart-rate": "averageHeartRate",
-  "activity-lowest-heart-rate": "lowestHeartRate",
+  "activity-average-heart-rate": "activityAverageHeartRate",
+  "activity-lowest-heart-rate": "minimumHeartRate",
   "skin-temp": "temperatureDeviation",
   "skin-temperature": "temperatureDeviation",
   "session-count": "sessionCount",
@@ -1486,6 +1529,7 @@ function listWearableMetricObservations(
       summaryKind,
     }];
   });
+
 }
 
 function buildWearableMetricWindowStats(
@@ -1538,7 +1582,11 @@ function summarizeWearableMetricFromBundle(
     return null;
   }
 
-  const observations = listWearableMetricObservations(bundle, resolvedRequest.metric, resolvedRequest.summaryKind);
+  const observations = listWearableMetricObservations(
+    bundle,
+    resolvedRequest.metric,
+    resolvedRequest.summaryKind,
+  );
   const windowDays = resolveWearableMetricWindowDays(filters.windowDays);
   const recentObservations = observations.slice(0, windowDays);
   const priorObservations = observations.slice(windowDays, windowDays * 2);
@@ -1694,11 +1742,7 @@ export function summarizeWearableMetricLatest(
   metric: string,
   filters: WearableMetricSummaryFilters = {},
 ): WearableMetricLatestSummary | null {
-  return summarizeWearableMetricFromBundle(
-    buildWearableSummaryBundle(vault, filters),
-    metric,
-    filters,
-  );
+  return summarizeWearableMetricLatestFromBundle(buildWearableSummaryBundle(vault, filters), metric, filters);
 }
 
 export function summarizeWearableMetricLatestFromBundle(

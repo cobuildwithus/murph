@@ -19,6 +19,7 @@ import {
   readDatabaseHealthPlanetScaleRequestCounts,
   resetDatabaseHealthMessageRequests,
   setDatabaseHealthClientWaitSeconds,
+  setDatabaseHealthMissingConnectionErrorPortScrapes,
   setDatabaseHealthMissingConnectionErrorScrapesRemaining,
   setDatabaseHealthNowMs,
   setDatabaseHealthPooledErrors,
@@ -97,6 +98,37 @@ describe("database health scheduled Worker path", () => {
       metrics: 2,
     });
     expect(readDatabaseHealthMessageRequests()).toEqual([]);
+  });
+
+  it("does not page for a sparse port through the scheduled Durable Object", async () => {
+    resetDatabaseHealthMessageRequests();
+    const scheduledAtMs = Date.now();
+    setDatabaseHealthNowMs(scheduledAtMs);
+    setDatabaseHealthClientWaitSeconds(0);
+    setDatabaseHealthMissingConnectionErrorPortScrapes({
+      port: "6432",
+      scrapes: 4,
+    });
+
+    const monitor = readDatabaseHealthNamespace().getByName(
+      "pooled-counter-telemetry",
+    );
+    await monitor.runScheduledCheck({ scheduledAtMs });
+    setDatabaseHealthNowMs(scheduledAtMs + FIVE_MINUTES_MS);
+    await monitor.runScheduledCheck({
+      scheduledAtMs: scheduledAtMs + FIVE_MINUTES_MS,
+    });
+
+    expect(readDatabaseHealthPlanetScaleRequestCounts()).toEqual({
+      discovery: 2,
+      metrics: 2,
+    });
+    expect(readDatabaseHealthMessageRequests()).toEqual([]);
+    await expect(monitor.readAlertState()).resolves.toMatchObject({
+      consecutiveScrapeFailures: 0,
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
   });
 
   it("pages a pooled connection-error delta through a scheduled monitor", async () => {

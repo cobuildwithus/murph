@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { DashboardCriticalLoadError } from "@/src/components/dashboard/dashboard-critical-load-error";
@@ -10,6 +11,11 @@ import {
   readHostedConsentStatus,
 } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
+import { MURPH_NOINDEX_PAGE_ROBOTS } from "@/src/lib/site-metadata";
+
+export const metadata: Metadata = {
+  robots: MURPH_NOINDEX_PAGE_ROBOTS,
+};
 
 export default async function DashboardLayout({
   children,

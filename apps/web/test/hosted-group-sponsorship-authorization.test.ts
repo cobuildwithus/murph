@@ -76,7 +76,6 @@ import {
   cancelHostedGroupSponsorshipsForPayerAccountDeletionTx,
   createHostedGroupSponsorshipAuthorizationTx,
   hasHostedGroupAutomaticRefillAvailable,
-  isHostedGroupSponsorshipNearCapNotificationCurrentTx,
   manageHostedGroupSponsorshipAuthorization,
   markHostedGroupSponsorshipRecoveryRequiredForPurchase,
   parseHostedGroupSponsorshipManagementAction,
@@ -1322,97 +1321,17 @@ describe("hosted capped group sponsorship authorization", () => {
     });
   });
 
-  it("validates near-cap notices against the exact active payer, period, cap, and committed spend", async () => {
-    const authorization = buildAuthorization();
-    const purchase = {
-      beneficiaryMemberId: authorization.beneficiaryMemberId,
-      groupSponsorshipAuthorizationId: authorization.id,
-      groupSponsorshipPeriodStartedAt: authorization.periodStartedAt,
-      payerMemberId: authorization.payerMemberId,
-      status: HostedUsageCreditPurchaseStatus.fulfilled,
-    };
-    const tx = {
-      hostedGroupSponsorshipAuthorization: {
-        findUnique: vi.fn(async () => authorization),
-      },
-      hostedUsageCreditPurchase: {
-        aggregate: vi.fn(async () => ({ _sum: { cashAmountMinor: 500 } })),
-        findUnique: vi.fn(async () => purchase),
-      },
-    };
-
-    await expect(isHostedGroupSponsorshipNearCapNotificationCurrentTx({
-      authorizationId: authorization.id,
-      beneficiaryMemberId: authorization.beneficiaryMemberId,
-      monthlyCapMinor: 1_000,
-      now: NOW,
-      payerMemberId: "member_payer",
-      periodStartedAt: PERIOD_START,
-      purchaseId: "hucp_refill_123456",
-      tx: tx as never,
-    })).resolves.toBe(true);
-  });
-
-  it.each([
-    {
-      label: "a canceled authorization",
-      authorization: buildAuthorization({
-        canceledAt: NOW,
-        status: HostedGroupSponsorshipAuthorizationStatus.canceled,
-      }),
-      purchasePeriodStartedAt: PERIOD_START,
-      requestedPeriodStartedAt: PERIOD_START,
-    },
-    {
-      label: "a delayed prior-period fulfillment",
-      authorization: buildAuthorization({
-        periodEndsAt: new Date("2026-09-30T12:00:00.000Z"),
-        periodStartedAt: PERIOD_END,
-      }),
-      purchasePeriodStartedAt: PERIOD_START,
-      requestedPeriodStartedAt: PERIOD_START,
-    },
-  ])("rejects a near-cap notice for $label", async ({
-    authorization,
-    purchasePeriodStartedAt,
-    requestedPeriodStartedAt,
-  }) => {
-    const tx = {
-      hostedGroupSponsorshipAuthorization: {
-        findUnique: vi.fn(async () => authorization),
-      },
-      hostedUsageCreditPurchase: {
-        aggregate: vi.fn(async () => ({ _sum: { cashAmountMinor: 500 } })),
-        findUnique: vi.fn(async () => ({
-          beneficiaryMemberId: "member_group_runtime",
-          groupSponsorshipAuthorizationId: "hgsa_abcdefghijklmnop",
-          groupSponsorshipPeriodStartedAt: purchasePeriodStartedAt,
-          payerMemberId: "member_payer",
-          status: HostedUsageCreditPurchaseStatus.fulfilled,
-        })),
-      },
-    };
-
-    await expect(isHostedGroupSponsorshipNearCapNotificationCurrentTx({
-      authorizationId: "hgsa_abcdefghijklmnop",
-      beneficiaryMemberId: "member_group_runtime",
-      monthlyCapMinor: 1_000,
-      now: NOW,
-      payerMemberId: "member_payer",
-      periodStartedAt: requestedPeriodStartedAt,
-      purchaseId: "hucp_refill_123456",
-      tx: tx as never,
-    })).resolves.toBe(false);
-  });
-
   it("applies confirmed increases immediately and preserves pause, resume, and cancel state", async () => {
     let authorization = buildAuthorization({ monthlyCapMinor: 500 });
+    let canceled = false;
     const tx = {
       hostedGroupSponsorshipAuthorization: {
-        findFirst: vi.fn(async () => authorization),
+        findFirst: vi.fn(async () => canceled ? null : authorization),
         findUnique: vi.fn(async () => authorization),
         updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
           authorization = { ...authorization, ...data };
+          canceled ||=
+            data.status === HostedGroupSponsorshipAuthorizationStatus.canceled;
           return { count: 1 };
         }),
       },
@@ -1453,6 +1372,11 @@ describe("hosted capped group sponsorship authorization", () => {
       ...base,
       action: { action: "cancel", authorizationId: "hgsa_abcdefghijklmnop" },
       now: new Date("2026-08-01T12:04:00.000Z"),
+    })).resolves.toBeNull();
+    await expect(manageHostedGroupSponsorshipAuthorization({
+      ...base,
+      action: { action: "cancel", authorizationId: "hgsa_abcdefghijklmnop" },
+      now: new Date("2026-08-01T12:05:00.000Z"),
     })).resolves.toBeNull();
     expect(authorization).toMatchObject({
       canceledAt: new Date("2026-08-01T12:04:00.000Z"),

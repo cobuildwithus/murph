@@ -241,6 +241,25 @@ export const WHOOP_WEARABLE_PROVIDER_DESCRIPTOR = {
   },
 } as const satisfies WearableProviderDescriptor;
 
+export const GOOGLE_HEALTH_WEARABLE_PROVIDER_DESCRIPTOR = {
+  provider: "google-health",
+  aliases: ["google_health"],
+  displayName: "Google Health",
+  sourcePriorityHints: {
+    defaultPriority: 55,
+    metricFamilies: {
+      activity: 55,
+      sleep: 55,
+      cardio: 55,
+      respiration: 55,
+      blood_oxygen: 55,
+      body: 55,
+      session: 55,
+    },
+    metrics: JUNCTION_METRIC_PRIORITIES,
+  },
+} as const satisfies WearableProviderDescriptor;
+
 export const JUNCTION_WEARABLE_PROVIDER_DESCRIPTOR = {
   provider: "junction",
   displayName: "Junction",
@@ -265,6 +284,7 @@ export const defaultWearableProviderDescriptors = Object.freeze([
   OURA_WEARABLE_PROVIDER_DESCRIPTOR,
   GARMIN_WEARABLE_PROVIDER_DESCRIPTOR,
   STRAVA_WEARABLE_PROVIDER_DESCRIPTOR,
+  GOOGLE_HEALTH_WEARABLE_PROVIDER_DESCRIPTOR,
   JUNCTION_WEARABLE_PROVIDER_DESCRIPTOR,
 ] as const);
 

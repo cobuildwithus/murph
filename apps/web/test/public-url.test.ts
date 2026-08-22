@@ -16,6 +16,34 @@ describe("hosted public URL helpers", () => {
     expect(resolveHostedPublicBaseUrl(source)).toBe("https://join.example.test");
   });
 
+  it("binds the native iOS custom environment to the exact Vercel deployment URL", () => {
+    const source = createProcessEnv({
+      DEVICE_SYNC_PUBLIC_BASE_URL: "https://stale.example.test/api/device-sync",
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://stale.example.test",
+      VERCEL_PROJECT_PRODUCTION_URL: "project.example.test",
+      VERCEL_TARGET_ENV: "native-ios-e2e",
+      VERCEL_URL: "exact-pr-sha.vercel.app",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBe("https://exact-pr-sha.vercel.app");
+    expect(resolveHostedPublicOrigin(source)).toBe("https://exact-pr-sha.vercel.app");
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBe(
+      "https://exact-pr-sha.vercel.app/api/device-sync",
+    );
+  });
+
+  it("fails closed when the native iOS custom environment lacks an exact Vercel URL", () => {
+    const source = createProcessEnv({
+      HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://stale.example.test",
+      VERCEL_PROJECT_PRODUCTION_URL: "project.example.test",
+      VERCEL_TARGET_ENV: "native-ios-e2e",
+    });
+
+    expect(resolveHostedPublicBaseUrl(source)).toBeNull();
+    expect(resolveHostedPublicOrigin(source)).toBeNull();
+    expect(resolveHostedDeviceSyncPublicBaseUrl(source)).toBeNull();
+  });
+
   it("normalizes the Vercel production domain into an HTTPS URL", () => {
     const source = createProcessEnv({
       VERCEL_PROJECT_PRODUCTION_URL: "www.withmurph.ai",

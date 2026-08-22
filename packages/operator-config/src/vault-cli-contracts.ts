@@ -7,6 +7,7 @@ import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import * as z from '@murphai/contracts/zod-runtime'
 
 export const VAULT_CLI_BATCH_RESULT_SCHEMA = 'murph.vault-cli.batch-result.v1'
+export const VAULT_CLI_BATCH_MAX_COMMANDS = 50
 
 function describeQueryRecordTypes(values: readonly string[]): string {
   return `Optional query record families. Repeat --record-type for multiple values: ${values.join(', ')}.`
@@ -83,6 +84,7 @@ export const vaultValidateResultSchema = z.object({
 })
 
 export const documentImportResultSchema = z.object({
+  created: z.boolean(),
   vault: pathSchema,
   sourceFile: pathSchema,
   rawFile: pathSchema,
@@ -184,6 +186,8 @@ const workoutExerciseResultSchema = z.object({
     .optional(),
   unitOverride: z.enum(['lb', 'kg']).optional(),
   note: z.string().min(1).optional(),
+  memberRepsPerSet: z.number().int().min(1).max(999).optional(),
+  setPlanIsFinite: z.boolean().optional(),
   sets: z.array(workoutSetResultSchema).min(1).max(150),
 })
 

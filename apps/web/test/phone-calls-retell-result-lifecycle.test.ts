@@ -42,7 +42,6 @@ describe("Retell phone-call result lifecycle", () => {
       event: "call_analyzed",
     })).toEqual({
       call,
-      requiresTransferFollowUp: false,
     });
   });
 
@@ -63,7 +62,6 @@ describe("Retell phone-call result lifecycle", () => {
       event: "call_analyzed",
     })).toEqual({
       call,
-      requiresTransferFollowUp: false,
     });
   });
 
@@ -92,7 +90,7 @@ describe("Retell phone-call result lifecycle", () => {
       event: "transfer_ended",
     });
 
-    expect(result.requiresTransferFollowUp).toBe(true);
+    expect(result.completionPolicy).toBe("transfer_follow_up_required");
     expect(result.call.call_analysis?.custom_analysis_data).toMatchObject({
       follow_up: null,
       outcome: "needs_user",
@@ -149,19 +147,22 @@ describe("Retell phone-call result lifecycle", () => {
     expect(result.call.call_analysis?.custom_analysis_data?.result).toContain(
       "Before the handoff, the automated call reported: A Monday morning option was available",
     );
-    expect(result.requiresTransferFollowUp).toBe(true);
+    expect(result.completionPolicy).toBe("transfer_follow_up_required");
 
     const mapped = mapRetellCallAnalysis(result.call);
     const instructions = buildPhoneCallResultNotificationInstructions({
       brief: BRIEF,
       requireSend: true,
-      requiresTransferFollowUp: result.requiresTransferFollowUp,
-      result: mapped,
+      result: {
+        ...mapped,
+        completionPolicy: result.completionPolicy,
+      },
     });
     expect(mapped).toMatchObject({
       outcome: "needs_user",
       summary: expect.stringContaining("post-handoff outcome is unknown"),
     });
+    expect(mapped).not.toHaveProperty("completionPolicy");
     expect(mapped.summary).toContain(
       "Before the handoff, the automated call reported: A Monday morning option was available",
     );
@@ -215,7 +216,7 @@ describe("Retell phone-call result lifecycle", () => {
       event: "call_analyzed",
     });
 
-    expect(result?.requiresTransferFollowUp).toBe(true);
+    expect(result?.completionPolicy).toBe("transfer_follow_up_required");
     expect(result?.call.call_analysis?.custom_analysis_data).toMatchObject({
       outcome: "needs_user",
       result: expect.stringContaining("post-handoff outcome is unknown"),

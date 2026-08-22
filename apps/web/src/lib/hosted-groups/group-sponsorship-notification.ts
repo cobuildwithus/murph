@@ -36,7 +36,6 @@ import {
   buildHostedGroupUsageFundingUrl,
 } from "./group-usage-funding";
 import {
-  isHostedGroupSponsorshipNearCapNotificationCurrentTx,
   readHostedGroupSponsorshipAuthorizationByPurchase,
 } from "./group-sponsorship-authorization";
 import type {
@@ -204,71 +203,6 @@ export async function materializeHostedGroupSponsorshipIfApplicable(input: {
     prisma: input.prisma,
   });
   return true;
-}
-
-export async function materializeHostedGroupSponsorshipNearCapNotification(
-  input: {
-    now?: Date;
-    prisma: PrismaClient;
-    purchaseId: string;
-  },
-): Promise<boolean> {
-  const now = input.now ?? new Date();
-  const purchase = await input.prisma.hostedUsageCreditPurchase.findUnique({
-    select: { status: true },
-    where: { id: input.purchaseId },
-  });
-  if (purchase?.status !== HostedUsageCreditPurchaseStatus.fulfilled) {
-    return false;
-  }
-  const sponsorship = await readHostedGroupSponsorshipAuthorizationByPurchase({
-    prisma: input.prisma,
-    purchaseId: input.purchaseId,
-  });
-  if (!sponsorship || sponsorship.monthlyCapMinor <= 500) {
-    return false;
-  }
-  const authorization =
-    await input.prisma.hostedGroupSponsorshipAuthorization.findUnique({
-      select: { beneficiaryMemberId: true },
-      where: { id: sponsorship.authorizationId },
-    });
-  if (!authorization) {
-    return false;
-  }
-  const managementUrl = buildPrivateManagementUrl(
-    authorization.beneficiaryMemberId,
-  );
-  return materializePrivateSponsorshipNotification({
-    beneficiaryMemberId: authorization.beneficiaryMemberId,
-    eventIdentity: [
-      "near-cap",
-      sponsorship.authorizationId,
-      sponsorship.periodStartedAt.toISOString(),
-      String(sponsorship.monthlyCapMinor),
-    ].join(":"),
-    instructions: [
-      "Send one concise private billing notice to the sponsor only.",
-      `One more $5 usage-credit refill would reach their $${sponsorship.monthlyCapMinor / 100} monthly maximum.`,
-      "Say that no action is required, and that they can change or pause the sponsorship from its private management page.",
-      managementUrl ? `Management page: ${managementUrl}` : null,
-      "Do not send this to the group or reveal sponsorship details to participants.",
-    ].filter((line): line is string => Boolean(line)).join("\n"),
-    now,
-    payerMemberId: sponsorship.payerMemberId,
-    prisma: input.prisma,
-    validateBeforeAppendTx: (tx) =>
-      isHostedGroupSponsorshipNearCapNotificationCurrentTx({
-        authorizationId: sponsorship.authorizationId,
-        beneficiaryMemberId: authorization.beneficiaryMemberId,
-        monthlyCapMinor: sponsorship.monthlyCapMinor,
-        now,
-        payerMemberId: sponsorship.payerMemberId,
-        periodStartedAt: sponsorship.periodStartedAt,
-        purchaseId: input.purchaseId,
-        tx,
-      }),
-  });
 }
 
 export async function materializeHostedGroupSponsorshipRecoveryNotification(

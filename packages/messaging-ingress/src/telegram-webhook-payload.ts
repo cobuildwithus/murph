@@ -171,6 +171,7 @@ export function buildTelegramCaptureRawMetadata(input: {
   mediaGroupId?: string | null;
   messageId: number | string | null | undefined;
   replyContextPreview?: string | null;
+  replyToMessageId?: number | string | null;
 }): Record<string, unknown> {
   const normalizedPreview = normalizeTelegramReplyContextPreview(
     input.replyContextPreview ?? null,
@@ -180,6 +181,9 @@ export function buildTelegramCaptureRawMetadata(input: {
       media_group_id: normalizeTextValue(input.mediaGroupId ?? null) ?? undefined,
       message_id: normalizeTelegramCaptureMessageId(input.messageId),
       reply_context_preview: normalizedPreview ?? undefined,
+      reply_to_message_id: normalizeTelegramCaptureMessageId(
+        input.replyToMessageId,
+      ),
       schema: TELEGRAM_CAPTURE_RAW_SCHEMA,
     }),
   ) as Record<string, unknown>;
@@ -192,6 +196,7 @@ export function minimizeTelegramUpdate(update: TelegramUpdateLike): Record<strin
     mediaGroupId: message?.media_group_id ?? null,
     messageId: message?.message_id,
     replyContextPreview: buildTelegramReplyContextPreview(message),
+    replyToMessageId: message?.reply_to_message?.message_id,
   });
 }
 

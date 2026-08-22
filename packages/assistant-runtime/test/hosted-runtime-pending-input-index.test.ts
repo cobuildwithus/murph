@@ -41,7 +41,9 @@ import {
   enqueueHostedPendingAssistantInputId,
   ensureHostedPendingAssistantInputIndex,
   inspectHostedPendingAssistantInputWakeCandidate,
+  readHostedPendingAssistantImageCompletionRecoveryInputIds,
   readHostedPendingAssistantInputIds,
+  resolveHostedPendingAssistantImageCompletionHintPath,
   resolveHostedPendingAssistantInputStatePath,
   runHostedPendingAssistantInputContentRetention,
   selectHostedConversationMailboxHandledItemBatch,
@@ -185,6 +187,133 @@ describe("hosted pending assistant input index", () => {
         value: {
           backfilled: true,
           inputIds: [inputId],
+        },
+      });
+  });
+
+  it("keeps the canonical pending index authoritative over its fixed completion hint", async () => {
+    const vaultRoot = await createTempVault();
+    const ordinary = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_completion_hint_ordinary",
+        eventId: "evt_completion_hint_ordinary",
+        itemId: "item_completion_hint_ordinary",
+        laneSeq: "10",
+        messageId: "msg_completion_hint_ordinary",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "ordinary pending input",
+      }),
+    });
+    const completion = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_completion_hint_image",
+        eventId: "evt_completion_hint_image",
+        itemId: "item_completion_hint_image",
+        lane: "system",
+        laneSeq: "image-completion:hint",
+        messageId: "msg_completion_hint_image",
+        occurredAt: "2026-04-23T00:00:03.000Z",
+        payloadSchema: "murph.hosted-image-completion.v1",
+        receivedAt: "2026-04-23T00:00:04.000Z",
+        text: "trusted image completion",
+        wakeSchema: "murph.hosted-image-completion.v1",
+      }),
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: ordinary.inputId,
+      vaultRoot,
+    });
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([]);
+    const hintFilePath = resolveHostedPendingAssistantImageCompletionHintPath(
+      vaultRoot,
+    );
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: false },
+    });
+
+    await enqueueHostedPendingAssistantInputId({
+      inputId: completion.inputId,
+      vaultRoot,
+    });
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([ordinary.inputId, completion.inputId]);
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: true },
+    });
+  });
+
+  it("keeps old state conservative until existing compaction rebuilds the hint", async () => {
+    const vaultRoot = await createTempVault();
+    await saveAssistantAutomationState(vaultRoot, {
+      autoReply: [{
+        channel: "linq",
+        eligibleAfter: null,
+        enabledAt: "2026-04-23T00:00:00.000Z",
+      }],
+      updatedAt: "2026-04-23T00:00:00.000Z",
+      version: 1,
+    });
+    const ordinary = await upsertAssistantInputEvent({
+      vault: vaultRoot,
+      event: createAssistantInputEvent({
+        dedupeKey: "dedupe_completion_hint_migration",
+        eventId: "evt_completion_hint_migration",
+        itemId: "item_completion_hint_migration",
+        laneSeq: "10",
+        messageId: "msg_completion_hint_migration",
+        occurredAt: "2026-04-23T00:00:01.000Z",
+        receivedAt: "2026-04-23T00:00:02.000Z",
+        text: "ordinary pre-hint pending input",
+      }),
+    });
+    const filePath = resolveHostedPendingAssistantInputStatePath(vaultRoot);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, `${JSON.stringify({
+      schema: "murph.hosted-pending-assistant-inputs.v2",
+      schemaVersion: 2,
+      value: {
+        backfilled: true,
+        handledBatchCursorInputId: null,
+        inputIds: [ordinary.inputId],
+      },
+    }, null, 2)}\n`, "utf8");
+
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([ordinary.inputId]);
+    const hintFilePath = resolveHostedPendingAssistantImageCompletionHintPath(
+      vaultRoot,
+    );
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: true },
+    });
+    await expect(compactHostedPendingAssistantInputIds({ vaultRoot }))
+      .resolves.toEqual([ordinary.inputId]);
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([]);
+    await expect(
+      readFile(hintFilePath, "utf8").then((value) => JSON.parse(value)),
+    ).resolves.toMatchObject({
+      value: { hasImageCompletionCandidate: false },
+    });
+    await expect(readFile(filePath, "utf8").then((value) => JSON.parse(value)))
+      .resolves.toMatchObject({
+        value: {
+          hasImageCompletionCandidate: false,
         },
       });
   });
@@ -1595,6 +1724,9 @@ describe("hosted pending assistant input index", () => {
       inputId: valid.inputId,
       vaultRoot,
     });
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([missingInputId, valid.inputId]);
     await expect(readHostedPendingAssistantInputIds({ vaultRoot })).resolves.toEqual([
       missingInputId,
       valid.inputId,
@@ -1607,6 +1739,9 @@ describe("hosted pending assistant input index", () => {
       missingInputId,
       valid.inputId,
     ]);
+    await expect(
+      readHostedPendingAssistantImageCompletionRecoveryInputIds({ vaultRoot }),
+    ).resolves.toEqual([missingInputId, valid.inputId]);
   });
 
   it("retains nonterminal indexed inputs whose source cannot currently use the reply channel", async () => {
@@ -2029,10 +2164,12 @@ function createAssistantInputEvent(input: {
   laneSeq: string;
   messageId: string;
   occurredAt: string;
+  payloadSchema?: string;
   receivedAt: string;
   replyTarget?: "linq" | "telegram" | null;
   source?: "linq" | "telegram";
   text: string;
+  wakeSchema?: string;
 }) {
   const source = input.source ?? "linq";
   const replyTarget = input.replyTarget === null
@@ -2082,10 +2219,10 @@ function createAssistantInputEvent(input: {
       kind: "hosted-mailbox" as const,
       lane: input.lane ?? "conversation",
       laneSeq: input.laneSeq,
-      payloadSchema: "murph.hosted-mailbox-payload.v1",
+      payloadSchema: input.payloadSchema ?? "murph.hosted-mailbox-payload.v1",
       payloadSource: "inline" as const,
       source: "hosted-mailbox" as const,
-      wakeSchema: "murph.hosted-execution-wake.v1",
+      wakeSchema: input.wakeSchema ?? "murph.hosted-execution-wake.v1",
     },
   };
 }

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-16",
+  "order": 100,
+  "item": {
+    "id": "workout-sets-keep-their-place",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout replies stay on the right set",
+    "summary": "Short replies such as \"ok\" no longer mark the next workout set as complete.",
+    "details": "Murph checks the canonical active workout before each set update. If none exists, Murph asks whether to start one instead of claiming that a set was saved.",
+    "relevanceTags": ["assistant", "workouts", "strength-training", "reliability"],
+    "sourcePullRequests": [1925]
+  }
+}

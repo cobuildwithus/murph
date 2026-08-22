@@ -152,12 +152,14 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
       expiresAt: new Date("2026-03-25T01:00:00.000Z"),
       consumedAt: null,
     };
+    const queryRaw = vi.fn(async () => [{ state: session.state }]);
     const updateMany = vi.fn().mockResolvedValue({ count: 1 });
 
     const store = new PrismaDeviceSyncControlPlaneStore({
       prisma: {
         $transaction: async <TResult>(
           callback: (transaction: {
+            $queryRaw: typeof queryRaw;
             deviceOauthSession: {
               findUnique: ({ where }: { where: { state: string } }) => Promise<MutableOAuthSession | null>;
               updateMany: typeof updateMany;
@@ -165,6 +167,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
           }) => Promise<TResult>,
         ) =>
           callback({
+            $queryRaw: queryRaw,
             deviceOauthSession: {
               findUnique: async ({ where }) => (where.state === session.state ? cloneOAuthSession(session) : null),
               updateMany,
@@ -181,6 +184,7 @@ describe("PrismaDeviceSyncControlPlaneStore oauth state ingress", () => {
         ownerId: "user-123",
       },
     });
+    expect(queryRaw).toHaveBeenCalledOnce();
     expect(updateMany).toHaveBeenCalledWith({
       data: {
         consumedAt: new Date("2026-03-25T00:30:00.000Z"),
@@ -2281,37 +2285,64 @@ describe("PrismaDeviceSyncControlPlaneStore hosted connection access", () => {
     );
   });
 
-  it("keeps webhook-ingress external-account lookups on the durable Prisma owner", async () => {
+  it("keeps webhook-ingress external-account lookup secret-free and returns its proven owner", async () => {
     const connection = createConnection({
       id: "dsc_123",
       provider: "oura",
       status: "active",
       userId: "user-123",
     });
-
+    const findUnique = vi.fn(async ({ where }: {
+      select: Record<string, boolean>;
+      where: {
+        provider_providerAccountBlindIndex: {
+          provider: string;
+          providerAccountBlindIndex: string;
+        };
+      };
+    }) =>
+      where.provider_providerAccountBlindIndex.provider === "oura"
+        && where.provider_providerAccountBlindIndex.providerAccountBlindIndex === buildHostedProviderAccountBlindIndex({
+          key: BLIND_INDEX_KEY,
+          provider: "oura",
+          externalAccountId: "acct_456",
+        })
+        ? cloneConnection(connection)
+        : null,
+    );
     const store = new PrismaDeviceSyncControlPlaneStore({
-      codec: TEST_CODEC,
       prisma: {
-        deviceConnection: {
-          findUnique: async ({ where }: { where: { provider_providerAccountBlindIndex: { provider: string; providerAccountBlindIndex: string } } }) =>
-            where.provider_providerAccountBlindIndex.provider === "oura"
-              && where.provider_providerAccountBlindIndex.providerAccountBlindIndex === buildHostedProviderAccountBlindIndex({
-                key: BLIND_INDEX_KEY,
-                provider: "oura",
-                externalAccountId: "acct_456",
-              })
-              ? cloneConnection(connection)
-              : null,
-        },
+        deviceConnection: { findUnique },
       } as never,
       providerAccountBlindIndexKey: BLIND_INDEX_KEY,
     });
 
-    await expect(store.getConnectionByExternalAccount("oura", "acct_456")).resolves.toEqual(expect.objectContaining({
-      id: "dsc_123",
-      provider: "oura",
-      status: "active",
-    }));
+    await expect(
+      store.getWebhookConnectionByExternalAccount("oura", "acct_456"),
+    ).resolves.toEqual({
+      account: expect.objectContaining({
+        externalAccountId: "acct_456",
+        id: "dsc_123",
+        provider: "oura",
+        status: "active",
+      }),
+      connectionOwnerId: "user-123",
+    });
+    expect(findUnique).toHaveBeenCalledOnce();
+    expect(findUnique).toHaveBeenCalledWith({
+      select: hostedRuntimeRedactedConnectionRecordArgs.select,
+      where: {
+        provider_providerAccountBlindIndex: {
+          provider: "oura",
+          providerAccountBlindIndex: buildHostedProviderAccountBlindIndex({
+            key: BLIND_INDEX_KEY,
+            provider: "oura",
+            externalAccountId: "acct_456",
+          }),
+        },
+      },
+    });
+    expect(openHostedUserSecureBoxStringMock).not.toHaveBeenCalled();
   });
 
   it("rehydrates seeded hosted callback accounts by durable connection id", async () => {

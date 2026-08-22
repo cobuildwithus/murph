@@ -16,6 +16,9 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "@/src/lib/hosted-onboarding/shared";
 import { buildHostedTelegramBotLink } from "@/src/lib/hosted-onboarding/telegram";
+import {
+  signalHostedPhoneCallResultNotificationRecovery,
+} from "@/src/lib/phone-calls/reconciliation-workflow-start";
 
 export const POST = withJsonError(async (request: Request) => {
   assertHostedOnboardingMutationOrigin(request);
@@ -73,6 +76,17 @@ export const POST = withJsonError(async (request: Request) => {
       sourceType: "settings.telegram.sync",
     });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+
+  try {
+    await signalHostedPhoneCallResultNotificationRecovery({
+      memberId: auth.member.id,
+      prisma,
+      signal: request.signal,
+    });
+  } catch {
+    // The binding is already durable and the per-call Workflow timer owns
+    // eventual recovery; this wake only reduces result-delivery latency.
+  }
 
   if (channelSyncDispatch) {
     await signalHostedMailboxAppendBestEffort({

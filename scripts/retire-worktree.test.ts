@@ -5,8 +5,10 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs'
 import os from 'node:os'
@@ -292,6 +294,87 @@ describe('retire-worktree', () => {
           `refs/heads/${harness.branch}`,
         ]),
       ).toContain(harness.head)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it('retires only an explicitly authorized detached HEAD contained in origin/main', () => {
+    const harness = createHarness()
+    try {
+      runGit(harness.primary, ['worktree', 'remove', harness.target])
+      const detachedTarget = path.join(harness.root, 'detached-benchmark')
+      runGit(harness.primary, ['worktree', 'add', '--detach', detachedTarget, 'main'])
+      const detachedHarness: Harness = {
+        ...harness,
+        branch: '',
+        head: runGit(detachedTarget, ['rev-parse', 'HEAD']),
+        target: realpathSync(detachedTarget),
+      }
+
+      const ordinary = runRetirement(detachedHarness, [])
+      expect(ordinary.status).toBe(1)
+      expect(ordinary.stderr).toContain('use --contained-detached')
+
+      const removal = runRetirement(detachedHarness, [], [
+        '--contained-detached',
+        detachedHarness.target,
+      ])
+      expect(removal.status, removal.stderr).toBe(0)
+      expect(removal.stdout).toContain('no branch changed')
+      expect(existsSync(detachedHarness.target)).toBe(false)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses to retire a worktree referenced by a primary dependency symlink', () => {
+    const harness = createHarness()
+    try {
+      mkdirSync(path.join(harness.primary, 'node_modules'), { recursive: true })
+      symlinkSync(harness.target, path.join(harness.primary, 'node_modules', 'linked-task'))
+
+      const result = runRetirement(harness, [terminalPullRequest(harness)])
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('primary dependency link resolves through the target')
+      expect(result.stderr).toContain('node_modules/linked-task')
+      expect(existsSync(harness.target)).toBe(true)
+    } finally {
+      rmSync(harness.root, { recursive: true, force: true })
+    }
+  })
+
+  it('moves an eligible checkout to a visible quarantine before recursive removal', () => {
+    const harness = createHarness()
+    try {
+      const realGit = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim()
+      writeExecutable(
+        path.join(harness.fakeBin, 'git'),
+        `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == 'worktree' && "\${2:-}" == 'remove' ]]; then
+  exit 1
+fi
+exec "\${RETIRE_TEST_REAL_GIT:?}" "$@"
+`,
+      )
+
+      const result = runRetirement(
+        harness,
+        [terminalPullRequest(harness)],
+        [harness.target],
+        { RETIRE_TEST_REAL_GIT: realGit },
+      )
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('remains visibly quarantined')
+      expect(existsSync(harness.target)).toBe(false)
+      const quarantine = readdirSync(harness.root).find((entry) =>
+        entry.startsWith('task-worktree.retiring-'),
+      )
+      expect(quarantine).toBeDefined()
+      expect(
+        runGit(harness.primary, ['worktree', 'list', '--porcelain']),
+      ).toContain(path.join(harness.root, quarantine!))
     } finally {
       rmSync(harness.root, { recursive: true, force: true })
     }

@@ -300,6 +300,7 @@ test("automation save and edit schemas expose typed fields while automation impo
     "activeUntil",
     "clearActiveUntil",
     "supportSeriesId",
+    "contextReference",
     "tag",
     "tags",
     "continuityPolicy",
@@ -338,6 +339,8 @@ test("automation save and edit schemas expose typed fields while automation impo
     "activeUntil",
     "clearActiveUntil",
     "supportSeriesId",
+    "contextReference",
+    "clearContextReferences",
   ]) {
     assert.equal(field in editSchema.options.properties, true, field);
   }
@@ -356,6 +359,107 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("includeBody" in listSchema.options.properties, false);
   assert.equal("supportSeriesId" in listSchema.options.properties, true);
   assert.equal("cursor" in listSchema.options.properties, true);
+});
+
+test("automation save and edit preserve exact canonical context references", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-automation-context-references-");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    registerAutomationCommands(cli);
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Workout reminder",
+      "--slug",
+      "workout-reminder",
+      "--instructions",
+      "Remind the member about the exact saved routine.",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "08:30",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--context-reference",
+      "workout_format=wfmt_01JQ8PWXP5A68SQM1W0GYM41WA",
+      "--context-reference",
+      "experiment=exp_01JQ8PWXP5A68SQM1W0GYM41WB",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+    const shown = await runInProcessJsonCli<{
+      automation: { contextReferences: Array<{ entityId: string; entityKind: string }> } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "workout-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.contextReferences, [
+      { entityId: "wfmt_01JQ8PWXP5A68SQM1W0GYM41WA", entityKind: "workout_format" },
+      { entityId: "exp_01JQ8PWXP5A68SQM1W0GYM41WB", entityKind: "experiment" },
+    ]);
+    const cleared = await runInProcessJsonCli(cli, [
+      "automation",
+      "edit",
+      "workout-reminder",
+      "--clear-context-references",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(cleared.exitCode, null);
+    assert.equal(cleared.envelope.ok, true);
+    const clearedShown = await runInProcessJsonCli<{
+      automation: { contextReferences: unknown[] } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "workout-reminder",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(clearedShown.exitCode, null);
+    assert.equal(clearedShown.envelope.ok, true);
+    assert.deepEqual(clearedShown.envelope.data?.automation?.contextReferences, []);
+    const malformed = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Malformed reference reminder",
+      "--instructions",
+      "This request must fail before persistence.",
+      "--schedule-kind",
+      "at",
+      "--schedule-at",
+      "2099-01-01T00:00:00.000Z",
+      "--channel",
+      "telegram",
+      "--delivery-target",
+      "telegram_thread_real",
+      "--context-reference",
+      "missing-separator",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(malformed.exitCode, 1);
+    assert.equal(malformed.envelope.ok, false);
+    assert.match(
+      malformed.envelope.ok ? "" : malformed.envelope.error.message ?? "",
+      /entity-kind.*entity-id/u,
+    );
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
 });
 
 test("automation save and edit manage assistant target overrides from typed fields", async () => {

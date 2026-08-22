@@ -67,6 +67,7 @@ model DeviceConnectionSource {
   resourceAvailabilitySummaryJson Json?            @map("resource_availability_summary_json")
   lastErrorCode                   String?          @map("last_error_code")
   lastErrorMessage                String?          @map("last_error_message")
+  lifecycleEpoch                  Int?             @default(1) @map("lifecycle_epoch")
   firstSeenAt                     DateTime         @map("first_seen_at")
   lastSeenAt                      DateTime         @map("last_seen_at")
   lastDataAt                      DateTime?        @map("last_data_at")
@@ -534,6 +535,28 @@ enum HostedComputerHandoffStatus {
   expired
 }
 
+enum HostedPhoneCallResultNotificationChannel {
+  linq
+  telegram
+}
+
+enum HostedPhoneCallResultDeliveryStatus {
+  pending
+  queued
+  sending
+  delivered
+  ambiguous
+}
+
+enum HostedEmailPublicBootstrapAttemptStatus {
+  claimed
+  sending
+  sent
+  ambiguous
+  failed
+  abandoned
+}
+
 enum HostedPhoneCallStatus {
   starting
   calling
@@ -583,6 +606,8 @@ model HostedMember {
   assistantUnhingedCausalSeq     BigInt?                         @map("assistant_unhinged_causal_seq")
   initialOnboardingCompletedAt   DateTime?                       @default(now()) @map("initial_onboarding_completed_at")
   pendingActivationTimeZone      String?                         @map("pending_activation_time_zone")
+  signupNotificationContextEncrypted String?                    @map("signup_notification_context_encrypted")
+  signupNotificationContextExpiresAt DateTime?                   @map("signup_notification_context_expires_at")
   signupNotificationEmailAttemptedAt DateTime?                   @map("signup_notification_email_attempted_at")
   signupWelcomeEmailAttemptedAt  DateTime?                       @map("signup_welcome_email_attempted_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
@@ -602,11 +627,13 @@ model HostedMember {
   billingRef                     HostedMemberBillingRef?
   subscriptionCheckouts          HostedMemberSubscriptionCheckout[]
   emailAuthorization             HostedMemberEmailAuthorization?
+  emailPublicBootstrapAttempts   HostedEmailPublicBootstrapAttempt[]
   hostedMailboxItems             HostedMailboxItem[]
   hostedMailboxPayloads          HostedMailboxPayload[]
   hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
   hostedWorkspace                HostedWorkspace?
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
+  opsUsageResetReceipts          HostedOpsUsageResetReceipt[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
   groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
@@ -899,6 +926,11 @@ model HostedPhoneCall {
   briefEncrypted String?               @map("brief_encrypted")
   resultJson     Json?                 @map("result_json")
   resultEncrypted String?              @map("result_encrypted")
+  stopRequestedAt DateTime?            @map("stop_requested_at")
+  resultNotificationChannel HostedPhoneCallResultNotificationChannel? @map("result_notification_channel")
+  resultDeliveryStatus HostedPhoneCallResultDeliveryStatus? @map("result_delivery_status")
+  resultDeliveryGeneration Int?        @default(0) @map("result_delivery_generation")
+  resultDeliveryTerminalAt DateTime?   @map("result_delivery_terminal_at")
   endedAt        DateTime?             @map("ended_at")
   analyzedAt     DateTime?             @map("analyzed_at")
   createdAt      DateTime              @default(now()) @map("created_at")
@@ -907,6 +939,7 @@ model HostedPhoneCall {
 
   @@unique([memberId, requestKey])
   @@index([memberId, createdAt])
+  @@index([memberId, resultNotificationChannel, resultDeliveryStatus, createdAt], map: "hosted_phone_call_result_delivery_idx")
   @@index([status, updatedAt])
   @@map("hosted_phone_call")
 }
@@ -979,6 +1012,7 @@ model HostedMemberRouting {
   pendingLinqParticipantContactEncrypted  String?   @map("pending_linq_participant_contact_encrypted")
   pendingLinqParticipantContactObservedAt DateTime? @map("pending_linq_participant_contact_observed_at")
   replyAliasLookupKey                String?      @unique @map("reply_alias_lookup_key")
+  replyAliasGeneration               Int?         @map("reply_alias_generation")
   telegramUserLookupKey              String?      @unique @map("telegram_user_lookup_key")
   telegramUserIdEncrypted            String?      @map("telegram_user_id_encrypted")
   createdAt                          DateTime     @default(now()) @map("created_at")
@@ -1004,6 +1038,12 @@ model HostedMemberBillingRef {
   checkoutAttemptId                 String?      @map("checkout_attempt_id")
   checkoutIntentHash                String?      @map("checkout_intent_hash")
   checkoutCreatedAt                 DateTime?    @map("checkout_created_at")
+  stripeEffectClaimId               String?      @map("stripe_effect_claim_id")
+  stripeEffectKind                  String?      @map("stripe_effect_kind")
+  stripeEffectTargetPlanCode        String?      @map("stripe_effect_target_plan_code")
+  stripeEffectClaimedAt             DateTime?    @map("stripe_effect_claimed_at")
+  stripeEffectExecutionId           String?      @map("stripe_effect_execution_id")
+  stripeEffectExecutionStartedAt    DateTime?    @map("stripe_effect_execution_started_at")
   currentBillingPlanCode        String?      @map("current_billing_plan_code")
   currentBillingPhase           String?      @map("current_billing_phase")
   currentCheckoutOffer          String?      @map("current_checkout_offer")
@@ -1037,6 +1077,26 @@ model HostedMemberSubscriptionCheckout {
 
   @@index([memberId])
   @@map("hosted_member_subscription_checkout")
+}
+
+model HostedEmailPublicBootstrapAttempt {
+  id                      String                                  @id
+  memberId                String                                  @map("member_id")
+  candidateEmailLookupKey String                                  @map("candidate_email_lookup_key")
+  status                  HostedEmailPublicBootstrapAttemptStatus
+  claimedAt               DateTime                                @map("claimed_at")
+  providerEntryAt         DateTime?                               @map("provider_entry_at")
+  providerMessageId       String?                                 @map("provider_message_id")
+  completedAt             DateTime?                               @map("completed_at")
+  expiresAt               DateTime                                @map("expires_at")
+  createdAt               DateTime                                @default(now()) @map("created_at")
+  updatedAt               DateTime                                @updatedAt @map("updated_at")
+  member                  HostedMember                            @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, claimedAt, id])
+  @@index([claimedAt, id])
+  @@index([expiresAt, id])
+  @@map("hosted_email_public_bootstrap_attempt")
 }
 
 model HostedMemberEmailAuthorization {
@@ -1346,6 +1406,20 @@ model HostedAccountGroupBillingRef {
   checkoutSeatCount                 Int?            @map("checkout_seat_count")
   checkoutCreatedAt                 DateTime?       @map("checkout_created_at")
   billedSeatCount                   Int?            @map("billed_seat_count")
+  stripeEffectClaimId               String?         @map("stripe_effect_claim_id")
+  stripeEffectKind                  String?         @map("stripe_effect_kind")
+  stripeEffectSourcePulseSeats      Int?            @map("stripe_effect_source_pulse_seats")
+  stripeEffectSourceEdgeSeats       Int?            @map("stripe_effect_source_edge_seats")
+  stripeEffectSourceMaxSeats        Int?            @map("stripe_effect_source_max_seats")
+  stripeEffectTargetPulseSeats      Int?            @map("stripe_effect_target_pulse_seats")
+  stripeEffectTargetEdgeSeats       Int?            @map("stripe_effect_target_edge_seats")
+  stripeEffectTargetMaxSeats        Int?            @map("stripe_effect_target_max_seats")
+  stripeEffectBeneficiaryMemberId   String?         @map("stripe_effect_beneficiary_member_id")
+  stripeEffectFamilySubscriptionLookupKey String?   @map("stripe_effect_family_subscription_lookup_key")
+  stripeEffectDirectSubscriptionLookupKey String?   @map("stripe_effect_direct_subscription_lookup_key")
+  stripeEffectClaimedAt             DateTime?       @map("stripe_effect_claimed_at")
+  stripeEffectExecutionId           String?         @map("stripe_effect_execution_id")
+  stripeEffectExecutionStartedAt    DateTime?       @map("stripe_effect_execution_started_at")
   currentBillingPlanCode        String?             @map("current_billing_plan_code")
   currentBillingPhase           String?             @map("current_billing_phase")
   currentPeriodStart            DateTime?           @map("current_period_start")
@@ -1384,6 +1458,19 @@ model HostedGrowthDailySnapshot {
   familyMrrUsdCents     Int? @map("family_mrr_usd_cents")
 
   @@map("hosted_growth_daily_snapshot")
+}
+
+/// Anonymous exact-once receipts for successful post-cutover conversational
+/// Telegram and email deliveries. The lookup key is a one-way digest over the
+/// authenticated member, channel, and durable outbox dedupe key; no member,
+/// target, thread, or provider identifier is retained.
+model HostedOutboundMessageVolumeReceipt {
+  receiptLookupKey String   @id @map("receipt_lookup_key") @db.VarChar(64)
+  channel          String   @db.VarChar(16)
+  recordedAt       DateTime @default(now()) @map("recorded_at")
+
+  @@index([recordedAt], map: "homvr_recorded_at_idx")
+  @@map("hosted_outbound_message_volume_receipt")
 }
 
 /// Anonymous company-wide growth totals that must outlive member-scoped rows.
@@ -2251,6 +2338,29 @@ model HostedAiUsagePeriod {
   @@index([blockedAt])
   @@index([periodEnd])
   @@map("hosted_ai_usage_period")
+}
+
+/// Append-only per-member receipt for one operator-wide usage reset. The
+/// compound key is the effect identity across response loss, retry, restart,
+/// and overlap; member deletion cascades the private operational history.
+model HostedOpsUsageResetReceipt {
+  operationId                    String       @map("operation_id") @db.Uuid
+  memberId                       String       @map("member_id")
+  outcome                        String
+  resetMode                      String?      @map("reset_mode")
+  runtimeRecheckRequired         Boolean      @map("runtime_recheck_required")
+  noticeClaimReleased            Boolean      @default(false) @map("notice_claim_released")
+  periodStart                    DateTime?    @map("period_start")
+  previousSpentUsdMicros         BigInt?      @map("previous_spent_usd_micros")
+  resetAt                        DateTime     @map("reset_at")
+  updatedAt                      DateTime?    @map("updated_at")
+  usageCreditGrantedUsdMicros    BigInt       @default(0) @map("usage_credit_granted_usd_micros")
+  createdAt                      DateTime     @default(now()) @map("created_at")
+  member                         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([operationId, memberId])
+  @@index([memberId, createdAt], map: "hosted_ops_usage_reset_receipt_member_created_idx")
+  @@map("hosted_ops_usage_reset_receipt")
 }
 
 model HostedAssistantRuntimeIssue {

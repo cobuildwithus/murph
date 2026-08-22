@@ -8,6 +8,7 @@ import {
 } from "./builders.ts";
 import {
   assistantPersonalitySettingIds,
+  getEnvironmentInterviewTopicGroup,
   isAssistantPersonalityScore,
   isAssistantPersonalitySettingId,
   isAssistantTonePreference,
@@ -16,6 +17,7 @@ import {
   normalizeIanaTimeZone,
   parseMemberActionRequestV1,
   parseMemberActionOutcomeV1,
+  validateEnvironmentInterviewAnswer,
 } from "@murphai/contracts";
 
 import {
@@ -46,6 +48,7 @@ import type {
   HostedExecutionAssistantNotificationDeliverySource,
   HostedExecutionAssistantNotificationFirstContactPolicy,
   HostedExecutionAssistantNotificationPromptProfile,
+  HostedExecutionGroupContextHandoffNotification,
   HostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   HostedExecutionPrivateAssistantAskCompletionNotification,
   HostedExecutionClinicalRecordsSyncRequestedEvent,
@@ -58,6 +61,7 @@ import type {
   HostedExecutionMemberPreferences,
   HostedExecutionMemberPreferencesUpdatedEvent,
   HostedExecutionEnvironmentVoiceCapturedPayload,
+  HostedExecutionEnvironmentInterviewCompletedPayload,
   HostedExecutionMealPhotoCapturedPayload,
   HostedExecutionMemberActionRequestedEvent,
   HostedExecutionMemberActionCompletedEvent,
@@ -78,6 +82,7 @@ import type {
 } from "./contracts.ts";
 import {
   parseHostedExecutionAssistantAskCompletedPayload,
+  parseHostedExecutionAssistantAskOriginInputId,
   parseHostedExecutionAssistantAskRequestedPayload,
   parseHostedExecutionAssistantAskTimestamp,
 } from "./assistant-ask-payload.ts";
@@ -101,6 +106,7 @@ import {
   buildHostedExecutionMemberPreferencesUpdatedWake,
   buildHostedExecutionEnvironmentVoiceCapturedWake,
   buildHostedExecutionDailyMetricReportedWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMealPhotoCapturedWake,
   buildHostedExecutionMemberActionRequestedWake,
   buildHostedExecutionMemberActionCompletedWake,
@@ -528,6 +534,32 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         sha256: environmentVoice.sha256,
       });
     }
+    case "environment-interview.completed": {
+      assertExactHostedExecutionKeys(record, [
+        "environmentInterview",
+        "eventId",
+        "kind",
+        "occurredAt",
+        "userId",
+      ], "Hosted execution environment-interview.completed wake");
+      const environmentInterview =
+        parseHostedExecutionEnvironmentInterviewCompletedPayload(
+          record.environmentInterview,
+        );
+      if (environmentInterview.completedAt !== occurredAt) {
+        throw new TypeError(
+          "Hosted execution wake environment-interview.completed occurredAt must match completedAt.",
+        );
+      }
+      return buildHostedExecutionEnvironmentInterviewCompletedWake({
+        completedAt: environmentInterview.completedAt,
+        completionId: environmentInterview.completionId,
+        eventId,
+        memberId: wireUserId,
+        occurredAt,
+        topics: environmentInterview.topics,
+      });
+    }
     case "runtime.manual-requested":
     case "runtime.maintenance-requested":
     case "runtime.browser-vault-refresh-requested":
@@ -730,6 +762,138 @@ export function parseHostedExecutionEnvironmentVoiceCapturedPayload(
     durationMs,
     sha256,
   };
+}
+
+export function parseHostedExecutionEnvironmentInterviewCompletedPayload(
+  value: unknown,
+): HostedExecutionEnvironmentInterviewCompletedPayload {
+  const record = requireObject(
+    value,
+    "Hosted execution environment-interview.completed payload",
+  );
+  assertExactHostedExecutionKeys(record, [
+    "completedAt",
+    "completionId",
+    "topics",
+  ], "Hosted execution environment-interview.completed payload");
+  const completedAt = requireString(
+    record.completedAt,
+    "Hosted execution environment-interview.completed completedAt",
+  );
+  if (!isIsoTimestamp(completedAt)) {
+    throw new TypeError(
+      "Hosted execution environment-interview.completed completedAt must be an ISO timestamp.",
+    );
+  }
+  const completionId = requireString(
+    record.completionId,
+    "Hosted execution environment-interview.completed completionId",
+  );
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(completionId)) {
+    throw new TypeError(
+      "Hosted execution environment-interview.completed completionId must be a UUID v4.",
+    );
+  }
+  const topics = requireArray(
+    record.topics,
+    "Hosted execution environment-interview.completed topics",
+  );
+  if (topics.length < 1 || topics.length > 5) {
+    throw new TypeError(
+      "Hosted execution environment-interview.completed must contain one to five topics.",
+    );
+  }
+  let answerCount = 0;
+  const parsedTopics = topics.map((topicValue, topicIndex) => {
+    const topic = requireObject(
+      topicValue,
+      `Hosted execution environment-interview.completed topic ${topicIndex}`,
+    );
+    assertExactHostedExecutionKeys(topic, [
+      "answers",
+      "topicId",
+    ], `Hosted execution environment-interview.completed topic ${topicIndex}`);
+    const topicId = requireString(
+      topic.topicId,
+      `Hosted execution environment-interview.completed topic ${topicIndex} id`,
+    );
+    if (!/^[a-z]+(?::[0-9]+)?$/u.test(topicId) || !getEnvironmentInterviewTopicGroup(topicId)) {
+      throw new TypeError(
+        "Hosted execution environment-interview.completed topic id is invalid.",
+      );
+    }
+    const answers = requireArray(
+      topic.answers,
+      `Hosted execution environment-interview.completed topic ${topicIndex} answers`,
+    );
+    if (answers.length < 1 || answers.length > 16) {
+      throw new TypeError(
+        "Hosted execution environment-interview.completed topic must contain one to sixteen answers.",
+      );
+    }
+    answerCount += answers.length;
+    return {
+      answers: answers.map((answerValue, answerIndex) => {
+        const answer = requireObject(
+          answerValue,
+          `Hosted execution environment-interview.completed answer ${answerIndex}`,
+        );
+        assertExactHostedExecutionKeys(answer, [
+          "aspectId",
+          "indicatorId",
+          "note",
+          "value",
+        ], `Hosted execution environment-interview.completed answer ${answerIndex}`);
+        const parsed = {
+          aspectId: requireString(answer.aspectId, "Environment interview answer aspectId"),
+          indicatorId: requireString(answer.indicatorId, "Environment interview answer indicatorId"),
+          ...(answer.note === undefined
+            ? {}
+            : {
+                note: answer.note === null
+                  ? null
+                  : requireString(
+                      answer.note,
+                      "Environment interview answer note",
+                    ).trim(),
+              }),
+          value: parseEnvironmentInterviewAnswerValue(answer.value),
+        };
+        const issue = validateEnvironmentInterviewAnswer(topicId, parsed);
+        if (issue) {
+          throw new TypeError(issue);
+        }
+        return parsed;
+      }),
+      topicId,
+    };
+  });
+  if (answerCount > 32) {
+    throw new TypeError(
+      "Hosted execution environment-interview.completed contains too many answers.",
+    );
+  }
+  return { completedAt, completionId, topics: parsedTopics };
+}
+
+function parseEnvironmentInterviewAnswerValue(
+  value: unknown,
+): string | number | boolean {
+  if (
+    typeof value === "string"
+    || typeof value === "boolean"
+    || (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return value;
+  }
+  throw new TypeError(
+    "Hosted execution environment interview answer value is invalid.",
+  );
+}
+
+function isIsoTimestamp(value: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(value)
+    && Number.isFinite(Date.parse(value));
 }
 
 export function parseHostedExecutionConversationMessagePayload(
@@ -1599,6 +1763,15 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
                 `${label}.firstContact`,
               ),
         }),
+    ...(record.groupContextHandoff === undefined
+      ? {}
+      : {
+          groupContextHandoff:
+            parseHostedExecutionGroupContextHandoffNotification(
+              record.groupContextHandoff,
+              `${label}.groupContextHandoff`,
+            ),
+        }),
     instructions: requireString(record.instructions, `${label}.instructions`),
     ...(record.notificationPromptProfile === undefined
       ? {}
@@ -1630,6 +1803,36 @@ function parseHostedExecutionAssistantNotificationRequestedPayload(
               ),
         }),
     route: parseHostedExecutionAssistantNotificationRoute(record.route, `${label}.route`),
+  };
+}
+
+function parseHostedExecutionGroupContextHandoffNotification(
+  value: unknown,
+  label: string,
+): HostedExecutionGroupContextHandoffNotification {
+  const record = requireObject(value, label);
+  assertExactHostedExecutionKeys(
+    record,
+    ["membershipId", "originAssistantInputId"],
+    label,
+  );
+  const membershipId = requireString(
+    record.membershipId,
+    `${label}.membershipId`,
+  );
+  if (
+    membershipId.trim() !== membershipId
+    || !membershipId
+    || [...membershipId].length > 256
+  ) {
+    throw new TypeError(`${label}.membershipId is invalid.`);
+  }
+  return {
+    membershipId,
+    originAssistantInputId: parseHostedExecutionAssistantAskOriginInputId(
+      record.originAssistantInputId,
+      `${label}.originAssistantInputId`,
+    ),
   };
 }
 

@@ -366,6 +366,9 @@ const assistantInputTelegramSourceMetadataSchema = z
     replyContext: safeNullableAssistantInputMetadataTextSchema(
       'sourceMetadata.replyContext',
     ),
+    replyToMessageId: safeAssistantInputTokenSchema(
+      'sourceMetadata.replyToMessageId',
+    ).optional(),
     // Presentation-only speaker label from trusted ingress or a current
     // server-owned membership lookup. It never supplies participant authority.
     senderDisplayName: safeAssistantInputMetadataTextSchema(

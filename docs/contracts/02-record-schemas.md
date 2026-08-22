@@ -55,7 +55,7 @@ Memory record metadata uses only canonical `mem_<ULID>` ids.
 - Preferences singleton:
   `schemaVersion`, `updatedAt`, optional `assistant`, `workoutUnitPreferences`, and `wearablePreferences`
 - Markdown frontmatter:
-  `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema
+  `CORE.md`, journal day pages, experiment pages, provider pages, food pages, workout-format pages, and health registry pages each use a closed or explicitly documented frontmatter schema. Automation frontmatter may include bounded exact `contextReferences` (`entityKind` plus canonical `entityId`) as reminder routing and interpretation context; those references grant no mutation authority.
 
 Baseline does not define a standalone transform record family. `xfm_*` ids are batch identifiers surfaced by import flows and raw-path layout only.
 

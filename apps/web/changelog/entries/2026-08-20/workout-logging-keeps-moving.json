@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 110,
+  "item": {
+    "id": "workout-logging-keeps-moving",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout logging keeps moving",
+    "summary": "When a member sets one repetition count for every set, Murph now remembers it for terse completion replies and completes finite workouts on the last planned set.",
+    "details": "An unfinished older workout no longer blocks a new one. Corrections and intentional extra sets still target the exact workout record, while targetless sessions can stay open.",
+    "relevanceTags": [
+      "assistant",
+      "workouts",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2063
+    ]
+  }
+}

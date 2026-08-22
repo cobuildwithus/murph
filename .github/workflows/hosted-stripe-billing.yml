@@ -106,7 +106,8 @@ jobs:
         run: echo "$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Install Playwright Chromium
-        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
 
       - name: Install pinned Stripe CLI
         run: pnpm stripe:cli:setup

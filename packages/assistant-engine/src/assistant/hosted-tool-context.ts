@@ -16,6 +16,9 @@ import type {
   HostedExecutionAssistantAskOrigin,
 } from '@murphai/hosted-execution/contracts'
 import type {
+  HostedPhoneCallResultNotificationChannel,
+} from '@murphai/hosted-execution/phone-calls'
+import type {
   AssistantSession,
   AssistantVaultImageResponseMedia,
 } from '@murphai/operator-config/assistant-cli-contracts'
@@ -57,6 +60,7 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantGroupEmailOutboxTool } from './group-email-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
+import type { AnalyzeVideoAttachmentAuthority } from '../assistant-codex/analyze-video-tool.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -74,11 +78,13 @@ export interface AssistantHostedToolRequestKeyScope {
 export interface AssistantHostedUserActionScope
   extends AssistantHostedToolRequestKeyScope {
   conversationScope: AssistantConversationScope
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel | null
   originSessionId: string
 }
 
 export interface AssistantHostedScheduledPhoneCallScope
   extends HostedRuntimeScheduledAutomationAuthority {
+  resultNotificationChannel?: HostedPhoneCallResultNotificationChannel
   originSessionId: string
 }
 
@@ -158,6 +164,7 @@ export interface AssistantHostedToolContext {
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
+  currentAnalyzeVideoAttachmentAuthorities?(): readonly AnalyzeVideoAttachmentAuthority[]
   currentHostedImageCompletionEffectScope?():
     AssistantHostedImageCompletionEffectScope | null
   verifyGeneratedImageDelivery?(input: {
@@ -208,6 +215,7 @@ export function createAssistantHostedToolContext(input: {
   beforeToolExecution?: (deliveryContextOrdinal: number) => Promise<void>
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getAnalyzeVideoAttachmentAuthorities?: () => readonly AnalyzeVideoAttachmentAuthority[]
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -265,6 +273,8 @@ export function createAssistantHostedToolContext(input: {
   const groupEmailOutboxTool = groupEmailHost && input.groupEmailOutbox
     ? createAssistantGroupEmailOutboxTool({
         automationAuthority: input.messageInput.outboxAutomationAuthority ?? null,
+        automationContextReferences:
+          input.messageInput.outboxAutomationContextReferences ?? null,
         authority: input.messageInput.scheduledAutomationAuthority ?? null,
         groupTool: groupEmailHost,
         recordPendingDeliveryIntentId:
@@ -323,10 +333,16 @@ export function createAssistantHostedToolContext(input: {
       return null
     }
     const deliveryContext = readDeliveryContext()
+    const conversationScope =
+      input.getConversationScope?.() ?? 'unverified-external'
     return {
       ...buildRequestKeyScope(acceptedInputIds),
-      conversationScope:
-        input.getConversationScope?.() ?? 'unverified-external',
+      conversationScope,
+      resultNotificationChannel:
+        resolveAssistantHostedPhoneCallResultNotificationChannel({
+          channel: deliveryContext.messageInput.channel,
+          conversationScope,
+        }),
       originSessionId: deliveryContext.session.sessionId,
     }
   }
@@ -370,6 +386,8 @@ export function createAssistantHostedToolContext(input: {
       originSessionId: deliveryContext.session.sessionId,
     })
   }
+  const phoneCalls: AssistantPhoneCallPort | null =
+    executionContext?.phoneCalls ?? null
   let subscriptionActionClaimed = false
   let imessageContactActionClaimed = false
   let clinicalRecordsConnectLinkRequest: ReturnType<
@@ -423,7 +441,7 @@ export function createAssistantHostedToolContext(input: {
     privateImageUrlPublisher:
       executionContext?.privateImageUrlPublisher ?? null,
     subscriptionTool: executionContext?.subscriptionTool ?? null,
-    phoneCalls: executionContext?.phoneCalls ?? null,
+    phoneCalls,
     ...(executionContext?.usageRecorder && route
       ? {
           recordDetachedUsage(usageInput) {
@@ -522,6 +540,13 @@ export function createAssistantHostedToolContext(input: {
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
     },
+    currentAnalyzeVideoAttachmentAuthorities: () => {
+      const userActionScope = readCurrentUserActionScope()
+      if (userActionScope === null) return []
+      const acceptedInputIds = new Set(userActionScope.acceptedInputIds)
+      return (input.getAnalyzeVideoAttachmentAuthorities?.() ?? [])
+        .filter((authority) => acceptedInputIds.has(authority.messageRef))
+    },
     currentHostedImageCompletionEffectScope:
       readCurrentHostedImageCompletionEffectScope,
     verifyGeneratedImageDelivery: input.verifyGeneratedImageDelivery,
@@ -618,8 +643,9 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   originSessionId: string
 }): AssistantHostedScheduledPhoneCallScope | null {
   const scope = resolveAssistantHostedScheduledInvocationScope(input)
+  const channel = input.channel?.trim().toLowerCase()
   if (
-    input.channel?.trim().toLowerCase() !== 'linq'
+    (channel !== 'linq' && channel !== 'telegram')
     || scope?.conversationScope !== 'direct'
   ) {
     return null
@@ -628,8 +654,22 @@ export function resolveAssistantHostedScheduledPhoneCallScope(input: {
   return {
     automationId: scope.origin.automationId,
     occurrenceAt: scope.origin.occurrenceAt,
+    resultNotificationChannel: channel,
     originSessionId: scope.originSessionId ?? input.originSessionId,
   }
+}
+
+export function resolveAssistantHostedPhoneCallResultNotificationChannel(input: {
+  channel: AssistantMessageInput['channel']
+  conversationScope: AssistantConversationScope
+}): HostedPhoneCallResultNotificationChannel | null {
+  if (input.conversationScope !== 'direct') {
+    return null
+  }
+  const channel = input.channel?.trim().toLowerCase()
+  return channel === 'linq' || channel === 'telegram'
+    ? channel
+    : null
 }
 
 function scopeHostedDeliveryContextPart(input: {

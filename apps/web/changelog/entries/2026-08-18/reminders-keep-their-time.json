@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-18",
+  "order": 100,
+  "item": {
+    "id": "reminders-keep-their-time",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Reminders keep their time",
+    "summary": "Murph now keeps a newer reminder scheduled while earlier assistant work finishes.",
+    "details": "The earlier work still completes its checkpoint first, and the later reminder stays armed without needing another message to wake it.",
+    "relevanceTags": ["assistant", "reminders", "reliability"],
+    "sourcePullRequests": [1979]
+  }
+}

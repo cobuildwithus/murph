@@ -1,5 +1,6 @@
 export const wearableCanonicalMetricKeys = [
   "activeCalories",
+  "activityAverageHeartRate",
   "activityMinutes",
   "activityScore",
   "afibBurden",
@@ -33,6 +34,7 @@ export const wearableCanonicalMetricKeys = [
   "maxHeartRate",
   "mediumActivityMinutes",
   "mindfulnessMinutes",
+  "minimumHeartRate",
   "muscleMassPercentage",
   "percentRecorded",
   "readinessScore",
@@ -93,6 +95,7 @@ export const wearableMetricCatalog = Object.freeze({
     "active_calories",
     "calories_active",
   ]),
+  activityAverageHeartRate: defineMetric("activityAverageHeartRate", "bpm", "daily_observation", 1),
   activityMinutes: defineMetric("activityMinutes", "minutes", "daily_observation", 5, []),
   activityScore: defineMetric("activityScore", "%", "daily_observation", 1, ["activity_score"]),
   afibBurden: defineMetric("afibBurden", "%", "daily_observation", 0.5, []),
@@ -104,7 +107,7 @@ export const wearableMetricCatalog = Object.freeze({
   averageHeartRate: defineMetric("averageHeartRate", "bpm", "session_observation", 1, ["average_heart_rate", "avg_hr", "heart_rate"]),
   awakeMinutes: defineMetric("awakeMinutes", "minutes", "session_observation", 5, ["awake", "awake_minutes"]),
   basalBodyTemperature: defineMetric("basalBodyTemperature", "celsius", "daily_observation", 0.2, []),
-  bmi: defineMetric("bmi", "kg_m2", "daily_observation", 0.1, ["body_mass_index"]),
+  bmi: defineMetric("bmi", "kg/m^2", "daily_observation", 0.1, ["body_mass_index"]),
   bodyBattery: defineMetric("bodyBattery", "score", "daily_observation", 1, ["body_battery"]),
   bodyFatPercentage: defineMetric("bodyFatPercentage", "%", "daily_observation", 1, [
     "body_fat",
@@ -167,6 +170,7 @@ export const wearableMetricCatalog = Object.freeze({
   maxHeartRate: defineMetric("maxHeartRate", "bpm", "session_observation", 1, ["max_heart_rate", "max_hr"]),
   mediumActivityMinutes: defineMetric("mediumActivityMinutes", "minutes", "daily_observation", 5, ["medium_activity_minutes"]),
   mindfulnessMinutes: defineMetric("mindfulnessMinutes", "minutes", "daily_observation", 2, ["mindful_minutes"]),
+  minimumHeartRate: defineMetric("minimumHeartRate", "bpm", "daily_observation", 1),
   muscleMassPercentage: defineMetric("muscleMassPercentage", "%", "daily_observation", 1, [
     "muscle_mass_percentage",
   ]),

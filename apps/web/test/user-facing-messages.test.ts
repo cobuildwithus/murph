@@ -33,6 +33,23 @@ const TEST_TEMPLATE_KEYS = [
   "linq.ai_usage.thread_limit_reached",
 ] as const satisfies readonly UserFacingMessageTemplateKey[];
 
+const PERSONAL_USAGE_RECOVERY_TEMPLATE_KEYS = [
+  "linq.ai_usage.starter_limit_reached",
+  "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.family_limit_reached",
+  "linq.ai_usage.group_upgrade_pulse",
+  "linq.ai_usage.max_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
+] as const;
+const GENERIC_USAGE_RECOVERY_TEMPLATE_KEYS = [
+  "linq.ai_usage.starter_limit_reached",
+  "linq.ai_usage.edge_limit_reached",
+  "linq.ai_usage.max_limit_reached",
+  "linq.ai_usage.pulse_upgrade_edge",
+] as const;
+const USAGE_RECOVERY_SETTINGS_URL =
+  "https://withmurph.ai/settings?usageRecovery=true#subscription";
+
 const TEST_CONTEXT_BY_KEY = {
   "assistant.signup_welcome": {},
   "assistant.family_welcome": {},
@@ -46,25 +63,25 @@ const TEST_CONTEXT_BY_KEY = {
     homeRecipientPhone: "+15555550123",
   },
   "linq.ai_usage.starter_limit_reached": {
-    homeUrl: "https://withmurph.ai/home",
+    settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
   "linq.ai_usage.edge_limit_reached": {
-    homeUrl: "https://withmurph.ai/home",
+    settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
   "linq.ai_usage.family_limit_reached": {
-    homeUrl: "https://withmurph.ai/home",
+    settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
   "linq.ai_usage.group_upgrade_pulse": {
-    homeUrl: "https://withmurph.ai/home",
+    settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
   "linq.ai_usage.max_limit_reached": {
-    homeUrl: "https://withmurph.ai/home",
+    settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
   "linq.ai_usage.billing_inactive": {
     homeUrl: "https://withmurph.ai/home",
   },
   "linq.ai_usage.pulse_upgrade_edge": {
-    homeUrl: "https://withmurph.ai/home",
+    settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
   },
   "linq.ai_usage.thread_limit_reached": {},
 } satisfies {
@@ -124,8 +141,9 @@ describe("user-facing message variants", () => {
     expectEveryVariantContains("linq.invite_signup", "https://withmurph.ai/join/test-code");
     expectEveryVariantContains("linq.daily_quota", "12");
     expectEveryVariantContains("linq.home_redirect", "+15555550123");
-    expectEveryVariantContains("linq.ai_usage.starter_limit_reached", "https://withmurph.ai/home");
-    expectEveryVariantContains("linq.ai_usage.family_limit_reached", "https://withmurph.ai/home");
+    for (const key of PERSONAL_USAGE_RECOVERY_TEMPLATE_KEYS) {
+      expectEveryVariantContains(key, USAGE_RECOVERY_SETTINGS_URL);
+    }
   });
 
   it("tells the member to resend every unprocessed wrong-line message", () => {
@@ -160,50 +178,44 @@ describe("user-facing message variants", () => {
 
 
 
-  it("keeps resetting Family allowance copy neutral about purchases", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
-      expect(text).not.toMatch(/add usage|top[ -]?up|checkout|subscribe/iu);
-    }
-  });
-
-  it("keeps direct paid limit templates neutral until delivery-time projection", () => {
-    for (const key of [
-      "linq.ai_usage.edge_limit_reached",
-      "linq.ai_usage.max_limit_reached",
-      "linq.ai_usage.pulse_upgrade_edge",
-    ] as const) {
+  it("keeps personal exhaustion notices short and first-party", () => {
+    for (const key of PERSONAL_USAGE_RECOVERY_TEMPLATE_KEYS) {
       for (const text of collectRenderedTexts(key)) {
-        expect(text).toMatch(/Murph is paused/iu);
+        expect(text).toMatch(/Murph.*paused/iu);
+        expect(text).toContain(USAGE_RECOVERY_SETTINGS_URL);
+        expect(text.length).toBeLessThan(260);
         expect(text).not.toMatch(
-          /add usage|top[ -]?up|checkout|https?:\/\/|until .+ usage is added|until you add usage/iu,
+          /Family owner|member[_ -]?id|email|token|trial|starter|Core|Pulse|Edge|Max|price|\$|add usage|checkout|billing authority/iu,
         );
+        expect(text.match(/https?:\/\//gu)).toHaveLength(1);
       }
     }
   });
 
-  it("keeps Core sync continuity explicit when personal AI usage pauses", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
-      expect(text).toMatch(/Core/u);
-      expect(text).not.toMatch(/\bGroup\b/u);
-      expect(text).toMatch(/sync|syncing|wearable|health data/iu);
-      expect(text).toMatch(/group/iu);
-      expect(text).toMatch(/pause|paused|wait|reset/iu);
-      expect(text).not.toMatch(/top[ -]?up|checkout|\$|paid/iu);
+  it("keeps direct exhaustion notices generic", () => {
+    for (const key of GENERIC_USAGE_RECOVERY_TEMPLATE_KEYS) {
+      for (const text of collectRenderedTexts(key)) {
+        expect(text).not.toMatch(/Family|wearable|group updates/iu);
+      }
     }
   });
 
-  it("explains how each blocked allowance can resume", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.starter_limit_reached")) {
-      expect(text).toMatch(/starter|free usage|account/iu);
-      expect(text).toMatch(/plan/iu);
-      expect(text).not.toMatch(/add usage|top[ -]?up/iu);
+  it("preserves the Core continuity boundary in every exhaustion notice", () => {
+    for (const text of collectRenderedTexts("linq.ai_usage.group_upgrade_pulse")) {
+      expect(text).toMatch(/new personal AI work pauses/iu);
+      expect(text).toMatch(/wearable syncing/iu);
+      expect(text).toMatch(/authorized group updates continue/iu);
     }
+  });
 
+  it("preserves individual Family allowance scope in every exhaustion notice", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
-      expect(text).toMatch(/AI usage is paused until .+ allowance resets/iu);
-      expect(text).not.toMatch(/add usage|top[ -]?up/iu);
+      expect(text).toMatch(/your individual Family allowance is used/iu);
+      expect(text).toMatch(/other members' allowances are separate/iu);
     }
+  });
 
+  it("keeps the room-specific reset explanation separate", () => {
     for (const text of collectRenderedTexts("linq.ai_usage.thread_limit_reached")) {
       expect(text).toMatch(THREAD_PAUSE_STATED);
       expect(text).toMatch(/(?:until|when)\b.*resets/iu);
@@ -226,17 +238,6 @@ describe("user-facing message variants", () => {
           /keep replying|replies continue|remain(?:s)? available|still available|chat stays open|conversation continues/iu,
         );
       }
-    }
-  });
-
-  it("keeps every Family usage notice scoped to one member's allowance", () => {
-    for (const text of collectRenderedTexts("linq.ai_usage.family_limit_reached")) {
-      expect(text).toMatch(/^(?:You've|Your)\b/u);
-      expect(text).toMatch(
-        /separate|does not (?:affect|draw from|use)|unaffected/u,
-      );
-      expect(text).toMatch(/AI usage is paused until your allowance resets/iu);
-      expect(text).not.toMatch(/\bshared\b/iu);
     }
   });
 

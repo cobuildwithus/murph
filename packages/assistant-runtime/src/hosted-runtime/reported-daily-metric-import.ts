@@ -159,7 +159,8 @@ function reportedDailyMetricMatches(input: {
     && existing.value === wake.dailyMetric.value
     && existing.unit === wake.dailyMetric.unit
     && existing.observationGrain === "summary"
-    && existing.qualifiers?.[HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER] === input.causalSeq
+    && (existing.qualifiers as Record<string, string | number | boolean> | undefined)
+      ?.[HOSTED_MAILBOX_CAUSAL_SEQ_QUALIFIER] === input.causalSeq
     && existing.queryVisibility === "default"
     && existing.visibility === "display"
     && existing.externalRef?.version === REPORTED_DAILY_METRIC_EXTERNAL_VERSION;

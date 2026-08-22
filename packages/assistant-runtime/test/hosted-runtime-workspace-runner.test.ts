@@ -5441,7 +5441,7 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
     }
   });
 
-  test("foreground stop aborts projection-stalled import after conversation staging", async () => {
+  test("foreground stop preserves the mailbox watermark after aborting a staged projection", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-runner-"));
     const lateOccurredAt = "2026-04-26T00:00:02.000Z";
     const lateWake: HostedExecutionConversationMessageWake = {
@@ -5572,20 +5572,12 @@ describe("runHostedWorkspaceUntilIdleOrBudget", () => {
       assert.deepEqual(yieldStates, [false, true]);
       assert.equal(projectionAbortObserved, true);
       assert.equal(projectionFinished, false);
-      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "0");
+      assert.equal(result.latestMailboxImport.state.watermarks.conversation, "1");
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
       ]);
       assert.deepEqual(fetchRequests[0]?.lanes, [
         { importedSeq: "0", lane: "conversation" },
       ]);
-      assert.ok(
-        fetchRequests.slice(1).some((request) =>
-          request.lanes.some((lane) =>
-            lane.lane === "conversation" && lane.importedSeq === "0"
-          )
-        ),
-        "aborted item should remain eligible for a later conversation fetch",
-      );
       assert.equal(
         logRequests.flatMap((request) => request.entries)
           .some((entry) => entry.errorCode === "foreground_mailbox_import_failed"),

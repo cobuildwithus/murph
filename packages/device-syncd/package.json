@@ -46,6 +46,10 @@
       "types": "./dist/errors.d.ts",
       "default": "./dist/errors.js"
     },
+    "./fitbit-migration": {
+      "types": "./dist/fitbit-migration.d.ts",
+      "default": "./dist/fitbit-migration.js"
+    },
     "./local-secret-codec": {
       "types": "./dist/local-secret-codec.d.ts",
       "default": "./dist/local-secret-codec.js"
@@ -61,6 +65,10 @@
     "./junction-historical-backfill-progress": {
       "types": "./dist/junction-historical-backfill-progress.d.ts",
       "default": "./dist/junction-historical-backfill-progress.js"
+    },
+    "./junction-source-reconnect": {
+      "types": "./dist/junction-source-reconnect.d.ts",
+      "default": "./dist/junction-source-reconnect.js"
     },
     "./junction-push-source-recovery": {
       "types": "./dist/junction-push-source-recovery.d.ts",

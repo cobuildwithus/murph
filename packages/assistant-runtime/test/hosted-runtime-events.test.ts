@@ -1130,6 +1130,197 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw tool output");
   });
 
+  it("captures generated-audio phase timing without content or identifiers", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_generated_audio_phase_timing",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_generated_audio",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+
+    const entry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        codexThreadId: "provider-session-should-drop",
+        rawEvent: {
+          schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+          type: "assistant.codex.generated_audio_phase_timing",
+          generatedAudioDeliveryMode: "synchronous",
+          generatedAudioGenerationDurationMs: 1_250,
+          generatedAudioKind: "song",
+          generatedAudioOutcome: "succeeded",
+          generatedAudioTerminalPhase: "upload",
+          generatedAudioUploadDurationMs: 250,
+          attachmentId: "attachment-should-drop",
+          audio: "audio-content-should-drop",
+          prompt: "prompt-should-drop",
+          providerBody: { identifier: "provider-body-should-drop" },
+          recipient: "recipient-should-drop",
+          text: "text-should-drop",
+        },
+      },
+      wake,
+    });
+
+    expect(entry).toEqual({
+      component: "runtime.provider",
+      eventId: "evt_generated_audio_phase_timing",
+      level: "info",
+      message: "Hosted assistant generated-audio phase timing captured.",
+      phase: "wake.running",
+      redacted: {
+        generatedAudioDeliveryMode: "synchronous",
+        generatedAudioGenerationDurationMs: 1_250,
+        generatedAudioKind: "song",
+        generatedAudioOutcome: "succeeded",
+        generatedAudioTerminalPhase: "upload",
+        generatedAudioTraceType: "phase-timing",
+        generatedAudioUploadDurationMs: 250,
+        providerTraceKind: "codex.generated_audio_phase_timing",
+        requestId: "req_123",
+        schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+      },
+    });
+    const redacted = JSON.stringify(entry?.redacted);
+    for (const unsafeValue of [
+      "provider-session-should-drop",
+      "attachment-should-drop",
+      "audio-content-should-drop",
+      "prompt-should-drop",
+      "provider-body-should-drop",
+      "recipient-should-drop",
+      "text-should-drop",
+    ]) {
+      expect(redacted).not.toContain(unsafeValue);
+    }
+
+    const validDeferredEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+          type: "assistant.codex.generated_audio_phase_timing",
+          generatedAudioDeliveryMode: "deferred",
+          generatedAudioKind: "voice_memo",
+          generatedAudioOutcome: "deferred",
+          generatedAudioTerminalPhase: "delivery",
+        },
+      },
+      wake,
+    });
+    expect(validDeferredEntry?.redacted).toEqual(expect.objectContaining({
+      generatedAudioDeliveryMode: "deferred",
+      generatedAudioKind: "voice_memo",
+      generatedAudioOutcome: "deferred",
+      generatedAudioTerminalPhase: "delivery",
+    }));
+    expect(validDeferredEntry?.redacted).not.toHaveProperty(
+      "generatedAudioGenerationDurationMs",
+    );
+    expect(validDeferredEntry?.redacted).not.toHaveProperty(
+      "generatedAudioUploadDurationMs",
+    );
+
+    const invalidDeferredEntry = emitHostedAssistantProviderTraceLog({
+      details: { requestId: "req_123" },
+      event: {
+        rawEvent: {
+          schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+          type: "assistant.codex.generated_audio_phase_timing",
+          generatedAudioDeliveryMode: "deferred",
+          generatedAudioGenerationDurationMs: 0,
+          generatedAudioKind: "voice_memo",
+          generatedAudioOutcome: "deferred",
+          generatedAudioTerminalPhase: "delivery",
+        },
+      },
+      wake,
+    });
+    expect(invalidDeferredEntry).toBeNull();
+  });
+
+  it("rejects non-exact generated-audio phase timing shapes", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_generated_audio_phase_timing_invalid",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_generated_audio",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+    });
+    const emit = (rawEvent: Record<string, unknown>) =>
+      emitHostedAssistantProviderTraceLog({
+        details: { requestId: "req_123" },
+        event: { rawEvent },
+        wake,
+      });
+    const synchronousUpload = {
+      schema: "murph.assistant-codex-generated-audio-phase-timing.v1",
+      type: "assistant.codex.generated_audio_phase_timing",
+      generatedAudioDeliveryMode: "synchronous",
+      generatedAudioGenerationDurationMs: 1_250,
+      generatedAudioKind: "song",
+      generatedAudioOutcome: "succeeded",
+      generatedAudioTerminalPhase: "upload",
+      generatedAudioUploadDurationMs: 250,
+    };
+
+    expect(
+      emit({ ...synchronousUpload, schema: ` ${synchronousUpload.schema}` }),
+    ).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioOutcome: "succeeded ",
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioOutcome: "generation_failed",
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioTerminalPhase: "generation",
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioGenerationDurationMs: -1,
+    })).toBeNull();
+    expect(emit({
+      ...synchronousUpload,
+      generatedAudioUploadDurationMs: Number.POSITIVE_INFINITY,
+    })).toBeNull();
+
+    const inheritedGenerationDuration = Object.assign(
+      Object.create({ generatedAudioGenerationDurationMs: 1_250 }),
+      synchronousUpload,
+    );
+    delete inheritedGenerationDuration.generatedAudioGenerationDurationMs;
+    expect(emit(inheritedGenerationDuration)).toBeNull();
+  });
+
   it("accepts legacy hosted provider plan diagnostic keys", () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_provider_plan_legacy_keys",
@@ -1231,6 +1422,61 @@ describe("executeHostedMailboxEvent", () => {
     expect(entry?.redacted).not.toHaveProperty("routePlanningRawPath");
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-provider-session-id");
     expect(JSON.stringify(entry?.redacted)).not.toContain("/tmp/raw-path");
+  });
+
+  it("projects only normalized provider-plan reasoning effort", () => {
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "evt_provider_plan_reasoning_effort",
+      memberId: "member_123",
+      notification: {
+        instructions: "Reply in chat.",
+        route: {
+          actorId: "actor_provider_plan_reasoning_effort",
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "thread_123",
+          },
+          identityId: "hbidx:phone:v1:test",
+          threadId: "thread_123",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: "2026-08-15T00:00:00.000Z",
+    });
+    const project = (reasoningEffort: unknown) =>
+      emitHostedAssistantProviderTraceLog({
+        event: {
+          rawEvent: {
+            schema: "murph.assistant-provider-plan-diagnostics.v1",
+            type: "assistant.provider.plan",
+            codexContinuation: "thread-start",
+            reasoningEffort,
+            workingDirectoryKind: "hosted-stable-proc-cwd",
+          },
+          updates: [],
+        },
+        wake,
+      });
+
+    expect(project("high")?.redacted).toMatchObject({
+      reasoningEffort: "high",
+    });
+    expect(project("low")?.redacted).toMatchObject({
+      reasoningEffort: "low",
+    });
+    expect(project(null)?.redacted).toMatchObject({
+      reasoningEffort: null,
+    });
+
+    for (const rejectedValue of [
+      "member-specific-private-value",
+      "/vaults/private/member",
+    ]) {
+      const rejected = project(rejectedValue);
+      expect(rejected?.redacted).not.toHaveProperty("reasoningEffort");
+      expect(JSON.stringify(rejected?.redacted)).not.toContain(rejectedValue);
+    }
   });
 
   it("captures assistant context snapshot as a route-planning slowest stage", () => {
@@ -1396,9 +1642,12 @@ describe("executeHostedMailboxEvent", () => {
           turnContextPromptBytes: 2048,
           developerInstructionsBytes: 1024,
           conversationContextBytes: 256,
+          conversationHistoryBytes: 1536,
+          conversationHistoryCount: 4,
           systemPromptBytes: 512,
           developerInstructionsPresent: true,
           conversationContextPresent: true,
+          conversationHistoryPresent: true,
           resumeCodexThreadIdPresent: true,
           prompt: "private prompt text should not be logged",
           userPrompt: "hello",
@@ -1419,6 +1668,9 @@ describe("executeHostedMailboxEvent", () => {
         baseInstructionsBytes: 768,
         conversationContextBytes: 256,
         conversationContextPresent: true,
+        conversationHistoryBytes: 1536,
+        conversationHistoryCount: 4,
+        conversationHistoryPresent: true,
         developerInstructionsBytes: 1024,
         developerInstructionsPresent: true,
         providerPromptBytes: 4096,
@@ -1893,6 +2145,159 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("maps a closed group context handoff into one output-only group notification", async () => {
+    const eventId =
+      `assistant.notification.requested:group-context-handoff:${"a".repeat(64)}`;
+    const externalThreadRouteAuthority = {
+      accountLookupKey: "linq-account-key",
+      channel: "linq" as const,
+      containerMemberId: "group-runtime-member",
+      threadId: "linq-group-chat",
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        externalThreadRouteAuthority,
+        groupContextHandoff: {
+          membershipId: "membership-generation-one",
+          originAssistantInputId: `ain_${"b".repeat(32)}`,
+        },
+        instructions: "Use the bounded handoff context in this group.",
+        notificationPromptProfile: "context-handoff",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-08-21T03:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext: {
+        hosted: {
+          memberId: "group-runtime-member",
+          userEnvKeys: [],
+        },
+      },
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_group_context_handoff",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        notificationPromptProfile: "context-handoff",
+        outboxExternalThreadRouteAuthority: externalThreadRouteAuthority,
+        responsePolicy: { kind: "require_send" },
+        threadIsDirect: false,
+      }),
+    );
+  });
+
+  it.each([
+    [
+      "missing proof",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          groupContextHandoff: undefined,
+        },
+      }),
+    ],
+    [
+      "direct route",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          route: {
+            ...wake.notification.route,
+            threadIsDirect: true,
+          },
+        },
+      }),
+    ],
+    [
+      "mismatched route authority",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          externalThreadRouteAuthority: {
+            ...wake.notification.externalThreadRouteAuthority!,
+            threadId: "other-thread",
+          },
+        },
+      }),
+    ],
+  ])("rejects a context handoff with %s", async (_case, mutate) => {
+    const eventId =
+      `assistant.notification.requested:group-context-handoff:${"c".repeat(64)}`;
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        externalThreadRouteAuthority: {
+          accountLookupKey: "linq-account-key",
+          channel: "linq",
+          containerMemberId: "group-runtime-member",
+          threadId: "linq-group-chat",
+        },
+        groupContextHandoff: {
+          membershipId: "membership-generation-one",
+          originAssistantInputId: `ain_${"d".repeat(32)}`,
+        },
+        instructions: "Use the bounded handoff context in this group.",
+        notificationPromptProfile: "context-handoff",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-08-21T03:00:00.000Z",
+    });
+
+    await expect(executeHostedMailboxEvent({
+      wake: mutate(wake) as never,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).rejects.toThrow(
+      "Hosted group context handoff notification proof is invalid.",
+    );
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+  });
+
   it("maps private Assistant Ask completion proof into exact notification delivery authority", async () => {
     const completionId = `aask_done_${"b".repeat(64)}`;
     const requestId = `aask_req_${"a".repeat(64)}`;
@@ -2352,6 +2757,55 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
+  it("terminally suppresses embedded Telegram signup welcomes", async () => {
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:stripe:member_123:evt_telegram_welcome",
+      memberChannels: {
+        email: false,
+        linq: false,
+        telegram: true,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: {
+        route: {
+          actorId: null,
+          channel: "telegram",
+          delivery: {
+            kind: "thread",
+            target: "telegram_thread_123",
+          },
+          identityId: null,
+          threadId: "hid_telegram_thread_123",
+          threadIsDirect: true,
+        },
+        text: "Welcome to Murph.",
+      },
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      redactedLogEntries: expect.arrayContaining([
+        expect.objectContaining({
+          redacted: expect.objectContaining({
+            eventCode: "assistant.signup_welcome.telegram_suppressed",
+            terminalDisposition: "proactive_telegram_disabled",
+          }),
+        }),
+      ]),
+    });
+  });
+
   it("still seeds onboarding follow-up when the embedded member activation welcome is superseded by prior first contact", async () => {
     const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
     mocks.sendAssistantNotification.mockResolvedValueOnce({
@@ -2524,7 +2978,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
-  it("seeds onboarding follow-up for Telegram signup welcome routes", async () => {
+  it("terminally suppresses legacy Telegram signup welcome notifications", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_telegram_welcome",
       memberId: "member_123",
@@ -2554,7 +3008,7 @@ describe("executeHostedMailboxEvent", () => {
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
 
-    await executeHostedMailboxEvent({
+    const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
@@ -2562,20 +3016,19 @@ describe("executeHostedMailboxEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        route: {
-          channel: "telegram",
-          deliverySource: null,
-          deliveryTarget: null,
-          identityId: null,
-          participantId: null,
-          threadId: "telegram_thread_123",
-          threadIsDirect: true,
-        },
-        slug: "finish-onboarding-followup",
-      }),
-    );
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      mailboxLane: "assistant-notification",
+      redactedLogEntries: expect.arrayContaining([
+        expect.objectContaining({
+          redacted: expect.objectContaining({
+            eventCode: "assistant.signup_welcome.telegram_suppressed",
+            terminalDisposition: "proactive_telegram_disabled",
+          }),
+        }),
+      ]),
+    });
   });
 
   it("keeps queue-only dispatch for non-canonical exact first-contact notifications", async () => {
@@ -2630,7 +3083,7 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("does not seed onboarding follow-up for non-canonical signup welcome tokens", async () => {
+  it("terminally suppresses Telegram signup welcomes with partial legacy tokens", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_prefix_only",
       memberId: "member_123",
@@ -2667,11 +3120,11 @@ describe("executeHostedMailboxEvent", () => {
       vaultRoot: "/tmp/assistant-runtime-events",
     });
 
-    expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
   });
 
-  it("still seeds onboarding follow-up when the signup welcome notification is superseded by prior first contact", async () => {
+  it("still seeds Linq onboarding follow-up when the signup welcome is superseded by prior first contact", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_skip_result",
       memberId: "member_123",
@@ -2687,14 +3140,14 @@ describe("executeHostedMailboxEvent", () => {
           text: "Welcome to Murph.",
         },
         route: {
-          actorId: "hid_telegram_actor_123",
-          channel: "telegram",
+          actorId: "hid_linq_actor_123",
+          channel: "linq",
           delivery: {
             kind: "thread",
-            target: "telegram_thread_123",
+            target: "thread_123",
           },
-          identityId: null,
-          threadId: null,
+          identityId: "hid_linq_identity_123",
+          threadId: "hid_linq_thread_123",
           threadIsDirect: true,
         },
       },

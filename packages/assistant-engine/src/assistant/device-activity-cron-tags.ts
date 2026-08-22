@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type {
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationDeviceActivityKind,
   AutomationDeviceActivitySource,
@@ -15,6 +16,7 @@ const ASSISTANT_DEVICE_ACTIVITY_DELIVERY_IDEMPOTENCY_PREFIX =
 export interface AssistantDeviceActivityAuthorityInput {
   automationId: string
   continuityPolicy: AutomationContinuityPolicy
+  contextReferences?: readonly AutomationContextReference[]
   instructions: string
   route: AutomationRoute
   schedule: {
@@ -37,6 +39,14 @@ export function buildAssistantDeviceActivityAuthorityKey(
     activityKind: automation.schedule.activityKind ?? null,
     automationId: automation.automationId,
     continuityPolicy: automation.continuityPolicy,
+    ...(automation.contextReferences?.length
+      ? {
+          contextReferences: automation.contextReferences.map((reference) => ({
+            entityId: reference.entityId,
+            entityKind: reference.entityKind,
+          })),
+        }
+      : {}),
     instructions: automation.instructions,
     route: automation.route,
     source: automation.schedule.source ?? null,

@@ -37,6 +37,7 @@ import {
   withBaseOptions,
 } from '@murphai/operator-config/command-helpers'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { assistantOutboxIntentIdSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   experimentCreateResultSchema,
   isoTimestampSchema,
@@ -1393,6 +1394,7 @@ const experimentSessionLogResultSchema = z.object({
   ledgerFile: pathSchema,
   created: z.boolean(),
   kind: z.literal('intervention_session'),
+  progress: experimentProgressSnapshotSchema.optional(),
 })
 
 const experimentSessionAttachResultSchema = showResultSchema.extend({
@@ -2407,6 +2409,11 @@ export function registerExperimentCommands(
     description: 'Log one structured intervention session for an experiment using typed fields.',
     args: experimentJournalLookupArgSchema,
     options: withBaseOptions({
+      reminderIntentId: assistantOutboxIntentIdSchema
+        .optional()
+        .describe(
+          'Provider-accepted private reminder intent id from trusted ordered conversation context. The canonical writer derives and deduplicates the occurrence from it.',
+        ),
       date: localDateSchema
         .optional()
         .describe('Optional intended local session date in YYYY-MM-DD form.'),
@@ -2486,6 +2493,7 @@ export function registerExperimentCommands(
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         lookup: args.lookup,
+        reminderIntentId: options.reminderIntentId,
         date: options.date,
         occurredAt: await normalizeOccurredAtOption({
           vault: options.vault,

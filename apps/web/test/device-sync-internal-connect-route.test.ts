@@ -192,7 +192,7 @@ describe("device sync internal connect-link route", () => {
       memberId: "member_123",
       provider: "junction",
       request: expect.any(Request),
-      sourceProviderSlug: "fitbit",
+      sourceProviderSlug: "google_health",
     });
     await expect(response.json()).resolves.toEqual({
       authorizationUrl: "https://join.example.test/connect#deviceConnectIntent=dc_fitbit_opaque&connectSource=fitbit",

@@ -42,7 +42,8 @@ jobs:
       # apps/web/playwright.config.ts) with placeholder smoke env, so no
       # database or extra secrets are required to render the public pages.
       - name: Install Playwright Chromium
-        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+        timeout-minutes: 14
+        run: scripts/install-playwright-chromium.sh
 
       - name: Smoke headed Chromium under Xvfb
         env:

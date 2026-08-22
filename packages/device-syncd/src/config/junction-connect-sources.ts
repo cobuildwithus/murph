@@ -1,8 +1,8 @@
 import {
+  canonicalizeJunctionProviderSlug,
   DEVICE_CONNECT_SOURCES,
   listDefaultJunctionLinkProviderSlugs,
   normalizeJunctionLinkProviderFilter,
-  normalizeJunctionProviderSlug,
   resolveDeviceConnectSourceById,
   resolveJunctionDeviceConnectRouteByProviderSlug,
 } from "./connect-routes.ts";
@@ -67,7 +67,7 @@ export function buildJunctionProviderSourceInstanceKey(input: {
   sourceProviderSlug: string;
 }): string | null {
   const connectionId = normalizeString(input.connectionId);
-  const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(input.sourceProviderSlug);
 
   if (!connectionId || !sourceProviderSlug) {
     return null;

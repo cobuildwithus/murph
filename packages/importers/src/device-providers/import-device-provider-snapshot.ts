@@ -1,7 +1,11 @@
+import { isStrictIsoDate, isWritableIsoDateTime } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 
 import { assertCanonicalWritePort } from "../core-port.ts";
-import type { DeviceBatchImportPayload, DeviceEvidencePartPayload } from "../core-port.ts";
+import type {
+  DeviceBatchImportPayload,
+  DeviceEvidencePartPayload,
+} from "../core-port.ts";
 import {
   optionalTrimmedStringSchema,
   parseInputObject,
@@ -10,10 +14,12 @@ import {
 } from "../shared.ts";
 
 import { defaultDeviceProviderAdapters } from "./defaults.ts";
+import { deriveJunctionCanonicalCoverageEvidence } from "./junction.ts";
 import { buildWearableRawIngestReceipt } from "./raw-ingest-receipt.ts";
 import { createDeviceProviderRegistry } from "./registry.ts";
 
 import type { DeviceProviderRegistry } from "./registry.ts";
+import type { CompleteDeviceProviderSourceDay } from "./types.ts";
 
 export interface DeviceProviderImporterExecutionOptions {
   corePort?: unknown;
@@ -22,6 +28,7 @@ export interface DeviceProviderImporterExecutionOptions {
 }
 
 export interface DeviceProviderSnapshotImportInput {
+  completeSourceDay?: CompleteDeviceProviderSourceDay;
   provider: string;
   snapshot: unknown;
   vaultRoot?: string;
@@ -43,12 +50,31 @@ export interface DeviceProviderSnapshotImportInput {
   normalizerVersion?: string;
 }
 
+export type PreparedDeviceProviderSnapshotImport = DeviceBatchImportPayload;
+
 const rawIngestSourceKindSchema = z.enum(["poll", "webhook", "sdk", "xml", "manual"]);
 const rawIngestDeliveryModeSchema = z.enum(["full_payload", "notification_only", "scheduled_reconcile"]);
 const rawIngestEventTypeSchema = z.enum(["create", "update", "delete", "deauthorize"]);
 
+function isSupportedTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const deviceProviderSnapshotImportSchema = z
   .object({
+    completeSourceDay: z.object({
+      connectionId: requiredTrimmedStringSchema("completeSourceDay connectionId"),
+      dayKey: z.string().refine(isStrictIsoDate),
+      resources: z.array(requiredTrimmedStringSchema("completeSourceDay resource")).min(1),
+      revisionAt: z.string().refine(isWritableIsoDateTime),
+      timeZone: requiredTrimmedStringSchema("completeSourceDay timeZone")
+        .refine(isSupportedTimeZone),
+    }).strict().optional(),
     provider: requiredTrimmedStringSchema("provider"),
     snapshot: z.unknown(),
     vaultRoot: optionalTrimmedStringSchema("vaultRoot"),
@@ -83,7 +109,7 @@ export async function prepareDeviceProviderSnapshotImport(
   }: Pick<DeviceProviderImporterExecutionOptions, "providerRegistry"> & {
     defaultTimeZone?: string;
   } = {},
-): Promise<DeviceBatchImportPayload> {
+): Promise<PreparedDeviceProviderSnapshotImport> {
   const request = parseInputObject(
     input,
     "device provider snapshot import input",
@@ -92,6 +118,15 @@ export async function prepareDeviceProviderSnapshotImport(
   const registry = resolveRegistry(providerRegistry);
   const adapter = registry.get(request.provider);
 
+  if (
+    request.completeSourceDay
+    && request.completeSourceDay.timeZone !== defaultTimeZone
+  ) {
+    throw new TypeError(
+      "Complete device source-day authority must use the vault import timezone.",
+    );
+  }
+
   if (!adapter) {
     throw new TypeError(`device provider "${request.provider}" is not registered`);
   }
@@ -99,7 +134,10 @@ export async function prepareDeviceProviderSnapshotImport(
   const snapshot = adapter.parseSnapshot
     ? adapter.parseSnapshot(request.snapshot)
     : request.snapshot;
-  const normalized = await adapter.normalizeSnapshot(snapshot, { defaultTimeZone });
+  const normalized = await adapter.normalizeSnapshot(snapshot, {
+    completeSourceDay: request.completeSourceDay,
+    defaultTimeZone,
+  });
   const sanitizedSnapshot = adapter.sanitizeRawSnapshot
     ? adapter.sanitizeRawSnapshot(snapshot)
     : request.snapshot;
@@ -114,9 +152,15 @@ export async function prepareDeviceProviderSnapshotImport(
     events: normalized.events,
     samples: normalized.samples,
     evidenceParts: normalized.evidenceParts,
+    authoritativeEventSets: normalized.authoritativeEventSets,
     provenance: normalized.provenance,
   });
-  const payloadWithEvidence = ensureProviderEvidencePart(basePayload, sanitizedSnapshot);
+  // A complete-source-day import persists only adapter-produced compact
+  // evidence: the sanitized provider snapshot must never be retained for that
+  // authority class, even when the day yields zero temporal samples.
+  const payloadWithEvidence = request.completeSourceDay
+    ? basePayload
+    : ensureProviderEvidencePart(basePayload, sanitizedSnapshot);
   const payloadWithSingleEvidenceFallback = attachSingleEvidenceRole(payloadWithEvidence);
   const rawReceipt = buildWearableRawIngestReceipt({
     provider: basePayload.provider,
@@ -168,20 +212,31 @@ function isVaultMetadataReadPort(value: unknown): value is VaultMetadataReadPort
   );
 }
 
+export async function resolveDeviceProviderSnapshotDefaultTimeZone(
+  input: { vaultRoot?: string },
+  corePort: unknown,
+): Promise<string | undefined> {
+  if (!input.vaultRoot || !isVaultMetadataReadPort(corePort)) {
+    return undefined;
+  }
+
+  const vault = await corePort.loadVault({ vaultRoot: input.vaultRoot });
+  return vault.metadata.timezone;
+}
+
 async function resolveSnapshotImportDefaultTimeZone(
   input: unknown,
   corePort: unknown,
 ): Promise<string | undefined> {
   const request = deviceProviderSnapshotImportSchema.safeParse(input);
-  if (!request.success || !request.data.vaultRoot || !isVaultMetadataReadPort(corePort)) {
-    return undefined;
-  }
-
-  const vault = await corePort.loadVault({ vaultRoot: request.data.vaultRoot });
-  return vault.metadata.timezone;
+  return request.success
+    ? resolveDeviceProviderSnapshotDefaultTimeZone(request.data, corePort)
+    : undefined;
 }
 
-function attachSingleEvidenceRole(payload: DeviceBatchImportPayload): DeviceBatchImportPayload {
+function attachSingleEvidenceRole(
+  payload: PreparedDeviceProviderSnapshotImport,
+): PreparedDeviceProviderSnapshotImport {
   if ((payload.evidenceParts ?? []).length !== 1) {
     return payload;
   }
@@ -200,9 +255,9 @@ function attachSingleEvidenceRole(payload: DeviceBatchImportPayload): DeviceBatc
 }
 
 function ensureProviderEvidencePart(
-  payload: DeviceBatchImportPayload,
+  payload: PreparedDeviceProviderSnapshotImport,
   rawSnapshot: unknown,
-): DeviceBatchImportPayload {
+): PreparedDeviceProviderSnapshotImport {
   if ((payload.evidenceParts ?? []).length > 0 || !hasRetainableEvidencePartContent(rawSnapshot)) {
     return payload;
   }
@@ -296,5 +351,47 @@ export async function importDeviceProviderSnapshot<TResult = unknown>(
     defaultTimeZone: resolvedDefaultTimeZone,
     providerRegistry,
   });
-  return (await writer.importDeviceBatch(payload)) as TResult;
+  const result = await writer.importDeviceBatch(payload);
+  const resultRecord = readPlainObject(result);
+  if (payload.provider !== "junction" || !resultRecord || !Array.isArray(resultRecord.events)) {
+    return result as TResult;
+  }
+
+  return {
+    ...resultRecord,
+    junctionCanonicalCoverage: deriveJunctionCanonicalCoverageEvidence(
+      resultRecord.events.filter(isEventRecord),
+      {
+        providerPulledAt: resolveJunctionCoverageProviderPulledAt(input),
+      },
+    ),
+  } as TResult;
+}
+
+function resolveJunctionCoverageProviderPulledAt(input: unknown): string | undefined {
+  const request = deviceProviderSnapshotImportSchema.safeParse(input);
+  if (!request.success || request.data.provider !== "junction") {
+    return undefined;
+  }
+  const providerPulledAt = readPlainObject(request.data.snapshot)
+    ?.canonicalCoverageProviderPulledAt;
+  return typeof providerPulledAt === "string" ? providerPulledAt : undefined;
+}
+
+function readPlainObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function isEventRecord(value: unknown): value is Parameters<
+  typeof deriveJunctionCanonicalCoverageEvidence
+>[0][number] {
+  const record = readPlainObject(value);
+  return Boolean(
+    record
+    && typeof record.kind === "string"
+    && typeof record.occurredAt === "string"
+    && typeof record.dayKey === "string",
+  );
 }

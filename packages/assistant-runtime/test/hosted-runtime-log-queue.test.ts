@@ -10,6 +10,7 @@ import {
   drainHostedRuntimeLogWritesBestEffort,
   HOSTED_RUNTIME_LOG_MAX_QUEUED_ENTRIES,
   writeHostedRuntimeLogBestEffort,
+  writeHostedRuntimeLogEntriesBestEffort,
 } from "../src/hosted-runtime/runtime-logs.ts";
 
 interface ControlledLogWrite {
@@ -150,6 +151,41 @@ describe("hosted runtime log write queue", () => {
     },
   );
 
+  it("retains every direct diagnostic when foreground yield is already waiting", async () => {
+    const { port, writes } = createControlledLogPort();
+    const shouldYieldBetweenBatches = vi.fn(() => true);
+    const entries = Array.from(
+      { length: HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES + 1 },
+      (_, index) => ({
+        ...buildQueueLogEntry("warn"),
+        errorCode: `DIRECT_DIAGNOSTIC_${index}`,
+      }),
+    );
+
+    await writeHostedRuntimeLogEntriesBestEffort({
+      entries,
+      now: () => "2026-06-12T00:00:03.000Z",
+      platform: { logPort: port },
+      shouldYieldBetweenBatches,
+    });
+    await flushMicrotasks();
+
+    expect(shouldYieldBetweenBatches).toHaveBeenCalledTimes(1);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.entries).toHaveLength(HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES);
+
+    writes[0]!.resolve();
+    await flushMicrotasks();
+    expect(writes).toHaveLength(2);
+    expect(writes[1]!.entries).toHaveLength(1);
+    expect(writes.flatMap((write) => write.entries).map((entry) => entry.errorCode)).toEqual(
+      entries.map((entry) => entry.errorCode),
+    );
+
+    writes[1]!.resolve();
+    await expect(drainHostedRuntimeLogWritesBestEffort()).resolves.toBeUndefined();
+  });
+
   it("bounded drain returns on timeout while queued writes keep flushing", async () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const { port, writes } = createControlledLogPort();
@@ -249,8 +285,8 @@ describe("hosted runtime log write queue", () => {
 
   it("splits oversized diagnostics so one request never exceeds the body limit", async () => {
     const { port, writes } = createControlledLogPort();
-    // Two entries that individually fit the 128 KiB batch budget but together
-    // exceed it must not share a request.
+    // An oversized single entry gets its own request instead of wedging the
+    // transport; two such entries must never share a request.
     const bulkyDiagnostic = { statusSummary: "x".repeat(100 * 1024) };
 
     await writeHostedRuntimeLogBestEffort({

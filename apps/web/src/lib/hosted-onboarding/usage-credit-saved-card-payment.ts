@@ -6,7 +6,10 @@ import {
 } from "@prisma/client";
 import type Stripe from "stripe";
 
-import { coerceStripeObjectId } from "./billing";
+import {
+  coerceStripeObjectId,
+  readStripeShouldRetryDirective,
+} from "./billing";
 import {
   hasHostedAccountGroupAccess,
   readHostedAccountGroupStripeBillingRef,
@@ -20,6 +23,7 @@ import {
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
+  normalizeNullableString,
 } from "./shared";
 import {
   buildHostedUsageCreditSavedCardMetadata,
@@ -36,8 +40,11 @@ import {
   lockHostedUsageCreditPurchaseReservationOwnersTx,
 } from "./usage-credit-purchase-reservation-lock";
 import {
+  HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
   HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION,
+  HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4,
   isHostedUsageCreditSavedCardPolicyVersion,
+  parseHostedUsageCreditCheckoutRequestPolicyVersion,
   type HostedUsageCreditCheckoutRequestPolicyVersion,
 } from "./usage-credit-offers";
 import {
@@ -139,6 +146,7 @@ export async function tryChargeHostedUsageCreditSavedCard(input: {
     const paymentMethodId = await resolveHostedUsageCreditSavedCard({
       billingAuthority: input.billingAuthority,
       customerId,
+      prisma: input.prisma,
       purchase: current,
       stripe: input.stripe,
     });
@@ -385,9 +393,26 @@ async function hasCurrentHostedUsageCreditAutomaticPaymentAuthority(input: {
 async function resolveHostedUsageCreditSavedCard(input: {
   billingAuthority: HostedUsageCreditSavedCardBillingAuthority;
   customerId: string;
+  prisma: PrismaClient;
   purchase: HostedUsageCreditPurchase;
   stripe: Stripe;
 }): Promise<string | null> {
+  if (
+    input.billingAuthority.kind === "group" &&
+    input.billingAuthority.automaticSponsorship
+  ) {
+    if (input.billingAuthority.automaticSponsorship.mode === "payer_recovery") {
+      return null;
+    }
+    return resolveHostedGroupSponsorshipPaymentMethod({
+      authority: input.billingAuthority.automaticSponsorship,
+      customerId: input.customerId,
+      prisma: input.prisma,
+      purchase: input.purchase,
+      stripe: input.stripe,
+    });
+  }
+
   let customer: Stripe.Customer | Stripe.DeletedCustomer;
   let paymentMethods: Stripe.ApiList<Stripe.PaymentMethod>;
   let subscriptions: Stripe.ApiList<Stripe.Subscription>;
@@ -484,8 +509,9 @@ async function resolveHostedUsageCreditSavedCard(input: {
       subscription.default_payment_method,
     );
     if (
-      input.purchase.checkoutRequestPolicyVersion ===
-        HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION &&
+      isHostedUsageCreditExactSavedCardPolicy(
+        input.purchase.checkoutRequestPolicyVersion,
+      ) &&
       stripeSubscriptionId &&
       subscription.id === stripeSubscriptionId
     ) {
@@ -511,8 +537,9 @@ async function resolveHostedUsageCreditSavedCard(input: {
     }
   }
   if (
-    input.purchase.checkoutRequestPolicyVersion ===
-      HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+    isHostedUsageCreditExactSavedCardPolicy(
+      input.purchase.checkoutRequestPolicyVersion,
+    )
   ) {
     if (stripeSubscriptionId) {
       if (!boundSubscriptionMatched || boundSubscriptionDefaultInvalid) {
@@ -555,6 +582,143 @@ async function resolveHostedUsageCreditSavedCard(input: {
   return attachedPaymentMethodIds.size === 1
     ? [...attachedPaymentMethodIds][0] ?? null
     : null;
+}
+
+async function resolveHostedGroupSponsorshipPaymentMethod(input: {
+  authority: HostedGroupSponsorshipPaymentAuthority;
+  customerId: string;
+  prisma: PrismaClient;
+  purchase: HostedUsageCreditPurchase;
+  stripe: Stripe;
+}): Promise<string | null> {
+  const payerMemberId = requireHostedUsageCreditPurchasePayerMemberId(
+    input.purchase,
+  );
+  const source = await input.prisma.hostedUsageCreditPurchase.findFirst({
+    orderBy: [{ paidAt: "desc" }, { id: "desc" }],
+    where: {
+      beneficiaryMemberId: input.authority.beneficiaryMemberId,
+      groupSponsorshipAuthorizationId: input.authority.authorizationId,
+      paidAt: { not: null },
+      payerMemberId,
+      status: HostedUsageCreditPurchaseStatus.fulfilled,
+      OR: [
+        { groupSponsorshipChargeOrdinal: 0 },
+        { stripeCheckoutSessionLookupKey: { not: null } },
+      ],
+      stripePaymentIntentIdEncrypted: { not: null },
+      stripePaymentIntentLookupKey: { not: null },
+    },
+  });
+  if (!source) {
+    return null;
+  }
+
+  const paymentIntent = await retrieveBoundHostedUsageCreditPaymentIntent({
+    prisma: input.prisma,
+    purchase: source,
+    stripe: input.stripe,
+  });
+  if (source.stripeCheckoutSessionLookupKey) {
+    assertHostedGroupSponsorshipCheckoutPaymentIntent({
+      customerId: input.customerId,
+      paymentIntent,
+      purchase: source,
+    });
+  } else {
+    if (source.groupSponsorshipChargeOrdinal !== 0) {
+      throw buildHostedUsageCreditInvariantError(
+        "group_sponsorship_payment_source_invalid",
+      );
+    }
+    assertHostedUsageCreditPaymentIntentMatchesPurchase({
+      paymentIntent,
+      purchase: source,
+    });
+    if (paymentIntent.status !== "succeeded") {
+      throw buildHostedUsageCreditInvariantError(
+        "group_sponsorship_payment_identity_invalid",
+      );
+    }
+  }
+  const paymentMethodId = coerceStripeObjectId(paymentIntent.payment_method);
+  if (!paymentMethodId) {
+    throw buildHostedUsageCreditInvariantError(
+      "group_sponsorship_payment_method_missing",
+    );
+  }
+
+  let paymentMethod: Stripe.PaymentMethod;
+  try {
+    paymentMethod = await input.stripe.paymentMethods.retrieve(paymentMethodId);
+  } catch (error) {
+    throw buildHostedUsageCreditStripeUnavailableError(
+      error,
+      "paymentMethods.retrieve.group-sponsorship",
+    );
+  }
+  if (
+    paymentMethod.id !== paymentMethodId ||
+    paymentMethod.livemode !== input.purchase.stripeLiveMode
+  ) {
+    throw buildHostedUsageCreditInvariantError(
+      "group_sponsorship_payment_method_invalid",
+    );
+  }
+  if (paymentMethod.type !== "card") {
+    return null;
+  }
+  return coerceStripeObjectId(paymentMethod.customer) === input.customerId
+    ? paymentMethod.id
+    : null;
+}
+
+function assertHostedGroupSponsorshipCheckoutPaymentIntent(input: {
+  customerId: string;
+  paymentIntent: Stripe.PaymentIntent;
+  purchase: HostedUsageCreditPurchase;
+}): void {
+  const policyVersion = parseHostedUsageCreditCheckoutRequestPolicyVersion(
+    input.purchase.checkoutRequestPolicyVersion,
+  );
+  const metadata = input.paymentIntent.metadata;
+  const expectedMetadata = policyVersion
+    ? {
+        policyVersion,
+        purchaseId: input.purchase.id,
+        purpose: HOSTED_USAGE_CREDIT_CHECKOUT_PURPOSE,
+      }
+    : null;
+  const chargeId = coerceStripeObjectId(input.paymentIntent.latest_charge);
+  if (
+    !expectedMetadata ||
+    input.paymentIntent.status !== "succeeded" ||
+    input.paymentIntent.livemode !== input.purchase.stripeLiveMode ||
+    coerceStripeObjectId(input.paymentIntent.customer) !== input.customerId ||
+    !hostedLookupKeyMatchesValue({
+      expectedLookupKey: input.purchase.stripePaymentIntentLookupKey,
+      kind: "stripe-billing-event",
+      normalizedValue: input.paymentIntent.id,
+    }) ||
+    !hostedLookupKeyMatchesValue({
+      expectedLookupKey: input.purchase.stripeChargeLookupKey,
+      kind: "stripe-billing-event",
+      normalizedValue: chargeId,
+    }) ||
+    !Number.isSafeInteger(input.paymentIntent.amount) ||
+    input.paymentIntent.amount !== input.purchase.cashAmountMinor ||
+    input.paymentIntent.amount_received !== input.purchase.cashAmountMinor ||
+    normalizeNullableString(input.paymentIntent.currency)?.toLowerCase() !==
+      input.purchase.cashCurrency.toLowerCase() ||
+    Object.keys(metadata).length !== Object.keys(expectedMetadata).length ||
+    Object.entries(expectedMetadata).some(
+      ([key, value]) => metadata[key] !== value,
+    )
+  ) {
+    throw buildHostedUsageCreditInvariantError(
+      "group_sponsorship_payment_identity_invalid",
+    );
+  }
 }
 
 async function retrieveBoundHostedUsageCreditPaymentIntent(input: {
@@ -670,8 +834,9 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "saved_card_confirmation_identity_changed",
       );
     }
+    let recovered: Stripe.PaymentIntent;
     try {
-      return await input.stripe.paymentIntents.retrieve(
+      recovered = await input.stripe.paymentIntents.retrieve(
         input.paymentIntent.id,
         { expand: ["latest_charge"] },
       );
@@ -681,7 +846,54 @@ async function confirmOrRecoverHostedUsageCreditPaymentIntent(input: {
         "paymentIntents.retrieve.saved-card-confirm-recovery",
       );
     }
+    if (
+      recovered.status === "requires_confirmation" &&
+      !isDefinitiveSavedCardConfirmationRejection(error)
+    ) {
+      throw buildHostedUsageCreditStripeUnavailableError(
+        error,
+        "paymentIntents.confirm.saved-card",
+      );
+    }
+    return recovered;
   }
+}
+
+function isDefinitiveSavedCardConfirmationRejection(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const shouldRetry = readStripeShouldRetryDirective(error);
+  if (shouldRetry !== null) {
+    return !shouldRetry;
+  }
+  const statusCode = "statusCode" in error &&
+      typeof error.statusCode === "number"
+    ? error.statusCode
+    : null;
+  if (statusCode !== null) {
+    return statusCode >= 400 &&
+      statusCode < 500 &&
+      statusCode !== 408 &&
+      statusCode !== 409 &&
+      statusCode !== 429;
+  }
+  const type = "type" in error && typeof error.type === "string"
+    ? error.type
+    : null;
+  const rawType = "rawType" in error && typeof error.rawType === "string"
+    ? error.rawType
+    : null;
+  return type === "StripeInvalidRequestError" ||
+    type === "StripeAuthenticationError" ||
+    type === "StripePermissionError" ||
+    type === "StripeCardError" ||
+    rawType === "invalid_request_error" ||
+    rawType === "authentication_error" ||
+    rawType === "permission_error" ||
+    rawType === "card_error";
 }
 
 async function cancelHostedUsageCreditDirectPaymentIntent(input: {
@@ -1116,8 +1328,9 @@ async function bindHostedUsageCreditDirectPaymentIntent(input: {
     }
     if (
       !alreadyBound &&
-      current.checkoutRequestPolicyVersion ===
-        HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION
+      isHostedUsageCreditExactSavedCardPolicy(
+        current.checkoutRequestPolicyVersion,
+      )
     ) {
       if (!input.billingAuthority || !input.customerId) {
         throw buildHostedUsageCreditInvariantError(
@@ -1261,6 +1474,11 @@ function hostedUsageCreditBillingDateMatches(
   expected: Date | null,
 ): boolean {
   return (current?.getTime() ?? null) === (expected?.getTime() ?? null);
+}
+
+function isHostedUsageCreditExactSavedCardPolicy(value: string): boolean {
+  return value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_V4 ||
+    value === HOSTED_USAGE_CREDIT_CHECKOUT_REQUEST_POLICY_VERSION;
 }
 
 function requireHostedUsageCreditDirectPaymentBinding(

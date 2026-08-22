@@ -25,6 +25,7 @@ import {
 } from '../src/assistant/codex-runtime.ts'
 import {
   MURPH_GROUP_ROOM_MODEL_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   resolveMurphDynamicTools,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -43,6 +44,15 @@ describe('Codex thread instructions', () => {
     )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('untrusted data')
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain('never fabricate tool output')
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'search deferred tools via `tool_search`',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'code-mode `ALL_TOOLS`',
+    )
+    expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
+      'eager absence is not proof',
+    )
     expect(MURPH_CODEX_BASE_INSTRUCTIONS).toContain(
       'Continue from runtime summaries without restarting completed work',
     )
@@ -177,20 +187,26 @@ describe('Codex thread instructions', () => {
       {
         contract:
           'This is an output-only turn. Return exactly one user-facing text response.',
-        maintenance: false,
+        maintenance: null,
         name: 'assistant-ask-continuation',
       },
       {
         contract:
           'This is an output-only turn. The platform owns delivery.',
-        maintenance: false,
+        maintenance: null,
         name: 'system-notification',
       },
       {
         contract:
           'The only state tool available is `murph.group_room_model`. Return exactly one JSON object.',
-        maintenance: true,
-        name: 'maintenance',
+        maintenance: 'group',
+        name: 'group maintenance',
+      },
+      {
+        contract:
+          'The only state tool available is `murph.member_memory`. Return exactly one JSON object.',
+        maintenance: 'member',
+        name: 'member maintenance',
       },
     ] as const
     const outputOnlyOverrides = [
@@ -221,21 +237,24 @@ describe('Codex thread instructions', () => {
         providerConfig: normalizeAssistantProviderConfig({
           approvalPolicy: 'never',
           provider: 'codex-cli',
-          sandbox: scenario.maintenance
+          sandbox: scenario.maintenance !== null
             ? 'danger-full-access'
             : 'read-only',
         }),
-        codexConfigOverrides: scenario.maintenance
+        codexConfigOverrides: scenario.maintenance !== null
           ? []
           : outputOnlyOverrides,
         developerInstructions: scenario.contract,
-        dynamicTools: scenario.maintenance
+        dynamicTools: scenario.maintenance === 'group'
           ? [MURPH_GROUP_ROOM_MODEL_TOOL]
+          : scenario.maintenance === 'member'
+            ? [MURPH_MEMBER_MEMORY_TOOL]
           : [],
         env: {},
-        groupConversation: scenario.maintenance,
-        groupRoomModelMaintenanceAuthorized: scenario.maintenance,
-        permissions: scenario.maintenance
+        groupConversation: scenario.maintenance === 'group',
+        groupRoomModelMaintenanceAuthorized: scenario.maintenance === 'group',
+        memberMemoryMaintenanceAuthorized: scenario.maintenance === 'member',
+        permissions: scenario.maintenance === 'group'
           ? 'murph-group-room-model-maintenance'
           : null,
         processLifetime: 'one-shot',
@@ -252,15 +271,28 @@ describe('Codex thread instructions', () => {
       )
       expect(appServerInput?.developerInstructions).toBe(scenario.contract)
       expect(appServerInput?.ephemeral).toBe(true)
-      expect(appServerInput?.groupConversation).toBe(scenario.maintenance)
+      expect(appServerInput?.groupConversation).toBe(
+        scenario.maintenance === 'group',
+      )
       expect(appServerInput?.processLifetime).toBe('one-shot')
-      if (scenario.maintenance) {
+      if (scenario.maintenance !== null) {
         expect(appServerInput?.dynamicTools).toHaveLength(1)
         expect(appServerInput?.dynamicTools?.[0]).toBe(
-          MURPH_GROUP_ROOM_MODEL_TOOL,
+          scenario.maintenance === 'group'
+            ? MURPH_GROUP_ROOM_MODEL_TOOL
+            : MURPH_MEMBER_MEMORY_TOOL,
         )
-        expect(appServerInput?.groupRoomModelMaintenanceAuthorized).toBe(true)
-        expect(appServerInput?.sandbox).toBeUndefined()
+        expect(appServerInput?.groupRoomModelMaintenanceAuthorized).toBe(
+          scenario.maintenance === 'group',
+        )
+        expect(appServerInput?.memberMemoryMaintenanceAuthorized).toBe(
+          scenario.maintenance === 'member',
+        )
+        expect(appServerInput?.sandbox).toBe(
+          scenario.maintenance === 'group'
+            ? undefined
+            : 'danger-full-access',
+        )
       } else {
         expect(appServerInput?.configOverrides).toEqual(outputOnlyOverrides)
         expect(appServerInput?.dynamicTools).toEqual([])

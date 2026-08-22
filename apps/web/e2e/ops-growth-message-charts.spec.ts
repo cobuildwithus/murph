@@ -40,7 +40,7 @@ for (const viewport of VIEWPORTS) {
     });
 
     const response = await page.goto(
-      "/design?tab=sections#ops-weekly-growth-compass",
+      "/screenshots/ops#ops-weekly-growth-compass",
       { waitUntil: "load" },
     );
     expect(response?.status(), "growth study should respond 200").toBe(200);

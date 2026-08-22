@@ -54,6 +54,40 @@ describe("hosted device-sync browser callback proof", () => {
     })).toBe(false);
   });
 
+  it("keeps concurrent browser sessions bound to their independent callback states", () => {
+    const sessionA = buildHostedDeviceSyncCallbackProof({
+      memberId: "member_a",
+      now: NOW,
+      provider: "junction",
+      sessionId: "session_a",
+      state: "callback_state_session_a",
+    });
+    const sessionB = buildHostedDeviceSyncCallbackProof({
+      memberId: "member_a",
+      now: NOW,
+      provider: "junction",
+      sessionId: "session_b",
+      state: "callback_state_session_b",
+    });
+
+    expect(verifyHostedDeviceSyncCallbackProof({
+      memberId: "member_a",
+      now: NOW,
+      provider: "junction",
+      request: requestWithCookie(sessionA.cookie),
+      sessionId: "session_a",
+      state: "callback_state_session_a",
+    })).toBe(true);
+    expect(verifyHostedDeviceSyncCallbackProof({
+      memberId: "member_a",
+      now: NOW,
+      provider: "junction",
+      request: requestWithCookie(sessionB.cookie),
+      sessionId: "session_b",
+      state: "callback_state_session_b",
+    })).toBe(true);
+  });
+
   it("rejects expired and tampered proofs", () => {
     const { cookie } = buildHostedDeviceSyncCallbackProof({
       memberId: "member_a",

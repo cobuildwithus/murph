@@ -32,6 +32,7 @@ export function withHostedWebMigrationOwner(databaseUrl: string): string {
       ? HOSTED_WEB_MIGRATION_OWNER_CONNECTION_OPTION
       : `${existingOptions} ${HOSTED_WEB_MIGRATION_OWNER_CONNECTION_OPTION}`,
   );
+  parsed.search = parsed.searchParams.toString().replaceAll("+", "%20");
   return parsed.toString();
 }
 

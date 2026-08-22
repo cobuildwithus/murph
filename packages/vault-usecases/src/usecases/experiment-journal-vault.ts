@@ -4,6 +4,8 @@ import path from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import {
   EXPERIMENT_STATUSES,
+  ID_PREFIXES,
+  VAULT_LAYOUT,
   eventSourceSchema,
   experimentAnalysisPlanSchema,
   experimentAssistantSupportSchema,
@@ -29,6 +31,23 @@ import {
   type ExperimentRunScheduleIntent,
 } from '@murphai/contracts'
 import {
+  deterministicContractId,
+  findEventByExternalRef,
+  toMonthlyShardRelativePath,
+  withCanonicalWriteLock,
+} from '@murphai/core'
+import * as z from '@murphai/contracts/zod-runtime'
+import {
+  assistantOutboxIntentIdSchema,
+  assistantOutboxIntentSchema,
+} from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  isoTimestampSchema,
+  localDateSchema,
+  slugSchema,
+} from '@murphai/operator-config/vault-cli-contracts'
+import {
   assessExperimentPrimaryMetricCapture,
   isRegisteredExperimentMetricSource,
   resolveExperimentMetricIdentity,
@@ -38,7 +57,7 @@ import {
   summarizeExperimentOutcomeEvidencePlan,
   validateExperimentSessionMetricValue,
 } from '@murphai/query'
-import * as z from '@murphai/contracts/zod-runtime'
+import { resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
@@ -46,12 +65,6 @@ import {
   type QueryRuntimeModule,
 } from '../query-runtime.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import {
-  isoTimestampSchema,
-  localDateSchema,
-  slugSchema,
-} from '@murphai/operator-config/vault-cli-contracts'
 import {
   asListEnvelope,
   readJsonPayload,
@@ -754,6 +767,7 @@ const experimentCheckpointPayloadSchema = experimentSelectorPayloadSchema.extend
   note: z.string().min(1).optional(),
 })
 const experimentSessionPayloadSchema = z.object({
+  reminderIntentId: assistantOutboxIntentIdSchema.optional(),
   date: localDateSchema.optional(),
   occurredAt: isoTimestampSchema.optional(),
   source: eventSourceSchema.optional(),
@@ -963,6 +977,8 @@ function hydrateRunPlanAdherenceTargets(
     protocolActivitySessionEvidence:
       effectiveProtocolSnapshot?.activitySessionEvidence,
     protocolKey,
+    protocolSessionsPerDay:
+      effectiveProtocolSnapshot?.frequency?.sessionsPerDay,
     runPlan,
   })
   if (!adherenceTarget?.calendar) {
@@ -1579,9 +1595,10 @@ export async function logExperimentSessionRecordFromInput(input: {
   })
 }
 
-export async function logExperimentSessionRecord(input: {
+type ExperimentSessionRecordInput = {
   vault: string
   lookup: string
+  reminderIntentId?: string
   date?: string
   occurredAt?: string
   source?: z.infer<typeof eventSourceSchema>
@@ -1598,9 +1615,43 @@ export async function logExperimentSessionRecord(input: {
   symptoms?: string[]
   confounders?: string[] | Record<string, string | number | boolean | null>
   fields?: ExperimentSessionFieldMap
-}) {
+}
+
+type ExperimentReminderOccurrenceProof = {
+  plannedOccurrenceAt: string
+}
+
+const EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM = 'murph-assistant'
+const EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE = 'experiment-reminder'
+const EXPERIMENT_REMINDER_REPLAY_EFFECT_FIELDS = [
+  'title',
+  'note',
+  'interventionType',
+  'durationMinutes',
+  'protocolId',
+  'sessionStatus',
+  'timing',
+  'temperatureC',
+  'afterExercise',
+  'symptoms',
+  'confounders',
+  'fields',
+] as const
+
+export async function logExperimentSessionRecord(input: ExperimentSessionRecordInput) {
   const experiment = await requireEntityFamily(input.vault, input.lookup, 'experiment')
   const frontmatter = requireExperimentFrontmatter(experiment)
+  const reminderProof = input.reminderIntentId === undefined
+    ? null
+    : await resolveExperimentReminderOccurrenceProof({
+        experimentId: frontmatter.experimentId,
+        reminderIntentId: input.reminderIntentId,
+        vault: input.vault,
+      })
+  if (reminderProof !== null) {
+    assertExperimentReminderSessionInput(input)
+  }
+
   const explicitInterventionType = slugifyExperimentValue(input.interventionType)
   const derivedInterventionType =
     slugifyExperimentValue(frontmatter.runPlan?.modality) ??
@@ -1641,32 +1692,86 @@ export async function logExperimentSessionRecord(input: {
     fields: normalizeExperimentSessionFields(input.fields),
     frontmatter,
   })
-  const event = await upsertEventRecord({
-    vault: input.vault,
-    payload: compactObject({
-      kind: 'intervention_session',
-      occurredAt: input.occurredAt ?? new Date().toISOString(),
-      source: input.source ?? 'manual',
-      title,
-      note: normalizeOptionalText(input.note) ?? undefined,
-      experimentId: frontmatter.experimentId,
-      experimentSlug: frontmatter.slug,
-      links: [{ type: 'related_to', targetId: frontmatter.experimentId }],
-      interventionType,
-      durationMinutes: input.durationMinutes,
-      protocolId: normalizeOptionalText(input.protocolId) ?? undefined,
-      sessionStatus: input.sessionStatus ?? input.status ?? 'completed',
-      sessionLocalDate: input.date,
-      timing: normalizeOptionalText(input.timing) ?? undefined,
-      temperatureC: input.temperatureC,
-      afterExercise: input.afterExercise,
-      symptoms: normalizeExperimentFreeTextList(input.symptoms, 160),
-      confounders: normalizeExperimentConfounders(input.confounders),
-      fields,
-    }) as JsonObject,
-  })
+  const occurredAt = reminderProof?.plannedOccurrenceAt
+    ?? input.occurredAt
+    ?? new Date().toISOString()
+  const reminderEventId = reminderProof === null
+    ? undefined
+    : deterministicContractId(
+        ID_PREFIXES.event,
+        JSON.stringify([
+          EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM,
+          EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE,
+          frontmatter.experimentId,
+          reminderProof.plannedOccurrenceAt,
+        ]),
+      )
+  const note = normalizeOptionalText(input.note) ?? undefined
+  const protocolId = normalizeOptionalText(input.protocolId) ?? undefined
+  const sessionStatus = input.sessionStatus ?? input.status ?? 'completed'
+  const timing = normalizeOptionalText(input.timing) ?? undefined
+  const symptoms = normalizeExperimentFreeTextList(input.symptoms, 160)
+  const confounders = normalizeExperimentConfounders(input.confounders)
+  const eventPayload = compactObject({
+    kind: 'intervention_session',
+    eventId: reminderEventId,
+    occurredAt,
+    source: input.source ?? 'manual',
+    title,
+    note,
+    experimentId: frontmatter.experimentId,
+    experimentSlug: frontmatter.slug,
+    links: [{ type: 'related_to', targetId: frontmatter.experimentId }],
+    externalRef: reminderProof === null
+      ? undefined
+      : {
+          system: EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM,
+          resourceType: EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE,
+          resourceId: frontmatter.experimentId,
+          version: reminderProof.plannedOccurrenceAt,
+        },
+    interventionType,
+    durationMinutes: input.durationMinutes,
+    protocolId,
+    sessionStatus,
+    sessionLocalDate: input.date,
+    timing,
+    temperatureC: input.temperatureC,
+    afterExercise: input.afterExercise,
+    symptoms,
+    confounders,
+    fields,
+  }) as JsonObject
+  const reminderReplayEffect = compactObject({
+    title: input.title === undefined ? undefined : title,
+    note: input.note === undefined ? undefined : note,
+    interventionType:
+      input.interventionType === undefined ? undefined : interventionType,
+    durationMinutes: input.durationMinutes,
+    protocolId: input.protocolId === undefined ? undefined : protocolId,
+    sessionStatus,
+    timing: input.timing === undefined ? undefined : timing,
+    temperatureC: input.temperatureC,
+    afterExercise: input.afterExercise,
+    symptoms: input.symptoms === undefined ? undefined : symptoms,
+    confounders: input.confounders === undefined ? undefined : confounders,
+    fields: input.fields === undefined ? undefined : fields,
+  }) as JsonObject
+  const event = reminderProof === null || reminderEventId === undefined
+    ? await upsertEventRecord({
+        vault: input.vault,
+        payload: eventPayload,
+      })
+    : await writeExperimentReminderSessionEvent({
+        eventId: reminderEventId,
+        experimentId: frontmatter.experimentId,
+        payload: eventPayload,
+        proof: reminderProof,
+        replayEffect: reminderReplayEffect,
+        vault: input.vault,
+      })
 
-  return {
+  const result = {
     vault: input.vault,
     experimentId: frontmatter.experimentId,
     lookupId: frontmatter.experimentId,
@@ -1675,6 +1780,161 @@ export async function logExperimentSessionRecord(input: {
     ledgerFile: event.ledgerFile,
     created: event.created,
     kind: 'intervention_session' as const,
+  }
+  if (reminderProof === null) {
+    return result
+  }
+
+  const readback = await showExperimentProgress({
+    vault: input.vault,
+    lookup: frontmatter.experimentId,
+  })
+  return {
+    ...result,
+    progress: readback.progress,
+  }
+}
+
+async function resolveExperimentReminderOccurrenceProof(input: {
+  experimentId: string
+  reminderIntentId: string
+  vault: string
+}): Promise<ExperimentReminderOccurrenceProof> {
+  const parsedIntentId = assistantOutboxIntentIdSchema.safeParse(
+    input.reminderIntentId,
+  )
+  if (!parsedIntentId.success) {
+    throw new VaultCliError(
+      'invalid_option',
+      'reminderIntentId must be an opaque assistant outbox intent id.',
+    )
+  }
+  const intentId = parsedIntentId.data
+  const intentPath = path.join(
+    resolveAssistantStatePaths(input.vault).outboxDirectory,
+    `${intentId}.json`,
+  )
+  const parsedIntent = assistantOutboxIntentSchema.safeParse(
+    await readJsonPayload(intentPath, 'delivered reminder provenance'),
+  )
+  if (!parsedIntent.success || parsedIntent.data.intentId !== intentId) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Delivered reminder provenance for "${intentId}" is invalid.`,
+    )
+  }
+
+  const intent = parsedIntent.data
+  if (
+    intent.status !== 'sent' ||
+    intent.delivery === null ||
+    intent.delivery.kind === 'message-reaction' ||
+    intent.threadIsDirect !== true ||
+    intent.message.trim().length === 0 ||
+    intent.operation !== null
+  ) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Outbox intent "${intent.intentId}" is not a provider-accepted private reminder message.`,
+    )
+  }
+  const authority = intent.automationAuthority
+  if (authority?.supportSeriesId !== `experiment:${input.experimentId}`) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Outbox intent "${intent.intentId}" does not own experiment "${input.experimentId}".`,
+    )
+  }
+  if (intent.scheduledOccurrenceAt === undefined || intent.scheduledOccurrenceAt === null) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Outbox intent "${intent.intentId}" has no scheduled occurrence provenance.`,
+    )
+  }
+  if (intent.plannedOccurrenceAt === undefined || intent.plannedOccurrenceAt === null) {
+    throw new VaultCliError(
+      'invalid_payload',
+      `Outbox intent "${intent.intentId}" has no planned occurrence provenance.`,
+    )
+  }
+
+  return {
+    plannedOccurrenceAt: intent.plannedOccurrenceAt,
+  }
+}
+
+async function writeExperimentReminderSessionEvent(input: {
+  eventId: string
+  experimentId: string
+  payload: JsonObject
+  proof: ExperimentReminderOccurrenceProof
+  replayEffect: JsonObject
+  vault: string
+}) {
+  return withCanonicalWriteLock(input.vault, async () => {
+    const existing = await findEventByExternalRef({
+      vaultRoot: input.vault,
+      system: EXPERIMENT_REMINDER_EXTERNAL_REF_SYSTEM,
+      resourceType: EXPERIMENT_REMINDER_EXTERNAL_REF_RESOURCE_TYPE,
+      resourceId: input.experimentId,
+      version: input.proof.plannedOccurrenceAt,
+    })
+    if (existing !== null) {
+      if (
+        existing.id !== input.eventId
+        || existing.kind !== 'intervention_session'
+        || existing.experimentId !== input.experimentId
+        || existing.occurredAt !== input.proof.plannedOccurrenceAt
+      ) {
+        throw new VaultCliError(
+          'contract_invalid',
+          'Delivered reminder occurrence identity conflicts with an existing canonical event.',
+        )
+      }
+      const changedField = EXPERIMENT_REMINDER_REPLAY_EFFECT_FIELDS.find(
+        (field) =>
+          Object.hasOwn(input.replayEffect, field) &&
+          !isDeepStrictEqual(existing[field], input.replayEffect[field]),
+      )
+      if (changedField !== undefined) {
+        throw new VaultCliError(
+          'contract_invalid',
+          `Delivered reminder occurrence is already logged with different ${changedField}; edit the existing event instead of replaying the reminder write.`,
+          { eventId: existing.id, field: changedField },
+        )
+      }
+      return {
+        vault: input.vault,
+        eventId: existing.id,
+        lookupId: existing.id,
+        ledgerFile: toMonthlyShardRelativePath(
+          VAULT_LAYOUT.eventLedgerDirectory,
+          existing.occurredAt,
+          'occurredAt',
+        ),
+        created: false,
+      }
+    }
+
+    return await upsertEventRecord({
+      vault: input.vault,
+      payload: input.payload,
+    })
+  })
+}
+
+function assertExperimentReminderSessionInput(
+  input: ExperimentSessionRecordInput,
+): void {
+  if (
+    input.date !== undefined ||
+    input.occurredAt !== undefined ||
+    input.source !== undefined
+  ) {
+    throw new VaultCliError(
+      'invalid_option',
+      'Do not pass date, occurredAt, or source with reminderIntentId; the delivered reminder owns the occurrence and the writer records an explicit manual report.',
+    )
   }
 }
 

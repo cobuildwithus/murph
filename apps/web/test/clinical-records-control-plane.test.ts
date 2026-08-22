@@ -164,6 +164,8 @@ describe("Clinical Records authorization persistence", () => {
       createHash("sha256").update(provider.fhirBaseUrl).digest("hex"),
     );
     expect(created).not.toHaveProperty("fhirBaseUrl");
+    expect(harness.transactionCalls).toBe(1);
+    expect(harness.oauthSessionDeleteMany).not.toHaveBeenCalled();
   });
 
   it("uses only the non-production client id for the curated Epic sandbox", async () => {
@@ -657,6 +659,40 @@ describe("Clinical Records authorization persistence", () => {
     expect(mocks.signalClinicalRetrievalWake).not.toHaveBeenCalled();
   });
 
+  it("locks the exact OAuth session before replay classification and consume", async () => {
+    const harness = createHarness(null);
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await finishAuthorization();
+
+    expect(harness.oauthSessionLock).toHaveBeenCalledTimes(1);
+    const lockSql = String(
+      harness.oauthSessionLock.mock.calls[0]?.[0].join("?"),
+    );
+    expect(lockSql).toContain(
+      'FROM "clinical_record_oauth_session" AS oauth_session',
+    );
+    expect(lockSql).toContain('WHERE oauth_session."state_hash" = ?');
+    expect(lockSql).toContain("FOR UPDATE OF oauth_session");
+    expect(harness.oauthSessionLock.mock.calls[0]?.slice(1)).toEqual([
+      "state-hash",
+    ]);
+    expect(
+      harness.oauthSessionLock.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      harness.oauthSessionFindUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+    expect(
+      harness.oauthSessionFindUnique.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThan(
+      harness.oauthSessionUpdateMany.mock.invocationCallOrder[0]
+        ?? Number.POSITIVE_INFINITY,
+    );
+  });
+
   it("rejects a superseded OAuth session before exchanging its provider code", async () => {
     const harness = createHarness(null, {
       consumedAt: new Date("2026-07-10T12:02:00.000Z"),
@@ -666,6 +702,22 @@ describe("Clinical Records authorization persistence", () => {
     await expect(finishAuthorization()).rejects.toMatchObject({
       code: "CLINICAL_RECORD_OAUTH_STATE_REPLAYED",
     });
+    expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
+    expect(harness.connectionCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects an expired OAuth callback without mutating or deleting its owner", async () => {
+    const harness = createHarness(null, {
+      expiresAt: new Date("2000-07-10T12:02:00.000Z"),
+    });
+    mocks.getPrisma.mockReturnValue(harness.prisma);
+
+    await expect(finishAuthorization()).rejects.toMatchObject({
+      code: "CLINICAL_RECORD_OAUTH_STATE_EXPIRED",
+    });
+
+    expect(harness.oauthSessionUpdateMany).not.toHaveBeenCalled();
+    expect(harness.oauthSessionDeleteMany).not.toHaveBeenCalled();
     expect(mocks.exchangeSmartAuthorizationCode).not.toHaveBeenCalled();
     expect(harness.connectionCreate).not.toHaveBeenCalled();
   });
@@ -734,6 +786,19 @@ function createHarness(
     return { count: 1 };
   });
   const oauthSessionCreate = vi.fn();
+  const oauthSessionDeleteMany = vi.fn().mockResolvedValue({ count: 0 });
+  const oauthSessionFindUnique = vi.fn(async () => ({
+    ...oauthSession(),
+    ...oauthOverrides,
+  }));
+  const oauthSessionLock = vi.fn(
+    async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      void strings;
+      void values;
+      return [{ stateHash: "state-hash" }];
+    },
+  );
+  const oauthSessionUpdateMany = vi.fn(async () => ({ count: 1 }));
   const retrievalRunCreate = vi.fn(async (input: { data: Record<string, unknown> }) => {
     callOrder.push("retrieval-run:create");
     if (!activeTransactionState) {
@@ -744,6 +809,7 @@ function createHarness(
   });
   const transactionStart = vi.fn<(call: number) => void>();
   const tx = {
+    $queryRaw: oauthSessionLock,
     clinicalRecordConnectIntent: {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       findUnique: vi.fn().mockResolvedValue({
@@ -763,9 +829,9 @@ function createHarness(
     },
     clinicalRecordOauthSession: {
       create: oauthSessionCreate,
-      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
-      findUnique: vi.fn().mockResolvedValue({ ...oauthSession(), ...oauthOverrides }),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: oauthSessionDeleteMany,
+      findUnique: oauthSessionFindUnique,
+      updateMany: oauthSessionUpdateMany,
     },
     clinicalRecordRetrievalRun: {
       create: retrievalRunCreate,
@@ -801,6 +867,7 @@ function createHarness(
     }),
     clinicalRecordConnectIntent: tx.clinicalRecordConnectIntent,
     clinicalRecordConnection: tx.clinicalRecordConnection,
+    clinicalRecordOauthSession: tx.clinicalRecordOauthSession,
   };
   return {
     callOrder,
@@ -816,6 +883,10 @@ function createHarness(
       return transactionState.depth;
     },
     oauthSessionCreate,
+    oauthSessionDeleteMany,
+    oauthSessionFindUnique,
+    oauthSessionLock,
+    oauthSessionUpdateMany,
     prisma,
     retrievalRunCreate,
     transactionStart,

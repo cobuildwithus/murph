@@ -95,6 +95,7 @@ export const HOSTED_EXECUTION_WAKE_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -228,6 +229,7 @@ export type HostedExecutionAssistantNotificationDeliveryDispatchMode =
   | "queue-only";
 
 export const HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES = [
+  "context-handoff",
   "creative-response",
   "creative-response-text",
 ] as const;
@@ -269,12 +271,18 @@ export interface HostedExecutionPrivateAssistantAskCompletionNotification {
   requestId: string;
 }
 
+export interface HostedExecutionGroupContextHandoffNotification {
+  membershipId: string;
+  originAssistantInputId: string;
+}
+
 export interface HostedExecutionAssistantNotificationRequestedPayload {
   deliveryDedupeToken?: string | null;
   deliveryDispatchMode?: HostedExecutionAssistantNotificationDeliveryDispatchMode | null;
   deliveryIdempotencyKey?: string | null;
   externalThreadRouteAuthority?: HostedExecutionExternalThreadRouteAuthority | null;
   firstContact?: HostedExecutionAssistantNotificationFirstContactPolicy | null;
+  groupContextHandoff?: HostedExecutionGroupContextHandoffNotification;
   instructions: string;
   notificationPromptProfile?: HostedExecutionAssistantNotificationPromptProfile | null;
   privateAssistantAskCompletion?: HostedExecutionPrivateAssistantAskCompletionNotification;
@@ -491,6 +499,8 @@ export interface HostedExecutionTelegramMessage {
   mediaGroupId?: string | null;
   messageId: string;
   replyContextPreview?: string | null;
+  /** Exact Telegram message id targeted by the sender's native reply. */
+  replyToMessageId?: string;
   schema: typeof HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA;
   /**
    * Presentation-only display name from trusted Telegram ingress. Never
@@ -882,6 +892,28 @@ export interface HostedExecutionDailyMetricReportedWake
   kind: "health.daily-metric.reported";
 }
 
+export interface HostedExecutionEnvironmentInterviewTopicCompletion {
+  answers: Array<{
+    aspectId: string;
+    indicatorId: string;
+    note?: string | null;
+    value: string | number | boolean;
+  }>;
+  topicId: string;
+}
+
+export interface HostedExecutionEnvironmentInterviewCompletedPayload {
+  completedAt: string;
+  completionId: string;
+  topics: HostedExecutionEnvironmentInterviewTopicCompletion[];
+}
+
+export interface HostedExecutionEnvironmentInterviewCompletedWake
+  extends HostedExecutionBaseWake {
+  environmentInterview: HostedExecutionEnvironmentInterviewCompletedPayload;
+  kind: "environment-interview.completed";
+}
+
 export const HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface HostedExecutionMealPhotoCapturedPayload {
@@ -946,6 +978,7 @@ export type HostedExecutionWake =
   | HostedExecutionAssistantAskCompletedWake
   | HostedExecutionClinicalRecordsSyncRequestedWake
   | HostedExecutionDeviceSyncWake
+  | HostedExecutionEnvironmentInterviewCompletedWake
   | HostedExecutionEnvironmentVoiceCapturedWake
   | HostedExecutionDailyMetricReportedWake
   | HostedExecutionMealPhotoCapturedWake

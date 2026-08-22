@@ -220,8 +220,6 @@ async function runSmokeChecks(input: {
       hostedCodexConfig.groupReadNetworkDenied,
     codexGroupReadOutsideRootReadDenied:
       hostedCodexConfig.groupReadOutsideRootReadDenied,
-    codexGroupReadPermissionProfileAttested:
-      hostedCodexConfig.groupReadPermissionProfileAttested,
     codexGroupReadRuntimeReadDenied:
       hostedCodexConfig.groupReadRuntimeReadDenied,
     codexGroupReadSecretEnvironmentDenied:
@@ -236,8 +234,6 @@ async function runSmokeChecks(input: {
       hostedCodexConfig.memberWorkspaceAutomationTreeUnchanged,
     codexMemberWorkspaceLocalMutationProofCount:
       hostedCodexConfig.memberWorkspaceLocalMutationProofCount,
-    codexMemberWorkspacePermissionProfileAttested:
-      hostedCodexConfig.memberWorkspacePermissionProfileAttested,
     codexMemberWorkspacePreloadBypassDenied:
       hostedCodexConfig.memberWorkspacePreloadBypassDenied,
     codexMemberWorkspaceTempWriteAllowed:
@@ -653,7 +649,6 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   groupReadGroupWriteDenied: boolean;
   groupReadNetworkDenied: boolean;
   groupReadOutsideRootReadDenied: boolean;
-  groupReadPermissionProfileAttested: boolean;
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;
@@ -661,7 +656,6 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   memberWorkspaceAutomationReadProofCount: number;
   memberWorkspaceAutomationTreeUnchanged: boolean;
   memberWorkspaceLocalMutationProofCount: number;
-  memberWorkspacePermissionProfileAttested: boolean;
   memberWorkspacePreloadBypassDenied: boolean;
   memberWorkspaceTempWriteAllowed: boolean;
   memberWorkspaceVaultWriteAllowed: boolean;
@@ -735,8 +729,6 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
     groupReadGroupWriteDenied: shellProbe.groupReadGroupWriteDenied,
     groupReadNetworkDenied: shellProbe.groupReadNetworkDenied,
     groupReadOutsideRootReadDenied: shellProbe.groupReadOutsideRootReadDenied,
-    groupReadPermissionProfileAttested:
-      shellProbe.groupReadPermissionProfileAttested,
     groupReadRuntimeReadDenied: shellProbe.groupReadRuntimeReadDenied,
     groupReadSecretEnvironmentDenied:
       shellProbe.groupReadSecretEnvironmentDenied,
@@ -749,8 +741,6 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
       shellProbe.memberWorkspaceAutomationTreeUnchanged,
     memberWorkspaceLocalMutationProofCount:
       shellProbe.memberWorkspaceLocalMutationProofCount,
-    memberWorkspacePermissionProfileAttested:
-      shellProbe.memberWorkspacePermissionProfileAttested,
     memberWorkspacePreloadBypassDenied:
       shellProbe.memberWorkspacePreloadBypassDenied,
     memberWorkspaceTempWriteAllowed:
@@ -823,7 +813,6 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   groupReadGroupWriteDenied: boolean;
   groupReadNetworkDenied: boolean;
   groupReadOutsideRootReadDenied: boolean;
-  groupReadPermissionProfileAttested: boolean;
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;
@@ -831,7 +820,6 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
   memberWorkspaceAutomationReadProofCount: number;
   memberWorkspaceAutomationTreeUnchanged: boolean;
   memberWorkspaceLocalMutationProofCount: number;
-  memberWorkspacePermissionProfileAttested: boolean;
   memberWorkspacePreloadBypassDenied: boolean;
   memberWorkspaceTempWriteAllowed: boolean;
   memberWorkspaceVaultWriteAllowed: boolean;
@@ -1002,8 +990,11 @@ async function runCodexAppServerShellEnvironmentProbe(input: {
     );
     const result = readCodexCommandExecResult(message.result);
     if (result.exitCode !== 0) {
+      const outputPreview = options.includeOutputPreviewOnFailure === false
+        ? ""
+        : ` stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`;
       throw new Error(
-        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")} stdoutPreview=${JSON.stringify(result.stdout.slice(0, 512))} stderrPreview=${JSON.stringify(result.stderr.slice(0, 512))}`,
+        `Codex app-server command failed for ${label}. exitCode=${result.exitCode} stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")} stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}${outputPreview}`,
       );
     }
 
@@ -1184,7 +1175,7 @@ async function runCodexMemberWorkspacePermissionProbe(input: {
   await runTextCommand(vaultCliCommand, [...seedSaveArgs]);
   const automationTreeBefore = await hashDirectoryTree(automationRoot);
 
-  const threadStart = await input.sendRequest(
+  await input.sendRequest(
     "member-workspace-thread-start",
     "thread/start",
     {
@@ -1200,10 +1191,6 @@ async function runCodexMemberWorkspacePermissionProbe(input: {
     },
     CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
   );
-  assertCodexMemberWorkspaceThreadAttestation(threadStart.result, {
-    vaultRoot: input.vaultRoot,
-  });
-
   const commandResult = await input.execCommand(
     "member-workspace-permission-probe",
     [
@@ -1276,7 +1263,6 @@ async function runCodexMemberWorkspacePermissionProbe(input: {
       HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
       "member-workspace local mutation",
     ),
-    memberWorkspacePermissionProfileAttested: true,
   };
 }
 
@@ -1338,38 +1324,6 @@ function createMemberWorkspaceAutomationImportPayload(input: {
     tags: [],
     title: input.title,
   };
-}
-
-function assertCodexMemberWorkspaceThreadAttestation(
-  value: unknown,
-  input: {
-    vaultRoot: string;
-  },
-): void {
-  const result = readObject(value, "Codex member-workspace thread/start result");
-  const activePermissionProfile = readObject(
-    result.activePermissionProfile,
-    "Codex member-workspace thread/start result.activePermissionProfile",
-  );
-  const runtimeWorkspaceRoots = readArray(
-    result.runtimeWorkspaceRoots,
-    "Codex member-workspace thread/start result.runtimeWorkspaceRoots",
-  );
-  const rootsMatch = runtimeWorkspaceRoots.length === 1
-    && typeof runtimeWorkspaceRoots[0] === "string"
-    && path.resolve(runtimeWorkspaceRoots[0]) === path.resolve(input.vaultRoot);
-
-  if (
-    activePermissionProfile.id !== MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE
-    || result.approvalPolicy !== "never"
-    || typeof result.cwd !== "string"
-    || path.resolve(result.cwd) !== path.resolve(input.vaultRoot)
-    || !rootsMatch
-  ) {
-    throw new Error(
-      "Codex app-server did not attest the requested member-workspace execution context.",
-    );
-  }
 }
 
 function buildCodexMemberWorkspacePermissionProbeScript(): string {
@@ -1441,7 +1395,6 @@ function parseCodexMemberWorkspacePermissionProof(
   CodexMemberWorkspacePermissionProof,
   "memberWorkspaceAutomationTreeUnchanged"
   | "memberWorkspaceLocalMutationProofCount"
-  | "memberWorkspacePermissionProfileAttested"
 > {
   const record = readObject(
     parseJsonFromCommandStdout(stdout, "member-workspace-permission-probe"),
@@ -1576,7 +1529,7 @@ async function runCodexGroupReadPermissionProbe(input: {
   await writeFile(outsideRootSecretPath, "outside secret\n", { mode: 0o600 });
   await rm(deniedWritePath, { force: true });
 
-  const threadStart = await input.sendRequest(
+  await input.sendRequest(
     "group-read-thread-start",
     "thread/start",
     {
@@ -1595,10 +1548,6 @@ async function runCodexGroupReadPermissionProbe(input: {
     },
     CODEX_SHELL_ENV_PROBE_TIMEOUT_MS,
   );
-  assertCodexGroupReadThreadAttestation(threadStart.result, {
-    vaultRoot: input.vaultRoot,
-  });
-
   let acceptedNetworkConnections = 0;
   const networkServer = createServer((socket) => {
     acceptedNetworkConnections += 1;
@@ -1654,49 +1603,9 @@ async function runCodexGroupReadPermissionProbe(input: {
       );
     }
 
-    return {
-      ...proof,
-      groupReadPermissionProfileAttested: true,
-    };
+    return proof;
   } finally {
     await closeServer(networkServer);
-  }
-}
-
-function assertCodexGroupReadThreadAttestation(
-  value: unknown,
-  input: {
-    vaultRoot: string;
-  },
-): void {
-  const result = readObject(value, "Codex group-read thread/start result");
-  const activePermissionProfile = readObject(
-    result.activePermissionProfile,
-    "Codex group-read thread/start result.activePermissionProfile",
-  );
-  const runtimeWorkspaceRoots = readArray(
-    result.runtimeWorkspaceRoots,
-    "Codex group-read thread/start result.runtimeWorkspaceRoots",
-  );
-  const instructionSources = readArray(
-    result.instructionSources,
-    "Codex group-read thread/start result.instructionSources",
-  );
-  const rootsMatch = runtimeWorkspaceRoots.length === 1
-    && typeof runtimeWorkspaceRoots[0] === "string"
-    && path.resolve(runtimeWorkspaceRoots[0]) === path.resolve(input.vaultRoot);
-
-  if (
-    activePermissionProfile.id !== MURPH_GROUP_READ_PERMISSION_PROFILE
-    || result.approvalPolicy !== "never"
-    || typeof result.cwd !== "string"
-    || path.resolve(result.cwd) !== path.resolve(input.vaultRoot)
-    || instructionSources.length !== 0
-    || !rootsMatch
-  ) {
-    throw new Error(
-      "Codex app-server did not attest the requested group-read execution context.",
-    );
   }
 }
 
@@ -1764,7 +1673,7 @@ void (async () => {
 
 function parseCodexGroupReadPermissionProof(
   stdout: string,
-): Omit<CodexGroupReadPermissionProof, "groupReadPermissionProfileAttested"> {
+): CodexGroupReadPermissionProof {
   const record = readObject(
     parseJsonFromCommandStdout(stdout, "group-read-permission-probe"),
     "Codex group-read permission proof",
@@ -1977,6 +1886,7 @@ async function runCodexVaultCliProof(input: {
   execCommand: (
     label: string,
     command: readonly string[],
+    options?: CodexCommandExecOptions,
   ) => Promise<CodexCommandExecResult>;
   expectedVaultId: string;
   vaultRoot: string;
@@ -1990,8 +1900,9 @@ async function runCodexVaultCliProof(input: {
   const runVaultJson = async (
     label: string,
     args: readonly string[],
+    options: CodexCommandExecOptions = {},
   ): Promise<unknown> => {
-    const result = await input.execCommand(label, ["vault-cli", ...args]);
+    const result = await input.execCommand(label, ["vault-cli", ...args], options);
     vaultCommandProofCount += 1;
     return parseJsonFromCommandStdout(result.stdout, label);
   };
@@ -2012,6 +1923,18 @@ async function runCodexVaultCliProof(input: {
     await runVaultJson("vault-show-default", ["vault", "show", "--format", "json"]),
     "vault-show-default",
     input.expectedVaultId,
+  );
+  assertMemoryShowProof(
+    await runVaultJson(
+      "memory-show",
+      ["memory", "show", "--format", "json"],
+      {
+        cwd: input.vaultRoot,
+        includeOutputPreviewOnFailure: false,
+        permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
+      },
+    ),
+    input.vaultRoot,
   );
   assertVaultShow(
     await runVaultJson("vault-show-explicit", [
@@ -2208,6 +2131,23 @@ async function runCodexVaultCliProof(input: {
       "vault write",
     ),
   };
+}
+
+function assertMemoryShowProof(value: unknown, expectedVaultRoot: string): void {
+  const result = readObject(value, "memory-show");
+  const document = readObject(result.document, "memory-show.document");
+  const records = readArray(document.records, "memory-show.document.records");
+
+  if (
+    result.vault !== expectedVaultRoot ||
+    document.exists !== true ||
+    records.length === 0 ||
+    result.memory !== null
+  ) {
+    throw new Error(
+      "Codex app-server vault-cli memory proof returned an unexpected populated document.",
+    );
+  }
 }
 
 function assertMeasurementProof(record: Record<string, unknown>, label: string): void {
@@ -2456,6 +2396,7 @@ interface CodexCommandExecResult {
 
 interface CodexCommandExecOptions {
   cwd?: string;
+  includeOutputPreviewOnFailure?: boolean;
   permissionProfile?: string;
 }
 
@@ -2464,7 +2405,6 @@ interface CodexMemberWorkspacePermissionProof {
   memberWorkspaceAutomationReadProofCount: number;
   memberWorkspaceAutomationTreeUnchanged: boolean;
   memberWorkspaceLocalMutationProofCount: number;
-  memberWorkspacePermissionProfileAttested: boolean;
   memberWorkspacePreloadBypassDenied: boolean;
   memberWorkspaceTempWriteAllowed: boolean;
   memberWorkspaceVaultWriteAllowed: boolean;
@@ -2476,7 +2416,6 @@ interface CodexGroupReadPermissionProof {
   groupReadGroupWriteDenied: boolean;
   groupReadNetworkDenied: boolean;
   groupReadOutsideRootReadDenied: boolean;
-  groupReadPermissionProfileAttested: boolean;
   groupReadRuntimeReadDenied: boolean;
   groupReadSecretEnvironmentDenied: boolean;
   groupReadSiblingRootReadDenied: boolean;

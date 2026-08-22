@@ -239,7 +239,7 @@ export async function writeTextFileAtomic(
 const assistantConversationHistoryTextEncoder = new TextEncoder()
 
 export const ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT =
-  '[For this provider request only: the bounded conversation excerpt is incomplete. Some committed message details may be omitted; do not infer silence from unavailable context.]'
+  '[For this provider request only: the bounded conversation excerpt is incomplete. Some committed message details may be omitted; do not infer silence or prior intent from unavailable context. When the current request depends on omitted details, inspect authoritative state when available or ask a useful clarification instead of guessing.]'
 
 export function assistantConversationHistoryUtf8Bytes(value: string): number {
   return assistantConversationHistoryTextEncoder.encode(value).byteLength

@@ -80,15 +80,21 @@ import type {
 import {
   MURPH_ASSISTANT_STYLE_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
+  MURPH_MEMBER_MEMORY_TOOL,
   type AssistantStyleTurnSettingsOverlay,
 } from './assistant-codex/dynamic-tool-catalog.js'
 import type {
+  VoiceMemoPhaseTiming,
   VoiceMemoToolRuntime,
 } from './assistant-codex/generate-voice-memo-tool.js'
 import {
   createAskGrokTurnState,
   type AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
+import {
+  createAnalyzeVideoTurnState,
+  type AnalyzeVideoToolRuntime,
+} from './assistant-codex/analyze-video-tool.js'
 import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
@@ -208,6 +214,9 @@ export type {
 export type {
   AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
+export type {
+  AnalyzeVideoToolRuntime,
+} from './assistant-codex/analyze-video-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -241,6 +250,10 @@ const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_SCHEMA =
   'murph.assistant-codex-transport-diagnostics.v1'
 const CODEX_TRANSPORT_DIAGNOSTICS_TRACE_TYPE =
   'assistant.codex.transport_diagnostics'
+const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
+  'murph.assistant-codex-generated-audio-phase-timing.v1'
+const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
+  'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
 // Bound on distinct subagent threads whose token usage is tracked per parent
 // turn. Far above any sane spawn fan-out; threads past the cap are ignored.
@@ -505,6 +518,7 @@ export interface CodexAppServerTurnInput {
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  memberMemoryMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
   oss?: boolean
@@ -531,6 +545,7 @@ export interface CodexAppServerTurnInput {
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
 }
@@ -779,6 +794,7 @@ export async function executeCodexAppServerTurn(
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+    analyzeVideoRuntime: input.analyzeVideoRuntime ?? null,
     askGrokRuntime: input.askGrokRuntime ?? null,
   }
 
@@ -3225,8 +3241,9 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
-  // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
-  // assistant turn, owned here and threaded into the dynamic-tool executor.
+  // Trusted turn-scoped provider-call ceilings: one counter per assistant turn,
+  // owned here and threaded into the dynamic-tool executor.
+  const analyzeVideoTurnState = createAnalyzeVideoTurnState()
   const askGrokTurnState = createAskGrokTurnState()
   const groupSharedReadTurnState = {
     currentSenderDecisionByMessageRef: new Map(),
@@ -3265,6 +3282,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
@@ -3272,6 +3290,10 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
+  let requiredFinalResponseFallbackOutcome:
+    | 'analyze-video-failure'
+    | 'analyze-video-success'
+    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -3381,6 +3403,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
 
@@ -4299,6 +4322,11 @@ async function runCodexAppServerTurnOnProcess(
         automationRelativeDateReferenceWindows[
           dynamicToolRequestDeliveryContextOrdinal
         ] ?? null,
+      responseCardAudience: input.groupConversation === true
+        ? 'group'
+        : input.groupConversation === false
+          ? 'private'
+          : null,
     })
     if (!dynamicToolRequest) {
       denyUnsupportedCodexServerRequest({
@@ -4682,6 +4710,13 @@ async function runCodexAppServerTurnOnProcess(
           ),
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
+          memberMemoryAvailable: input.dynamicTools.some(
+            (tool) =>
+              tool.namespace === MURPH_MEMBER_MEMORY_TOOL.namespace &&
+              tool.name === MURPH_MEMBER_MEMORY_TOOL.name,
+          ),
+          memberMemoryMaintenanceAuthorized:
+            input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
             ? AbortSignal.any([input.abortSignal, dynamicToolAbortController.signal])
             : dynamicToolAbortController.signal,
@@ -4700,6 +4735,14 @@ async function runCodexAppServerTurnOnProcess(
             ),
           groupSharedReadTurnState,
           privateDirectResponseCardAllowed: input.groupConversation === false,
+          telegramPresentationResponseCardAllowed:
+            input.dynamicTools.some((tool) =>
+              tool.namespace === 'murph' &&
+              (
+                tool.name === 'attach_exercise_routine_card' ||
+                tool.name === 'attach_telegram_rich_content'
+              )
+            ),
           deliveryContextOrdinal: dynamicToolRequestDeliveryContextOrdinal,
           nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
           onboardingFirstReadCompletionTransitionAvailable:
@@ -4716,11 +4759,28 @@ async function runCodexAppServerTurnOnProcess(
           requireHostedPrivateImageDelivery:
             input.requireHostedPrivateImageDelivery ?? false,
           vaultRoot: input.vaultRoot ?? null,
+          voiceMemoPhaseTimingRecorder:
+            (dynamicToolRequest.kind === 'generate-voice-memo' ||
+              dynamicToolRequest.kind === 'generate-song') &&
+            input.onTraceEvent
+              ? (timing) => {
+                  emitCodexGeneratedAudioPhaseTimingTrace({
+                    codexThreadId,
+                    onTraceEvent: input.onTraceEvent,
+                    timing,
+                  })
+                }
+              : null,
           voiceMemoRuntime:
             dynamicToolRequest.kind === 'generate-voice-memo' ||
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          analyzeVideoRuntime:
+            dynamicToolRequest.kind === 'analyze-video'
+              ? input.analyzeVideoRuntime ?? null
+              : null,
+          analyzeVideoTurnState,
           askGrokRuntime:
             dynamicToolRequest.kind === 'ask-grok'
               ? input.askGrokRuntime ?? null
@@ -4733,6 +4793,20 @@ async function runCodexAppServerTurnOnProcess(
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
+      }
+      if (dynamicToolRequest.kind === 'analyze-video') {
+        const analyzeVideoFallback = normalizeNullableString(
+          result.requiredFinalResponseFallback,
+        )
+        if (analyzeVideoFallback !== null) {
+          if (result.rpcResult.success) {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
+          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
+          }
+        }
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -5773,11 +5847,6 @@ async function runCodexAppServerTurnOnProcess(
         requestedThreadId: resumeThreadId,
         threadResult,
       })
-    } else if (normalizeNullableString(input.permissions)) {
-      assertCodexThreadStartPermissionAttestation({
-        input,
-        threadResult,
-      })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     codexProcess.noteBoundThreadId(codexThreadId)
@@ -6007,6 +6076,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const requiredSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage) ??
+    requiredFinalResponseFallback ??
+    semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -6015,22 +6088,25 @@ async function runCodexAppServerTurnOnProcess(
       : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
     appendRequiredAutomationLocalAtClarification(
-      semanticFinalMessage,
+      requiredSemanticFinalMessage,
       requiredAutomationLocalAtClarificationsInOrder,
     ),
     requiredVaultFileApprovalUrls,
   )
+  const semanticTranscriptMessage = finalResponseCard
+    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
+      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      : renderAssistantResponseCardText(finalResponseCard)
+    : finalResponseCardTextFallback
+      ? renderAssistantWorkoutResponseCardTranscriptText(
+          finalResponseCardTextFallback,
+        )
+      : normalizeNullableString(modelFinalMessage) ??
+        (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    finalResponseCard
-      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-        : renderAssistantResponseCardText(finalResponseCard)
-      : finalResponseCardTextFallback
-        ? renderAssistantWorkoutResponseCardTranscriptText(
-            finalResponseCardTextFallback,
-          )
-        : normalizeNullableString(modelFinalMessage) ??
-          (finalResponseMedia.length > 0 ? '' : null),
+    normalizeNullableString(semanticTranscriptMessage) ??
+      requiredFinalResponseFallback ??
+      semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (
@@ -6127,63 +6203,6 @@ function mergeAutomationRelativeDateReferenceWindows(
   }
 }
 
-function assertCodexThreadStartPermissionAttestation(input: {
-  input: CodexAppServerPreparedTurnInput
-  threadResult: unknown
-}): void {
-  const result = asCodexRecord(input.threadResult)
-  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
-  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
-  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
-  const instructionSources = Array.isArray(result?.instructionSources)
-    ? result.instructionSources
-    : null
-  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
-  const mismatchedFields: string[] = []
-
-  const permissionProfileMismatch =
-    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
-      normalizeNullableString(input.input.permissions) ||
-    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
-  if (permissionProfileMismatch) {
-    mismatchedFields.push('activePermissionProfile')
-  }
-  if (
-    !actualRoots ||
-    actualRoots.length !== expectedRoots.length ||
-    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
-  ) {
-    mismatchedFields.push('runtimeWorkspaceRoots')
-  }
-  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
-    mismatchedFields.push('cwd')
-  }
-  if (
-    input.input.processLifetime === 'one-shot' &&
-    (instructionSources === null || instructionSources.length !== 0)
-  ) {
-    mismatchedFields.push('instructionSources')
-  }
-  if (
-    asCodexString(result?.approvalPolicy) !==
-    mapCodexAppServerApprovalPolicy(input.input.approvalPolicy)
-  ) {
-    mismatchedFields.push('approvalPolicy')
-  }
-  if (mismatchedFields.length === 0) {
-    return
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested named-permission execution context.',
-    {
-      mismatchedFields,
-      retryable: false,
-    },
-  )
-}
-
 function emitCodexSuppressedFinalMessageTrace(input: {
   codexThreadId: string | null
   finalActionKind: AssistantNoReplyDisposition['kind']
@@ -6207,6 +6226,42 @@ function emitCodexSuppressedFinalMessageTrace(input: {
     })
   } catch {
     // Diagnostic-only.
+  }
+}
+
+function emitCodexGeneratedAudioPhaseTimingTrace(input: {
+  codexThreadId: string | null
+  onTraceEvent?: ((event: AssistantProviderTraceEvent) => void) | null
+  timing: VoiceMemoPhaseTiming
+}): void {
+  if (!input.onTraceEvent) {
+    return
+  }
+
+  try {
+    input.onTraceEvent({
+      codexThreadId: input.codexThreadId,
+      rawEvent: {
+        schema: CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA,
+        type: CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE,
+        generatedAudioDeliveryMode: input.timing.deliveryMode,
+        ...(input.timing.generationDurationMs === undefined
+          ? {}
+          : {
+              generatedAudioGenerationDurationMs:
+                input.timing.generationDurationMs,
+            }),
+        generatedAudioKind: input.timing.mediaKind,
+        generatedAudioOutcome: input.timing.outcome,
+        generatedAudioTerminalPhase: input.timing.terminalPhase,
+        ...(input.timing.uploadDurationMs === undefined
+          ? {}
+          : { generatedAudioUploadDurationMs: input.timing.uploadDurationMs }),
+      },
+      updates: [],
+    })
+  } catch {
+    // Phase timing is diagnostic-only and must not block assistant turns.
   }
 }
 

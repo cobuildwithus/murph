@@ -14,6 +14,7 @@ import {
   mergeHostedDeviceSyncEventToProviderSendBuckets,
   serializeHostedExecutionDeviceSyncDirtyPayloadIdentity,
   type DeviceSyncCredentialIndependentImportJobClassifier,
+  type HostedExecutionDeviceSyncCompletedImport,
   type HostedExecutionDeviceSyncStagedDirtyAck,
 } from "@murphai/device-syncd/hosted-runtime";
 
@@ -700,7 +701,7 @@ export class PrismaHostedDirtyConnectionStore {
 
     if (!existing) {
       const counters = buildDirtyCounters(resourceBatch.allResources);
-      const created = await prisma.deviceSyncDirtyConnection.createMany({
+      const [record] = await prisma.deviceSyncDirtyConnection.createManyAndReturn({
         data: {
           connectionId: input.connectionId,
           userId: input.userId,
@@ -722,7 +723,7 @@ export class PrismaHostedDirtyConnectionStore {
         skipDuplicates: true,
       });
 
-      if (created.count === 0) {
+      if (!record) {
         throw createDirtyStateContentionError("update");
       }
 
@@ -736,15 +737,6 @@ export class PrismaHostedDirtyConnectionStore {
         tx: prisma,
         userId: input.userId,
       });
-
-      const record = await prisma.deviceSyncDirtyConnection.findUnique({
-        where: {
-          connectionId: input.connectionId,
-        },
-      });
-      if (!record) {
-        throw createDirtyStateContentionError("update");
-      }
 
       return {
         dirty: withDirtyPayloadResources(
@@ -819,7 +811,7 @@ export class PrismaHostedDirtyConnectionStore {
     ) {
       throw createDirtyStateContentionError("update");
     }
-    const updated = await prisma.deviceSyncDirtyConnection.updateMany({
+    const [record] = await prisma.deviceSyncDirtyConnection.updateManyAndReturn({
       where: {
         connectionId: input.connectionId,
         dirtyRevision: existing.dirtyRevision,
@@ -843,7 +835,7 @@ export class PrismaHostedDirtyConnectionStore {
       },
     });
 
-    if (updated.count === 0) {
+    if (!record) {
       throw createDirtyStateContentionError("update");
     }
 
@@ -857,15 +849,6 @@ export class PrismaHostedDirtyConnectionStore {
       tx: prisma,
       userId: input.userId,
     });
-
-    const record = await prisma.deviceSyncDirtyConnection.findUnique({
-      where: {
-        connectionId: input.connectionId,
-      },
-    });
-    if (!record) {
-      throw createDirtyStateContentionError("update");
-    }
 
     return {
       dirty: withDirtyPayloadResources(
@@ -921,6 +904,29 @@ export class PrismaHostedDirtyConnectionStore {
     `);
 
     return rows.some((row) => row.pending === true);
+  }
+
+  async readPendingDirtyConnectionSnapshot(input: {
+    connectionId: string;
+    provider: string;
+    userId: string;
+  }): Promise<{ dirtyRevision: bigint; processedRevision: bigint } | null> {
+    const [snapshot] = await this.prisma.$queryRaw<Array<{
+      dirtyRevision: bigint;
+      processedRevision: bigint;
+    }>>(Prisma.sql`
+      SELECT
+        "dirty_revision" AS "dirtyRevision",
+        "processed_revision" AS "processedRevision"
+      FROM "device_sync_dirty_connection"
+      WHERE "connection_id" = ${input.connectionId}
+        AND "user_id" = ${input.userId}
+        AND "provider" = ${input.provider}
+        AND "dirty_revision" > "processed_revision"
+      LIMIT 1
+    `);
+
+    return snapshot ?? null;
   }
 
   async shouldRequestWakeForDirtyConnectionUpsert(input: {
@@ -1046,6 +1052,7 @@ export class PrismaHostedDirtyConnectionStore {
   }
 
   async markDirtyConnectionProcessed(input: {
+    completedImports?: readonly HostedExecutionDeviceSyncCompletedImport[];
     connectionId: string;
     processedDirtyPayloadIds?: readonly string[];
     processedRevision: bigint;
@@ -1083,6 +1090,7 @@ export class PrismaHostedDirtyConnectionStore {
   }
 
   private async markDirtyConnectionProcessedOnce(input: {
+    completedImports?: readonly HostedExecutionDeviceSyncCompletedImport[];
     connectionId: string;
     processedDirtyPayloadIds?: readonly string[];
     processedRevision: bigint;
@@ -1140,6 +1148,40 @@ export class PrismaHostedDirtyConnectionStore {
       const processedDirtyPayloadIds = [...new Set(input.processedDirtyPayloadIds)]
         .filter((id) => normalizeNullableString(id));
       if (processedDirtyPayloadIds.length > 0) {
+        const completedImportByPayloadId = new Map(
+          (input.completedImports ?? []).map((receipt) => [receipt.dirtyPayloadId, receipt]),
+        );
+        const importCandidateIds = processedDirtyPayloadIds.filter((id) =>
+          completedImportByPayloadId.has(id)
+        );
+        if (importCandidateIds.length > 0) {
+          const acknowledgedPayloads = await prisma.deviceSyncDirtyPayload.findMany({
+            where: {
+              connectionId: input.connectionId,
+              id: { in: importCandidateIds },
+              userId: input.userId,
+            },
+            select: { id: true },
+          });
+          const importSignals = acknowledgedPayloads.flatMap(({ id }) => {
+            const receipt = completedImportByPayloadId.get(id);
+            return receipt
+              ? [{
+                  connectionId: input.connectionId,
+                  createdAt: new Date(),
+                  eventType: `canonical.data.${receipt.resource}.imported`,
+                  kind: "canonical_import",
+                  occurredAt: new Date(receipt.importCompletedAt),
+                  provider: existing.provider,
+                  sourceProviderSlug: receipt.sourceProviderSlug,
+                  userId: input.userId,
+                }]
+              : [];
+          });
+          if (importSignals.length > 0) {
+            await prisma.deviceSyncSignal.createMany({ data: importSignals });
+          }
+        }
         await prisma.deviceSyncDirtyPayload.deleteMany({
           where: {
             connectionId: input.connectionId,

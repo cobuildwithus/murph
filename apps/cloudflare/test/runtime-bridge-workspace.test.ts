@@ -1416,7 +1416,16 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
       .rejects.toThrow("Hosted workspace committed snapshot state is missing.");
 
     expect(putArtifact).not.toHaveBeenCalled();
-    expect(writeLog).not.toHaveBeenCalled();
+    expect(writeLog.mock.calls.flatMap(([request]) => request.entries)).toEqual([
+      expect.objectContaining({
+        eventCode: "checkpoint.snapshot_failed",
+        redactedJson: expect.objectContaining({
+          safeErrorDetail: "Hosted workspace committed snapshot state is missing.",
+          snapshotMode: "workspace_snapshot_v2",
+          snapshotStage: "plan",
+        }),
+      }),
+    ]);
   });
 
   it("logs safe bundle validation detail when full compaction preserves an invalid artifact ref", async () => {

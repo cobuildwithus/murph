@@ -19,7 +19,15 @@ import {
   type DeviceSyncCredentialIndependentImportJobClassifier,
 } from "../hosted-runtime.ts";
 import { isJunctionRetainedAcceptedWorkJob } from "../junction-resources.ts";
-import type { DeviceSyncJobInput, DeviceSyncJobRecord } from "../types.ts";
+import {
+  DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT,
+  JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX,
+  type DeviceSyncCanonicalImportReceipt,
+  type DeviceSyncJobFailureDisposition,
+  type DeviceSyncJobFailureTransition,
+  type DeviceSyncJobInput,
+  type DeviceSyncJobRecord,
+} from "../types.ts";
 
 export interface DeviceSyncEnqueueJobInput extends DeviceSyncJobInput {
   provider: string;
@@ -46,10 +54,58 @@ interface StoredJobRow {
   updated_at: string;
   started_at: string | null;
   finished_at: string | null;
+  canonical_import_receipts_json: string;
 }
 
 const EXPIRED_JOB_LEASE_ERROR_CODE = "LEASE_EXPIRED";
 const EXPIRED_JOB_LEASE_ERROR_MESSAGE = "Device sync job lease expired before completion.";
+export const DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT = 396;
+
+function readCanonicalImportReceipts(value: string): DeviceSyncCanonicalImportReceipt[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed) || parsed.length > DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT) {
+    return [];
+  }
+
+  const receipts = new Map<string, DeviceSyncCanonicalImportReceipt>();
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+    const record = entry as Record<string, unknown>;
+    if (
+      typeof record.importCompletedAt !== "string"
+      || !Number.isFinite(Date.parse(record.importCompletedAt))
+      || new Date(record.importCompletedAt).toISOString() !== record.importCompletedAt
+      || typeof record.resource !== "string"
+      || !/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(record.resource)
+      || typeof record.sourceProviderSlug !== "string"
+      || !/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(record.sourceProviderSlug)
+    ) {
+      return [];
+    }
+    const receipt: DeviceSyncCanonicalImportReceipt = {
+      importCompletedAt: record.importCompletedAt,
+      resource: record.resource,
+      sourceProviderSlug: record.sourceProviderSlug,
+    };
+    const key = `${receipt.sourceProviderSlug}\u0000${receipt.resource}`;
+    const current = receipts.get(key);
+    if (!current || current.importCompletedAt < receipt.importCompletedAt) {
+      receipts.set(key, receipt);
+    }
+  }
+
+  return [...receipts.values()].sort((left, right) =>
+    left.sourceProviderSlug.localeCompare(right.sourceProviderSlug)
+    || left.resource.localeCompare(right.resource)
+  );
+}
 
 function requireJobRowString(
   row: Record<string, unknown>,
@@ -102,6 +158,7 @@ function decodeStoredJobRow(row: Record<string, unknown>): StoredJobRow {
     created_at: requireJobRowString(row, "created_at"),
     dedupe_key: readJobRowNullableString(row, "dedupe_key"),
     finished_at: readJobRowNullableString(row, "finished_at"),
+    canonical_import_receipts_json: requireJobRowString(row, "canonical_import_receipts_json"),
     id: requireJobRowString(row, "id"),
     kind: requireJobRowString(row, "kind"),
     last_error_code: readJobRowNullableString(row, "last_error_code"),
@@ -175,6 +232,7 @@ function mapJobRow(row: StoredJobRow | undefined): DeviceSyncJobRecord | null {
     updatedAt: row.updated_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
+    canonicalImportReceipts: readCanonicalImportReceipts(row.canonical_import_receipts_json),
   };
 }
 
@@ -203,6 +261,51 @@ export function listPendingDeviceSyncJobsForAccount(input: {
     const job = mapJobRow(row);
     return job ? [job] : [];
   });
+}
+
+export function findActiveDeviceSyncJobDedupeKeys(input: {
+  accountId: string;
+  database: DatabaseSync;
+  dedupeKeys: readonly string[];
+  provider: string;
+}): ReadonlySet<string> {
+  const dedupeKeys = [...new Set(input.dedupeKeys)];
+  if (dedupeKeys.length > DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT) {
+    throw new TypeError(
+      `Active device-sync dedupe lookup exceeds ${DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT} keys.`,
+    );
+  }
+  if (dedupeKeys.length === 0) {
+    return new Set();
+  }
+  const now = toIsoTimestamp(new Date());
+  const placeholders = dedupeKeys.map(() => "?").join(", ");
+  const rows = input.database.prepare(`
+    select distinct dedupe_key
+    from device_job
+    where account_id = ?
+      and provider = ?
+      and dedupe_key in (${placeholders})
+      and status in ('queued', 'running')
+      and not (
+        status = 'running'
+        and lease_expires_at is not null
+        and lease_expires_at <= ?
+        and attempts >= max_attempts
+        and not (
+          provider = 'junction'
+          and kind = 'resource'
+          and coalesce(json_extract(payload_json, '$.resource'), '') = ?
+        )
+      )
+  `).all(
+    input.accountId,
+    input.provider,
+    ...dedupeKeys,
+    now,
+    COMPANION_HRV_RMSSD_RESOURCE,
+  ) as { dedupe_key: string }[];
+  return new Set(rows.map((row) => row.dedupe_key));
 }
 
 export function readNextDeviceSyncJobWakeAt(database: DatabaseSync): string | null {
@@ -526,6 +629,7 @@ export function completeDeviceSyncJobIfOwned(
 export function completeDeviceSyncJobsIfOwnedInTransaction(
   database: DatabaseSync,
   input: {
+    canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
     jobIds: readonly string[];
     now: string;
     workerId: string;
@@ -560,6 +664,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
     set status = 'succeeded',
         lease_owner = null,
         lease_expires_at = null,
+        canonical_import_receipts_json = ?,
         finished_at = ?,
         updated_at = ?
     where id in (${placeholders})
@@ -568,6 +673,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
       and lease_expires_at is not null
       and lease_expires_at > ?
   `).run(
+    stringifyJson(input.canonicalImportReceipts ?? []),
     input.now,
     input.now,
     ...jobIds,
@@ -581,6 +687,7 @@ export function completeDeviceSyncJobsIfOwnedInTransaction(
 export function completeDeviceSyncJobsIfOwned(
   database: DatabaseSync,
   input: {
+    canonicalImportReceipts?: readonly DeviceSyncCanonicalImportReceipt[];
     jobIds: readonly string[];
     now: string;
     workerId: string;
@@ -710,7 +817,7 @@ export function failDeviceSyncJobIfOwned(
     retainUntilSuccess?: boolean;
     workerId: string;
   },
-): boolean {
+): DeviceSyncJobFailureTransition | null {
   if (input.retryable) {
     const replacementPayloadJson = input.replacementPayload === undefined
       ? null
@@ -732,7 +839,8 @@ export function failDeviceSyncJobIfOwned(
         and lease_expires_at is not null
         and lease_expires_at > ?
         and (attempts < max_attempts or ? = 1)
-    `).run(
+      returning attempts, max_attempts
+    `).get(
       input.retryAt ?? input.now,
       input.retainUntilSuccess ? 1 : 0,
       replacementPayloadJson === null ? 0 : 1,
@@ -744,10 +852,10 @@ export function failDeviceSyncJobIfOwned(
       input.workerId,
       input.now,
       input.retainUntilSuccess ? 1 : 0,
-    ) as { changes: number };
+    ) as Record<string, unknown> | undefined;
 
-    if ((retryResult.changes ?? 0) > 0) {
-      return true;
+    if (retryResult) {
+      return decodeDeviceSyncJobFailureTransition(retryResult, "queued");
     }
   }
 
@@ -765,7 +873,8 @@ export function failDeviceSyncJobIfOwned(
       and lease_owner = ?
       and lease_expires_at is not null
       and lease_expires_at > ?
-  `).run(
+    returning attempts, max_attempts
+  `).get(
     input.code,
     input.message,
     input.now,
@@ -773,9 +882,33 @@ export function failDeviceSyncJobIfOwned(
     input.jobId,
     input.workerId,
     input.now,
-  ) as { changes: number };
+  ) as Record<string, unknown> | undefined;
 
-  return (deadResult.changes ?? 0) > 0;
+  return deadResult
+    ? decodeDeviceSyncJobFailureTransition(deadResult, "dead")
+    : null;
+}
+
+function decodeDeviceSyncJobFailureTransition(
+  row: Record<string, unknown>,
+  disposition: DeviceSyncJobFailureDisposition,
+): DeviceSyncJobFailureTransition {
+  const attempts = requireJobRowNumber(row, "attempts");
+  const maxAttempts = requireJobRowNumber(row, "max_attempts");
+
+  if (!Number.isSafeInteger(attempts) || attempts < 1) {
+    throw new TypeError("Expected device_job.attempts to be a positive safe integer.");
+  }
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < attempts) {
+    throw new TypeError("Expected device_job.max_attempts to cover the committed attempt count.");
+  }
+
+  return {
+    attempts,
+    disposition,
+    maxAttempts,
+    remainingAttempts: disposition === "queued" ? maxAttempts - attempts : 0,
+  };
 }
 
 export function markPendingDeviceSyncJobsDeadForAccount(
@@ -989,6 +1122,31 @@ export function enqueueDeviceSyncJobInTransaction(
         return getDeviceSyncJobById(database, existing.id) ?? existingJob;
       }
       return existingJob;
+    }
+
+    // Junction temporal resource/day children are re-enqueued on every
+    // scheduled reconcile cadence so widened sources or late provider history
+    // converge. Terminal rows are execution history, not authority. Sweep the
+    // whole temporal dedupe namespace, not just the incoming coordinate:
+    // coordinates that roll out of the horizon (or belong to a prior vault
+    // timezone) are never re-enqueued, so exact-key cleanup would strand their
+    // rows forever.
+    if (
+      input.provider === "junction"
+      && input.kind === "resource"
+      && input.dedupeKey.startsWith(JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX)
+    ) {
+      database.prepare(`
+        delete from device_job
+        where account_id = ?
+          and provider = ?
+          and dedupe_key like ?
+          and status not in ('queued', 'running')
+      `).run(
+        input.accountId,
+        input.provider,
+        `${JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX}%`,
+      );
     }
   }
 

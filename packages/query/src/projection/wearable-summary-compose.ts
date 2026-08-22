@@ -650,6 +650,12 @@ function wearableDatasetFromProjectedBundle(
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
     sleepWindows,
+    workoutFeatures: bundle.activityDays.flatMap((summary) =>
+      summary.workoutFeatures.map((feature) => ({
+        date: summary.date,
+        feature,
+      }))
+    ),
   };
 }
 

@@ -5,7 +5,7 @@ import {
   readRenderedSection,
   renderPrBody,
   renderedText,
-} from "./check-frontend-design-proof.mjs";
+} from "./pr-body-markdown.mjs";
 
 const SECTION_HEADING = "Architecture and reuse";
 const REQUIRED_ITEMS = [
@@ -67,8 +67,8 @@ async function main() {
 }
 
 const isDirectRun =
-  typeof process.argv[1] === "string"
-  && import.meta.url === pathToFileURL(process.argv[1]).href;
+  typeof process.argv[1] === "string" &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
   try {
     await main();

@@ -37,6 +37,7 @@ export const JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA =
     serializableFields: {
       allowedLinkHosts: "string[]",
       apiBaseUrl: "string",
+      clientUserIdNamespace: "string",
       environment: "string",
       providerFilter: "string[]",
       pushSourceRecoveryEnabled: "boolean",

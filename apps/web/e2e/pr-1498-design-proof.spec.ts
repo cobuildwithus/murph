@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
-const DESIGN_ROUTE = "/design?tab=sections#signup-referral-signed-in-recovery";
+const DESIGN_ROUTE = "/screenshots/account#signup-referral-signed-in-recovery";
 const STUDY_SELECTOR = '[data-design-section="signup-referral-signed-in-recovery"]';
 
 function isLoopbackUrl(rawUrl: string): boolean {

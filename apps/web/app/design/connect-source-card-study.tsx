@@ -1,6 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitbit-migration";
 
 import { SourceCard } from "@/app/(dashboard)/connect/connect-source-card";
 import { ConnectDisconnectDialog } from "@/app/(dashboard)/connect/connect-page-dialogs";
@@ -25,6 +26,88 @@ const ZEPP_CONNECT_SOURCE: ConnectSource = {
   id: "zepp",
   ...APPLE_HEALTH_RELAY_CONNECT_SOURCE_UI.zepp,
 };
+
+const APPLE_HEALTH_CONNECT_SOURCE: ConnectSource = {
+  description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
+  id: "apple-health",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/apple-health.png",
+    width: 128,
+  },
+  name: "Apple Health",
+  unavailableActionLabel: "Download app",
+  unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
+};
+
+const FITBIT_CONNECT_SOURCE: ConnectSource = {
+  connectTarget: "fitbit",
+  description: "Fitbit and Pixel Watch sleep, activity, heart rate, and workouts.",
+  id: "fitbit",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/fitbit.svg",
+    width: 128,
+  },
+  name: "Fitbit",
+};
+
+const DEXCOM_UNAVAILABLE_SOURCE: ConnectSource = {
+  connectionAvailable: false,
+  description: "CGM glucose readings and trends.",
+  id: "dexcom",
+  logo: {
+    className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+    height: 36,
+    src: "/brand-logos/connect/dexcom.png",
+    width: 128,
+  },
+  name: "Dexcom",
+  unavailableActionLabel: "Coming soon",
+  unavailableMessage: "Dexcom connections are coming soon.",
+};
+
+const DESIGN_SIGNED_OUT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
+  {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      ...ZEPP_CONNECT_SOURCE,
+      id: "zepp-signed-out",
+    },
+  },
+  {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      ...APPLE_HEALTH_CONNECT_SOURCE,
+      id: "apple-health-signed-out",
+    },
+  },
+  {
+    authenticated: false,
+    errorMessage: null,
+    source: {
+      connectTarget: "oura",
+      description: "Sleep, readiness, activity, heart rate, and temperature trends.",
+      id: "oura-signed-out",
+      logo: {
+        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
+        height: 36,
+        src: "/brand-logos/connect/oura.png",
+        width: 128,
+      },
+      name: "Oura",
+    },
+  },
+  {
+    authenticated: false,
+    errorMessage: null,
+    source: DEXCOM_UNAVAILABLE_SOURCE,
+  },
+];
 
 const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
@@ -75,90 +158,42 @@ const DESIGN_CONNECT_SOURCE_CASES: ConnectSourceCardStudyCase[] = [
   {
     authenticated: true,
     errorMessage: null,
-    source: {
-      description: "iPhone and Apple Watch activity, sleep, vitals, and workouts.",
-      id: "apple-health",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/apple-health.png",
-        width: 128,
-      },
-      name: "Apple Health",
-      unavailableActionLabel: "Download app",
-      unavailableActionUrl: "https://apps.apple.com/us/app/murph-ai/id6786145859",
-    },
+    source: APPLE_HEALTH_CONNECT_SOURCE,
   },
   {
     authenticated: true,
     errorMessage: null,
-    source: {
-      connectTarget: "fitbit",
-      description: "Sleep, activity, heart rate, and daily readiness.",
-      id: "fitbit",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/fitbit.svg",
-        width: 128,
-      },
-      name: "Fitbit",
-    },
+    source: FITBIT_CONNECT_SOURCE,
   },
-  {
-    authenticated: false,
+  ...([
+    ["fitbit-authorization", "authorization_required", false],
+    ["fitbit-verifying", "verifying_successor", false],
+    ["fitbit-switching", "cutover_ready", false],
+    ["fitbit-retry", "cutover_ready", true],
+  ] as const).map(([id, migrationState, migrationRetryRequired]) => ({
+    authenticated: true,
     errorMessage: null,
     source: {
-      connectTarget: "oura",
-      description: "Sleep, readiness, activity, heart rate, and temperature trends.",
-      id: "oura-signed-out",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/oura.png",
-        width: 128,
-      },
-      name: "Oura",
+      ...FITBIT_CONNECT_SOURCE,
+      disconnectConnectionId: "design-fitbit-migration",
+      ...(migrationState === "cutover_ready"
+        ? { disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG }
+        : {}),
+      id,
+      ...(migrationRetryRequired ? { migrationRetryRequired: true } : {}),
+      migrationState,
     },
-  },
-  {
-    authenticated: false,
-    errorMessage: null,
-    source: {
-      connectionAvailable: false,
-      description: "CGM glucose readings and trends.",
-      id: "dexcom",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/dexcom.png",
-        width: 128,
-      },
-      name: "Dexcom",
-      unavailableActionLabel: "Coming soon",
-      unavailableMessage: "Dexcom connections are coming soon.",
-    },
-  },
+  })),
   {
     authenticated: true,
     errorMessage: null,
     source: {
-      connectionAvailable: false,
+      ...DEXCOM_UNAVAILABLE_SOURCE,
       connected: true,
-      description: "CGM glucose readings and trends.",
       disconnectConnectionId: "design-dexcom-recovery",
       disconnectScope: "junction_account",
       id: "dexcom-recovery",
-      logo: {
-        className: "h-auto max-h-8 w-auto max-w-[8rem] object-contain",
-        height: 36,
-        src: "/brand-logos/connect/dexcom.png",
-        width: 128,
-      },
-      name: "Dexcom",
       requiresReconnect: true,
-      unavailableActionLabel: "Coming soon",
-      unavailableMessage: "Dexcom connections are coming soon.",
     },
   },
   {
@@ -334,6 +369,7 @@ export function ConnectSourceCardStudy({
           source: DESIGN_SOURCE_DISCONNECT_SUCCESS_SOURCES[index] ?? studyCase.source,
         }))
       : defaultStudyCases;
+  const showSignedOutActions = studyState === null;
 
   return (
     <>
@@ -343,20 +379,19 @@ export function ConnectSourceCardStudy({
         id="connect-source-card-actions"
         inert
       >
-        <div className="grid items-stretch gap-4 lg:grid-cols-3">
-          {studyCases.map(({ authenticated, errorMessage, source }) => (
-            <SourceCard
-              key={source.id}
-              authenticated={authenticated}
-              errorMessage={errorMessage}
-              pending={false}
-              pendingDisconnect={false}
-              source={source}
-              onDisconnectTargetChange={() => {}}
-              onSetupGuideOpen={() => {}}
-              onStartConnection={() => Promise.resolve()}
-            />
-          ))}
+        {showSignedOutActions ? (
+          <div
+            className="-mx-5 px-5"
+            data-design-state="signed-out-source-actions"
+          >
+            <p className="mb-4 font-mono text-[10px] font-medium uppercase tracking-[0.11em] text-muted-foreground">
+              Signed out
+            </p>
+            <SourceCardStudyGrid studyCases={DESIGN_SIGNED_OUT_SOURCE_CASES} />
+          </div>
+        ) : null}
+        <div className={showSignedOutActions ? "mt-8" : undefined}>
+          <SourceCardStudyGrid studyCases={studyCases} />
         </div>
       </div>
 
@@ -370,6 +405,31 @@ export function ConnectSourceCardStudy({
         onOpenChange={() => {}}
       />
     </>
+  );
+}
+
+function SourceCardStudyGrid({
+  studyCases,
+}: {
+  studyCases: ConnectSourceCardStudyCase[];
+}) {
+  return (
+    <div className="grid items-stretch gap-4 lg:grid-cols-3">
+      {studyCases.map(({ authenticated, errorMessage, source }) => (
+        <SourceCard
+          key={source.id}
+          authenticated={authenticated}
+          errorMessage={errorMessage}
+          pending={false}
+          pendingDisconnect={false}
+          source={source}
+          onDisconnectTargetChange={() => {}}
+          onMigrationRetry={() => {}}
+          onSetupGuideOpen={() => {}}
+          onStartConnection={() => Promise.resolve()}
+        />
+      ))}
+    </div>
   );
 }
 

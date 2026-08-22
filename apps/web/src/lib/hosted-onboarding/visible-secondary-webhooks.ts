@@ -8,7 +8,11 @@ import type { HostedMember, PrismaClient } from "@prisma/client";
 
 import { getPrisma } from "../prisma";
 import { sha256Hex } from "../primitives";
-import { isHostedOnboardingError } from "./errors";
+import {
+  HOSTED_STRIPE_EFFECT_PENDING_MESSAGE,
+  HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
+  isHostedOnboardingError,
+} from "./errors";
 import {
   buildHostedFamilyDraftCheckoutConflictReplyText,
 } from "./family-plan";
@@ -103,6 +107,7 @@ const HOSTED_TELEGRAM_GROUP_CHAT_UNAVAILABLE_REPLY =
 
 const HOSTED_LINQ_VISIBLE_SECONDARY_REASONS = new Set([
   "family-invite-not-accepted",
+  HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
   "group-chat",
   "home-line-capacity-exhausted",
   "signup-link-already-sent",
@@ -130,6 +135,7 @@ const HOSTED_TELEGRAM_VISIBLE_SECONDARY_REASONS = new Set([
   "ambiguous-telegram-binding",
   "family-invite-draft-recovery-required",
   "family-invite-not-accepted",
+  HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
   "group-chat-provision-unavailable",
   "telegram-binding-changed",
   "unlinked-telegram",
@@ -318,6 +324,8 @@ export function resolveHostedLinqVisibleSecondaryReply(input: {
   recognizedSender: boolean;
 }): string | null {
   switch (input.reason) {
+    case HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON:
+      return HOSTED_STRIPE_EFFECT_PENDING_MESSAGE;
     case "family-invite-not-accepted":
       return HOSTED_FAMILY_INVITE_UNAVAILABLE_REPLY;
     case "signup-link-already-sent":
@@ -346,6 +354,8 @@ export function resolveHostedTelegramVisibleSecondaryReply(input: {
   signupUrl: string | null;
 }): string | null {
   switch (input.reason) {
+    case HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON:
+      return input.isDirect ? HOSTED_STRIPE_EFFECT_PENDING_MESSAGE : null;
     case "family-invite-draft-recovery-required":
       return input.isDirect && input.familyInviteCode
         ? buildHostedFamilyDraftCheckoutConflictReplyText({

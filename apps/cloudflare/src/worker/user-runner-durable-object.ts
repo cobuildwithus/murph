@@ -73,6 +73,7 @@ export class UserRunnerDurableObject extends DurableObject implements UserRunner
 
   async ensureRuntimeProcessingForUser(
     input: HostedRuntimeEnsureProcessingRequest & {
+      commandStartedAtEpochMs?: number;
       commandTimeoutMs?: number;
       orchestration?: NonNullable<HostedRuntimeLatencyPhaseBreakdown["orchestration"]> | null;
       userId: string;

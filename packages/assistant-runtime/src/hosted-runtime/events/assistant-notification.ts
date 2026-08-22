@@ -31,6 +31,9 @@ import {
   emitHostedExecutionStructuredLog,
   extractHostedAssistantNotificationRedactedDetails,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
+} from "@murphai/hosted-execution/runtime-control";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
 import type { HostedRuntimeEffectsPort } from "../platform.ts";
@@ -192,6 +195,25 @@ export async function executeHostedMemberActivatedWake(input: {
     });
   }
 
+  if (signupWelcome.route.channel === "telegram") {
+    redactedLogEntries.push(
+      emitHostedMemberActivationSignupWelcomeLifecycleLog({
+        extraDetails: {
+          eventCode: "assistant.signup_welcome.telegram_suppressed",
+          terminalDisposition: "proactive_telegram_disabled",
+        },
+        message: "Hosted Telegram signup welcome ended without proactive delivery.",
+        phase: "wake.running",
+        wake: input.wake,
+      }),
+    );
+    return createNoopMailboxEffect({
+      conversationMetrics: null,
+      mailboxLane: "member-activated",
+      redactedLogEntries,
+    });
+  }
+
   redactedLogEntries.push(
     emitHostedMemberActivationSignupWelcomeLifecycleLog({
       message: "Hosted member activation signup welcome started.",
@@ -271,6 +293,24 @@ export async function executeHostedAssistantNotificationWake(input: {
       wake: input.wake,
     }),
   ];
+  if (isHostedTelegramSignupWelcomeNotification(input.wake)) {
+    redactedLogEntries.push(
+      emitHostedAssistantNotificationLifecycleLog({
+        extraDetails: {
+          eventCode: "assistant.signup_welcome.telegram_suppressed",
+          terminalDisposition: "proactive_telegram_disabled",
+        },
+        message: "Hosted Telegram signup welcome ended without proactive delivery.",
+        phase: "wake.running",
+        wake: input.wake,
+      }),
+    );
+    return createNoopMailboxEffect({
+      conversationMetrics: null,
+      mailboxLane: "assistant-notification",
+      redactedLogEntries,
+    });
+  }
   let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
   let deliveryIntentIds: string[] = [];
@@ -761,6 +801,15 @@ function buildAssistantNotificationInput(
   if (privateAssistantAskCompletion) {
     requireHostedPrivateAssistantAskCompletionNotification(wake);
   }
+  if (
+    wake.notification.groupContextHandoff != null
+    || wake.notification.notificationPromptProfile === "context-handoff"
+    || wake.eventId.startsWith(
+      HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
+    )
+  ) {
+    requireHostedGroupContextHandoffNotification(wake);
+  }
   return buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
@@ -918,6 +967,37 @@ function buildAssistantNotificationInputFromRoute(input: {
   };
 }
 
+function requireHostedGroupContextHandoffNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): void {
+  const handoff = wake.notification.groupContextHandoff;
+  const authority = wake.notification.externalThreadRouteAuthority;
+  const route = wake.notification.route;
+  if (
+    !wake.eventId.startsWith(
+      HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
+    )
+    || !handoff
+    || wake.notification.notificationPromptProfile !== "context-handoff"
+    || wake.notification.deliveryDedupeToken !== wake.eventId
+    || wake.notification.deliveryIdempotencyKey !== wake.eventId
+    || wake.notification.deliveryDispatchMode !== "queue-only"
+    || wake.notification.firstContact != null
+    || wake.notification.privateAssistantAskCompletion != null
+    || wake.notification.responsePolicy?.kind !== "require_send"
+    || authority == null
+    || authority.containerMemberId !== wake.userId
+    || authority.channel !== route.channel
+    || authority.threadId !== route.delivery.target
+    || route.delivery.kind !== "thread"
+    || route.threadIsDirect !== false
+  ) {
+    throw new TypeError(
+      "Hosted group context handoff notification proof is invalid.",
+    );
+  }
+}
+
 function requireHostedPrivateAssistantAskCompletionNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
 ): void {
@@ -934,6 +1014,7 @@ function requireHostedPrivateAssistantAskCompletionNotification(
     || wake.notification.deliveryDispatchMode !== "queue-only"
     || wake.notification.externalThreadRouteAuthority != null
     || wake.notification.firstContact != null
+    || wake.notification.groupContextHandoff != null
     || wake.notification.notificationPromptProfile != null
     || wake.notification.route.threadIsDirect !== true
     || (
@@ -1069,6 +1150,21 @@ function isHostedSignupWelcomeNotification(
     && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
     && wake.notification.deliveryDedupeToken === signupWelcomeToken
     && wake.notification.deliveryIdempotencyKey === signupWelcomeToken
+  );
+}
+
+function isHostedTelegramSignupWelcomeNotification(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): boolean {
+  const signupWelcomeToken = `signup-welcome:${wake.userId}`;
+  return (
+    wake.notification.route.channel === "telegram"
+    && wake.notification.responsePolicy?.kind === "require_send_exact_text"
+    && wake.notification.firstContact?.markSeenOnDeliveryAccepted === true
+    && (
+      wake.notification.deliveryDedupeToken === signupWelcomeToken
+      || wake.notification.deliveryIdempotencyKey === signupWelcomeToken
+    )
   );
 }
 

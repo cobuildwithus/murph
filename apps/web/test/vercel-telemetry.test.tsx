@@ -174,6 +174,8 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/integrations/connect/private-claim",
     "/join/private-invite",
     "/experiments/runs/private-run",
+    "/screenshots",
+    "/screenshots/home",
     "/unknown/private-segment",
   ]) {
     mocks.pathname = pathname;
@@ -537,7 +539,11 @@ function listStaticPagePathnames(
   appSources: Array<{ path: string; source: string }>,
 ): string[] {
   return appSources
-    .filter(({ path }) => path === "app/page.tsx" || path.endsWith("/page.tsx"))
+    .filter(
+      ({ path }) =>
+        path !== "app/screenshots/page.tsx"
+        && (path === "app/page.tsx" || path.endsWith("/page.tsx")),
+    )
     .flatMap(({ path }) => {
       const segments = path
         .split("/")

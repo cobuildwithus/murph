@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type {
   HostedWorkspaceInvocationResult,
+  HostedWorkspaceState,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+} from "@murphai/hosted-execution/orchestration-control";
 import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_SOL_MODEL,
@@ -509,6 +513,76 @@ describe("hosted runner container identity", () => {
     })).resolves.toEqual(runtimeTarget);
   });
 
+  it("preserves an orchestration-owned assistant block with custom inference", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const override: HostedAssistantCustomInferenceOverride = {
+      contextWindowTokens: 131_072,
+      modelAlias: "murph-custom-r7",
+      protocol: "responses",
+      revision: 7,
+      supportsImages: false,
+      verificationProfile: "murph-codex-0.147.0-portable-responses-v1",
+    };
+    const runtimeTarget = {
+      auth: {
+        kind: "bearer" as const,
+        secret: "synthetic-upstream-secret",
+      },
+      contextWindowTokens: override.contextWindowTokens,
+      endpointUrl: "https://inference.example.com/v1/responses",
+      model: "synthetic-upstream-model",
+      protocol: override.protocol,
+      revision: override.revision,
+      schema: "murph.hosted-inference-runtime-target.v1" as const,
+      supportsImages: override.supportsImages,
+      verificationProfile: override.verificationProfile,
+    };
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>(async () =>
+      Response.json(runtimeTarget)
+    ));
+    const service = createRuntimeInvocationService({
+      hostedAssistantCustomInferenceOverride: override,
+      invokedContainerNames: [],
+      platformAiUsageAllowed: true,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        assistantExecutionBlocked: true,
+        orchestrationAttemptId: "orchestration_attempt_blocked_custom_inference",
+        processingMode: "system_mailbox",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(prepared.job.request).toMatchObject({
+      assistantExecutionBlocked: true,
+      processingMode: "system_mailbox",
+    });
+    expect(prepared.job.runtime?.forwardedEnv).toMatchObject({
+      HOSTED_ASSISTANT_MODEL: "murph-custom-r7",
+      HOSTED_ASSISTANT_PROVIDER: "hosted-custom-inference",
+    });
+  });
+
   it("narrows a denied managed default wake to model-free system mailbox work", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
@@ -543,6 +617,61 @@ describe("hosted runner container identity", () => {
     });
     expect(invokedContainerNames).toEqual([]);
     expect(prepared.job.request.processingMode).toBe("system_mailbox");
+    if (!prepared.token.providerEgressToken) {
+      throw new Error("Expected a provider egress token on the active fence.");
+    }
+    await expect(stateStore.validateProviderEgressToken({
+      providerEgressToken: prepared.token.providerEgressToken,
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      owns: true,
+      platformAiUsageAllowed: false,
+    });
+  });
+
+  it("keeps a due delivery-only wake on its outbox-owning phase while metered egress stays denied", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    const durable = createRunnerDurableState();
+    const stateStore = new RunnerStateStore(durable.state);
+    const service = createRuntimeInvocationService({
+      invokedContainerNames: [],
+      platformAiUsageAllowed: false,
+      runnerRuntimeEnvSource: {
+        CF_VERSION_METADATA: { id: "version_1" },
+        HOSTED_ASSISTANT_MODEL: HOSTED_ASSISTANT_TERRA_MODEL,
+        HOSTED_ASSISTANT_PROVIDER: "openai",
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
+          "provider-egress-signing-secret",
+        OPENAI_API_KEY: "test-openai-key",
+      },
+      stateStore,
+      state: durable.state,
+      workspace: {
+        createdAt: "2026-06-02T23:59:00.000Z",
+        nextWakeAt: "2026-06-02T23:59:59.000Z",
+        nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+        snapshotRef: null,
+        updatedAt: "2026-06-02T23:59:59.000Z",
+        userId: TEST_USER_ID,
+        version: "5",
+      },
+    });
+    const token = await stateStore.beginWriteFence({
+      runnerContainerName: "member_123--v-version_1",
+      userId: TEST_USER_ID,
+    });
+
+    const prepared = await service.prepareWithFence({
+      input: {
+        orchestrationAttemptId: "orchestration_attempt_delivery_denied",
+        userId: TEST_USER_ID,
+      },
+      token,
+    });
+
+    expect(prepared.job.request.processingMode).toBeUndefined();
+    expect(prepared.job.request.assistantExecutionBlocked).toBeUndefined();
     if (!prepared.token.providerEgressToken) {
       throw new Error("Expected a provider egress token on the active fence.");
     }
@@ -816,6 +945,7 @@ function createRuntimeInvocationService(input: {
   runnerRuntimeEnvSource: Readonly<Record<string, unknown>>;
   state: DurableObjectStateLike;
   stateStore: RunnerStateStore;
+  workspace?: HostedWorkspaceState | null;
 }): RuntimeInvocationService {
   return new RuntimeInvocationService({
     assertWorkspaceBelongsToRunnerUser(workspace, userId) {
@@ -827,7 +957,7 @@ function createRuntimeInvocationService(input: {
     readHostedRuntimeStatusFromWeb: async (userId) => ({
       mailboxLag: [],
       userId,
-      workspace: null,
+      workspace: input.workspace ?? null,
     }),
     readHostedWebControlBaseUrl: () => "https://web.example.test",
     readHostedWorkspaceFromWeb: async () => ({
@@ -856,7 +986,7 @@ function createRuntimeInvocationService(input: {
               input.hostedAssistantReasoningEffortOverride,
           }
         : {}),
-      workspace: null,
+      workspace: input.workspace ?? null,
     }),
     runnerContainerNamespace: createRunnerContainerNamespace({
       invokedContainerNames: input.invokedContainerNames,

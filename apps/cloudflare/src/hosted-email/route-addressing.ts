@@ -18,6 +18,17 @@ export function isHostedEmailPublicSenderAddress(
   return publicSenderAddress !== null && normalizedAddress === publicSenderAddress;
 }
 
+export function isHostedEmailPublicBootstrapAddress(
+  address: string | null | undefined,
+  config: HostedEmailConfig,
+): boolean {
+  const publicBootstrapAddress = normalizeHostedEmailAddress(config.publicAddress);
+  const normalizedAddress = normalizeHostedEmailAddress(address);
+
+  return publicBootstrapAddress !== null
+    && normalizedAddress === publicBootstrapAddress;
+}
+
 export function parseHostedEmailRouteCandidate(
   value: string | null | undefined,
   config: HostedEmailConfig,

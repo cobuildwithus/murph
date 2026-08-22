@@ -3,6 +3,12 @@ export type JunctionRegion = "us" | "eu";
 
 export interface JunctionDeviceSyncProviderConfig {
   apiKey: string;
+  /**
+   * Optional non-secret isolation namespace for deterministic Junction users.
+   * Production and ordinary development omit it to preserve the established
+   * `murph_` identity shape.
+   */
+  clientUserIdNamespace?: string;
   clientUserIdSecret: string;
   environment: JunctionEnvironment;
   region: JunctionRegion;

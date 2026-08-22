@@ -1292,9 +1292,7 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'https://cdn.example.test/assistant/cat.png',
-                      alt: 'A cat image',
-                      source: 'cat-catalog-item',
+                      url: 'http://cdn.example.test/assistant/not-https.png',
                     },
                   ],
                 },
@@ -1306,11 +1304,11 @@ describe('assistant codex runtime', () => {
           expect(messages[4]).toEqual({
             id: 17,
             result: {
-              success: true,
+              success: false,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '1 response image attached',
+                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
                 },
               ],
             },
@@ -1325,7 +1323,9 @@ describe('assistant codex runtime', () => {
                 arguments: {
                   media: [
                     {
-                      url: 'http://cdn.example.test/assistant/not-https.png',
+                      url: 'https://cdn.example.test/assistant/cat.png',
+                      alt: 'A cat image',
+                      source: 'cat-catalog-item',
                     },
                   ],
                 },
@@ -1337,11 +1337,11 @@ describe('assistant codex runtime', () => {
           expect(messages[5]).toEqual({
             id: 18,
             result: {
-              success: false,
+              success: true,
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid response media arguments',
+                  text: '1 response image attached',
                 },
               ],
             },
@@ -6398,9 +6398,9 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-27_250, 'SIGTERM')
   })
 
-  it('fails closed before turn start when permission attestation drifts', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-attest-work-')
-    const workspaceRoot = await createTempDir('assistant-codex-attest-root-')
+  it('starts fresh named-permission turns without response metadata', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-permission-work-')
+    const workspaceRoot = await createTempDir('assistant-codex-permission-root-')
     const children: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(children)
 
@@ -6416,15 +6416,36 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({
             id: threadStart.id,
             result: {
-              activePermissionProfile: {
-                id: 'murph-group-read',
-              },
-              approvalPolicy: 'never',
-              cwd: workingDirectory,
-              instructionSources: [{ source: 'workspace' }],
-              runtimeWorkspaceRoots: [workspaceRoot],
               thread: {
-                id: 'thread-attestation-drift',
+                id: 'thread-permission-metadata-free',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-permission-metadata-free',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-permission-metadata-free',
+                text: 'Completed without response metadata.',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-permission-metadata-free',
+                status: 'completed',
               },
             },
           }))
@@ -6440,22 +6461,28 @@ describe('assistant codex runtime', () => {
         ephemeral: true,
         permissions: 'murph-group-read',
         processLifetime: 'one-shot',
-        prompt: 'must never reach turn start',
+        prompt: 'continue without response metadata',
         runtimeWorkspaceRoots: [workspaceRoot],
         workingDirectory,
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-      context: {
-        mismatchedFields: ['instructionSources'],
-        retryable: false,
-      },
+    ).resolves.toMatchObject({
+      finalMessage: 'Completed without response metadata.',
+      sessionId: 'thread-permission-metadata-free',
+      turnId: 'turn-permission-metadata-free',
     })
 
     const child = requireMockChildProcess(children[0] ?? null)
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      permissions: 'murph-group-read',
+      runtimeWorkspaceRoots: [workspaceRoot],
+    })
     expect(readWrittenRpcMessages(child).some(
       (message) => message.method === 'turn/start',
-    )).toBe(false)
+    )).toBe(true)
     expect(child.signalCode).toBe('SIGTERM')
   })
 
@@ -16862,10 +16889,17 @@ describe('assistant codex runtime', () => {
         phase: 'tool_call',
         issueKind: 'schema_rejection',
         severity: 'warning',
+        summary: 'Tool input failed schema validation.',
         errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
         details: expect.objectContaining({
           detailsSchema: 'murph.tool-call-validation-digest.v1',
-          invalidPaths: ['intentIds.[]'],
+          invalidPaths: ['intentIds[]'],
+          pathIssues: [{
+            code: 'invalid_format',
+            expected: 'string',
+            path: 'intentIds[]',
+            received: 'string.len_1_32',
+          }],
           schemaName: 'murph.pending_vault_files.input',
           toolName: 'murph.pending_vault_files',
         }),
@@ -22123,6 +22157,71 @@ describe('steered final segments', () => {
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
     )
+  })
+
+  it('emits generated-audio timing from the Codex voice-memo tool boundary', async () => {
+    const onTraceEvent = vi.fn()
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        expectedText: 'generated voice memo attached to the final response',
+        id: 872,
+        kind: 'generate-voice-memo',
+        text: 'Read this aloud.',
+      },
+    ], {
+      onTraceEvent,
+      voiceMemoRuntime: {
+        elevenLabs: {
+          apiKeyAvailable: true,
+          modelId: 'eleven_multilingual_v2',
+          voiceId: 'voice_murph',
+        },
+        async generateAndUpload(request) {
+          request.recordPhaseTiming?.({
+            deliveryMode: 'synchronous',
+            generationDurationMs: 21,
+            mediaKind: 'voice_memo',
+            outcome: 'succeeded',
+            terminalPhase: 'upload',
+            uploadDurationMs: 13,
+          })
+          return {
+            attachmentId: 'attachment_timing_trace',
+            filename: 'timing-trace.mp3',
+            ok: true,
+          }
+        },
+        kind: 'linq',
+      },
+    })
+
+    const timingEvents = onTraceEvent.mock.calls
+      .map(([event]) => event)
+      .filter((event) => asRecord(event.rawEvent).schema ===
+        'murph.assistant-codex-generated-audio-phase-timing.v1')
+
+    expect(timingEvents).toEqual([
+      {
+        codexThreadId: 'thread-steered-finals',
+        rawEvent: {
+          schema: 'murph.assistant-codex-generated-audio-phase-timing.v1',
+          type: 'assistant.codex.generated_audio_phase_timing',
+          generatedAudioDeliveryMode: 'synchronous',
+          generatedAudioGenerationDurationMs: 21,
+          generatedAudioKind: 'voice_memo',
+          generatedAudioOutcome: 'succeeded',
+          generatedAudioTerminalPhase: 'upload',
+          generatedAudioUploadDurationMs: 13,
+        },
+        updates: [],
+      },
+    ])
+    expect(result.responseMedia).toEqual([
+      expect.objectContaining({
+        filename: 'timing-trace.mp3',
+        kind: 'voice_memo',
+      }),
+    ])
   })
 
   it('blocks response effects before work after workout card overflow owns presentation', async () => {

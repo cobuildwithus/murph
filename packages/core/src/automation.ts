@@ -8,6 +8,7 @@ import {
   MIN_AUTOMATION_EVERY_MS,
   assistantReasoningEffortValues,
   automationActiveUntilSchema,
+  automationContextReferencesSchema,
   automationFrontmatterSchema,
   automationContinuityPolicyValues,
   automationDeviceActivityKindSchema,
@@ -22,6 +23,7 @@ import {
   parseAutomationSupportSeriesTag,
   resolveNextDeviceActivityCoverageCursor,
   type AutomationAssistantTargetOverride,
+  type AutomationContextReference,
   type AutomationContinuityPolicy,
   type AutomationDeviceActivityKind,
   type AutomationDeviceActivitySource,
@@ -97,6 +99,7 @@ function normalizeRecurringScheduleTimeZone(
 
 export type {
   AutomationAssistantTargetOverride,
+  AutomationContextReference,
   AutomationContinuityPolicy,
   AutomationRoute,
   AutomationSchedule,
@@ -117,6 +120,8 @@ export interface AutomationRecord {
   route: AutomationRoute;
   assistantTargetOverride: AutomationAssistantTargetOverride | null;
   supportKind: AutomationSupportKind | null;
+  plannedOccurrenceOffsetMs: number | null;
+  contextReferences: AutomationContextReference[];
   continuityPolicy: AutomationContinuityPolicy;
   tags: string[];
   createdAt: string;
@@ -164,6 +169,8 @@ export interface PatchAutomationInput {
   route?: AutomationRoute;
   assistantTargetOverride?: AutomationAssistantTargetOverride | null;
   supportKind?: AutomationSupportKind | null;
+  plannedOccurrenceOffsetMs?: number | null;
+  contextReferences?: AutomationContextReference[];
   schedule?: AutomationSchedule;
   slug?: string;
   status?: AutomationStatus;
@@ -296,6 +303,19 @@ function normalizeAutomationSupportKind(
   value: unknown,
 ): AutomationSupportKind | null {
   return optionalEnum(value, automationSupportKindValues, "supportKind") ?? null;
+}
+
+function normalizeAutomationPlannedOccurrenceOffsetMs(value: unknown): number | null {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "plannedOccurrenceOffsetMs must be a nonnegative safe integer.",
+    );
+  }
+  return value as number;
 }
 
 function normalizeAutomationDeviceActivitySource(value: unknown): AutomationDeviceActivitySource | undefined {
@@ -611,6 +631,19 @@ function normalizeAutomationInstructions(value: unknown): string {
   return instructions;
 }
 
+function normalizeAutomationContextReferences(
+  value: unknown,
+): AutomationContextReference[] {
+  try {
+    return automationContextReferencesSchema.parse(value ?? []);
+  } catch {
+    throw new VaultError(
+      "VAULT_INVALID_INPUT",
+      "contextReferences must contain unique canonical entityKind and entityId pairs.",
+    );
+  }
+}
+
 function normalizeAutomationTags(value: unknown): string[] {
   if (value === undefined || value === null) {
     return [];
@@ -775,6 +808,12 @@ function buildAutomationFrontmatter(record: AutomationRecord): FrontmatterObject
           ),
         }),
     ...(record.supportKind === null ? {} : { supportKind: record.supportKind }),
+    ...(record.plannedOccurrenceOffsetMs === null
+      ? {}
+      : { plannedOccurrenceOffsetMs: record.plannedOccurrenceOffsetMs }),
+    ...(record.contextReferences.length === 0
+      ? {}
+      : { contextReferences: record.contextReferences }),
     continuityPolicy: record.continuityPolicy,
     tags: record.tags,
     createdAt: record.createdAt,
@@ -821,6 +860,12 @@ function parseAutomationRecord(
       attributes.assistantTargetOverride,
     ),
     supportKind: normalizeAutomationSupportKind(attributes.supportKind),
+    plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
+      attributes.plannedOccurrenceOffsetMs,
+    ),
+    contextReferences: normalizeAutomationContextReferences(
+      attributes.contextReferences,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(attributes.continuityPolicy),
     tags: normalizeAutomationTags(attributes.tags),
     createdAt,
@@ -1091,6 +1136,16 @@ export async function patchAutomation(
         input.supportKind === undefined
           ? existingRecord.supportKind
           : normalizeAutomationSupportKind(input.supportKind),
+      plannedOccurrenceOffsetMs:
+        input.plannedOccurrenceOffsetMs === undefined
+          ? existingRecord.plannedOccurrenceOffsetMs
+          : normalizeAutomationPlannedOccurrenceOffsetMs(
+              input.plannedOccurrenceOffsetMs,
+            ),
+      contextReferences:
+        input.contextReferences === undefined
+          ? existingRecord.contextReferences
+          : normalizeAutomationContextReferences(input.contextReferences),
       schedule: input.schedule === undefined
         ? existingRecord.schedule
         : resolveAutomationPatchSchedule({
@@ -1672,6 +1727,16 @@ async function upsertAutomationWithLatestRegistry(
       input.supportKind === undefined
         ? existingRecord?.supportKind ?? null
         : normalizeAutomationSupportKind(input.supportKind),
+    plannedOccurrenceOffsetMs:
+      input.plannedOccurrenceOffsetMs === undefined
+        ? existingRecord?.plannedOccurrenceOffsetMs ?? null
+        : normalizeAutomationPlannedOccurrenceOffsetMs(
+            input.plannedOccurrenceOffsetMs,
+          ),
+    contextReferences:
+      input.contextReferences === undefined
+        ? existingRecord?.contextReferences ?? []
+        : normalizeAutomationContextReferences(input.contextReferences),
     continuityPolicy:
       normalizeAutomationContinuityPolicy(input.continuityPolicy ?? existingRecord?.continuityPolicy),
     tags,
@@ -1744,6 +1809,12 @@ export function buildAutomationMarkdownPreview(
       input.assistantTargetOverride,
     ),
     supportKind: normalizeAutomationSupportKind(input.supportKind),
+    plannedOccurrenceOffsetMs: normalizeAutomationPlannedOccurrenceOffsetMs(
+      input.plannedOccurrenceOffsetMs,
+    ),
+    contextReferences: normalizeAutomationContextReferences(
+      input.contextReferences,
+    ),
     continuityPolicy: normalizeAutomationContinuityPolicy(input.continuityPolicy),
     tags: normalizeAutomationTags(input.tags),
     createdAt: now,

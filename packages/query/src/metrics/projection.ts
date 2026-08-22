@@ -64,9 +64,11 @@ export function buildMetricProjection(
   });
   return {
     dailySampleSummaries,
-    metricPoints: applyWearableSummaryMetricPrecedence(
-      applyJunctionPreciseBodyObservationPrecedence(metricPoints),
-      wearableMetricEvidence.suppressionEvidence,
+    metricPoints: applyJunctionPreciseBodyObservationPrecedence(
+      applyWearableSummaryMetricPrecedence(
+        metricPoints,
+        wearableMetricEvidence.suppressionEvidence,
+      ),
     ),
     wearableMetricRows,
   };
@@ -164,13 +166,15 @@ const ACTIVITY_METRIC_EVIDENCE = [
   { metricKey: "workout-count", summaryField: "sessionCount", sourceKind: "activity-summary" },
   { metricKey: "active-calories", summaryField: "activeCalories", sourceKind: "activity-summary" },
   { metricKey: "activity-score", summaryField: "activityScore", sourceKind: "activity-summary" },
+  { metricKey: "activity-average-heart-rate", summaryField: "activityAverageHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "walking-average-heart-rate", summaryField: "walkingAverageHeartRate", sourceKind: "activity-summary" },
+  { metricKey: "minimum-heart-rate", summaryField: "minimumHeartRate", sourceKind: "activity-summary" },
   { metricKey: "day-strain", summaryField: "dayStrain", sourceKind: "activity-summary" },
   { metricKey: "distance-km", summaryField: "distanceKm", sourceKind: "activity-summary" },
   { metricKey: "elevation-gain-meters", summaryField: "totalElevationGainMeters", sourceKind: "activity-summary" },
   { metricKey: "estimated-vo2-max", summaryField: "estimatedVo2Max", sourceKind: "activity-summary" },
   { metricKey: "floors-climbed", summaryField: "floorsClimbed", sourceKind: "activity-summary" },
   { metricKey: "average-heart-rate", summaryField: "averageHeartRate", sourceKind: "activity-summary" },
-  { metricKey: "walking-average-heart-rate", summaryField: "walkingAverageHeartRate", sourceKind: "activity-summary" },
   { metricKey: "lowest-heart-rate", summaryField: "lowestHeartRate", sourceKind: "activity-summary" },
   { metricKey: "max-heart-rate", summaryField: "maxHeartRate", sourceKind: "activity-summary" },
   { metricKey: "workout-strain", summaryField: "workoutStrain", sourceKind: "activity-summary" },
@@ -179,6 +183,9 @@ const ACTIVITY_METRIC_EVIDENCE = [
 const BODY_STATE_METRIC_EVIDENCE = [
   { metricKey: "body-weight", summaryField: "weightKg", sourceKind: "wearable-summary" },
   { metricKey: "body-fat-percentage", summaryField: "bodyFatPercentage", sourceKind: "wearable-summary" },
+  { metricKey: "bmi", summaryField: "bmi", sourceKind: "wearable-summary" },
+  { metricKey: "lean-body-mass", summaryField: "leanBodyMassKg", sourceKind: "wearable-summary" },
+  { metricKey: "waist-circumference", summaryField: "waistCircumference", sourceKind: "wearable-summary" },
   { metricKey: "body-water-percentage", summaryField: "bodyWaterPercentage", sourceKind: "wearable-summary" },
   { metricKey: "bone-mass-percentage", summaryField: "boneMassPercentage", sourceKind: "wearable-summary" },
   { metricKey: "muscle-mass-percentage", summaryField: "muscleMassPercentage", sourceKind: "wearable-summary" },
@@ -313,20 +320,25 @@ interface JunctionBodyObservationIdentity {
 function applyJunctionPreciseBodyObservationPrecedence(
   points: readonly MetricPoint[],
 ): MetricPoint[] {
-  const preciseIdentities = new Set(
+  const preciseEventIdentities = new Set(
     points.flatMap((point) => {
       const identity = resolveJunctionBodyObservationIdentity(point);
-      return identity?.kind === "precise" ? [identity.key] : [];
+      return identity?.kind === "precise" && point.source.family === "event"
+        ? [identity.key]
+        : [];
     }),
   );
 
-  if (preciseIdentities.size === 0) {
+  if (preciseEventIdentities.size === 0) {
     return [...points];
   }
 
   return points.filter((point) => {
     const identity = resolveJunctionBodyObservationIdentity(point);
-    return identity?.kind !== "summary" || !preciseIdentities.has(identity.key);
+    if (!identity || !preciseEventIdentities.has(identity.key)) {
+      return true;
+    }
+    return identity.kind === "precise" && point.source.family === "event";
   });
 }
 
@@ -418,6 +430,10 @@ function applyWearableSummaryMetricPrecedence(
 
   return points.filter((point) => {
     if (point.source.family !== "event" || point.source.kind !== "observation") {
+      return true;
+    }
+
+    if (resolveJunctionBodyObservationIdentity(point)?.kind === "precise") {
       return true;
     }
 

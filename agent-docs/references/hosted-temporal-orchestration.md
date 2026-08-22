@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-11
+Last verified: 2026-08-16
 
 ## Decision
 
@@ -121,7 +121,7 @@ write fence is the active ownership truth while a run is in flight.
 | `apps/web` | Webhook verification, provider minimization, mailbox append and dedupe, device-sync dirty state, hosted member/billing/usage/product policy, hosted workspace metadata, mailbox lag, redacted runtime logs/status, reconciliation-facts endpoint. | Codex invocation, assistant automation semantics, outbox truth, internal runtime timers, container routing, Temporal workflow state. |
 | Temporal | Per-user workflow identity, pointer-only signals, coalesced wake hints, durable timers from web-owned reconciliation facts, retry policy for web facts reads and Cloudflare processing adapter calls, continue-as-new history bounds, and global device-sync scheduled-wake cadence/retry through a short-lived reconciler workflow. | Raw payloads, decrypted mailbox contents, provider headers, prompts, transcripts, vault data, full workspace state, full runtime invocation results, signed usage decisions, assistant automation logic, device provider semantics, usage policy decisions, Cloudflare state, provider tokens, dirty resource bodies, or canonical dirty/reconcile facts. |
 | `apps/cloudflare` | Durable Object routing, write-fence generation and validation, container invoke/wake, runtime callback authorization, direct R2/snapshot transport, execution cleanup, alarm cleanup for active write fences. | Reconciliation-facts derivation, mailbox backlog decisions, assistant wake calculation, browser-vault scheduling policy, device-sync dirty semantics, retry caps as orchestration, queue history, product facts. |
-| Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local pre-floor assistant wake service, assistant `nextWakeAt`/`nextWakeReason` projection, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
+| Murph runtime | Mailbox import watermarks, `AssistantInputEvent` staging, active-turn admission, Codex invocation, assistant automation and timers, device-sync runtime execution, outbox/provider cleanup, idle-floor/shutdown checkpointing plus invocation-local pre-floor assistant wake service, assistant `nextWakeAt`/`nextWakeReason` projection including model-free `assistant_delivery` retries, and inbox media retention wake projection. | Temporal workflow state, web product policy, hosted member/billing facts, Durable Object routing, Cloudflare execution lease ownership. |
 
 ## Temporal State
 
@@ -187,7 +187,9 @@ the owning marker is durable, then represented as a bounded `device-sync.wake`
 mailbox handoff keyed by connection and reconcile timestamp. Dirty webhook
 freshness is separate: web persists dirty state and appends one deterministic
 `device-sync.wake` handoff on clean-to-dirty transitions, but dirty rows are not
-selected by a global scheduled sweep. Historical `runtime.mailbox-lag-observed`
+selected by a global scheduled sweep. The existing shared mailbox-handoff sweep
+may re-signal one exact unconsumed `device-sync.wake` pointer per user; it reads
+mailbox and lane-watermark truth, not dirty rows. Historical `runtime.mailbox-lag-observed`
 and `runtime.device-sync-recovery-requested` rows remain valid runtime-control
 rows for drain compatibility, but web no longer produces them.
 
@@ -356,11 +358,13 @@ The per-user workflow reads source-less reconciliation facts from web:
 - `blocked`: nullable product/access block with `reason` and `retryAt`
 - `mailboxLag`: lane lag counters only
 - `workspace`: nullable projection with `nextWakeAt`, `nextWakeReason`,
-  `inboxMediaRetentionWakeAt`, and `version`
+  `inboxMediaRetentionWakeAt`, optional `systemMailboxFrontier`, and `version`
 
-Facts do not contain run/idle decisions, producer source/reason, raw mailbox
-payloads, workspace redacted status, signed usage decisions, or direct wake
-flags. Temporal interprets the facts mechanically: fresh mailbox signals may
+Facts do not contain run/idle decisions, raw mailbox kinds, producer
+source/reason, raw mailbox payloads, workspace redacted status, signed usage
+decisions, or direct wake flags. The frontier classification exposes only
+whether the first retained system item is bounded model-free work or remains
+default-owned. Temporal interprets the facts mechanically: fresh mailbox signals may
 ensure processing directly; carried pointers and timers re-read facts;
 conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
@@ -368,6 +372,12 @@ wake selects `inbox_media_retention` processing when foreground/default work is
 not runnable; future or absent wakes wait. These modes are invocation input, not
 new scheduler state. Foreground/default work must replace an active
 system-mailbox or retention owner instead of waiting for its idle checkpoint.
+The runtime projects an outbox-only continuation as `assistant_delivery` rather
+than model-capable `assistant`. Web admits that due delivery continuation
+without the managed-AI usage gate; Temporal still selects ordinary processing,
+and the runtime assistant phase drains the durable outbox. Provider egress keeps
+its independent fail-closed spend check if unrelated model work becomes visible
+during the same invocation.
 
 Usage and product policy blocks are successful reconciliation reads with a
 non-null `blocked` object, never Temporal activity failures. Transport, auth,
@@ -437,12 +447,22 @@ Request summary:
 
 - `orchestrationAttemptId`: an opaque Temporal attempt id for observability and
   idempotency at the orchestration boundary.
+- `processingMode`: an optional narrow execution lane selected from current
+  reconciliation facts.
+- `assistantExecutionBlocked`: an optional positive-only execution guard valid
+  only with `system_mailbox`. Temporal includes it when Web blocks assistant
+  admission but retained model-free system work remains runnable. Cloudflare
+  forwards it to the runtime invocation without persisting a second policy
+  projection; the runtime drains eligible system work, skips assistant
+  execution, and preserves the canonical assistant wake for later restoration.
 
 The request does not carry signed AI usage decisions. Web reconciliation facts
-gate mailbox lag and workspace wakes that strongly imply foreground model work
-before Temporal calls Cloudflare, and the runtime/provider layer enforces spend
-before actual model calls. There is no Activity-local signed usage-decision
-endpoint in the Temporal execution path.
+gate mailbox lag and model-capable workspace wakes before Temporal calls
+Cloudflare. A due `assistant_delivery` wake is deliberately model-free at that
+gate so the runtime can reconcile an already-created outbox delivery; the
+runtime/provider layer still enforces spend before any actual model call. There
+is no Activity-local signed usage-decision endpoint in the Temporal execution
+path.
 
 Response summary:
 
@@ -506,6 +526,29 @@ existing Temporal HTTP timeout:
 Cloudflare uses its existing web-control/readiness timeout values as per-step
 caps inside that budget and never lets unsigned timeout metadata increase the
 configured Cloudflare wait.
+The Web direct-wake lane supplies a 25-second end-to-end command budget inside
+a shared 29-second outer deadline. Cloudflare starts its server-side clock at
+runtime-control authorization, before route parsing, Durable Object dispatch,
+consent serialization, and health-data admission. Container readiness is capped at 20
+wall-clock seconds end to end: at most 15 seconds for readiness, including
+lifecycle-lock queue time, plus one absolute five-second deadline shared by a
+readiness-triggered cleanup state read and destroy settlement. Its caller guard adds a
+separate one-second margin, so the RPC can
+settle before the request deadline. Shorter command budgets keep the smaller of
+15 seconds and the remaining time minus that one-second guard for readiness;
+they do not subtract cleanup time before a start fails. If cleanup then outlives
+the short budget, the outer guard preserves the fence. A `retry_later` may trigger one retry only
+when its delay and the minimum command/response window fit the remaining outer
+deadline. This fast lane never replaces the accepted Temporal signal or owns
+durable retry state. The relational latency trace stores only the final parsed
+direct result kind and accepted action/runtime attempt id; retry reasons remain
+in orchestration-correlated Cloudflare structured logs.
+
+Roll this boundary out Web first, then Cloudflare. New Web sends the bounded
+timeout but still accepts the legacy `202 { accepted: true }`; old Cloudflare
+already accepts the additive timeout metadata. After Web converges, new
+Cloudflare can safely await and return the full result without exposing old-Web
+callers to the shorter default budget during a cold start.
 
 ## Runtime Status And Completion
 
@@ -569,8 +612,9 @@ The hard-cut architecture is accepted when:
   sleeps/retries.
 - Temporal has one global due-reconcile device-sync scheduled wakes Schedule that
   starts a short-lived reconciler workflow whose web command appends bounded
-  `device-sync.wake` handoffs and re-signals bounded, already-durable preference
-  and queued Clinical Records mailbox candidates through one shared sweep. It
+  `device-sync.wake` handoffs and re-signals bounded, already-durable
+  device-sync, preference, runtime-control, and queued Clinical Records mailbox
+  candidates through one shared sweep. It
   selects at most one exact pending item per user ahead of its lane watermark.
   Clinical recovery does not create a second run, wake, receipt, or generation.
   There is no Vercel device-sync dirty-sweeper cron cadence and no

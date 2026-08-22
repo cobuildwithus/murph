@@ -23,7 +23,6 @@ import type {
   DeviceConnectionSourceResourceAvailabilitySummary,
   DeviceConnectionSourceStatus,
 } from "./client.ts";
-
 export {
   canCurrentRuntimeMutateJunctionHistoricalBackfillProgress,
   JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS,
@@ -42,6 +41,9 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =
+  "/api/internal/device-sync/fitbit-migration/cutover";
+export const HOSTED_EXECUTION_DEVICE_SYNC_PASS_JOB_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT = 100;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_SOURCE_LIMIT = 64;
 export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES =
@@ -63,6 +65,7 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT =
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_RECORD_LIMIT = 200;
 export const HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT = 5_000;
+export const HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT = 500;
 
 export const HOSTED_DEVICE_SYNC_EVENT_TO_PROVIDER_SEND_BUCKETS = [
   "under_5_minutes",
@@ -265,6 +268,15 @@ export interface HostedExecutionDeviceSyncReconcileResponse {
   status: "queued";
 }
 
+export interface HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
+  connectionId: string;
+}
+
+export interface HostedExecutionDeviceSyncFitbitMigrationCutoverResponse {
+  connectionId: string;
+  status: "complete" | "pending";
+}
+
 export interface HostedExecutionDeviceSyncRuntimeTokenBundle {
   accessToken: string;
   accessTokenExpiresAt: string | null;
@@ -367,6 +379,8 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceSnapshot {
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  /** Absent only during rolling deploys from a pre-epoch Web producer. */
+  lifecycleEpoch?: number;
   firstSeenAt: string;
   lastSeenAt: string;
   /** Last inbound payload carrying this source's data; null until one has. */
@@ -440,6 +454,7 @@ export interface HostedExecutionDeviceSyncRuntimeConnectionSourceUpdate {
   sourceInstanceKey: string;
   sourceProviderSlug: string;
   observedLastSeenAt: string | null;
+  observedLifecycleEpoch?: number;
   displayName?: string | null;
   status: DeviceConnectionSourceStatus;
   resourceAvailabilitySummary?: DeviceConnectionSourceResourceAvailabilitySummary;
@@ -659,11 +674,19 @@ export interface HostedExecutionDeviceSyncDirtyPendingResponse {
 }
 
 export interface HostedExecutionDeviceSyncDirtyAckRequest {
+  completedImports?: HostedExecutionDeviceSyncCompletedImport[];
   connectionId: string;
   processedDirtyPayloadIds?: string[];
   processedRevision: string;
   stagedDirtyAcks?: HostedExecutionDeviceSyncStagedDirtyAck[];
   userId: string;
+}
+
+export interface HostedExecutionDeviceSyncCompletedImport {
+  dirtyPayloadId: string;
+  importCompletedAt: string;
+  resource: string;
+  sourceProviderSlug: string;
 }
 
 export interface HostedExecutionDeviceSyncDirtyAckResponse {
@@ -732,6 +755,8 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   eventType: "string",
   historicalBackfill: "boolean",
   historicalBackfillVersion: "number",
+  historicalProofFirstSeenAt: "isoTimestamp",
+  historicalProofSourceProviderSlug: "string",
   historicalProviderRecordsSeen: "boolean",
   historicalRecordsSeen: "boolean",
   historicalUnresolvedProviderRecordIdentitiesJson: "string",
@@ -743,10 +768,14 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   occurredAt: "isoTimestamp",
   resource: "string",
   resourceCategory: "string",
+  sourceLifecycleEpoch: "number",
   resourceId: "string",
   resourceType: "string",
   sourceEventType: "string",
   sourceProviderSlug: "string",
+  summaryPhaseComplete: "boolean",
+  summaryResourceCursor: "string",
+  temporalAuthorityTimeZone: "string",
   timeseriesCursor: "isoTimestamp",
   timeseriesResourceCursor: "string",
   timeseriesWindowHours: "number",
@@ -758,6 +787,46 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
 
 export function buildHostedExecutionDeviceSyncConnectLinkPath(connectTarget: string): string {
   return `/api/internal/device-sync/connect-targets/${encodeURIComponent(connectTarget)}/connect-link`;
+}
+
+export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest(
+  value: unknown,
+): HostedExecutionDeviceSyncFitbitMigrationCutoverRequest {
+  const record = requireObject(value, "Hosted Fitbit migration cutover request");
+  assertSupportedFields(
+    record,
+    "Hosted Fitbit migration cutover request",
+    ["connectionId"],
+  );
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted Fitbit migration cutover request connectionId",
+    ),
+  };
+}
+
+export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse(
+  value: unknown,
+): HostedExecutionDeviceSyncFitbitMigrationCutoverResponse {
+  const record = requireObject(value, "Hosted Fitbit migration cutover response");
+  assertSupportedFields(
+    record,
+    "Hosted Fitbit migration cutover response",
+    ["connectionId", "status"],
+  );
+  if (record.status !== "complete" && record.status !== "pending") {
+    throw new TypeError(
+      "Hosted Fitbit migration cutover response status must be complete or pending.",
+    );
+  }
+  return {
+    connectionId: requireString(
+      record.connectionId,
+      "Hosted Fitbit migration cutover response connectionId",
+    ),
+    status: record.status,
+  };
 }
 
 export function parseHostedExecutionDeviceSyncConnectLinkResponse(
@@ -1173,6 +1242,47 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
   trustedUserId: string | null = null,
 ): HostedExecutionDeviceSyncDirtyAckRequest {
   const record = requireObject(value, "Hosted device-sync dirty ack request");
+  const processedDirtyPayloadIds = record.processedDirtyPayloadIds === undefined
+    ? undefined
+    : requireBoundedArray(
+      record.processedDirtyPayloadIds,
+      "Hosted device-sync dirty ack request processedDirtyPayloadIds",
+      HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT,
+    ).map((entry, index) =>
+      requireString(
+        entry,
+        `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
+      )
+    );
+  const completedImports = record.completedImports === undefined
+    ? undefined
+    : requireBoundedArray(
+      record.completedImports,
+      "Hosted device-sync dirty ack request completedImports",
+      HOSTED_EXECUTION_DEVICE_SYNC_COMPLETED_IMPORT_LIMIT,
+    ).map((entry, index) =>
+      parseHostedExecutionDeviceSyncCompletedImport(
+        entry,
+        `Hosted device-sync dirty ack request completedImports[${index}]`,
+      )
+    );
+  if (completedImports) {
+    const processedIds = new Set(processedDirtyPayloadIds ?? []);
+    const completedIds = new Set<string>();
+    for (const completedImport of completedImports) {
+      if (!processedIds.has(completedImport.dirtyPayloadId)) {
+        throw new TypeError(
+          "Hosted device-sync dirty ack request completedImports must reference processed dirty payload ids.",
+        );
+      }
+      if (completedIds.has(completedImport.dirtyPayloadId)) {
+        throw new TypeError(
+          "Hosted device-sync dirty ack request completedImports must not repeat a dirty payload id.",
+        );
+      }
+      completedIds.add(completedImport.dirtyPayloadId);
+    }
+  }
   const stagedDirtyAcks = record.stagedDirtyAcks === undefined
     ? undefined
     : parseHostedExecutionDeviceSyncStagedDirtyAcks(
@@ -1181,20 +1291,9 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     );
 
   return {
+    ...(completedImports === undefined ? {} : { completedImports }),
     connectionId: requireString(record.connectionId, "Hosted device-sync dirty ack request connectionId"),
-    ...(record.processedDirtyPayloadIds === undefined
-      ? {}
-      : {
-          processedDirtyPayloadIds: requireArray(
-            record.processedDirtyPayloadIds,
-            "Hosted device-sync dirty ack request processedDirtyPayloadIds",
-          ).map((entry, index) =>
-            requireString(
-              entry,
-              `Hosted device-sync dirty ack request processedDirtyPayloadIds[${index}]`,
-            )
-          ),
-        }),
+    ...(processedDirtyPayloadIds === undefined ? {} : { processedDirtyPayloadIds }),
     processedRevision: requireBigIntString(
       record.processedRevision,
       "Hosted device-sync dirty ack request processedRevision",
@@ -1202,6 +1301,33 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     ...(stagedDirtyAcks === undefined ? {} : { stagedDirtyAcks }),
     userId: resolveHostedDeviceSyncRuntimeRequestUserId(record.userId, trustedUserId),
   };
+}
+
+export function parseHostedExecutionDeviceSyncCompletedImport(
+  value: unknown,
+  label = "Hosted device-sync completed import",
+): HostedExecutionDeviceSyncCompletedImport {
+  const record = requireObject(value, label);
+  return {
+    dirtyPayloadId: requireString(record.dirtyPayloadId, `${label}.dirtyPayloadId`),
+    importCompletedAt: requireIsoTimestamp(
+      record.importCompletedAt,
+      `${label}.importCompletedAt`,
+    ),
+    resource: requireDeviceSyncImportReceiptKey(record.resource, `${label}.resource`),
+    sourceProviderSlug: requireDeviceSyncImportReceiptKey(
+      record.sourceProviderSlug,
+      `${label}.sourceProviderSlug`,
+    ),
+  };
+}
+
+function requireDeviceSyncImportReceiptKey(value: unknown, label: string): string {
+  const key = requireString(value, label);
+  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(key)) {
+    throw new TypeError(`${label} must be a normalized device-sync key.`);
+  }
+  return key;
 }
 
 export function parseHostedExecutionDeviceSyncDirtyAckResponse(
@@ -1771,6 +1897,14 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     lastErrorMessage: sanitizeHostedRuntimeErrorText(
       readNullableStringValue(record.lastErrorMessage, `${label}.lastErrorMessage`),
     ),
+    ...(record.lifecycleEpoch === undefined
+      ? {}
+      : {
+          lifecycleEpoch: requirePositiveInteger(
+            record.lifecycleEpoch,
+            `${label}.lifecycleEpoch`,
+          ),
+        }),
     lastSeenAt: requireIsoTimestamp(record.lastSeenAt, `${label}.lastSeenAt`),
     // Absent means "produced before this field existed", which must stay
     // parseable: a runner-first deploy would otherwise reject every snapshot
@@ -1906,6 +2040,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     "lastErrorCode",
     "lastErrorMessage",
     "lastSeenAt",
+    "observedLifecycleEpoch",
     "observedLastSeenAt",
     "resourceAvailabilitySummary",
     "sourceInstanceKey",
@@ -1935,6 +2070,12 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
       record.observedLastSeenAt,
       `${label}.observedLastSeenAt`,
     ),
+    observedLifecycleEpoch: record.observedLifecycleEpoch === undefined
+      ? undefined
+      : requirePositiveInteger(
+          record.observedLifecycleEpoch,
+          `${label}.observedLifecycleEpoch`,
+        ),
     sourceInstanceKey: requireString(record.sourceInstanceKey, `${label}.sourceInstanceKey`),
     sourceProviderSlug: requireString(record.sourceProviderSlug, `${label}.sourceProviderSlug`),
     ...(record.displayName === undefined

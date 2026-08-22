@@ -7,6 +7,7 @@ import {
   HOSTED_RUNTIME_PROCESSING_MODES,
   HOSTED_RUNTIME_RECONCILIATION_BLOCKED_REASONS,
   HOSTED_RUNTIME_SIGNAL_KINDS,
+  HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
   type HostedRuntimeEnsureProcessingRequest,
   type HostedRuntimeEnsureProcessingResponse,
   type HostedRuntimeReconciliationFacts,
@@ -17,6 +18,7 @@ import {
 } from "../orchestration-control.ts";
 import {
   requireArray,
+  requireBoolean,
   requireObject,
   requireString,
   readNullableString,
@@ -102,6 +104,7 @@ export function parseHostedRuntimeReconciliationFacts(
   const record = requireObject(value, "Hosted runtime reconciliation facts");
   assertExactKeys(record, "Hosted runtime reconciliation facts", [
     "blocked",
+    "environmentInterviewPending",
     "mailboxLag",
     "workspace",
   ]);
@@ -110,6 +113,12 @@ export function parseHostedRuntimeReconciliationFacts(
     blocked: record.blocked === null
       ? null
       : parseHostedRuntimeReconciliationFactsBlocked(record.blocked),
+    environmentInterviewPending: record.environmentInterviewPending === undefined
+      ? false
+      : requireBoolean(
+          record.environmentInterviewPending,
+          "Hosted runtime reconciliation facts environmentInterviewPending",
+        ),
     mailboxLag: parseHostedRuntimeMailboxLaneLagArray(
       record.mailboxLag,
       "Hosted runtime reconciliation facts mailboxLag",
@@ -151,6 +160,7 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
     "inboxMediaRetentionWakeAt",
     "nextWakeAt",
     "nextWakeReason",
+    "systemMailboxFrontier",
     "version",
   ]);
 
@@ -179,6 +189,15 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
       record.nextWakeReason,
       "Hosted runtime reconciliation facts workspace nextWakeReason",
     ),
+    ...(record.systemMailboxFrontier === undefined
+      ? {}
+      : {
+          systemMailboxFrontier: parseNullableAllowedString(
+            record.systemMailboxFrontier,
+            "Hosted runtime reconciliation facts workspace systemMailboxFrontier",
+            HOSTED_RUNTIME_SYSTEM_MAILBOX_FRONTIER_CLASSES,
+          ),
+        }),
     version: readRequiredNullableBoundedString(
       record.version,
       "Hosted runtime reconciliation facts workspace version",
@@ -191,24 +210,39 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 ): HostedRuntimeEnsureProcessingRequest {
   const record = requireObject(value, "Hosted runtime ensure-processing request");
   assertExactKeys(record, "Hosted runtime ensure-processing request", [
+    "assistantExecutionBlocked",
     "orchestrationAttemptId",
     "processingMode",
   ]);
 
+  const processingMode = record.processingMode === undefined
+    ? undefined
+    : parseNullableAllowedString(
+        record.processingMode,
+        "Hosted runtime ensure-processing request processingMode",
+        HOSTED_RUNTIME_PROCESSING_MODES,
+      );
+  const assistantExecutionBlocked = record.assistantExecutionBlocked === undefined
+    ? undefined
+    : requireExactTrue(
+        record.assistantExecutionBlocked,
+        "Hosted runtime ensure-processing request assistantExecutionBlocked",
+      );
+  if (assistantExecutionBlocked && processingMode !== "system_mailbox") {
+    throw new TypeError(
+      "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
+    );
+  }
+
   return {
+    ...(assistantExecutionBlocked === undefined
+      ? {}
+      : { assistantExecutionBlocked }),
     orchestrationAttemptId: requireOpaqueIdentifier(
       record.orchestrationAttemptId,
       "Hosted runtime ensure-processing request orchestrationAttemptId",
     ),
-    ...(record.processingMode === undefined
-      ? {}
-      : {
-          processingMode: parseNullableAllowedString(
-            record.processingMode,
-            "Hosted runtime ensure-processing request processingMode",
-            HOSTED_RUNTIME_PROCESSING_MODES,
-          ),
-        }),
+    ...(processingMode === undefined ? {} : { processingMode }),
   };
 }
 
@@ -403,6 +437,14 @@ function parseNullableAllowedString<T extends string>(
   }
 
   return parseAllowedString(value, label, allowed);
+}
+
+function requireExactTrue(value: unknown, label: string): true {
+  if (value !== true) {
+    throw new TypeError(`${label} must be true.`);
+  }
+
+  return true;
 }
 
 function assertExactKeys(

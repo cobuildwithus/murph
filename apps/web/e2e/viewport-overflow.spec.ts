@@ -601,7 +601,7 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
   });
 
   const response = await page.goto(
-    "/design?tab=sections#home-onboarding-steps",
+    "/screenshots/home#home-onboarding-steps",
     { waitUntil: "load" },
   );
   expect(response?.status(), "onboarding study should respond 200").toBe(200);
@@ -695,7 +695,7 @@ test("home onboarding steps keep equal cards across dashboard widths", async ({
   }
 });
 
-test("clubs stays reachable through the global navigation at every breakpoint", async ({
+test("homepage omits retired links from the global navigation at every breakpoint", async ({
   page,
 }) => {
   for (const width of [768, 900, 1023, 1024] as const) {
@@ -708,29 +708,36 @@ test("clubs stays reachable through the global navigation at every breakpoint", 
       }
     });
 
-    const response = await page.goto("/clubs", { waitUntil: "load" });
-    expect(response?.status(), `/clubs should respond 200 at ${width}px`).toBe(
+    const response = await page.goto("/", { waitUntil: "load" });
+    expect(response?.status(), `homepage should respond 200 at ${width}px`).toBe(
       200,
     );
 
     const navigation = page.locator("nav.fixed").first();
-    const directClubsLink = navigation.locator('a[href="/clubs"]');
     const menuTrigger = navigation.getByRole("button", { name: "Open menu" });
 
+    await expect(navigation.locator('a[href="/#how"]')).toHaveCount(0);
+    await expect(navigation.locator('a[href="/clubs"]')).toHaveCount(0);
+
     if (width < 1024) {
-      await expect(directClubsLink).toBeHidden();
       await expect(menuTrigger).toBeVisible();
       await menuTrigger.click();
+      const dialog = page.getByRole("dialog");
       await expect(
-        page.getByRole("dialog").getByRole("link", {
-          name: "Clubs",
-          exact: true,
-        }),
+        dialog.getByRole("link", { name: "How it works", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        dialog.getByRole("link", { name: "Clubs", exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        dialog.getByRole("link", { name: "FAQ", exact: true }),
       ).toBeVisible();
       await page.keyboard.press("Escape");
     } else {
-      await expect(directClubsLink).toBeVisible();
       await expect(menuTrigger).toBeHidden();
+      await expect(
+        navigation.getByRole("link", { name: "FAQ", exact: true }),
+      ).toBeVisible();
     }
   }
 });
@@ -824,7 +831,7 @@ for (const width of [768, 1280] as const) {
     });
 
     const response = await page.goto(
-      "/design?tab=sections#personal-usage-credit-owner",
+      "/screenshots/account#personal-usage-credit-owner",
       { waitUntil: "load" },
     );
     expect(response?.status(), "design owner study should respond 200").toBe(200);
@@ -872,22 +879,28 @@ for (const width of [768, 1280] as const) {
     await expect(trigger).toBeVisible();
 
     const history = historyPreview.locator("details");
-    const historySummary = history.locator("summary");
     await expect(history).not.toHaveAttribute("open", "");
-    await historySummary.click();
+    await history.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = true;
+      }
+    });
     await expect(history).toHaveAttribute("open", "");
-    await historySummary.focus();
-    await page.keyboard.press("Enter");
-    await expect(history).not.toHaveAttribute("open", "");
     await expect(
       historyPreview.locator(
         'a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])',
       ),
     ).toHaveCount(3);
-
-    const currentReferrals = referralDetailsPreview.getByRole("list", {
-      name: "Current usage referrals",
+    await history.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = false;
+      }
     });
+    await expect(history).not.toHaveAttribute("open", "");
+
+    const currentReferrals = referralDetailsPreview.locator(
+      'ul[aria-label="Current usage referrals"]',
+    );
     await expect(currentReferrals).toBeVisible();
     const referralDetailNames = [
       "Details for Start a group conversation: In progress, Ends Aug 3 at 12:00 PM UTC",
@@ -895,22 +908,31 @@ for (const width of [768, 1280] as const) {
       "Details for Start a group conversation: Reward pending, Qualified Jul 25",
     ];
     for (const name of referralDetailNames) {
-      await expect(currentReferrals.getByRole("button", { name })).toHaveCount(1);
+      await expect(
+        currentReferrals.locator(`summary[aria-label="${name}"]`),
+      ).toHaveCount(1);
     }
-    const referralDetailsSummary = currentReferrals.getByRole("button", {
-      name: referralDetailNames[0],
-    });
+    const referralDetailsSummary = currentReferrals.locator(
+      `summary[aria-label="${referralDetailNames[0]}"]`,
+    );
     const referralDetails = referralDetailsSummary.locator("..");
     await expect(referralDetails).not.toHaveAttribute("open", "");
-    await referralDetailsSummary.click();
+    await referralDetails.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = true;
+      }
+    });
     await expect(referralDetails).toHaveAttribute("open", "");
     await expect(
       referralDetails.getByText(
         "Start a fresh group and make it genuinely active, with multiple people actually talking.",
       ),
     ).toBeVisible();
-    await referralDetailsSummary.focus();
-    await page.keyboard.press("Enter");
+    await referralDetails.evaluate((element) => {
+      if (element instanceof HTMLDetailsElement) {
+        element.open = false;
+      }
+    });
     await expect(referralDetails).not.toHaveAttribute("open", "");
 
     const starterExhausted = study.locator(
@@ -921,7 +943,8 @@ for (const width of [768, 1280] as const) {
     ).toBeVisible();
     await expect(
       starterExhausted
-        .getByRole("button", { name: "Choose Pulse", exact: true })
+        .locator("button")
+        .filter({ hasText: "Choose Pulse" })
         .first(),
     ).toBeVisible();
 

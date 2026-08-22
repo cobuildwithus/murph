@@ -23,6 +23,7 @@ export function readTestMurphDynamicToolRequest(
   message: CodexRpcMessage,
   input?: {
     automationRelativeDateReferenceWindow?: AssistantAcceptedTurnInputReferenceWindow | null
+    responseCardAudience?: 'group' | 'private' | null
   },
 ): MurphDynamicToolRequest | null {
   const params = isRecord(message.params) ? message.params : {}

@@ -87,6 +87,7 @@ describe("device webhook signed batch callback route", () => {
       };
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -104,27 +105,32 @@ describe("device webhook signed batch callback route", () => {
     );
   });
 
-  it("accepts the exact signed subject and serially admits 25 prepared events", async () => {
-    const batch = createAdmissionBatch(DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE);
-    const response = await POST(await createSignedRequest({
-      body: JSON.stringify(batch),
-      privateJwkJson: callbackPrivateJwkJson,
-      userId: DEVICE_WEBHOOK_TRANSPORT_USER_ID,
-    }));
+  it.each([25, DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE])(
+    "accepts a signed %i-entry rollout-compatible batch with at most four active lanes",
+    async (entryCount) => {
+      const batch = createAdmissionBatch(entryCount);
+      const response = await POST(await createSignedRequest({
+        body: JSON.stringify(batch),
+        privateJwkJson: callbackPrivateJwkJson,
+        userId: DEVICE_WEBHOOK_TRANSPORT_USER_ID,
+      }));
 
-    expect(response.status).toBe(200);
-    expect(mocks.queryRaw).toHaveBeenCalledOnce();
-    expect(maxActiveAdmissions).toBe(1);
-    expect(mocks.handlePreparedWebhook).toHaveBeenCalledTimes(25);
-    expect(replayRequests).toHaveLength(1);
-    expect(replayRequests[0]?.url).toBe(
-      `https://join.example.test${HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH}`,
-    );
-    for (const [index, entry] of batch.entries.entries()) {
-      const [preparedWebhook] = mocks.handlePreparedWebhook.mock.calls[index]!;
-      expect(preparedWebhook).toEqual(entry.preparedWebhook);
-    }
-  });
+      expect(response.status).toBe(200);
+      expect(mocks.queryRaw).toHaveBeenCalledOnce();
+      expect(maxActiveAdmissions).toBe(4);
+      expect(mocks.handlePreparedWebhook).toHaveBeenCalledTimes(entryCount);
+      expect(replayRequests).toHaveLength(1);
+      expect(replayRequests[0]?.url).toBe(
+        `https://join.example.test${HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH}`,
+      );
+      const admitted = mocks.handlePreparedWebhook.mock.calls
+        .map(([preparedWebhook]) => preparedWebhook)
+        .sort((left, right) => left.receivedAt.localeCompare(right.receivedAt));
+      expect(admitted).toEqual(
+        batch.entries.map((entry) => entry.preparedWebhook),
+      );
+    },
+  );
 
   it("rejects a valid signature bound to the wrong subject before ordinary ingress", async () => {
     const response = await POST(await createSignedRequest({
@@ -138,7 +144,7 @@ describe("device webhook signed batch callback route", () => {
     expect(mocks.handlePreparedWebhook).not.toHaveBeenCalled();
   });
 
-  it("rejects 26 entries and malformed signed JSON before ordinary ingress", async () => {
+  it("rejects 101 entries and malformed signed JSON before ordinary ingress", async () => {
     const invalidBodies = [
       JSON.stringify(createAdmissionBatch(DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE + 1)),
       "{",

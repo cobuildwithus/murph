@@ -48,12 +48,16 @@ export function computeRuntimeProcessingOwnerRecheckAt(input: {
 
 export function createRuntimeProcessingRetryLater(input: {
   analytics?: WorkerAnalyticsEngineDatasetLike | null;
+  orchestrationAttemptId?: string;
   reason: RuntimeProcessingRetryReason;
   userId: string;
 }): HostedRuntimeEnsureProcessingResponse {
   emitHostedExecutionStructuredLog({
     component: "hosted.runner",
     details: {
+      ...(input.orchestrationAttemptId === undefined
+        ? {}
+        : { orchestrationAttemptId: input.orchestrationAttemptId }),
       runtimeProcessingRetryReason: input.reason,
     },
     level: "warn",
@@ -61,6 +65,8 @@ export function createRuntimeProcessingRetryLater(input: {
     phase: "runtime.starting",
     userId: input.userId,
   });
+  // Analytics Engine remains deliberately identifier-free; correlation lives
+  // only in the structured Workers log above.
   recordRuntimeProcessingRetry(input.analytics ?? null, input.reason);
   return {
     kind: "retry_later",

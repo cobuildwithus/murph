@@ -657,8 +657,11 @@ test("JoinInvitePage keeps route copy and uses a dedicated Open Graph image", as
   ).toBe(true);
 });
 
-test("JoinInviteSuccessPage keeps the shared preview image and setup copy", async () => {
-  const { metadata } = await import("../app/join/[inviteCode]/success/page");
+test("JoinInviteSuccessPage keeps the invite preview image and setup copy", async () => {
+  const { generateMetadata } = await import("../app/join/[inviteCode]/success/page");
+  const metadata = await generateMetadata({
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+  });
 
   expect(metadata.title).toBe("Finishing setup — Murph");
   expect(metadata.description).toBe(
@@ -666,14 +669,14 @@ test("JoinInviteSuccessPage keeps the shared preview image and setup copy", asyn
   );
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({
-      url: "/opengraph-image",
+      url: "/join/invite-code/opengraph-image",
       width: 1200,
       height: 630,
     }),
   ]);
   expect(metadata.twitter?.images).toEqual([
     expect.objectContaining({
-      url: "/opengraph-image",
+      url: "/join/invite-code/opengraph-image",
       width: 1200,
       height: 630,
     }),
@@ -708,8 +711,11 @@ test("JoinInviteSuccessPage tolerates malformed percent-encoded success params",
   assert.match(markup, /data-session-id="checkout%zz"/);
 });
 
-test("JoinInviteCancelPage keeps the shared preview image and pause copy", async () => {
-  const { metadata } = await import("../app/join/[inviteCode]/cancel/page");
+test("JoinInviteCancelPage keeps the invite preview image and pause copy", async () => {
+  const { generateMetadata } = await import("../app/join/[inviteCode]/cancel/page");
+  const metadata = await generateMetadata({
+    params: Promise.resolve({ inviteCode: "invite-code" }),
+  });
 
   expect(metadata.title).toBe("Checkout paused — Murph");
   expect(metadata.description).toBe(
@@ -717,14 +723,14 @@ test("JoinInviteCancelPage keeps the shared preview image and pause copy", async
   );
   expect(metadata.openGraph?.images).toEqual([
     expect.objectContaining({
-      url: "/opengraph-image",
+      url: "/join/invite-code/opengraph-image",
       width: 1200,
       height: 630,
     }),
   ]);
   expect(metadata.twitter?.images).toEqual([
     expect.objectContaining({
-      url: "/opengraph-image",
+      url: "/join/invite-code/opengraph-image",
       width: 1200,
       height: 630,
     }),

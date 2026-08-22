@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-18",
+  "order": 100,
+  "item": {
+    "id": "workout-reminders-keep-the-right-routine",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout reminders keep the right routine",
+    "summary": "Workout reminders now keep their saved routine attached, so an ordinary reply can target the right workout without using the iMessage Reply feature.",
+    "details": "You can report a set and say you’re done in the same message; Murph logs it, finishes the workout, and returns the completed card. If an older workout is already still open, Murph asks for its end time or total duration instead of guessing.",
+    "relevanceTags": ["assistant", "workouts", "automations", "reliability"],
+    "sourcePullRequests": [1981]
+  }
+}

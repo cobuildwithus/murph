@@ -687,6 +687,112 @@ test("AuthProvider preserves a Group payment return through sign-in", async () =
 
 test.each([
   {
+    hash: "#subscription",
+    label: "exact recovery handoff",
+    resumes: true,
+    search: "?usageRecovery=true",
+  },
+  {
+    hash: "#subscription",
+    label: "recovery handoff with extra state",
+    resumes: false,
+    search: "?usageRecovery=true&context=extra",
+  },
+  {
+    hash: "#subscription",
+    label: "repeated recovery handoff",
+    resumes: false,
+    search: "?usageRecovery=true&usageRecovery=true",
+  },
+  {
+    hash: "#family",
+    label: "exact Family recovery handoff",
+    resumes: true,
+    search: "?familyRecovery=true",
+  },
+  {
+    hash: "#subscription",
+    label: "Family recovery with the wrong fragment",
+    resumes: false,
+    search: "?familyRecovery=true",
+  },
+  {
+    hash: "#family",
+    label: "augmented Family recovery handoff",
+    resumes: false,
+    search: "?familyRecovery=true&context=extra",
+  },
+  {
+    hash: "#family",
+    label: "repeated Family recovery handoff",
+    resumes: false,
+    search: "?familyRecovery=true&familyRecovery=true",
+  },
+])("AuthProvider scopes the Settings recovery return: $label", async ({
+  hash,
+  resumes,
+  search,
+}) => {
+  const { AuthProvider, useAuth } = await import(
+    "@/src/components/hosted-onboarding/auth-dialog-provider"
+  );
+  const assign = vi.fn();
+  const reload = vi.fn();
+
+  function OpenAuthButton() {
+    const { openAuthDialog } = useAuth();
+    return createElement(
+      "button",
+      { type: "button", onClick: openAuthDialog },
+      "Sign in",
+    );
+  }
+
+  const href = `https://join.example.test/settings${search}${hash}`;
+  const rendered = await renderClientComponent(
+    createElement(
+      AuthProvider,
+      { authenticated: false },
+      createElement(OpenAuthButton),
+    ),
+  );
+  Object.defineProperty(rendered.window, "location", {
+    configurable: true,
+    value: {
+      assign,
+      hash,
+      href,
+      origin: "https://join.example.test",
+      pathname: "/settings",
+      reload,
+      search,
+    },
+  });
+
+  await act(async () => {
+    rendered.button.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+  const completeButton = Array.from(rendered.container.querySelectorAll("button")).find(
+    (button) => button.textContent === "Complete auth",
+  );
+  await act(async () => {
+    completeButton?.dispatchEvent(new rendered.window.Event("click", { bubbles: true }));
+  });
+
+  if (resumes) {
+    expect(rendered.window.location.href).toBe(href);
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(assign).not.toHaveBeenCalled();
+  } else {
+    expect(assign).toHaveBeenCalledWith("/home");
+    expect(reload).not.toHaveBeenCalled();
+  }
+
+  await rendered.cleanup();
+});
+
+test.each([
+  {
     label: "exact Family invite",
     resumes: true,
     search:

@@ -3,11 +3,11 @@ import { Buffer } from "node:buffer";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION } from "../../cloudflare/test/hosted-execution-fixtures";
 import {
   createHostedGcpKmsClientFromEnv,
   HostedGcpKmsIntegrityError,
   HostedGcpKmsProviderError,
+  HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS,
   HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
   type HostedGcpKmsClient,
   type HostedGcpKmsClientDependencies,
@@ -384,6 +384,28 @@ describe("hosted crypto Google KMS integrity transport", () => {
     expectAllZero(responseSignature);
   });
 
+  it("reports the provider digest size rather than the unhashed Sign message size", async () => {
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      asymmetricSign: async () => {
+        throw { code: "PERMISSION_DENIED" };
+      },
+    })).client;
+
+    await expect(client.asymmetricSign({
+      keyVersionName: SIGN_KEY_VERSION_NAME,
+      message: new Uint8Array(1_024),
+    })).rejects.toMatchObject({ providerReason: "PERMISSION_DENIED" });
+
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        operation: "asymmetricSign",
+        providerPayloadBytes: 32,
+      }),
+    );
+  });
+
   it("requires an exact 32-byte MAC with matching data and response CRCs", async () => {
     const responseMac = new Uint8Array(32).fill(7);
     const captured: { request?: HostedGcpKmsSdkMacSignRequest } = {};
@@ -515,6 +537,210 @@ describe("hosted crypto Google KMS integrity transport", () => {
 });
 
 describe("hosted crypto Google KMS aborts and redacted errors", () => {
+  it.each([
+    { code: 4, reason: "DEADLINE_EXCEEDED" },
+    { code: 14, reason: "UNAVAILABLE" },
+  ])("retries one transient Decrypt $reason failure with the same bounded request", async ({
+    code,
+    reason,
+  }) => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requests: HostedGcpKmsSdkDecryptRequest[] = [];
+    const timeouts: number[] = [];
+    let calls = 0;
+    const responsePlaintext = new Uint8Array([4, 5, 6]);
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async (request, options) => {
+        calls += 1;
+        requests.push(request);
+        timeouts.push(options.timeoutMs);
+        if (calls === 1) {
+          throw { code };
+        }
+        return {
+          plaintext: responsePlaintext,
+          plaintextCrc32c: crc32c(responsePlaintext),
+          usedPrimary: true,
+        };
+      },
+    })).client;
+
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).resolves.toEqual({ plaintext: new Uint8Array([4, 5, 6]) });
+
+    expect(calls).toBe(2);
+    expect(requests[0]).toBe(requests[1]);
+    expect(timeouts).toHaveLength(2);
+    expect(timeouts.every((timeout) =>
+      timeout > 0 && timeout <= HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS
+    )).toBe(true);
+    expect(warning).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS decrypt retrying after a transient failure.",
+      expect.objectContaining({
+        additionalAuthenticatedDataBytes: Buffer.byteLength("domain=control"),
+        aggregateTimeoutMs: HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS,
+        attempt: 1,
+        attemptTimeoutMs: HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS,
+        failureStage: "kms_rpc",
+        kmsRpcElapsedMs: expect.any(Number),
+        maxAttempts: 2,
+        operation: "decrypt",
+        operationElapsedMs: expect.any(Number),
+        providerPayloadBytes: 3,
+        providerReason: reason,
+        workloadIdentityRefreshObserved: false,
+      }),
+    );
+    expectAllZero(requests[0]!.ciphertext);
+    expectAllZero(requests[0]!.additionalAuthenticatedData);
+    expectAllZero(responsePlaintext);
+  });
+
+  it.each([
+    {
+      code: 4,
+      expected: { name: "TimeoutError" },
+    },
+    {
+      code: 14,
+      expected: {
+        code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+        providerReason: "UNAVAILABLE",
+      },
+    },
+  ])("stops after two transient Decrypt failures for provider code $code", async ({
+    code,
+    expected,
+  }) => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const requests: HostedGcpKmsSdkDecryptRequest[] = [];
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async (request) => {
+        requests.push(request);
+        throw { code };
+      },
+    })).client;
+
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).rejects.toMatchObject(expected);
+    expect(requests).toHaveLength(2);
+    expectAllZero(requests[0]!.ciphertext);
+    expectAllZero(requests[0]!.additionalAuthenticatedData);
+  });
+
+  it("does not retry permanent Decrypt failures or retryable codes on other operations", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let decryptCalls = 0;
+    let encryptCalls = 0;
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => {
+        decryptCalls += 1;
+        throw { code: "PERMISSION_DENIED", response: { status: 403 } };
+      },
+      encrypt: async () => {
+        encryptCalls += 1;
+        throw { code: 14 };
+      },
+    })).client;
+
+    await expect(client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    })).rejects.toMatchObject({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "PERMISSION_DENIED",
+    });
+    await expect(client.encrypt({
+      additionalAuthenticatedData: "domain=control",
+      keyName: KMS_KEY_NAME,
+      plaintext: new Uint8Array([1, 2, 3]),
+    })).rejects.toMatchObject({
+      code: "HOSTED_GCP_KMS_PROVIDER_ERROR",
+      providerReason: "UNAVAILABLE",
+    });
+    expect(decryptCalls).toBe(1);
+    expect(encryptCalls).toBe(1);
+  });
+
+  it("honors caller abort during Decrypt retry backoff", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0.999);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const caller = new AbortController();
+    let calls = 0;
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => {
+        calls += 1;
+        throw { code: 14 };
+      },
+    })).client;
+    const operation = client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+      signal: caller.signal,
+    });
+
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledTimes(1));
+    caller.abort(new Error(`secret caller reason for ${KMS_KEY_NAME}`));
+    await expect(operation).rejects.toMatchObject({
+      message: "Google Cloud KMS operation was aborted by the caller.",
+      name: "AbortError",
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("logs aggregate deadline expiry during Decrypt retry backoff", async () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const failureLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const aggregateDeadline = new AbortController();
+    const attemptDeadline = new AbortController();
+    const deadlineSignals = [aggregateDeadline.signal, attemptDeadline.signal];
+    vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const signal = deadlineSignals.shift();
+      if (!signal) {
+        throw new Error("Unexpected Google KMS deadline allocation.");
+      }
+      return signal;
+    });
+    let calls = 0;
+    const client = createClientHarness(STATIC_ENV, createTransport({
+      decrypt: async () => {
+        calls += 1;
+        throw { code: 14 };
+      },
+    })).client;
+    const operation = client.decrypt({
+      additionalAuthenticatedData: "domain=control",
+      ciphertext: Buffer.from(new Uint8Array([1, 2, 3])).toString("base64"),
+      keyName: KMS_KEY_NAME,
+    });
+
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
+    aggregateDeadline.abort();
+
+    await expect(operation).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(calls).toBe(1);
+    expect(failureLog).toHaveBeenCalledWith(
+      "Hosted Google Cloud KMS operation failed.",
+      expect.objectContaining({
+        failureStage: "retry_backoff",
+        outcome: "failed",
+        providerReason: "DEADLINE_EXCEEDED",
+        retryBackoffElapsedMs: expect.any(Number),
+      }),
+    );
+  });
+
   it("honors caller abort without retrying or exposing the caller reason", async () => {
     const caller = new AbortController();
     let calls = 0;
@@ -543,9 +769,9 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
     expectAllZero(requireValue(captured.request, "aborted Encrypt request").plaintext);
   });
 
-  it("owns one deadline across the operation and never retries", async () => {
+  it("lets the aggregate Decrypt deadline win without starting another attempt", async () => {
     const deadline = new AbortController();
-    vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
     let calls = 0;
     const client = createClientHarness(STATIC_ENV, createTransport({
       decrypt: (_request, options) => {
@@ -566,6 +792,8 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
       name: "TimeoutError",
     });
     expect(calls).toBe(1);
+    expect(timeout).toHaveBeenNthCalledWith(1, HOSTED_GCP_KMS_DECRYPT_TIMEOUT_MS);
+    expect(timeout).toHaveBeenNthCalledWith(2, HOSTED_GCP_KMS_OPERATION_TIMEOUT_MS);
   });
 
   it("returns a structured provider error without raw messages, payloads, resources, or causes", async () => {
@@ -612,18 +840,6 @@ describe("hosted crypto Google KMS aborts and redacted errors", () => {
 });
 
 describe("hosted crypto local KMS", () => {
-  it("accepts the shared hosted execution authority-signing fixture", async () => {
-    const signingKey = await createLocalSigningKey();
-    const client = createLocalClient(signingKey.privateJwkJson, 6);
-
-    await expect(client.asymmetricSign({
-      keyVersionName: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
-      message: new TextEncoder().encode("shared hosted execution fixture"),
-    })).resolves.toMatchObject({
-      keyVersionName: TEST_HOSTED_CRYPTO_AUTHORITY_SIGN_KEY_VERSION,
-    });
-  });
-
   it("encrypts, decrypts, signs, and MACs without Google credentials", async () => {
     const signingKey = await createLocalSigningKey();
     const client = createLocalClient(signingKey.privateJwkJson, 7);

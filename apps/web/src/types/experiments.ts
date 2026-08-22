@@ -321,6 +321,18 @@ export interface ScheduleCell {
   kind: ScheduleCellKind;
   detail?: string;
   isToday?: boolean;
+  occurrences?: ScheduleCellOccurrences;
+}
+
+export interface ScheduleCellOccurrences {
+  assumed: number;
+  completed: number;
+  expected: number;
+  failed: number;
+  missed: number;
+  partial: number;
+  scheduled: number;
+  unknown: number;
 }
 
 export interface ScheduleWeek {

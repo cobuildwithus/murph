@@ -646,6 +646,35 @@ describe("hosted runtime latency alert monitor", () => {
     });
   });
 
+  it("keeps a latency incident to one email beyond the progress reminder horizon", async () => {
+    const fixture = createMonitorPrismaFixture([
+      latencyRow({
+        acceptedAt: "2026-07-26T15:58:00.000Z",
+      }),
+    ]);
+    const sendAlert = vi.fn(async (_input: AlertSendInput) => {
+      void _input;
+      return { providerMessageId: "resend-email-long-incident" };
+    });
+
+    const opened = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now,
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+    const stillActive = await runHostedRuntimeLatencyAlertMonitor({
+      env: alertEnv,
+      now: instant("2026-07-26T22:15:00.000Z"),
+      prisma: fixture.prisma,
+      sendAlert,
+    });
+
+    expect(opened.outcome).toBe("alert_sent");
+    expect(stillActive.outcome).toBe("incident_active");
+    expect(sendAlert).toHaveBeenCalledTimes(1);
+  });
+
   it("names overdue terminal checkpoint acknowledgement in the alert", async () => {
     const fixture = createMonitorPrismaFixture([
       latencyRow({

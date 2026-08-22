@@ -50,8 +50,13 @@ const AUTH_ACTIONS = [
   /\bconfirm\b/i,
   /\bconnect\b/i,
 ] as const;
+const AUTH_ACTION_PATTERN = new RegExp(
+  AUTH_ACTIONS.map((pattern) => pattern.source).join("|"),
+  "iu",
+);
 const NEGATIVE_AUTH_ACTION_PATTERN =
   /\b(?:cancel|decline|deny|disallow|do not|don't|not now|reject|skip)\b/iu;
+const WHOOP_RENDERED_GRANT_PATTERN = /^\s*grant\s*$/iu;
 const TRUSTED_AUTHORIZATION_DOMAINS = [
   "junction.com",
   "tryvital.io",
@@ -234,7 +239,11 @@ async function completeExternalAuthorization(
       }
 
       await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS);
+      const clicked = await clickFirstVisibleAction(
+        page,
+        AUTH_ACTIONS,
+        config.source,
+      );
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
@@ -260,8 +269,9 @@ async function completeExternalAuthorization(
           `${config.label} authorization was blocked by an external provider challenge.`,
         );
       }
+      const surface = await describeAuthorizationSurface(page);
       throw new Error(
-        `${config.label} did not expose an automated authorization action. Manual completion is available only in a headed non-CI run.`,
+        `${config.label} did not expose an automated authorization action. ${surface} Manual completion is available only in a headed non-CI run.`,
       );
     }
     await page.waitForTimeout(1_000);
@@ -353,29 +363,208 @@ async function checkRequiredConsentCheckboxes(page: Page): Promise<void> {
 async function clickFirstVisibleAction(
   page: Page,
   names: readonly RegExp[],
+  source: BrowserConfig["source"],
 ): Promise<boolean> {
   for (const name of names) {
     for (const role of ["button", "link"] as const) {
       const controls = page.getByRole(role, { name });
+      const negativeControls = page.getByRole(role, {
+        name: NEGATIVE_AUTH_ACTION_PATTERN,
+      });
       for (let index = 0; index < await controls.count(); index += 1) {
         const control = controls.nth(index);
-        const actionText = [
-          await control.getAttribute("aria-label").catch(() => null),
-          await control.innerText().catch(() => ""),
-        ].filter(Boolean).join(" ");
         if (
-          NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
-          || !await control.isVisible().catch(() => false)
-          || !await control.isEnabled().catch(() => false)
+          await hasNegativeAccessibleName(control, negativeControls)
+          || await readAuthorizationActionState(control) !== "enabled"
         ) {
           continue;
         }
-        await control.click();
+        await clickAuthorizationControl(control);
         return true;
       }
     }
   }
-  return false;
+
+  return source === "whoop" && await clickWhoopRenderedGrant(page);
+}
+
+async function clickWhoopRenderedGrant(page: Page): Promise<boolean> {
+  // WHOOP documents its consent action as a rendered "GRANT" button, while the
+  // live button can expose a different accessible name. Element handles bind
+  // discovery, safety checks, and the click to one exact element; a rerender
+  // detaches that handle instead of rebinding approved text to another control.
+  const grantButtons = page.getByRole("button").filter({
+    hasText: WHOOP_RENDERED_GRANT_PATTERN,
+  });
+  const negativeButtons = page.getByRole("button", {
+    name: NEGATIVE_AUTH_ACTION_PATTERN,
+  });
+  const candidates = await grantButtons.elementHandles();
+  const hasNegativeAccessibleName = async (
+    candidate: (typeof candidates)[number],
+  ): Promise<boolean> => {
+    const currentNegatives = await negativeButtons.elementHandles();
+    try {
+      for (const negative of currentNegatives) {
+        const matches = await candidate.evaluate(
+          (candidateElement, negativeElement) =>
+            candidateElement === negativeElement,
+          negative,
+        ).catch(() => null);
+        if (matches === null || matches) return true;
+      }
+      return false;
+    } finally {
+      await Promise.all(currentNegatives.map((handle) =>
+        handle.dispose().catch(() => undefined)
+      ));
+    }
+  };
+
+  try {
+    for (const candidate of candidates) {
+      const renderedText = await candidate.innerText().catch(() => "");
+      if (
+        !WHOOP_RENDERED_GRANT_PATTERN.test(renderedText)
+        || await hasNegativeAccessibleName(candidate)
+        || !await candidate.isVisible().catch(() => false)
+        || !await candidate.isEnabled().catch(() => false)
+      ) {
+        continue;
+      }
+      const currentText = await candidate.innerText().catch(() => "");
+      if (
+        !WHOOP_RENDERED_GRANT_PATTERN.test(currentText)
+        || await hasNegativeAccessibleName(candidate)
+      ) {
+        continue;
+      }
+      await clickAuthorizationControl(candidate);
+      return true;
+    }
+    return false;
+  } finally {
+    await Promise.all(candidates.map((handle) =>
+      handle.dispose().catch(() => undefined)
+    ));
+  }
+}
+
+async function clickAuthorizationControl(
+  control: Pick<Locator, "click">,
+): Promise<void> {
+  try {
+    await control.click();
+  } catch (error) {
+    const category = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout"
+      : "other";
+    throw new Error(`Authorization action failed (${category}).`);
+  }
+}
+
+async function hasNegativeAccessibleName(
+  control: Locator,
+  negativeControls: Locator,
+): Promise<boolean> {
+  return await control.and(negativeControls).count().catch(() => 1) > 0;
+}
+
+async function readAuthorizationActionText(
+  control: Locator,
+): Promise<string> {
+  const [ariaLabel, innerText] = await Promise.all([
+    control.getAttribute("aria-label").catch(() => null),
+    control.innerText().catch(() => ""),
+  ]);
+  return [ariaLabel, innerText].filter(Boolean).join(" ");
+}
+
+async function readAuthorizationActionState(
+  control: Locator,
+): Promise<"disabled" | "enabled" | null> {
+  const actionText = await readAuthorizationActionText(control);
+  if (
+    NEGATIVE_AUTH_ACTION_PATTERN.test(actionText)
+    || !await control.isVisible().catch(() => false)
+  ) {
+    return null;
+  }
+  return await control.isEnabled().catch(() => false) ? "enabled" : "disabled";
+}
+
+async function describeAuthorizationSurface(page: Page): Promise<string> {
+  const countScope = async (scope: Pick<Page, "getByRole">) => {
+    const countActions = async (controls: Locator) => {
+      let actions = 0;
+      let enabledActions = 0;
+      for (let index = 0; index < await controls.count(); index += 1) {
+        const state = await readAuthorizationActionState(controls.nth(index));
+        if (state !== null) actions += 1;
+        if (state === "enabled") enabledActions += 1;
+      }
+      return { actions, enabledActions };
+    };
+    let actions = 0;
+    let allActions = 0;
+    let enabledActions = 0;
+    for (const role of ["button", "link"] as const) {
+      const all = await countActions(scope.getByRole(role));
+      const recognized = await countActions(
+        scope.getByRole(role, { name: AUTH_ACTION_PATTERN }),
+      );
+      allActions += all.actions;
+      actions += recognized.actions;
+      enabledActions += recognized.enabledActions;
+    }
+    const checkboxes = scope.getByRole("checkbox");
+    let uncheckedCheckboxes = 0;
+    for (let index = 0; index < await checkboxes.count(); index += 1) {
+      const checkbox = checkboxes.nth(index);
+      if (
+        await checkbox.isVisible().catch(() => false)
+        && !await checkbox.isChecked().catch(() => false)
+      ) {
+        uncheckedCheckboxes += 1;
+      }
+    }
+    return {
+      actions,
+      enabledActions,
+      otherActions: Math.max(0, allActions - actions),
+      uncheckedCheckboxes,
+    };
+  };
+  const mainFrame = page.mainFrame();
+  const childFrames = page.frames().filter((frame) => frame !== mainFrame);
+  const [main, ...children] = await Promise.all([
+    countScope(mainFrame),
+    ...childFrames.map(countScope),
+  ]);
+  const child = children.reduce((total, current) => ({
+    actions: total.actions + current.actions,
+    enabledActions: total.enabledActions + current.enabledActions,
+    otherActions: total.otherActions + current.otherActions,
+    uncheckedCheckboxes:
+      total.uncheckedCheckboxes + current.uncheckedCheckboxes,
+  }), {
+    actions: 0,
+    enabledActions: 0,
+    otherActions: 0,
+    uncheckedCheckboxes: 0,
+  });
+  return [
+    "Authorization surface:",
+    `childFrames=${childFrames.length}`,
+    `mainActions=${main.actions}`,
+    `mainEnabledActions=${main.enabledActions}`,
+    `mainOtherActions=${main.otherActions}`,
+    `childActions=${child.actions}`,
+    `childEnabledActions=${child.enabledActions}`,
+    `childOtherActions=${child.otherActions}`,
+    `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
+    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
+  ].join(" ");
 }
 
 async function assertWearableConnectionState(

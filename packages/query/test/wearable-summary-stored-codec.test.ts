@@ -169,6 +169,7 @@ function activityDataset(input: {
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
     sleepWindows: [],
+    workoutFeatures: [],
   };
 }
 
@@ -309,6 +310,7 @@ function buildFixtureDataset(providers: readonly string[]): WearableDataset {
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
     sleepWindows,
+    workoutFeatures: [],
   };
 }
 
@@ -797,6 +799,7 @@ test("stored metric drilldowns distinguish activity and sleep heart-rate aliases
     provenanceDiagnostics: [],
     rawMetricCandidates: metricCandidates,
     sleepWindows: [sleepWindow("garmin", date)],
+    workoutFeatures: [],
   };
   const direct = buildWearableSummaryBundleFromDataset(dataset);
   const stored = composeStoredDataset(dataset);
@@ -961,6 +964,7 @@ test("compose preserves stored same-public provider conflict evidence", () => {
     provenanceDiagnostics: [],
     rawMetricCandidates: [],
     sleepWindows: [],
+    workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
   const composed = composePublicWearableSummaryBundleFromStoredRows({
@@ -1039,6 +1043,7 @@ test("compose rebuilt stored sleep rows drops zeroed Apple HealthKit summary in 
         startAt,
       }),
     ],
+    workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
   const composed = composePublicWearableSummaryBundleFromStoredRows({
@@ -1096,6 +1101,7 @@ test("compose preserves stored same-public sleep-window conflict evidence", () =
         title: "Junction Garmin sleep",
       }),
     ],
+    workoutFeatures: [],
   };
   const rows = buildWearableSummaryProjectionFromDataset(dataset);
   const composed = composePublicWearableSummaryBundleFromStoredRows({

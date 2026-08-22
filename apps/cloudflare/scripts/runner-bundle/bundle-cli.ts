@@ -3,13 +3,23 @@ import { access, chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import { build, type Metafile } from "esbuild";
+import {
+  memoryDocumentSnapshotSchema,
+  type MemoryDocumentSnapshot,
+} from "@murphai/contracts";
 import {
   MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV,
 } from "@murphai/health-commons/runtime";
 
 import {
+  VAULT_CLI_MEMORY_SHOW_ARGS,
+  createInitializedVaultCliMemoryFixture,
+} from "./vault-cli-memory-fixture.js";
+import {
+  collectStaticRunnerBundleOutputPaths,
   RUNNER_BUNDLE_SHARED_EXTERNALS,
   RUNNER_BUNDLE_SHARED_FORBIDDEN_INPUT_MARKERS,
 } from "./bundle-shared.js";
@@ -75,11 +85,65 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // current main on 2026-08-14. The reviewed Junction temporal-fidelity and
 // source-authority graph measured 9,128,211 B on Linux CI and 9,175,594 B on
 // macOS after merging current main on 2026-08-14; no package entered the graph.
-// Keep the larger measured graph inside a narrow 32 KiB allowance. If a
-// violation fires, investigate the listed largest inputs first; only raise the
-// budget deliberately for understood, intended growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_209_000;
+// The reviewed cross-session context reply work measured 9,119,111 B after
+// normalizing the esbuild working directory on 2026-08-15; it grows the
+// existing Assistant Engine graph without adding a package. Preserving the
+// exact planned experiment occurrence measured 9,153,208 B on Linux CI; it
+// extends that same graph without adding a package. The August 2026 Junction
+// temporal-authority and canonical event-schema additions extend the same graph
+// without a new package. Junction summary-completeness work measured 9,170,089 B
+// on Linux CI on 2026-08-17; its 32,160 B increase is confined to the existing
+// Core event reconciliation and Junction normalization inputs, with no package
+// entering the graph or the static startup closure. The combined reviewed
+// summary-completeness and bounded workout-feature graph measured 9,188,582 B on
+// the same Linux CI lane; it extends the existing device-sync, importer, and
+// query packages without adding a package.
+// The reviewed Telegram rich-response work measured 9,159,100 B in the Linux
+// deploy lane on 2026-08-16; it grows the existing Assistant Engine graph
+// without adding a package. The reviewed Telegram phone-call result route adds
+// only bounded schemas and delivery handling within the already-bundled Hosted
+// Execution and Assistant Engine graphs; the combined graph measured
+// 9,165,765 B on 2026-08-16. Junction body-composition work extends the existing
+// device-sync, importer, query, and CLI graph without adding a package. Under
+// the established 32 KiB allowance, its reviewed 9,227,033 B ceiling represents
+// a 9,194,265 B measured baseline. The merged assistant execution graph,
+// including the session-routing SQLite projection, measured 9,209,386 B in the
+// Linux deploy lane on 2026-08-18; it extends existing graphs without adding a
+// package. Integrated Junction history measured 9,311,785 B in the canonical
+// production build. The merged bounded foreground-state work extends that graph
+// with the outbox projection and pending-input hint and measured 9,272,172 B
+// in the Linux deploy lane on 2026-08-19; no package entered the graph. The
+// resolved combined graph measured 9,364,936 B in the canonical production
+// build; the static startup closure still measured 24,950 B. The stable
+// Junction profile replay migration grew the existing lazy Core graph by
+// 7,993 B: public Linux measured 9,391,948 B, while the production-only managed
+// voice runtime overlay added 6,889 B and exposed a 1,133 B overage. Emitting
+// this Node-only artifact as UTF-8 instead of ASCII-escaping existing Unicode
+// literals removed 51,325 B without changing any input, output, entry, or
+// static-closure topology. The resulting public Linux baseline is 9,340,623 B;
+// the total cap retains 32 KiB of graph allowance plus an 8 KiB reserve for
+// the measured production overlay.
+// Batched workout creation and exact canonical event reads replace the
+// projection-backed command path without adding a package or changing the
+// static startup closure. The merged public Linux graph measured 9,360,190 B
+// on 2026-08-21 and remains within that retained allowance.
+// Direct Gemini video analysis extends the existing CLI and contract graph
+// without adding a package or changing the static startup closure. Combined
+// with the batched-workout graph, public Linux measured 9,382,747 B on
+// 2026-08-21. The cap is ratcheted from that exact baseline and retains the
+// ordinary 32 KiB graph allowance plus the 8 KiB production-overlay reserve.
+// Junction daily-alias self-healing extends the existing Core event-
+// reconciliation graph without adding a package or changing the entry or
+// static-startup topology. The combined cap composes its reviewed 41,089 B
+// lazy-graph delta with the current public Linux baseline and retains the same
+// 32 KiB graph allowance plus 8 KiB production-overlay reserve.
+// Keep total output inside a narrow 32 KiB allowance and static startup inside
+// an 8 KiB allowance. If a violation fires, investigate the listed largest
+// inputs first; only raise the budget deliberately for understood, intended
+// growth.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_464_796;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
+const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
 // Known divergence the parity battery cannot reach (it would need a live
 // codex session): assistant-engine resolves two assets relative to its own
@@ -120,11 +184,13 @@ export async function bundleInstalledVaultCliBinary(
   await rm(bundleOutDir, { force: true, recursive: true });
 
   const buildResult = await build({
+    absWorkingDir: bundleDir,
     banner: {
       js: "import { createRequire as __vaultCliCreateRequire } from 'node:module'; const require = __vaultCliCreateRequire(import.meta.url);",
     },
     bundle: true,
-    entryPoints: [entryPath],
+    charset: "utf8",
+    entryPoints: [path.relative(bundleDir, entryPath)],
     external: [
       ...VAULT_CLI_BUNDLE_EXTERNALS,
       ...VAULT_CLI_BUNDLE_LAZY_OPTIONAL_PACKAGE_NAMES,
@@ -146,7 +212,7 @@ export async function bundleInstalledVaultCliBinary(
   assertVaultCliBundleInlinesSingleCopies(Object.keys(buildResult.metafile.inputs));
   const bundleBytes = assertVaultCliBundleWithinBudgets(buildResult.metafile);
   console.log(
-    `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget`,
+    `vault-cli bundle size: total ${bundleBytes.totalBytes}B of ${VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET}B budget, entry ${bundleBytes.entryBytes}B of ${VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET}B budget, static startup closure ${bundleBytes.staticClosureBytes}B of ${VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET}B budget`,
   );
   const healthCommonsPackageRoot = path.join(
     bundleDir,
@@ -154,7 +220,7 @@ export async function bundleInstalledVaultCliBinary(
     "@murphai",
     "health-commons",
   );
-  assertVaultCliBundleParity({
+  await assertVaultCliBundleParity({
     bundleOutDir,
     cliPackageDir,
     entryPath,
@@ -231,11 +297,16 @@ export function assertVaultCliBundleInlinesSingleCopies(inputPaths: string[]): v
 // bytes so the assembly log can report actual-vs-budget on success.
 export function assertVaultCliBundleWithinBudgets(
   metafile: Metafile,
-  budgets: { entryBytes: number; totalBytes: number } = {
+  budgets: {
+    entryBytes: number;
+    staticClosureBytes: number;
+    totalBytes: number;
+  } = {
     entryBytes: VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET,
+    staticClosureBytes: VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET,
     totalBytes: VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET,
   },
-): { entryBytes: number; totalBytes: number } {
+): { entryBytes: number; staticClosureBytes: number; totalBytes: number } {
   const outputs = Object.entries(metafile.outputs);
   const totalBytes = outputs.reduce((sum, [, output]) => sum + output.bytes, 0);
 
@@ -253,6 +324,14 @@ export function assertVaultCliBundleWithinBudgets(
     );
   }
   const [entryPath, { bytes: entryBytes }] = entryOutput;
+  const staticOutputPaths = collectStaticRunnerBundleOutputPaths(
+    metafile,
+    entryPath,
+  );
+  const staticClosureBytes = [...staticOutputPaths].reduce(
+    (sum, outputPath) => sum + (metafile.outputs[outputPath]?.bytes ?? 0),
+    0,
+  );
 
   const violations: string[] = [];
   if (totalBytes > budgets.totalBytes) {
@@ -265,8 +344,13 @@ export function assertVaultCliBundleWithinBudgets(
       `entry chunk ${entryPath} ${entryBytes}B exceeds budget ${budgets.entryBytes}B`,
     );
   }
+  if (staticClosureBytes > budgets.staticClosureBytes) {
+    violations.push(
+      `static startup closure ${staticClosureBytes}B exceeds budget ${budgets.staticClosureBytes}B`,
+    );
+  }
   if (violations.length === 0) {
-    return { entryBytes, totalBytes };
+    return { entryBytes, staticClosureBytes, totalBytes };
   }
 
   // List the heaviest inputs so the failure is diagnosable from the build
@@ -285,68 +369,314 @@ export function assertVaultCliBundleWithinBudgets(
   );
 }
 
-function assertVaultCliBundleParity(input: {
+async function assertVaultCliBundleParity(input: {
   bundleOutDir: string;
   cliPackageDir: string;
   entryPath: string;
   healthCommonsPackageRoot: string;
-}): void {
+}): Promise<void> {
   const bundledEntryPath = path.join(input.bundleOutDir, "bin.js");
 
   for (const probe of VAULT_CLI_BUNDLE_PARITY_PROBES) {
-    const unbundledStartedAt = performance.now();
-    const expected = runVaultCliParityProbe({
+    const results = runVaultCliParityPair({
       args: probe,
+      bundledEntryPath,
       cwd: input.cliPackageDir,
-      entryPath: input.entryPath,
       healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+      label: probe.join(" "),
+      unbundledEntryPath: input.entryPath,
     });
-    const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
-    const bundledStartedAt = performance.now();
-    const actual = runVaultCliParityProbe({
-      args: probe,
-      cwd: input.cliPackageDir,
-      entryPath: bundledEntryPath,
-      healthCommonsPackageRoot: input.healthCommonsPackageRoot,
-    });
-    const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
-
-    // Warn-only longitudinal trend signal in the assembly log. Never turn
-    // this into a hard assertion: shared CI runners make wall-time budgets
-    // flake, and a budget loose enough to be stable would catch nothing.
-    console.log(
-      `parity probe \`${probe.join(" ")}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
-    );
 
     // Symmetric unknown-command output would otherwise "pass" parity while
     // proving nothing — a renamed command or broken CLI bootstrap must fail
     // the assembly, not slip through as matching error text.
-    if (expected.stdout.includes("is not a command for")) {
+    if (results.unbundled.stdout.includes("is not a command for")) {
       throw new Error(
         [
           `Unbundled vault-cli no longer recognizes parity probe \`${probe.join(" ")}\`.`,
-          `Update VAULT_CLI_BUNDLE_PARITY_PROBES to match the current command surface.`,
-          `unbundled stdout head: ${expected.stdout.slice(0, 400)}`,
+          "Update VAULT_CLI_BUNDLE_PARITY_PROBES to match the current command surface.",
+          formatVaultCliParityResult("unbundled", results.unbundled),
         ].join("\n"),
       );
     }
 
-    if (
-      expected.stdout !== actual.stdout ||
-      expected.stderr !== actual.stderr ||
-      expected.status !== actual.status
-    ) {
-      throw new Error(
-        [
-          `Bundled vault-cli output diverged for \`${probe.join(" ")}\`.`,
-          `unbundled status=${expected.status} stdout=${expected.stdout.length}B stderr=${expected.stderr.length}B`,
-          `bundled status=${actual.status} stdout=${actual.stdout.length}B stderr=${actual.stderr.length}B`,
-          `bundled stdout head: ${actual.stdout.slice(0, 200)}`,
-          `bundled stderr head: ${actual.stderr.slice(0, 400)}`,
-        ].join("\n"),
-      );
-    }
+    assertVaultCliParityMatch({
+      bundled: results.bundled,
+      label: probe.join(" "),
+      unbundled: results.unbundled,
+    });
   }
+
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-runner-vault-cli-memory-parity-"),
+  );
+  const fixtureCases = [
+    {
+      compareStdout: true,
+      expectedExists: true,
+      expectedRecords: "populated",
+      label: "populated",
+      vaultRoot: path.join(fixtureRoot, "populated-home", "vault"),
+    },
+    {
+      // Empty documents are created at read time, so their timestamps differ
+      // across the two processes. Status, stderr, and shape remain the parity
+      // contract.
+      compareStdout: false,
+      expectedExists: false,
+      expectedRecords: "empty",
+      label: "missing",
+      vaultRoot: path.join(fixtureRoot, "missing-home", "vault"),
+    },
+  ] as const;
+
+  try {
+    await Promise.all(
+      fixtureCases.map((fixtureCase) =>
+        createInitializedVaultCliMemoryFixture({
+          includeMemory: fixtureCase.expectedExists,
+          vaultRoot: fixtureCase.vaultRoot,
+        }),
+      ),
+    );
+
+    for (const fixtureCase of fixtureCases) {
+      const label = `memory show --format json (${fixtureCase.label})`;
+      const results = runVaultCliParityPair({
+        args: VAULT_CLI_MEMORY_SHOW_ARGS,
+        bundledEntryPath,
+        cwd: fixtureCase.vaultRoot,
+        healthCommonsPackageRoot: input.healthCommonsPackageRoot,
+        homeRoot: path.dirname(fixtureCase.vaultRoot),
+        label,
+        unbundledEntryPath: input.entryPath,
+        vaultRoot: fixtureCase.vaultRoot,
+      });
+      const unbundledMemory = assertVaultCliMemoryShowResult({
+        expectedExists: fixtureCase.expectedExists,
+        expectedRecords: fixtureCase.expectedRecords,
+        expectedVaultRoot: fixtureCase.vaultRoot,
+        label: `unbundled ${fixtureCase.label} memory`,
+        result: results.unbundled,
+      });
+      const bundledMemory = assertVaultCliMemoryShowResult({
+        expectedExists: fixtureCase.expectedExists,
+        expectedRecords: fixtureCase.expectedRecords,
+        expectedVaultRoot: fixtureCase.vaultRoot,
+        label: `bundled ${fixtureCase.label} memory`,
+        result: results.bundled,
+      });
+      if (!fixtureCase.expectedExists) {
+        assertVaultCliMissingMemoryParity({
+          bundled: bundledMemory,
+          bundledResult: results.bundled,
+          label,
+          unbundled: unbundledMemory,
+          unbundledResult: results.unbundled,
+        });
+      }
+      assertVaultCliParityMatch({
+        bundled: results.bundled,
+        compareStdout: fixtureCase.compareStdout,
+        label,
+        unbundled: results.unbundled,
+      });
+    }
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true });
+  }
+}
+
+function runVaultCliParityPair(options: {
+  args: readonly string[];
+  bundledEntryPath: string;
+  cwd: string;
+  healthCommonsPackageRoot: string;
+  homeRoot?: string;
+  label: string;
+  unbundledEntryPath: string;
+  vaultRoot?: string;
+}): { bundled: VaultCliParityResult; unbundled: VaultCliParityResult } {
+  const unbundledStartedAt = performance.now();
+  const unbundled = runVaultCliParityProbe({
+    args: options.args,
+    cwd: options.cwd,
+    entryPath: options.unbundledEntryPath,
+    healthCommonsPackageRoot: options.healthCommonsPackageRoot,
+    homeRoot: options.homeRoot,
+    vaultRoot: options.vaultRoot,
+  });
+  const unbundledDurationMs = Math.round(performance.now() - unbundledStartedAt);
+  const bundledStartedAt = performance.now();
+  const bundled = runVaultCliParityProbe({
+    args: options.args,
+    cwd: options.cwd,
+    entryPath: options.bundledEntryPath,
+    healthCommonsPackageRoot: options.healthCommonsPackageRoot,
+    homeRoot: options.homeRoot,
+    vaultRoot: options.vaultRoot,
+  });
+  const bundledDurationMs = Math.round(performance.now() - bundledStartedAt);
+
+  // Warn-only longitudinal trend signal in the assembly log. Never turn
+  // this into a hard assertion: shared CI runners make wall-time budgets
+  // flake, and a budget loose enough to be stable would catch nothing.
+  console.log(
+    `parity probe \`${options.label}\`: unbundled ${unbundledDurationMs}ms, bundled ${bundledDurationMs}ms`,
+  );
+
+  return { bundled, unbundled };
+}
+
+function assertVaultCliParityMatch(input: {
+  bundled: VaultCliParityResult;
+  compareStdout?: boolean;
+  label: string;
+  unbundled: VaultCliParityResult;
+}): void {
+  if (
+    (input.compareStdout !== false && input.unbundled.stdout !== input.bundled.stdout) ||
+    input.unbundled.stderr !== input.bundled.stderr ||
+    input.unbundled.status !== input.bundled.status
+  ) {
+    throwVaultCliParityMismatch(input);
+  }
+}
+
+function throwVaultCliParityMismatch(input: {
+  bundled: VaultCliParityResult;
+  label: string;
+  unbundled: VaultCliParityResult;
+}): never {
+  throw new Error(
+    [
+      `Bundled vault-cli output diverged for \`${input.label}\`.`,
+      formatVaultCliParityResult("unbundled", input.unbundled),
+      formatVaultCliParityResult("bundled", input.bundled),
+    ].join("\n"),
+  );
+}
+
+function assertVaultCliMemoryShowResult(input: {
+  expectedExists: boolean;
+  expectedRecords: "empty" | "populated";
+  expectedVaultRoot: string;
+  label: string;
+  result: VaultCliParityResult;
+}): VaultCliMemoryShowResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.result.stdout);
+  } catch {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+  const root = parsed as Record<string, unknown>;
+  const documentValue = root.document;
+  const documentRead = memoryDocumentSnapshotSchema.safeParse(documentValue);
+  if (!documentRead.success) {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+  const document = documentRead.data;
+  const records = document.records;
+  if (
+    input.result.status !== 0 ||
+    input.result.stderr.length !== 0 ||
+    !isDeepStrictEqual(Object.keys(root).sort(), ["document", "memory", "vault"]) ||
+    root.vault !== input.expectedVaultRoot ||
+    document.exists !== input.expectedExists ||
+    (input.expectedRecords === "empty"
+      ? records.length !== 0
+      : records.length === 0) ||
+    (!input.expectedExists && document.updatedAt !== null) ||
+    root.memory !== null
+  ) {
+    throwVaultCliMemoryShowFailure(input.label, input.result);
+  }
+
+  return {
+    document,
+    memory: null,
+    vault: root.vault,
+  };
+}
+
+function assertVaultCliMissingMemoryParity(input: {
+  bundled: VaultCliMemoryShowResult;
+  bundledResult: VaultCliParityResult;
+  label: string;
+  unbundled: VaultCliMemoryShowResult;
+  unbundledResult: VaultCliParityResult;
+}): void {
+  if (
+    !isDeepStrictEqual(
+      normalizeVaultCliMissingMemoryResult(input.unbundled),
+      normalizeVaultCliMissingMemoryResult(input.bundled),
+    )
+  ) {
+    throwVaultCliParityMismatch({
+      bundled: input.bundledResult,
+      label: input.label,
+      unbundled: input.unbundledResult,
+    });
+  }
+}
+
+function normalizeVaultCliMissingMemoryResult(
+  input: VaultCliMemoryShowResult,
+): VaultCliMemoryShowResult {
+  const readTime = input.document.frontmatter.updatedAt;
+  const frontmatter = {
+    ...input.document.frontmatter,
+    updatedAt: "<read-time>",
+  };
+  return {
+    document: {
+      ...input.document,
+      frontmatter,
+      markdown: input.document.markdown.replaceAll(readTime, "<read-time>"),
+    },
+    memory: null,
+    vault: input.vault,
+  };
+}
+
+function throwVaultCliMemoryShowFailure(
+  label: string,
+  result: VaultCliParityResult,
+): never {
+  throw new Error(
+    [
+      `vault-cli memory show parity probe failed for ${label}.`,
+      formatVaultCliParityResult("result", result),
+    ].join("\n"),
+  );
+}
+
+function formatVaultCliParityResult(
+  label: string,
+  result: VaultCliParityResult,
+): string {
+  return [
+    `${label} status=${result.status}`,
+    `stdoutBytes=${Buffer.byteLength(result.stdout, "utf8")}`,
+    `stderrBytes=${Buffer.byteLength(result.stderr, "utf8")}`,
+  ].join(" ");
+}
+
+interface VaultCliParityResult {
+  status: number;
+  stderr: string;
+  stdout: string;
+}
+
+interface VaultCliMemoryShowResult {
+  document: MemoryDocumentSnapshot;
+  memory: null;
+  vault: string;
 }
 
 function runVaultCliParityProbe(input: {
@@ -354,17 +684,20 @@ function runVaultCliParityProbe(input: {
   cwd: string;
   entryPath: string;
   healthCommonsPackageRoot: string;
-}): { status: number; stderr: string; stdout: string } {
+  homeRoot?: string;
+  vaultRoot?: string;
+}): VaultCliParityResult {
   const result = spawnSync(process.execPath, [input.entryPath, ...input.args], {
     cwd: input.cwd,
     encoding: "utf8",
     env: {
       ...process.env,
       // Keep probes hermetic: no operator config or vault may leak in from
-      // the assembling machine.
-      HOME: path.join(input.cwd, ".parity-probe-home"),
+      // the assembling machine. Fixture probes opt into only their synthetic
+      // HOME and VAULT roots.
+      HOME: input.homeRoot ?? path.join(input.cwd, ".parity-probe-home"),
       [MURPH_HEALTH_COMMONS_PACKAGE_ROOT_ENV]: input.healthCommonsPackageRoot,
-      VAULT: "",
+      VAULT: input.vaultRoot ?? "",
     },
     // The full `--llms-full` manifest exceeds the 1MiB default; a too-small
     // buffer kills the child mid-stream and turns OS pipe chunking into
@@ -379,14 +712,24 @@ function runVaultCliParityProbe(input: {
   // infrastructure breaking and must fail the assembly loudly instead of
   // posing as a parity result.
   if (result.error || result.signal !== null || typeof result.status !== "number") {
+    const failureKind = result.error
+      ? "spawn_error"
+      : result.signal !== null
+        ? "signal"
+        : "missing_status";
     throw new Error(
-      `vault-cli parity probe \`${input.args.join(" ")}\` did not exit cleanly (${
-        result.error?.message ?? `signal ${result.signal ?? "unknown"}`
-      }).`,
+      [
+        `vault-cli parity probe \`${input.args.join(" ")}\` did not exit cleanly.`,
+        `outcome=${failureKind} status=${result.status ?? -1} stdoutBytes=${Buffer.byteLength(result.stdout ?? "", "utf8")} stderrBytes=${Buffer.byteLength(result.stderr ?? "", "utf8")}`,
+      ].join("\n"),
     );
   }
 
-  return { status: result.status, stderr: result.stderr, stdout: result.stdout };
+  return {
+    status: result.status,
+    stderr: result.stderr,
+    stdout: result.stdout,
+  };
 }
 
 async function assertVaultCliJsonImportSurface(input: {

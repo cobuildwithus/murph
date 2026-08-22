@@ -67,6 +67,7 @@ export interface NormalizeHostedTelegramMessageInput {
     mediaGroupId?: string | null;
     messageId: string;
     replyContextPreview?: string | null;
+    replyToMessageId?: string;
     text?: string | null;
     threadId: string;
   };
@@ -548,5 +549,6 @@ function buildHostedTelegramRawMetadata(
     mediaGroupId: message.mediaGroupId ?? null,
     messageId: message.messageId,
     replyContextPreview: message.replyContextPreview ?? null,
+    replyToMessageId: message.replyToMessageId ?? null,
   });
 }

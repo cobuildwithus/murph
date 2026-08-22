@@ -20,6 +20,7 @@ import {
 import { assistantCronJobSchema } from '@murphai/operator-config/assistant-cli-contracts'
 import {
   appendAssistantDeviceActivityCronJobMetadata,
+  buildAssistantDeviceActivityAuthorityKey,
   readAssistantDeviceActivityCronJobMetadata,
 } from '../src/assistant/device-activity-cron-tags.ts'
 
@@ -95,6 +96,10 @@ describe('device activity triggered automations', () => {
     const automation = createDeviceActivityAutomation({
       activityKind: 'walk',
       after: '2026-06-07T11:00:00.000Z',
+      contextReferences: [{
+        entityId: 'exp_walk_context',
+        entityKind: 'experiment',
+      }],
       source: 'whoop',
       tags: [
         'system:assistant-device-activity-parent:auto_other',
@@ -153,6 +158,21 @@ describe('device activity triggered automations', () => {
       parentAutomationId: 'auto_walk',
       parentAutomationRelativePath: 'bank/automations/auto_walk.md',
     })
+    if (automation.schedule.kind !== 'deviceActivity') {
+      throw new Error('Expected device activity automation.')
+    }
+    expect(metadata?.authorityKey).toBe(
+      buildAssistantDeviceActivityAuthorityKey({
+        ...automation,
+        schedule: {
+          activityKind: automation.schedule.activityKind,
+          source: automation.schedule.source,
+        },
+      }),
+    )
+    expect(metadata?.authorityKey).not.toBe(
+      buildLegacyDeviceActivityAuthorityKey(automation),
+    )
     expect(deviceActivityMocks.advanceAutomationDeviceActivityCursor).toHaveBeenCalledWith(
       expect.objectContaining({
         after: '2026-06-07T12:00:00.000Z',
@@ -1705,6 +1725,7 @@ function createDeviceActivityAutomation(input: {
   assistantTargetOverride?: AutomationQueryRecord['assistantTargetOverride']
   automationId?: string
   continuityPolicy?: 'fresh' | 'preserve'
+  contextReferences?: AutomationQueryRecord['contextReferences']
   instructions?: string
   source?: 'whoop' | 'whoop_v2'
   tags?: string[]
@@ -1715,6 +1736,7 @@ function createDeviceActivityAutomation(input: {
     automationId,
     assistantTargetOverride: input.assistantTargetOverride ?? null,
     continuityPolicy: input.continuityPolicy ?? 'preserve',
+    contextReferences: input.contextReferences ?? [],
     createdAt: '2026-06-07T10:00:00.000Z',
     docType: 'automation',
     instructions: input.instructions ?? 'Ask how the walk felt.',
@@ -1741,6 +1763,7 @@ function createDeviceActivityAutomation(input: {
     status: 'active',
     summary: null,
     supportKind: null,
+    plannedOccurrenceOffsetMs: null,
     tags: input.tags ?? [],
     title: 'After walk',
     updatedAt: '2026-06-07T10:00:00.000Z',

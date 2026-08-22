@@ -139,6 +139,10 @@ describe("@murphai/openclaw-plugin", () => {
       "Use bounded one-shot `automation save ... --schedule-kind at` reminders by default",
     );
     expect(skill).toContain("not open-ended recurring reminders");
+    expect(skill).toContain("plannedOccurrenceOffsetMs` to the lead");
+    expect(skill).toContain("normally `900000`");
+    expect(skill).toContain("Every reminder for a planned session must set `plannedOccurrenceOffsetMs`");
+    expect(skill).toContain("`0` when it fires at session time");
     expect(skill).toContain("session_support_status");
     expect(skill).toContain("session_support_automation_slugs");
     expect(skill).toContain("Pass known setup answers on `experiment start`");

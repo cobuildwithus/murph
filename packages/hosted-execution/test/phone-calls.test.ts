@@ -4,6 +4,10 @@ import * as z from "@murphai/contracts/zod-runtime";
 import {
   HOSTED_SCHEDULED_PHONE_CALL_REQUEST_KEY_PREFIX,
   hostedPhoneCallBriefSchema,
+  hostedPhoneCallStatusRequestSchema,
+  hostedPhoneCallStatusResponseSchema,
+  hostedPhoneCallStopRequestSchema,
+  hostedPhoneCallStopResponseSchema,
   hostedPhoneCallStartRequestSchema,
   hostedPhoneCallStartResponseSchema,
   isHostedScheduledPhoneCallRequestKey,
@@ -80,9 +84,18 @@ describe("hosted phone call contracts", () => {
     });
     expect(hostedPhoneCallStartRequestSchema.parse({
       brief: VALID_BRIEF,
+      resultNotificationChannel: "telegram",
       originSessionId: "session_direct_phone_call",
       requestKey: "turn-124:tool-1",
-    })).not.toHaveProperty("groupRequester");
+    })).toMatchObject({
+      resultNotificationChannel: "telegram",
+    });
+    expect(() => hostedPhoneCallStartRequestSchema.parse({
+      brief: VALID_BRIEF,
+      resultNotificationChannel: "email",
+      originSessionId: "session_direct_phone_call",
+      requestKey: "turn-124:tool-2",
+    })).toThrow();
   });
 
   it("rejects malformed exact group requester evidence", () => {
@@ -114,6 +127,63 @@ describe("hosted phone call contracts", () => {
       phoneCallId: "hpc_123",
       status: "calling",
     }).status).toBe("calling");
+  });
+
+  it("keeps status reads bounded and explicit about pending analysis", () => {
+    expect(hostedPhoneCallStatusRequestSchema.parse({})).toEqual({});
+    expect(hostedPhoneCallStatusRequestSchema.parse({
+      phoneCallId: "hpc_123",
+    })).toEqual({ phoneCallId: "hpc_123" });
+    expect(hostedPhoneCallStatusResponseSchema.parse({
+      calls: [{
+        analyzedAt: null,
+        createdAt: "2026-09-01T15:00:00.000Z",
+        endedAt: "2026-09-01T15:01:00.000Z",
+        phoneCallId: "hpc_123",
+        result: null,
+        status: "ended",
+        stopRequestedAt: null,
+        updatedAt: "2026-09-01T15:01:00.000Z",
+      }],
+    }).calls[0]).toMatchObject({
+      phoneCallId: "hpc_123",
+      result: null,
+      status: "ended",
+    });
+  });
+
+  it("returns terminal result details separately from transport status", () => {
+    expect(hostedPhoneCallStatusResponseSchema.parse({
+      calls: [{
+        analyzedAt: "2026-09-01T15:01:10.000Z",
+        createdAt: "2026-09-01T15:00:00.000Z",
+        endedAt: "2026-09-01T15:01:00.000Z",
+        phoneCallId: "hpc_123",
+        result: {
+          followUp: "The requester must provide one missing detail.",
+          outcome: "not_completed",
+          summary: "The requested task was not completed.",
+        },
+        status: "failed",
+        stopRequestedAt: null,
+        updatedAt: "2026-09-01T15:01:10.000Z",
+      }],
+    }).calls[0]?.result?.outcome).toBe("not_completed");
+  });
+
+  it("keeps stop requests exact and their terminal state explicit", () => {
+    expect(hostedPhoneCallStopRequestSchema.parse({
+      phoneCallId: "hpc_stop_exact",
+    })).toEqual({ phoneCallId: "hpc_stop_exact" });
+    expect(hostedPhoneCallStopResponseSchema.parse({
+      phoneCallId: "hpc_stop_exact",
+      state: "stopped",
+      status: "ended",
+    })).toEqual({
+      phoneCallId: "hpc_stop_exact",
+      state: "stopped",
+      status: "ended",
+    });
   });
 
   it("recognizes only exact scheduled occurrence request keys", () => {

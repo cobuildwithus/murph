@@ -11,7 +11,7 @@ const productionBuildScript = path.join(
   "scripts",
   "run-production-next-build.sh",
 );
-const buildCacheEpoch = "webpack-next-16.3-v1";
+const buildCacheEpoch = "webpack-next-16.3-v4-in-process-cold-webpack";
 
 async function createRunnerFixture(): Promise<{
   appDir: string;
@@ -20,6 +20,7 @@ async function createRunnerFixture(): Promise<{
   cleanup: () => Promise<void>;
   removeLog: string;
   scriptPath: string;
+  typecheckLog: string;
 }> {
   const testTempRoot = process.env.MURPH_VITEST_TEMP_ROOT;
   if (!testTempRoot) {
@@ -32,6 +33,7 @@ async function createRunnerFixture(): Promise<{
   const scriptPath = path.join(appDir, "scripts", "run-production-next-build.sh");
   const buildLog = path.join(fixtureRoot, "build.log");
   const removeLog = path.join(fixtureRoot, "remove.log");
+  const typecheckLog = path.join(fixtureRoot, "typecheck.log");
 
   await mkdir(path.dirname(scriptPath), { recursive: true });
   await mkdir(binDir, { recursive: true });
@@ -44,17 +46,34 @@ async function createRunnerFixture(): Promise<{
     `#!/usr/bin/env bash
 set -euo pipefail
 if [[ "\${1:-}" == "-p" ]]; then
-  printf '%s\\n' "\$MURPH_FAKE_NEXT_BIN"
+  if [[ "\${2:-}" == *typescript* ]]; then
+    printf '%s\\n' "\$MURPH_FAKE_TYPESCRIPT_BIN"
+  else
+    printf '%s\\n' "\$MURPH_FAKE_NEXT_BIN"
+  fi
   exit 0
 fi
 if [[ "\${1:-}" == "../../scripts/rm-paths.mjs" ]]; then
   printf '%s\\n' "\${2:-}" >> "\$MURPH_FAKE_REMOVE_LOG"
+  if [[ -n "\${MURPH_FAKE_REMOVE_FAIL:-}" ]]; then
+    exit 31
+  fi
   rm -rf "\${2:-}"
   exit 0
 fi
-printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" > "\$MURPH_FAKE_BUILD_LOG"
+if [[ "\${2:-}" == "\$MURPH_FAKE_TYPESCRIPT_BIN" ]]; then
+  printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" > "\$MURPH_FAKE_TYPECHECK_LOG"
+  printf 'TYPECHECK_GATE=%s\\n' "\${MURPH_HOSTED_WEB_PREPARED_TYPECHECK:-}" >> "\$MURPH_FAKE_TYPECHECK_LOG"
+  printf '%s\\n' "\$@" >> "\$MURPH_FAKE_TYPECHECK_LOG"
+  exit "\${MURPH_FAKE_TYPECHECK_EXIT_CODE:-0}"
+fi
+printf 'NODE_OPTIONS=%s\\n' "\${NODE_OPTIONS:-}" >> "\$MURPH_FAKE_BUILD_LOG"
+printf 'TYPECHECK_GATE=%s\\n' "\${MURPH_HOSTED_WEB_PREPARED_TYPECHECK:-}" >> "\$MURPH_FAKE_BUILD_LOG"
 printf '%s\\n' "\$@" >> "\$MURPH_FAKE_BUILD_LOG"
-exit "\${MURPH_FAKE_BUILD_EXIT_CODE:-0}"
+if [[ "\${3:-}" == "build" ]]; then
+  exit "\${MURPH_FAKE_BUILD_EXIT_CODE:-0}"
+fi
+exit 0
 `,
   );
   await chmod(fakeNodePath, 0o755);
@@ -66,6 +85,7 @@ exit "\${MURPH_FAKE_BUILD_EXIT_CODE:-0}"
     cleanup: () => rm(fixtureRoot, { force: true, recursive: true }),
     removeLog,
     scriptPath,
+    typecheckLog,
   };
 }
 
@@ -74,30 +94,42 @@ function runProductionBuild(input: {
   binDir: string;
   buildExitCode?: number;
   buildLog: string;
+  removeFail?: boolean;
   removeLog: string;
   scriptPath: string;
+  typecheckExitCode?: number;
+  typecheckLog: string;
 }) {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    MURPH_FAKE_BUILD_EXIT_CODE: String(input.buildExitCode ?? 0),
+    MURPH_FAKE_BUILD_LOG: input.buildLog,
+    MURPH_FAKE_NEXT_BIN: "/fixture/next",
+    MURPH_FAKE_REMOVE_LOG: input.removeLog,
+    MURPH_FAKE_TYPECHECK_EXIT_CODE: String(input.typecheckExitCode ?? 0),
+    MURPH_FAKE_TYPECHECK_LOG: input.typecheckLog,
+    MURPH_FAKE_TYPESCRIPT_BIN: "/fixture/tsc",
+    MURPH_HOSTED_WEB_PREPARED_TYPECHECK: "forged",
+    NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
+    PATH: `${input.binDir}:${process.env.PATH ?? ""}`,
+  };
+  if (input.removeFail) {
+    env.MURPH_FAKE_REMOVE_FAIL = "1";
+  }
   return spawnSync("bash", [input.scriptPath], {
     cwd: input.appDir,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      MURPH_FAKE_BUILD_EXIT_CODE: String(input.buildExitCode ?? 0),
-      MURPH_FAKE_BUILD_LOG: input.buildLog,
-      MURPH_FAKE_NEXT_BIN: "/fixture/next",
-      MURPH_FAKE_REMOVE_LOG: input.removeLog,
-      NODE_OPTIONS: "--trace-warnings --max-old-space-size=99",
-      PATH: `${input.binDir}:${process.env.PATH ?? ""}`,
-    },
+    env,
   });
 }
 
-test("production Next runner owns the Webpack cache epoch transition", async () => {
+test("production Next runner owns the cold Webpack cache and fail-closed epoch", async () => {
   const fixture = await createRunnerFixture();
   const cacheDir = path.join(fixture.appDir, ".next", "cache");
   const cacheStamp = path.join(cacheDir, "murph-production-build-epoch");
   const staleCacheEntry = path.join(cacheDir, "stale-cache-entry");
-  const warmCacheEntry = path.join(cacheDir, "warm-cache-entry");
+  const restoredWebpackEntry = path.join(cacheDir, "webpack", "restored-cache-entry");
+  const retainedSwcEntry = path.join(cacheDir, "swc", "retained-cache-entry");
 
   try {
     await mkdir(cacheDir, { recursive: true });
@@ -108,39 +140,103 @@ test("production Next runner owns the Webpack cache epoch transition", async () 
     expect(coldBuild.stdout).toContain(
       `Resetting incompatible Next build cache for epoch=${buildCacheEpoch}`,
     );
-    expect(coldBuild.stdout).toContain("compiler=webpack");
+    expect(coldBuild.stdout).toContain(
+      "compiler=webpack build_old_space_mb=3072 typecheck_old_space_mb=3584 webpack_cache=cold webpack_build_worker=off",
+    );
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
     await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
     await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
       "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
-      "--max-old-space-size=1024",
+      "TYPECHECK_GATE=",
+      "--max-old-space-size=3072",
+      "/fixture/next",
+      "typegen",
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
+      "TYPECHECK_GATE=complete",
+      "--max-old-space-size=3072",
       "/fixture/next",
       "build",
       "--webpack",
       "",
     ].join("\n"));
+    await expect(readFile(fixture.typecheckLog, "utf8")).resolves.toBe([
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3584",
+      "TYPECHECK_GATE=",
+      "--max-old-space-size=3584",
+      "/fixture/tsc",
+      "-p",
+      "tsconfig.next.json",
+      "--pretty",
+      "false",
+      "",
+    ].join("\n"));
 
-    await writeFile(warmCacheEntry, "warm\n");
+    await mkdir(path.dirname(restoredWebpackEntry), { recursive: true });
+    await writeFile(restoredWebpackEntry, "restored\n");
+    await mkdir(path.dirname(retainedSwcEntry), { recursive: true });
+    await writeFile(retainedSwcEntry, "retained\n");
     await rm(fixture.removeLog, { force: true });
     const warmBuild = runProductionBuild(fixture);
     expect(warmBuild.status, warmBuild.stderr).toBe(0);
     expect(warmBuild.stdout).not.toContain("Resetting incompatible Next build cache");
-    await expect(readFile(warmCacheEntry, "utf8")).resolves.toBe("warm\n");
-    await expect(readFile(fixture.removeLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(warmBuild.stdout).toContain(
+      "Resetting restored Webpack cache before production compile",
+    );
+    await expect(readFile(restoredWebpackEntry, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(readFile(retainedSwcEntry, "utf8")).resolves.toBe("retained\n");
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache/webpack\n");
 
     await writeFile(cacheStamp, "turbopack-old-epoch\n");
     await writeFile(staleCacheEntry, "stale-again\n");
+    await rm(fixture.removeLog, { force: true });
     const failedBuild = runProductionBuild({ ...fixture, buildExitCode: 23 });
     expect(failedBuild.status).toBe(23);
     expect(failedBuild.stdout).toContain("Resetting incompatible Next build cache");
     await expect(readFile(staleCacheEntry, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(cacheStamp, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache\n");
 
     const recoveredBuild = runProductionBuild(fixture);
     expect(recoveredBuild.status, recoveredBuild.stderr).toBe(0);
     expect(recoveredBuild.stdout).toContain("Resetting incompatible Next build cache");
     await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+
+    // A failed pre-compile Webpack-cache removal must abort before Next runs:
+    // the pre-compile deletion is the sole cold-cache boundary.
+    await rm(fixture.removeLog, { force: true });
+    await rm(fixture.buildLog, { force: true });
+    const removalFailedBuild = runProductionBuild({ ...fixture, removeFail: true });
+    expect(removalFailedBuild.status).toBe(31);
+    await expect(readFile(fixture.buildLog, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(fixture.removeLog, "utf8")).resolves.toBe(".next/cache/webpack\n");
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+
+    const recoveredAfterRemovalFailure = runProductionBuild(fixture);
+    expect(recoveredAfterRemovalFailure.status, recoveredAfterRemovalFailure.stderr).toBe(0);
+    await expect(readFile(cacheStamp, "utf8")).resolves.toBe(`${buildCacheEpoch}\n`);
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("production Next runner fails closed before compilation when the prepared typecheck fails", async () => {
+  const fixture = await createRunnerFixture();
+
+  try {
+    const result = runProductionBuild({ ...fixture, typecheckExitCode: 19 });
+    expect(result.status).toBe(19);
+    await expect(readFile(fixture.buildLog, "utf8")).resolves.toBe([
+      "NODE_OPTIONS=--trace-warnings --max-old-space-size=3072",
+      "TYPECHECK_GATE=",
+      "--max-old-space-size=3072",
+      "/fixture/next",
+      "typegen",
+      "",
+    ].join("\n"));
   } finally {
     await fixture.cleanup();
   }

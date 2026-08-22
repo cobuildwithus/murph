@@ -1,0 +1,95 @@
+name: Foreground Reply State Cardinality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Durable contract: agent-docs/references/README.md#foreground-reply-state-cardinality
+jobs:
+  bounded-work:
+    name: Foreground reply state cardinality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      MURPH_TEST_STATE_CARDINALITY: "1"
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Require state-cardinality gate mode
+        run: test "$MURPH_TEST_STATE_CARDINALITY" = "1"
+
+      - name: Verify state-cardinality meter
+        run: >-
+          pnpm --dir packages/assistant-engine exec vitest run
+          --config vitest.config.ts
+          --no-coverage
+          test/state-cardinality-harness.test.ts
+
+      - name: Run foreground state-cardinality probes
+        shell: bash
+        run: |
+          set +e
+          status=0
+          mapfile -t package_dirs < <(
+            find packages apps -type f -path '*/test/*-state-cardinality.test.ts' -print \
+              | sed 's#/test/.*##' \
+              | sort -u
+          )
+          if (( ${#package_dirs[@]} == 0 )); then
+            echo "No production state-cardinality probes were discovered."
+            exit 1
+          fi
+
+          for package_dir in "${package_dirs[@]}"; do
+            mapfile -t probe_paths < <(
+              find "$package_dir/test" -type f -name '*-state-cardinality.test.ts' -print \
+                | sort
+            )
+            relative_probes=()
+            for probe_path in "${probe_paths[@]}"; do
+              relative_probes+=("${probe_path#"$package_dir/"}")
+            done
+
+            config_args=()
+            if [[ -f "$package_dir/vitest.config.ts" ]]; then
+              config_args=(--config vitest.config.ts)
+            elif [[ -f "$package_dir/vitest.workspace.ts" ]]; then
+              config_args=(--config vitest.workspace.ts)
+            else
+              echo "No supported Vitest config found for $package_dir."
+              status=1
+              continue
+            fi
+
+            echo "Running ${#relative_probes[@]} state-cardinality probe(s) in $package_dir."
+            pnpm --dir "$package_dir" exec vitest run \
+              "${config_args[@]}" \
+              --no-coverage \
+              "${relative_probes[@]}" \
+              || status=$?
+          done
+
+          exit "$status"

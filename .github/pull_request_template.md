@@ -1,34 +1,21 @@
-## Why this PR exists
+## Why and outcome
 
-<!-- State the user or product need in one or two sentences. -->
+<!-- State the need and the result in one or two short paragraphs. -->
 
-## User goal / user-visible behavior
+## Product UX
 
-<!-- Describe the outcome this PR is meant to reach. -->
+<!-- Follow agent-docs/operations/product-ux.md for user-facing work. Keep this proportional. -->
 
-## User experience
+- Effort: <!-- Patch, Product change, Feature, or Not applicable — reason -->
+- Result: <!-- Ready, Hold, or Not applicable -->
+- Walkthrough: <!-- Affected people, material exclusions, and any difference from the approved plan -->
 
-<!-- Entry point, interaction and feedback states, failure/recovery, and what happens next. Write "No user-facing effect" when accurate. -->
+## Evidence
 
-## Invariants
+<!-- List direct journey proof and focused checks. For frontend work, name the states and viewports checked. Link screenshots only when they add proof. -->
 
-<!-- List the smallest correctness, privacy, security, and operational invariants this PR must preserve. -->
-
-## Changelog
-
-<!-- Use `$write-changelog` for member-visible features and improvements. Choose exactly one disposition. For `updated`, name the edition date and stable item IDs. For `not applicable`, explain concretely why no member-visible behavior changed. -->
-
-- Changelog: <!-- updated OR not applicable -->
-- Items: <!-- 2026-08-09 · stable-item-id; remove this bullet when not applicable -->
-- Reason: <!-- Required only when not applicable; remove this bullet when updated -->
-
-## ReviewGPT later-round context
-
-<!-- Replace the placeholder below with exactly `routine` or `sensitive`. Use `sensitive` for any product-critical flow; auth, privacy, security, billing, health-safety, persisted-state, public API, runtime/deploy, ordering/retry/concurrency/idempotency, broad refactor, cross-owner, external-boundary, or other cross-cutting change. A cosmetic change or small bug fix is `routine` only when none of those conditions apply. Missing, malformed, or duplicate declarations default later ReviewGPT rounds to a full ZIP. -->
-
-ReviewGPT context sensitivity: <!-- routine OR sensitive -->
-
-- Classification reason: <!-- Briefly explain why this PR is routine or sensitive. -->
+- Direct: <!-- Real path, channel output, provider-shaped scenario, trace, test, or rendered state -->
+- Coverage: <!-- Why this evidence covers the changed claim -->
 
 ## Non-obvious affected surfaces
 
@@ -45,7 +32,7 @@ ReviewGPT context sensitivity: <!-- routine OR sensitive -->
 
 ## Hot reply path impact
 
-<!-- The hot reply path runs from durable acceptance of a current conversation message through provider start and durable reply handoff. If this PR does not change that path, write "Not applicable" and say why. If it does, list every database call, network/provider call, or other awaited operation added or moved onto the path. Include call counts, serial/parallel ordering, timeout/retry/fallback behavior, expected or measured latency, and the proof used to compare before and after. -->
+<!-- The hot reply path runs from durable acceptance of a current conversation message through provider start and durable reply handoff. If this PR does not change that path, write "Not applicable" and say why. If it does, list every database call, network/provider call, or other awaited operation added or moved onto the path. Include maximum call counts, serial/parallel ordering, timeout/retry/fallback behavior, expected or measured latency, and before/after proof. -->
 
 - Path status: <!-- Touched, or Not applicable — reason -->
 - Database calls: <!-- Added or moved-on-path calls, or None -->
@@ -55,7 +42,7 @@ ReviewGPT context sensitivity: <!-- routine OR sensitive -->
 
 ## Murph initial provider input impact
 
-<!-- Report the complete first provider-visible input assembled by Murph and Codex for representative individual and group turns. Include final instructions/messages, eager tool definitions and schemas, deferred-tool metadata, and Codex-generated tool or code-mode guidance. Do not report only authored system-prompt text. Use identical base/head fixtures and the target model tokenizer; serialize the same provider-visible fields for byte counts. If no provider-input surface changed, write "Not applicable" and name the reason instead of claiming a measured zero. -->
+<!-- Report the complete first provider-visible input assembled by Murph and Codex for representative individual and group turns. Include final instructions/messages, eager tool definitions and schemas, deferred-tool metadata, and generated tool or code-mode guidance. Use identical base/head fixtures and the target model tokenizer; serialize the same provider-visible fields for byte counts. If no provider-input surface changed, write "Not applicable" and name the reason instead of claiming a measured zero. -->
 
 | Runtime | Base input tokens | Head input tokens | Delta | Percent | Base bytes | Head bytes | Byte delta |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -69,16 +56,39 @@ ReviewGPT context sensitivity: <!-- routine OR sensitive -->
 
 ## Design proof
 
-<!-- Required for user-facing apps/web UI changes. Update /design?tab=components for reusable components or /design?tab=sections for full page sections. Embed cropped lossless PNG screenshots captured at 2x device scale or higher from that design-page state and uploaded through the /designproof variant. Verify local and hosted images at native resolution. -->
+<!-- Required for user-facing apps/web UI changes; remove for other PRs. Link a repository-owned, reviewer-openable absolute URL with a fragment to the reusable component on /design?tab=components, consent surface on /design?tab=consent, or composed-section study on /screenshots/<category>. Refresh an expired or inaccessible preview; use production only when it already renders the changed state. Add or update the representation only when no existing route and anchor render the changed state. Choose evidence for the actual visual, state, interaction, and responsive risks; there is no screenshot quota. -->
 
-- Design page: <!-- /design?tab=components#... or /design?tab=sections#... -->
-- Coverage: <!-- Component or section names added or updated -->
-- Desktop screenshot: <!-- ![Desktop description](https://hosted-image-url) -->
-- Mobile screenshot: <!-- ![Mobile description](https://hosted-image-url) -->
+- Design page: <!-- [proof label](https://<preview-host>/design?tab=components#...), [proof label](https://<preview-host>/design?tab=consent#...), or [proof label](https://<preview-host>/screenshots/<category>#...) -->
+- Evidence: <!-- Links, images, browser walkthrough, or a clear reason why an image adds no proof -->
+- Coverage: <!-- States and viewports checked, plus why this evidence is sufficient -->
+
+## Risks (only when relevant)
+
+<!-- Delete this section when no special risk applies. Include only affected invariants, database fanout, or deliberately deferred work not already covered above. -->
+
+<!-- Add the next two lines only before a final ReviewGPT gate. Missing or invalid sensitivity defaults safely to a full review packet. -->
+<!-- ReviewGPT context sensitivity: routine OR sensitive -->
+<!-- Classification reason: ... -->
+
+## Deployment concerns
+
+<!-- Keep this section in every PR. Select exactly one disposition. For an applicable deploy boundary, complete every deployment detail and remove Reason. Otherwise remove the deployment-detail bullets and explain why deployment concerns do not apply. -->
+
+- Deployment: <!-- applicable OR not applicable -->
+- Supported skew: <!-- Required when applicable -->
+- Safe order: <!-- Required when applicable -->
+- Rollback floor: <!-- Required when applicable -->
+- Expected exposure: <!-- Required when applicable -->
+- Reversibility: <!-- Required when applicable -->
+- Convergence proof: <!-- Required when applicable -->
+- Post-deploy checks: <!-- Required when applicable -->
+- Reason: <!-- Required only when not applicable -->
 
 ## Change-shape breakdown
 
-Classification rule: <!-- Explain how paths were classified. Note any binary files. -->
+<!-- Classify base-to-head added/deleted lines by primary purpose. Note binary files and keep generated output separate from authored source. Raw LOC is reviewer orientation and a scope-anomaly signal, not a quality target. -->
+
+Classification rule: <!-- Explain how paths were classified and note any binary files. -->
 
 | Category | Added | Deleted |
 | --- | ---: | ---: |
@@ -89,6 +99,10 @@ Classification rule: <!-- Explain how paths were classified. Note any binary fil
 | Generated / other | 0 | 0 |
 | **Total** | **0** | **0** |
 
-## Verification
+## Changelog
 
-<!-- List exact commands and direct scenario evidence. -->
+<!-- Use `$write-changelog` for member-visible features and improvements. Choose exactly one disposition. -->
+
+- Changelog: <!-- updated OR not applicable -->
+- Items: <!-- 2026-08-09 · stable-item-id; remove when not applicable -->
+- Reason: <!-- Required only when not applicable; remove when updated -->

@@ -92,15 +92,30 @@ describe("deviceSyncProviderManifests", () => {
 
     const config = junctionManifest.readConfig({
       JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_NAMESPACE: "e2e",
       JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
       JUNCTION_ENV: "sandbox",
       JUNCTION_REGION: "us",
     });
 
     expect(config).toMatchObject({
+      clientUserIdNamespace: "e2e",
       environment: "sandbox",
       region: "us",
     });
+    const invalidNamespaceConfig = junctionManifest.readConfig({
+      JUNCTION_API_KEY: "sk_us_test_manifest",
+      JUNCTION_CLIENT_USER_ID_NAMESPACE: "Native-iOS",
+      JUNCTION_CLIENT_USER_ID_SECRET: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
+      JUNCTION_ENV: "sandbox",
+      JUNCTION_REGION: "us",
+    });
+    if (!invalidNamespaceConfig) {
+      throw new Error("Expected invalid Junction namespace config to be present.");
+    }
+    expect(() => createConfiguredDeviceSyncProvidersFromConfigs({
+      junction: invalidNamespaceConfig,
+    })).toThrow(/JUNCTION_CLIENT_USER_ID_NAMESPACE/u);
     expect(config).not.toHaveProperty("allowCustomBaseUrl");
     expect(config).not.toHaveProperty("baseUrl");
   });
@@ -121,12 +136,14 @@ describe("deviceSyncProviderManifests", () => {
     }
     expect(junctionConfig.timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
-    expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-5)).toEqual([
-      "steps",
-      "distance",
-      "calories_active",
-      "heartrate",
-      "weight",
+    expect([...JUNCTION_DEFAULT_TIMESERIES_RESOURCES].slice(-7)).toEqual([
+      "forced_vital_capacity",
+      "heart_rate_alert",
+      "inhaler_usage",
+      "insulin_injection",
+      "peak_expiratory_flow_rate",
+      "sleep_apnea_alert",
+      "fall",
     ]);
     expect(normalizeJunctionDeviceSyncRuntimeConfig(junctionConfig).timeseriesResources)
       .toEqual([...JUNCTION_PRODUCTION_TIMESERIES_RESOURCES]);
@@ -147,20 +164,11 @@ describe("deviceSyncProviderManifests", () => {
 
     expect([...JUNCTION_OPT_IN_TIMESERIES_RESOURCES]).toEqual([
       "body_mass_index",
-      "carbohydrates",
       "fat",
-      "forced_expiratory_volume_1",
-      "forced_vital_capacity",
-      "heart_rate_alert",
-      "inhaler_usage",
-      "insulin_injection",
       "lean_body_mass",
-      "peak_expiratory_flow_rate",
-      "sleep_apnea_alert",
       "waist_circumference",
       "calories_basal",
       "daylight_exposure",
-      "fall",
       "floors_climbed",
       "handwashing",
       "stand_duration",
@@ -253,6 +261,10 @@ describe("deviceSyncProviderManifests", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "backfill")).toEqual({
       payload: {
         emptyBackfillAttempts: { kind: "number", includeInHostedHint: true },
+        historicalProofFirstSeenAt: { kind: "string", includeInHostedHint: true },
+        historicalProofSourceProviderSlug: { kind: "string", includeInHostedHint: true },
+        historicalProviderRecordsSeen: { kind: "boolean", includeInHostedHint: true },
+        historicalRecordsSeen: { kind: "boolean", includeInHostedHint: true },
         sourceProviderSlug: { kind: "string", includeInHostedHint: true },
         timeseriesCursor: { kind: "string", includeInHostedHint: true },
         timeseriesResourceCursor: { kind: "string", includeInHostedHint: true },
@@ -404,6 +416,7 @@ describe("deviceSyncProviderManifests", () => {
       junction: {
         allowedLinkHosts: ["junction.com", "tryvital.io"],
         apiKey: "sk_us_test_runtime",
+        clientUserIdNamespace: "e2e",
         clientUserIdSecret: "<REDACTED_JUNCTION_CLIENT_USER_ID_SECRET>",
         environment: "sandbox",
         region: "us",
@@ -469,6 +482,7 @@ describe("deviceSyncProviderManifests", () => {
     expect(cloned.junction).not.toHaveProperty("webhookSecret");
     expect(cloned.junction).toMatchObject({
       allowedLinkHosts: ["junction.com", "tryvital.io"],
+      clientUserIdNamespace: "e2e",
       environment: "sandbox",
       region: "us",
       providerFilter: ["oura", "withings"],
@@ -589,6 +603,8 @@ describe("deviceSyncProviderManifests", () => {
         kind: "backfill",
         payload: {
           emptyBackfillAttempts: 2,
+          historicalProviderRecordsSeen: true,
+          historicalRecordsSeen: true,
           resources: ["profile"],
           timeseriesCursor: "2026-04-01T00:00:00.000Z",
           timeseriesResourceCursor,
@@ -599,6 +615,8 @@ describe("deviceSyncProviderManifests", () => {
       }),
     ).toEqual({
       emptyBackfillAttempts: 2,
+      historicalProviderRecordsSeen: true,
+      historicalRecordsSeen: true,
       timeseriesCursor: "2026-04-01T00:00:00.000Z",
       timeseriesResourceCursor,
       workoutStreamCursor,
@@ -920,9 +938,11 @@ describe("Junction opt-in timeseries configuration", () => {
     region: "us" as const,
   };
 
-  it("requests every canonical resource when configuration is omitted", () => {
+  it("requests only curated defaults when configuration is omitted", () => {
     expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
-      .toEqual(JUNCTION_TIMESERIES_RESOURCES);
+      .toEqual(JUNCTION_DEFAULT_TIMESERIES_RESOURCES);
+    expect(normalizeJunctionDeviceSyncRuntimeConfig(baseConfig).timeseriesResources)
+      .not.toContain(JUNCTION_OPT_IN_TIMESERIES_RESOURCES[0]);
   });
 
   it("preserves an explicit only-opt-in list exactly", () => {

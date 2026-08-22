@@ -24,6 +24,8 @@ import {
 import {
   hostedOnboardingError,
   isHostedOnboardingError,
+  isHostedStripeEffectPendingError,
+  HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
 } from "./errors";
 import {
   acceptHostedFamilyInviteFromPhoneTx,
@@ -1857,7 +1859,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
       : undefined;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+  let familySignupNotificationMemberId: string | null = null;
   let familyDraftCheckoutConflict = false;
+  let familyStripeEffectPending = false;
   let familyRouteBlockedPlan: HostedOnboardingLinqDirectPlan | null = null;
   const familyRouteBlockedError = new Error("Hosted Linq family route is not bindable.");
   if (participantContact.kind === "phone") {
@@ -1921,6 +1925,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
           });
         },
         onAcceptedMemberActivated: (activation) => {
+          if (activation.activated) {
+            familySignupNotificationMemberId = activation.memberId;
+          }
           if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
             familyActivationWake = {
               eventId: activation.hostedExecutionEventId,
@@ -1966,6 +1973,8 @@ export async function planHostedOnboardingLinqWebhook(input: {
         && error.code === HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE_ERROR_CODE
       ) {
         familyDraftCheckoutConflict = true;
+      } else if (isHostedStripeEffectPendingError(error)) {
+        familyStripeEffectPending = true;
       } else if (error instanceof HostedDomainRootPreparationMismatchError) {
         throw hostedLinqDirectMailboxPreparationRequired("member");
       } else if (!isExpectedHostedLinqFamilyInviteAcceptanceMiss(error)) {
@@ -1990,6 +1999,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
         messageId: summary.messageId,
         occurredAt,
+        ...(familySignupNotificationMemberId
+          ? {
+              signupNotificationMemberId:
+                familySignupNotificationMemberId,
+            }
+          : {}),
         sourceEventId: input.event.event_id,
         ...(familyActivationWake ? { wakeHandoff: familyActivationWake } : {}),
       }),
@@ -2042,6 +2057,18 @@ export async function planHostedOnboardingLinqWebhook(input: {
         existingMemberMatch,
         reason: "family-invite-draft-recovery-required",
         routeStage: "family-invite-draft-recovery-required",
+      }),
+    );
+  }
+
+  if (familyStripeEffectPending) {
+    return logHostedLinqWebhookPlannerDecisionAndReturn(
+      buildIgnoredLinqWebhookPlan(HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON),
+      buildHostedLinqWebhookPlannerDetails(input.event, context, {
+        existingMemberActive: existingMemberEffectiveActive,
+        existingMemberMatch,
+        reason: HOSTED_STRIPE_EFFECT_PENDING_VISIBLE_REASON,
+        routeStage: "family-invite-stripe-effect-pending",
       }),
     );
   }
