@@ -74,6 +74,8 @@ export interface HostedBillingMemberSeedForTest {
   billingStatus: HostedBillingStatusForTest;
   environment?: NodeJS.ProcessEnv;
   memberId: string;
+  /** Seeds the crypto-root marker used to detect an earlier activation. */
+  previouslyActivated: boolean;
   privyUserId?: string | null;
   verifiedEmail?: string | null;
 }
@@ -123,6 +125,26 @@ export interface HostedFamilyProjectionForTest {
   } | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+}
+
+export async function provisionHostedBillingActivationProofForTest<TTx>(input: {
+  memberId: string;
+  previouslyActivated: boolean;
+  provision: (input: {
+    reason: string;
+    tx: TTx;
+    userId: string;
+  }) => Promise<void>;
+  tx: TTx;
+}): Promise<void> {
+  if (!input.previouslyActivated) {
+    return;
+  }
+  await input.provision({
+    reason: "hosted-billing-live.test-seed",
+    tx: input.tx,
+    userId: input.memberId,
+  });
 }
 
 interface HostedBillingTestReader {
@@ -348,11 +370,6 @@ export async function seedHostedBillingMemberForTest(
           memberId: input.memberId,
           prisma: tx,
         });
-        await modules.provisionHostedCryptoDomainRootsForUserTx({
-          reason: "hosted-billing-live.test-seed",
-          tx,
-          userId: input.memberId,
-        });
         await modules.upsertHostedMemberIdentity({
           maskedPhoneNumberHint: null,
           memberId: input.memberId,
@@ -371,6 +388,13 @@ export async function seedHostedBillingMemberForTest(
           walletProvider: null,
         });
       }
+
+      await provisionHostedBillingActivationProofForTest({
+        memberId: input.memberId,
+        previouslyActivated: input.previouslyActivated,
+        provision: modules.provisionHostedCryptoDomainRootsForUserTx,
+        tx,
+      });
 
       await tx.hostedMember.update({
         data: {
