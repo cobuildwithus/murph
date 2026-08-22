@@ -16,6 +16,11 @@ or irreversible-effect boundary, or when production evidence shows prompt
 guidance and native Codex controls are insufficient. Follow
 `docs/contracts/00-invariants.md` § Trust Codex Native Capabilities.
 
+Reject security theater. A control must enforce an independent boundary or
+prove behavior at that boundary. Self-reported metadata, echoed configuration,
+and duplicate checks inside one trust domain are diagnostics, not security
+guarantees. Delete them when they add brittleness without reducing real risk.
+
 ## Purpose
 
 This file is the compact routing map for agent work in this repository.
