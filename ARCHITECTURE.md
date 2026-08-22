@@ -770,8 +770,10 @@ retired vault-share projection roots, and environment files are denied; tool
 network is off, shell commands inherit no secrets, and the child receives only
 the consent-aware lazy `murph.group/read_shared` dynamic tool, with no mutation
 or delivery authority.
-Thread-start attestation must confirm the exact profile, roots, empty working
-directory, empty instruction sources, and approval policy before model work.
+The thread request supplies the exact profile, roots, empty working directory,
+disabled instruction sources, and approval policy. The App Server response is
+not an authorization boundary; production-like Linux smoke proves the
+profile's actual filesystem, environment, and network enforcement.
 The child never shares the resident process, provider thread, interruption
 domain, or route grant. Before checkpoint, invocation return, fence loss,
 workspace replacement, or shutdown, the runtime aborts and awaits the exact

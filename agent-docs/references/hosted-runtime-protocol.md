@@ -882,9 +882,11 @@ promise. That call launches a separate one-shot App Server process with the
 native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
 `.codex/**`, and environment-file denial, no tool network or inherited shell
 secrets, and only the consent-aware lazy `murph.group/read_shared` dynamic
-tool, with no mutation or delivery authority. Thread-start attestation
-must confirm the exact profile, roots, sealed empty working directory, empty
-instruction sources, and approval policy before model work. Further asks stay
+tool, with no mutation or delivery authority. The thread request supplies the
+exact profile, roots, sealed empty working directory, disabled instruction
+sources, and approval policy. Its response is not an authorization boundary;
+production-like Linux smoke proves the resulting filesystem, environment, and
+network enforcement. Further asks stay
 pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
 delivery never await the child. The child also receives the server-bound

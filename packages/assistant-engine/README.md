@@ -157,9 +157,10 @@ configuration, but starts from a fresh empty working directory and removes that
 directory after the exact child exits. It uses process lifetime `one-shot`; its
 `thread/start` request sets `permissions = "murph-group-read"`, exact
 `runtimeWorkspaceRoots`, `ephemeral = true`, and approval policy `never` without
-legacy `sandbox`. The pinned App Server must attest the effective profile,
-roots, working directory, empty instruction sources, and approval policy before
-the turn starts. The profile permits read-only access to the exact target roots
+legacy `sandbox`. The App Server response is not an authorization boundary;
+production-like Linux smoke proves the named profile's actual filesystem,
+environment, and network enforcement. The profile permits read-only access to
+the exact target roots
 while denying `.runtime/**`, `.codex/**`, environment files, writes, other
 workspaces, and tool network. Model-run shell commands inherit no provider
 credential or hosted secret. The child's only dynamic tool is the consent-aware
