@@ -125,6 +125,8 @@ Every pull request carries one mechanically validated, field-complete
 deployment-concerns disposition. Applicable deploy boundaries record supported skew, safe order,
 rollback floor, expected exposure, reversibility, convergence proof, and
 post-deploy checks; other changes record one concrete not-applicable reason.
+Shared protocols between independently deployed components use a
+consumer-first rollout and prove every supported mixed-version pair.
 Every PR also records non-obvious affected surfaces, a mechanically validated
 architecture/reuse summary, an exact synthetic-merge-first-parent-to-candidate
 cyclomatic-complexity result plus agent hotspot judgment, foreground reply-path
