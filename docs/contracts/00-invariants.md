@@ -557,7 +557,7 @@ it has been explicitly elevated to a cross-cutting invariant.
   Stripe; an earlier invite transaction is not purchase authority.
 - A live monthly group sponsorship is a payer authorization, not a Stripe
   subscription and not a message bundle. It stores only payer, beneficiary,
-  status, $5/$10/$20 cap, and anchored period. Current-period committed spend is
+  status, $5/$10/$20/$50 cap, and anchored period. Current-period committed spend is
   derived from exact-$5 `HostedUsageCreditPurchase` rows in fulfilled or pending
   states; `HostedUsageCreditEntry` is the only balance and unused credit carries
   forward. One live authorization per group is database-enforced. Refill

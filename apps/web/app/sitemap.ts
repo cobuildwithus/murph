@@ -7,8 +7,10 @@ import { MURPH_PUBLIC_SITE_URL } from "@/src/lib/site-metadata";
 
 const STATIC_PUBLIC_ROUTES = [
   "/",
+  "/about",
   "/changelog",
   "/clubs",
+  "/contact",
   "/consumer-health-data-privacy-policy",
   "/experiments",
   "/knowledge",

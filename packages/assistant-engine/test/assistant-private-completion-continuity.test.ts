@@ -273,6 +273,7 @@ describe('private completion continuity', () => {
       expect.objectContaining({
         kind: 'assistant',
         sourceOutboxIntentId: delivered.intentId,
+        standaloneAssistantContext: true,
         text: delivered.message,
       }),
     ])

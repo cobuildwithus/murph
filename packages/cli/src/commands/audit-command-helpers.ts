@@ -33,10 +33,13 @@ export async function showAudit(
 ): Promise<CommandShowEntity> {
   await assertInitializedVaultRoot(vaultRoot)
   const query = await loadQueryRuntime()
-  const vault = await query.readVault(vaultRoot)
-  const record = query.lookupEntityById(vault, auditId)
+  const record = await query.resolveCanonicalEntityInFamily(
+    vaultRoot,
+    'audit',
+    auditId,
+  )
 
-  if (!record || record.family !== 'audit') {
+  if (!record) {
     throw new VaultCliError('not_found', `No audit record found for "${auditId}".`)
   }
 
@@ -49,8 +52,11 @@ export async function listAudits(
 ): Promise<AuditCommandListItem[]> {
   await assertInitializedVaultRoot(vaultRoot)
   const query = await loadQueryRuntime()
-  const vault = await query.readVault(vaultRoot)
-  const sorted = [...vault.audits]
+  const records = await query.listCanonicalEntities(vaultRoot, {
+    family: 'audit',
+    limit: null,
+  })
+  const sorted = records
     .filter((record) => matchesOptionalString(firstString(record.attributes, ['action']), options.action))
     .filter((record) => matchesOptionalString(firstString(record.attributes, ['actor']), options.actor))
     .filter((record) => matchesOptionalString(record.status ?? null, options.status))

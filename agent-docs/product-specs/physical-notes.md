@@ -41,6 +41,21 @@ The assistant composes two existing-style primitives:
 3. `murph.send_physical_note` materializes and hashes the exact saved image,
    publishes a short-lived private capability, and asks Web to submit it to Lob.
 
+An independent `murph.resolve_physical_note` action handles a current accepted
+message that explicitly asks to check, clear, resolve, or cancel an earlier
+uncertain submission. When the conversation or prior tool result identifies a
+specific earlier send or recovery, the call also carries an opaque
+`target_message_ref` plus a required `target_kind` of `send` or `recovery`.
+That target pair selects only the checked operation; it does not grant
+authority. The current accepted direct or authenticated-group message remains
+the sole authority for the check. Recovery performs one foreground
+reconciliation through Web and returns in the same turn. It does not generate
+artwork, publish an image, create a provider effect, recall accepted mail,
+schedule work, or authorize a later send. The low-frequency action uses the
+existing deferred-tool discovery path: ordinary eligible turns carry only its
+compact discovery record, while an explicit recovery request discovers the full
+schema before calling it.
+
 On the immediate completion turn the send tool infers the trusted image only
 when its completion carries that exact accepted origin. When Murph showed the
 artwork first, a later user-authored send turn provides the exact trusted vault
@@ -82,13 +97,70 @@ note.
 
 ## Ownership and persistence
 
-Web owns the sole durable `HostedPhysicalNote` row. It stores only operational
+Web owns the durable `HostedPhysicalNote` effect row. It stores only operational
 facts: beneficiary, request identity and fingerprint, provider id, status,
 complimentary offer code, configured provider cost, pricing version, one
 provider-neutral failure reason, and timestamps. The failure reason is limited
 to recipient address, artwork, service availability, invalid Murph request,
 prior-note unresolved or accepted state, or unknown. It never stores the postal
 address, image URL, artwork, prompt, note text, or Lob's freeform error message.
+
+Standalone recovery reuses that same row and the same guard transitions. A
+narrow Web-owned `HostedPhysicalNoteRecovery` row binds the exact current
+accepted assistant input to a versioned fingerprint of its normalized target
+kind and reference, the checked operation, and, after reconciliation, its
+bounded response. The current input authorizes the check. An optional target
+identifies only the checked operation by pairing an earlier accepted assistant
+input with a required operation kind. A `recovery` target queries only
+`HostedPhysicalNoteRecovery` and replays its stored response or stored note
+pointer. A `send` target derives the send request key from that earlier
+accepted assistant input and queries only the same-member `HostedPhysicalNote`.
+Web never infers the operation by probing both target namespaces. A targeted
+incomplete recovery retries its stored `physicalNoteId` while that note is
+still an unresolved same-member guard, rather than advancing to a different
+guard. Unknown, deleted, cross-member, unauthorized, or unidentified targets in
+the selected namespace store and return an unconfirmed pending result, never a
+row-specific `clear`, and call no provider. With no target, legacy unresolved
+records still use the oldest-first fallback; if no guard can be identified,
+recovery returns unconfirmed pending rather than `clear`.
+
+The accepted input can be replayed only with that same normalized selector.
+Changing the target reference, changing `send` to `recovery`, adding a target to
+a no-target request, or removing one fails closed as unconfirmed under the
+member lock. A selector mismatch does not read the provider, mutate either
+target, or relabel the first selector's stored result; checking a different
+operation requires a newly accepted input.
+
+The binding is created under the member lock before any provider read. A
+completed replay returns the stored response without selecting another guard,
+calling the provider, or settling usage again, even if its optional note pointer
+is later removed. An interrupted pre-terminal binding with a live unresolved
+note retries that same note; if the pointer is gone or terminal without a stored
+response, replay fails closed as unconfirmed and cannot touch another guard.
+Terminal acceptance or aged-absence reconciliation commits the checked-note
+transition, blocker settlement, any paid usage, the remaining-guard fact, and
+the stored response in one member-locked transaction. If result persistence
+fails, those terminal writes all roll back and the same accepted input can retry
+the same stored note while it remains unresolved. A newly accepted explicit
+input is required to try again after an unconfirmed response.
+
+The current accepted direct or authenticated-group message authorizes one
+provider metadata lookup for an identified same-member unresolved target or
+legacy oldest guard. Provider acceptance settles the checked row as accepted.
+Proven absence clears it only after the existing 23-hour safety window. A recent
+absence or an indeterminate lookup leaves the guard unchanged and returns
+`pending`, with the end of the safety window when it is still in the future. The
+response `status` describes the checked target or guard, while
+`remainingUnresolved` is derived from the existing remaining-guard read. When a
+checked guard reaches `accepted` or `clear` but another guard remains, the
+response preserves that checked outcome with `remainingUnresolved: true`; the
+member learns that one reconciliation succeeded and that another explicit
+request is required. When recovery first proves acceptance for a current paid
+note, the stored replay response also returns the frozen settled Murph-time
+amount. Complimentary acceptance, legacy accepted restoration, and every
+non-accepted recovery result return that settlement field as null. Recovery
+never calls provider create, and there is no transport replay, model retry,
+notification, or automatic follow-up.
 
 The exact authorized input derives the request key. The artwork and recipient
 remain in the separate request fingerprint, so reusing one approval with changed
@@ -106,7 +178,11 @@ evidence can finalize the original row after local commit failure. Recent absent
 or indeterminate evidence remains pending; only aged proven absence uses the
 existing unknown transition. Every other unresolved row keeps its independent
 admission authority, so new effects remain blocked until all such rows are
-terminal. A distinct request
+terminal. A targeted recovery checks the named operation kind and historical
+ref; without a target, one legacy recovery request still checks only the oldest
+unresolved row. It reports the checked outcome and the independently derived
+remaining-blocker fact instead of turning the latter into a false claim that the
+checked provider result stayed indeterminate. A distinct request
 is first persisted as an unsent `prior_note_unresolved` row. Only that distinct
 explicit request may, after the 23-hour provider window, reconcile the guarded
 row through Lob's exact-metadata lookup. Recent or indeterminate evidence keeps
@@ -224,6 +300,13 @@ participant-aware thread-container access derivation, so an inactive owner does
 not block an otherwise authorized active participant. It does not add a
 physical-note-specific entitlement path.
 
+A standalone recovery request has separate, narrower authority. It requires the
+exact current accepted message from a direct member or current authenticated
+group participant, and Web reasserts group participant and route authority
+immediately before the provider read. That message authorizes only one
+reconciliation. It does not authorize another note or cancellation of a
+provider-accepted mailpiece.
+
 The tool remains bounded to one domestic recipient and rejects bulk,
 international, threatening, harassing, fraudulent, impersonating, doxxing, or
 illegal mail through product policy and the constrained tool shape.
@@ -234,6 +317,17 @@ Murph account. Local operational rows delete with the hosted member, while Lob
 and postal-service retention remain governed by those providers.
 
 ## Deployment
+
+For standalone recovery, deploy Web's additive recovery table, route, and
+response producer first. Then deploy the Cloudflare Web-control allowlist and port plus
+the runner bundle, and require immediate container convergence and fingerprint
+proof. The recovery request is not replayed after transport loss: provider
+metadata reads are safe, but a lost response may hide a durable reconciliation,
+so the assistant reports the final recovery state as unconfirmed instead of
+converting transport failure into a claim about the old note. It still states
+that nothing new was sent and no automatic retry is running. An older runner
+does not expose the action; a new runner against old Web receives a route
+failure and leaves the guard unchanged.
 
 The proactive address-completion change ships in the runner bundle and reuses an
 existing CLI command family plus the unchanged Worker-owned Mapbox provider-egress

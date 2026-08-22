@@ -769,7 +769,7 @@ Last verified: 2026-08-20
   Current-policy Checkout enables Stripe's explicit payment-method save choice;
   Murph does not upgrade or broadly redisplay historical methods. A monthly
   group sponsorship binds one authenticated payer to one exact group and a
-  $5/$10/$20 cap. Conversation text, room participation, amount selection, and
+  $5/$10/$20/$50 cap. Conversation text, room participation, amount selection, and
   possession of a funding URL are never financial consent. Current group
   capacity is not payment authority and does not gate an explicit contribution
   or activation. Activation and every cap increase require an explicit
@@ -1472,6 +1472,10 @@ Last verified: 2026-08-20
   dispatch. Cleanup must completely enumerate and validate the configured team,
   ignore every unrelated namespace, delete at most one exact namespace-owned
   user, and prove that namespace empty before resetting the isolated database.
+  Deployment retirement must first enumerate aliases through each already
+  validated lane-owned deployment, reject malformed alias responses, and delete
+  those exact alias ids before deleting the deployment so the reusable custom
+  environment cannot retain an alias to deleted state.
   This namespace limits trusted cleanup; it does not scope the Junction Team API
   key, which retains full team data access. A second key on the same team is not
   a least-privilege boundary, so the shared sandbox must contain only disposable

@@ -262,6 +262,7 @@ export async function applyAssistantSessionCodexResumeStateAction(input: {
 }
 
 export async function persistAssistantTurnAndSession(input: {
+  assistantTranscriptStandaloneContext?: true
   assistantTranscriptText?: string | null
   input: AssistantMessageInput
   plan: AssistantTurnSharedPlan
@@ -316,11 +317,17 @@ export async function persistAssistantTurnAndSession(input: {
   const assistantTranscriptEntries = [
     ...(input.precedingAssistantTranscriptTexts ?? []).map((text) => ({
       kind: 'assistant' as const,
+      ...(input.assistantTranscriptStandaloneContext === true
+        ? { standaloneAssistantContext: true as const }
+        : {}),
       text,
     })),
     ...(assistantTranscriptText !== null
       ? [{
           kind: 'assistant' as const,
+          ...(input.assistantTranscriptStandaloneContext === true
+            ? { standaloneAssistantContext: true as const }
+            : {}),
           text: assistantTranscriptText,
         }]
       : []),

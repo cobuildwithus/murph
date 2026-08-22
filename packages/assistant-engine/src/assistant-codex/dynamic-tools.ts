@@ -788,6 +788,89 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     .strict(),
 ])
 
+type GroupArguments = z.infer<typeof groupArgumentsSchema>
+
+const GROUP_TOOL_FAMILY_ACTIONS = {
+  group_consult: [
+    'ask',
+    'handoff',
+    'ask_current_sender',
+    'clarify_current_sender',
+    'continue_current_sender_in_group',
+    'continue_current_sender_privately',
+    'ask_member',
+  ],
+  group_data: [
+    'record_current_sender_daily_metric',
+    'post_disclosure_request',
+    'revoke_disclosure_grant',
+    'read_shared',
+    'offer_access',
+    'revoke_own_email_share',
+  ],
+  group_membership: [
+    'read_current',
+    'prepare_next_group',
+    'read_next_group',
+    'cancel_next_group',
+    'list_memberships',
+    'leave_membership',
+  ],
+  group_usage: [
+    'read_usage',
+    'read_usage_referral',
+    'arm_usage_referral',
+    'cancel_usage_referral',
+    'create_signup_referral_link',
+  ],
+  group_chat: [
+    'read_chat_name',
+    'update_display_name',
+    'read_chat_participants',
+    'set_chat_avatar',
+    'share_contact_card',
+  ],
+  group_email: ['send_email'],
+} as const satisfies Record<string, readonly GroupArguments['action'][]>
+
+type GroupToolFamilyName = keyof typeof GROUP_TOOL_FAMILY_ACTIONS
+type GroupParserToolName = typeof MURPH_GROUP_TOOL.name | GroupToolFamilyName
+
+function buildGroupFamilyArgumentsSchema(
+  actions: readonly GroupArguments['action'][],
+) {
+  const acceptedActions = new Set<string>(actions)
+  return groupArgumentsSchema.refine(
+    (request) => acceptedActions.has(request.action),
+    {
+      message: 'Action is not accepted by this group tool family.',
+      path: ['action'],
+    },
+  )
+}
+
+const groupArgumentsSchemaByToolName = {
+  [MURPH_GROUP_TOOL.name]: groupArgumentsSchema,
+  group_consult: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_consult,
+  ),
+  group_data: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_data,
+  ),
+  group_membership: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_membership,
+  ),
+  group_usage: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_usage,
+  ),
+  group_chat: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_chat,
+  ),
+  group_email: buildGroupFamilyArgumentsSchema(
+    GROUP_TOOL_FAMILY_ACTIONS.group_email,
+  ),
+} as const satisfies Record<GroupParserToolName, unknown>
+
 const sendVaultFileArgumentsSchema = z
   .object({
     ref: z.string().trim().min(1).max(1024),
@@ -1901,8 +1984,14 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_GROUP_TOOL.name: {
-      const parsed = parseGroupArguments(request.arguments)
+    case MURPH_GROUP_TOOL.name:
+    case 'group_consult':
+    case 'group_data':
+    case 'group_membership':
+    case 'group_usage':
+    case 'group_chat':
+    case 'group_email': {
+      const parsed = parseGroupArguments(request.arguments, request.tool)
       if (!parsed.ok) {
         return {
           kind: 'invalid-group-arguments',
@@ -2594,6 +2683,121 @@ export async function executeMurphDynamicToolRequest(input: {
         return replyRequiredResult(
           false,
           'secure vault-file approval could not be prepared',
+        )
+      }
+    }
+    case 'resolve-physical-note': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const resolvePhysicalNote = hostedToolContext?.physicalNotes?.resolve
+      const userActionScope =
+        hostedToolContext?.currentUserActionScope?.() ?? null
+      const explicitOriginCandidate = userActionScope
+        ? resolvePhysicalNoteExplicitOriginInputId({
+            acceptedInputIds: userActionScope.acceptedInputIds,
+            conversationScope: userActionScope.conversationScope,
+            messageRef: input.request.messageRef,
+          })
+        : null
+      const originAssistantInputId = explicitOriginCandidate && userActionScope
+        ? await authorizeDynamicToolEffectOrigin({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            conversationScope: userActionScope.conversationScope,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: explicitOriginCandidate,
+          })
+        : null
+      if (!resolvePhysicalNote || !originAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note recovery requires the exact current authorizing Message ref and hosted recovery transport',
+        )
+      }
+
+      try {
+        const result = await resolvePhysicalNote({
+          originAssistantInputId,
+          ...(input.request.targetMessageRef
+            ? {
+                targetKind: input.request.targetKind,
+                targetOriginAssistantInputId: input.request.targetMessageRef,
+              }
+            : {}),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+        switch (result.status) {
+          case 'accepted':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              result.remainingUnresolved
+                ? `${physicalNoteRecoveryAcceptedCopy(result.settledUsageCostUsdMicros)} A different unresolved submission remains and needs another explicit recovery request.`
+                : physicalNoteRecoveryAcceptedCopy(
+                    result.settledUsageCostUsdMicros,
+                  ),
+              result.remainingUnresolved,
+              null,
+              result.settledUsageCostUsdMicros,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'clear':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              result.remainingUnresolved
+                ? 'The checked earlier submission was cleared. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing.'
+                : 'The checked earlier submission was cleared. No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'pending':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              'The earlier outcome is still unconfirmed and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
+              result.remainingUnresolved,
+              result.retryAfter,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'permission_denied':
+            return physicalNoteRecoveryToolResult(
+              false,
+              result.status,
+              'The earlier submission was not changed because recovery is not available to the current participant.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'unavailable':
+            return physicalNoteRecoveryToolResult(
+              false,
+              result.status,
+              'Physical-note recovery is currently unavailable. The earlier submission was not cleared; nothing new was sent and no automatic retry is running.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+        }
+      } catch {
+        return physicalNoteRecoveryToolResult(
+          false,
+          'unavailable',
+          'The recovery response was lost, so the earlier submission\'s final state is unconfirmed. Do not claim it cleared or was accepted. Nothing new was sent and no automatic retry is running.',
+          null,
+          null,
+          null,
+          input.request.targetMessageRef ?? null,
+          input.request.targetKind ?? null,
         )
       }
     }
@@ -6628,6 +6832,39 @@ function toolTextResult(
   }
 }
 
+function physicalNoteRecoveryToolResult(
+  success: boolean,
+  status: 'accepted' | 'clear' | 'pending' | 'permission_denied' | 'unavailable',
+  note: string,
+  remainingUnresolved: boolean | null,
+  retryAfter: string | null = null,
+  settledUsageCostUsdMicros: string | null = null,
+  targetMessageRef: string | null = null,
+  targetKind: 'recovery' | 'send' | null = null,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    success,
+    JSON.stringify({
+      note,
+      remainingUnresolved,
+      retryAfter,
+      settledUsageCostUsdMicros,
+      status,
+      ...(targetMessageRef ? { targetMessageRef } : {}),
+      ...(targetKind ? { targetKind } : {}),
+    }),
+  )
+}
+
+function physicalNoteRecoveryAcceptedCopy(
+  settledUsageCostUsdMicros: string | null,
+): string {
+  const usage = settledUsageCostUsdMicros === null
+    ? ''
+    : ` The earlier accepted note used ${settledUsageCostUsdMicros} USD micros of Murph time. Recovery itself added no separate fee.`
+  return `The earlier note was accepted for printing, not delivered, and cannot be treated as canceled.${usage} This recovery sent nothing new.`
+}
+
 function invalidDynamicToolArgumentsResult(
   error: string,
   validationDigest: SafeToolCallValidationDigest,
@@ -6984,22 +7221,24 @@ function parseAssistantConfigurationArguments(
 
 function parseGroupArguments(
   value: unknown,
+  toolName: GroupParserToolName,
 ):
   | {
       request: MurphGroupToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = groupArgumentsSchema.safeParse(value)
+  const qualifiedToolName = `murph.${toolName}`
+  const parsed = groupArgumentsSchemaByToolName[toolName].safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: value,
-        schemaName: 'murph.group.input',
+        schemaName: `${qualifiedToolName}.input`,
         schemaRootKeys: ['action', 'message_ref'],
-        toolName: 'murph.group',
+        toolName: qualifiedToolName,
       }),
     }
   }
@@ -7123,9 +7362,9 @@ function parseGroupArguments(
               },
             ]),
             rawInput: value,
-            schemaName: 'murph.group.input',
+            schemaName: `${qualifiedToolName}.input`,
             schemaRootKeys: ['action'],
-            toolName: 'murph.group',
+            toolName: qualifiedToolName,
           }),
         }
       }
@@ -7159,9 +7398,9 @@ function parseGroupArguments(
             },
           ]),
           rawInput: value,
-          schemaName: 'murph.group.input',
+          schemaName: `${qualifiedToolName}.input`,
           schemaRootKeys: ['action'],
-          toolName: 'murph.group',
+          toolName: qualifiedToolName,
         }),
       }
     }
@@ -7229,7 +7468,23 @@ function parseGroupArguments(
       },
     }
   }
-  return { ok: true, request: { action: 'read_current' } }
+  if (parsed.data.action === 'read_current') {
+    return { ok: true, request: { action: 'read_current' } }
+  }
+  return {
+    ok: false,
+    validationDigest: buildDynamicToolValidationDigest({
+      error: new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Group action has no explicit normalization path.',
+        path: ['action'],
+      }]),
+      rawInput: value,
+      schemaName: `${qualifiedToolName}.input`,
+      schemaRootKeys: ['action', 'message_ref'],
+      toolName: qualifiedToolName,
+    }),
+  }
 }
 
 function readCurrentSenderToolDecision(action:
