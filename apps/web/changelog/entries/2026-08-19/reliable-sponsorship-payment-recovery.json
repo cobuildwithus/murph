@@ -9,6 +9,6 @@
     "summary": "Review payment now opens a fresh checkout for an interrupted monthly group sponsorship instead of leaving the funding page without progress.",
     "details": "Automatic refills stay tied to the payment choice verified for that monthly sponsorship. If confirmation is interrupted before Stripe attempts the payment, Murph retries the same refill automatically. A separate one-time contribution does not silently replace it.",
     "relevanceTags": ["groups", "billing", "reliability"],
-    "sourcePullRequests": [2010, 2035]
+    "sourcePullRequests": [2010, 2035, 2132]
   }
 }
