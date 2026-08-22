@@ -3714,7 +3714,11 @@ A separately exposed physical-note recovery action is accepted-message-only and
 does not depend on image completion. It authorizes one Web-owned provider metadata
 reconciliation for the oldest unresolved guard, never a provider create or recall.
 Web first claims the exact accepted assistant input in a durable recovery row
-under the member lock and binds it to that selected guard. A completed replay
+under the member lock and binds it to a versioned fingerprint of the normalized
+target kind and reference, including the explicit no-target case, plus that
+selected guard. Reusing the accepted input with a different target selector
+fails closed as unconfirmed under the same lock without a provider read or
+state transition. A completed exact-selector replay
 returns the stored bounded response without another provider read or transition;
 an interrupted pre-terminal claim remains unconfirmed and fails closed. When
 provider evidence permits a terminal result, Web commits the note transition,

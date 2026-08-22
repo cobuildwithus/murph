@@ -107,7 +107,8 @@ address, image URL, artwork, prompt, note text, or Lob's freeform error message.
 
 Standalone recovery reuses that same row and the same guard transitions. A
 narrow Web-owned `HostedPhysicalNoteRecovery` row binds the exact current
-accepted assistant input to the checked operation and, after reconciliation, its
+accepted assistant input to a versioned fingerprint of its normalized target
+kind and reference, the checked operation, and, after reconciliation, its
 bounded response. The current input authorizes the check. An optional target
 identifies only the checked operation by pairing an earlier accepted assistant
 input with a required operation kind. A `recovery` target queries only
@@ -122,6 +123,13 @@ the selected namespace store and return an unconfirmed pending result, never a
 row-specific `clear`, and call no provider. With no target, legacy unresolved
 records still use the oldest-first fallback; if no guard can be identified,
 recovery returns unconfirmed pending rather than `clear`.
+
+The accepted input can be replayed only with that same normalized selector.
+Changing the target reference, changing `send` to `recovery`, adding a target to
+a no-target request, or removing one fails closed as unconfirmed under the
+member lock. A selector mismatch does not read the provider, mutate either
+target, or relabel the first selector's stored result; checking a different
+operation requires a newly accepted input.
 
 The binding is created under the member lock before any provider read. A
 completed replay returns the stored response without selecting another guard,

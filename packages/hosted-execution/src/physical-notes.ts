@@ -173,6 +173,22 @@ export function createHostedPhysicalNoteRequestKey(input: {
   return `physical_note_${digest}`;
 }
 
+export function createHostedPhysicalNoteRecoveryRequestFingerprint(
+  input: Pick<
+    HostedPhysicalNoteRecoveryRequest,
+    "targetKind" | "targetOriginAssistantInputId"
+  >,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      schema: "murph.resolve-physical-note.request-fingerprint.v1",
+      targetKind: input.targetKind ?? null,
+      targetOriginAssistantInputId:
+        input.targetOriginAssistantInputId ?? null,
+    }))
+    .digest("hex");
+}
+
 export function normalizeHostedPhysicalNoteRecipient(
   value: HostedPhysicalNoteRecipient,
 ): HostedPhysicalNoteRecipient {

@@ -16,6 +16,7 @@ import type {
   HostedPhysicalNoteSendResponse,
 } from "@murphai/hosted-execution/physical-notes";
 import {
+  createHostedPhysicalNoteRecoveryRequestFingerprint,
   createHostedPhysicalNoteRequestKey,
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
@@ -419,6 +420,11 @@ async function claimHostedPhysicalNoteRecovery(input: {
   targetKind: "recovery" | "send" | null;
   targetOriginAssistantInputId: string | null;
 }): Promise<PhysicalNoteRecoveryClaim> {
+  const requestFingerprint =
+    createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: input.targetKind,
+      targetOriginAssistantInputId: input.targetOriginAssistantInputId,
+    });
   return await input.prisma.$transaction(async (tx) => {
     await lockHostedMemberRow(tx, input.memberId);
     const existing = await tx.hostedPhysicalNoteRecovery.findUnique({
@@ -427,6 +433,15 @@ async function claimHostedPhysicalNoteRecovery(input: {
     if (existing) {
       if (existing.memberId !== input.memberId) {
         throw new Error("Hosted physical-note recovery identity collision.");
+      }
+      if (existing.requestFingerprint !== requestFingerprint) {
+        return {
+          kind: "replay" as const,
+          response: await buildUnconfirmedPhysicalNoteRecoveryResponse({
+            memberId: input.memberId,
+            tx,
+          }),
+        };
       }
       const response = readPhysicalNoteRecoveryResponseIfConfirmed(existing);
       if (response) {
@@ -451,6 +466,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
         return await createUnconfirmedPhysicalNoteRecoveryClaim({
           memberId: input.memberId,
           originAssistantInputId: input.originAssistantInputId,
+          requestFingerprint,
           tx,
         });
       }
@@ -458,12 +474,14 @@ async function claimHostedPhysicalNoteRecovery(input: {
         ? await claimTargetedHostedPhysicalNoteRecovery({
             memberId: input.memberId,
             originAssistantInputId: input.originAssistantInputId,
+            requestFingerprint,
             targetOriginAssistantInputId: input.targetOriginAssistantInputId,
             tx,
           })
         : await claimTargetedHostedPhysicalNoteSendRecovery({
             memberId: input.memberId,
             originAssistantInputId: input.originAssistantInputId,
+            requestFingerprint,
             targetOriginAssistantInputId: input.targetOriginAssistantInputId,
             tx,
           });
@@ -482,6 +500,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
       await createCompletedPhysicalNoteRecovery({
         memberId: input.memberId,
         originAssistantInputId: input.originAssistantInputId,
+        requestFingerprint,
         response,
         tx,
       });
@@ -495,6 +514,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
         memberId: input.memberId,
         originAssistantInputId: input.originAssistantInputId,
         physicalNoteId: guard.id,
+        requestFingerprint,
       },
     });
     return { guard, kind: "claimed" as const };
@@ -504,6 +524,7 @@ async function claimHostedPhysicalNoteRecovery(input: {
 async function claimTargetedHostedPhysicalNoteRecovery(input: {
   memberId: string;
   originAssistantInputId: string;
+  requestFingerprint: string;
   targetOriginAssistantInputId: string;
   tx: Prisma.TransactionClient;
 }): Promise<PhysicalNoteRecoveryClaim> {
@@ -524,6 +545,7 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
         memberId: input.memberId,
         originAssistantInputId: input.originAssistantInputId,
         physicalNoteId: targetRecovery.physicalNoteId ?? undefined,
+        requestFingerprint: input.requestFingerprint,
         response,
         tx: input.tx,
       });
@@ -540,6 +562,7 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
           memberId: input.memberId,
           originAssistantInputId: input.originAssistantInputId,
           physicalNoteId: targetNote.id,
+          requestFingerprint: input.requestFingerprint,
         },
       });
       return { guard: targetNote, kind: "claimed" as const };
@@ -548,6 +571,7 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
       return await createTerminalPhysicalNoteRecoveryTargetClaim({
         memberId: input.memberId,
         originAssistantInputId: input.originAssistantInputId,
+        requestFingerprint: input.requestFingerprint,
         targetNote,
         tx: input.tx,
       });
@@ -561,6 +585,7 @@ async function claimTargetedHostedPhysicalNoteRecovery(input: {
 async function claimTargetedHostedPhysicalNoteSendRecovery(input: {
   memberId: string;
   originAssistantInputId: string;
+  requestFingerprint: string;
   targetOriginAssistantInputId: string;
   tx: Prisma.TransactionClient;
 }): Promise<PhysicalNoteRecoveryClaim> {
@@ -583,6 +608,7 @@ async function claimTargetedHostedPhysicalNoteSendRecovery(input: {
         memberId: input.memberId,
         originAssistantInputId: input.originAssistantInputId,
         physicalNoteId: targetNote.id,
+        requestFingerprint: input.requestFingerprint,
       },
     });
     return { guard: targetNote, kind: "claimed" as const };
@@ -591,6 +617,7 @@ async function claimTargetedHostedPhysicalNoteSendRecovery(input: {
   return await createTerminalPhysicalNoteRecoveryTargetClaim({
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
+    requestFingerprint: input.requestFingerprint,
     targetNote,
     tx: input.tx,
   });
@@ -599,6 +626,7 @@ async function claimTargetedHostedPhysicalNoteSendRecovery(input: {
 async function createUnconfirmedPhysicalNoteRecoveryClaim(input: {
   memberId: string;
   originAssistantInputId: string;
+  requestFingerprint: string;
   tx: Prisma.TransactionClient;
 }): Promise<PhysicalNoteRecoveryClaim> {
   const response = await buildUnconfirmedPhysicalNoteRecoveryResponse({
@@ -608,6 +636,7 @@ async function createUnconfirmedPhysicalNoteRecoveryClaim(input: {
   await createCompletedPhysicalNoteRecovery({
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
+    requestFingerprint: input.requestFingerprint,
     response,
     tx: input.tx,
   });
@@ -667,6 +696,7 @@ function readSettledUsageCostForAcceptedRecoveryTarget(
 async function createTerminalPhysicalNoteRecoveryTargetClaim(input: {
   memberId: string;
   originAssistantInputId: string;
+  requestFingerprint: string;
   targetNote: HostedPhysicalNote;
   tx: Prisma.TransactionClient;
 }): Promise<PhysicalNoteRecoveryClaim> {
@@ -683,6 +713,7 @@ async function createTerminalPhysicalNoteRecoveryTargetClaim(input: {
     memberId: input.memberId,
     originAssistantInputId: input.originAssistantInputId,
     physicalNoteId: input.targetNote.id,
+    requestFingerprint: input.requestFingerprint,
     response,
     tx: input.tx,
   });
@@ -693,6 +724,7 @@ async function createCompletedPhysicalNoteRecovery(input: {
   memberId: string;
   originAssistantInputId: string;
   physicalNoteId?: string;
+  requestFingerprint: string;
   response: HostedPhysicalNoteRecoveryResponse;
   tx: Prisma.TransactionClient;
 }): Promise<void> {
@@ -702,6 +734,7 @@ async function createCompletedPhysicalNoteRecovery(input: {
       memberId: input.memberId,
       originAssistantInputId: input.originAssistantInputId,
       ...(input.physicalNoteId ? { physicalNoteId: input.physicalNoteId } : {}),
+      requestFingerprint: input.requestFingerprint,
       remainingUnresolved: input.response.remainingUnresolved,
       resultStatus: input.response.status,
       retryAfter: stored.retryAfter,

@@ -1,6 +1,7 @@
 CREATE TABLE "hosted_physical_note_recovery" (
   "origin_assistant_input_id" TEXT NOT NULL,
   "member_id" TEXT NOT NULL,
+  "request_fingerprint" TEXT NOT NULL,
   "physical_note_id" TEXT,
   "result_status" TEXT,
   "remaining_unresolved" BOOLEAN,

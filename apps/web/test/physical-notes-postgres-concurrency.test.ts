@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
+  createHostedPhysicalNoteRecoveryRequestFingerprint,
   createHostedPhysicalNoteRequestKey,
   normalizeHostedPhysicalNoteRecipient,
   stableHostedPhysicalNoteRecipientJson,
@@ -542,6 +543,8 @@ describe.skipIf(!runPostgresProof)(
         data: {
           memberId: beneficiary,
           originAssistantInputId: targetOrigin,
+          requestFingerprint:
+            createHostedPhysicalNoteRecoveryRequestFingerprint({}),
           remainingUnresolved: false,
           resultStatus: "clear",
         },
@@ -1156,6 +1159,135 @@ describe.skipIf(!runPostgresProof)(
       });
     });
 
+    it("binds concurrent same-input recovery to one target selector", async () => {
+      const first = requirePrisma(firstClient);
+      const second = requirePrisma(secondClient);
+      const observer = requirePrisma(observerClient);
+      const beneficiary = requireMemberId(memberId);
+      const firstNoteId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const secondNoteId = `hpn_${randomUUID().replaceAll("-", "")}`;
+      const firstTarget = buildRequest(33, beneficiary).originAssistantInputId;
+      const secondTarget = buildRequest(34, beneficiary).originAssistantInputId;
+      const currentInput = buildRequest(35, beneficiary).originAssistantInputId;
+      const { recoverHostedPhysicalNote } = await import(
+        "@/src/lib/physical-notes/service"
+      );
+      await observer.hostedPhysicalNote.createMany({
+        data: [
+          {
+            complimentaryOfferCode: null,
+            id: firstNoteId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `selector-first-${firstNoteId}`,
+            requestKey: createHostedPhysicalNoteRequestKey({
+              originAssistantInputId: firstTarget,
+            }),
+            status: "starting",
+          },
+          {
+            complimentaryOfferCode: null,
+            id: secondNoteId,
+            memberId: beneficiary,
+            pricingVersion: "lob-test-v1",
+            provider: "lob",
+            providerCostUsdMicros: 250_000n,
+            requestFingerprint: `selector-second-${secondNoteId}`,
+            requestKey: createHostedPhysicalNoteRequestKey({
+              originAssistantInputId: secondTarget,
+            }),
+            status: "starting",
+          },
+        ],
+      });
+      const lookupStarted = createDeferred<string>();
+      const completeLookup = createDeferred<LobPhysicalNoteLookupResult>();
+      const findProviderLetter = vi.fn(async (input: { noteId: string }) => {
+        lookupStarted.resolve(input.noteId);
+        return await completeLookup.promise;
+      });
+      const runtime = {
+        async create() {
+          throw new Error("Recovery must not create a physical note.");
+        },
+        findLetterByNoteId: findProviderLetter,
+      };
+
+      const recoveries = Promise.all([
+        recoverHostedPhysicalNote({
+          memberId: beneficiary,
+          originAssistantInputId: currentInput,
+          prisma: first,
+          runtime,
+          targetKind: "send",
+          targetOriginAssistantInputId: firstTarget,
+        }),
+        recoverHostedPhysicalNote({
+          memberId: beneficiary,
+          originAssistantInputId: currentInput,
+          prisma: second,
+          runtime,
+          targetKind: "send",
+          targetOriginAssistantInputId: secondTarget,
+        }),
+      ]);
+      const winningNoteId = await lookupStarted.promise;
+      completeLookup.resolve({ kind: "indeterminate" });
+      const responses = await recoveries;
+      expect(responses).toEqual([
+        expect.objectContaining({
+          remainingUnresolved: true,
+          settledUsageCostUsdMicros: null,
+          status: "pending",
+        }),
+        expect.objectContaining({
+          remainingUnresolved: true,
+          settledUsageCostUsdMicros: null,
+          status: "pending",
+        }),
+      ]);
+      expect(responses.map((response) => response.retryAfter))
+        .toEqual(expect.arrayContaining([null, expect.any(String)]));
+
+      expect(findProviderLetter).toHaveBeenCalledOnce();
+      const winningTarget = winningNoteId === firstNoteId
+        ? firstTarget
+        : secondTarget;
+      await expect(observer.hostedPhysicalNoteRecovery.findUnique({
+        where: { originAssistantInputId: currentInput },
+      })).resolves.toMatchObject({
+        memberId: beneficiary,
+        physicalNoteId: winningNoteId,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({
+            targetKind: "send",
+            targetOriginAssistantInputId: winningTarget,
+          }),
+        resultStatus: "pending",
+      });
+      await expect(observer.hostedPhysicalNote.findMany({
+        orderBy: { id: "asc" },
+        select: {
+          failureReason: true,
+          id: true,
+          providerLetterId: true,
+          status: true,
+        },
+        where: { id: { in: [firstNoteId, secondNoteId] } },
+      })).resolves.toEqual([
+        firstNoteId,
+        secondNoteId,
+      ].sort().map((id) => ({
+        failureReason: null,
+        id,
+        providerLetterId: null,
+        status: "starting",
+      })));
+      expect(mocks.recordUsage).not.toHaveBeenCalled();
+    });
+
     it("targets an incomplete prior recovery without advancing the oldest guard", async () => {
       const observer = requirePrisma(observerClient);
       const beneficiary = requireMemberId(memberId);
@@ -1200,6 +1332,8 @@ describe.skipIf(!runPostgresProof)(
           memberId: beneficiary,
           originAssistantInputId: targetOrigin,
           physicalNoteId: secondId,
+          requestFingerprint:
+            createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         },
       });
       const findProviderLetter = vi.fn(async (input: { noteId: string }) => {
@@ -1292,6 +1426,8 @@ describe.skipIf(!runPostgresProof)(
           memberId: beneficiary,
           originAssistantInputId: targetOrigin,
           physicalNoteId: secondId,
+          requestFingerprint:
+            createHostedPhysicalNoteRecoveryRequestFingerprint({}),
           remainingUnresolved: true,
           resultStatus: "pending",
           retryAfter: new Date(Date.now() - 1_000),
@@ -1711,6 +1847,8 @@ describe.skipIf(!runPostgresProof)(
           memberId: beneficiary,
           originAssistantInputId,
           physicalNoteId: completedId,
+          requestFingerprint:
+            createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         },
       });
       const findProviderLetter = vi.fn(async () => ({

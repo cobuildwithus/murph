@@ -959,6 +959,7 @@ model HostedPhysicalNote {
 model HostedPhysicalNoteRecovery {
   originAssistantInputId String              @id @map("origin_assistant_input_id")
   memberId               String              @map("member_id")
+  requestFingerprint     String              @map("request_fingerprint")
   physicalNoteId         String?             @map("physical_note_id")
   resultStatus           String?             @map("result_status")
   remainingUnresolved    Boolean?            @map("remaining_unresolved")

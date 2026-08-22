@@ -25,6 +25,7 @@ const APPROVED_RECOVERY_FIELDS = [
   "originAssistantInputId",
   "physicalNoteId",
   "remainingUnresolved",
+  "requestFingerprint",
   "resultStatus",
   "retryAfter",
   "settledUsageCostUsdMicros",
@@ -114,6 +115,7 @@ describe("HostedPhysicalNote storage contract", () => {
     expect(migration).toContain(
       'PRIMARY KEY ("origin_assistant_input_id")',
     );
+    expect(migration).toContain('"request_fingerprint" TEXT NOT NULL');
     expect(migration).toContain(
       '"result_status" IN (\'accepted\', \'clear\', \'pending\', \'unavailable\')',
     );

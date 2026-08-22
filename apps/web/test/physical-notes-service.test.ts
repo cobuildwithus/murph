@@ -8,6 +8,7 @@ import type {
   HostedPhysicalNoteSendRequest,
 } from "@murphai/hosted-execution/physical-notes";
 import {
+  createHostedPhysicalNoteRecoveryRequestFingerprint,
   createHostedPhysicalNoteRequestKey,
 } from "@murphai/hosted-execution/physical-notes";
 import {
@@ -114,7 +115,7 @@ type PhysicalNoteUpdateData = Partial<Pick<
 
 type PhysicalNoteRecoveryCreateData = Pick<
   HostedPhysicalNoteRecovery,
-  "memberId" | "originAssistantInputId"
+  "memberId" | "originAssistantInputId" | "requestFingerprint"
 > & Partial<Pick<
   HostedPhysicalNoteRecovery,
   | "physicalNoteId"
@@ -1889,6 +1890,8 @@ describe("recoverHostedPhysicalNote", () => {
       data: {
         memberId: MEMBER_ID,
         originAssistantInputId: targetOrigin,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         remainingUnresolved: false,
         resultStatus: "clear",
       },
@@ -1927,6 +1930,175 @@ describe("recoverHostedPhysicalNote", () => {
     expect(mocks.recordUsage).toHaveBeenCalledOnce();
   });
 
+  it("fails closed when one recovery input changes its target selector", async () => {
+    const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
+    const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
+    const store = createPhysicalNoteStore();
+    const firstTarget = recoveryOrigin(270);
+    const secondTarget = recoveryOrigin(271);
+    const provider = createPhysicalNoteRuntime([
+      { kind: "accepted", providerLetterId: "ltr_selector_first" },
+      { kind: "accepted", providerLetterId: "ltr_selector_second" },
+    ]);
+    await createHostedPhysicalNote({
+      ...buildRequest(270),
+      originAssistantInputId: firstTarget,
+      requestKey: createHostedPhysicalNoteRequestKey({
+        originAssistantInputId: firstTarget,
+      }),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    await createHostedPhysicalNote({
+      ...buildRequest(271),
+      originAssistantInputId: secondTarget,
+      requestKey: createHostedPhysicalNoteRequestKey({
+        originAssistantInputId: secondTarget,
+      }),
+      prisma: store.prisma,
+      runtime: provider.runtime,
+    });
+    await store.prisma.hostedPhysicalNoteRecovery.create({
+      data: {
+        memberId: MEMBER_ID,
+        originAssistantInputId: firstTarget,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
+        remainingUnresolved: false,
+        resultStatus: "clear",
+      },
+    });
+    mocks.recordUsage.mockClear();
+    const recoveryRuntime = createPhysicalNoteRuntime([]);
+    const accepted = {
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: "accepted" as const,
+    };
+    const unconfirmed = {
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: null,
+      status: "pending" as const,
+    };
+    const firstCurrentInput = recoveryOrigin(272);
+    const kindChangeInput = recoveryOrigin(273);
+    const noTargetFirstInput = recoveryOrigin(274);
+    const targetFirstInput = recoveryOrigin(275);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: firstCurrentInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "send",
+      targetOriginAssistantInputId: firstTarget,
+    })).resolves.toEqual(accepted);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: firstCurrentInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "send",
+      targetOriginAssistantInputId: firstTarget,
+    })).resolves.toEqual(accepted);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: firstCurrentInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "send",
+      targetOriginAssistantInputId: secondTarget,
+    })).resolves.toEqual(unconfirmed);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: kindChangeInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "send",
+      targetOriginAssistantInputId: firstTarget,
+    })).resolves.toEqual(accepted);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: kindChangeInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "recovery",
+      targetOriginAssistantInputId: firstTarget,
+    })).resolves.toEqual(unconfirmed);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: noTargetFirstInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+    })).resolves.toEqual(unconfirmed);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: noTargetFirstInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "send",
+      targetOriginAssistantInputId: firstTarget,
+    })).resolves.toEqual(unconfirmed);
+
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: targetFirstInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+      targetKind: "send",
+      targetOriginAssistantInputId: firstTarget,
+    })).resolves.toEqual(accepted);
+    await expect(recoverHostedPhysicalNote({
+      memberId: MEMBER_ID,
+      originAssistantInputId: targetFirstInput,
+      prisma: store.prisma,
+      runtime: recoveryRuntime.runtime,
+    })).resolves.toEqual(unconfirmed);
+
+    expect(recoveryRuntime.findLetterByNoteId).not.toHaveBeenCalled();
+    expect(mocks.recordUsage).not.toHaveBeenCalled();
+    const recoveries = store.allRecoveries();
+    expect(recoveries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        originAssistantInputId: firstCurrentInput,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({
+            targetKind: "send",
+            targetOriginAssistantInputId: firstTarget,
+          }),
+        resultStatus: "accepted",
+      }),
+      expect.objectContaining({
+        originAssistantInputId: kindChangeInput,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({
+            targetKind: "send",
+            targetOriginAssistantInputId: firstTarget,
+          }),
+        resultStatus: "accepted",
+      }),
+      expect.objectContaining({
+        originAssistantInputId: noTargetFirstInput,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
+        resultStatus: "pending",
+      }),
+      expect.objectContaining({
+        originAssistantInputId: targetFirstInput,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({
+            targetKind: "send",
+            targetOriginAssistantInputId: firstTarget,
+          }),
+        resultStatus: "accepted",
+      }),
+    ]));
+  });
+
   it("does not fall through to the other target namespace on a miss", async () => {
     const createHostedPhysicalNote = await loadCreateHostedPhysicalNote();
     const recoverHostedPhysicalNote = await loadRecoverHostedPhysicalNote();
@@ -1937,6 +2109,8 @@ describe("recoverHostedPhysicalNote", () => {
       data: {
         memberId: MEMBER_ID,
         originAssistantInputId: recoveryOnlyOrigin,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         remainingUnresolved: false,
         resultStatus: "clear",
       },
@@ -2006,6 +2180,8 @@ describe("recoverHostedPhysicalNote", () => {
         memberId: MEMBER_ID,
         originAssistantInputId: targetOrigin,
         physicalNoteId: blockedId,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
       },
     });
     const provider = createPhysicalNoteRuntime([], [{
@@ -2081,6 +2257,8 @@ describe("recoverHostedPhysicalNote", () => {
           memberId: MEMBER_ID,
           originAssistantInputId: targetOrigin,
           physicalNoteId: blockedId,
+          requestFingerprint:
+            createHostedPhysicalNoteRecoveryRequestFingerprint({}),
           remainingUnresolved: true,
           resultStatus,
           retryAfter,
@@ -2156,6 +2334,8 @@ describe("recoverHostedPhysicalNote", () => {
         memberId: MEMBER_ID,
         originAssistantInputId: targetOrigin,
         physicalNoteId: pendingId,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         remainingUnresolved: true,
         resultStatus: "pending",
         retryAfter: new Date(Date.now() - 1_000),
@@ -2218,6 +2398,8 @@ describe("recoverHostedPhysicalNote", () => {
         memberId: MEMBER_ID,
         originAssistantInputId: targetOrigin,
         physicalNoteId: guardId,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         remainingUnresolved: true,
         resultStatus: "pending",
         retryAfter: new Date(Date.now() - 1_000),
@@ -2278,6 +2460,8 @@ describe("recoverHostedPhysicalNote", () => {
           memberId: MEMBER_ID,
           originAssistantInputId,
           physicalNoteId: guardId,
+          requestFingerprint:
+            createHostedPhysicalNoteRecoveryRequestFingerprint({}),
           remainingUnresolved: true,
           resultStatus,
           retryAfter,
@@ -2312,6 +2496,8 @@ describe("recoverHostedPhysicalNote", () => {
         memberId: MEMBER_ID,
         originAssistantInputId: targetOrigin,
         physicalNoteId: "hpn_missing_physical_note",
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
         remainingUnresolved: true,
         resultStatus: "pending",
       },
@@ -2350,6 +2536,8 @@ describe("recoverHostedPhysicalNote", () => {
       data: {
         memberId: "member_other_physical_note",
         originAssistantInputId: crossMemberTargetOrigin,
+        requestFingerprint:
+          createHostedPhysicalNoteRecoveryRequestFingerprint({}),
       },
     });
 

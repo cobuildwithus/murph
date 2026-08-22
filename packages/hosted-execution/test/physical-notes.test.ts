@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createHostedPhysicalNoteRecoveryRequestFingerprint,
   createHostedPhysicalNoteRequestKey,
   hostedPhysicalNoteRecoveryRequestSchema,
   hostedPhysicalNoteRecoveryResponseSchema,
@@ -70,6 +71,30 @@ describe("hosted physical-note contracts", () => {
       originAssistantInputId,
       targetKind: "recovery",
     })).toThrow();
+  });
+
+  it("binds recovery replay to one normalized target selector", () => {
+    const targetOriginAssistantInputId = `ain_${"c".repeat(32)}`;
+    const noTarget = createHostedPhysicalNoteRecoveryRequestFingerprint({});
+    const sendTarget = createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: "send",
+      targetOriginAssistantInputId,
+    });
+
+    expect(noTarget).toMatch(/^[0-9a-f]{64}$/u);
+    expect(createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: null,
+      targetOriginAssistantInputId: null,
+    })).toBe(noTarget);
+    expect(createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: "send",
+      targetOriginAssistantInputId,
+    })).toBe(sendTarget);
+    expect(createHostedPhysicalNoteRecoveryRequestFingerprint({
+      targetKind: "recovery",
+      targetOriginAssistantInputId,
+    })).not.toBe(sendTarget);
+    expect(sendTarget).not.toBe(noTarget);
   });
 
   it("normalizes one bounded US recipient", () => {
