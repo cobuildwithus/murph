@@ -46,13 +46,16 @@ const loadCachedGeocodedPlace = unstable_cache(
 );
 
 const loadCachedCurrentConditions = unstable_cache(
-  async (lat: number, lon: number) => loadCurrentConditions({
-    apiKey: readHostedOpenWeatherApiKey(),
-    fetchImpl: fetch,
-    lat,
-    lon,
-  }),
-  ["environment-openweather-current-conditions-v1"],
+  async (lat: number, lon: number, cacheWindow: number) => {
+    void cacheWindow;
+    return loadCurrentConditions({
+      apiKey: readHostedOpenWeatherApiKey(),
+      fetchImpl: fetch,
+      lat,
+      lon,
+    });
+  },
+  ["environment-openweather-current-conditions-v2"],
   { revalidate: CONDITIONS_CACHE_SECONDS },
 );
 
@@ -111,7 +114,11 @@ export async function loadEnvironmentConditions(input: {
           lat: place.lat,
           lon: place.lon,
         })
-      : await loadCachedCurrentConditions(place.lat, place.lon);
+      : await loadCachedCurrentConditions(
+          place.lat,
+          place.lon,
+          currentConditionsCacheWindow(),
+        );
   } catch {
     console.error("Environment conditions weather provider request failed.");
     throw providerFailedError();
@@ -128,6 +135,10 @@ export async function loadEnvironmentConditions(input: {
     ...conditions,
     locationLabel: [place.name, place.country].filter(Boolean).join(", "),
   };
+}
+
+function currentConditionsCacheWindow(): number {
+  return Math.floor(Date.now() / (CONDITIONS_CACHE_SECONDS * 1_000));
 }
 
 async function loadGeocodedPlace(input: {

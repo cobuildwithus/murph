@@ -36,12 +36,14 @@ import { loadEnvironmentConditions } from "@/src/lib/environment/conditions";
 const TEST_API_KEY = "openweather-test-key";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
 
 test("environment conditions use direct OpenWeather APIs", async () => {
-  const calls: URL[] = [];
+  const calls: Array<{ init?: RequestInit; url: URL }> = [];
+  const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
   const result = await loadEnvironmentConditions({
     fetchImpl: createOpenWeatherFetch(calls),
     location: "Lisbon",
@@ -55,7 +57,7 @@ test("environment conditions use direct OpenWeather APIs", async () => {
   });
   assert.equal(calls.length, 3);
   assert.deepEqual(
-    calls.map((url) => url.pathname),
+    calls.map(({ url }) => url.pathname),
     [
       "/geo/1.0/direct",
       "/data/2.5/weather",
@@ -63,15 +65,27 @@ test("environment conditions use direct OpenWeather APIs", async () => {
     ],
   );
   assert.deepEqual(
-    Object.fromEntries(calls[0]!.searchParams),
+    calls.map(({ url }) => url.origin),
+    Array.from({ length: 3 }, () => "https://api.openweathermap.org"),
+  );
+  assert.deepEqual(
+    Object.fromEntries(calls[0]!.url.searchParams),
     { appid: TEST_API_KEY, limit: "1", q: "Lisbon" },
   );
-  for (const url of calls.slice(1)) {
+  for (const { init } of calls) {
+    assert.equal(init?.cache, "no-store");
+    assert.equal(init?.method, "GET");
+    assert.equal(init?.redirect, "error");
+    assert.deepEqual(init?.headers, { accept: "application/json" });
+    assert.ok(init?.signal instanceof AbortSignal);
+  }
+  for (const { url } of calls.slice(1)) {
     assert.equal(url.searchParams.get("lat"), "38.7223");
     assert.equal(url.searchParams.get("lon"), "-9.1393");
     assert.equal(url.searchParams.get("appid"), TEST_API_KEY);
   }
-  assert.equal(calls[1]!.searchParams.get("units"), "metric");
+  assert.equal(calls[1]!.url.searchParams.get("units"), "metric");
+  assert.deepEqual(timeoutSpy.mock.calls, [[10_000], [10_000], [10_000]]);
 });
 
 test("environment conditions configure 30-day location and 10-minute conditions caches", () => {
@@ -81,14 +95,14 @@ test("environment conditions configure 30-day location and 10-minute conditions 
       revalidate: 30 * 24 * 60 * 60,
     },
     {
-      keyParts: ["environment-openweather-current-conditions-v1"],
+      keyParts: ["environment-openweather-current-conditions-v2"],
       revalidate: 10 * 60,
     },
   ]);
 });
 
 test("environment conditions reuse cached production results for the same city", async () => {
-  const calls: URL[] = [];
+  const calls: Array<{ init?: RequestInit; url: URL }> = [];
   vi.stubEnv("OPENWEATHER_API_KEY", TEST_API_KEY);
   vi.stubGlobal("fetch", createOpenWeatherFetch(calls));
 
@@ -97,6 +111,123 @@ test("environment conditions reuse cached production results for the same city",
 
   assert.deepEqual(second, first);
   assert.equal(calls.length, 3);
+});
+
+test("environment conditions partition production caches by normalized city", async () => {
+  const calls: URL[] = [];
+  vi.stubEnv("OPENWEATHER_API_KEY", TEST_API_KEY);
+  vi.stubGlobal("fetch", createCityAwareOpenWeatherFetch(calls));
+
+  const porto = await loadEnvironmentConditions({ location: "Porto" });
+  const warsaw = await loadEnvironmentConditions({ location: "Warsaw" });
+  const portoAgain = await loadEnvironmentConditions({ location: "Porto" });
+
+  assert.deepEqual(portoAgain, porto);
+  assert.notDeepEqual(warsaw, porto);
+  assert.equal(
+    calls.filter((url) => url.pathname === "/geo/1.0/direct").length,
+    2,
+  );
+  assert.equal(
+    calls.filter((url) => url.pathname !== "/geo/1.0/direct").length,
+    4,
+  );
+});
+
+test("environment conditions await fresh provider data after ten minutes", async () => {
+  let now = Date.UTC(2026, 7, 22, 10, 0, 0);
+  let currentRequestCount = 0;
+  let releaseRefresh: () => void = () => undefined;
+  let markRefreshStarted: () => void = () => undefined;
+  const refreshStarted = new Promise<void>((resolve) => {
+    markRefreshStarted = resolve;
+  });
+  const refreshReleased = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  vi.stubEnv("OPENWEATHER_API_KEY", TEST_API_KEY);
+  vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/geo/1.0/direct") {
+      return Response.json([
+        { country: "PL", lat: 50.01, lon: 19.91, name: "Freshville" },
+      ]);
+    }
+    currentRequestCount += 1;
+    const refreshing = currentRequestCount > 2;
+    if (refreshing) {
+      if (currentRequestCount === 4) {
+        markRefreshStarted();
+      }
+      await refreshReleased;
+    }
+    return url.pathname === "/data/2.5/weather"
+      ? Response.json({
+          main: { temp: refreshing ? 22 : 12 },
+          weather: [{ description: refreshing ? "clear" : "rain" }],
+        })
+      : Response.json({
+          list: [{
+            components: { pm2_5: refreshing ? 4 : 14 },
+            main: { aqi: refreshing ? 1 : 3 },
+          }],
+        });
+  });
+
+  const first = await loadEnvironmentConditions({ location: "Freshville" });
+  now += (10 * 60 * 1_000) + 1;
+  let refreshSettled = false;
+  const refresh = loadEnvironmentConditions({ location: "Freshville" })
+    .finally(() => {
+      refreshSettled = true;
+    });
+  await refreshStarted;
+  await Promise.resolve();
+
+  assert.equal(refreshSettled, false);
+  releaseRefresh();
+  const refreshed = await refresh;
+  const reused = await loadEnvironmentConditions({ location: "Freshville" });
+
+  assert.equal(first.weather?.temperatureC, 12);
+  assert.equal(refreshed.weather?.temperatureC, 22);
+  assert.deepEqual(reused, refreshed);
+  assert.equal(currentRequestCount, 4);
+});
+
+test("environment conditions fail closed when an expired refresh fails", async () => {
+  let now = Date.UTC(2026, 7, 22, 11, 0, 0);
+  let currentRequestCount = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
+  vi.stubEnv("OPENWEATHER_API_KEY", TEST_API_KEY);
+  vi.stubGlobal("fetch", async (input: Parameters<typeof fetch>[0]) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/geo/1.0/direct") {
+      return Response.json([
+        { country: "PL", lat: 50.02, lon: 19.92, name: "Failureville" },
+      ]);
+    }
+    currentRequestCount += 1;
+    if (currentRequestCount > 2) {
+      return Response.json({ message: "unavailable" }, { status: 503 });
+    }
+    return url.pathname === "/data/2.5/weather"
+      ? Response.json({
+          main: { temp: 15 },
+          weather: [{ description: "cloudy" }],
+        })
+      : Response.json({
+          list: [{ components: { pm2_5: 9 }, main: { aqi: 2 } }],
+        });
+  });
+
+  await loadEnvironmentConditions({ location: "Failureville" });
+  now += (10 * 60 * 1_000) + 1;
+  const error = await loadEnvironmentConditions({ location: "Failureville" })
+    .catch((value: unknown) => value);
+
+  assert.match(String(error), /Live conditions are unavailable right now/);
 });
 
 test("environment conditions request weather and air quality concurrently", async () => {
@@ -193,10 +324,12 @@ test("environment conditions convert OpenWeather failures to a retryable provide
   assert.doesNotMatch(String(error), new RegExp(TEST_API_KEY));
 });
 
-function createOpenWeatherFetch(calls: URL[]): typeof fetch {
-  return async (input) => {
+function createOpenWeatherFetch(
+  calls: Array<{ init?: RequestInit; url: URL }>,
+): typeof fetch {
+  return async (input, init) => {
     const url = new URL(String(input));
-    calls.push(url);
+    calls.push({ init, url });
     switch (url.pathname) {
       case "/geo/1.0/direct":
         return Response.json([
@@ -219,5 +352,31 @@ function createOpenWeatherFetch(calls: URL[]): typeof fetch {
       default:
         throw new Error(`Unexpected OpenWeather path ${url.pathname}`);
     }
+  };
+}
+
+function createCityAwareOpenWeatherFetch(calls: URL[]): typeof fetch {
+  return async (input) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    if (url.pathname === "/geo/1.0/direct") {
+      const location = url.searchParams.get("q");
+      return location === "Porto"
+        ? Response.json([
+            { country: "PT", lat: 41.15, lon: -8.61, name: "Porto" },
+          ])
+        : Response.json([
+            { country: "PL", lat: 52.23, lon: 21.01, name: "Warsaw" },
+          ]);
+    }
+    const lat = Number(url.searchParams.get("lat"));
+    return url.pathname === "/data/2.5/weather"
+      ? Response.json({
+          main: { temp: lat },
+          weather: [{ description: "clear" }],
+        })
+      : Response.json({
+          list: [{ components: { pm2_5: lat }, main: { aqi: 1 } }],
+        });
   };
 }

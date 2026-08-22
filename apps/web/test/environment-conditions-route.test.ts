@@ -43,12 +43,29 @@ describe("environment conditions route", () => {
   });
 
   it("passes a normalized city or region to the provider owner", async () => {
-    const response = await POST(createRequest("  Warsaw, Poland  "));
+    const request = createRequest("  Warsaw, Poland  ");
+    const response = await POST(request);
 
     expect(response.status).toBe(200);
+    expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(
+      request,
+    );
+    expect(
+      mocks.requireActiveHostedAppSessionFromRequest,
+    ).toHaveBeenCalledWith(request);
     expect(mocks.loadEnvironmentConditions).toHaveBeenCalledWith({
       location: "Warsaw, Poland",
     });
+    expect(
+      mocks.assertHostedOnboardingMutationOrigin.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.loadEnvironmentConditions.mock.invocationCallOrder[0]!,
+    );
+    expect(
+      mocks.requireActiveHostedAppSessionFromRequest.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.loadEnvironmentConditions.mock.invocationCallOrder[0]!,
+    );
   });
 });
 
