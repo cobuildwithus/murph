@@ -63,7 +63,10 @@ identity derived from the authenticated member and accepted input, decrypts and
 validates the stored notification, and retains its pinned membership and route
 even if the member's group count changed. Changed context, membership
 generation, target group, or route conflicts instead of redirecting. `accepted`
-proves only that the target mailbox item is durable.
+proves only that the target mailbox item is durable. The runner exact-replays
+the same hidden request once after a retryable Cloudflare-to-Web failure, so a
+lost successful response re-signals the same mailbox item instead of reporting
+a false failure or selecting another target.
 
 The target turn uses the conversation prompt with an isolated output-only
 provider thread. It has no tools, private-vault access, filesystem capability,

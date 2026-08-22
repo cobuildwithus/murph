@@ -777,6 +777,65 @@ describe("Hosted private-to-group context handoff admission", () => {
       .not.toHaveBeenCalled();
   });
 
+  it("replays a committed wake without selecting or appending again", async () => {
+    const context = "The original bounded fact.";
+    const eventId = createHostedGroupContextHandoffEventId({
+      memberId: ORIGIN_MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+    let persistedWake: ReturnType<typeof contextHandoffWake> | null = null;
+    const { prisma } = createPrisma();
+    mocks.readHostedMailboxItemById.mockImplementation(async () =>
+      persistedWake ? mailboxItemForContextHandoff(persistedWake) : null
+    );
+    mocks.readHostedMailboxWakeByItemId.mockImplementation(async () =>
+      persistedWake
+    );
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
+      async (input: {
+        envelope: ReturnType<typeof contextHandoffWake>;
+      }) => {
+        persistedWake = input.envelope;
+        return {
+          dedupeConflict: false,
+          duplicate: false,
+          inserted: true,
+          item: {
+            id: input.envelope.eventId,
+            userId: input.envelope.userId,
+          },
+        };
+      },
+    );
+    const request = {
+      context,
+      groupLabel: "100 Club",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    };
+
+    const first = await requestHostedGroupContextHandoff(request);
+    const replay = await requestHostedGroupContextHandoff({
+      ...request,
+      now: new Date(NOW.getTime() + 60_000),
+    });
+
+    expect(replay).toEqual(first);
+    expect(replay).toEqual({
+      mailboxWake: {
+        expectedUserId: TARGET_RUNTIME_MEMBER_ID,
+        mailboxItemId: eventId,
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+    expect(mocks.resolveHostedAssistantNotificationDestination)
+      .toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledOnce();
+  });
+
   it("rejects replay after the pinned route loses egress authority", async () => {
     const context = "The original bounded fact.";
     const wake = contextHandoffWake({ context });
