@@ -587,14 +587,14 @@ terminal receipt. Never use a browser alert or confirm prompt for sponsorship
 changes.
 
 When group funding is fulfilled, switch from the payment-status composition to
-one confident success hierarchy: a compact sage confirmation mark and mono
-`NICE ONE` label, the Fraunces headline `This group has more Murph`, one
-sentence confirming that the contribution is ready, and one full-width **Open
-Messages** action. State that Messages opens without a group deep link and the
-member must choose the group. Keep the desktop dialog and mobile drawer at
-content height, and use their standard close control as the only separate exit.
-Do not add a divider band, a second dismissal action, a bordered status card,
-payment-pending copy, an invented amount, or celebration graphics. Once
+one confident success hierarchy: a compact sage confirmation mark, the
+Fraunces headline `This group has more Murph`, one sentence confirming that the
+contribution is ready, and one full-width **Open Messages** action. State that
+Messages opens without a group deep link and the member must choose the group.
+Keep the desktop dialog and mobile drawer at content height, and use their
+standard close control as the only separate exit. Do not add a congratulatory
+kicker, divider band, second dismissal action, bordered status card,
+payment-pending copy, invented amount, or celebration graphics. Once
 fulfillment is verified, do not carry frozen sponsor details or their
 payment-recovery instructions into the success receipt.
 

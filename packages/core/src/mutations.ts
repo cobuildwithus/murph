@@ -145,6 +145,7 @@ type LooseRecord = Record<string, unknown>;
 
 const DENSE_DEVICE_TELEMETRY_NOT_ALLOWED_CODE = "VAULT_DENSE_DEVICE_TELEMETRY_NOT_ALLOWED";
 const DENSE_DEVICE_SAMPLES_NOT_ALLOWED_LEGACY_CODE = "VAULT_DENSE_DEVICE_SAMPLES_NOT_ALLOWED";
+const MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS = 64;
 
 const RESERVED_DEVICE_EVENT_FIELD_NAMES = new Set([
   "schemaVersion",
@@ -2160,6 +2161,10 @@ function orderEventImportDecisionsBySourceVersion(
 }
 
 interface EventExternalRefIndex {
+  aliasRepairContaminatedEventIds: Set<string>;
+  aliasRepairContaminatedRefKeys: Set<string>;
+  aliasRepairHistoryById: Map<string, EventSpineEntry<EventRecord>[]>;
+  liveOwnerIdsByRefKey: Map<string, Set<string>>;
   junctionSparseDayHistoryById: Map<string, {
     latest: { dayKey: string; revision: number };
     previous?: { dayKey: string; revision: number };
@@ -2196,12 +2201,15 @@ async function indexLatestEventsByExternalRef(
   relativePaths: readonly string[],
   signal?: AbortSignal | null,
 ): Promise<EventExternalRefIndex> {
+  const aliasRepairContaminatedEventIds = new Set<string>();
+  const aliasRepairContaminatedRefKeys = new Set<string>();
   const deviceOwnerRevisionsByRefKeyAndFingerprint = new Map<
     string,
     Map<string, Map<string, Set<number>>>
   >();
   const junctionSparseDayHistoryById: EventExternalRefIndex["junctionSparseDayHistoryById"] =
     new Map();
+  const liveOwnerIdsByRefKey = new Map<string, Set<string>>();
   const latestByRefKey = new Map<string, IndexedEventExternalRefMatch>();
   const latestById = new Map<string, EventRecord>();
   const maxRevisionById = new Map<string, number>();
@@ -2225,6 +2233,15 @@ async function indexLatestEventsByExternalRef(
         const parsed = safeParseContract(eventRecordSchema, raw);
 
         if (!parsed.success) {
+          if (isLooseRecordValue(raw)) {
+            if (typeof raw.id === "string" && raw.id.length > 0) {
+              aliasRepairContaminatedEventIds.add(raw.id);
+            }
+            const rejectedRefKey = readRejectedEventExternalRefKey(raw.externalRef);
+            if (rejectedRefKey) {
+              aliasRepairContaminatedRefKeys.add(rejectedRefKey);
+            }
+          }
           return;
         }
         const entry = { relativePath, record: parsed.data };
@@ -2317,13 +2334,19 @@ async function indexLatestEventsByExternalRef(
     const indexedExternalRefEntry =
       state.latestDeviceExternalRefEntryByRefKey.get(refKey) ?? externalRefEntry;
     const refGroup = groupedByRefKey.get(refKey) ?? [];
-    refGroup.push({
+    const indexedMatch = {
       indexedExternalRef: indexedExternalRefEntry.record.externalRef ?? externalRefEntry.record.externalRef,
       indexedRecord: indexedExternalRefEntry.record,
       relativePath: latestForId.relativePath,
       record: latestForId.record,
-    });
+    };
+    refGroup.push(indexedMatch);
     groupedByRefKey.set(refKey, refGroup);
+    if (!isDeletedEventSpineRecord(latestForId.record)) {
+      const liveOwnerIds = liveOwnerIdsByRefKey.get(refKey) ?? new Set<string>();
+      liveOwnerIds.add(latestForId.record.id);
+      liveOwnerIdsByRefKey.set(refKey, liveOwnerIds);
+    }
   }
 
   for (const [refKey, group] of groupedByRefKey) {
@@ -2341,14 +2364,49 @@ async function indexLatestEventsByExternalRef(
     indexJunctionNoIdProfilePredecessors(latestByRefKey.values());
 
   return {
+    aliasRepairContaminatedEventIds,
+    aliasRepairContaminatedRefKeys,
+    aliasRepairHistoryById: new Map(),
     deviceOwnerRevisionsByRefKeyAndFingerprint,
     junctionNoIdProfilePredecessorsByScope,
     junctionSparseDayHistoryById,
     latestByRefKey,
     latestById,
+    liveOwnerIdsByRefKey,
     maxRevisionById,
     revisionsById,
   };
+}
+
+async function loadBoundedAliasRepairHistories(
+  vaultRoot: string,
+  relativePaths: readonly string[],
+  eventIds: ReadonlySet<string>,
+): Promise<Map<string, EventSpineEntry<EventRecord>[]>> {
+  const histories = new Map<string, EventSpineEntry<EventRecord>[]>();
+  for (const relativePath of relativePaths) {
+    await visitJsonlRecordsInterruptible({
+      vaultRoot,
+      relativePath,
+      visit(raw) {
+        const parsed = safeParseContract(eventRecordSchema, raw);
+        if (!parsed.success || !eventIds.has(parsed.data.id)) {
+          return;
+        }
+        const history = histories.get(parsed.data.id) ?? [];
+        if (history.length <= MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS) {
+          history.push({ relativePath, record: parsed.data });
+          histories.set(parsed.data.id, history);
+        }
+      },
+    });
+  }
+  for (const history of histories.values()) {
+    history.sort((left, right) =>
+      eventSpineRevision(left.record) - eventSpineRevision(right.record)
+    );
+  }
+  return histories;
 }
 
 function isSameObservationFacet(existing: EventRecord, incoming: EventRecord): boolean {
@@ -3090,14 +3148,31 @@ function buildLegacyExternalRefReservations(
     }
 
     const primaryRefKey = eventExternalRefKey(externalRef);
+    const dailyAliasOwnerSplit = resolveJunctionDailyAggregateAliasOwnerSplit(
+      entry,
+      index,
+    );
     for (const legacyExternalRef of entry.legacyExternalRefs) {
       const legacyRefKey = eventExternalRefKey(legacyExternalRef);
       if (legacyRefKey === primaryRefKey) {
         continue;
       }
 
-      const indexedMatch = index.latestByRefKey.get(legacyRefKey);
-      if (!indexedMatch || !isCompatibleLegacyExternalRefMatch(indexedMatch, entry.record, legacyExternalRef)) {
+      const persistedAliasMatch = dailyAliasOwnerSplit?.legacyRefKey === legacyRefKey
+        ? dailyAliasOwnerSplit.legacyOwner
+        : undefined;
+      const indexedMatch = persistedAliasMatch ?? index.latestByRefKey.get(legacyRefKey);
+      if (
+        !indexedMatch
+        || (
+          !persistedAliasMatch
+          && !isCompatibleLegacyExternalRefMatch(
+            indexedMatch,
+            entry.record,
+            legacyExternalRef,
+          )
+        )
+      ) {
         continue;
       }
 
@@ -3179,11 +3254,15 @@ async function buildDeviceEventIdentityContext(
   if (entries.length === 0 && authoritativeEventSets.length === 0) {
     return {
       index: {
+        aliasRepairContaminatedEventIds: new Set(),
+        aliasRepairContaminatedRefKeys: new Set(),
+        aliasRepairHistoryById: new Map(),
         deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
         junctionNoIdProfilePredecessorsByScope: new Map(),
         junctionSparseDayHistoryById: new Map(),
         latestByRefKey: new Map(),
         latestById: new Map(),
+        liveOwnerIdsByRefKey: new Map(),
         maxRevisionById: new Map(),
         revisionsById: new Map(),
       },
@@ -3194,10 +3273,32 @@ async function buildDeviceEventIdentityContext(
     extension: ".jsonl",
   });
   const index = await indexLatestEventsByExternalRef(vaultRoot, shardPaths);
-  return {
-    index,
-    legacyReservations: buildLegacyExternalRefReservations(entries, index),
-  };
+  const context: DeviceEventIdentityContext = { index, legacyReservations: new Map() };
+  // A legitimate primary spine may advance before the duplicate is repaired.
+  // Load only structural candidates first so reservations can use the bounded
+  // common-initial-history proof instead of latest-record equality.
+  const aliasRepairOwnerIds = new Set<string>();
+  for (const entry of entries) {
+    const ownerSplit = resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+      entry,
+      index,
+    );
+    if (!ownerSplit) {
+      continue;
+    }
+    assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
+    aliasRepairOwnerIds.add(ownerSplit.primaryOwner.record.id);
+    aliasRepairOwnerIds.add(ownerSplit.legacyOwner.record.id);
+  }
+  if (aliasRepairOwnerIds.size > 0) {
+    index.aliasRepairHistoryById = await loadBoundedAliasRepairHistories(
+      vaultRoot,
+      shardPaths,
+      aliasRepairOwnerIds,
+    );
+  }
+  context.legacyReservations = buildLegacyExternalRefReservations(entries, index);
+  return context;
 }
 
 function cloneDeviceEventIdentityContext(
@@ -3205,6 +3306,15 @@ function cloneDeviceEventIdentityContext(
 ): DeviceEventIdentityContext {
   return {
     index: {
+      aliasRepairContaminatedEventIds: new Set(
+        context.index.aliasRepairContaminatedEventIds,
+      ),
+      aliasRepairContaminatedRefKeys: new Set(
+        context.index.aliasRepairContaminatedRefKeys,
+      ),
+      aliasRepairHistoryById: new Map(
+        [...context.index.aliasRepairHistoryById].map(([id, history]) => [id, [...history]]),
+      ),
       deviceOwnerRevisionsByRefKeyAndFingerprint:
         context.index.deviceOwnerRevisionsByRefKeyAndFingerprint,
       junctionNoIdProfilePredecessorsByScope:
@@ -3212,8 +3322,13 @@ function cloneDeviceEventIdentityContext(
       junctionSparseDayHistoryById: context.index.junctionSparseDayHistoryById,
       latestByRefKey: new Map(context.index.latestByRefKey),
       latestById: new Map(context.index.latestById),
+      liveOwnerIdsByRefKey: new Map(
+        [...context.index.liveOwnerIdsByRefKey].map(([key, ids]) => [key, new Set(ids)]),
+      ),
       maxRevisionById: new Map(context.index.maxRevisionById),
-      revisionsById: new Map(context.index.revisionsById),
+      revisionsById: new Map(
+        [...context.index.revisionsById].map(([id, revisions]) => [id, new Set(revisions)]),
+      ),
     },
     legacyReservations: new Map(context.legacyReservations),
   };
@@ -3223,11 +3338,15 @@ function buildEmptyDeviceEventIdentityContext(
   entries: readonly PreparedDeviceEventEntry[],
 ): DeviceEventIdentityContext {
   const index: EventExternalRefIndex = {
+    aliasRepairContaminatedEventIds: new Set(),
+    aliasRepairContaminatedRefKeys: new Set(),
+    aliasRepairHistoryById: new Map(),
     deviceOwnerRevisionsByRefKeyAndFingerprint: new Map(),
     junctionNoIdProfilePredecessorsByScope: new Map(),
     junctionSparseDayHistoryById: new Map(),
     latestByRefKey: new Map(),
     latestById: new Map(),
+    liveOwnerIdsByRefKey: new Map(),
     maxRevisionById: new Map(),
     revisionsById: new Map(),
   };
@@ -3247,6 +3366,728 @@ function eventSpineRevisionsAreComplete(
     && maxRevision > 0
     && revisions !== undefined
     && revisions.size === maxRevision;
+}
+
+interface DeviceEventAliasRepairContext {
+  evidenceByRole: ReadonlyMap<string, IntegrationEvidencePart>;
+  evidenceRolesByPreparedRecordId: ReadonlyMap<string, readonly string[]>;
+}
+
+interface JunctionDailyAggregateAliasEvidence {
+  dayKey: string;
+  legacyDayKey: string;
+  resource: string;
+}
+
+interface JunctionDailyAggregateAliasOverlay {
+  links: NonNullable<EventRecord["links"]>;
+  memberAuthored: boolean;
+  note?: string;
+  tags: NonNullable<EventRecord["tags"]>;
+}
+
+interface JunctionDailyAggregateAliasOwnerSplit {
+  legacyOwner: IndexedEventExternalRefMatch;
+  legacyRefKey: string;
+  primaryOwner: IndexedEventExternalRefMatch;
+  primaryRefKey: string;
+  resource: string;
+}
+
+interface JunctionDailyAggregateAliasHistoryProof
+  extends JunctionDailyAggregateAliasOwnerSplit {
+  legacyOverlay: JunctionDailyAggregateAliasOverlay;
+  primaryOverlay: JunctionDailyAggregateAliasOverlay;
+}
+
+interface JunctionDailyAggregateAliasRepairPlan {
+  legacyRefKey: string;
+  loserPath: string;
+  loserTombstone: EventRecord;
+  overlaySurvivor?: EventRecord;
+  primaryExternalRef: ExternalRef;
+  primaryRefKey: string;
+  providerSurvivor: EventRecord;
+  survivorPath: string;
+}
+
+function buildDeviceEventAliasRepairContext(
+  plan: Pick<DeviceBatchPlan, "evidenceRolesByPreparedRecordId" | "preparedEvidenceParts">,
+): DeviceEventAliasRepairContext {
+  return {
+    evidenceByRole: new Map(plan.preparedEvidenceParts.map((part) => [part.role, part])),
+    evidenceRolesByPreparedRecordId: plan.evidenceRolesByPreparedRecordId,
+  };
+}
+
+function isLooseRecordValue(value: unknown): value is LooseRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function readRejectedEventExternalRefKey(value: unknown): string | undefined {
+  if (!isLooseRecordValue(value)) {
+    return undefined;
+  }
+  const parsed = safeParseContract(externalRefSchema, {
+    system: value.system,
+    resourceType: value.resourceType,
+    resourceId: value.resourceId,
+    ...(value.facet === undefined ? {} : { facet: value.facet }),
+    ...(value.version === undefined ? {} : { version: value.version }),
+  });
+  return parsed.success ? eventExternalRefKey(parsed.data) : undefined;
+}
+
+function junctionDailyAggregateAliasRefShape(externalRef: ExternalRef): string {
+  return stableStringify({
+    facet: externalRef.facet ?? null,
+    resourceType: externalRef.resourceType,
+    system: externalRef.system,
+    version: externalRef.version ?? null,
+  });
+}
+
+function junctionDailyAggregateAliasOriginKey(
+  origin: DeviceDataOrigin | undefined,
+): string | null {
+  if (!origin) {
+    return null;
+  }
+  const { observedAtRaw: _observedAtRaw, ...stableOrigin } = origin;
+  return stableStringify(stableOrigin);
+}
+
+function junctionDailyAggregateAliasHistoricalOriginMatches(
+  historical: DeviceDataOrigin | undefined,
+  current: DeviceDataOrigin,
+): boolean {
+  if (!historical) {
+    return false;
+  }
+  if (junctionDailyAggregateAliasOriginKey(historical)
+    === junctionDailyAggregateAliasOriginKey(current)) {
+    return true;
+  }
+  if (historical.timeZoneOffsetMinutes !== undefined) {
+    return false;
+  }
+  const {
+    observedAtRaw: _historicalObservedAtRaw,
+    timeZoneOffsetMinutes: _historicalOffset,
+    ...stableHistorical
+  } = historical;
+  const {
+    observedAtRaw: _currentObservedAtRaw,
+    timeZoneOffsetMinutes: _currentOffset,
+    ...stableCurrent
+  } = current;
+  return stableStringify(stableHistorical) === stableStringify(stableCurrent);
+}
+
+function junctionDailyAggregateProviderStateKey(record: EventRecord): string {
+  const {
+    dataOrigin: _dataOrigin,
+    dayKey: _dayKey,
+    externalRef: _externalRef,
+    id: _id,
+    lifecycle: _lifecycle,
+    links: _links,
+    note: _note,
+    recordedAt: _recordedAt,
+    source: _source,
+    tags: _tags,
+    ...providerState
+  } = record;
+  return stableStringify(providerState);
+}
+
+function isJunctionDailyAggregateAliasCandidate(entry: PreparedDeviceEventEntry): boolean {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  return externalRef !== undefined
+    && legacyExternalRef !== undefined
+    && entry.legacyExternalRefs.length === 1
+    && entry.record.kind === "observation"
+    && entry.record.source === "device"
+    && entry.record.dataOrigin?.aggregatorProvider === "junction"
+    && entry.record.dataOrigin.normalizerVersion === "junction-normalizer.v1"
+    && externalRef.system === "junction"
+    && externalRef.version === undefined
+    && legacyExternalRef.version === undefined
+    && eventExternalRefKey(externalRef) !== eventExternalRefKey(legacyExternalRef)
+    && junctionDailyAggregateAliasRefShape(externalRef)
+      === junctionDailyAggregateAliasRefShape(legacyExternalRef)
+    && entry.record.note === undefined
+    && entry.record.tags === undefined
+    && entry.record.links === undefined
+    && entry.record.rawRefs === undefined
+    && entry.record.evidence === undefined
+    && entry.record.attachments === undefined;
+}
+
+function resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): JunctionDailyAggregateAliasOwnerSplit | null {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (
+    !externalRef
+    || !legacyExternalRef
+    || !isJunctionDailyAggregateAliasCandidate(entry)
+  ) {
+    return null;
+  }
+  const primaryRefKey = eventExternalRefKey(externalRef);
+  const legacyRefKey = eventExternalRefKey(legacyExternalRef);
+  const primaryOwnerIds = index.liveOwnerIdsByRefKey.get(primaryRefKey)
+    ?? new Set<string>();
+  const legacyOwnerIds = index.liveOwnerIdsByRefKey.get(legacyRefKey)
+    ?? new Set<string>();
+  if (primaryOwnerIds.size === 0 || legacyOwnerIds.size === 0) {
+    return null;
+  }
+
+  const primaryOwner = index.latestByRefKey.get(primaryRefKey);
+  const legacyOwner = index.latestByRefKey.get(legacyRefKey);
+  if (!primaryOwner || !legacyOwner) {
+    return null;
+  }
+
+  const primaryProviderRecord = primaryOwner.indexedRecord;
+  const legacyProviderRecord = legacyOwner.indexedRecord;
+  const primaryOrigin = primaryProviderRecord.dataOrigin;
+  const legacyOrigin = legacyProviderRecord.dataOrigin;
+  const incomingOrigin = entry.record.dataOrigin;
+  const observedAtRaw = incomingOrigin?.observedAtRaw;
+  const observedAtRawPrefix = `${entry.record.dayKey}:`;
+  const resource = observedAtRaw?.startsWith(observedAtRawPrefix)
+    && observedAtRaw.endsWith(":daily")
+    ? observedAtRaw.slice(observedAtRawPrefix.length, -":daily".length)
+    : "";
+  if (
+    primaryProviderRecord.dayKey !== entry.record.dayKey
+    || !isSameObservationFacet(primaryProviderRecord, entry.record)
+    || !isSameObservationFacet(primaryProviderRecord, legacyProviderRecord)
+    || junctionDailyAggregateAliasRefShape(primaryOwner.indexedExternalRef)
+      !== junctionDailyAggregateAliasRefShape(externalRef)
+    || junctionDailyAggregateAliasRefShape(legacyOwner.indexedExternalRef)
+      !== junctionDailyAggregateAliasRefShape(legacyExternalRef)
+    || !primaryOrigin
+    || !legacyOrigin
+    || !incomingOrigin
+    || resource.length === 0
+    || !deviceDataOriginSourceMatches(primaryOrigin, incomingOrigin)
+    || !deviceDataOriginSourceMatches(legacyOrigin, incomingOrigin)
+  ) {
+    return null;
+  }
+
+  const distinctOwnerIds = new Set([...primaryOwnerIds, ...legacyOwnerIds]);
+  if (distinctOwnerIds.size < 2) {
+    return null;
+  }
+  if (
+    primaryOwnerIds.size !== 1
+    || legacyOwnerIds.size !== 1
+    || distinctOwnerIds.size !== 2
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      "Junction daily aggregate alias repair requires exactly one live owner per claimed reference.",
+    );
+  }
+  if (
+    !primaryOwnerIds.has(primaryOwner.record.id)
+    || !legacyOwnerIds.has(legacyOwner.record.id)
+    || primaryOwner.record.id === legacyOwner.record.id
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      "Junction daily aggregate alias repair could not prove the two live reference owners.",
+    );
+  }
+
+  return { legacyOwner, legacyRefKey, primaryOwner, primaryRefKey, resource };
+}
+
+function assertJunctionDailyAggregateAliasHistoryIsUncontaminated(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+): void {
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (!externalRef || !legacyExternalRef) {
+    return;
+  }
+  const primaryRefKey = eventExternalRefKey(externalRef);
+  const legacyRefKey = eventExternalRefKey(legacyExternalRef);
+  const ownerIds = new Set([
+    ...(context.index.liveOwnerIdsByRefKey.get(primaryRefKey) ?? []),
+    ...(context.index.liveOwnerIdsByRefKey.get(legacyRefKey) ?? []),
+  ]);
+  if (
+    [...ownerIds].some((id) => context.index.aliasRepairContaminatedEventIds.has(id))
+    || context.index.aliasRepairContaminatedRefKeys.has(primaryRefKey)
+    || context.index.aliasRepairContaminatedRefKeys.has(legacyRefKey)
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair found a schema-rejected candidate revision.",
+    );
+  }
+}
+
+function parseJunctionDailyAggregateAliasEvidence(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventAliasRepairContext,
+): JunctionDailyAggregateAliasEvidence {
+  const roles = context.evidenceRolesByPreparedRecordId.get(entry.record.id) ?? [];
+  const part = roles.length === 1 ? context.evidenceByRole.get(roles[0]!) : undefined;
+  const metadata = part?.metadata;
+  if (
+    !part
+    || !isLooseRecordValue(metadata)
+    || metadata.artifactClass !== "compact_provider_timeseries_aggregate"
+    || metadata.provider !== "junction"
+    || metadata.resourceCategory !== "timeseries_daily_aggregate"
+    || metadata.retentionClass !== "provider_evidence"
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair requires one exact compact provider evidence role.",
+    );
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(part.content);
+  } catch {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair evidence was not valid JSON.",
+    );
+  }
+  if (!isLooseRecordValue(parsed)) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair evidence did not contain an object.",
+    );
+  }
+
+  const legacyDayKeys = parsed.legacyDayKeys;
+  const origin = entry.record.dataOrigin;
+  if (
+    parsed.schema !== "junction.timeseries_daily_aggregate.v1"
+    || parsed.provider !== "junction"
+    || typeof parsed.resource !== "string"
+    || parsed.resource.length === 0
+    || metadata.resource !== parsed.resource
+    || typeof parsed.dayKey !== "string"
+    || !/^\d{4}-\d{2}-\d{2}$/u.test(parsed.dayKey)
+    || parsed.dayKey !== entry.record.dayKey
+    || typeof parsed.sourceProviderSlug !== "string"
+    || parsed.sourceProviderSlug.length === 0
+    || typeof parsed.sampleCount !== "number"
+    || !Number.isSafeInteger(parsed.sampleCount)
+    || parsed.sampleCount <= 0
+    || !Array.isArray(legacyDayKeys)
+    || legacyDayKeys.length !== 1
+    || typeof legacyDayKeys[0] !== "string"
+    || !/^\d{4}-\d{2}-\d{2}$/u.test(legacyDayKeys[0])
+    || legacyDayKeys[0] === parsed.dayKey
+    || (parsed.sourceType !== undefined && typeof parsed.sourceType !== "string")
+    || (
+      parsed.sourceInstanceId !== undefined
+      && parsed.sourceInstanceId !== null
+      && typeof parsed.sourceInstanceId !== "string"
+    )
+    || origin?.sourceProviderSlug !== parsed.sourceProviderSlug
+    || (origin.sourceType ?? null) !== (parsed.sourceType ?? null)
+    || (origin.sourceInstanceId ?? null) !== (parsed.sourceInstanceId ?? null)
+    || origin.observedAtRaw !== `${parsed.dayKey}:${parsed.resource}:daily`
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+      "Junction daily aggregate alias repair evidence did not prove one normalized primary and legacy day split.",
+    );
+  }
+
+  return {
+    dayKey: parsed.dayKey,
+    legacyDayKey: legacyDayKeys[0],
+    resource: parsed.resource,
+  };
+}
+
+function readCompleteJunctionDailyAggregateAliasHistory(
+  index: EventExternalRefIndex,
+  eventId: string,
+): readonly EventSpineEntry<EventRecord>[] {
+  const history = index.aliasRepairHistoryById.get(eventId) ?? [];
+  const maxRevision = index.maxRevisionById.get(eventId) ?? 0;
+  const revisions = index.revisionsById.get(eventId);
+  if (
+    maxRevision < 1
+    || maxRevision > MAX_JUNCTION_DAILY_ALIAS_REPAIR_REVISIONS
+    || !revisions
+    || revisions.size !== maxRevision
+    || history.length !== maxRevision
+    || history.some((entry, historyIndex) =>
+      eventSpineRevision(entry.record) !== historyIndex + 1
+    )
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair requires a complete bounded event history.",
+    );
+  }
+  return history;
+}
+
+function junctionDailyAggregateAliasPersistedOriginsMatch(
+  left: DeviceDataOrigin | undefined,
+  right: DeviceDataOrigin | undefined,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return junctionDailyAggregateAliasHistoricalOriginMatches(left, right)
+    || junctionDailyAggregateAliasHistoricalOriginMatches(right, left);
+}
+
+function junctionDailyAggregateAliasInitialRecordMatches(
+  record: EventRecord | undefined,
+  input: {
+    expectedDayKey: string;
+    expectedExternalRef: ExternalRef;
+    expectedObservedAtRaw: string;
+  },
+): record is EventRecord {
+  return record !== undefined
+    && record.source === "device"
+    && !isDeletedEventSpineRecord(record)
+    && record.dayKey === input.expectedDayKey
+    && record.dataOrigin?.observedAtRaw === input.expectedObservedAtRaw
+    && record.externalRef !== undefined
+    && eventExternalRefKey(record.externalRef)
+      === eventExternalRefKey(input.expectedExternalRef)
+    && junctionDailyAggregateAliasRefShape(record.externalRef)
+      === junctionDailyAggregateAliasRefShape(input.expectedExternalRef);
+}
+
+function analyzeJunctionDailyAggregateAliasHistoryEvolution(input: {
+  allowProviderEvolution: boolean;
+  expectedDayKey: string;
+  expectedExternalRef: ExternalRef;
+  expectedOrigin: DeviceDataOrigin;
+  expectedObservedAtRaw: string;
+  history: readonly EventSpineEntry<EventRecord>[];
+  initialProviderStateKey: string;
+  initialRecord: EventRecord;
+}): JunctionDailyAggregateAliasOverlay {
+  const expectedRefKey = eventExternalRefKey(input.expectedExternalRef);
+  let providerStateKey = input.initialProviderStateKey;
+  let memberCarrierStateKey: string | undefined;
+  for (const { record } of input.history) {
+    const recordProviderStateKey = junctionDailyAggregateProviderStateKey(record);
+    const providerRecord = record.source === "device";
+    const manualMatchesProvider = recordProviderStateKey === providerStateKey;
+    const manualMatchesCarrier = memberCarrierStateKey !== undefined
+      && recordProviderStateKey === memberCarrierStateKey;
+    if (
+      isDeletedEventSpineRecord(record)
+      || (record.source !== "device" && record.source !== "manual")
+      || record.dayKey !== input.expectedDayKey
+      || !isSameObservationFacet(input.initialRecord, record)
+      || (
+        providerRecord
+        && (
+          !record.externalRef
+          || !record.dataOrigin
+        )
+      )
+      || (
+        record.externalRef !== undefined
+        && (
+          eventExternalRefKey(record.externalRef) !== expectedRefKey
+          || junctionDailyAggregateAliasRefShape(record.externalRef)
+            !== junctionDailyAggregateAliasRefShape(input.expectedExternalRef)
+        )
+      )
+      || (
+        record.dataOrigin !== undefined
+        && (
+          record.dataOrigin.observedAtRaw !== input.expectedObservedAtRaw
+          || !junctionDailyAggregateAliasHistoricalOriginMatches(
+            record.dataOrigin,
+            input.expectedOrigin,
+          )
+        )
+      )
+      || (
+        providerRecord
+          ? !input.allowProviderEvolution
+            && recordProviderStateKey !== input.initialProviderStateKey
+          : !manualMatchesProvider && !manualMatchesCarrier
+      )
+    ) {
+      throw new VaultError(
+        "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+        "Junction daily aggregate alias repair found unsupported or divergent historical state.",
+      );
+    }
+    if (providerRecord) {
+      providerStateKey = recordProviderStateKey;
+    } else if (manualMatchesProvider) {
+      memberCarrierStateKey = recordProviderStateKey;
+    }
+  }
+
+  const latest = input.history.at(-1)?.record;
+  if (!latest) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair requires a complete bounded event history.",
+    );
+  }
+  const links = [...(latest.links ?? [])];
+  const tags = [...(latest.tags ?? [])];
+  return {
+    links,
+    memberAuthored: latest.source === "manual"
+      || latest.note !== undefined
+      || tags.length > 0
+      || links.length > 0,
+    ...(latest.note ? { note: latest.note } : {}),
+    tags,
+  };
+}
+
+function resolveJunctionDailyAggregateAliasOwnerSplit(
+  entry: PreparedDeviceEventEntry,
+  index: EventExternalRefIndex,
+): JunctionDailyAggregateAliasHistoryProof | null {
+  const ownerSplit = resolveStructuralJunctionDailyAggregateAliasOwnerSplit(
+    entry,
+    index,
+  );
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  if (!ownerSplit || !externalRef || !legacyExternalRef || !entry.record.dataOrigin) {
+    return null;
+  }
+
+  const primaryInitial = index.aliasRepairHistoryById.get(
+    ownerSplit.primaryOwner.record.id,
+  )?.[0]?.record;
+  const legacyInitial = index.aliasRepairHistoryById.get(
+    ownerSplit.legacyOwner.record.id,
+  )?.[0]?.record;
+  const legacyDayKey = ownerSplit.legacyOwner.indexedRecord.dayKey;
+  // Divergent initial baselines are ordinary adjacent-day owners. Once the
+  // baselines match, every later revision must satisfy the bounded evolution
+  // rules before this pair can reserve or mutate either identity.
+  if (
+    !junctionDailyAggregateAliasInitialRecordMatches(primaryInitial, {
+      expectedDayKey: entry.record.dayKey,
+      expectedExternalRef: externalRef,
+      expectedObservedAtRaw: `${entry.record.dayKey}:${ownerSplit.resource}:daily`,
+    })
+    || !junctionDailyAggregateAliasInitialRecordMatches(legacyInitial, {
+      expectedDayKey: legacyDayKey,
+      expectedExternalRef: legacyExternalRef,
+      expectedObservedAtRaw: `${legacyDayKey}:${ownerSplit.resource}:daily`,
+    })
+    || !isSameObservationFacet(primaryInitial, legacyInitial)
+    || junctionDailyAggregateProviderStateKey(primaryInitial)
+      !== junctionDailyAggregateProviderStateKey(legacyInitial)
+    || !junctionDailyAggregateAliasPersistedOriginsMatch(
+      primaryInitial.dataOrigin,
+      legacyInitial.dataOrigin,
+    )
+  ) {
+    return null;
+  }
+
+  const primaryHistory = readCompleteJunctionDailyAggregateAliasHistory(
+    index,
+    ownerSplit.primaryOwner.record.id,
+  );
+  const legacyHistory = readCompleteJunctionDailyAggregateAliasHistory(
+    index,
+    ownerSplit.legacyOwner.record.id,
+  );
+
+  const primaryOverlay = analyzeJunctionDailyAggregateAliasHistoryEvolution({
+    allowProviderEvolution: true,
+    expectedDayKey: entry.record.dayKey,
+    expectedExternalRef: externalRef,
+    expectedOrigin: entry.record.dataOrigin,
+    expectedObservedAtRaw: `${entry.record.dayKey}:${ownerSplit.resource}:daily`,
+    history: primaryHistory,
+    initialProviderStateKey: junctionDailyAggregateProviderStateKey(primaryInitial),
+    initialRecord: primaryInitial,
+  });
+  const legacyOverlay = analyzeJunctionDailyAggregateAliasHistoryEvolution({
+    allowProviderEvolution: false,
+    expectedDayKey: legacyDayKey,
+    expectedExternalRef: legacyExternalRef,
+    expectedOrigin: entry.record.dataOrigin,
+    expectedObservedAtRaw: `${legacyDayKey}:${ownerSplit.resource}:daily`,
+    history: legacyHistory,
+    initialProviderStateKey: junctionDailyAggregateProviderStateKey(legacyInitial),
+    initialRecord: legacyInitial,
+  });
+  return { ...ownerSplit, legacyOverlay, primaryOverlay };
+}
+
+function hasJunctionDailyAggregateAliasSplit(
+  entry: PreparedDeviceEventEntry,
+  context: DeviceEventIdentityContext,
+): boolean {
+  return resolveJunctionDailyAggregateAliasOwnerSplit(entry, context.index) !== null;
+}
+
+function mergeJunctionDailyAggregateAliasOverlays(
+  primary: JunctionDailyAggregateAliasOverlay,
+  legacy: JunctionDailyAggregateAliasOverlay,
+): JunctionDailyAggregateAliasOverlay {
+  if (primary.note && legacy.note && primary.note !== legacy.note) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_OVERLAY_REFUSED",
+      "Junction daily aggregate alias repair found conflicting member notes.",
+    );
+  }
+  const linksByKey = new Map<string, NonNullable<EventRecord["links"]>[number]>();
+  for (const link of [...primary.links, ...legacy.links]) {
+    linksByKey.set(stableStringify(link), link);
+  }
+  return {
+    links: [...linksByKey.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([, link]) => link),
+    memberAuthored: primary.memberAuthored || legacy.memberAuthored,
+    ...(primary.note || legacy.note ? { note: primary.note ?? legacy.note } : {}),
+    tags: [...new Set([...primary.tags, ...legacy.tags])].sort(),
+  };
+}
+
+function buildJunctionDailyAggregateAliasRepairPlan(input: {
+  aliasRepairContext?: DeviceEventAliasRepairContext;
+  context: DeviceEventIdentityContext;
+  entry: PreparedDeviceEventEntry;
+}): JunctionDailyAggregateAliasRepairPlan | null {
+  const { aliasRepairContext, context, entry } = input;
+  const externalRef = entry.record.externalRef;
+  const legacyExternalRef = entry.legacyExternalRefs[0];
+  const ownerSplit = resolveJunctionDailyAggregateAliasOwnerSplit(
+    entry,
+    context.index,
+  );
+  if (
+    !aliasRepairContext
+    || !externalRef
+    || !legacyExternalRef
+    || !ownerSplit
+  ) {
+    return null;
+  }
+  assertJunctionDailyAggregateAliasHistoryIsUncontaminated(entry, context);
+
+  const {
+    legacyOverlay,
+    legacyOwner,
+    legacyRefKey,
+    primaryOverlay,
+    primaryOwner,
+    primaryRefKey,
+  } = ownerSplit;
+
+  const evidence = parseJunctionDailyAggregateAliasEvidence(entry, aliasRepairContext);
+  if (
+    primaryOwner.record.dayKey !== evidence.dayKey
+    || legacyOwner.record.dayKey !== evidence.legacyDayKey
+    || ownerSplit.resource !== evidence.resource
+  ) {
+    throw new VaultError(
+      "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+      "Junction daily aggregate alias repair owner days did not match the normalized evidence.",
+    );
+  }
+
+  const overlay = mergeJunctionDailyAggregateAliasOverlays(primaryOverlay, legacyOverlay);
+  const primaryRevision = (context.index.maxRevisionById.get(primaryOwner.record.id) ?? 0) + 1;
+  const legacyRevision = (context.index.maxRevisionById.get(legacyOwner.record.id) ?? 0) + 1;
+  const providerSurvivor: EventRecord = {
+    ...entry.record,
+    id: primaryOwner.record.id,
+    lifecycle: buildEventSpineLifecycle(primaryRevision),
+  };
+  const loserTombstone: EventRecord = {
+    ...entry.record,
+    id: legacyOwner.record.id,
+    lifecycle: buildEventSpineLifecycle(legacyRevision, "deleted"),
+  };
+  const overlaySurvivor: EventRecord | undefined = overlay.memberAuthored
+    ? {
+        ...providerSurvivor,
+        source: "manual",
+        ...(overlay.note ? { note: overlay.note } : {}),
+        ...(overlay.tags.length > 0 ? { tags: overlay.tags } : {}),
+        ...(overlay.links.length > 0 ? { links: overlay.links } : {}),
+        lifecycle: buildEventSpineLifecycle(primaryRevision + 1),
+      }
+    : undefined;
+
+  return {
+    legacyRefKey,
+    loserPath: legacyOwner.relativePath || toEventLedgerFile(legacyOwner.record.occurredAt),
+    loserTombstone,
+    ...(overlaySurvivor ? { overlaySurvivor } : {}),
+    primaryExternalRef: externalRef,
+    primaryRefKey,
+    providerSurvivor,
+    survivorPath: entry.relativePath,
+  };
+}
+
+function applyJunctionDailyAggregateAliasRepairToIndex(
+  plan: JunctionDailyAggregateAliasRepairPlan,
+  index: EventExternalRefIndex,
+): void {
+  const survivor = plan.overlaySurvivor ?? plan.providerSurvivor;
+  index.latestByRefKey.set(plan.primaryRefKey, {
+    indexedExternalRef: plan.primaryExternalRef,
+    indexedRecord: plan.providerSurvivor,
+    relativePath: plan.survivorPath,
+    record: survivor,
+  });
+  index.latestByRefKey.delete(plan.legacyRefKey);
+  index.latestById.set(survivor.id, survivor);
+  index.latestById.set(plan.loserTombstone.id, plan.loserTombstone);
+  index.liveOwnerIdsByRefKey.set(plan.primaryRefKey, new Set([survivor.id]));
+  index.liveOwnerIdsByRefKey.delete(plan.legacyRefKey);
+
+  for (const record of [
+    plan.providerSurvivor,
+    ...(plan.overlaySurvivor ? [plan.overlaySurvivor] : []),
+    plan.loserTombstone,
+  ]) {
+    const revision = eventSpineRevision(record);
+    index.maxRevisionById.set(record.id, revision);
+    const revisions = index.revisionsById.get(record.id) ?? new Set<number>();
+    revisions.add(revision);
+    index.revisionsById.set(record.id, revisions);
+    const history = index.aliasRepairHistoryById.get(record.id) ?? [];
+    history.push({
+      relativePath: record.id === plan.loserTombstone.id
+        ? plan.loserPath
+        : plan.survivorPath,
+      record,
+    });
+    index.aliasRepairHistoryById.set(record.id, history);
+  }
 }
 
 function whoopSleepTypeProviderBaselineRevision(
@@ -3533,20 +4374,77 @@ async function reconcileDeviceEventEntriesByExternalRef(
   existingContext?: DeviceEventIdentityContext,
   preferredCanonicalIdByPreparedId: ReadonlyMap<string, string> = new Map(),
   authoritativeEventSets: readonly NormalizedDeviceAuthoritativeEventSet[] = [],
+  aliasRepairContext?: DeviceEventAliasRepairContext,
 ): Promise<EventExternalRefReconciliation> {
   assertCanonicalWriteLockScope(vaultRoot);
   const context = existingContext ?? await buildDeviceEventIdentityContext(vaultRoot, entries);
   const { index } = context;
   const appendEntries: PreparedJsonlEntry<EventRecord>[] = [];
   const appendRecordIdByPreparedRecordId = new Map<string, string>();
-  const records: EventRecord[] = [];
+  const recordsByEntryIndex = new Map<number, EventRecord>();
   const forceAppendIds = new Set<string>();
   const retainedPreparedIds = new Set<string>();
   let skippedDuplicateCount = 0;
   let supersededCount = 0;
   let retractedCount = 0;
 
-  for (const originalEntry of entries) {
+  const aliasRepairByEntryIndex = new Map<number, JunctionDailyAggregateAliasRepairPlan>();
+  for (const [entryIndex, entry] of entries.entries()) {
+    const aliasRepair = buildJunctionDailyAggregateAliasRepairPlan({
+      aliasRepairContext,
+      context,
+      entry,
+    });
+    if (aliasRepair) {
+      aliasRepairByEntryIndex.set(entryIndex, aliasRepair);
+    }
+  }
+  const aliasRepairOwnerIds = new Set<string>();
+  for (const aliasRepair of aliasRepairByEntryIndex.values()) {
+    for (const ownerId of [
+      aliasRepair.providerSurvivor.id,
+      aliasRepair.loserTombstone.id,
+    ]) {
+      if (aliasRepairOwnerIds.has(ownerId)) {
+        throw new VaultError(
+          "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+          "Junction daily aggregate alias repair operations cannot share persisted owners.",
+        );
+      }
+      aliasRepairOwnerIds.add(ownerId);
+    }
+  }
+  for (const [entryIndex, aliasRepair] of aliasRepairByEntryIndex) {
+    const entry = entries[entryIndex]!;
+    appendEntries.push(
+      { relativePath: aliasRepair.survivorPath, record: aliasRepair.providerSurvivor },
+      { relativePath: aliasRepair.loserPath, record: aliasRepair.loserTombstone },
+    );
+    if (aliasRepair.overlaySurvivor) {
+      appendEntries.push({
+        relativePath: aliasRepair.survivorPath,
+        record: aliasRepair.overlaySurvivor,
+      });
+    }
+    appendRecordIdByPreparedRecordId.set(
+      entry.record.id,
+      aliasRepair.providerSurvivor.id,
+    );
+    forceAppendIds.add(aliasRepair.providerSurvivor.id);
+    forceAppendIds.add(aliasRepair.loserTombstone.id);
+    recordsByEntryIndex.set(
+      entryIndex,
+      aliasRepair.overlaySurvivor ?? aliasRepair.providerSurvivor,
+    );
+    applyJunctionDailyAggregateAliasRepairToIndex(aliasRepair, index);
+    supersededCount += 1;
+    retractedCount += 1;
+  }
+
+  for (const [entryIndex, originalEntry] of entries.entries()) {
+    if (aliasRepairByEntryIndex.has(entryIndex)) {
+      continue;
+    }
     let entry = originalEntry;
     const externalRef = entry.record.externalRef;
 
@@ -3559,12 +4457,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
       ) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(current);
+        recordsByEntryIndex.set(entryIndex, current);
         continue;
       }
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
-      records.push(entry.record);
+      recordsByEntryIndex.set(entryIndex, entry.record);
       continue;
     }
 
@@ -3573,6 +4471,12 @@ async function reconcileDeviceEventEntriesByExternalRef(
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
         "Device event identity unexpectedly lost its externalRef during reconciliation.",
+      );
+    }
+    if (resolved.latest && aliasRepairOwnerIds.has(resolved.latest.id)) {
+      throw new VaultError(
+        "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+        "Junction daily aggregate alias repair operations cannot share persisted owners.",
       );
     }
     const { matchedEntries, refKey } = resolved;
@@ -3589,7 +4493,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(canonicalRecord, externalRef));
       appendEntries.push({ relativePath: entry.relativePath, record: canonicalRecord });
       appendRecordIdByPreparedRecordId.set(entry.record.id, canonicalRecord.id);
-      records.push(canonicalRecord);
+      recordsByEntryIndex.set(entryIndex, canonicalRecord);
       continue;
     }
 
@@ -3604,7 +4508,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     if (replaysJunctionNoIdProfileTimestamp) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
     const matchesIndexedProviderContent = indexedProviderMatch !== undefined
@@ -3631,7 +4535,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -3652,7 +4556,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       );
       if (sourceVersionComparison !== null && sourceVersionComparison < 0) {
         skippedDuplicateCount += 1;
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       if (
@@ -3707,7 +4611,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     ) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -3762,14 +4666,14 @@ async function reconcileDeviceEventEntriesByExternalRef(
           record: retainedMemberRevision,
         });
         appendRecordIdByPreparedRecordId.set(entry.record.id, providerBaseline.id);
-        records.push(retainedMemberRevision);
+        recordsByEntryIndex.set(entryIndex, retainedMemberRevision);
         supersededCount += 1;
         continue;
       }
       if (indexedSourceVersionComparison === null || indexedSourceVersionComparison === 0) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
     }
@@ -3812,7 +4716,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       if (sourceVersionComparison === 0) {
@@ -3837,7 +4741,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       const sleepTypeBaselineRevision = sourceVersionComparison === 0
@@ -3874,7 +4778,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
         if (eventSpineRevisionsAreComplete(index, latest.id)) {
           retainedPreparedIds.add(entry.record.id);
         }
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
     }
@@ -3886,7 +4790,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -3900,7 +4804,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
     if (replaysProviderOwnedRetractionWithoutSetAuthority) {
       skippedDuplicateCount += 1;
       retainedPreparedIds.add(entry.record.id);
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -3911,13 +4815,13 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (authoritativeSet && indexedSourceVersionComparison === null) {
         skippedDuplicateCount += 1;
         retainedPreparedIds.add(entry.record.id);
-        records.push(latest);
+        recordsByEntryIndex.set(entryIndex, latest);
         continue;
       }
       index.latestByRefKey.set(refKey, toIndexedExternalRefMatch(entry.record, externalRef));
       appendEntries.push(entry);
       appendRecordIdByPreparedRecordId.set(entry.record.id, entry.record.id);
-      records.push(entry.record);
+      recordsByEntryIndex.set(entryIndex, entry.record);
       continue;
     }
     // A member declared current by this batch's authoritative set falls
@@ -3928,7 +4832,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       if (eventSpineRevisionsAreComplete(index, latest.id)) {
         retainedPreparedIds.add(entry.record.id);
       }
-      records.push(latest);
+      recordsByEntryIndex.set(entryIndex, latest);
       continue;
     }
 
@@ -3996,7 +4900,7 @@ async function reconcileDeviceEventEntriesByExternalRef(
       appendEntries.push({ relativePath: retainedMemberPath, record: retainedMemberRevision });
     }
     appendRecordIdByPreparedRecordId.set(entry.record.id, superseding.id);
-    records.push(retainedMemberRevision ?? superseding);
+    recordsByEntryIndex.set(entryIndex, retainedMemberRevision ?? superseding);
     supersededCount += 1;
   }
 
@@ -4084,6 +4988,17 @@ async function reconcileDeviceEventEntriesByExternalRef(
       retractedCount += 1;
     }
   }
+
+  const records = entries.map((entry, entryIndex) => {
+    const record = recordsByEntryIndex.get(entryIndex);
+    if (!record) {
+      throw new VaultError(
+        "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
+        `Device event reconciliation did not produce a result for "${entry.record.id}".`,
+      );
+    }
+    return record;
+  });
 
   return {
     appendEntries,
@@ -6277,6 +7192,7 @@ export async function importDeviceBatch({
       initialEventIdentityContext.index,
     ),
   };
+  const aliasRepairContext = buildDeviceEventAliasRepairContext(deviceBatchPlan);
   const eventTargetShardPaths = [
     ...new Set(deviceBatchPlan.preparedEvents.map((entry) => entry.relativePath)),
   ].sort();
@@ -6307,6 +7223,7 @@ export async function importDeviceBatch({
     deviceBatchPlan.preparedEvents
       .filter((entry) =>
         baselineRetainedPreparedIds.has(entry.record.id)
+        && !hasJunctionDailyAggregateAliasSplit(entry, eventIdentityContext)
         && (
           currentEventOwners.historicallyDeliveredPreparedIds.has(entry.record.id)
           || (
@@ -6329,6 +7246,7 @@ export async function importDeviceBatch({
     cloneDeviceEventIdentityContext(eventIdentityContext),
     new Map(),
     deviceBatchPlan.authoritativeEventSets,
+    aliasRepairContext,
   );
   const replayRetainedPreparedIds = new Set([
     ...protectedPreparedEventIds,
@@ -6789,6 +7707,7 @@ export async function importDeviceBatch({
           cloneDeviceEventIdentityContext(eventIdentityContext),
           new Map(),
           deviceBatchPlan.authoritativeEventSets,
+          aliasRepairContext,
         )
       : currentEventReconciliation;
     const reconciledRecordByPreparedId = new Map(

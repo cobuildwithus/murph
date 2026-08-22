@@ -5696,11 +5696,6 @@ async function runCodexAppServerTurnOnProcess(
         requestedThreadId: resumeThreadId,
         threadResult,
       })
-    } else if (normalizeNullableString(input.permissions)) {
-      assertCodexThreadStartPermissionAttestation({
-        input,
-        threadResult,
-      })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     codexProcess.noteBoundThreadId(codexThreadId)
@@ -6053,63 +6048,6 @@ function mergeAutomationRelativeDateReferenceWindows(
     earliestAt: new Date(earliestAtMs).toISOString(),
     latestAt: new Date(latestAtMs).toISOString(),
   }
-}
-
-function assertCodexThreadStartPermissionAttestation(input: {
-  input: CodexAppServerPreparedTurnInput
-  threadResult: unknown
-}): void {
-  const result = asCodexRecord(input.threadResult)
-  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
-  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
-  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
-  const instructionSources = Array.isArray(result?.instructionSources)
-    ? result.instructionSources
-    : null
-  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
-  const mismatchedFields: string[] = []
-
-  const permissionProfileMismatch =
-    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
-      normalizeNullableString(input.input.permissions) ||
-    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
-  if (permissionProfileMismatch) {
-    mismatchedFields.push('activePermissionProfile')
-  }
-  if (
-    !actualRoots ||
-    actualRoots.length !== expectedRoots.length ||
-    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
-  ) {
-    mismatchedFields.push('runtimeWorkspaceRoots')
-  }
-  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
-    mismatchedFields.push('cwd')
-  }
-  if (
-    input.input.processLifetime === 'one-shot' &&
-    (instructionSources === null || instructionSources.length !== 0)
-  ) {
-    mismatchedFields.push('instructionSources')
-  }
-  if (
-    asCodexString(result?.approvalPolicy) !==
-    mapCodexAppServerApprovalPolicy(input.input.approvalPolicy)
-  ) {
-    mismatchedFields.push('approvalPolicy')
-  }
-  if (mismatchedFields.length === 0) {
-    return
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested named-permission execution context.',
-    {
-      mismatchedFields,
-      retryable: false,
-    },
-  )
 }
 
 function emitCodexSuppressedFinalMessageTrace(input: {

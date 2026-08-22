@@ -1640,7 +1640,7 @@ describe("hosted orchestration reconciliation facts", () => {
     expect(facts.blocked).toBeNull();
   });
 
-  it("exposes pending Environment interviews to the orchestration owner", async () => {
+  it("keeps pending Environment interviews off the deployed orchestration wire", async () => {
     mocks.readPendingHostedEnvironmentInterviewMailboxItem.mockResolvedValue({
       id: "mailbox_environment_interview_1",
     });
@@ -1649,9 +1649,9 @@ describe("hosted orchestration reconciliation facts", () => {
       requestForFacts(),
       routeContext(),
     );
-    const facts = parseHostedRuntimeReconciliationFacts(await response.json());
+    const facts = await response.json();
 
-    expect(facts.environmentInterviewPending).toBe(true);
+    expect(facts).not.toHaveProperty("environmentInterviewPending");
   });
 
   it("blocks inactive members while preserving workspace facts", async () => {

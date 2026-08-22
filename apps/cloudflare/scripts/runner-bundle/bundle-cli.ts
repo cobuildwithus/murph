@@ -132,11 +132,16 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // with the batched-workout graph, public Linux measured 9,382,747 B on
 // 2026-08-21. The cap is ratcheted from that exact baseline and retains the
 // ordinary 32 KiB graph allowance plus the 8 KiB production-overlay reserve.
+// Junction daily-alias self-healing extends the existing Core event-
+// reconciliation graph without adding a package or changing the entry or
+// static-startup topology. The combined cap composes its reviewed 41,089 B
+// lazy-graph delta with the current public Linux baseline and retains the same
+// 32 KiB graph allowance plus 8 KiB production-overlay reserve.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
 // growth.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_423_707;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_464_796;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

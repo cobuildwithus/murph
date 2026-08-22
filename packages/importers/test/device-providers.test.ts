@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
@@ -78,6 +78,17 @@ type _deviceProviderSnapshotImportPayloadLayersSnapshotOntoCorePayload = AssertT
 >;
 type CoreDeviceImportResult = Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>;
 type CoreDeviceImportEvent = CoreDeviceImportResult["events"][number];
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer>> {
+  const snapshot = new Map<string, Buffer>();
+  for (const relativePath of await readdir(vaultRoot, { recursive: true })) {
+    const absolutePath = join(vaultRoot, relativePath);
+    if ((await stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await readFile(absolutePath));
+    }
+  }
+  return snapshot;
+}
 
 interface DeviceProviderCoreContractFixture {
   expectedEventKinds?: readonly string[];
@@ -1924,14 +1935,14 @@ test("malformed Junction workout metric cardinality cannot supersede a complete 
   }
 });
 
-test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate legacy aliases", async () => {
-  const vaultRoot = await makeTempDirectory("murph-junction-daily-aggregate-legacy-conflict");
-  await coreRuntime.initializeVault({
-    createdAt: "2026-06-25T00:00:00.000Z",
-    vaultRoot,
-  });
-
-  const snapshot = {
+function junctionDailyAliasSnapshot(
+  value = 44,
+  options: {
+    currentLastSampleAt?: string;
+    precedingDayValue?: number;
+  } = {},
+) {
+  return {
     accountId: "junction-user-legacy-days",
     importedAt: "2026-06-25T12:00:00.000Z",
     timeseries: {
@@ -1939,19 +1950,28 @@ test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate le
         groups: {
           garmin: [{
             data: [
+              ...(options.precedingDayValue === undefined
+                ? []
+                : [{
+                    calendar_date: "2026-06-24",
+                    timestamp: "2026-06-24T10:00:00.000Z",
+                    timestamp_semantics: "offset",
+                    timezone_offset: -14_400,
+                    value: options.precedingDayValue,
+                  }]),
               {
                 calendar_date: "2026-06-25",
                 timestamp: "2026-06-25T00:30:00.000Z",
                 timestamp_semantics: "offset",
                 timezone_offset: -14_400,
-                value: 44,
+                value,
               },
               {
                 calendar_date: "2026-06-25",
-                timestamp: "2026-06-25T10:00:00.000Z",
+                timestamp: options.currentLastSampleAt ?? "2026-06-25T10:00:00.000Z",
                 timestamp_semantics: "offset",
                 timezone_offset: -14_400,
-                value: 44,
+                value,
               },
             ],
             source: { provider: "garmin", type: "watch" },
@@ -1960,6 +1980,131 @@ test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate le
       },
     },
   };
+}
+
+function junctionReciprocalDailyAliasSnapshot(reverse = false) {
+  const data = [
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-25T00:30:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 44,
+    },
+    {
+      calendar_date: "2026-06-24",
+      timestamp: "2026-06-24T23:30:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: 7_200,
+      value: 44,
+    },
+  ];
+  return {
+    accountId: "junction-user-legacy-days",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: reverse ? [...data].reverse() : data,
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  };
+}
+
+function junctionDisjointDailyAliasSnapshot() {
+  const data = [
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-25T00:30:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 44,
+    },
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-25T10:00:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 44,
+    },
+  ];
+  return {
+    accountId: "junction-user-disjoint-legacy-days",
+    importedAt: "2026-06-25T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data,
+            source: { provider: "garmin", type: "watch" },
+          }],
+          oura: [{
+            data,
+            source: { provider: "oura", type: "ring" },
+          }],
+        },
+      },
+    },
+  };
+}
+
+function junctionRepairOrdinaryOwnerOverlapSnapshot(reverse = false) {
+  const data = [
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-25T00:30:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 47,
+    },
+    {
+      calendar_date: "2026-06-25",
+      timestamp: "2026-06-26T02:00:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 47,
+    },
+    {
+      calendar_date: "2026-06-26",
+      timestamp: "2026-06-26T02:00:00.000Z",
+      timestamp_semantics: "offset",
+      timezone_offset: -14_400,
+      value: 47,
+    },
+  ];
+  return {
+    accountId: "junction-user-legacy-days",
+    importedAt: "2026-06-26T12:00:00.000Z",
+    timeseries: {
+      stress_level: {
+        groups: {
+          garmin: [{
+            data: reverse ? [...data].reverse() : data,
+            source: { provider: "garmin", type: "watch" },
+          }],
+        },
+      },
+    },
+  };
+}
+
+async function createJunctionDailyAliasSplit(input: {
+  historicalTimeZoneOffsetMinutes?: number;
+  legacyOccurredAt?: string;
+  legacyValue?: number;
+  ownerOccurredAt?: string;
+  primaryValue?: number;
+} = {}) {
+  const vaultRoot = await makeTempDirectory("murph-junction-daily-aggregate-alias-repair");
+  await coreRuntime.initializeVault({
+    createdAt: "2026-06-25T00:00:00.000Z",
+    vaultRoot,
+  });
+  const snapshot = junctionDailyAliasSnapshot();
   const prepared = await prepareDeviceProviderSnapshotImport({
     provider: "junction",
     snapshot,
@@ -1979,80 +2124,1021 @@ test("importDeviceProviderSnapshot rejects ambiguous Junction daily aggregate le
     sourceProviderSlug: "garmin",
     sourceType: "watch",
     timestampSemantics: "offset" as const,
+    ...(input.historicalTimeZoneOffsetMinutes === undefined
+      ? {}
+      : { timeZoneOffsetMinutes: input.historicalTimeZoneOffsetMinutes }),
     normalizerVersion: "junction-normalizer.v1",
   };
+  const makeEvent = (options: {
+    dayKey: string;
+    externalRef: NonNullable<typeof currentExternalRef>;
+    occurredAt?: string;
+    value: number;
+  }) => ({
+    kind: "observation" as const,
+    occurredAt: options.occurredAt
+      ?? input.ownerOccurredAt
+      ?? "2026-06-25T10:00:00.000Z",
+    recordedAt: options.occurredAt
+      ?? input.ownerOccurredAt
+      ?? "2026-06-25T10:00:00.000Z",
+    dayKey: options.dayKey,
+    title: "Junction stress level average",
+    externalRef: options.externalRef,
+    dataOrigin: {
+      ...sourceOrigin,
+      observedAtRaw: `${options.dayKey}:stress_level:daily`,
+    },
+    fields: {
+      metric: "stress-level",
+      observationGrain: "summary" as const,
+      value: options.value,
+      unit: "score",
+    },
+  });
   const legacyImport = await coreRuntime.importDeviceBatch({
     vaultRoot,
     provider: "junction",
     accountId: "junction-user-legacy-days",
     importedAt: "2026-06-25T11:00:00.000Z",
     events: [
+      makeEvent({
+        dayKey: "2026-06-24",
+        externalRef: legacyExternalRef,
+        ...(input.legacyOccurredAt ? { occurredAt: input.legacyOccurredAt } : {}),
+        value: input.legacyValue ?? 44,
+      }),
+      makeEvent({
+        dayKey: "2026-06-25",
+        externalRef: currentExternalRef,
+        value: input.primaryValue ?? 44,
+      }),
+    ],
+  });
+  const primaryOwner = legacyImport.events.find(
+    (event) => event.externalRef?.resourceId === currentExternalRef.resourceId,
+  );
+  const legacyOwner = legacyImport.events.find(
+    (event) => event.externalRef?.resourceId === legacyExternalRef.resourceId,
+  );
+  assert.ok(primaryOwner);
+  assert.ok(legacyOwner);
+  assert.notEqual(primaryOwner.id, legacyOwner.id);
+  return {
+    currentExternalRef,
+    legacyExternalRef,
+    legacyImport,
+    legacyOwner,
+    prepared,
+    primaryOwner,
+    snapshot,
+    vaultRoot,
+  };
+}
+
+async function readJunctionDailyAliasRecords(
+  fixture: Awaited<ReturnType<typeof createJunctionDailyAliasSplit>>,
+  additionalPaths: readonly string[] = [],
+): Promise<StoredJsonlRecord[]> {
+  return (
+    await Promise.all(
+      [...new Set([...fixture.legacyImport.eventShardPaths, ...additionalPaths])].map(
+        (relativePath) => coreRuntime.readJsonlRecords({
+          vaultRoot: fixture.vaultRoot,
+          relativePath,
+        }),
+      ),
+    )
+  ).flat();
+}
+
+function liveJunctionStressRecords(
+  records: readonly StoredJsonlRecord[],
+): StoredJsonlRecord[] {
+  return latestLiveRecords(records).filter(
+    (record) => record.kind === "observation" && record.metric === "stress-level",
+  );
+}
+
+test("Junction daily aggregate alias repair converges under the primary owner and stays idempotent", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
       {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: fixture.snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    const afterRepair = await readJunctionDailyAliasRecords(
+      fixture,
+      repaired.eventShardPaths,
+    );
+    const live = liveJunctionStressRecords(afterRepair);
+    assert.equal(live.length, 1);
+    assert.equal(live[0]?.id, fixture.primaryOwner.id);
+    assert.equal(
+      storedExternalRefResourceId(live[0]),
+      fixture.currentExternalRef.resourceId,
+    );
+    const loserHistory = afterRepair.filter((record) => record.id === fixture.legacyOwner.id);
+    assert.equal(isDeletedEventLifecycle(loserHistory.at(-1)?.lifecycle), true);
+    assert.equal(
+      storedExternalRefResourceId(loserHistory.at(-1)),
+      fixture.currentExternalRef.resourceId,
+    );
+
+    const replay = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: fixture.snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...replay.eventShardPaths,
+      ]),
+      afterRepair,
+    );
+
+    const updated = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: junctionDailyAliasSnapshot(47),
+      },
+      { corePort: coreRuntime },
+    );
+    const updatedLive = liveJunctionStressRecords(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...updated.eventShardPaths,
+      ]),
+    );
+    assert.equal(updatedLive.length, 1);
+    assert.equal(updatedLive[0]?.id, fixture.primaryOwner.id);
+    assert.equal(updatedLive[0]?.value, 47);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.each([false, true])(
+  "Junction daily aggregate alias repair refuses reciprocal owner plans (reverse=%s)",
+  async (reverse) => {
+    const fixture = await createJunctionDailyAliasSplit();
+    try {
+      const before = await snapshotVaultFiles(fixture.vaultRoot);
+      await assert.rejects(
+        importDeviceProviderSnapshot(
+          {
+            provider: "junction",
+            vaultRoot: fixture.vaultRoot,
+            snapshot: junctionReciprocalDailyAliasSnapshot(reverse),
+          },
+          { corePort: coreRuntime },
+        ),
+        (error) =>
+          error instanceof coreRuntime.VaultError
+          && error.code === "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      );
+      assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([false, true])(
+  "Junction daily aggregate alias repair refuses an ordinary entry that matches its survivor only after repair (reverse=%s)",
+  async (reverse) => {
+    const fixture = await createJunctionDailyAliasSplit({
+      ownerOccurredAt: "2026-06-26T01:00:00.000Z",
+    });
+    try {
+      const before = await snapshotVaultFiles(fixture.vaultRoot);
+      await assert.rejects(
+        importDeviceProviderSnapshot(
+          {
+            provider: "junction",
+            vaultRoot: fixture.vaultRoot,
+            snapshot: junctionRepairOrdinaryOwnerOverlapSnapshot(reverse),
+          },
+          { corePort: coreRuntime },
+        ),
+        (error) =>
+          error instanceof coreRuntime.VaultError
+          && error.code === "EVENT_ALIAS_REPAIR_OWNER_REFUSED",
+      );
+      assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
+    } finally {
+      await rm(fixture.vaultRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+test("Junction daily aggregate alias repair accepts disjoint owner plans", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-disjoint-alias-repair");
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-06-25T00:00:00.000Z",
+      vaultRoot,
+    });
+    const snapshot = junctionDisjointDailyAliasSnapshot();
+    const prepared = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      snapshot,
+    });
+    const stressEvents = (prepared.events ?? []).filter(
+      (event) => event.kind === "observation" && event.fields?.metric === "stress-level",
+    );
+    assert.equal(stressEvents.length, 2);
+    const seeded = await coreRuntime.importDeviceBatch({
+      vaultRoot,
+      provider: prepared.provider,
+      accountId: prepared.accountId,
+      importedAt: "2026-06-25T11:00:00.000Z",
+      source: prepared.source,
+      events: stressEvents.flatMap((event) => {
+        const primaryExternalRef = event.externalRef;
+        const legacyExternalRef = event.legacyExternalRefs?.[0];
+        const dataOrigin = event.dataOrigin;
+        assert.ok(primaryExternalRef);
+        assert.ok(legacyExternalRef);
+        assert.ok(dataOrigin);
+        const base = {
+          ...event,
+          evidenceRoles: [],
+          occurredAt: "2026-06-25T10:00:00.000Z",
+          recordedAt: "2026-06-25T10:00:00.000Z",
+          legacyExternalRefs: [],
+        };
+        return [
+          {
+            ...base,
+            dayKey: "2026-06-24",
+            externalRef: legacyExternalRef,
+            dataOrigin: {
+              ...dataOrigin,
+              observedAtRaw: "2026-06-24:stress_level:daily",
+            },
+          },
+          {
+            ...base,
+            dayKey: "2026-06-25",
+            externalRef: primaryExternalRef,
+            dataOrigin: {
+              ...dataOrigin,
+              observedAtRaw: "2026-06-25:stress_level:daily",
+            },
+          },
+        ];
+      }),
+    });
+    assert.equal(seeded.events.length, 4);
+    const primaryResourceIds = new Set(
+      stressEvents.map((event) => event.externalRef?.resourceId),
+    );
+    const legacyResourceIds = new Set(
+      stressEvents.map((event) => event.legacyExternalRefs?.[0]?.resourceId),
+    );
+    const primaryOwnerIds = new Set(
+      seeded.events
+        .filter((event) => primaryResourceIds.has(event.externalRef?.resourceId))
+        .map((event) => event.id),
+    );
+    const legacyOwnerIds = new Set(
+      seeded.events
+        .filter((event) => legacyResourceIds.has(event.externalRef?.resourceId))
+        .map((event) => event.id),
+    );
+    assert.equal(primaryOwnerIds.size, 2);
+    assert.equal(legacyOwnerIds.size, 2);
+
+    const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      { provider: "junction", vaultRoot, snapshot },
+      { corePort: coreRuntime },
+    );
+    const records = (
+      await Promise.all(
+        [...new Set([...seeded.eventShardPaths, ...repaired.eventShardPaths])].map(
+          (relativePath) => coreRuntime.readJsonlRecords({ vaultRoot, relativePath }),
+        ),
+      )
+    ).flat();
+    const live = liveJunctionStressRecords(records);
+    assert.equal(live.length, 2);
+    assert.deepEqual(new Set(live.map((record) => record.id)), primaryOwnerIds);
+    for (const loserId of legacyOwnerIds) {
+      const loserHistory = records.filter((record) => record.id === loserId);
+      assert.equal(isDeletedEventLifecycle(loserHistory.at(-1)?.lifecycle), true);
+    }
+    const ownerRecords = records.filter((record) =>
+      primaryOwnerIds.has(String(record.id)) || legacyOwnerIds.has(String(record.id))
+    );
+    assert.equal(
+      new Set(ownerRecords.map((record) =>
+        `${String(record.id)}:${eventRevisionFromLifecycle(record.lifecycle)}`
+      )).size,
+      ownerRecords.length,
+    );
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair composes with a preceding-day aggregate", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const snapshot = junctionDailyAliasSnapshot(47, {
+      currentLastSampleAt: "2026-06-25T11:00:00.000Z",
+      precedingDayValue: 31,
+    });
+    const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(repaired.applied, true);
+    assert.ok(repaired.ingestId);
+    assert.ok(repaired.auditPath);
+    assert.ok(repaired.persistedEvidencePartCount > 0);
+    assert.equal(
+      repaired.events.some((event) =>
+        event.kind === "measurement" && event.externalRef?.facet === "features"
+      ),
+      true,
+    );
+    const returnedStress = repaired.events.filter(
+      (event) => event.kind === "observation" && event.metric === "stress-level",
+    );
+    assert.deepEqual(
+      returnedStress.map((event) => event.dayKey),
+      ["2026-06-24", "2026-06-25"],
+    );
+    const afterRepair = await readJunctionDailyAliasRecords(
+      fixture,
+      repaired.eventShardPaths,
+    );
+    assert.equal(
+      latestLiveRecords(afterRepair).some(
+        (record) => storedExternalRefFacet(record) === "features",
+      ),
+      true,
+    );
+    const repairedLive = liveJunctionStressRecords(afterRepair)
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    const preceding = repairedLive[0];
+    const current = repairedLive[1];
+    assert.equal(repairedLive.length, 2);
+    assert.equal(preceding?.dayKey, "2026-06-24");
+    assert.equal(preceding?.value, 31);
+    assert.notEqual(preceding?.id, fixture.legacyOwner.id);
+    assert.equal(current?.dayKey, "2026-06-25");
+    assert.equal(current?.id, fixture.primaryOwner.id);
+    assert.equal(current?.value, 47);
+    assert.equal(returnedStress[0]?.id, preceding?.id);
+    assert.equal(returnedStress[1]?.id, current?.id);
+    const loserHistory = afterRepair.filter((record) => record.id === fixture.legacyOwner.id);
+    assert.equal(isDeletedEventLifecycle(loserHistory.at(-1)?.lifecycle), true);
+    assert.equal(
+      loserHistory.filter((record) => isDeletedEventLifecycle(record.lifecycle)).length,
+      1,
+    );
+
+    const replay = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...replay.eventShardPaths,
+      ]),
+      afterRepair,
+    );
+
+    const updated = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: junctionDailyAliasSnapshot(51, {
+          currentLastSampleAt: "2026-06-25T12:00:00.000Z",
+          precedingDayValue: 31,
+        }),
+      },
+      { corePort: coreRuntime },
+    );
+    const updatedLive = liveJunctionStressRecords(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...updated.eventShardPaths,
+      ]),
+    ).sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    assert.equal(updatedLive[0]?.id, preceding?.id);
+    assert.equal(updatedLive[0]?.value, 31);
+    assert.equal(updatedLive[1]?.id, fixture.primaryOwner.id);
+    assert.equal(updatedLive[1]?.value, 51);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair converges after the primary provider spine advanced", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.primaryOwner,
+        eventId: fixture.primaryOwner.id,
+        source: "manual",
+        note: "member note",
+        tags: ["primary-tag"],
+        links: [{ type: "related_to", targetId: fixture.primaryOwner.id }],
+      },
+    });
+    const advancedSnapshot = junctionDailyAliasSnapshot(47, {
+      currentLastSampleAt: "2026-06-25T11:00:00.000Z",
+    });
+    const advancedPrepared = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      snapshot: advancedSnapshot,
+    });
+    const advancedStressEvent = advancedPrepared.events?.find(
+      (event) => event.kind === "observation" && event.fields?.metric === "stress-level",
+    );
+    assert.ok(advancedStressEvent);
+    const advanced = await coreRuntime.importDeviceBatch({
+      vaultRoot: fixture.vaultRoot,
+      provider: advancedPrepared.provider,
+      accountId: advancedPrepared.accountId,
+      importedAt: advancedPrepared.importedAt,
+      source: advancedPrepared.source,
+      events: [{
+        ...advancedStressEvent,
+        evidenceRoles: [],
+        legacyExternalRefs: [],
+      }],
+    });
+    assert.equal(advanced.applied, true);
+    assert.equal(advanced.events[0]?.id, fixture.primaryOwner.id);
+    const beforeRepairRecords = await readJunctionDailyAliasRecords(
+      fixture,
+      advanced.eventShardPaths,
+    );
+    const primaryHistory = beforeRepairRecords.filter(
+      (record) => record.id === fixture.primaryOwner.id,
+    );
+    assert.deepEqual(
+      primaryHistory.map((record) => [record.source, record.value]),
+      [
+        ["device", 44],
+        ["manual", 44],
+        ["device", 47],
+        ["manual", 44],
+      ],
+    );
+    const beforeRepair = liveJunctionStressRecords(
+      beforeRepairRecords,
+    ).sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    assert.equal(beforeRepair.length, 2);
+    assert.equal(beforeRepair[0]?.id, fixture.legacyOwner.id);
+    assert.equal(beforeRepair[0]?.value, 44);
+    assert.equal(beforeRepair[1]?.id, fixture.primaryOwner.id);
+    assert.equal(beforeRepair[1]?.value, 44);
+    assert.equal(beforeRepair[1]?.note, "member note");
+    assert.deepEqual(beforeRepair[1]?.tags, ["primary-tag"]);
+
+    const snapshot = junctionDailyAliasSnapshot(51, {
+      currentLastSampleAt: "2026-06-25T12:00:00.000Z",
+      precedingDayValue: 31,
+    });
+    const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(repaired.applied, true);
+    assert.ok(repaired.ingestId);
+    assert.ok(repaired.auditPath);
+    assert.ok(repaired.persistedEvidencePartCount > 0);
+    assert.equal(
+      repaired.events.some((event) =>
+        event.kind === "measurement" && event.externalRef?.facet === "features"
+      ),
+      true,
+    );
+    const afterRepair = await readJunctionDailyAliasRecords(
+      fixture,
+      repaired.eventShardPaths,
+    );
+    const repairedLive = liveJunctionStressRecords(afterRepair)
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    assert.equal(repairedLive.length, 2);
+    assert.equal(repairedLive[0]?.dayKey, "2026-06-24");
+    assert.equal(repairedLive[0]?.value, 31);
+    assert.notEqual(repairedLive[0]?.id, fixture.legacyOwner.id);
+    assert.equal(repairedLive[1]?.dayKey, "2026-06-25");
+    assert.equal(repairedLive[1]?.id, fixture.primaryOwner.id);
+    assert.equal(repairedLive[1]?.value, 51);
+    assert.equal(repairedLive[1]?.note, "member note");
+    assert.deepEqual(repairedLive[1]?.tags, ["primary-tag"]);
+    assert.deepEqual(repairedLive[1]?.links, [
+      { type: "related_to", targetId: fixture.primaryOwner.id },
+    ]);
+    const loserHistory = afterRepair.filter((record) => record.id === fixture.legacyOwner.id);
+    assert.equal(
+      loserHistory.filter((record) => isDeletedEventLifecycle(record.lifecycle)).length,
+      1,
+    );
+
+    const replay = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.equal(replay.applied, false);
+    assert.deepEqual(
+      await readJunctionDailyAliasRecords(fixture, [
+        ...repaired.eventShardPaths,
+        ...replay.eventShardPaths,
+      ]),
+      afterRepair,
+    );
+
+    const updated = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: junctionDailyAliasSnapshot(55, {
+          currentLastSampleAt: "2026-06-25T13:00:00.000Z",
+          precedingDayValue: 31,
+        }),
+      },
+      { corePort: coreRuntime },
+    );
+    const afterUpdate = await readJunctionDailyAliasRecords(fixture, [
+      ...repaired.eventShardPaths,
+      ...updated.eventShardPaths,
+    ]);
+    const updatedLive = liveJunctionStressRecords(afterUpdate)
+      .sort((left, right) => String(left.dayKey).localeCompare(String(right.dayKey)));
+    assert.equal(updatedLive[0]?.id, repairedLive[0]?.id);
+    assert.equal(updatedLive[1]?.id, fixture.primaryOwner.id);
+    assert.equal(updatedLive[1]?.source, "manual");
+    assert.equal(updatedLive[1]?.note, "member note");
+    assert.deepEqual(updatedLive[1]?.tags, ["primary-tag"]);
+    assert.equal(
+      afterUpdate.filter((record) =>
+        record.id === fixture.primaryOwner.id
+        && record.source === "device"
+        && record.value === 55
+      ).length,
+      1,
+    );
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair refuses changed provider state in a carried member overlay", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.primaryOwner,
+        eventId: fixture.primaryOwner.id,
+        source: "manual",
+        note: "member note",
+      },
+    });
+    const advancedPrepared = await prepareDeviceProviderSnapshotImport({
+      provider: "junction",
+      snapshot: junctionDailyAliasSnapshot(47, {
+        currentLastSampleAt: "2026-06-25T11:00:00.000Z",
+      }),
+    });
+    const advancedStressEvent = advancedPrepared.events?.find(
+      (event) => event.kind === "observation" && event.fields?.metric === "stress-level",
+    );
+    assert.ok(advancedStressEvent);
+    const advanced = await coreRuntime.importDeviceBatch({
+      vaultRoot: fixture.vaultRoot,
+      provider: advancedPrepared.provider,
+      accountId: advancedPrepared.accountId,
+      importedAt: advancedPrepared.importedAt,
+      source: advancedPrepared.source,
+      events: [{
+        ...advancedStressEvent,
+        evidenceRoles: [],
+        legacyExternalRefs: [],
+      }],
+    });
+    const carriedOverlay = advanced.events[0];
+    assert.ok(carriedOverlay?.kind === "observation");
+    assert.equal(carriedOverlay.source, "manual");
+    assert.equal(carriedOverlay.value, 44);
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...carriedOverlay,
+        eventId: fixture.primaryOwner.id,
+        value: 45,
+      },
+    });
+
+    const before = await snapshotVaultFiles(fixture.vaultRoot);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: junctionDailyAliasSnapshot(51, {
+            currentLastSampleAt: "2026-06-25T12:00:00.000Z",
+            precedingDayValue: 31,
+          }),
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+    );
+    assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair preserves supported member overlays", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.primaryOwner,
+        eventId: fixture.primaryOwner.id,
+        source: "manual",
+        tags: ["primary-tag"],
+      },
+    });
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.legacyOwner,
+        eventId: fixture.legacyOwner.id,
+        source: "manual",
+        note: "member note",
+        tags: ["legacy-tag"],
+        links: [{ type: "related_to", targetId: fixture.primaryOwner.id }],
+      },
+    });
+
+    const repaired = await importDeviceProviderSnapshot<CoreDeviceImportResult>(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: fixture.snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    const latest = liveJunctionStressRecords(
+      await readJunctionDailyAliasRecords(fixture, repaired.eventShardPaths),
+    )[0];
+    assert.equal(latest?.id, fixture.primaryOwner.id);
+    assert.equal(latest?.source, "manual");
+    assert.equal(latest?.note, "member note");
+    assert.deepEqual(latest?.tags, ["legacy-tag", "primary-tag"]);
+    assert.deepEqual(latest?.links, [
+      { type: "related_to", targetId: fixture.primaryOwner.id },
+    ]);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair fails closed on conflicting member notes", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.primaryOwner,
+        eventId: fixture.primaryOwner.id,
+        source: "manual",
+        note: "primary note",
+      },
+    });
+    await coreRuntime.upsertEvent({
+      vaultRoot: fixture.vaultRoot,
+      payload: {
+        ...fixture.legacyOwner,
+        eventId: fixture.legacyOwner.id,
+        source: "manual",
+        note: "legacy note",
+      },
+    });
+    const before = await readJunctionDailyAliasRecords(fixture);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: fixture.snapshot,
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_OVERLAY_REFUSED",
+    );
+    assert.deepEqual(await readJunctionDailyAliasRecords(fixture), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair requires exact normalized evidence", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const evidenceParts = fixture.prepared.evidenceParts?.map((part) => ({
+      ...part,
+      metadata: fixture.prepared.events?.some((event) =>
+          event.kind === "observation"
+          && event.fields?.metric === "stress-level"
+          && event.evidenceRoles?.includes(part.role)
+        )
+        ? { ...part.metadata, resourceCategory: "timeseries_reading" }
+        : part.metadata,
+    }));
+    const before = await readJunctionDailyAliasRecords(fixture);
+    await assert.rejects(
+      coreRuntime.importDeviceBatch({
+        vaultRoot: fixture.vaultRoot,
+        provider: fixture.prepared.provider,
+        accountId: fixture.prepared.accountId,
+        importedAt: fixture.prepared.importedAt,
+        source: fixture.prepared.source,
+        evidenceParts,
+        events: fixture.prepared.events?.map((event) => ({ ...event })),
+        samples: fixture.prepared.samples?.map((sample) => ({ ...sample })),
+        authoritativeEventSets: fixture.prepared.authoritativeEventSets?.map((set) => ({
+          ...set,
+        })),
+        ingestReceipt: fixture.prepared.ingestReceipt,
+        provenance: fixture.prepared.provenance,
+      }),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_EVIDENCE_REFUSED",
+    );
+    assert.deepEqual(await readJunctionDailyAliasRecords(fixture), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  ["values", { legacyValue: 43 }],
+  ["occurrences", { legacyOccurredAt: "2026-06-25T09:00:00.000Z" }],
+] as const)("Junction daily aggregate alias repair skips divergent initial %s", async (
+  _divergence,
+  fixtureInput,
+) => {
+  const fixture = await createJunctionDailyAliasSplit(fixtureInput);
+  try {
+    const before = await readJunctionDailyAliasRecords(fixture);
+    await importDeviceProviderSnapshot(
+      {
+        provider: "junction",
+        vaultRoot: fixture.vaultRoot,
+        snapshot: fixture.snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    assert.deepEqual(
+      liveJunctionStressRecords(await readJunctionDailyAliasRecords(fixture)),
+      liveJunctionStressRecords(before),
+    );
+    assert.equal(liveJunctionStressRecords(before).length, 2);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair refuses legacy provider evolution", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const advancedLegacy = await coreRuntime.importDeviceBatch({
+      vaultRoot: fixture.vaultRoot,
+      provider: "junction",
+      accountId: "junction-user-legacy-days",
+      importedAt: "2026-06-25T12:00:00.000Z",
+      events: [{
         kind: "observation",
-        occurredAt: "2026-06-25T10:00:00.000Z",
-        recordedAt: "2026-06-25T10:00:00.000Z",
+        occurredAt: "2026-06-25T11:00:00.000Z",
         dayKey: "2026-06-24",
         title: "Junction stress level average",
-        externalRef: legacyExternalRef,
+        externalRef: fixture.legacyExternalRef,
         dataOrigin: {
-          ...sourceOrigin,
+          version: 1,
+          aggregatorProvider: "junction",
+          sourceProviderSlug: "garmin",
+          sourceType: "watch",
+          timestampSemantics: "offset",
+          normalizerVersion: "junction-normalizer.v1",
           observedAtRaw: "2026-06-24:stress_level:daily",
         },
         fields: {
           metric: "stress-level",
           observationGrain: "summary",
-          value: 44,
+          value: 47,
           unit: "score",
         },
-      },
-      {
-        kind: "observation",
-        occurredAt: "2026-06-25T10:00:00.000Z",
-        recordedAt: "2026-06-25T10:00:00.000Z",
-        dayKey: "2026-06-25",
-        title: "Junction stress level average",
-        externalRef: currentExternalRef,
-        dataOrigin: {
-          ...sourceOrigin,
-          observedAtRaw: "2026-06-25:stress_level:daily",
+      }],
+    });
+    assert.equal(advancedLegacy.applied, true);
+    assert.equal(advancedLegacy.events[0]?.id, fixture.legacyOwner.id);
+    const before = await readJunctionDailyAliasRecords(
+      fixture,
+      advancedLegacy.eventShardPaths,
+    );
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: fixture.snapshot,
         },
-        fields: {
-          metric: "stress-level",
-          observationGrain: "summary",
-          value: 44,
-          unit: "score",
-        },
-      },
-    ],
-  });
-
-  await assert.rejects(
-    importDeviceProviderSnapshot(
-      {
-        provider: "junction",
-        vaultRoot,
-        snapshot,
-      },
-      {
-        corePort: coreRuntime,
-      },
-    ),
-    (error) =>
-      error instanceof coreRuntime.VaultError &&
-      error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
-  );
-
-  const records = (
-    await Promise.all(
-      legacyImport.eventShardPaths.map((relativePath) =>
-        coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        { corePort: coreRuntime },
       ),
-    )
-  ).flat();
-  const liveStressRecords = latestLiveRecords(records).filter(
-    (record) => record.kind === "observation" && record.metric === "stress-level",
-  );
-  assert.equal(liveStressRecords.length, 2);
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+    );
+    assert.deepEqual(await readJunctionDailyAliasRecords(fixture), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair refuses a conflicting historical timezone offset", async () => {
+  const fixture = await createJunctionDailyAliasSplit({
+    historicalTimeZoneOffsetMinutes: -300,
+  });
+  try {
+    const before = await readJunctionDailyAliasRecords(fixture);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: fixture.snapshot,
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+    );
+    assert.deepEqual(await readJunctionDailyAliasRecords(fixture), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  "candidate-id",
+  "primary-ref",
+  "legacy-ref",
+] as const)("Junction daily aggregate alias repair refuses schema-invalid %s contamination", async (claim) => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const shardPath = fixture.legacyImport.eventShardPaths[0];
+    assert.ok(shardPath);
+    const claimedOwner = claim === "legacy-ref" ? fixture.legacyOwner : fixture.primaryOwner;
+    await appendFile(
+      join(fixture.vaultRoot, shardPath),
+      `${JSON.stringify({
+        ...claimedOwner,
+        id: claim === "candidate-id" ? fixture.primaryOwner.id : `invalid-${claim}-owner`,
+        ...(claim === "candidate-id"
+          ? { "from-the-future": true }
+          : {
+              externalRef: {
+                ...claimedOwner.externalRef,
+                "from-the-future": true,
+              },
+            }),
+      })}\n`,
+    );
+    const before = await snapshotVaultFiles(fixture.vaultRoot);
+    await assert.rejects(
+      importDeviceProviderSnapshot(
+        {
+          provider: "junction",
+          vaultRoot: fixture.vaultRoot,
+          snapshot: fixture.snapshot,
+        },
+        { corePort: coreRuntime },
+      ),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_ALIAS_REPAIR_HISTORY_REFUSED",
+    );
+    assert.deepEqual(await snapshotVaultFiles(fixture.vaultRoot), before);
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("Junction daily aggregate alias repair remains atomic when a later event refuses", async () => {
+  const fixture = await createJunctionDailyAliasSplit();
+  try {
+    const conflictingRef = {
+      system: "junction",
+      resourceType: "junction-test-conflict",
+      resourceId: "conflict-1",
+      facet: "value",
+    };
+    const conflictOwnerImport = await coreRuntime.importDeviceBatch({
+      vaultRoot: fixture.vaultRoot,
+      provider: "junction",
+      importedAt: "2026-06-25T11:30:00.000Z",
+      events: [{
+        kind: "observation",
+        occurredAt: "2026-06-25T11:00:00.000Z",
+        title: "Existing conflict owner",
+        externalRef: conflictingRef,
+        fields: {
+          metric: "test-value",
+          observationGrain: "summary",
+          value: 1,
+          unit: "score",
+        },
+      }],
+    });
+    const before = await readJunctionDailyAliasRecords(
+      fixture,
+      conflictOwnerImport.eventShardPaths,
+    );
+    await assert.rejects(
+      coreRuntime.importDeviceBatch({
+        vaultRoot: fixture.vaultRoot,
+        provider: fixture.prepared.provider,
+        accountId: fixture.prepared.accountId,
+        importedAt: fixture.prepared.importedAt,
+        source: fixture.prepared.source,
+        events: [
+          ...(fixture.prepared.events ?? []).map((event) => ({ ...event })),
+          {
+            kind: "note",
+            occurredAt: "2026-06-25T11:00:00.000Z",
+            title: "Conflicting kind",
+            note: "conflict",
+            externalRef: conflictingRef,
+          },
+        ],
+        samples: fixture.prepared.samples?.map((sample) => ({ ...sample })),
+        evidenceParts: fixture.prepared.evidenceParts?.map((part) => ({ ...part })),
+        authoritativeEventSets: fixture.prepared.authoritativeEventSets?.map((set) => ({
+          ...set,
+        })),
+        ingestReceipt: fixture.prepared.ingestReceipt,
+        provenance: fixture.prepared.provenance,
+      }),
+      (error) =>
+        error instanceof coreRuntime.VaultError
+        && error.code === "EVENT_KIND_MISMATCH",
+    );
+    assert.deepEqual(
+      await readJunctionDailyAliasRecords(fixture, conflictOwnerImport.eventShardPaths),
+      before,
+    );
+  } finally {
+    await rm(fixture.vaultRoot, { recursive: true, force: true });
+  }
 });
 
 test("importDeviceProviderSnapshot delegates normalized device batches to core", async () => {

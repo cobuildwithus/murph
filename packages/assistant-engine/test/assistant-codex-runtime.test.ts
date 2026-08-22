@@ -6395,9 +6395,9 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-27_250, 'SIGTERM')
   })
 
-  it('fails closed before turn start when permission attestation drifts', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-attest-work-')
-    const workspaceRoot = await createTempDir('assistant-codex-attest-root-')
+  it('starts fresh named-permission turns without response metadata', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-permission-work-')
+    const workspaceRoot = await createTempDir('assistant-codex-permission-root-')
     const children: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(children)
 
@@ -6413,15 +6413,36 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({
             id: threadStart.id,
             result: {
-              activePermissionProfile: {
-                id: 'murph-group-read',
-              },
-              approvalPolicy: 'never',
-              cwd: workingDirectory,
-              instructionSources: [{ source: 'workspace' }],
-              runtimeWorkspaceRoots: [workspaceRoot],
               thread: {
-                id: 'thread-attestation-drift',
+                id: 'thread-permission-metadata-free',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-permission-metadata-free',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-permission-metadata-free',
+                text: 'Completed without response metadata.',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-permission-metadata-free',
+                status: 'completed',
               },
             },
           }))
@@ -6437,22 +6458,28 @@ describe('assistant codex runtime', () => {
         ephemeral: true,
         permissions: 'murph-group-read',
         processLifetime: 'one-shot',
-        prompt: 'must never reach turn start',
+        prompt: 'continue without response metadata',
         runtimeWorkspaceRoots: [workspaceRoot],
         workingDirectory,
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-      context: {
-        mismatchedFields: ['instructionSources'],
-        retryable: false,
-      },
+    ).resolves.toMatchObject({
+      finalMessage: 'Completed without response metadata.',
+      sessionId: 'thread-permission-metadata-free',
+      turnId: 'turn-permission-metadata-free',
     })
 
     const child = requireMockChildProcess(children[0] ?? null)
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      permissions: 'murph-group-read',
+      runtimeWorkspaceRoots: [workspaceRoot],
+    })
     expect(readWrittenRpcMessages(child).some(
       (message) => message.method === 'turn/start',
-    )).toBe(false)
+    )).toBe(true)
     expect(child.signalCode).toBe('SIGTERM')
   })
 
