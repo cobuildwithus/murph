@@ -80,7 +80,7 @@ jobs:
                 apps/web/src/lib/device-sync/*|apps/web/src/lib/hosted-crypto/*|apps/web/src/lib/hosted-execution/*|apps/web/src/lib/hosted-groups/*|\
                 apps/web/src/lib/hosted-mailbox/*|apps/web/src/lib/hosted-onboarding/*|apps/web/src/lib/hosted-orchestration/*|apps/web/src/lib/hosted-routing/*|\
                 apps/web/src/lib/hosted-web/*|apps/web/src/lib/hosted-workspace/*|apps/web/src/lib/legal/*|apps/web/src/lib/linq/*|apps/web/src/lib/phone-calls/*|\
-                apps/web/src/lib/hosted-agent-sessions.ts|apps/web/src/lib/http.ts|apps/web/src/lib/murph-contact-avatars.ts|\
+                apps/web/src/lib/hosted-agent-sessions.ts|apps/web/src/lib/hosted-messages/user-facing-messages.ts|apps/web/src/lib/http.ts|apps/web/src/lib/murph-contact-avatars.ts|\
                 apps/web/src/lib/murph-contact-routing.ts|apps/web/src/lib/primitives.ts|apps/web/src/lib/prisma-operation-timing.ts|\
                 apps/web/src/lib/prisma.ts|apps/web/src/lib/process-warnings.ts|\
                 apps/web/instrumentation.ts|apps/web/next.config.ts|apps/web/package.json|apps/web/prisma.config.ts|apps/web/prisma/*|apps/web/proxy.ts|\

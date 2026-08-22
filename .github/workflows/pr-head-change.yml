@@ -9,6 +9,7 @@ permissions: {}
 jobs:
   head-change:
     name: Record pull request head change
+    if: ${{ github.event.pull_request.draft == false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

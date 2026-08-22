@@ -98,6 +98,12 @@ Updated: 2026-08-21
 - Treat this as a high-risk workflow/trust-boundary change with a final
   ReviewGPT gate.
 - Do not mutate the current open-PR population as part of the patch.
+- Accept the final round-one ordering finding: a successful observer receipt
+  must attest that the synchronize payload itself was ready so delayed draft
+  events cannot overwrite a newer Ready action on the same SHA.
+- Accept the shared-retry finding: keep one Repo Hygiene retry owner and add the
+  explicit `android_workflow_rerun` infrastructure reason used by the current
+  Android status instead of making Android operators claim an iOS failure.
 
 ## Verification
 

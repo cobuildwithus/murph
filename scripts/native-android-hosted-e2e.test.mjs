@@ -617,7 +617,7 @@ test("Android commit status shell distinguishes retry, skip, trust, live pass, a
     TRUSTED: "true",
   };
   const scenarios = [
-    [{ RUN_ATTEMPT: "2" }, "failure", "Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42; native reruns do not enter the live queue."],
+    [{ RUN_ATTEMPT: "2" }, "failure", "Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42 --failure-code android_workflow_rerun; native reruns do not enter the live queue."],
     [{ SELECT_RESULT: "failure" }, "failure", "Hosted-native Android selection failed; no passing proof was recorded."],
     [{ SOURCE_RESULT: "failure" }, "failure", "Repo Hygiene did not pass; hosted-native Android was not run."],
     [{ SELECTED: "false" }, "success", "Path filter did not select hosted-native Android for this exact commit."],

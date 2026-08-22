@@ -10,13 +10,16 @@ const REPO_HYGIENE_WORKFLOW_FILE = "repo-hygiene.yml";
 const REPO_HYGIENE_WORKFLOW_NAME = "Repo Hygiene";
 const REPO_HYGIENE_WORKFLOW_PATH = ".github/workflows/repo-hygiene.yml";
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const RETRYABLE_INFRASTRUCTURE_FAILURE_CODES = new Set(["xcodebuild_failed"]);
-const USAGE = "Usage: node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed.";
+const RETRYABLE_INFRASTRUCTURE_FAILURE_CODES = new Set([
+  "android_workflow_rerun",
+  "xcodebuild_failed",
+]);
+const USAGE = "Usage: node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code <android_workflow_rerun|xcodebuild_failed>.";
 
 export function inspectRetryableNativeIosFailureCode(value) {
   if (typeof value !== "string" || !RETRYABLE_INFRASTRUCTURE_FAILURE_CODES.has(value)) {
     throw new Error(
-      "Native iOS hosted E2E may be retried only for the allowlisted infrastructure failure code xcodebuild_failed.",
+      "Native hosted E2E may be retried only for the allowlisted infrastructure failure codes android_workflow_rerun or xcodebuild_failed.",
     );
   }
   return value;

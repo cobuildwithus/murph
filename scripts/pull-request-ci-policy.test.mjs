@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -136,6 +138,8 @@ test("only documented lightweight PR workflows retain synchronize", async () => 
 test("synchronize observer is read-only and never checks out candidate code", async () => {
   const source = await workflow("pr-head-change.yml");
   assert.match(source, /^permissions: \{\}$/mu);
+  assert.deepEqual(workflowJobNames(source), ["head-change"]);
+  assert.match(source, /^    if: \$\{\{ github\.event\.pull_request\.draft == false \}\}$/mu);
   assert.match(source, /PR_HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/u);
   assert.match(source, /\^\[0-9a-f\]\{40\}\$/u);
   assert.doesNotMatch(source, /actions\/checkout|pull_request_target|permissions:\n/u);
@@ -145,6 +149,10 @@ function inspectDraftReset(source) {
   assert.match(source, /^  workflow_run:\n    workflows: \["Pull Request Head Change"\]\n    types: \[completed\]$/mu);
   assert.match(source, /^permissions:\n  pull-requests: write$/mu);
   assert.doesNotMatch(source, /contents: write|actions\/checkout|pull_request_target/u);
+  assert.match(
+    source,
+    /^    if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && github\.event\.workflow_run\.event == 'pull_request' && github\.event\.workflow_run\.pull_requests\[0\] != null \}\}$/mu,
+  );
   assert.match(source, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.head\.sha \}\}/u);
   assert.match(source, /current_head_sha="\$\(jq -r '\.head\.sha \/\/ empty'/u);
   assert.match(source, /if \[\[ "\$\{current_head_sha\}" != "\$\{EXPECTED_HEAD_SHA\}" \]\]; then/u);
@@ -164,6 +172,48 @@ test("weakening exact-head draft reset is detected", async () => {
     'if [[ -z "${current_head_sha}" ]]; then',
   );
   assert.throws(() => inspectDraftReset(mutation), /current_head_sha/u);
+});
+
+test("draft reset executes only for an event-time ready receipt and current eligible PR", async () => {
+  const currentReadyPullRequest = {
+    draft: false,
+    head: { sha: "a".repeat(40) },
+    node_id: "PR_node",
+    state: "open",
+  };
+  assert.equal(await runDraftResetScenario({
+    currentPullRequest: currentReadyPullRequest,
+    synchronizedWhileDraft: true,
+  }), 0, "a delayed draft-time synchronize receipt must not undo a newer Ready action");
+  assert.equal(await runDraftResetScenario({
+    currentPullRequest: currentReadyPullRequest,
+    synchronizedWhileDraft: false,
+  }), 1, "a ready-time synchronize receipt must reset the same current head exactly once");
+
+  for (const currentPullRequest of [
+    {
+      ...currentReadyPullRequest,
+      head: { sha: "b".repeat(40) },
+    },
+    {
+      ...currentReadyPullRequest,
+      state: "closed",
+    },
+    {
+      ...currentReadyPullRequest,
+      draft: true,
+    },
+  ]) {
+    assert.equal(await runDraftResetScenario({
+      currentPullRequest,
+      synchronizedWhileDraft: false,
+    }), 0);
+  }
+  assert.equal(await runDraftResetScenario({
+    confirmMutation: false,
+    currentPullRequest: currentReadyPullRequest,
+    synchronizedWhileDraft: false,
+  }), 1, "an unconfirmed GraphQL mutation must fail after exactly one write attempt");
 });
 
 test("repository-created pull requests remain draft-first", async () => {
@@ -187,3 +237,102 @@ test("operator docs preserve the ready-only exact-head lifecycle", async () => {
     assert.match(document, /--failure-code xcodebuild_failed/u);
   }
 });
+
+function workflowJobNames(source) {
+  const jobsStart = source.indexOf("\njobs:\n");
+  assert.ok(jobsStart >= 0, "workflow jobs block must exist");
+  return [...source.slice(jobsStart + "\njobs:\n".length).matchAll(/^  ([a-zA-Z0-9_-]+):$/gmu)]
+    .map((match) => match[1]);
+}
+
+function extractWorkflowStepScript(source, stepName) {
+  const stepStart = source.indexOf(`      - name: ${stepName}\n`);
+  assert.ok(stepStart >= 0, `${stepName} step must exist`);
+  const runMarker = "        run: |\n";
+  const scriptStart = source.indexOf(runMarker, stepStart);
+  assert.ok(scriptStart >= 0, `${stepName} script must exist`);
+  const scriptLines = [];
+  for (const line of source.slice(scriptStart + runMarker.length).split("\n")) {
+    if (line.length === 0) {
+      scriptLines.push("");
+      continue;
+    }
+    if (!line.startsWith("          ")) break;
+    scriptLines.push(line.slice(10));
+  }
+  assert.ok(scriptLines.length > 0, `${stepName} script must be readable`);
+  return scriptLines.join("\n");
+}
+
+async function runDraftResetScenario({
+  confirmMutation = true,
+  currentPullRequest,
+  synchronizedWhileDraft,
+}) {
+  const observer = await workflow("pr-head-change.yml");
+  assert.deepEqual(workflowJobNames(observer), ["head-change"]);
+  assert.match(observer, /^    if: \$\{\{ github\.event\.pull_request\.draft == false \}\}$/mu);
+  const observerConclusion = synchronizedWhileDraft ? "skipped" : "success";
+
+  const controller = await workflow("pr-head-draft-reset.yml");
+  inspectDraftReset(controller);
+  if (observerConclusion !== "success") return 0;
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), "pr-draft-reset-proof-"));
+  const capturePath = path.join(tempDir, "graphql.calls");
+  try {
+    await writeFile(path.join(tempDir, "gh"), `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == api ]]
+case "$2" in
+  repos/*/pulls/*)
+    printf '%s\n' "\${GH_PR_JSON}"
+    ;;
+  graphql)
+    printf '%s\n' mutation >> "\${GH_MUTATION_CAPTURE}"
+    printf '%s\n' "\${GH_MUTATION_JSON}"
+    ;;
+  *)
+    exit 2
+    ;;
+esac
+`, { mode: 0o755 });
+    const script = extractWorkflowStepScript(
+      controller,
+      "Convert the exact synchronized head to draft",
+    );
+    const result = spawnSync("bash", ["-c", script], {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        EXPECTED_HEAD_SHA: "a".repeat(40),
+        GH_MUTATION_CAPTURE: capturePath,
+        GH_MUTATION_JSON: JSON.stringify({
+          data: {
+            convertPullRequestToDraft: {
+              pullRequest: { id: "PR_node", isDraft: confirmMutation },
+            },
+          },
+        }),
+        GH_PR_JSON: JSON.stringify(currentPullRequest),
+        GH_TOKEN: "synthetic-token",
+        GITHUB_REPOSITORY: "cobuildwithus/murph",
+        PATH: `${tempDir}:${process.env.PATH ?? ""}`,
+        PR_NUMBER: "42",
+      },
+    });
+    if (confirmMutation) {
+      assert.equal(result.status, 0, result.stderr);
+    } else {
+      assert.notEqual(result.status, 0, "an unconfirmed mutation must fail closed");
+    }
+    const capture = await readFile(capturePath, "utf8").catch((error) => {
+      if (error?.code === "ENOENT") return "";
+      throw error;
+    });
+    return capture.trim().length === 0 ? 0 : capture.trim().split("\n").length;
+  } finally {
+    await rm(tempDir, { force: true, recursive: true });
+  }
+}

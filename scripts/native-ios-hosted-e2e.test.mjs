@@ -237,6 +237,7 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
     "apps/web/app/api/device-sync/companion/sign-in-token/route.ts",
     "apps/web/app/api/device-sync/companion/status/route.ts",
     "apps/web/src/lib/hosted-onboarding/request-auth.ts",
+    "apps/web/src/lib/hosted-messages/user-facing-messages.ts",
     "apps/web/src/lib/device-sync/control-plane.ts",
     "apps/web/prisma/schema.prisma",
     "packages/device-syncd/src/hosted-runtime.ts",
@@ -365,7 +366,7 @@ printf '%s\n' "$@" > "$GH_CAPTURE"
   assert.doesNotMatch(workflow, /PR does not require the hosted Web native E2E lane/u);
 });
 
-test("native iOS retry route is documented instead of direct workflow reruns", async () => {
+test("shared native retry routes are documented instead of direct workflow reruns", async () => {
   const documents = await Promise.all([
     readFile(path.join(REPO_ROOT, "agent-docs", "operations", "verification-and-runtime.md"), "utf8"),
     readFile(path.join(REPO_ROOT, "agent-docs", "references", "testing-ci-map.md"), "utf8"),
@@ -375,10 +376,16 @@ test("native iOS retry route is documented instead of direct workflow reruns", a
       document,
       /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number> --failure-code xcodebuild_failed/u,
     );
+    assert.match(
+      document,
+      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number> --failure-code android_workflow_rerun/u,
+    );
+    assert.match(document, /operator attestation/u);
+    assert.match(document, /does not discover or verify/u);
   }
 });
 
-test("native iOS retry helper requires one positive PR number and the infrastructure code", () => {
+test("native retry helper requires one positive PR number and an infrastructure code", () => {
   assert.deepEqual(
     parseNativeIosHostedE2eRetryArgs([
       "--pr",
@@ -387,6 +394,15 @@ test("native iOS retry helper requires one positive PR number and the infrastruc
       "xcodebuild_failed",
     ]),
     { failureCode: "xcodebuild_failed", prNumber: 42 },
+  );
+  assert.deepEqual(
+    parseNativeIosHostedE2eRetryArgs([
+      "--pr",
+      "42",
+      "--failure-code",
+      "android_workflow_rerun",
+    ]),
+    { failureCode: "android_workflow_rerun", prNumber: 42 },
   );
   for (const argv of [
     [],
@@ -401,8 +417,12 @@ test("native iOS retry helper requires one positive PR number and the infrastruc
   }
 });
 
-test("native iOS retry rejects journey, product, legacy, and contract failure codes", () => {
+test("native retry rejects journey, product, legacy, and contract failure codes", () => {
   assert.equal(inspectRetryableNativeIosFailureCode("xcodebuild_failed"), "xcodebuild_failed");
+  assert.equal(
+    inspectRetryableNativeIosFailureCode("android_workflow_rerun"),
+    "android_workflow_rerun",
+  );
   for (const failureCode of [
     "fresh_signup_and_onboarding_failed",
     "returning_privy_otp_failed",
@@ -417,8 +437,48 @@ test("native iOS retry rejects journey, product, legacy, and contract failure co
   ]) {
     assert.throws(
       () => inspectRetryableNativeIosFailureCode(failureCode),
-      /allowlisted infrastructure failure code xcodebuild_failed/u,
+      /allowlisted infrastructure failure codes android_workflow_rerun or xcodebuild_failed/u,
       failureCode,
+    );
+  }
+});
+
+test("every advertised native retry command reaches the shared exact-head rerun owner", async () => {
+  for (const workflowName of [
+    "native-ios-hosted-e2e.yml",
+    "native-android-hosted-e2e.yml",
+  ]) {
+    const workflow = await readFile(
+      path.join(REPO_ROOT, ".github", "workflows", workflowName),
+      "utf8",
+    );
+    const commands = [...workflow.matchAll(
+      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\} --failure-code [a-z_]+/gu,
+    )].map((match) => match[0].replace("${PR_NUMBER}", "42"));
+    assert.equal(commands.length, 1, `${workflowName} must advertise one retry command`);
+
+    const parsed = parseNativeIosHostedE2eRetryArgs(commands[0].split(" ").slice(2));
+    const calls = [];
+    await retryNativeIosHostedE2e({
+      ...parsed,
+      request: async (request) => {
+        calls.push(request);
+        if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
+          return retryablePullRequest();
+        }
+        if (request.method === "GET") {
+          return [{ workflow_runs: [repoHygieneRun(321)] }];
+        }
+        return null;
+      },
+    });
+    assert.deepEqual(
+      calls.filter((request) => request.method === "POST"),
+      [{
+        endpoint: "repos/cobuildwithus/murph/actions/runs/321/rerun",
+        method: "POST",
+      }],
+      `${workflowName} must reach the one exact Repo Hygiene rerun POST`,
     );
   }
 });
@@ -521,7 +581,7 @@ test("native iOS retry rejects a product failure before making a GitHub request"
       requested = true;
       return null;
     },
-  }), /allowlisted infrastructure failure code xcodebuild_failed/u);
+  }), /allowlisted infrastructure failure codes android_workflow_rerun or xcodebuild_failed/u);
   assert.equal(requested, false);
 });
 

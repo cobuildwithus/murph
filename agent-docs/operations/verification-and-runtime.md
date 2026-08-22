@@ -42,16 +42,19 @@ Repository-created pull requests are draft-first. Opening a PR explicitly as
 non-draft remains the deliberate bypass for entering expensive CI immediately.
 The expensive pull-request workflows admit only non-draft `opened` or
 `reopened` events and `ready_for_review`; they do not run expensive proof on
-`synchronize`. A synchronize event records the new exact head through a
-read-only observer, then a trusted default-branch controller returns a ready PR
-to draft only while that event still names the current SHA. Mark the PR ready
-again to prove that exact head. A skipped job is not exact-head success, and
-required check names remain bound to the jobs that actually execute the proof.
+`synchronize`. A synchronize event that occurred while the PR was ready records
+the new exact head through a successful read-only observer receipt, then a
+trusted default-branch controller returns the PR to draft only while that event
+still names the current SHA. A synchronize event that occurred while the PR was
+already draft produces no consumable receipt, so delayed handling cannot undo a
+newer Ready action on the unchanged SHA. Mark the PR ready again to prove the
+new exact head. A skipped job is not exact-head success, and required check
+names remain bound to the jobs that actually execute the proof.
 
 `PR Evidence` intentionally remains lightweight on `synchronize` so policy and
 rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
-`synchronize`, but owns only the read-only receipt consumed by the draft-reset
-controller. Main-branch push CI is unchanged.
+`synchronize`, but owns only the event-time-ready read-only receipt consumed by
+the draft-reset controller. Main-branch push CI is unchanged.
 
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
@@ -88,16 +91,23 @@ Native companion auth/control/device-sync PRs additionally use the applicable
 `Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
 `agent-docs/references/testing-ci-map.md`.
 A canceled native workflow must not be rerun directly because the rerun retains
-its original queue identity. Manual native iOS retry is infrastructure-only.
-From an authenticated operator checkout, use
+its original queue identity. Manual native retry is infrastructure-only. From
+an authenticated operator checkout, use
 `node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed`
-only for the explicit allowlisted `xcodebuild_failed` infrastructure failure.
-The helper rejects journey, product, legacy-contract, and workflow-contract
-failure codes, requires the PR to remain ready, and revalidates the open
-same-repository human-authored PR and exact current head before rerunning a
-successful exact-head Repo Hygiene owner. Its completion creates a fresh
-applicable iOS and Android waiter without widening the protected environment or
-secret boundary.
+only for the explicit allowlisted iOS `xcodebuild_failed` infrastructure
+failure, after inspecting and recording that closed failure code from the
+private run. The supplied failure code is an operator attestation: the helper
+validates the allowlisted literal but does not discover or verify its run
+provenance. When the Android controller reports that a direct workflow rerun
+could not enter the live queue, its status supplies the corresponding
+attestation; use
+`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code android_workflow_rerun`.
+Non-allowlisted journey, product, legacy-contract, and workflow-contract
+literals are rejected. The helper requires the PR to remain ready and
+revalidates the open same-repository human-authored PR and exact current head
+before rerunning a successful exact-head Repo Hygiene owner. Its completion
+creates a fresh applicable iOS and Android waiter without widening the
+protected environment or secret boundary.
 A status description that records a real pass is production-shaped evidence:
 exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
 Connect native flow.
