@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-22",
+  "order": 100,
+  "item": {
+    "id": "workout-replies-keep-their-place",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Workout replies keep their place",
+    "summary": "When Murph asks about your next set, your reply now stays connected to the exact workout being discussed.",
+    "details": "Murph carries that context privately between messages, so you can answer naturally without supplying an internal identifier or risking a different unfinished workout.",
+    "relevanceTags": [
+      "assistant",
+      "workouts",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2148
+    ]
+  }
+}
