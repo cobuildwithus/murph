@@ -1,6 +1,6 @@
 # Retire native E2E aliases before deployments
 
-Status: active
+Status: completed
 Created: 2026-08-22
 Updated: 2026-08-22
 
@@ -47,14 +47,18 @@ Updated: 2026-08-22
 
 ## Tasks
 
-1. Add failing focused tests for alias-before-deployment retirement and strict
-   owner validation.
-2. Implement the smallest Vercel alias cleanup inside the existing retirement
-   owner and run focused proof.
-3. Commit, push, open the PR, run the required specialist/final review gates
-   with CI, and remediate accepted findings.
-4. Repair the current orphan only after the live lane releases, then prove a
-   protected candidate reaches native dispatch.
+1. Completed: added focused tests for alias-before-deployment retirement,
+   strict owner validation, multi-alias ordering, second-alias failure, and
+   pagination rejection before mutation.
+2. Completed: implemented alias cleanup inside the existing Vercel retirement
+   owner and ran the focused iOS and shared Android controller proof.
+3. Completed: opened PR #2155, passed exact-head CI and final ReviewGPT round
+   2, and resolved the accepted preliminary pagination finding.
+4. Completed without a repair mutation: the stale alias was absent after the
+   prior controller released the lane; the next protected candidate reached
+   `READY`, owned the custom-environment alias, and dispatched the exact v9
+   Android tag. Its later native permission-state failure is a separate
+   Android test-driver issue.
 
 ## Verification
 
@@ -64,3 +68,19 @@ Updated: 2026-08-22
   malformed/cross-owner failure.
 - Names-only Vercel inspection showing no orphan alias and a subsequent
   candidate transition to `READY` before native dispatch.
+
+## Outcome
+
+- Retirement now validates every deployment and complete alias response before
+  the first mutation, deletes aliases serially, and preserves the deployment
+  when any alias deletion fails.
+- Local proof: 44 native iOS controller tests, 23 shared Android controller
+  tests, and focused pagination/ordering cases passed.
+- Review proof: preliminary specialists returned one accepted pagination
+  finding; final ReviewGPT round 2 passed the corrected exact head with zero
+  findings. Required GitHub checks passed on that head and the current-base
+  merge tree was clean.
+- Runtime proof: the dedicated alias was absent before the next run; the next
+  candidate reached `READY`, acquired the expected alias, and dispatched the
+  exact v9 Android source. No manual provider deletion was needed.
+Completed: 2026-08-22
