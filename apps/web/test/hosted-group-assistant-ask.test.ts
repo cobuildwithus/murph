@@ -68,6 +68,9 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
 } from "@murphai/hosted-execution/runtime-control";
+import {
+  areHostedDomainRootProviderCallsDisabled,
+} from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const NOW = new Date("2026-07-15T12:00:00.000Z");
@@ -744,9 +747,16 @@ describe("Hosted private-to-group context handoff admission", () => {
     const wake = contextHandoffWake({ context });
     const existing = mailboxItemForContextHandoff(wake);
     const { prisma } = createPrisma();
+    const providerCallFences: boolean[] = [];
     mocks.readHostedMailboxItemById
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue(existing);
+      .mockImplementationOnce(async () => {
+        providerCallFences.push(areHostedDomainRootProviderCallsDisabled());
+        return null;
+      })
+      .mockImplementation(async () => {
+        providerCallFences.push(areHostedDomainRootProviderCallsDisabled());
+        return existing;
+      });
     mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
 
     await expect(requestHostedGroupContextHandoff({
@@ -762,6 +772,7 @@ describe("Hosted private-to-group context handoff admission", () => {
       },
       result: { status: "accepted", targetLabel: "100 Club" },
     });
+    expect(providerCallFences).toEqual([false, true]);
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
       .not.toHaveBeenCalled();
   });

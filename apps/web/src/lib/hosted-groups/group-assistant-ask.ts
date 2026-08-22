@@ -47,7 +47,10 @@ import {
   readHostedMailboxWakeByItemId,
   runWithPreparedHostedMailboxItemAppendCrypto,
 } from "../hosted-mailbox/store";
-import { runWithHostedDomainRootUnwrapCache } from "../hosted-crypto/domain-root-unwrap-cache";
+import {
+  runWithHostedDomainRootProviderCallsDisabled,
+  runWithHostedDomainRootUnwrapCache,
+} from "../hosted-crypto/domain-root-unwrap-cache";
 import {
   requireHostedRuntimeActiveAccess,
   requireHostedRuntimeActiveAccessForUpdateTx,
@@ -515,86 +518,88 @@ export async function requestHostedGroupContextHandoff(input: {
   });
 
   return runWithPreparedHostedMailboxItemAppendCrypto({
-    append: (prepared) => prisma.$transaction(async (tx) => {
-      await acquireHostedAssistantAskLockTx(tx, eventId);
+    append: (prepared) => prisma.$transaction((tx) =>
+      runWithHostedDomainRootProviderCallsDisabled(async () => {
+        await acquireHostedAssistantAskLockTx(tx, eventId);
 
-      const existing = await readHostedMailboxItemById({
-        mailboxItemId: eventId,
-        prisma: tx,
-      });
-      if (existing) {
-        return replayHostedGroupContextHandoffTx({
-          context,
-          eventId,
-          existingDedupeKey: existing.dedupeKey,
-          existingExpiresAt: existing.expiresAt ?? null,
-          existingKind: existing.kind,
-          existingUserId: existing.userId,
+        const existing = await readHostedMailboxItemById({
+          mailboxItemId: eventId,
+          prisma: tx,
+        });
+        if (existing) {
+          return replayHostedGroupContextHandoffTx({
+            context,
+            eventId,
+            existingDedupeKey: existing.dedupeKey,
+            existingExpiresAt: existing.expiresAt ?? null,
+            existingKind: existing.kind,
+            existingUserId: existing.userId,
+            memberId: input.memberId,
+            now,
+            originAssistantInputId: input.originAssistantInputId,
+            requestedLabel,
+            tx,
+          });
+        }
+
+        if (!await isEligiblePersonalAssistantAskCallerTx({
           memberId: input.memberId,
           now,
           originAssistantInputId: input.originAssistantInputId,
-          requestedLabel,
+          tx,
+        })) {
+          return unavailableAdmission("origin_unavailable");
+        }
+        const authority = await readHostedAssistantAskMembershipAuthorityTx({
+          expectedOriginMemberId: input.memberId,
+          expectedTargetRuntimeMemberId:
+            preparedSelection.targetRuntimeMemberId,
+          membershipId: preparedSelection.membershipId,
+          now,
+          originAssistantInputId: input.originAssistantInputId,
           tx,
         });
-      }
-
-      if (!await isEligiblePersonalAssistantAskCallerTx({
-        memberId: input.memberId,
-        now,
-        originAssistantInputId: input.originAssistantInputId,
-        tx,
-      })) {
-        return unavailableAdmission("origin_unavailable");
-      }
-      const authority = await readHostedAssistantAskMembershipAuthorityTx({
-        expectedOriginMemberId: input.memberId,
-        expectedTargetRuntimeMemberId:
-          preparedSelection.targetRuntimeMemberId,
-        membershipId: preparedSelection.membershipId,
-        now,
-        originAssistantInputId: input.originAssistantInputId,
-        tx,
-      });
-      if (!authority) {
-        return unavailableAdmission("membership_unavailable");
-      }
-      try {
-        await assertHostedThreadRouteEgressAuthority({
-          authority: routeAuthority,
-          prisma: tx,
-        });
-      } catch (error) {
-        if (
-          isHostedOnboardingError(error)
-          && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
-          && !error.retryable
-        ) {
-          return unavailableAdmission("group_route_unavailable");
+        if (!authority) {
+          return unavailableAdmission("membership_unavailable");
         }
-        throw error;
-      }
+        try {
+          await assertHostedThreadRouteEgressAuthority({
+            authority: routeAuthority,
+            prisma: tx,
+          });
+        } catch (error) {
+          if (
+            isHostedOnboardingError(error)
+            && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED"
+            && !error.retryable
+          ) {
+            return unavailableAdmission("group_route_unavailable");
+          }
+          throw error;
+        }
 
-      const append = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
-        envelope: wake,
-        expiresAt,
-        itemId: eventId,
-        prepared,
-        tx,
-      });
-      if (append.dedupeConflict || append.item.id !== eventId) {
-        return unavailableAdmission("request_conflict");
-      }
-      return {
-        mailboxWake: {
-          expectedUserId: preparedSelection.targetRuntimeMemberId,
-          mailboxItemId: append.item.id,
-        },
-        result: {
-          status: "accepted",
-          targetLabel: authority.targetLabel,
-        },
-      };
-    }),
+        const append = await appendHostedMailboxEnvelopeWithPreparedCryptoTx({
+          envelope: wake,
+          expiresAt,
+          itemId: eventId,
+          prepared,
+          tx,
+        });
+        if (append.dedupeConflict || append.item.id !== eventId) {
+          return unavailableAdmission("request_conflict");
+        }
+        return {
+          mailboxWake: {
+            expectedUserId: preparedSelection.targetRuntimeMemberId,
+            mailboxItemId: append.item.id,
+          },
+          result: {
+            status: "accepted",
+            targetLabel: authority.targetLabel,
+          },
+        };
+      })
+    ),
     prepareExisting: async () => {
       await readHostedMailboxWakeByItemId({
         availableAt: now,
