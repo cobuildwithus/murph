@@ -6,6 +6,7 @@ import {
   readCodexNonEmptyString,
   readCodexRecord,
   readCodexServerNotification,
+  readCodexTokenUsageBreakdown,
   readCodexThreadTokenUsage,
   type CodexThreadTokenUsage,
   type CodexTokenUsageBreakdown,
@@ -1007,20 +1008,30 @@ function subtractCodexTokenUsage(
 }
 
 export interface CodexSubagentTurnTokenUsageSample {
+  executionMetadata?: CodexSubagentExecutionMetadata | null
   firstEvent: unknown
   lastEvent: unknown
   occurredAt: string
+  rawResponseEvents?: unknown[]
   threadId: string
   turnId: string
 }
 
+export interface CodexSubagentExecutionMetadata {
+  model: string
+  modelProvider: string
+  reasoningEffort: string | null
+  serviceTier: string | null
+}
+
 // Codex ships no aggregate usage primitive for spawned subagent threads (no
 // usage RPC, no usage on the protocol Turn, no parent-side aggregation), so
-// the canonical pattern is consuming each child thread's tokenUsage
-// notifications. This converts the buffered first/final tokenUsage samples
-// per child turn into additional usage drafts on the parent turn, using the
-// same total-delta arithmetic as the parent's billed usage. Billing is
-// gated on spawn evidence: only threads named by a parent-thread
+// the canonical pattern is consuming each child thread's usage notifications.
+// Fresh raw-enabled lifecycles produce one exact rawResponse/completed usage
+// record per provider request. Cold or legacy lifecycles retain the existing
+// first/final tokenUsage delta fallback. A lifecycle chooses exactly one
+// source, so cumulative notifications can never double-bill exact raw usage.
+// Billing is gated on spawn evidence: only threads named by a parent-thread
 // collabAgentToolCall item's receiverThreadIds (multi-agent V1: spawnAgent,
 // sendInput, wait, resume — covering freshly spawned and reused children) or
 // by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
@@ -1049,10 +1060,91 @@ export function extractCodexSubagentUsageDrafts(input: {
     input.parentRawEvents,
   )
   const drafts: AssistantProviderUsageDraft[] = []
+  const seenRawResponseIds = new Set<string>()
   let ordinal = input.ordinalStart
 
   for (const sample of input.subagentTokenUsageByTurn.values()) {
     if (!spawnModelByThreadId.has(sample.threadId)) {
+      continue
+    }
+
+    const requestedModel = spawnModelByThreadId.get(sample.threadId)
+      ?? input.parentModel
+      ?? null
+    const servedModel = sample.executionMetadata?.model ?? requestedModel
+    const modelProvider = sample.executionMetadata?.modelProvider
+      ?? input.modelProvider
+    const serviceTier = sample.executionMetadata
+      ? readAssistantProviderServiceTier(sample.executionMetadata.serviceTier)
+      : input.serviceTier ?? null
+    const providerMetadataJson = sample.executionMetadata
+      ? {
+          reasoningEffort: sample.executionMetadata.reasoningEffort,
+          requestedServiceTier: sample.executionMetadata.serviceTier,
+        }
+      : null
+    const appendDraft = (usageInput: {
+      providerRequestId: string | null
+      sourcePath: string
+      usage: CodexTokenUsageBreakdown
+    }): void => {
+      const rawUsageJson = sanitizeCodexUsage(usageInput.usage)
+      drafts.push({
+        occurredAt: sample.occurredAt,
+        provider: 'codex-cli',
+        providerRequestOrdinal: ordinal++,
+        providerRequestOutcome: 'succeeded',
+        usage: {
+          apiKeyEnv: null,
+          baseUrl: null,
+          cacheWriteTokens: usageInput.usage.cacheWriteInputTokens,
+          cachedInputTokens: usageInput.usage.cachedInputTokens,
+          inputTokens: usageInput.usage.inputTokens,
+          outputTokens: usageInput.usage.outputTokens,
+          providerMetadataJson,
+          providerName: resolveAssistantCodexUsageProviderName(modelProvider),
+          providerRequestId: usageInput.providerRequestId,
+          rawUsageJson,
+          rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+          reasoningTokens: usageInput.usage.reasoningOutputTokens,
+          requestedModel,
+          servedModel,
+          tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+            model: servedModel,
+            modelProvider,
+            serviceTier,
+          }),
+          totalTokens: usageInput.usage.totalTokens,
+          usageExtractionSourcePath: usageInput.sourcePath,
+          usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
+        },
+      })
+    }
+
+    const rawResponseEvents = sample.rawResponseEvents ?? []
+    const rawResponseSourceSelected = rawResponseEvents.some((event) =>
+      readCodexServerNotification(event)?.method === 'rawResponse/completed'
+    )
+    if (rawResponseSourceSelected) {
+      for (const event of rawResponseEvents) {
+        const response = readAssistantCodexRawResponseUsageFromEvent(event)
+        if (
+          !response ||
+          response.threadId !== sample.threadId ||
+          response.turnId !== sample.turnId ||
+          seenRawResponseIds.has(response.responseId)
+        ) {
+          continue
+        }
+        seenRawResponseIds.add(response.responseId)
+        if (response.usage) {
+          appendDraft({
+            providerRequestId: response.responseId,
+            sourcePath: 'subagent.rawResponse.completed.usage',
+            usage: response.usage,
+          })
+        }
+      }
       continue
     }
 
@@ -1069,47 +1161,57 @@ export function extractCodexSubagentUsageDrafts(input: {
         : []
     })
     const delta = resolveAssistantCodexThreadTokenUsageTotalDelta(pairs)
-    if (!delta) {
-      continue
-    }
-
-    const model = spawnModelByThreadId.get(sample.threadId)
-      ?? input.parentModel
-      ?? null
-    const rawUsageJson = sanitizeCodexUsage(delta)
-    drafts.push({
-      occurredAt: sample.occurredAt,
-      provider: 'codex-cli',
-      providerRequestOrdinal: ordinal++,
-      providerRequestOutcome: 'succeeded',
-      usage: {
-        apiKeyEnv: null,
-        baseUrl: null,
-        cacheWriteTokens: delta.cacheWriteInputTokens,
-        cachedInputTokens: delta.cachedInputTokens,
-        inputTokens: delta.inputTokens,
-        outputTokens: delta.outputTokens,
-        providerMetadataJson: null,
-        providerName: resolveAssistantCodexUsageProviderName(input.modelProvider),
+    if (delta) {
+      appendDraft({
         providerRequestId: null,
-        rawUsageJson,
-        rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
-        reasoningTokens: delta.reasoningOutputTokens,
-        requestedModel: model,
-        servedModel: model,
-        tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
-          model,
-          modelProvider: input.modelProvider,
-          serviceTier: input.serviceTier ?? null,
-        }),
-        totalTokens: delta.totalTokens,
-        usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
-        usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
-      },
-    })
+        sourcePath: 'subagent.turn.tokenUsage.total.delta',
+        usage: delta,
+      })
+    }
   }
 
   return drafts
+}
+
+function readAssistantCodexRawResponseUsageFromEvent(rawEvent: unknown): {
+  responseId: string
+  threadId: string
+  turnId: string
+  usage: CodexTokenUsageBreakdown | null
+} | null {
+  const notification = readCodexServerNotification(rawEvent)
+  if (notification?.method !== 'rawResponse/completed') {
+    return null
+  }
+
+  const params = notification.params
+  const threadId = readCodexNonEmptyString(params.threadId)
+  const turnId = readCodexNonEmptyString(params.turnId)
+  const responseId = readCodexNonEmptyString(params.responseId)
+  const usage = params.usage === null
+    ? null
+    : readCodexTokenUsageBreakdown(params.usage)
+  if (
+    !threadId ||
+    !turnId ||
+    !responseId ||
+    (usage === null && params.usage !== null)
+  ) {
+    return null
+  }
+
+  return {
+    responseId,
+    threadId,
+    turnId,
+    usage,
+  }
+}
+
+function readAssistantProviderServiceTier(
+  value: string | null,
+): AssistantProviderServiceTier | null {
+  return value === 'flex' ? value : null
 }
 
 export function resolveCodexAssistantProviderTokenPricingBasis(input: {

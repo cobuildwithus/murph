@@ -141,6 +141,7 @@ import {
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
 import {
+  type CodexSubagentExecutionMetadata,
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
@@ -417,6 +418,39 @@ function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
         threadId,
       }
     : null
+}
+
+function readCodexSubagentExecutionMetadata(input: {
+  expectedThreadId: string
+  threadResult: unknown
+}): CodexSubagentExecutionMetadata | null {
+  const result = readCodexRecord(input.threadResult)
+  const thread = readCodexRecord(result?.thread)
+  const threadId = readCodexNonEmptyString(thread?.id)
+  const model = readCodexNonEmptyString(result?.model)
+  const modelProvider = readCodexNonEmptyString(result?.modelProvider)
+  const serviceTier = result?.serviceTier === null
+    ? null
+    : readCodexNonEmptyString(result?.serviceTier)
+  const reasoningEffort = result?.reasoningEffort === null
+    ? null
+    : readCodexNonEmptyString(result?.reasoningEffort)
+  if (
+    threadId !== input.expectedThreadId ||
+    !model ||
+    !modelProvider ||
+    (serviceTier === null && result?.serviceTier !== null) ||
+    (reasoningEffort === null && result?.reasoningEffort !== null)
+  ) {
+    return null
+  }
+
+  return {
+    model,
+    modelProvider,
+    reasoningEffort,
+    serviceTier,
+  }
 }
 
 function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
@@ -1288,13 +1322,17 @@ class CodexAppServerProcess {
     rejectPendingCodexRpcRequests(this.pendingRequests, error)
   }
 
-  sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+  sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    pendingMethod = method,
+  ): Promise<unknown> {
     const id = this.nextRequestId
     this.nextRequestId += 1
 
     return new Promise<unknown>((resolve, reject) => {
       this.pendingRequests.set(id, {
-        method,
+        method: pendingMethod,
         reject,
         resolve,
       })
@@ -3220,6 +3258,9 @@ async function runCodexAppServerTurnOnProcess(
     : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
+  const subagentExecutionMetadataByThreadId =
+    new Map<string, CodexSubagentExecutionMetadata | null>()
+  const pendingSubagentMetadataRequests = new Map<string, Promise<void>>()
   const trackedSubagentUsageThreadIds = new Set<string>()
   // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
   // collected live so evidenced subagent threads win buffer slots over
@@ -5222,6 +5263,53 @@ async function runCodexAppServerTurnOnProcess(
     completeTurn?.()
   }
 
+  const beginSubagentMetadataRequest = (
+    sample: CodexSubagentTurnTokenUsageSample,
+  ): void => {
+    if (subagentExecutionMetadataByThreadId.has(sample.threadId)) {
+      sample.executionMetadata =
+        subagentExecutionMetadataByThreadId.get(sample.threadId) ?? null
+      return
+    }
+    if (pendingSubagentMetadataRequests.has(sample.threadId)) {
+      return
+    }
+
+    const request = withCodexRpcTimeout(
+      codexProcess.sendRequest(
+        'thread/resume',
+        {
+          excludeTurns: true,
+          threadId: sample.threadId,
+        },
+        'subagent/thread/resume',
+      ),
+      CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+      'subagent thread/resume',
+    )
+      .then((threadResult) => readCodexSubagentExecutionMetadata({
+        expectedThreadId: sample.threadId,
+        threadResult,
+      }))
+      .catch(() => null)
+      .then((metadata) => {
+        subagentExecutionMetadataByThreadId.set(sample.threadId, metadata)
+        for (const trackedSample of subagentTokenUsageByTurn.values()) {
+          if (trackedSample.threadId === sample.threadId) {
+            trackedSample.executionMetadata = metadata
+          }
+        }
+      })
+      .finally(() => {
+        pendingSubagentMetadataRequests.delete(sample.threadId)
+      })
+    pendingSubagentMetadataRequests.set(sample.threadId, request)
+  }
+
+  const drainPendingSubagentMetadataRequests = async (): Promise<void> => {
+    await Promise.all([...pendingSubagentMetadataRequests.values()])
+  }
+
   const handleSubagentThreadMessage = (
     threadId: string,
     message: CodexRpcMessage,
@@ -5241,7 +5329,7 @@ async function runCodexAppServerTurnOnProcess(
     const eventMethod = readCodexEventMethod(message)
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     if (isCodexTurnStartedMethod(eventMethod)) {
-      if (!messageTurnId) {
+      if (!messageTurnId || !collabReceiverThreadIds.has(threadId)) {
         return
       }
       const usageKey = createCodexSubagentTurnUsageKey({
@@ -5271,19 +5359,19 @@ async function runCodexAppServerTurnOnProcess(
         }
       }
       trackedSubagentUsageThreadIds.add(threadId)
-      subagentTokenUsageByTurn.set(usageKey, {
+      const sample: CodexSubagentTurnTokenUsageSample = {
         firstEvent: null,
         lastEvent: null,
         occurredAt: new Date().toISOString(),
+        rawResponseEvents: [],
         threadId,
         turnId: messageTurnId,
-      })
+      }
+      subagentTokenUsageByTurn.set(usageKey, sample)
+      beginSubagentMetadataRequest(sample)
       return
     }
-    if (
-      !isAssistantCodexTokenUsageEventType(eventMethod)
-      || !messageTurnId
-    ) {
+    if (!messageTurnId) {
       return
     }
 
@@ -5296,6 +5384,14 @@ async function runCodexAppServerTurnOnProcess(
       // A child token sample without an observed start has no safe accounting
       // timestamp. Parent collab evidence authorizes the child but cannot
       // establish when its provider operation began.
+      return
+    }
+    if (eventMethod === 'rawResponse/completed') {
+      sample.rawResponseEvents ??= []
+      sample.rawResponseEvents.push(message)
+      return
+    }
+    if (!isAssistantCodexTokenUsageEventType(eventMethod)) {
       return
     }
     sample.firstEvent ??= message
@@ -5356,6 +5452,8 @@ async function runCodexAppServerTurnOnProcess(
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
       const pending = codexProcess.pendingRequests.get(responseId)
+      const isSubagentMetadataResponse =
+        pending?.method === 'subagent/thread/resume'
       const resolveResult = resolvePendingCodexRpcRequest({
         message,
         pendingRequests: codexProcess.pendingRequests,
@@ -5365,7 +5463,9 @@ async function runCodexAppServerTurnOnProcess(
         codexProcess.consumeIgnoredResponseId(responseId)
         return
       }
-      acceptJsonEvent(message)
+      if (!isSubagentMetadataResponse) {
+        acceptJsonEvent(message)
+      }
       if (message.error) {
         return
       }
@@ -5452,6 +5552,16 @@ async function runCodexAppServerTurnOnProcess(
       messageTurnId === null &&
       method !== 'model/rerouted'
     ) {
+      return
+    }
+
+    if (
+      method === 'rawResponseItem/completed' ||
+      method === 'rawResponse/completed'
+    ) {
+      // Raw response items can contain provider payload content. Exact child
+      // usage is captured above in the isolated subagent buffer; neither raw
+      // notification belongs in the parent turn's persisted event surface.
       return
     }
 
@@ -5751,6 +5861,7 @@ async function runCodexAppServerTurnOnProcess(
     lifecycleStage = 'turn_running'
     await turnCompleted
     clearInterruptCleanupTimer()
+    await drainPendingSubagentMetadataRequests()
     await drainPendingDynamicToolRequests()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
@@ -5808,6 +5919,7 @@ async function runCodexAppServerTurnOnProcess(
       ? (buildRecordedTerminationError(lastEventError) ?? error)
       : error
     emitActionDiagnosticsTrace()
+    await drainPendingSubagentMetadataRequests()
     await drainPendingDynamicToolRequests()
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
