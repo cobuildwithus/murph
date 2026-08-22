@@ -993,6 +993,9 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const dirty = await controlPlane.store.markDirtyConnectionProcessed({
+    ...(parsed.completedImports
+      ? { completedImports: parsed.completedImports }
+      : {}),
     connectionId: parsed.connectionId,
     ...(parsed.processedDirtyPayloadIds
       ? { processedDirtyPayloadIds: parsed.processedDirtyPayloadIds }

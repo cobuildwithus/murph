@@ -18,6 +18,7 @@ import {
   findCaptureByLookup,
   initializeVault,
   patchAutomation,
+  readHabitatAspect,
   readJsonlRecords,
   repairVault,
   runCanonicalWrite,
@@ -32,6 +33,7 @@ import {
 } from "@murphai/inboxd";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionLinqConversationMessageWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionRuntimeControlWake,
@@ -90,6 +92,7 @@ import {
   sha256HostedBundleHex,
   createHostedPortableWorkspaceManifestFromBundle,
   listPendingAssistantRuntimeIssueRecords,
+  restoreHostedBundleRoots,
   restoreHostedExecutionContext,
   snapshotHostedPortableWorkspaceDelta,
   snapshotHostedAssistantRuntimeHotState,
@@ -155,8 +158,18 @@ type HasCompleteAssistantAutoReplyDeliveryTerminalEvidence = (
 
 type RefreshHostedBrowserVaultReplicaFromRuntime =
   typeof import("../src/hosted-runtime/browser-vault-replica.ts")["refreshHostedBrowserVaultReplicaFromRuntime"];
+type CollectHostedAssistantDeliverySideEffects =
+  typeof import("../src/hosted-runtime/callbacks.ts")["collectHostedAssistantDeliverySideEffects"];
+type PrepareHostedAssistantDeliveryEffectsForDispatch =
+  typeof import("../src/hosted-runtime/callbacks.ts")["prepareHostedAssistantDeliveryEffectsForDispatch"];
+type DrainHostedPreparedAssistantDeliveries =
+  typeof import("../src/hosted-runtime/callbacks.ts")["drainHostedPreparedAssistantDeliveries"];
 
 const mocks = vi.hoisted(() => ({
+  actualCollectHostedAssistantDeliverySideEffects:
+    null as CollectHostedAssistantDeliverySideEffects | null,
+  actualDrainHostedPreparedAssistantDeliveries:
+    null as DrainHostedPreparedAssistantDeliveries | null,
   actualEnqueueHostedPendingAssistantInputId: null as null | ((input: {
     inputId: string;
     vaultRoot: string;
@@ -165,7 +178,13 @@ const mocks = vi.hoisted(() => ({
     null as HasCompleteAssistantAutoReplyDeliveryTerminalEvidence | null,
   actualRefreshHostedBrowserVaultReplicaFromRuntime:
     null as RefreshHostedBrowserVaultReplicaFromRuntime | null,
+  actualPrepareHostedAssistantDeliveryEffectsForDispatch:
+    null as PrepareHostedAssistantDeliveryEffectsForDispatch | null,
+  collectHostedAssistantDeliverySideEffects:
+    vi.fn<CollectHostedAssistantDeliverySideEffects>(),
   createHostedWorkspaceSnapshotCheckpointRequestBuilder: vi.fn(),
+  drainHostedPreparedAssistantDeliveries:
+    vi.fn<DrainHostedPreparedAssistantDeliveries>(),
   enqueueHostedPendingAssistantInputId: vi.fn(),
   executeConsentedReadOnlyAssistantAsk: vi.fn(),
   executeReadOnlyAssistantAsk: vi.fn(),
@@ -181,6 +200,8 @@ const mocks = vi.hoisted(() => ({
     ) => Promise<HostedCodexAssistantProcessPreparation | null>
   >(async () => null),
   prepareHostedCodexRuntimeEnvironment: vi.fn(),
+  prepareHostedAssistantDeliveryEffectsForDispatch:
+    vi.fn<PrepareHostedAssistantDeliveryEffectsForDispatch>(),
   refreshHostedBrowserVaultReplicaFromRuntime: vi.fn(),
   runAssistantAutomationPass: vi.fn(),
   runHostedIdleCheckpointMaintenance: vi.fn(),
@@ -188,6 +209,34 @@ const mocks = vi.hoisted(() => ({
   snapshotHostedPortableWorkspaceDelta: vi.fn(),
   cancelPendingWarmCodexPreinitialization: vi.fn(async () => undefined),
 }));
+
+vi.mock("../src/hosted-runtime/callbacks.ts", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../src/hosted-runtime/callbacks.ts")
+  >();
+  mocks.actualCollectHostedAssistantDeliverySideEffects =
+    actual.collectHostedAssistantDeliverySideEffects;
+  mocks.actualDrainHostedPreparedAssistantDeliveries =
+    actual.drainHostedPreparedAssistantDeliveries;
+  mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch =
+    actual.prepareHostedAssistantDeliveryEffectsForDispatch;
+
+  return {
+    ...actual,
+    collectHostedAssistantDeliverySideEffects:
+      mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
+        actual.collectHostedAssistantDeliverySideEffects,
+      ),
+    drainHostedPreparedAssistantDeliveries:
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(
+        actual.drainHostedPreparedAssistantDeliveries,
+      ),
+    prepareHostedAssistantDeliveryEffectsForDispatch:
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockImplementation(
+        actual.prepareHostedAssistantDeliveryEffectsForDispatch,
+      ),
+  };
+});
 
 vi.mock("../src/hosted-runtime/pending-input-index.ts", async (importOriginal) => {
   const actual = await importOriginal<
@@ -9243,7 +9292,7 @@ describe("hosted workspace runtime entrypoint", () => {
     });
   }
 
-  test("keeps a mixed causal and device system prefix checkpoint-gated while dirty", async () => {
+  test("keeps a mixed causal and device prefix gated until after checkpoint", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -9290,21 +9339,21 @@ describe("hosted workspace runtime entrypoint", () => {
             }),
           }),
           runtimeWakeSignal,
-          async runAssistantPhase() {
+          async runAssistantPhase(input) {
             assistantPhaseCalls += 1;
             events.push(`assistant.phase:${assistantPhaseCalls}`);
             if (assistantPhaseCalls === 1) {
               setTimeout(() => {
                 mailboxItems.push(
                   createMailboxItem({
-                    id: "mailbox_item_entrypoint_mixed_pending_effects",
-                    kind: "runtime.pending-effects-reconcile-requested",
+                    id: "mailbox_item_entrypoint_mixed_device",
+                    kind: "device-sync.wake",
                     lane: "system",
                     laneSeq: "1",
                   }),
                   createMailboxItem({
-                    id: "mailbox_item_entrypoint_mixed_device",
-                    kind: "device-sync.wake",
+                    id: "mailbox_item_entrypoint_mixed_pending_effects",
+                    kind: "runtime.pending-effects-reconcile-requested",
                     lane: "system",
                     laneSeq: "2",
                   }),
@@ -9332,14 +9381,14 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.ok(
         idleCheckpointIndex < requireEventIndex(
           events,
-          "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects",
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_device",
         ),
         events.join(","),
       );
       assert.ok(
         idleCheckpointIndex < requireEventIndex(
           events,
-          "mailbox.importItem:mailbox_item_entrypoint_mixed_device",
+          "mailbox.importItem:mailbox_item_entrypoint_mixed_pending_effects",
         ),
         events.join(","),
       );
@@ -10449,6 +10498,1591 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test("environment interview mode applies only Habitat answers and refreshes the browser replica", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const interviewItem = createMailboxItem({
+      dedupeKey: "environment-interview:entrypoint-isolation",
+      id: "mailbox_item_environment_interview_entrypoint_isolation",
+      kind: "environment-interview.completed",
+      lane: "system",
+      laneSeq: "1",
+    });
+
+    try {
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueEnvironmentInterviewSystemMailboxItemForTest({
+        item: interviewItem,
+        vaultRoot,
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/environment-interview-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_environment_interview_entrypoint_isolation",
+            processingMode: "environment_interview",
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/environment-interview-after.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported Environment work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [createMailboxItem({
+                id: "mailbox_item_environment_interview_unrelated_conversation",
+                kind: "conversation.message",
+                lane: "conversation",
+                laneSeq: "1",
+              })],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assert.equal(input.foregroundCausalOnly, true);
+            return await runHostedWorkspaceAssistantPhase(input);
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.deepEqual(
+        fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
+        [["system"]],
+      );
+      await expect(readHabitatAspect({
+        slug: "sleep-environment",
+        vaultRoot,
+      })).resolves.toMatchObject({
+        indicators: { night_temp_c: 19 },
+      });
+      expect(mocks.refreshHostedBrowserVaultReplicaFromRuntime).toHaveBeenCalledTimes(1);
+      expect(mocks.prepareHostedCodexRuntimeEnvironment).not.toHaveBeenCalled();
+      expect(mocks.prepareHostedCodexAssistantProcess).not.toHaveBeenCalled();
+      expect(result.status).toBe("idle");
+    } finally {
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("blocked system mailbox mode delivers one exact group-join confirmation without draining a generic notification", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const exactText = "You are now part of the synthetic group.";
+    const deliveryBodies: unknown[] = [];
+    const exactDeliveryKey = "group-join:membership_blocked_exact";
+    const exactDedupeKey =
+      `assistant.notification.requested:${exactDeliveryKey}`;
+    const genericDeliveryKey = "generic:blocked_after_group_join";
+    const genericDedupeKey =
+      `assistant.notification.requested:${genericDeliveryKey}`;
+    const exactItem = createMailboxItem({
+      dedupeKey: exactDedupeKey,
+      id: "mailbox_item_group_join_blocked_exact",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const genericItem = createMailboxItem({
+      dedupeKey: genericDedupeKey,
+      id: "mailbox_item_group_join_later_generic",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "2",
+    });
+    const buildResolvedNotificationItem = (
+      item: HostedMailboxItem,
+    ): HostedMailboxResolvedImportItem => ({
+      item,
+      payload: {
+        payloadCiphertext: "ciphertext",
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        requestId: `request_${item.id}`,
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "dispatch-assistant-notification",
+        advanceProgress: true,
+        itemRef: {
+          id: item.id,
+          kind: item.kind,
+          lane: item.lane,
+          laneSeq: item.laneSeq,
+        },
+        state: "route",
+      },
+    });
+    const buildNotificationWake = (input: {
+      deliveryKey: string;
+      eventId: string;
+      text: string;
+    }) =>
+      buildHostedExecutionAssistantNotificationRequestedWake({
+        eventId: input.eventId,
+        memberId: TEST_USER_ID,
+        notification: {
+          deliveryDispatchMode: "queue-only",
+          deliveryDedupeToken: input.deliveryKey,
+          deliveryIdempotencyKey: input.deliveryKey,
+          instructions: "Send the exact private confirmation text.",
+          responsePolicy: {
+            kind: "require_send_exact_text",
+            text: input.text,
+          },
+          route: {
+            actorId: null,
+            channel: "linq",
+            delivery: {
+              kind: "thread",
+              target: "linq_private_group_join_thread",
+            },
+            identityId: "hbidx:phone:v1:group-join-test",
+            threadId: "hbidx:thread:v1:group-join-test",
+            threadIsDirect: true,
+          },
+        },
+        occurredAt: TEST_NOW,
+      });
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const method =
+        init?.method
+        ?? (request instanceof Request ? request.method : "GET");
+      const url = request instanceof Request ? request.url : String(request);
+      if (method === "POST" && url.includes("/messages")) {
+        deliveryBodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({
+          message: { id: "provider_group_join_confirmation" },
+        }), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.runAssistantAutomationPass.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: buildResolvedNotificationItem(exactItem),
+        vaultRoot,
+        wake: buildNotificationWake({
+          deliveryKey: exactDeliveryKey,
+          eventId: exactDedupeKey,
+          text: exactText,
+        }),
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: buildResolvedNotificationItem(genericItem),
+        vaultRoot,
+        wake: buildNotificationWake({
+          deliveryKey: genericDeliveryKey,
+          eventId: genericDedupeKey,
+          text: "Generic automatic message.",
+        }),
+      });
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "2";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-group-join-before.bundle.json",
+        vaultRoot,
+      });
+      const completedResult = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          platformEnv: {
+            TELEGRAM_BOT_TOKEN: "",
+          },
+          forwardedEnv: {
+            LINQ_API_TOKEN: "synthetic-linq-token",
+          },
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId: "attempt_synthetic_blocked_group_join_exact",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: false,
+              telegramBotConfigured: false,
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [{
+              capabilityReady: true,
+              channel: "linq",
+              memberChannel: "linq",
+            }],
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "c".repeat(64),
+                key: "users/bundles/member-synthetic/blocked-group-join.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported notifications must not import a new row.");
+          },
+          platform: {
+            ...createPlatform({
+              artifactBytesByHash: new Map([
+                [restoredWorkspace.hash, restoredWorkspace.bytes],
+              ]),
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
+              }),
+            }),
+            effectsPort: {
+              async assertLinqRecentInboundEngagement(request) {
+                assert.equal(request.target, "linq_private_group_join_thread");
+                return {
+                  providerDispatchClaimed: true,
+                  resolvedRoute: {
+                    conversationThreadId: null,
+                    directRecipientPhoneNumber: null,
+                    fromPhoneNumber: null,
+                    target: "linq_private_group_join_thread",
+                    targetKind: "thread",
+                    threadIsDirect: true,
+                  },
+                };
+              },
+              async readRawEmailMessage() {
+                return null;
+              },
+              async recordLinqDeliveryOutcome(request) {
+                events.push(
+                  `provider.record:${request.providerMessageId ?? "missing"}`,
+                );
+              },
+              async sendEmail() {},
+            },
+            providerFetch,
+          },
+          async runAssistantPhase() {
+            throw new Error("Blocked exact notification must not enter assistant execution.");
+          },
+          vaultRoot,
+        },
+      );
+
+      const pendingAfter = await readHostedSystemMailboxState(vaultRoot);
+      const outboxAfter = await listAssistantOutboxIntents(vaultRoot);
+      assert.equal(deliveryBodies.length, 1, JSON.stringify({
+        events,
+        outbox: outboxAfter.map((intent) => ({
+          deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+          status: intent.status,
+        })),
+        pending: pendingAfter.pending.map((item) => ({
+          itemId: item.itemId,
+          mailboxDedupeKey: item.mailboxDedupeKey,
+          status: item.status,
+        })),
+        result: completedResult,
+      }));
+      expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
+      assert.deepEqual(
+        outboxAfter.map((intent) => ({
+          deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+          status: intent.status,
+        })),
+        [{
+          deliveryIdempotencyKey: exactDeliveryKey,
+          status: "sent",
+        }],
+      );
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      assert.equal(
+        checkpointRequests.at(-1)?.redactedStatus
+          ?.hostedMailboxSystemHandledThroughSeq,
+        "1",
+      );
+      assert.deepEqual(
+        pendingAfter.pending.map((item) => ({
+          itemId: item.itemId,
+          mailboxDedupeKey: item.mailboxDedupeKey,
+          mailboxLaneSeq: item.mailboxLaneSeq,
+        })),
+        [{
+          itemId: genericItem.id,
+          mailboxDedupeKey: genericDedupeKey,
+          mailboxLaneSeq: "2",
+        }],
+      );
+      assert.equal(completedResult.status, "idle", JSON.stringify(completedResult));
+      assert.equal(completedResult.nextWakeAt, null);
+      assert.equal(completedResult.nextWakeReason ?? null, null);
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test.each([
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: false,
+      expectedProviderSends: 1,
+      initialOutboxState: "pending" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: true,
+      expectedProviderSends: 0,
+      initialOutboxState: "pending" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: true,
+      expectedProviderSends: 0,
+      initialOutboxState: "due_retryable" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: false,
+      expectedProviderSends: 0,
+      initialOutboxState: "retryable" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: false,
+      expectedProviderSends: 0,
+      initialOutboxState: "sent" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "telegram" as const,
+      checkpointConversationInputAhead: true,
+      expectedProviderSends: 0,
+      initialOutboxState: "pending" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "telegram" as const,
+      checkpointConversationInputAhead: true,
+      expectedProviderSends: 0,
+      initialOutboxState: "due_retryable" as const,
+      providerOutcome: "success" as const,
+    },
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: false,
+      expectedProviderSends: 3,
+      initialOutboxState: "pending" as const,
+      providerOutcome: "retryable_failure" as const,
+    },
+    {
+      channel: "linq" as const,
+      checkpointConversationInputAhead: false,
+      expectedProviderSends: 3,
+      initialOutboxState: "pending" as const,
+      providerOutcome: "retryable_failure_with_host_abort" as const,
+    },
+  ])("system mailbox mode resumes a restored exact group-join delivery from its durable identity ($channel, $initialOutboxState outbox, provider: $providerOutcome, foreground checkpoint: $checkpointConversationInputAhead)", async ({
+    channel,
+    checkpointConversationInputAhead,
+    expectedProviderSends,
+    initialOutboxState,
+    providerOutcome,
+  }) => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const deliveryBodies: unknown[] = [];
+    const retryCheckpointAbortController = new AbortController();
+    const retryCheckpointAbortReason = new Error(
+      "Synthetic host abort during exact delivery retry checkpoint.",
+    );
+    const exactText = "You are now part of the synthetic group.";
+    const exactDeliveryKey = "group-join:membership_restored_exact";
+    const exactTarget = channel === "telegram"
+      ? "123456789"
+      : "linq_private_group_join_thread";
+    const exactIdentityId = channel === "telegram"
+      ? "telegram-bot"
+      : "hbidx:phone:v1:group-join-restored-test";
+    const exactThreadId = channel === "telegram"
+      ? exactTarget
+      : "hbidx:thread:v1:group-join-restored-test";
+    const exactDedupeKey =
+      `assistant.notification.requested:${exactDeliveryKey}`;
+    let providerFailuresRemaining =
+      providerOutcome === "success" ? 0 : 3;
+    const providerRetries = providerOutcome !== "success";
+    const retryWakeAt = new Date(
+      Date.parse(TEST_NOW) + 5 * 60_000,
+    ).toISOString();
+    const exactItem = createMailboxItem({
+      dedupeKey: exactDedupeKey,
+      id: "mailbox_item_group_join_restored_exact",
+      kind: "assistant.notification.requested",
+      lane: "system",
+      laneSeq: "1",
+    });
+    const exactWake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: exactDedupeKey,
+      memberId: TEST_USER_ID,
+      notification: {
+        deliveryDispatchMode: "queue-only",
+        deliveryDedupeToken: exactDeliveryKey,
+        deliveryIdempotencyKey: exactDeliveryKey,
+        instructions: "Send the exact private confirmation text.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: exactText,
+        },
+        route: {
+          actorId: null,
+          channel,
+          delivery: {
+            kind: "thread",
+            target: exactTarget,
+          },
+          identityId: exactIdentityId,
+          threadId: exactThreadId,
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: TEST_NOW,
+    });
+    const providerFetch = vi.fn<typeof fetch>(async (request, init) => {
+      const method =
+        init?.method
+        ?? (request instanceof Request ? request.method : "GET");
+      const url = request instanceof Request ? request.url : String(request);
+      if (
+        method === "POST"
+        && (
+          (channel === "linq" && url.includes("/messages"))
+          || (channel === "telegram" && url.endsWith("/sendMessage"))
+        )
+      ) {
+        deliveryBodies.push(JSON.parse(String(init?.body)));
+        if (providerFailuresRemaining > 0) {
+          providerFailuresRemaining -= 1;
+          return new Response(JSON.stringify({
+            error: { message: "Synthetic retryable provider failure." },
+          }), {
+            headers: { "content-type": "application/json" },
+            status: 503,
+          });
+        }
+        return new Response(JSON.stringify(
+          channel === "telegram"
+            ? {
+                ok: true,
+                result: { message_id: 123 },
+              }
+            : {
+                message: { id: "provider_group_join_restored_confirmation" },
+              },
+        ), {
+          headers: { "content-type": "application/json" },
+          status: 200,
+        });
+      }
+      return new Response(null, { status: 204 });
+    });
+    const effectsPort = {
+      async assertLinqRecentInboundEngagement() {
+        assert.equal(channel, "linq");
+        return {
+          providerDispatchClaimed: true,
+          resolvedRoute: {
+            conversationThreadId: null,
+            directRecipientPhoneNumber: null,
+            fromPhoneNumber: null,
+            target: exactTarget,
+            targetKind: "thread" as const,
+            threadIsDirect: true,
+          },
+        };
+      },
+      async readRawEmailMessage() {
+        return null;
+      },
+      async recordLinqDeliveryOutcome(request: {
+        providerMessageId?: string | null;
+      }) {
+        events.push(
+          `provider.record:${request.providerMessageId ?? "missing"}`,
+        );
+      },
+      async sendEmail() {},
+    };
+
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.prepareHostedCodexAssistantProcess.mockClear();
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.runAssistantAutomationPass.mockClear();
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueHostedSystemMailboxItem({
+        item: {
+          item: exactItem,
+          payload: {
+            payloadCiphertext: "ciphertext",
+            payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+            requestId: `request_${exactItem.id}`,
+            source: "inline",
+            status: "resolved",
+          },
+          route: {
+            action: "dispatch-assistant-notification",
+            advanceProgress: true,
+            itemRef: {
+              id: exactItem.id,
+              kind: exactItem.kind,
+              lane: exactItem.lane,
+              laneSeq: exactItem.laneSeq,
+            },
+            state: "route",
+          },
+        },
+        vaultRoot,
+        wake: exactWake,
+      });
+      await updateHostedSystemMailboxState(vaultRoot, (state) => ({
+        pending: state.pending.map((item) =>
+          item.itemId === exactItem.id
+            ? {
+                ...item,
+                attemptCount: 1,
+                lastAttemptAt: TEST_NOW,
+                status: "recording",
+              }
+            : item
+        ),
+      }));
+      const exactIntent = await createAssistantOutboxIntent({
+        channel,
+        createdAt: TEST_NOW,
+        dedupeToken: exactDeliveryKey,
+        deliveryIdempotencyKey: exactDeliveryKey,
+        deliveryTransportIdempotent: channel === "linq",
+        explicitTarget: exactTarget,
+        identityId: exactIdentityId,
+        message: exactText,
+        sessionId: "session_group_join_restored_exact",
+        threadId: exactThreadId,
+        threadIsDirect: true,
+        turnId: "turn_group_join_restored_exact",
+        vault: vaultRoot,
+      });
+      if (
+        initialOutboxState === "retryable"
+        || initialOutboxState === "due_retryable"
+      ) {
+        await saveAssistantOutboxIntent(vaultRoot, {
+          ...exactIntent,
+          attemptCount: 1,
+          lastAttemptAt: TEST_NOW,
+          lastError: {
+            code: "ASSISTANT_DELIVERY_RETRYABLE",
+            message: "Synthetic retry window.",
+          },
+          nextAttemptAt:
+            initialOutboxState === "due_retryable" ? TEST_NOW : retryWakeAt,
+          status: "retryable",
+          updatedAt: TEST_NOW,
+        });
+      }
+      if (initialOutboxState === "sent") {
+        const sentIntent = await markAssistantOutboxIntentSentById({
+          delivery: {
+            channel,
+            idempotencyKey: exactDeliveryKey,
+            messageLength: exactText.length,
+            providerMessageId: "provider_group_join_already_sent",
+            providerThreadId: exactTarget,
+            sentAt: TEST_NOW,
+            target: exactTarget,
+            targetKind: "explicit",
+          },
+          intentId: exactIntent.intentId,
+          vault: vaultRoot,
+        });
+        assert.equal(sentIntent?.status, "sent");
+      }
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "1";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/blocked-group-join-restored-before.bundle.json",
+        vaultRoot,
+      });
+      const checkpointBundles: Array<Awaited<
+        ReturnType<typeof createVaultSnapshotBundle>
+      >> = [];
+
+      const resultPromise = runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          platformEnv: {
+            TELEGRAM_BOT_TOKEN:
+              channel === "telegram" ? "synthetic-telegram-token" : "",
+          },
+          forwardedEnv: {
+            LINQ_API_TOKEN:
+              channel === "linq" ? "synthetic-linq-token" : "",
+          },
+          request: {
+            assistantExecutionBlocked: true,
+            attemptId: "attempt_synthetic_blocked_group_join_restored_exact",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: {
+            channelCapabilities: {
+              emailSendReady: false,
+              telegramBotConfigured: channel === "telegram",
+            },
+            deviceSync: null,
+            managedAutoReplyChannels: [{
+              capabilityReady: true,
+              channel,
+              memberChannel: channel,
+            }],
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            const checkpointBundle = await createVaultSnapshotBundle({
+              key:
+                "users/bundles/member-synthetic/"
+                + `blocked-group-join-restored-checkpoint-${
+                  checkpointRequests.length + 1
+                }.bundle.json`,
+              vaultRoot,
+            });
+            checkpointBundles.push(checkpointBundle);
+            if (
+              providerOutcome === "retryable_failure_with_host_abort"
+              && checkpointRequests.length === 1
+            ) {
+              retryCheckpointAbortController.abort(
+                retryCheckpointAbortReason,
+              );
+            }
+            return {
+              snapshotRef: checkpointBundle.snapshotRef,
+            };
+          },
+          async importItem() {
+            throw new Error("Restored notification must not import a new row.");
+          },
+          platform: {
+            ...createPlatform({
+              artifactBytesByHash: new Map([
+                [restoredWorkspace.hash, restoredWorkspace.bytes],
+              ]),
+              mailboxPort: createMailboxPort({ events, items: [] }),
+              workspacePort: createWorkspacePort({
+                checkpointRequests,
+                ...(checkpointConversationInputAhead
+                  ? {
+                      checkpointResponse(request) {
+                        return {
+                          checkpointed: true,
+                          conversationInputAhead: checkpointRequests.length === 1,
+                          workspace: createWorkspaceState({
+                            inboxMediaRetentionWakeAt:
+                              request.inboxMediaRetentionWakeAt ?? null,
+                            nextWakeAt: request.nextWakeAt ?? null,
+                            nextWakeReason: request.nextWakeReason ?? null,
+                            redactedStatus: request.redactedStatus ?? null,
+                            snapshotRef: request.snapshotRef,
+                            version: String(
+                              BigInt(request.expectedWorkspaceVersion) + 1n,
+                            ),
+                          }),
+                        };
+                      },
+                    }
+                  : {}),
+                events,
+                workspace: createWorkspaceState({
+                  snapshotRef: restoredWorkspace.snapshotRef,
+                  version: "0",
+                }),
+              }),
+            }),
+            effectsPort,
+            providerFetch,
+          },
+          async runAssistantPhase() {
+            throw new Error("Restored exact notification must not enter assistant execution.");
+          },
+          signal: retryCheckpointAbortController.signal,
+          vaultRoot,
+        },
+      );
+
+      if (providerOutcome === "retryable_failure_with_host_abort") {
+        await assert.rejects(resultPromise, retryCheckpointAbortReason);
+        assert.equal(deliveryBodies.length, expectedProviderSends);
+        const abortedOutbox = await listAssistantOutboxIntents(vaultRoot);
+        const abortedRetryWakeAt = abortedOutbox.at(0)?.nextAttemptAt ?? null;
+        assert.ok(abortedRetryWakeAt);
+        assert.deepEqual(
+          abortedOutbox.map((intent) => ({
+            nextAttemptAt: intent.nextAttemptAt,
+            status: intent.status,
+          })),
+          [{
+            nextAttemptAt: abortedRetryWakeAt,
+            status: "retryable",
+          }],
+        );
+        const durableRetryWorkspace = checkpointBundles.at(-1);
+        assert.ok(durableRetryWorkspace);
+        const durableRetryRoot = await mkdtemp(
+          path.join(tmpdir(), "murph-workspace-entrypoint-aborted-retry-"),
+        );
+        try {
+          await restoreHostedBundleRoots({
+            bytes: durableRetryWorkspace.bytes,
+            expectedKind: "vault",
+            roots: { vault: durableRetryRoot },
+          });
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(durableRetryRoot)).map(
+              (intent) => ({
+                nextAttemptAt: intent.nextAttemptAt,
+                status: intent.status,
+              }),
+            ),
+            [{
+              nextAttemptAt: abortedRetryWakeAt,
+              status: "retryable",
+            }],
+          );
+          assert.deepEqual(
+            (await readHostedSystemMailboxState(durableRetryRoot)).pending.map(
+              (item) => ({
+                nextAttemptAt: item.nextAttemptAt,
+                status: item.status,
+              }),
+            ),
+            [{
+              nextAttemptAt: abortedRetryWakeAt,
+              status: "recording",
+            }],
+          );
+        } finally {
+          await removeTempRoot(durableRetryRoot);
+        }
+        return;
+      }
+
+      const result = await resultPromise;
+
+      if (channel === "telegram" && checkpointConversationInputAhead) {
+        const preparedWorkspace = checkpointBundles.at(0);
+        assert.ok(preparedWorkspace);
+        const preparedCheckpointRoot = await mkdtemp(
+          path.join(tmpdir(), "murph-workspace-entrypoint-prepared-checkpoint-"),
+        );
+        try {
+          await restoreHostedBundleRoots({
+            bytes: preparedWorkspace.bytes,
+            expectedKind: "vault",
+            roots: { vault: preparedCheckpointRoot },
+          });
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(preparedCheckpointRoot)).map(
+              (intent) => ({
+                preparedDispatchTokenPresent:
+                  intent.preparedDispatchToken !== null,
+                status: intent.status,
+              }),
+            ),
+            [{
+              preparedDispatchTokenPresent: true,
+              status: "sending",
+            }],
+          );
+        } finally {
+          await removeTempRoot(preparedCheckpointRoot);
+        }
+      }
+
+      assert.equal(deliveryBodies.length, expectedProviderSends, JSON.stringify({
+        outbox: (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
+          deliveryIdempotencyKey: intent.deliveryIdempotencyKey,
+          status: intent.status,
+        })),
+        pending: (await readHostedSystemMailboxState(vaultRoot)).pending.map(
+          (item) => ({ itemId: item.itemId, status: item.status }),
+        ),
+        result,
+      }));
+      if (expectedProviderSends === 1) {
+        expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
+      }
+      const outboxAfter = await listAssistantOutboxIntents(vaultRoot);
+      const providerRetryWakeAt = providerRetries
+        ? outboxAfter.at(0)?.nextAttemptAt ?? null
+        : null;
+      if (providerRetries) {
+        assert.ok(providerRetryWakeAt);
+        assert.deepEqual(
+          outboxAfter.map((intent) => ({
+            nextAttemptAt: intent.nextAttemptAt,
+            status: intent.status,
+          })),
+          [{
+            nextAttemptAt: providerRetryWakeAt,
+            status: "retryable",
+          }],
+        );
+      }
+      if (checkpointConversationInputAhead) {
+        assert.deepEqual(
+          outboxAfter.map((intent) => ({
+            nextAttemptAt: intent.nextAttemptAt,
+            status: intent.status,
+          })),
+          [{
+            nextAttemptAt: TEST_NOW,
+            status:
+              initialOutboxState === "due_retryable" ? "retryable" : "pending",
+          }],
+        );
+      }
+      const pendingAfter = (await readHostedSystemMailboxState(vaultRoot)).pending;
+      if (providerRetries) {
+        assert.deepEqual(
+          pendingAfter.map((item) => ({
+            nextAttemptAt: item.nextAttemptAt,
+            status: item.status,
+          })),
+          [{
+            nextAttemptAt: providerRetryWakeAt,
+            status: "recording",
+          }],
+        );
+        assert.notEqual(
+          checkpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+      } else if (initialOutboxState === "retryable") {
+        assert.deepEqual(
+          pendingAfter.map((item) => ({
+            nextAttemptAt: item.nextAttemptAt,
+            status: item.status,
+          })),
+          [{
+            nextAttemptAt: retryWakeAt,
+            status: "recording",
+          }],
+        );
+        assert.notEqual(
+          checkpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+      } else if (checkpointConversationInputAhead) {
+        assert.deepEqual(
+          pendingAfter.map((item) => ({
+            nextAttemptAt: item.nextAttemptAt,
+            status: item.status,
+          })),
+          [{
+            nextAttemptAt: null,
+            status: "recording",
+          }],
+        );
+        assert.notEqual(
+          checkpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+      } else {
+        assert.deepEqual(pendingAfter, []);
+        assert.equal(
+          checkpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+      }
+      assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+      assert.equal(mocks.prepareHostedCodexRuntimeEnvironment.mock.calls.length, 0);
+      assert.equal(mocks.runAssistantAutomationPass.mock.calls.length, 0);
+      if (providerRetries) {
+        assert.equal(result.status, "scheduled");
+        assert.equal(result.nextWakeAt, providerRetryWakeAt);
+        assert.equal(result.nextWakeReason, "assistant");
+      } else if (initialOutboxState === "retryable") {
+        assert.equal(result.status, "scheduled");
+        assert.equal(result.nextWakeAt, retryWakeAt);
+        assert.equal(result.nextWakeReason, "assistant");
+      } else if (checkpointConversationInputAhead) {
+        assert.equal(result.immediateRecheckRequested, true);
+        assert.equal(result.status, "scheduled");
+        assert.equal(result.nextWakeAt, TEST_NOW);
+        assert.equal(result.nextWakeReason, "assistant");
+      } else {
+        assert.equal(result.status, "idle");
+        assert.equal(result.nextWakeAt, null);
+      }
+      if (providerRetries) {
+        const durableRetryWorkspace = checkpointBundles.at(-1);
+        assert.ok(durableRetryWorkspace);
+        const durableRetryRoot = await mkdtemp(
+          path.join(tmpdir(), "murph-workspace-entrypoint-durable-retry-"),
+        );
+        try {
+          await restoreHostedBundleRoots({
+            bytes: durableRetryWorkspace.bytes,
+            expectedKind: "vault",
+            roots: { vault: durableRetryRoot },
+          });
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(durableRetryRoot)).map(
+              (intent) => ({
+                nextAttemptAt: intent.nextAttemptAt,
+                status: intent.status,
+              }),
+            ),
+            [{
+              nextAttemptAt: providerRetryWakeAt,
+              status: "retryable",
+            }],
+          );
+          assert.deepEqual(
+            (await readHostedSystemMailboxState(durableRetryRoot)).pending.map(
+              (item) => ({
+                nextAttemptAt: item.nextAttemptAt,
+                status: item.status,
+              }),
+            ),
+            [{
+              nextAttemptAt: providerRetryWakeAt,
+              status: "recording",
+            }],
+          );
+        } finally {
+          await removeTempRoot(durableRetryRoot);
+        }
+
+        const durableRetryWorkspaceVersion = String(
+          BigInt(
+            checkpointRequests.at(-1)?.expectedWorkspaceVersion ?? "0",
+          ) + 1n,
+        );
+        const runColdRetryWorkspace = async (input: {
+          attemptId: string;
+          workspace: Awaited<ReturnType<typeof createVaultSnapshotBundle>>;
+          workspaceVersion: string;
+        }) => {
+          const coldCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+          const coldCheckpointBundles: Array<Awaited<
+            ReturnType<typeof createVaultSnapshotBundle>
+          >> = [];
+          const coldResult = await runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput({
+              platformEnv: { TELEGRAM_BOT_TOKEN: "" },
+              forwardedEnv: { LINQ_API_TOKEN: "synthetic-linq-token" },
+              request: {
+                assistantExecutionBlocked: true,
+                attemptId: input.attemptId,
+                processingMode: "system_mailbox",
+                workspaceVersion: input.workspaceVersion,
+              },
+              resolvedConfig: {
+                channelCapabilities: {
+                  emailSendReady: false,
+                  telegramBotConfigured: false,
+                },
+                deviceSync: null,
+                managedAutoReplyChannels: [{
+                  capabilityReady: true,
+                  channel: "linq",
+                  memberChannel: "linq",
+                }],
+              },
+            }),
+            {
+              async createCheckpointSnapshot() {
+                const checkpointBundle = await createVaultSnapshotBundle({
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + `${input.attemptId}-${coldCheckpointRequests.length + 1}.bundle.json`,
+                  vaultRoot,
+                });
+                coldCheckpointBundles.push(checkpointBundle);
+                return { snapshotRef: checkpointBundle.snapshotRef };
+              },
+              async importItem() {
+                throw new Error(
+                  "Cold-restored retry notification must not import a new row.",
+                );
+              },
+              platform: {
+                ...createPlatform({
+                  artifactBytesByHash: new Map([
+                    [input.workspace.hash, input.workspace.bytes],
+                  ]),
+                  mailboxPort: createMailboxPort({ events, items: [] }),
+                  workspacePort: createWorkspacePort({
+                    checkpointRequests: coldCheckpointRequests,
+                    events,
+                    workspace: createWorkspaceState({
+                      snapshotRef: input.workspace.snapshotRef,
+                      version: input.workspaceVersion,
+                    }),
+                  }),
+                }),
+                effectsPort,
+                providerFetch,
+              },
+              async runAssistantPhase() {
+                throw new Error(
+                  "Cold-restored retry notification must not enter assistant execution.",
+                );
+              },
+              vaultRoot,
+            },
+          );
+          return {
+            checkpointBundles: coldCheckpointBundles,
+            checkpointRequests: coldCheckpointRequests,
+            result: coldResult,
+          };
+        };
+
+        const sendsAfterProviderFailure = deliveryBodies.length;
+        const beforeRetry = await runColdRetryWorkspace({
+          attemptId: "attempt_synthetic_group_join_cold_before_retry",
+          workspace: durableRetryWorkspace,
+          workspaceVersion: durableRetryWorkspaceVersion,
+        });
+        assert.equal(deliveryBodies.length, sendsAfterProviderFailure);
+        assert.equal(beforeRetry.checkpointRequests.length, 1);
+        assert.equal(
+          beforeRetry.checkpointRequests[0]?.nextWakeAt,
+          providerRetryWakeAt,
+        );
+        assert.equal(
+          beforeRetry.checkpointRequests[0]?.nextWakeReason,
+          "assistant",
+        );
+        assert.equal(beforeRetry.result.status, "scheduled");
+        assert.equal(beforeRetry.result.nextWakeAt, providerRetryWakeAt);
+        assert.deepEqual(
+          (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
+            nextAttemptAt: intent.nextAttemptAt,
+            status: intent.status,
+          })),
+          [{
+            nextAttemptAt: providerRetryWakeAt,
+            status: "retryable",
+          }],
+        );
+
+        if (!providerRetryWakeAt) {
+          throw new Error("Provider retry wake must be available after failure.");
+        }
+        vi.setSystemTime(new Date(providerRetryWakeAt));
+        const beforeRetryWorkspace = beforeRetry.checkpointBundles.at(-1);
+        assert.ok(beforeRetryWorkspace);
+        const beforeRetryWorkspaceVersion = String(
+          BigInt(
+            beforeRetry.checkpointRequests.at(-1)
+              ?.expectedWorkspaceVersion ?? durableRetryWorkspaceVersion,
+          ) + 1n,
+        );
+        const atRetry = await runColdRetryWorkspace({
+          attemptId: "attempt_synthetic_group_join_cold_at_retry",
+          workspace: beforeRetryWorkspace,
+          workspaceVersion: beforeRetryWorkspaceVersion,
+        });
+        assert.equal(deliveryBodies.length, sendsAfterProviderFailure + 1);
+        assert.deepEqual(
+          (await listAssistantOutboxIntents(vaultRoot)).map((intent) =>
+            intent.status
+          ),
+          ["sent"],
+        );
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending,
+          [],
+        );
+        assert.equal(
+          atRetry.checkpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+        assert.equal(atRetry.result.status, "idle");
+      }
+      if (checkpointConversationInputAhead) {
+        assert.deepEqual(
+          checkpointRequests.map((request) => request.expectedWorkspaceVersion),
+          ["0", "1"],
+        );
+        if (channel === "telegram") {
+          const ambiguousWorkspace = checkpointBundles.at(0);
+          assert.ok(ambiguousWorkspace);
+          const ambiguousCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+          const ambiguousResult = await runHostedWorkspaceRuntimeJobInProcess(
+            createWorkspaceRuntimeJobInput({
+              platformEnv: {
+                TELEGRAM_BOT_TOKEN: "synthetic-telegram-token",
+              },
+              forwardedEnv: { LINQ_API_TOKEN: "" },
+              request: {
+                assistantExecutionBlocked: true,
+                attemptId:
+                  "attempt_synthetic_blocked_group_join_restored_telegram_ambiguous",
+                processingMode: "system_mailbox",
+                workspaceVersion: "1",
+              },
+              resolvedConfig: {
+                channelCapabilities: {
+                  emailSendReady: false,
+                  telegramBotConfigured: true,
+                },
+                deviceSync: null,
+                managedAutoReplyChannels: [{
+                  capabilityReady: true,
+                  channel: "telegram",
+                  memberChannel: "telegram",
+                }],
+              },
+            }),
+            {
+              async createCheckpointSnapshot() {
+                return {
+                  snapshotRef: createBundleRef({
+                    hash: "f".repeat(64),
+                    key:
+                      "users/bundles/member-synthetic/"
+                      + "blocked-group-join-restored-telegram-ambiguous.bundle.json",
+                    size: 512,
+                  }),
+                };
+              },
+              async importItem() {
+                throw new Error(
+                  "Ambiguous Telegram notification must not import a new row.",
+                );
+              },
+              platform: {
+                ...createPlatform({
+                  artifactBytesByHash: new Map([
+                    [ambiguousWorkspace.hash, ambiguousWorkspace.bytes],
+                  ]),
+                  mailboxPort: createMailboxPort({ events, items: [] }),
+                  workspacePort: createWorkspacePort({
+                    checkpointRequests: ambiguousCheckpointRequests,
+                    events,
+                    workspace: createWorkspaceState({
+                      snapshotRef: ambiguousWorkspace.snapshotRef,
+                      version: "1",
+                    }),
+                  }),
+                }),
+                effectsPort,
+                providerFetch,
+              },
+              async runAssistantPhase() {
+                throw new Error(
+                  "Ambiguous Telegram notification must not enter assistant execution.",
+                );
+              },
+              vaultRoot,
+            },
+          );
+
+          assert.equal(deliveryBodies.length, 0);
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
+              preparedDispatchTokenPresent:
+                intent.preparedDispatchToken !== null,
+              status: intent.status,
+            })),
+            [{
+              preparedDispatchTokenPresent: true,
+              status: "sending",
+            }],
+          );
+          assert.equal(ambiguousResult.status, "scheduled");
+          assert.ok(ambiguousResult.nextWakeAt);
+          assert.ok(ambiguousResult.nextWakeAt > TEST_NOW);
+        }
+        const resumedWorkspaceVersion = String(
+          BigInt(
+            checkpointRequests.at(-1)?.expectedWorkspaceVersion ?? "0",
+          ) + 1n,
+        );
+        const resumedWorkspace = checkpointBundles.at(-1);
+        assert.ok(resumedWorkspace);
+        const resumedCheckpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+        const resumedResult = await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            platformEnv: {
+              TELEGRAM_BOT_TOKEN:
+                channel === "telegram" ? "synthetic-telegram-token" : "",
+            },
+            forwardedEnv: {
+              LINQ_API_TOKEN:
+                channel === "linq" ? "synthetic-linq-token" : "",
+            },
+            request: {
+              assistantExecutionBlocked: true,
+              attemptId:
+                "attempt_synthetic_blocked_group_join_restored_after_foreground",
+              processingMode: "system_mailbox",
+              workspaceVersion: resumedWorkspaceVersion,
+            },
+            resolvedConfig: {
+              channelCapabilities: {
+                emailSendReady: false,
+                telegramBotConfigured: channel === "telegram",
+              },
+              deviceSync: null,
+              managedAutoReplyChannels: [{
+                capabilityReady: true,
+                channel,
+                memberChannel: channel,
+              }],
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              return {
+                snapshotRef: createBundleRef({
+                  hash: "e".repeat(64),
+                  key:
+                    "users/bundles/member-synthetic/"
+                    + "blocked-group-join-restored-after-foreground-done.bundle.json",
+                  size: 512,
+                }),
+              };
+            },
+            async importItem() {
+              throw new Error(
+                "Foreground-preempted notification must not import a new row.",
+              );
+            },
+            platform: {
+              ...createPlatform({
+                artifactBytesByHash: new Map([
+                  [resumedWorkspace.hash, resumedWorkspace.bytes],
+                ]),
+                mailboxPort: createMailboxPort({ events, items: [] }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests: resumedCheckpointRequests,
+                  events,
+                  workspace: createWorkspaceState({
+                    snapshotRef: resumedWorkspace.snapshotRef,
+                    version: resumedWorkspaceVersion,
+                  }),
+                }),
+              }),
+              effectsPort,
+              providerFetch,
+            },
+            async runAssistantPhase() {
+              throw new Error(
+                "Resumed exact notification must not enter assistant execution.",
+              );
+            },
+            vaultRoot,
+          },
+        );
+
+        assert.equal(deliveryBodies.length, 1);
+        expect(JSON.stringify(deliveryBodies[0])).toContain(exactText);
+        assert.deepEqual(
+          (await listAssistantOutboxIntents(vaultRoot)).map((intent) =>
+            intent.status
+          ),
+          ["sent"],
+        );
+        assert.deepEqual(
+          (await readHostedSystemMailboxState(vaultRoot)).pending,
+          [],
+        );
+        assert.equal(
+          resumedCheckpointRequests.at(-1)?.redactedStatus
+            ?.hostedMailboxSystemHandledThroughSeq,
+          "1",
+        );
+        assert.equal(resumedResult.status, "idle");
+      }
+    } finally {
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
+  test("system mailbox mode hands ready approvals to the foreground owner before device-sync", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const events: string[] = [];
+    const fetchRequests: HostedMailboxFetchRequest[] = [];
+    const deviceSyncPort = createEmptyDeviceSyncPort();
+    const approvalEffectIds = [
+      "effect_system_mailbox_approval_a",
+      "effect_system_mailbox_approval_b",
+    ];
+    const deviceItem = createMailboxItem({
+      dedupeKey: "device-sync.wake:before-system-mailbox-approvals",
+      id: "mailbox_item_system_mailbox_device_before_approvals",
+      kind: "device-sync.wake",
+      lane: "system",
+      laneSeq: "1",
+      occurredAt: "2026-04-26T23:59:00.000Z",
+    });
+    const approvalItems = approvalEffectIds.map((effectId, index) =>
+      createMailboxItem({
+        dedupeKey: `runtime.pending-effects-reconcile-requested:${effectId}`,
+        id: `mailbox_item_system_mailbox_approval_${index + 1}`,
+        kind: "runtime.pending-effects-reconcile-requested",
+        lane: "system",
+        laneSeq: String(index + 2),
+      })
+    );
+    let assistantPhaseCalls = 0;
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(TEST_NOW));
+      mocks.collectHostedAssistantDeliverySideEffects.mockClear();
+      mocks.drainHostedPreparedAssistantDeliveries.mockClear();
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockClear();
+      mocks.prepareHostedCodexRuntimeEnvironment.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
+        async (input) => {
+          const effectId = input.preferredEffectIds?.[0] ?? null;
+          if (!effectId || !approvalEffectIds.includes(effectId)) {
+            return [];
+          }
+          return [{
+            deliveryPhase: "foreground_current_turn",
+            effectId,
+            fingerprint: `fingerprint_${effectId}`,
+            kind: "assistant.delivery",
+            payload: {
+              actorId: null,
+              answeredMailboxItemIds: [],
+              bindingDeliveryKind: null,
+              bindingDeliveryTarget: null,
+              channel: "linq",
+              deliverySourceKey: null,
+              explicitTarget: null,
+              identityId: null,
+              idempotencyKey: `assistant-outbox:${effectId}`,
+              media: [],
+              message: `Synthetic approved delivery ${effectId}`,
+              replyToMessageId: null,
+              sessionId: "session_system_mailbox_approval_owner",
+              subject: null,
+              threadId: null,
+              threadIsDirect: true,
+              transportIdempotent: true,
+              turnId: "turn_system_mailbox_approval_owner",
+            },
+          }];
+        },
+      );
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockResolvedValue({
+        preparedDispatches: [],
+      });
+      mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(async (input) => {
+        assert.equal(deviceSyncPort.fetchSnapshotCalls, 0);
+        for (const effect of input.assistantDeliveryEffects) {
+          events.push(`approval.delivery:${effect.effectId}`);
+        }
+        return [];
+      });
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await enqueueDeviceSyncSystemMailboxItemForTest({
+        item: deviceItem,
+        vaultRoot,
+      });
+      for (const [index, item] of approvalItems.entries()) {
+        await enqueuePendingEffectsSystemMailboxItemForTest({
+          effectId: approvalEffectIds[index]!,
+          item,
+          vaultRoot,
+        });
+      }
+      const importState = createEmptyHostedMailboxImportState();
+      importState.watermarks.system = "3";
+      await writeMailboxImportStateFile(vaultRoot, importState);
+      const restoredWorkspace = await createVaultSnapshotBundle({
+        key: "users/bundles/member-synthetic/system-mailbox-approval-owner-before.bundle.json",
+        vaultRoot,
+      });
+
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId: "attempt_synthetic_system_mailbox_approval_owner",
+            processingMode: "system_mailbox",
+            workspaceVersion: "0",
+          },
+          resolvedConfig: createDeviceSyncResolvedConfig(),
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "9".repeat(64),
+                key: "users/bundles/member-synthetic/system-mailbox-approval-owner.bundle.json",
+                size: 512,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("Already-imported approval work should not import a new row.");
+          },
+          platform: createPlatform({
+            artifactBytesByHash: new Map([[restoredWorkspace.hash, restoredWorkspace.bytes]]),
+            deviceSyncPort,
+            mailboxPort: createMailboxPort({
+              events,
+              fetchRequests,
+              items: [],
+            }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests,
+              events,
+              workspace: createWorkspaceState({
+                snapshotRef: restoredWorkspace.snapshotRef,
+                version: "0",
+              }),
+            }),
+          }),
+          async runAssistantPhase(input) {
+            assistantPhaseCalls += 1;
+            events.push("approval.foreground-owner");
+            return await runHostedWorkspaceAssistantPhase({
+              ...input,
+              now: () => TEST_NOW,
+            });
+          },
+          vaultRoot,
+        },
+      );
+
+      assert.ok(assistantPhaseCalls >= 2);
+      assert.deepEqual(
+        mocks.collectHostedAssistantDeliverySideEffects.mock.calls.map(
+          ([input]) => input.preferredEffectIds ?? [],
+        ),
+        approvalEffectIds.map((effectId) => [effectId]),
+        events.join(","),
+      );
+      assert.equal(
+        mocks.drainHostedPreparedAssistantDeliveries.mock.calls.length,
+        2,
+        events.join(","),
+      );
+      assert.deepEqual(
+        events.filter((event) => event.startsWith("approval.delivery:")),
+        approvalEffectIds.map((effectId) => `approval.delivery:${effectId}`),
+        events.join(","),
+      );
+      assert.ok(events.includes("workspace.checkpoint"), events.join(","));
+      assert.ok(deviceSyncPort.fetchSnapshotCalls <= 1);
+      const remainingWakeKinds = (await readHostedSystemMailboxState(vaultRoot))
+        .pending.map((item) => item.wake.kind);
+      assert.equal(
+        remainingWakeKinds.includes("runtime.pending-effects-reconcile-requested"),
+        false,
+      );
+      if (deviceSyncPort.fetchSnapshotCalls === 0) {
+        assert.ok(remainingWakeKinds.includes("device-sync.wake"));
+        assert.equal(result.nextWakeReason, "device-sync.reconcile");
+      }
+    } finally {
+      if (mocks.actualCollectHostedAssistantDeliverySideEffects) {
+        mocks.collectHostedAssistantDeliverySideEffects.mockImplementation(
+          mocks.actualCollectHostedAssistantDeliverySideEffects,
+        );
+      }
+      if (mocks.actualDrainHostedPreparedAssistantDeliveries) {
+        mocks.drainHostedPreparedAssistantDeliveries.mockImplementation(
+          mocks.actualDrainHostedPreparedAssistantDeliveries,
+        );
+      }
+      if (mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch) {
+        mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockImplementation(
+          mocks.actualPrepareHostedAssistantDeliveryEffectsForDispatch,
+        );
+      }
+      mocks.collectHostedAssistantDeliverySideEffects.mockClear();
+      mocks.drainHostedPreparedAssistantDeliveries.mockClear();
+      mocks.prepareHostedAssistantDeliveryEffectsForDispatch.mockClear();
+      mocks.refreshHostedBrowserVaultReplicaFromRuntime.mockClear();
+      vi.useRealTimers();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("system mailbox mode immediately rechecks when browser refresh defers to a runtime wake", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
@@ -11109,6 +12743,7 @@ describe("hosted workspace runtime entrypoint", () => {
     let snapshotOrdinal = 0;
     let activeAttemptId = "unassigned";
     let failRecordCheckpoint = true;
+    let failRetryFenceCheckpoint = false;
     const refreshImplementation =
       mocks.refreshHostedBrowserVaultReplicaFromRuntime.getMockImplementation();
 
@@ -11195,7 +12830,18 @@ describe("hosted workspace runtime entrypoint", () => {
       checkpointAttempt += 1;
       checkpointRequests.push(request);
       events.push(`checkpoint.attempt:${activeAttemptId}:${checkpointAttempt}`);
-      if (failRecordCheckpoint && checkpointAttempt === 2) {
+      if (
+        failRetryFenceCheckpoint
+        && request.reason === "canonical_runtime_commit"
+      ) {
+        events.push(`checkpoint.fail:${activeAttemptId}:${checkpointAttempt}`);
+        throw new Error("synthetic retry-fence checkpoint transport fault");
+      }
+      if (
+        failRecordCheckpoint
+        && activeAttemptId === "attempt_device_sync_closed_loop_initial"
+        && request.reason === "idle_shutdown"
+      ) {
         events.push(`checkpoint.fail:${activeAttemptId}:${checkpointAttempt}`);
         throw new Error("synthetic checkpoint transport fault");
       }
@@ -11530,6 +13176,52 @@ describe("hosted workspace runtime entrypoint", () => {
       }
       assert.equal(committedInputItem.wake.eventId, scheduleEventId);
       observedScheduleEventIds.add(committedInputItem.wake.eventId);
+      const committedInputWorkspace = currentWorkspace;
+      assert.ok(committedInputWorkspace);
+
+      failRetryFenceCheckpoint = true;
+      const rejectedRetryFenceResult = await runSystemPass({
+        attemptId:
+          "attempt_device_sync_closed_loop_retry_fence_rejected",
+        vaultRoot: warmVaultRoot,
+      });
+      assert.equal(checkpointAttempt, 2);
+      assert.equal(checkpointRequests.length, 2);
+      assert.deepEqual(
+        checkpointRequests.map((request) => request.reason),
+        ["canonical_runtime_commit", "idle_shutdown"],
+      );
+      assert.equal(providerRequestClasses.length, 0);
+      assert.equal(cadencePublications.length, 0);
+      assert.equal(
+        events.filter((event) => event.startsWith("provider.request:")).length,
+        0,
+      );
+      assert.equal(
+        events.filter((event) => event.startsWith("artifact.put:")).length,
+        0,
+      );
+      assert.ok(currentWorkspace);
+      assert.equal(currentWorkspace.version, "2");
+      assert.equal(currentWorkspace.nextWakeReason, "device-sync.reconcile");
+      assert.ok(currentWorkspace.nextWakeAt);
+      assert.equal(
+        currentWorkspace.redactedStatus
+          ?.hostedMailboxSystemHandledThroughSeq
+          ?? "0",
+        "0",
+      );
+      assert.equal(rejectedRetryFenceResult.status, "scheduled");
+      assert.equal(
+        rejectedRetryFenceResult.nextWakeReason,
+        "device-sync.reconcile",
+      );
+      assert.ok(rejectedRetryFenceResult.nextWakeAt);
+      currentWorkspace = committedInputWorkspace;
+      failRetryFenceCheckpoint = false;
+      checkpointAttempt = 0;
+      checkpointRequests.length = 0;
+      events.length = 0;
 
       await assert.rejects(
         runSystemPass({
@@ -11539,18 +13231,22 @@ describe("hosted workspace runtime entrypoint", () => {
         /synthetic checkpoint transport fault/u,
       );
 
-      assert.equal(checkpointAttempt, 2);
-      assert.equal(checkpointRequests.length, 2);
+      assert.equal(checkpointAttempt, 3);
+      assert.equal(checkpointRequests.length, 3);
       assert.deepEqual(
         checkpointRequests.map((request) => request.reason),
-        ["canonical_runtime_commit", "idle_shutdown"],
+        [
+          "canonical_runtime_commit",
+          "canonical_runtime_commit",
+          "idle_shutdown",
+        ],
       );
       assert.deepEqual(
         checkpointRequests.map((request) => request.expectedWorkspaceVersion),
-        ["1", "2"],
+        ["1", "2", "3"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "2");
+      assert.equal(currentWorkspace.version, "3");
       const initialProviderRequestClasses = providerRequestClasses.slice();
       assert.deepEqual(initialProviderRequestClasses, expectedWhoopRequestClasses);
       assert.deepEqual(cadencePublications, []);
@@ -11559,7 +13255,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "checkpoint.attempt:attempt_device_sync_closed_loop_initial:1",
       );
       const lostRecordCheckpointIndex = events.indexOf(
-        "checkpoint.fail:attempt_device_sync_closed_loop_initial:2",
+        "checkpoint.fail:attempt_device_sync_closed_loop_initial:3",
       );
       assert.notEqual(firstCheckpointAttemptIndex, -1);
       assert.notEqual(lostRecordCheckpointIndex, -1);
@@ -11568,23 +13264,23 @@ describe("hosted workspace runtime entrypoint", () => {
         events.slice(0, firstCheckpointAttemptIndex).filter((event) =>
           event.startsWith("provider.request:")
         ).length,
-        4,
+        0,
       );
       assert.equal(
         events.slice(0, firstCheckpointAttemptIndex).filter((event) =>
           event.startsWith("artifact.put:")
         ).length,
-        4,
+        0,
       );
       assert.equal(
-        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:3"),
+        events.indexOf("checkpoint.commit:attempt_device_sync_closed_loop_initial:4"),
         -1,
       );
-      const durablePostPullCheckpoint = checkpointRequests[0];
+      const durablePostPullCheckpoint = checkpointRequests[1];
       assert.ok(durablePostPullCheckpoint);
       assert.deepEqual(currentWorkspace.snapshotRef, durablePostPullCheckpoint.snapshotRef);
       assert.deepEqual(currentWorkspace.snapshotRef, committedInputSnapshotRef);
-      const failedPostPullCheckpoint = checkpointRequests[1];
+      const failedPostPullCheckpoint = checkpointRequests[2];
       assert.ok(failedPostPullCheckpoint);
       const failedPostPullSnapshotRef = failedPostPullCheckpoint.snapshotRef;
       assert.ok(isHostedWorkspaceSnapshotV2Ref(failedPostPullSnapshotRef));
@@ -11643,19 +13339,19 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(canonicalNextReconcileAt, dueAt);
       assert.equal(recovered.nextWakeReason, "device-sync.reconcile");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "5");
-      assert.equal(checkpointAttempt, 5);
-      assert.equal(checkpointRequests.length, 5);
+      assert.equal(currentWorkspace.version, "7");
+      assert.equal(checkpointAttempt, 7);
+      assert.equal(checkpointRequests.length, 7);
       assert.deepEqual(
-        checkpointRequests.slice(2, 5).map((request) =>
+        checkpointRequests.slice(3, 7).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["2", "3", "4"],
+        ["3", "4", "5", "6"],
       );
       const recoveryCheckpointCommitIndexes = events.flatMap((event, index) =>
         event.startsWith(`checkpoint.commit:${recoveryAttemptId}:`) ? [index] : []
       );
-      assert.equal(recoveryCheckpointCommitIndexes.length, 3);
+      assert.equal(recoveryCheckpointCommitIndexes.length, 4);
       const durableRecoveryCompletionCheckpointIndex =
         recoveryCheckpointCommitIndexes[recoveryCheckpointCommitIndexes.length - 1];
       assert.notEqual(durableRecoveryCompletionCheckpointIndex, undefined);
@@ -11706,17 +13402,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(settled.nextWakeAt, "2026-04-27T06:05:00.000Z");
       assert.equal(settled.nextWakeReason, "device-sync.reconcile");
       assert.deepEqual(
-        checkpointRequests.slice(5, 7).map((request) =>
+        checkpointRequests.slice(7, 10).map((request) =>
           request.expectedWorkspaceVersion
         ),
-        ["5", "6"],
+        ["7", "8", "9"],
       );
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "7");
+      assert.equal(currentWorkspace.version, "10");
 
       const checkpointAttemptsAfterSettlement = checkpointAttempt;
-      assert.equal(checkpointAttemptsAfterSettlement, 7);
-      assert.equal(checkpointRequests.length, 7);
+      assert.equal(checkpointAttemptsAfterSettlement, 10);
+      assert.equal(checkpointRequests.length, 10);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.fail:")).length,
         1,
@@ -11738,9 +13434,9 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(converged.nextWakeReason, undefined);
       assert.equal(providerRequestClasses.length, providerRequestsBeforeConvergence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeConvergence + 1);
-      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "7");
+      assert.equal(checkpointRequests.at(-1)?.expectedWorkspaceVersion, "10");
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "8");
+      assert.equal(currentWorkspace.version, "11");
 
       const quiescentBucketAt = "2026-04-27T00:15:00.000Z";
       const quiescentAttemptId =
@@ -11758,17 +13454,17 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(providerRequestClasses.length, providerRequestsBeforeQuiescence);
       assert.equal(checkpointAttempt, checkpointAttemptsBeforeQuiescence);
       assert.ok(currentWorkspace);
-      assert.equal(currentWorkspace.version, "8");
+      assert.equal(currentWorkspace.version, "11");
       assert.equal(
         providerRequestClasses.length,
         providerRequestClassesAfterSettlement,
       );
       assert.equal(checkpointAttempt, checkpointAttemptsAfterSettlement + 1);
-      assert.equal(checkpointAttempt, 8);
+      assert.equal(checkpointAttempt, 11);
       assert.equal(checkpointAttempt, checkpointRequests.length);
       assert.equal(
         events.filter((event) => event.startsWith("checkpoint.commit:")).length,
-        7,
+        10,
       );
       assert.deepEqual([...observedScheduleEventIds], [scheduleEventId]);
       assert.deepEqual([...observedMailboxItemIds], [mailboxItemId]);
@@ -12966,23 +14662,26 @@ describe("hosted workspace runtime entrypoint", () => {
       assert.equal(browserPublishCalls, 0);
       assert.deepEqual(checkpointRequests.map((request) => request.reason), [
         "canonical_runtime_commit",
+        "canonical_runtime_commit",
         "idle_shutdown",
       ]);
       assert.equal(checkpointRequests[0]?.expectedWorkspaceVersion, "0");
       assert.equal(checkpointRequests[1]?.expectedWorkspaceVersion, "1");
+      assert.equal(checkpointRequests[2]?.expectedWorkspaceVersion, "2");
+      assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
       assert.equal(
-        typeof checkpointRequests[0]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
+        typeof checkpointRequests[1]?.redactedStatus?.hostedCanonicalWriteReceiptLogSha256,
         "string",
       );
       assert.equal(
-        checkpointRequests[1]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
+        checkpointRequests[2]?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
         "0",
       );
-      assert.equal(typeof checkpointRequests[1]?.nextWakeAt, "string");
+      assert.equal(typeof checkpointRequests[2]?.nextWakeAt, "string");
       // The canonical write may make an immediate assistant snapshot refresh
       // earlier than the device continuation; either wake must be checkpointed.
       assert.match(
-        checkpointRequests[1]?.nextWakeReason ?? "",
+        checkpointRequests[2]?.nextWakeReason ?? "",
         /^(assistant|device-sync\.reconcile)$/u,
       );
       const retainedState = await readHostedSystemMailboxState(vaultRoot);
@@ -38874,20 +40573,30 @@ describe("hosted workspace runtime entrypoint", () => {
         },
       );
 
-      assert.deepEqual(events, [
+      const expectedEvents = [
         "workspace.read",
         "mailbox.fetch",
         "mailbox.fetch",
+        ...(input.nextWakeReason === "device-sync.reconcile"
+          ? ["workspace.checkpoint"]
+          : []),
         "snapshot:idle_shutdown",
         "workspace.checkpoint",
-      ]);
+      ];
+      assert.deepEqual(events, expectedEvents);
       const shouldRunDeviceSync = input.nextWakeReason === "device-sync.reconcile";
       assert.equal(deviceSyncPort.fetchSnapshotCalls, shouldRunDeviceSync ? 1 : 0);
       assert.equal(deviceSyncPort.fetchDirtyStatesCalls, 0);
-      assert.equal(checkpointRequests.length, 1);
-      assert.equal(checkpointRequests[0]?.reason, "idle_shutdown");
-      assert.equal(checkpointRequests[0]?.nextWakeAt, null);
-      assert.equal(checkpointRequests[0]?.nextWakeReason, null);
+      assert.equal(checkpointRequests.length, shouldRunDeviceSync ? 2 : 1);
+      const terminalCheckpoint = checkpointRequests.at(-1);
+      assert.equal(terminalCheckpoint?.reason, "idle_shutdown");
+      assert.equal(terminalCheckpoint?.nextWakeAt, null);
+      assert.equal(terminalCheckpoint?.nextWakeReason, null);
+      if (shouldRunDeviceSync) {
+        assert.equal(checkpointRequests[0]?.reason, "canonical_runtime_commit");
+        assert.equal(checkpointRequests[0]?.nextWakeReason, "device-sync.reconcile");
+        assert.equal(typeof checkpointRequests[0]?.nextWakeAt, "string");
+      }
       assert.equal(result.status, "idle");
       assert.equal(result.nextWakeAt, null);
       assert.equal(result.redactedStatus?.hostedMailboxFetchedCount, 0);
@@ -40862,6 +42571,96 @@ async function enqueueDeviceSyncSystemMailboxItemForTest(input: {
     item: createResolvedDeviceSyncSystemMailboxItem(input.item),
     vaultRoot: input.vaultRoot,
     wake: createDeviceSyncSystemWakeForMailboxItem(input.item),
+  });
+}
+
+async function enqueueEnvironmentInterviewSystemMailboxItemForTest(input: {
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}) {
+  return await enqueueHostedSystemMailboxItem({
+    item: {
+      item: input.item,
+      payload: {
+        payloadCiphertext: "ciphertext",
+        payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+        requestId: "request_entrypoint_environment_interview",
+        source: "inline",
+        status: "resolved",
+      },
+      route: {
+        action: "run-environment-interview",
+        advanceProgress: true,
+        itemRef: {
+          id: input.item.id,
+          kind: input.item.kind,
+          lane: input.item.lane,
+          laneSeq: input.item.laneSeq,
+        },
+        state: "route",
+      },
+    },
+    vaultRoot: input.vaultRoot,
+    wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
+      completedAt: input.item.occurredAt,
+      completionId: "550e8400-e29b-41d4-a716-446655440000",
+      eventId: input.item.dedupeKey,
+      memberId: TEST_USER_ID,
+      occurredAt: input.item.occurredAt,
+      topics: [{
+        answers: [{
+          aspectId: "sleep-environment",
+          indicatorId: "night_temp_c",
+          note: "The bedroom stays near 19 degrees at night.",
+          value: 19,
+        }],
+        topicId: "sleep:0",
+      }],
+    }),
+  });
+}
+
+function createResolvedPendingEffectsSystemMailboxItem(
+  item: HostedMailboxItem,
+): HostedMailboxResolvedImportItem {
+  return {
+    item,
+    payload: {
+      payloadCiphertext: "ciphertext",
+      payloadSchema: HOSTED_MAILBOX_PAYLOAD_SCHEMA,
+      requestId: "request_entrypoint_pending_effects_wake",
+      source: "inline",
+      status: "resolved",
+    },
+    route: {
+      action: "apply-runtime-control-request",
+      advanceProgress: true,
+      itemRef: {
+        id: item.id,
+        kind: item.kind,
+        lane: item.lane,
+        laneSeq: item.laneSeq,
+      },
+      state: "route",
+    },
+  };
+}
+
+async function enqueuePendingEffectsSystemMailboxItemForTest(input: {
+  effectId: string;
+  item: HostedMailboxItem;
+  vaultRoot: string;
+}) {
+  return await enqueueHostedSystemMailboxItem({
+    item: createResolvedPendingEffectsSystemMailboxItem(input.item),
+    vaultRoot: input.vaultRoot,
+    wake: {
+      effectId: input.effectId,
+      eventId: input.item.dedupeKey,
+      kind: "runtime.pending-effects-reconcile-requested",
+      occurredAt: input.item.occurredAt,
+      userId: input.item.userId,
+    },
   });
 }
 

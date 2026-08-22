@@ -381,7 +381,7 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     userId: input.boundUserId,
   });
 
-  const text = await readHostedWebControlPlaneResponseText({
+  const readResponseText = () => readHostedWebControlPlaneResponseText({
     description: input.description,
     maxBytes: input.sensitiveResponseBody?.maxBytes,
     response,
@@ -390,6 +390,16 @@ async function fetchHostedWebControlPlaneJsonAttempt(
   });
   const acceptedStatus = input.acceptedStatuses?.includes(response.status) ?? false;
   if (!response.ok && !acceptedStatus) {
+    let text = "";
+    try {
+      text = await readResponseText();
+    } catch (error) {
+      if (input.signal?.aborted) {
+        throw input.signal.reason ?? error;
+      }
+      // The received status is authoritative even when its optional diagnostic
+      // body is lost at transport.
+    }
     const error = createHostedWebControlPlaneResponseError({
       description: input.description,
       detail: input.sensitiveResponseBody ? "" : text.trim(),
@@ -421,6 +431,7 @@ async function fetchHostedWebControlPlaneJsonAttempt(
     throw error;
   }
 
+  const text = await readResponseText();
   if (!text.trim()) {
     return null;
   }

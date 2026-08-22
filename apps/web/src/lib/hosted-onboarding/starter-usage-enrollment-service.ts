@@ -36,6 +36,10 @@ import {
 } from "./member-activation-runtime-wake";
 import { readActiveHostedFamilySponsorship } from "./member-access";
 import {
+  scheduleHostedSignupNotificationEmails,
+} from "./signup-notification-email";
+import type { HostedSignupSurface } from "./signup-notification-context";
+import {
   sendHostedSignupWelcomeEmailForMemberBestEffort,
 } from "./signup-welcome-email";
 import {
@@ -103,7 +107,7 @@ type HostedStarterUsageEnrollmentPolicy = {
   };
   requireActivationRuntimeWake: boolean;
   requireLaunchConsent: boolean;
-  source: HostedStarterUsageSource;
+  source: Exclude<HostedStarterUsageSource, "legacy_trial_migration">;
   suppressSignupWelcomeEmail: boolean;
   suppressSignupWelcome: boolean;
 };
@@ -112,6 +116,7 @@ type HostedStarterUsagePostCommitEffects = {
   activatedMemberId: string | null;
   hostedExecutionEventId: string | null;
   hostedExecutionMailboxItemId: string | null;
+  signupNotificationEmailMemberId: string | null;
   welcomeEmailMemberId: string | null;
 };
 
@@ -433,6 +438,8 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           hostedExecutionMailboxItemId: shouldWakeActivationRuntime
             ? activation?.hostedExecutionMailboxItemId ?? null
             : null,
+          signupNotificationEmailMemberId:
+            activation?.activated ? invite.member.id : null,
           welcomeEmailMemberId:
             activation?.activated && !policy.suppressSignupWelcomeEmail
               ? invite.member.id
@@ -480,6 +487,14 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     );
   })();
 
+  if (outcome.effects.signupNotificationEmailMemberId) {
+    scheduleHostedSignupNotificationEmails({
+      activationSurface: resolveHostedStarterSignupSurface(policy.source),
+      memberIds: [outcome.effects.signupNotificationEmailMemberId],
+      prisma,
+    });
+  }
+
   const deferredActivationWake = policy.instantStartAdmission
     ? buildHostedLinqInstantStartDeferredActivationWake(outcome.effects)
     : null;
@@ -510,6 +525,19 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     deferredActivationWake,
     result: outcome.result,
   };
+}
+
+function resolveHostedStarterSignupSurface(
+  source: HostedStarterUsageEnrollmentPolicy["source"],
+): HostedSignupSurface {
+  switch (source) {
+    case "companion_onboarding":
+      return "mobile_app";
+    case "linq_instant_start":
+      return "imessage";
+    case "web_onboarding":
+      return "website";
+  }
 }
 
 async function prepareHostedStarterUsageActivationCrypto(input: {

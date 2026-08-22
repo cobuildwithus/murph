@@ -232,6 +232,7 @@ import {
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   queueHostedAssistantPendingMessageVolumeReceiptsForVault,
+  resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
 import {
@@ -609,6 +610,72 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
+  it("resolves an exact durable delivery identity and preserves its retry wake", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        deliveryIdempotencyKey: "unrelated-delivery",
+        intentId: "intent_unrelated",
+      }),
+      createPendingHostedDeliveryIntent({
+        deliveryIdempotencyKey: "exact-delivery",
+        intentId: "intent_exact",
+        nextAttemptAt: "2026-04-08T00:05:00.000Z",
+        status: "retryable",
+      }),
+    ]);
+
+    await expect(resolveHostedAssistantDeliveryIntentState({
+      deliveryIdempotencyKey: "exact-delivery",
+      now: new Date("2026-04-08T00:00:00.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual({
+      intentId: "intent_exact",
+      nextWakeAt: "2026-04-08T00:05:00.000Z",
+      terminal: false,
+    });
+  });
+
+  it("recognizes an exact durable delivery that already reached a terminal state", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        delivery: createDelivery(),
+        deliveryIdempotencyKey: "exact-delivery",
+        intentId: "intent_exact",
+        status: "sent",
+      }),
+    ]);
+
+    await expect(resolveHostedAssistantDeliveryIntentState({
+      deliveryIdempotencyKey: "exact-delivery",
+      now: new Date("2026-04-08T00:00:00.000Z"),
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual({
+      intentId: "intent_exact",
+      nextWakeAt: null,
+      terminal: true,
+    });
+  });
+
+  it("fails closed when one durable delivery identity matches multiple intents", async () => {
+    mocks.listAssistantOutboxIntents.mockResolvedValue([
+      createPendingHostedDeliveryIntent({
+        deliveryIdempotencyKey: "duplicate-delivery",
+        intentId: "intent_one",
+      }),
+      createPendingHostedDeliveryIntent({
+        deliveryIdempotencyKey: "duplicate-delivery",
+        intentId: "intent_two",
+      }),
+    ]);
+
+    await expect(resolveHostedAssistantDeliveryIntentState({
+      deliveryIdempotencyKey: "duplicate-delivery",
+      vaultRoot: "/tmp/vault",
+    })).rejects.toThrow(
+      "An exact hosted delivery identity matched multiple outbox intents.",
+    );
+  });
+
   it("does not pre-claim arbitrary non-idempotent delivery effects before provider dispatch", async () => {
     const preparation = await prepareHostedAssistantDeliveryEffectsForDispatch({
       assistantDeliveryEffects: [createEffect({ transportIdempotent: false })],

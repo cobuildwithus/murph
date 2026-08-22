@@ -12,6 +12,7 @@ import {
 } from "../hosted-crypto/secure-box";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { assertActiveHostedMemberAccessAllowed } from "../hosted-onboarding/member-access";
+import { lookupHostedMemberForPrivyPrincipal } from "../hosted-onboarding/member-identity-service";
 import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   type HostedOnboardingReadClient,
@@ -594,6 +595,34 @@ export async function assertCurrentMealPhotoCaptureEnrollmentTx(input: {
   }
 }
 
+export async function assertCurrentManualMealPhotoUploadAuthorityTx(input: {
+  identityUserId: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  await lockHostedMemberRow(input.prisma, input.memberId);
+  await lockHostedMemberSponsoredAccessRows(input.prisma, input.memberId);
+  const currentMember = await lookupHostedMemberForPrivyPrincipal({
+    identity: { userId: input.identityUserId },
+    prisma: input.prisma,
+  });
+  if (currentMember?.id !== input.memberId) {
+    throw hostedOnboardingError({
+      code: "PRIVY_USER_MISMATCH",
+      httpStatus: 409,
+      message: "This login no longer matches the current Murph member.",
+    });
+  }
+  await assertActiveHostedMemberAccessAllowed({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  await assertHostedHistoricalLaunchConsentGranted({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+}
+
 export function isMealPhotoCaptureScopedAuthorization(request: Request): boolean {
   const token = readBearerToken(request);
   return typeof token === "string" && token.startsWith(MEAL_PHOTO_CAPTURE_TOKEN_PREFIX);
@@ -629,6 +658,47 @@ export async function assertMealPhotoCaptureRequestHasNoBody(request: Request): 
 export async function readAndValidateMealPhotoUpload(
   request: Request,
 ): Promise<ValidatedMealPhotoUpload> {
+  return readAndValidateMealPhotoUploadWithCaptureId({
+    captureId: parseAutomaticMealPhotoCaptureId(request),
+    request,
+  });
+}
+
+export async function readAndValidateManualMealPhotoUpload(input: {
+  memberId: string;
+  request: Request;
+}): Promise<ValidatedMealPhotoUpload> {
+  const idempotencyKey = input.request.headers
+    .get(MEAL_PHOTO_CAPTURE_IDEMPOTENCY_HEADER)
+    ?.trim()
+    .toLowerCase() ?? "";
+  if (!MEAL_PHOTO_CAPTURE_UUID_PATTERN.test(idempotencyKey)) {
+    throw mealPhotoCaptureUploadInvalid("Meal photo idempotency key is invalid.");
+  }
+  return readAndValidateMealPhotoUploadWithCaptureId({
+    captureId: createHash("sha256")
+      .update("murph:manual-meal-photo:v1\0")
+      .update(input.memberId)
+      .update("\0")
+      .update(idempotencyKey)
+      .digest("hex"),
+    request: input.request,
+  });
+}
+
+function parseAutomaticMealPhotoCaptureId(request: Request): string {
+  const captureId = request.headers.get(MEAL_PHOTO_CAPTURE_IDEMPOTENCY_HEADER)?.trim() ?? "";
+  if (!MEAL_PHOTO_CAPTURE_CAPTURE_ID_PATTERN.test(captureId)) {
+    throw mealPhotoCaptureUploadInvalid("Meal photo idempotency key is invalid.");
+  }
+  return captureId;
+}
+
+async function readAndValidateMealPhotoUploadWithCaptureId(input: {
+  captureId: string;
+  request: Request;
+}): Promise<ValidatedMealPhotoUpload> {
+  const request = input.request;
   if (request.headers.get("content-type")?.trim().toLowerCase() !== "image/jpeg") {
     throw hostedOnboardingError({
       code: "MEAL_PHOTO_CONTENT_TYPE_UNSUPPORTED",
@@ -638,10 +708,6 @@ export async function readAndValidateMealPhotoUpload(
   }
   if (request.headers.get(MEAL_PHOTO_CAPTURE_SCHEMA_VERSION_HEADER) !== "1") {
     throw mealPhotoCaptureUploadInvalid("Meal photo schema version is invalid.");
-  }
-  const captureId = request.headers.get(MEAL_PHOTO_CAPTURE_IDEMPOTENCY_HEADER)?.trim() ?? "";
-  if (!MEAL_PHOTO_CAPTURE_CAPTURE_ID_PATTERN.test(captureId)) {
-    throw mealPhotoCaptureUploadInvalid("Meal photo idempotency key is invalid.");
   }
   const capturedAt = parseCapturedAt(
     request.headers.get(MEAL_PHOTO_CAPTURE_CAPTURED_AT_HEADER),
@@ -668,7 +734,7 @@ export async function readAndValidateMealPhotoUpload(
 
   return {
     bytes,
-    captureId,
+    captureId: input.captureId,
     capturedAt,
     ...dimensions,
     sha256: createHash("sha256").update(bytes).digest("hex"),

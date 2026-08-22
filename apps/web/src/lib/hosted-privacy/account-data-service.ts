@@ -232,6 +232,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Confirmed export includes verified-email and direct-public-sender addresses when available while omitting address lookup keys.",
   },
   {
+    slug: "prisma.hosted_email_public_bootstrap_attempt",
+    label: "Short-lived public-email bootstrap delivery attempts",
+    deletion: "live-delete",
+    note: "Deletes member-scoped cooldown, blinded candidate lookup, terminal provider outcome, and provider message metadata. The original public email body, headers, attachments, and address plaintext are never stored by this owner or included in export.",
+  },
+  {
     slug: "prisma.hosted_member_billing_ref",
     label: "Local Stripe billing references",
     deletion: "local-reference-delete",
@@ -3527,6 +3533,11 @@ async function deleteHostedAccountPrismaRows(input: {
           WHERE phone_call.member_id IN (SELECT id FROM target_members)
           RETURNING 1
         ),
+        deleted_email_public_bootstrap_attempts AS (
+          DELETE FROM hosted_email_public_bootstrap_attempt AS bootstrap_attempt
+          WHERE bootstrap_attempt.member_id IN (SELECT id FROM target_members)
+          RETURNING 1
+        ),
         deleted_member_email_authorizations AS (
           DELETE FROM hosted_member_email_authorization AS email_authorization
           WHERE email_authorization.member_id IN (SELECT id FROM target_members)
@@ -3664,6 +3675,8 @@ async function deleteHostedAccountPrismaRows(input: {
             AS "prisma.hosted_workspace",
           (SELECT count(*) FROM deleted_phone_calls)
             AS "prisma.hosted_phone_call",
+          (SELECT count(*) FROM deleted_email_public_bootstrap_attempts)
+            AS "prisma.hosted_email_public_bootstrap_attempt",
           (SELECT count(*) FROM deleted_member_email_authorizations)
             AS "prisma.hosted_member_email_authorization",
           (SELECT count(*) FROM deleted_subscription_checkouts)

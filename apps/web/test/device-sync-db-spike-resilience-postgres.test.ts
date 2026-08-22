@@ -1238,7 +1238,7 @@ describe.skipIf(!runPostgresProof)(
         "listBoundedConnectionSourcesForConnections",
       );
       const statusRead = vi.spyOn(store, "listMemberConnectionStatuses");
-      const signalRead = vi.spyOn(store, "listRecentConnectionWebhookSignals");
+      const signalRead = vi.spyOn(store, "listRecentConnectionStatusSignals");
 
       controlPlaneMocks.createHostedDeviceSyncControlPlane.mockReturnValue({
         store,

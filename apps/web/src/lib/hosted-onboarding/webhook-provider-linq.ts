@@ -1859,6 +1859,7 @@ export async function planHostedOnboardingLinqWebhook(input: {
       : undefined;
   let familyAcceptance: Awaited<ReturnType<typeof acceptHostedFamilyInviteFromPhoneTx>> = null;
   let familyActivationWake: HostedWebhookWakeHandoff | null = null;
+  let familySignupNotificationMemberId: string | null = null;
   let familyDraftCheckoutConflict = false;
   let familyStripeEffectPending = false;
   let familyRouteBlockedPlan: HostedOnboardingLinqDirectPlan | null = null;
@@ -1924,6 +1925,9 @@ export async function planHostedOnboardingLinqWebhook(input: {
           });
         },
         onAcceptedMemberActivated: (activation) => {
+          if (activation.activated) {
+            familySignupNotificationMemberId = activation.memberId;
+          }
           if (activation.hostedExecutionEventId && activation.hostedExecutionMailboxItemId) {
             familyActivationWake = {
               eventId: activation.hostedExecutionEventId,
@@ -1995,6 +1999,12 @@ export async function planHostedOnboardingLinqWebhook(input: {
         }),
         messageId: summary.messageId,
         occurredAt,
+        ...(familySignupNotificationMemberId
+          ? {
+              signupNotificationMemberId:
+                familySignupNotificationMemberId,
+            }
+          : {}),
         sourceEventId: input.event.event_id,
         ...(familyActivationWake ? { wakeHandoff: familyActivationWake } : {}),
       }),

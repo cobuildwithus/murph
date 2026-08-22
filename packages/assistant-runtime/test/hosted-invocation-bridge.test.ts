@@ -402,15 +402,17 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   }
 
   it("emits one bounded failure record at each fixed snapshot lifecycle stage", async () => {
-    const failureStages = [
-      "plan",
-      "session",
-      "archive",
-      "upload",
-      "checkpoint",
+    const failureCases = [
+      { stage: "plan" },
+      { sessionPhase: "session_start_request", stage: "session" },
+      { sessionPhase: "session_start_response_decode", stage: "session" },
+      { stage: "archive" },
+      { stage: "upload" },
+      { stage: "checkpoint" },
     ] as const;
 
-    for (const expectedStage of failureStages) {
+    for (const failureCase of failureCases) {
+      const expectedStage = failureCase.stage;
       const vaultRoot = await createVaultRoot();
       const { calls, platform } = createRuntimePlatform();
       const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
@@ -419,6 +421,17 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           ? "Hosted bundle archive is invalid."
           : `Synthetic ${expectedStage} failure.`,
       );
+      if (expectedStage === "session") {
+        Object.assign(failure, {
+          phase: failureCase.sessionPhase,
+          timeoutMs: 6_000,
+        });
+      } else if (expectedStage === "checkpoint") {
+        Object.assign(failure, {
+          phase: "session_complete_request",
+          timeoutMs: 30_000,
+        });
+      }
 
       if (expectedStage === "plan") {
         platform.workspacePort = {
@@ -458,6 +471,19 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           eventCode: "checkpoint.snapshot_failed",
           redactedJson: expect.objectContaining({
             snapshotMode: "workspace_snapshot_v2",
+            ...(expectedStage === "session"
+              ? {
+                  snapshotSessionStartElapsedMs: expect.any(Number),
+                  snapshotSessionStartFailurePhase: failureCase.sessionPhase,
+                  snapshotSessionStartTimeoutMs: 6_000,
+                }
+              : expectedStage === "checkpoint"
+                ? {
+                    snapshotSessionCompleteElapsedMs: expect.any(Number),
+                    snapshotSessionCompleteFailurePhase: "session_complete_request",
+                    snapshotSessionCompleteTimeoutMs: 30_000,
+                  }
+              : {}),
             snapshotStage: expectedStage,
           }),
         }),
@@ -467,6 +493,47 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
         || entry.eventCode === "checkpoint.snapshot_started"
       )).toBe(false);
     }
+  });
+
+  it("retains local checkpoint-recording failure provenance without inventing a timeout", async () => {
+    const vaultRoot = await createVaultRoot();
+    const { calls, platform } = createRuntimePlatform();
+    const recordFailureCause = Object.freeze(
+      new Error("Synthetic local checkpoint recording cause."),
+    );
+    const failure = Object.assign(
+      new Error("Hosted workspace snapshot session start failed.", {
+        cause: recordFailureCause,
+      }),
+      { phase: "session_complete_record_checkpoint" },
+    );
+    calls.completeSnapshotSession.mockRejectedValueOnce(failure);
+    const options = createBridgeOptions({
+      platform,
+      snapshotArchiveBuilder: createSnapshotArchiveBuilder(),
+      vaultRoot,
+    });
+
+    await expect(options.createCheckpointSnapshot(
+      createCheckpointInput("idle_shutdown"),
+    )).rejects.toBe(failure);
+
+    expect(failure.cause).toBe(recordFailureCause);
+    const lifecycleEntries = calls.logWrite.mock.calls
+      .flatMap(([request]) => request.entries)
+      .filter((entry) => entry.eventCode === "checkpoint.snapshot_failed");
+    expect(lifecycleEntries).toEqual([
+      expect.objectContaining({
+        redactedJson: expect.objectContaining({
+          snapshotSessionCompleteElapsedMs: expect.any(Number),
+          snapshotSessionCompleteFailurePhase: "session_complete_record_checkpoint",
+          snapshotStage: "checkpoint",
+        }),
+      }),
+    ]);
+    expect(lifecycleEntries[0]?.redactedJson).not.toHaveProperty(
+      "snapshotSessionCompleteTimeoutMs",
+    );
   });
 
   it("does not wait for the queued finished record before returning a checkpoint", async () => {
@@ -1290,6 +1357,8 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
           snapshotDirectR2UploadElapsedMs: expect.any(Number),
           snapshotElapsedMs: expect.any(Number),
           snapshotMode: "workspace_snapshot_v2",
+          snapshotSessionCompleteElapsedMs: expect.any(Number),
+          snapshotSessionStartElapsedMs: expect.any(Number),
           webCheckpointAccepted: true,
           workspaceSnapshotEncryptedBytes: 18,
           workspaceSnapshotFileCount: expect.any(Number),

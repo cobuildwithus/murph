@@ -27,9 +27,6 @@ export function resolveHostedRuntimeDeviceSyncProviderConfigs(
     const junction = readConfiguredJunctionDeviceSyncProviderConfig(platformEnv);
 
     if (junction) {
-      // Hosted config owns no explicit resource list; preserve that omission so
-      // provider normalization applies the contracts-owned curated defaults.
-      delete junction.timeseriesResources;
       runtimeProviderConfigs.junction = junction;
     }
   }

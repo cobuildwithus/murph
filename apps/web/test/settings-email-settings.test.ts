@@ -214,7 +214,7 @@ describe("HostedEmailSettings", () => {
       (candidate) => candidate.textContent?.includes("Link email"),
     );
     expect(linkButton).toBeTruthy();
-    const contactLink = container.querySelector('a[href="mailto:murph@mail.withmurph.ai"]');
+    const contactLink = container.querySelector('a[href="mailto:mail@mail.withmurph.ai"]');
     expect(contactLink).toBeNull();
     expect(container.querySelector('input[id="settings-email-address"]')).toBeNull();
 

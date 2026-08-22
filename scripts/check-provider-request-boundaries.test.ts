@@ -236,6 +236,27 @@ describe("check-provider-request-boundaries", () => {
     ]);
   });
 
+  it("allows Gemini only in the exact runtime-validated video owner", () => {
+    expect(violations(`
+      async function executeAnalyzeVideoTool(fetchImpl: typeof fetch) {
+        return fetchImpl(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+          { method: "POST" },
+        );
+      }
+    `, "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts"))
+      .toEqual([]);
+    expect(violations(`
+      async function analyzeVideo(fetchImpl: typeof fetch) {
+        return fetchImpl(
+          "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent",
+          { method: "POST" },
+        );
+      }
+    `, "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts"))
+      .toEqual(["raw-provider-http"]);
+  });
+
   it("reports the primitive once inside a local wrapper", () => {
     const result = findProviderRequestBoundaryViolations(
       "packages/example/src/openai-client.ts",
@@ -261,6 +282,7 @@ describe("check-provider-request-boundaries", () => {
       "apps/web/src/lib/hosted-onboarding/linq-contact-card.ts",
       "apps/web/src/lib/linq/api.ts",
       "packages/assistant-engine/src/assistant/channels/runtime.ts",
+      "packages/assistant-engine/src/assistant-codex/analyze-video-tool.ts",
       "packages/operator-config/src/linq-runtime.ts",
       "scripts/linq-typing-repro.ts",
       "scripts/native-ios-hosted-e2e-identity.mjs",

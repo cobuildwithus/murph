@@ -783,7 +783,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Ops usage dashboard pagination">
+          <StudySection title="Ops usage search and recovery">
             <OpsUsageStudy />
           </StudySection>
         </>

@@ -135,6 +135,14 @@ const ASSISTANT_MAINTENANCE_TURN_PROFILE: Required<
   threadScope: 'isolated-thread',
   toolProfile: 'maintenance-turn',
 }
+const ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE: Required<
+  AssistantCodexTurnThreadScopeProfile
+> = {
+  nativeResumePolicy: 'disabled',
+  promptProfile: 'conversation',
+  threadScope: 'isolated-thread',
+  toolProfile: 'output-only-turn',
+}
 const ASSISTANT_SYSTEM_NOTIFICATION_TURN_PROFILE: Required<
   AssistantCodexTurnThreadScopeProfile
 > = {
@@ -194,6 +202,7 @@ export type AssistantNotificationTurnPolicy =
     }
 
 export type AssistantNotificationPromptProfile =
+  | 'context-handoff'
   | 'creative-response'
   | 'creative-response-text'
 
@@ -1752,6 +1761,9 @@ function resolveAssistantNotificationTurnProfile(
 ): Required<AssistantCodexTurnThreadScopeProfile> | null {
   if (isAssistantNotificationMaintenanceExactSkip(input)) {
     return ASSISTANT_MAINTENANCE_TURN_PROFILE
+  }
+  if (input.notificationPromptProfile === 'context-handoff') {
+    return ASSISTANT_CONTEXT_HANDOFF_NOTIFICATION_TURN_PROFILE
   }
   if (input.notificationPromptProfile === 'creative-response') {
     return ASSISTANT_CREATIVE_NOTIFICATION_TURN_PROFILE

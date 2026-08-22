@@ -30,6 +30,7 @@ describe("experiment start contact resolver", () => {
           },
         ],
       },
+      murphEmailAddress: "assistant+private@mail.example.test",
       murphPhoneNumber: "+15550100001",
       protocolTitle: "Finnish Dry Sauna",
     });
@@ -50,7 +51,7 @@ describe("experiment start contact resolver", () => {
     expect(action.options.find((option) => option.kind === "telegram")?.href)
       .toEqual(expect.stringContaining(`${MURPH_EXPERIMENT_TELEGRAM_URL}?text=`));
     expect(action.options.find((option) => option.kind === "email")?.href)
-      .toContain(`mailto:${MURPH_EXPERIMENT_CONTACT_EMAIL}`);
+      .toContain("mailto:assistant+private@mail.example.test");
     for (const option of action.options) {
       expect(decodeURIComponent(option.href.replaceAll("+", "%20")))
         .toContain("I want to start the Finnish Dry Sauna experiment.");
@@ -86,6 +87,16 @@ describe("experiment start contact resolver", () => {
         kind: "email",
       },
     });
+    if (action.kind !== "open") {
+      return;
+    }
+    expect(action.option.href).toContain(`mailto:${MURPH_EXPERIMENT_CONTACT_EMAIL}`);
+    expect(decodeURIComponent(action.option.href)).toContain(
+      "Please send me a private Murph reply.",
+    );
+    expect(decodeURIComponent(action.option.href)).not.toContain(
+      "I want to start the Norwegian 4x4 experiment.",
+    );
   });
 
   it("does not enable unverified email as a start channel", () => {

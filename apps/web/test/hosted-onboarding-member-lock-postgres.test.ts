@@ -23,6 +23,7 @@ import { scheduleHostedBillingPlanSwitch } from "@/src/lib/hosted-onboarding/bil
 import { createHostedBillingCheckout } from "@/src/lib/hosted-onboarding/billing-service";
 import { completeHostedPrivyVerification } from "@/src/lib/hosted-onboarding/authentication-service";
 import { ensureHostedCompanionMemberId } from "@/src/lib/hosted-onboarding/companion-member-access";
+import { createHostedMemberReplyAliasRoute } from "@/src/lib/hosted-onboarding/hosted-email-reply-alias";
 import {
   createHostedFamilyBillingCheckout,
   HOSTED_FAMILY_STRIPE_PRICE_ID_ENV_KEY,
@@ -44,6 +45,9 @@ import {
   ensureHostedMemberForPrivyIdentityResolutionTx,
   reconcileHostedPrivyIdentityOnMemberTx,
 } from "@/src/lib/hosted-onboarding/member-identity-service";
+import {
+  readHostedMemberIdByReplyAliasLookupKey,
+} from "@/src/lib/hosted-onboarding/hosted-member-routing-store";
 import {
   suspendHostedMemberForBillingReversalTx,
   writeHostedMemberStripeBillingTx,
@@ -2180,6 +2184,113 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 describe.skipIf(!runPostgresConcurrencyProof)(
   "hosted verified-email Privy rebinding PostgreSQL concurrency",
   () => {
+    it("rotates the private reply alias from live email authority and keeps agreement stable", async () => {
+      const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const fixtureId = randomUUID();
+      const memberId = `hbm_email_alias_rebind_${fixtureId}`;
+      const staleBearerAddress = `alias-stale-${fixtureId}@example.test`;
+      const liveAddress = `alias-live-${fixtureId}@example.test`;
+      const privyUserId = `did:privy:alias-live-${fixtureId}`;
+      const previousEmailDomain = process.env.HOSTED_EMAIL_DOMAIN;
+      const previousEmailLocalPart = process.env.HOSTED_EMAIL_LOCAL_PART;
+      const previousEmailSigningSecret = process.env.HOSTED_EMAIL_SIGNING_SECRET;
+      const previousPublicBaseUrl = process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL;
+      process.env.HOSTED_EMAIL_DOMAIN = "mail.example.test";
+      process.env.HOSTED_EMAIL_LOCAL_PART = "assistant";
+      process.env.HOSTED_EMAIL_SIGNING_SECRET = "test-rebinding-reply-alias-secret";
+      process.env.HOSTED_ONBOARDING_PUBLIC_BASE_URL = "https://join.example.test";
+      clearHostedOnboardingEnvCache();
+      installPassthroughHostedSecureBoxTestCodec();
+      privyProvider.exists = true;
+      privyProvider.emailByUserId.set(privyUserId, liveAddress);
+      const originalRoute = await createHostedMemberReplyAliasRoute({
+        generation: 4,
+        memberId,
+      });
+      if (!originalRoute) {
+        throw new Error("Expected the original reply-alias route.");
+      }
+
+      try {
+        await seedVerifiedEmailRebindingMember({
+          emailAddress: staleBearerAddress,
+          memberId,
+          oldPrivyUserId: privyUserId,
+          prisma: observer,
+        });
+        await observer.hostedMemberRouting.create({
+          data: {
+            memberId,
+            replyAliasGeneration: 4,
+            replyAliasLookupKey: originalRoute.replyAliasLookupKey,
+          },
+        });
+
+        await expect(completeHostedPrivyVerification({
+          authMethod: "email",
+          identity: makeVerifiedEmailRebindingIdentity({
+            emailAddress: staleBearerAddress,
+            privyUserId,
+          }),
+          now: new Date("2026-08-20T12:00:00.000Z"),
+          prisma: observer,
+        })).resolves.toMatchObject({ memberId });
+
+        const rotatedRoute = await createHostedMemberReplyAliasRoute({
+          generation: 5,
+          memberId,
+        });
+        if (!rotatedRoute) {
+          throw new Error("Expected the rotated reply-alias route.");
+        }
+        await expect(observer.hostedMemberEmailAuthorization.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          verifiedEmailLookupKey: createHostedEmailLookupKey(liveAddress),
+        });
+        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          replyAliasGeneration: 5,
+          replyAliasLookupKey: rotatedRoute.replyAliasLookupKey,
+        });
+        await expect(readHostedMemberIdByReplyAliasLookupKey({
+          prisma: observer,
+          replyAliasLookupKey: originalRoute.replyAliasLookupKey,
+        })).resolves.toBeNull();
+        await expect(readHostedMemberIdByReplyAliasLookupKey({
+          prisma: observer,
+          replyAliasLookupKey: rotatedRoute.replyAliasLookupKey,
+        })).resolves.toBe(memberId);
+
+        await expect(completeHostedPrivyVerification({
+          authMethod: "email",
+          identity: makeVerifiedEmailRebindingIdentity({
+            emailAddress: liveAddress,
+            privyUserId,
+          }),
+          now: new Date("2026-08-20T12:01:00.000Z"),
+          prisma: observer,
+        })).resolves.toMatchObject({ memberId });
+        await expect(observer.hostedMemberRouting.findUniqueOrThrow({
+          where: { memberId },
+        })).resolves.toMatchObject({
+          replyAliasGeneration: 5,
+          replyAliasLookupKey: rotatedRoute.replyAliasLookupKey,
+        });
+      } finally {
+        restoreEnvValue("HOSTED_EMAIL_DOMAIN", previousEmailDomain);
+        restoreEnvValue("HOSTED_EMAIL_LOCAL_PART", previousEmailLocalPart);
+        restoreEnvValue("HOSTED_EMAIL_SIGNING_SECRET", previousEmailSigningSecret);
+        restoreEnvValue("HOSTED_ONBOARDING_PUBLIC_BASE_URL", previousPublicBaseUrl);
+        clearHostedOnboardingEnvCache();
+        privyProvider.emailByUserId.delete(privyUserId);
+        await observer.hostedMember.deleteMany({ where: { id: memberId } });
+        setHostedSecureBoxStringTestCodecForTests(null);
+        await disconnectClients([observer]);
+      }
+    });
+
     it("rebinds the existing member without creating another member", async () => {
       const observer = createPrismaClient({ databaseUrl, poolMax: 1 });
       const writer = createPrismaClient({ databaseUrl, poolMax: 1 });
@@ -3078,6 +3189,14 @@ function installPassthroughHostedSecureBoxTestCodec(): void {
 
 function clearHostedOnboardingEnvCache(): void {
   Reflect.deleteProperty(globalThis, "__murphHostedOnboardingEnv");
+}
+
+function restoreEnvValue(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
 }
 
 async function waitForPostgresLock(input: {

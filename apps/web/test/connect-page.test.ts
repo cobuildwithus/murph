@@ -4237,7 +4237,17 @@ test("ConnectSourcesGrid falls back to email when no preferred recovery contact 
   const contactLink = rendered.container.querySelector("a[href^='mailto:']");
   assert.ok(contactLink instanceof rendered.window.HTMLAnchorElement);
   assert.equal(contactLink.textContent, "Email Murph");
-  assert.match(contactLink.href, /Fresh%20device%20connection%20link/);
+  assert.match(contactLink.href, /Start%20a%20private%20Murph%20conversation/);
+  assert.match(
+    decodeURIComponent(contactLink.href),
+    /Please send me a private Murph reply\./,
+  );
+  assert.doesNotMatch(contactLink.href, /Fresh%20device%20connection%20link/);
+  assert.match(
+    rendered.container.textContent ?? "",
+    /receive a private reply, then ask for a fresh connection link/,
+  );
+  assert.match(rendered.container.textContent ?? "", /within a few minutes/);
   assert.doesNotMatch(rendered.container.textContent ?? "", /Set up contact/);
 
   await rendered.cleanup();

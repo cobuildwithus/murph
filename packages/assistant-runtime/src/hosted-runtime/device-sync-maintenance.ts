@@ -231,6 +231,7 @@ export async function runHostedDeviceSyncPass(
     options.onStage?.("retry_fence");
     await setHostedDeviceSyncDenseRawRetentionMailboxWakeAt({
       nextWakeAt: resolveHostedDeviceSyncYieldRetryAt(),
+      persistAtCanonicalBoundary: true,
       userId: wake.userId,
       vaultRoot,
     });
@@ -1431,6 +1432,9 @@ function toHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
   ack: HostedDeviceSyncRuntimeSyncState["pendingDirtyAcks"][number],
 ): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
   return {
+    ...(ack.completedImports
+      ? { completedImports: ack.completedImports }
+      : {}),
     connectionId: ack.connectionId,
     nextWakeAt: ack.nextWakeAt,
     ...(ack.processedDirtyPayloadIds

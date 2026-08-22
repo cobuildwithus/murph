@@ -38,12 +38,11 @@ export class PrismaHostedSignalStore {
   }
 
   /**
-   * Bounded newest-first read of durable webhook receipt signals
-   * (`kind: "webhook_hint"`) for a set of connections. This is read-only
-   * companion/status evidence over the existing signal ledger; rows are
-   * written once per durably accepted provider webhook.
+   * Bounded newest-first read of durable data-receipt evidence for a set of
+   * connections. Provider webhooks prove accepted push delivery; canonical
+   * import rows prove that an exact pull payload reached its durable owner.
    */
-  async listRecentConnectionWebhookSignals(input: {
+  async listRecentConnectionStatusSignals(input: {
     userId: string;
     connectionIds: readonly string[];
     sourceProviderSlug?: string | null;
@@ -54,8 +53,8 @@ export class PrismaHostedSignalStore {
     }
 
     const limit = Math.min(
-      Math.max(input.limit ?? DEFAULT_WEBHOOK_SIGNAL_READ_LIMIT, 1),
-      MAX_WEBHOOK_SIGNAL_READ_LIMIT,
+      Math.max(input.limit ?? DEFAULT_STATUS_SIGNAL_READ_LIMIT, 1),
+      MAX_STATUS_SIGNAL_READ_LIMIT,
     );
     // userId is required both as an ownership guard and so the newest-first
     // read can walk the existing (userId, id) index.
@@ -63,7 +62,7 @@ export class PrismaHostedSignalStore {
       where: {
         userId: input.userId,
         connectionId: { in: [...input.connectionIds] },
-        kind: "webhook_hint",
+        kind: { in: ["webhook_hint", "canonical_import"] },
         ...(input.sourceProviderSlug
           ? { sourceProviderSlug: input.sourceProviderSlug }
           : {}),
@@ -76,8 +75,8 @@ export class PrismaHostedSignalStore {
   }
 }
 
-const DEFAULT_WEBHOOK_SIGNAL_READ_LIMIT = 300;
-const MAX_WEBHOOK_SIGNAL_READ_LIMIT = 500;
+const DEFAULT_STATUS_SIGNAL_READ_LIMIT = 300;
+const MAX_STATUS_SIGNAL_READ_LIMIT = 500;
 
 function mapHostedSignalRecord(record: HostedSignalPrismaRecord): HostedSignalRecord {
   return {

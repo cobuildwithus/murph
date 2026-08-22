@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => ({
   readActiveHostedGroupDisclosureGrantsForGroup: vi.fn(),
   readActiveHostedGroupDisclosureGrantsForMember: vi.fn(),
   requestHostedGroupAssistantAsk: vi.fn(),
+  requestHostedGroupContextHandoff: vi.fn(),
   requestHostedGroupCurrentSenderAssistantAsk: vi.fn(),
   recordHostedGroupCurrentSenderDailyMetric: vi.fn(),
   requestHostedGroupMemberAssistantAsk: vi.fn(),
@@ -238,6 +239,7 @@ vi.mock("@/src/lib/hosted-groups/pending-group-setup", () => ({
 
 vi.mock("@/src/lib/hosted-groups/group-assistant-ask", () => ({
   requestHostedGroupAssistantAsk: mocks.requestHostedGroupAssistantAsk,
+  requestHostedGroupContextHandoff: mocks.requestHostedGroupContextHandoff,
   requestHostedGroupMemberAssistantAsk: mocks.requestHostedGroupMemberAssistantAsk,
 }));
 
@@ -623,6 +625,10 @@ describe("handleHostedRuntimeGroupTool", () => {
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
     });
+    mocks.requestHostedGroupContextHandoff.mockResolvedValue({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "not_configured" },
+    });
     mocks.requestHostedGroupCurrentSenderAssistantAsk.mockResolvedValue({
       mailboxWake: null,
       result: { status: "unavailable", unavailableReason: "not_configured" },
@@ -640,6 +646,7 @@ describe("handleHostedRuntimeGroupTool", () => {
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
       ask: "personal_active",
+      handoff: "personal_active",
       ask_current_sender: "participant_aware",
       record_current_sender_daily_metric: "participant_aware",
       ask_member: "participant_aware",
@@ -886,6 +893,43 @@ describe("handleHostedRuntimeGroupTool", () => {
     expect(scheduleMailboxWake).toHaveBeenCalledWith({
       expectedUserId: "member_group_runtime",
       mailboxItemId: "aask_req_one",
+    });
+  });
+
+  it("dispatches a private-to-group handoff and schedules only its committed wake", async () => {
+    const scheduleMailboxWake = vi.fn();
+    mocks.requestHostedGroupContextHandoff.mockResolvedValue({
+      mailboxWake: {
+        expectedUserId: "member_group_runtime",
+        mailboxItemId: "assistant.notification.requested:group-context-handoff:test",
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    await expect(handleHostedRuntimeGroupTool({
+      memberId: "member_self",
+      request: {
+        action: "handoff",
+        context: "Sunny logged a 405 lb deadlift personal record today.",
+        groupLabel: "100 Club",
+        originAssistantInputId: `ain_${"a".repeat(32)}`,
+      },
+      scheduleMailboxWake,
+    })).resolves.toEqual({
+      action: "handoff",
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    expect(mocks.requestHostedGroupContextHandoff).toHaveBeenCalledWith({
+      context: "Sunny logged a 405 lb deadlift personal record today.",
+      groupLabel: "100 Club",
+      memberId: "member_self",
+      originAssistantInputId: `ain_${"a".repeat(32)}`,
+    });
+    expect(scheduleMailboxWake).toHaveBeenCalledWith({
+      expectedUserId: "member_group_runtime",
+      mailboxItemId:
+        "assistant.notification.requested:group-context-handoff:test",
     });
   });
 

@@ -24,6 +24,9 @@ import {
 import {
   deviceWebhookEnqueueRoutes,
 } from "./route-handlers/device-webhook-enqueue.ts";
+import {
+  environmentRealtimeRoutes,
+} from "./route-handlers/environment-realtime.ts";
 
 export const workerInternalRoutes = [
   ...deviceWebhookEnqueueRoutes,
@@ -32,6 +35,7 @@ export const workerInternalRoutes = [
   ...inferenceVerificationRoutes,
   ...userDataDeleteRoutes,
   ...telegramUsageLimitNoticeRoutes,
+  ...environmentRealtimeRoutes,
   ...environmentVoiceRoutes,
   ...mealPhotoRoutes,
   ...browserVaultRoutes,

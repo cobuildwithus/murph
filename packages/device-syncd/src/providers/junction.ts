@@ -388,7 +388,7 @@ interface JunctionDailyTimeseriesWindow {
 
 const JUNCTION_PROFILE_SUMMARY_RESOURCE = "profile";
 const JUNCTION_PROFILE_SUMMARY_CHECKED_AT_METADATA_KEY = "junctionProfileSummaryCheckedAt";
-const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 1;
+const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION = 2;
 const JUNCTION_PROFILE_SUMMARY_NORMALIZATION_REVISION_METADATA_KEY =
   "junctionProfileSummaryNormalizationRevision";
 
@@ -1028,15 +1028,21 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const statuses = (await client.listUserProviders(userId))
+    const providerStatuses = (await client.listUserProviders(userId))
       .filter((provider) => (
         canonicalizeJunctionProviderSlug(provider.origin.sourceProviderSlug)
         ?? canonicalizeJunctionProviderSlug(provider.slug)
       ) === targetProviderSlug)
-      .map((provider) => mapJunctionSourceStatus(provider.status));
-    if (statuses.includes("connected")) {
+      .map((provider) => provider.status.trim().toLowerCase());
+    // Connection authority is the provider row's literal status. The broader
+    // projection mapper also accepts lifecycle/resource aliases such as `available`.
+    if (
+      providerStatuses.length > 0
+      && providerStatuses.every((status) => status === "connected")
+    ) {
       return true;
     }
+    const statuses = providerStatuses.map(mapJunctionSourceStatus);
     if (statuses.length === 0 || statuses.every((status) => status === "disconnected")) {
       return false;
     }

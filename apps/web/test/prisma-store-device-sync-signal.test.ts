@@ -74,7 +74,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
       take: number;
       where: {
         connectionId: { in: string[] };
-        kind: string;
+        kind: { in: string[] };
         sourceProviderSlug?: string;
         userId: string;
       };
@@ -83,7 +83,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
       return [...signals.values()]
         .filter((signal) =>
           signal.userId === input.where.userId
-          && signal.kind === input.where.kind
+          && input.where.kind.in.includes(signal.kind)
           && signal.connectionId !== null
           && input.where.connectionId.in.includes(signal.connectionId)
           && (
@@ -303,7 +303,7 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
     });
   });
 
-  it("filters webhook receipt evidence by Junction source when requested", async () => {
+  it("filters webhook and canonical import evidence by Junction source when requested", async () => {
     const baseSignal: MutableSignal = {
       connectionId: "dsc_123",
       createdAt: new Date("2026-03-26T12:00:00.000Z"),
@@ -325,13 +325,16 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       baseSignal,
       {
         ...baseSignal,
+        eventType: "canonical.data.workouts.imported",
         id: 2,
+        kind: "canonical_import",
+        occurredAt: new Date("2026-03-26T12:01:00.000Z"),
         sourceProviderSlug: "health_connect",
         traceId: "trace_android",
       },
     ]);
 
-    const signals = await store.listRecentConnectionWebhookSignals({
+    const signals = await store.listRecentConnectionStatusSignals({
       connectionIds: ["dsc_123"],
       sourceProviderSlug: "health_connect",
       userId: "user-123",
@@ -346,7 +349,7 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       expect.objectContaining({
         where: {
           connectionId: { in: ["dsc_123"] },
-          kind: "webhook_hint",
+          kind: { in: ["webhook_hint", "canonical_import"] },
           sourceProviderSlug: "health_connect",
           userId: "user-123",
         },

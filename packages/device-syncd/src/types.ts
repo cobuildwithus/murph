@@ -28,8 +28,10 @@ export type { ListDeviceConnectionSourcesInput } from "./client.ts";
 export type { ListDeviceSyncAccountsInput } from "./client.ts";
 export type { DeviceConnectionSourceRecord } from "./client.ts";
 export type { DeviceSyncJobRecord } from "./client.ts";
+export type { DeviceSyncCanonicalImportReceipt } from "./client.ts";
 
 export const DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES = 1_048_576;
+export const DEVICE_SYNC_CANONICAL_IMPORT_RECEIPT_LIMIT = 100;
 // Shared between the Junction provider's temporal resource/day dedupe keys and
 // the store's bounded terminal-history retention for those coordinates.
 export const JUNCTION_TEMPORAL_AUTHORITY_DEDUPE_PREFIX = "junction-temporal-authority:";

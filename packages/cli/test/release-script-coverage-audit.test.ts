@@ -1621,7 +1621,7 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_PROFILE_SLUG:-auto')
     expect(reviewGptConfig).toContain('REVIEW_GPT_BROWSER_LANE_COUNT')
-    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-4')
+    expect(reviewGptConfig).toContain('MURPH_REVIEW_GPT_BROWSER_LANE_COUNT:-6')
     expect(reviewGptConfig).toContain('REVIEW_GPT_THREAD_URL')
     expect(reviewGptConfig).toContain('review_gpt_reuses_existing_thread=1')
     expect(reviewGptConfig).toContain(
@@ -1716,6 +1716,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(prDeepReviewPrompt).toContain('`Checked: PR #123 @ abc1234`')
     expect(prDeepReviewPrompt).toContain('Our utmost priority is clean, simple, long-term maintainable')
     expect(prDeepReviewPrompt).toContain('Default to deletion and radical')
+    expect(prDeepReviewPrompt).toContain('merge veto, not product brainstorming')
+    expect(prDeepReviewPrompt).toContain('it is not a product\nbacklog')
+    expect(prDeepReviewPrompt).toContain('current writer, current consumer')
+    expect(prDeepReviewPrompt).toContain(
+      'Inspect an exceptional state only when the diff changes it',
+    )
     expect(prDeepReviewPrompt).toContain('`full` is a fresh full-patch audit')
     expect(prDeepReviewPrompt).toContain(
       '`correction` is a same-thread correction-verification round',
@@ -1837,6 +1843,12 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionSpecialistsPrompt).toContain(
       'Product purpose verdict:',
     )
+    expect(completionSpecialistsPrompt).toContain(
+      'merge veto, not a product backlog',
+    )
+    expect(completionSpecialistsPrompt).toContain(
+      'current writer, current consumer',
+    )
     expect(completionSpecialistsPrompt).toContain('`reviewgpt-coverage.patch`')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: PASS`')
     expect(completionSpecialistsPrompt).toContain('`SPECIALIST_OUTCOME: FINDINGS`')
@@ -1899,7 +1911,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('Vonneumann on `9446`')
     expect(prReviewGptLoop).toContain('Apollo on')
     expect(prReviewGptLoop).toContain('`9454`, always with profile `Default`')
-    expect(prReviewGptLoop).toContain('through six lanes and defaults to four')
+    expect(prReviewGptLoop).toContain('through six lanes and defaults to all six')
     expect(prReviewGptLoop).toContain('current installed Brave binary')
     expect(prReviewGptLoop).toContain(
       "passes none of Chromium's background-timer, occluded-window, or renderer",
@@ -1915,6 +1927,20 @@ describe('monorepo release flow coverage audit', () => {
       'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
+    expect(prReviewGptLoop).toContain('## Finding Disposition Pause')
+    expect(prReviewGptLoop).toMatch(
+      /Every substantive `PASS` or `FINDINGS` result from either ReviewGPT stage pauses/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'may reject a finding as wrong, already handled,',
+    )
+    expect(prReviewGptLoop).toContain(
+      'requires neither a\ncode change nor reviewer withdrawal',
+    )
+    expect(prReviewGptLoop).toContain(
+      'A `FINDINGS` result needs no review rerun',
+    )
+    expect(prReviewGptLoop).toContain('End the active task turn after this handoff')
     expect(prReviewGptLoop).toMatch(/non-obvious\s+affected\s+surfaces/iu)
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
     expect(prReviewGptLoop).toContain('disclosure-only finding')
@@ -1977,6 +2003,12 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(agentsGuide).toMatch(
       /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
+    )
+    expect(agentsGuide).toContain(
+      'agents may reject speculative, unproven, or disproportionate fixes',
+    )
+    expect(agentWorkflowRouting).toContain(
+      'evidence-backed rejections are terminal',
     )
     expect(agentWorkflowRouting).toContain(
       'For prompt-primary changes, apply the prompt lens inside the preliminary specialist ReviewGPT pass',
@@ -2083,12 +2115,18 @@ describe('monorepo release flow coverage audit', () => {
     )
     expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
+    expect(completionWorkflow).toContain(
+      'perform `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Pause',
+    )
+    expect(completionWorkflow).toContain(
+      'A rejected finding is terminal and does not require model agreement',
+    )
     expect(completionWorkflow).not.toContain(
       'User experience (when applicable)',
     )
-    expect(prDeepReviewPrompt).toContain('expected timing class and longest')
+    expect(prDeepReviewPrompt).toContain('Trace the ordinary current')
     expect(prDeepReviewPrompt).toContain(
-      'without requiring an unrelated new inbound action',
+      'Do not infer a new feature,\ncontrol, cascade, or lifecycle',
     )
     expect(completionWorkflow).toContain('direct journey proof')
     expect(completionWorkflow).toContain('Add a **Risks** section only when')
@@ -2447,8 +2485,8 @@ printf '%s|%s|%s|%s|%s\n' \
         defaultBackgroundMode,
         defaultDisplayMode,
       ] = defaultResult.stdout.trim().split('|')
-      expect(['eragon', 'phlebas', 'hercules', 'mountain']).toContain(defaultLane)
-      expect(defaultLaneCount).toBe('4')
+      expect(['vonneumann', 'apollo']).toContain(defaultLane)
+      expect(defaultLaneCount).toBe('6')
       expect(defaultBrowser).toBe(
         '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
       )
@@ -2468,7 +2506,7 @@ printf '%s|%s|%s|%s|%s\n' \
       })
       expect(mainResult.status, mainResult.stderr).toBe(0)
       expect(mainResult.stdout.trim()).toBe(
-        'main|4|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
+        'main|6|/Applications/Brave Browser.app/Contents/MacOS/Brave Browser|balanced|headful',
       )
 
       writeHarnessFile(
@@ -2855,14 +2893,11 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(prDeepReview).toMatch(
       /Frontend-facing changes express the feature's irreducible purpose with the\s+fewest necessary words, actions, choices, and screens/u,
     )
-    expect(prDeepReview).toMatch(
-      /work waits behind\s+unrelated idle or maintenance activity/u,
+    expect(prDeepReview).toContain(
+      'Trace the ordinary current',
     )
     expect(prDeepReview).toContain(
-      'result without requiring an unrelated new inbound action',
-    )
-    expect(prDeepReview).toContain(
-      'Make every word, click, field, choice,',
+      'Inspect only states touched by the diff or required by the declared',
     )
     expect(completionSpecialists).toContain(
       'rendered interactions, or design-system UI outside the tiny-copy fast path',
@@ -2874,6 +2909,11 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     )
     expect(completionSpecialists).not.toMatch(/product\s+alignment/u)
     expect(productUx).toContain('irreducible user purpose')
+    expect(productUx).toContain('### Requirement Boundary')
+    expect(productUx).toContain('current writer, current consumer')
+    expect(productUx).toContain(
+      'The parent owns finding disposition',
+    )
     expect(productUx).toContain('Restore the existing promise: `Patch`.')
     expect(productUx).toContain(
       'Change the existing promise: `Product change`.',

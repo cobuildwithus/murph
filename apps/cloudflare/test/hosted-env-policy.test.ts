@@ -53,12 +53,14 @@ describe("buildHostedRunnerContainerEnv", () => {
     const env = buildHostedRunnerContainerEnv({
       ...requiredHostedAssistantProvider,
       ELEVENLABS_API_KEY: "elevenlabs-secret",
+      GEMINI_API_KEY: "gemini-secret",
       MURPH_ELEVENLABS_MODEL_ID: "eleven_multilingual_v2",
       MURPH_ELEVENLABS_VOICE_ID: "voice_murph",
       OPENAI_API_KEY: "openai-secret",
     });
 
     expect(env.ELEVENLABS_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
+    expect(env.GEMINI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
     expect(env.MURPH_ELEVENLABS_MODEL_ID).toBe("eleven_multilingual_v2");
     expect(env.MURPH_ELEVENLABS_VOICE_ID).toBe("voice_murph");
     expect(env.OPENAI_API_KEY).toBe(HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL);
@@ -219,10 +221,12 @@ describe("buildHostedWorkerSecretsPayload", () => {
       OLLAMA_API_KEY: "ollama-secret",
       VERCEL_AI_API_KEY: "vercel-secret",
       XAI_API_KEY: "xai-secret",
+      GEMINI_API_KEY: "gemini-secret",
     });
 
     expect(payload.ELEVENLABS_API_KEY).toBe("elevenlabs-secret");
     expect(payload.XAI_API_KEY).toBe("xai-secret");
+    expect(payload.GEMINI_API_KEY).toBe("gemini-secret");
     expect(payload.OLLAMA_API_KEY).toBeUndefined();
     expect(payload.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET).toBe("images-signing-fixture");
     expect(payload.HOSTED_LOG_FINGERPRINT_SECRET).toBe("log-fingerprint-secret");

@@ -128,6 +128,7 @@ describe("hosted orchestration control contracts", () => {
       workspace,
     })).toEqual({
       blocked: null,
+      environmentInterviewPending: false,
       mailboxLag,
       workspace,
     });
@@ -141,6 +142,7 @@ describe("hosted orchestration control contracts", () => {
       },
     })).toEqual({
       blocked: null,
+      environmentInterviewPending: false,
       mailboxLag,
       workspace: {
         ...workspace,
@@ -178,6 +180,7 @@ describe("hosted orchestration control contracts", () => {
       },
     })).toEqual({
       blocked: null,
+      environmentInterviewPending: false,
       mailboxLag,
       workspace: {
         inboxMediaRetentionWakeAt: null,
@@ -198,6 +201,7 @@ describe("hosted orchestration control contracts", () => {
         reason: "ai_usage_gate_unavailable",
         retryAt: "2026-05-20T12:02:00.000Z",
       },
+      environmentInterviewPending: false,
       mailboxLag,
       workspace: null,
     });
@@ -213,6 +217,7 @@ describe("hosted orchestration control contracts", () => {
         reason: "automation_engagement_paused",
         retryAt: "2026-05-21T12:00:00.000Z",
       },
+      environmentInterviewPending: false,
       mailboxLag,
       workspace: null,
     });

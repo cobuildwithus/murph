@@ -7,24 +7,20 @@ import {
   type Response as ResendResponse,
 } from "resend";
 
-import { normalizeNullableString, parseInteger } from "../primitives";
+import { normalizeNullableString } from "../primitives";
+import type {
+  HostedResendPlainTextEmailConfig,
+} from "./resend-plain-text-email-config";
+export {
+  readHostedResendPlainTextEmailConfig,
+  type HostedResendPlainTextEmailConfig,
+  type HostedResendPlainTextEmailEnv,
+} from "./resend-plain-text-email-config";
 
 const RESEND_API_BASE_URL = "https://api.resend.com";
 const RESEND_SDK_USER_AGENT = "resend-node:6.18.0";
 const RESEND_EMAILS_PATH = "/emails";
 const RESEND_BATCH_EMAILS_PATH = "/emails/batch";
-const HOSTED_RESEND_EMAIL_DEFAULT_TIMEOUT_MS = 10_000;
-const HOSTED_RESEND_EMAIL_MIN_TIMEOUT_MS = 1_000;
-const HOSTED_RESEND_EMAIL_MAX_TIMEOUT_MS = 30_000;
-
-export type HostedResendPlainTextEmailEnv = Readonly<Record<string, string | undefined>>;
-
-export type HostedResendPlainTextEmailConfig = {
-  apiBaseUrl?: string;
-  apiKey: string;
-  from: string;
-  timeoutMs: number;
-};
 
 export type HostedResendPlainTextEmailResult = {
   providerMessageId: string | null;
@@ -46,27 +42,11 @@ export class HostedResendPlainTextEmailError extends Error {
   }
 }
 
-export function readHostedResendPlainTextEmailConfig(
-  source: HostedResendPlainTextEmailEnv,
-): HostedResendPlainTextEmailConfig | null {
-  const apiKey = normalizeNullableString(source.RESEND_API_KEY);
-  const from = normalizeNullableString(source.HOSTED_SIGNUP_WELCOME_EMAIL_FROM);
-
-  if (!apiKey || !from) {
-    return null;
-  }
-
-  return {
-    apiKey,
-    from,
-    timeoutMs: readHostedResendPlainTextEmailTimeoutMs(source),
-  };
-}
-
 export async function sendHostedResendPlainTextEmail(input: {
   config: HostedResendPlainTextEmailConfig;
   fetchImpl?: typeof fetch;
   idempotencyKey: string;
+  replyTo?: string | null;
   signal?: AbortSignal;
   subject: string;
   text: string;
@@ -83,8 +63,10 @@ export async function sendHostedResendPlainTextEmail(input: {
     fetchImpl: input.fetchImpl,
     requestSignal,
   });
+  const replyTo = normalizeHostedResendReplyTo(input.replyTo);
   const email: CreateEmailOptions = {
     from: input.config.from,
+    ...(replyTo ? { replyTo } : {}),
     subject: input.subject,
     text: input.text,
     to: input.to,
@@ -154,19 +136,15 @@ export async function sendHostedResendPlainTextEmailBatch(input: {
   };
 }
 
-function readHostedResendPlainTextEmailTimeoutMs(
-  source: HostedResendPlainTextEmailEnv,
-): number {
-  const configured = parseInteger(source.HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS);
-
-  if (!configured) {
-    return HOSTED_RESEND_EMAIL_DEFAULT_TIMEOUT_MS;
+function normalizeHostedResendReplyTo(value: string | null | undefined): string | null {
+  const normalized = normalizeNullableString(value);
+  if (!normalized) {
+    return null;
   }
-
-  return Math.min(
-    Math.max(configured, HOSTED_RESEND_EMAIL_MIN_TIMEOUT_MS),
-    HOSTED_RESEND_EMAIL_MAX_TIMEOUT_MS,
-  );
+  if (normalized.length > 254 || /[\r\n]/u.test(normalized)) {
+    throw new TypeError("Hosted Resend reply-to address is invalid.");
+  }
+  return normalized;
 }
 
 function createHostedResendClient(input: {
