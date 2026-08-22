@@ -99,6 +99,7 @@ describe('GitHub Actions cache trust-boundary guards', () => {
           if (
             isAllowedHostSupportTypeScriptCache(file, workflow, description)
             || isAllowedNativeHostedE2eHandoff(file, workflow, description)
+            || isAllowedTemporalCompatibilityHandoff(file, workflow, description)
           ) {
             continue
           }
@@ -216,6 +217,76 @@ describe('GitHub Actions cache trust-boundary guards', () => {
           'NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}',
           'NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: untrusted',
         ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+  })
+
+  it('allows only the trusted Temporal compatibility workflow_run controller', () => {
+    const workflow = readFileSync(
+      path.join(workflowsDir, 'temporal-compatibility.yml'),
+      'utf8',
+    )
+
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'release.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('- Repo Hygiene', '- Release'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(" && needs.select-pr.outputs.trusted == 'true'", ''),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        removeWorkflowStep(workflow, 'Revalidate exact PR head before credentialed setup'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replaceAll(
+          'ref: ${{ github.event.repository.default_branch }}',
+          'ref: ${{ needs.select-pr.outputs.head_sha }}',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          '      pull-requests: read\n    steps:',
+          '      pull-requests: read\n      statuses: write\n    steps:',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('repositories: murph-cloud', 'repositories: murph'),
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
@@ -361,6 +432,86 @@ function isAllowedNativeHostedE2eHandoff(
       || hasAndroidAppCredentials(prLive.steps)
     )
   )
+}
+
+function isAllowedTemporalCompatibilityHandoff(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (
+    file !== 'temporal-compatibility.yml'
+    || description !== 'workflow_run handoff trigger'
+  ) {
+    return false
+  }
+
+  const parsedWorkflow: unknown = parse(workflow)
+  if (!isRecord(parsedWorkflow)) {
+    return false
+  }
+
+  const triggers = parsedWorkflow.on
+  const permissions = parsedWorkflow.permissions
+  const jobs = parsedWorkflow.jobs
+  if (!isRecord(triggers) || !isRecord(permissions) || !isRecord(jobs)) {
+    return false
+  }
+
+  const workflowRun = triggers.workflow_run
+  const selectPr = jobs['select-pr']
+  const compatibility = jobs.compatibility
+  if (
+    !isRecord(workflowRun)
+    || !isRecord(selectPr)
+    || !isRecord(compatibility)
+  ) {
+    return false
+  }
+
+  return (
+    isStringArray(workflowRun.workflows, ['Repo Hygiene'])
+    && isStringArray(workflowRun.types, ['completed'])
+    && Object.keys(permissions).sort().join(',') === 'contents,pull-requests,statuses'
+    && permissions.contents === 'read'
+    && permissions['pull-requests'] === 'read'
+    && permissions.statuses === 'write'
+    && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
+    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+    && compatibility.environment === 'temporal-compatibility'
+    && hasExactReadOnlyPrLivePermissions(compatibility.permissions)
+    && hasEarlyExactPrHeadRevalidation(
+      compatibility.steps,
+      'Checkout trusted controller',
+    )
+    && hasTrustedControlPlaneCheckout(
+      compatibility.steps,
+      'Checkout trusted controller',
+    )
+    && hasTemporalCompatibilityAppToken(compatibility.steps)
+    && workflow.includes('node scripts/hosted-orchestration-compatibility.mjs run')
+  )
+}
+
+function hasTemporalCompatibilityAppToken(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+
+  const token = value.find((step) =>
+    isRecord(step) && step.name === 'Mint private compatibility token'
+  )
+  if (!isRecord(token) || !isRecord(token.with)) {
+    return false
+  }
+
+  return token.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1'
+    && token.with['app-id'] === '${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}'
+    && token.with['private-key'] === '${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}'
+    && token.with.owner === 'cobuildwithus'
+    && token.with.repositories === 'murph-cloud'
+    && token.with['permission-actions'] === 'write'
+    && token.with['permission-contents'] === 'read'
 }
 
 function hasAndroidAppCredentials(value: unknown): boolean {
