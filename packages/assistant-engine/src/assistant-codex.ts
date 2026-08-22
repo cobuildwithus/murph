@@ -1327,10 +1327,47 @@ class CodexAppServerProcess {
     params: Record<string, unknown>,
     pendingMethod = method,
   ): Promise<unknown> {
+    return this.beginRequest(method, params, pendingMethod).promise
+  }
+
+  sendRequestWithTimeout(input: {
+    method: string
+    params: Record<string, unknown>
+    pendingMethod?: string
+    timeoutLabel: string
+    timeoutMs: number
+  }): Promise<unknown> {
+    const request = this.beginRequest(
+      input.method,
+      input.params,
+      input.pendingMethod ?? input.method,
+    )
+    return withCodexRpcTimeout(
+      request.promise,
+      input.timeoutMs,
+      input.timeoutLabel,
+      () => {
+        // Ordinary responses remove themselves in
+        // resolvePendingCodexRpcRequest. A timeout has no response to do that
+        // work, so release its process-wide bookkeeping here rather than
+        // leaking one entry per unresponsive child.
+        this.pendingRequests.delete(request.id)
+      },
+    )
+  }
+
+  private beginRequest(
+    method: string,
+    params: Record<string, unknown>,
+    pendingMethod: string,
+  ): {
+    id: CodexRpcId
+    promise: Promise<unknown>
+  } {
     const id = this.nextRequestId
     this.nextRequestId += 1
 
-    return new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pendingRequests.set(id, {
         method: pendingMethod,
         reject,
@@ -1346,6 +1383,7 @@ class CodexAppServerProcess {
         reject(failure)
       }
     })
+    return { id, promise }
   }
 
   sendNotification(method: string, params: Record<string, unknown>): void {
@@ -5275,18 +5313,16 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const request = withCodexRpcTimeout(
-      codexProcess.sendRequest(
-        'thread/resume',
-        {
-          excludeTurns: true,
-          threadId: sample.threadId,
-        },
-        'subagent/thread/resume',
-      ),
-      CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
-      'subagent thread/resume',
-    )
+    const request = codexProcess.sendRequestWithTimeout({
+      method: 'thread/resume',
+      params: {
+        excludeTurns: true,
+        threadId: sample.threadId,
+      },
+      pendingMethod: 'subagent/thread/resume',
+      timeoutLabel: 'subagent thread/resume',
+      timeoutMs: CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+    })
       .then((threadResult) => readCodexSubagentExecutionMetadata({
         expectedThreadId: sample.threadId,
         threadResult,

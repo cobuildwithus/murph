@@ -86,6 +86,7 @@ import {
 import {
   attachCodexAppServerProcessExitCleanup,
   stopCodexAppServerChild,
+  withCodexRpcTimeout,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
   extractCodexAppServerUserMessageImages,
@@ -776,6 +777,37 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
 }
 
 describe('assistant codex runtime', () => {
+  it('runs RPC timeout cleanup only when the timeout wins', async () => {
+    vi.useFakeTimers()
+    try {
+      const timedOutCleanup = vi.fn()
+      const timedOutRequest = withCodexRpcTimeout(
+        new Promise<never>(() => undefined),
+        25,
+        'subagent thread/resume',
+        timedOutCleanup,
+      )
+      const timeoutExpectation = expect(timedOutRequest).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT',
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+      await timeoutExpectation
+      expect(timedOutCleanup).toHaveBeenCalledOnce()
+
+      const completedCleanup = vi.fn()
+      await expect(withCodexRpcTimeout(
+        Promise.resolve('metadata'),
+        25,
+        'subagent thread/resume',
+        completedCleanup,
+      )).resolves.toBe('metadata')
+      expect(completedCleanup).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('builds Codex app-server args for configured turns', () => {
     expect(
       buildCodexAppServerArgs({

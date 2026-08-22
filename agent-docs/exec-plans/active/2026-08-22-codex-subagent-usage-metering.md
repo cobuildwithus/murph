@@ -65,8 +65,10 @@ existing cumulative fallback.
 ## Verification
 
 - Focused subagent usage tests pass (14 tests).
-- Full assistant Codex runtime tests pass (273 tests).
+- Full assistant Codex runtime tests pass (274 tests), including timeout-only
+  cleanup of unresolved metadata request bookkeeping.
 - Full real Codex scripted-runtime tests pass (99 tests).
 - Focused public CLI Codex lifecycle tests pass (9 tests).
 - Assistant-engine typecheck passes.
-- Pending exact-head ReviewGPT specialist/final gates and required CI.
+- The prior corrected head passed all 19 required CI checks; exact-head
+  ReviewGPT and CI remain pending for the final cleanup candidate.
