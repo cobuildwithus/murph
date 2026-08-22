@@ -3442,14 +3442,17 @@ Invited Web onboarding continues from launch consent inside the authenticated
 consent request rather than relying on a later browser-only enrollment effect.
 The join client supplies its invite code as an explicit continuation hint; the
 legal-consent owner first commits the requested scope and continues only when
-the authoritative returned status has both launch scopes current. It then
-delegates to the existing idempotent Starter enrollment service, which remains
-the sole owner of invite/member matching, suspension, messaging readiness,
-billing eligibility, grant creation, activation, routing, welcome work, and
-runtime handoff. The hint grants no authority by itself. The existing Starter
-island remains a recovery path for already-consented historical or interrupted
-states; Privy authentication webhooks are not activation authority and do not
-replace the consent-owned continuation.
+the authoritative returned status has both launch scopes current. The existing
+Starter enrollment boundary then revalidates invite/member matching,
+suspension, messaging readiness, direct billing, and Family recovery under its
+member/beneficiary lock before any append-only grant. Messaging or billing
+recovery defers successfully to the existing server-rendered join owner. An
+actual Starter enrollment returns its canonical destination through the same
+request so the browser can reuse the existing full-document Home or armed
+group-start handoff. The hint grants no authority by itself. The existing
+Starter island remains a recovery path for already-consented historical or
+interrupted states; Privy authentication webhooks are not activation authority
+and do not replace the consent-owned continuation.
 
 Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under

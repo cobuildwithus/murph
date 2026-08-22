@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   cleanupWithdrawnHostedHealthDataConsent: vi.fn(),
-  ensureHostedStarterUsageEnrollment: vi.fn(),
+  continueHostedJoinInviteAfterLaunchConsent: vi.fn(),
   getPrisma: vi.fn(),
   grantHostedOptionalFeatureConsent: vi.fn(),
   readHostedHealthDataConsentState: vi.fn(),
@@ -46,7 +46,8 @@ vi.mock("@/src/lib/hosted-onboarding/csrf", () => ({
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", () => ({
-  ensureHostedStarterUsageEnrollment: mocks.ensureHostedStarterUsageEnrollment,
+  continueHostedJoinInviteAfterLaunchConsent:
+    mocks.continueHostedJoinInviteAfterLaunchConsent,
 }));
 
 vi.mock("@/src/lib/legal/consent", async () => {
@@ -126,9 +127,12 @@ describe("legal consent routes", () => {
     vi.clearAllMocks();
     mocks.getPrisma.mockReturnValue(mocks.prismaClient);
     mocks.assertHostedOnboardingMutationOrigin.mockImplementation(() => {});
-    mocks.ensureHostedStarterUsageEnrollment.mockResolvedValue({
-      redirectPath: "/home",
-      status: "enrolled",
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockResolvedValue({
+      disposition: "enrolled",
+      enrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
     });
     mocks.requirePrivyMemberAuth.mockResolvedValue(memberAuth);
     mocks.readHostedConsentStatus.mockResolvedValue(currentStatus);
@@ -240,11 +244,90 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.ensureHostedStarterUsageEnrollment).not.toHaveBeenCalled();
-    await expect(response.json()).resolves.toEqual(partialStatus);
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      ...partialStatus,
+      starterEnrollment: null,
+    });
   });
 
-  it("continues invited Starter enrollment in the request that commits final launch consent", async () => {
+  it("waits for durable Starter enrollment before acknowledging final launch consent", async () => {
+    let resolveContinuation!: (
+      value: {
+        disposition: "enrolled";
+        enrollment: { redirectPath: string; status: "enrolled" };
+      },
+    ) => void;
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveContinuation = resolve;
+      }),
+    );
+    let responseSettled = false;
+    const responsePromise = consentAcceptRoute.POST(
+      new Request("https://join.example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "consumer-health-data-notice": "2026-07-23",
+          },
+          inviteCode: "invite_123",
+          scope: "launch.health-data",
+          source: "join-invite-phone-verify",
+        }),
+        headers: {
+          "Content-Type": "application/json",
+          origin: "https://join.example.test",
+        },
+        method: "POST",
+      }),
+    );
+
+    void responsePromise.then(() => {
+      responseSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(mocks.continueHostedJoinInviteAfterLaunchConsent).toHaveBeenCalledOnce();
+    });
+    expect(responseSettled).toBe(false);
+
+    resolveContinuation({
+      disposition: "enrolled",
+      enrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).toHaveBeenCalledWith({
+      inviteCode: "invite_123",
+      member: {
+        id: "member_123",
+        suspendedAt: null,
+      },
+      source: "web_onboarding",
+    });
+    expect(
+      mocks.recordHostedLaunchRequiredConsent.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      mocks.continueHostedJoinInviteAfterLaunchConsent.mock
+        .invocationCallOrder[0] ?? 0,
+    );
+    await expect(response.json()).resolves.toEqual({
+      ...currentStatus,
+      starterEnrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+  });
+
+  it("acknowledges committed consent when another onboarding owner must continue", async () => {
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockResolvedValueOnce({
+      disposition: "deferred",
+    });
+
     const response = await consentAcceptRoute.POST(
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
@@ -264,24 +347,14 @@ describe("legal consent routes", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledWith({
-      inviteCode: "invite_123",
-      member: {
-        id: "member_123",
-        suspendedAt: null,
-      },
-      source: "web_onboarding",
+    await expect(response.json()).resolves.toEqual({
+      ...currentStatus,
+      starterEnrollment: null,
     });
-    expect(
-      mocks.recordHostedLaunchRequiredConsent.mock.invocationCallOrder[0],
-    ).toBeLessThan(
-      mocks.ensureHostedStarterUsageEnrollment.mock.invocationCallOrder[0] ?? 0,
-    );
-    await expect(response.json()).resolves.toEqual(currentStatus);
   });
 
   it("keeps committed consent retryable when invited Starter enrollment fails", async () => {
-    mocks.ensureHostedStarterUsageEnrollment.mockRejectedValueOnce(
+    mocks.continueHostedJoinInviteAfterLaunchConsent.mockRejectedValueOnce(
       hostedOnboardingError({
         code: "HOSTED_STARTER_USAGE_ENROLLMENT_RETRYABLE",
         httpStatus: 503,
@@ -310,7 +383,7 @@ describe("legal consent routes", () => {
 
     expect(response.status).toBe(503);
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledOnce();
-    expect(mocks.ensureHostedStarterUsageEnrollment).toHaveBeenCalledOnce();
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).toHaveBeenCalledOnce();
     await expect(response.json()).resolves.toMatchObject({
       error: {
         code: "HOSTED_STARTER_USAGE_ENROLLMENT_RETRYABLE",

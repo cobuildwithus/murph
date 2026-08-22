@@ -6,8 +6,8 @@
     "kind": "improvement",
     "priority": 4,
     "title": "Starter signup finishes more reliably",
-    "summary": "Accepting the last required consent during signup now completes Starter setup in the same step.",
-    "details": "If that response is interrupted, a retry reuses the existing setup instead of creating another allowance or activation.",
+    "summary": "Accepting the last required consent now safely continues signup on the server before the next screen.",
+    "details": "Starter-ready members finish automatically. If messaging or billing still needs attention, signup continues at that existing step without reporting that consent failed.",
     "relevanceTags": ["onboarding", "reliability", "starter"],
     "sourcePullRequests": [2166]
   }

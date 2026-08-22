@@ -20,6 +20,7 @@ import {
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import {
+  completeHostedStarterUsageHandoff,
   consumeHostedGroupStartHandoff,
   HOSTED_GROUP_START_PATH,
 } from "@/src/lib/hosted-groups/group-start-handoff";
@@ -39,6 +40,7 @@ import {
 import {
   requestHostedBillingCheckout,
   requestHostedOnboardingJson,
+  type HostedStarterUsageEnrollmentResponse,
 } from "./client-api";
 import { HostedAuthPanel } from "./hosted-auth-panel";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
@@ -337,21 +339,41 @@ export function JoinInviteLegalConsentIsland({
   initialStatus: HostedConsentStatus | null;
 }) {
   const router = useRouter();
+  const completionStartedRef = useRef(false);
+  const starterEnrollmentRef = useRef<HostedStarterUsageEnrollmentResponse | null>(null);
   const acceptScope = useCallback<HostedLegalConsentAcceptScope>(
-    (input) => requestHostedOnboardingJson<HostedConsentStatus>({
-      method: "POST",
-      payload: {
-        acceptedDocumentVersions: input.acceptedDocumentVersions,
-        inviteCode,
-        scope: input.scope,
-        source: input.source,
-      },
-      url: "/api/legal/consent/accept",
-    }),
+    async (input) => {
+      const status = await requestHostedOnboardingJson<
+        HostedConsentStatus & {
+          starterEnrollment?: HostedStarterUsageEnrollmentResponse | null;
+        }
+      >({
+        method: "POST",
+        payload: {
+          acceptedDocumentVersions: input.acceptedDocumentVersions,
+          inviteCode,
+          scope: input.scope,
+          source: input.source,
+        },
+        url: "/api/legal/consent/accept",
+      });
+      starterEnrollmentRef.current = status.starterEnrollment ?? null;
+      return status;
+    },
     [inviteCode],
   );
 
   function refreshRoute() {
+    if (completionStartedRef.current) {
+      return;
+    }
+    completionStartedRef.current = true;
+    if (starterEnrollmentRef.current) {
+      completeHostedStarterUsageHandoff(
+        starterEnrollmentRef.current.redirectPath,
+      );
+      return;
+    }
     router.refresh();
   }
 

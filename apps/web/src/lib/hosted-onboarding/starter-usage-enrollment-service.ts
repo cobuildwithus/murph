@@ -25,6 +25,7 @@ import {
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
+import { readHostedFamilyBillingRecoveryForOwner } from "./family-plan";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
 import {
   activateHostedMemberForPositiveSourceTx,
@@ -89,6 +90,13 @@ export interface HostedStarterUsageEnrollmentResult {
   status: HostedStarterUsageEnrollmentStatus;
 }
 
+export type HostedJoinInviteStarterContinuationResult =
+  | { disposition: "deferred" }
+  | {
+      disposition: "enrolled";
+      enrollment: HostedStarterUsageEnrollmentResult;
+    };
+
 export interface HostedLinqInstantStartDeferredActivationWake {
   hostedExecutionEventId: string;
   memberId: string;
@@ -101,6 +109,7 @@ export interface HostedLinqInstantStartStarterUsageEnrollmentResult
 
 type HostedStarterUsageEnrollmentPolicy = {
   allowSignupWelcomeWithoutAssignableLinqLine: boolean;
+  deferToExistingPageOwner: boolean;
   instantStartAdmission?: {
     eventId: string;
     inviteCode: string;
@@ -151,6 +160,7 @@ export async function ensureHostedStarterUsageEnrollment(
   const companionOnboarding = input.source === "companion_onboarding";
   const enrollment = await ensureHostedStarterUsageEnrollmentWithPolicy(input, {
     allowSignupWelcomeWithoutAssignableLinqLine: companionOnboarding,
+    deferToExistingPageOwner: false,
     requireActivationRuntimeWake: companionOnboarding,
     requireLaunchConsent: true,
     source: input.source,
@@ -158,7 +168,27 @@ export async function ensureHostedStarterUsageEnrollment(
     suppressSignupWelcomeEmail:
       suppressSignupWelcome || companionOnboarding,
   });
+  if (!enrollment) {
+    throw new Error("Starter enrollment unexpectedly deferred without a page owner.");
+  }
   return enrollment.result;
+}
+
+export async function continueHostedJoinInviteAfterLaunchConsent(
+  input: HostedStarterUsageEnrollmentInput,
+): Promise<HostedJoinInviteStarterContinuationResult> {
+  const enrollment = await ensureHostedStarterUsageEnrollmentWithPolicy(input, {
+    allowSignupWelcomeWithoutAssignableLinqLine: false,
+    deferToExistingPageOwner: true,
+    requireActivationRuntimeWake: false,
+    requireLaunchConsent: true,
+    source: input.source,
+    suppressSignupWelcome: input.suppressSignupWelcome ?? false,
+    suppressSignupWelcomeEmail: input.suppressSignupWelcome ?? false,
+  });
+  return enrollment
+    ? { disposition: "enrolled", enrollment: enrollment.result }
+    : { disposition: "deferred" };
 }
 
 /**
@@ -180,6 +210,7 @@ export async function ensureHostedLinqInstantStartStarterUsageEnrollment(
     ...(input.prisma ? { prisma: input.prisma } : {}),
   }, {
     allowSignupWelcomeWithoutAssignableLinqLine: false,
+    deferToExistingPageOwner: false,
     instantStartAdmission: {
       eventId: input.admissionEventId,
       inviteCode: input.inviteCode,
@@ -190,6 +221,9 @@ export async function ensureHostedLinqInstantStartStarterUsageEnrollment(
     suppressSignupWelcomeEmail: true,
     suppressSignupWelcome: true,
   });
+  if (!enrollment) {
+    throw new Error("Instant-start enrollment unexpectedly deferred without a page owner.");
+  }
   return {
     ...enrollment.result,
     deferredActivationWake: enrollment.deferredActivationWake,
@@ -253,7 +287,7 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     "inviteCode" | "member" | "now" | "prisma"
   >,
   policy: HostedStarterUsageEnrollmentPolicy,
-): Promise<HostedStarterUsageEnrollmentWithPolicyResult> {
+): Promise<HostedStarterUsageEnrollmentWithPolicyResult | null> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const invite = await requireHostedInviteForBillingCheckout(
@@ -287,11 +321,22 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
     });
   }
   if (!policy.instantStartAdmission) {
-    await assertHostedMemberBillingStartMessagingReady({
-      identity: invite.member.identity,
-      prisma,
-      routing: invite.member.routing,
-    });
+    try {
+      await assertHostedMemberBillingStartMessagingReady({
+        identity: invite.member.identity,
+        prisma,
+        routing: invite.member.routing,
+      });
+    } catch (error) {
+      if (
+        policy.deferToExistingPageOwner
+        && isHostedOnboardingError(error)
+        && error.code === "HOSTED_MESSAGING_CHANNEL_REQUIRED"
+      ) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   const semanticSourceKey = buildHostedStarterUsageSemanticSourceKey(
@@ -332,6 +377,22 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         memberId: invite.member.id,
         tx,
       });
+      const familyBillingRecovery =
+        await readHostedFamilyBillingRecoveryForOwner({
+          ownerMemberId: invite.member.id,
+          prisma: tx,
+        });
+      if (familyBillingRecovery) {
+        if (policy.deferToExistingPageOwner) {
+          return null;
+        }
+        throw hostedOnboardingError({
+          code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+          message:
+            "This hosted account has Family billing to recover before starting individual access.",
+          httpStatus: 409,
+        });
+      }
       const hasPaidSubscription = hasHostedPaidBillingRefEvidence(
         member.billingRef,
       );
@@ -347,6 +408,9 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
         && !hasPaidSubscription
         && !hasFamilySponsorship
       ) {
+        if (policy.deferToExistingPageOwner) {
+          return null;
+        }
         throw hostedOnboardingError({
           code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
           message:
@@ -486,6 +550,10 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
       "Hosted Starter usage crypto preparation retry exhausted unexpectedly.",
     );
   })();
+
+  if (!outcome) {
+    return null;
+  }
 
   if (outcome.effects.signupNotificationEmailMemberId) {
     scheduleHostedSignupNotificationEmails({

@@ -6,18 +6,21 @@ Updated: 2026-08-22
 
 ## Goal
 
-- A fresh invited member who accepts the final launch-consent scope is enrolled
-  in Starter usage by that same authenticated server request, so closing the
-  tab or losing client hydration immediately afterward cannot strand an
-  otherwise complete signup.
+- A fresh invited member who accepts the final launch-consent scope continues
+  through the correct messaging, billing, or Starter owner in that same
+  authenticated server request, so closing the tab or losing client hydration
+  immediately afterward cannot strand or misroute signup.
 
 ## Success criteria
 
 - The ordinary join-consent request carries the invite continuation explicitly.
-- The server invokes the existing idempotent Starter enrollment owner only
-  after both launch scopes are current and only after revalidating the app
-  session, invite ownership, suspension, messaging readiness, and billing
-  invariants through the existing enrollment service.
+- The server invokes the existing idempotent Starter boundary only after both
+  launch scopes are current, and that boundary revalidates the app session,
+  invite ownership, suspension, messaging readiness, direct billing, and
+  Family recovery before any grant.
+- Messaging and billing recovery defer successfully to their existing
+  server-rendered owners; actual Starter completion reuses the full-document
+  Home or armed group-start handoff.
 - Consent calls outside invited onboarding retain their current behavior.
 - A lost response or retry can repeat the same request without another Starter
   grant or a second activation owner.
@@ -52,10 +55,14 @@ Updated: 2026-08-22
 2. Risk: the first of two launch-scope acceptances starts too early.
    Mitigation: continue only when the returned authoritative status says all
    launch scopes are granted.
-3. Risk: enrollment fails after consent commits.
-   Mitigation: return the existing retryable error; the same consent request is
-   safe to retry and enrollment remains idempotent.
-4. Risk: a Privy authentication webhook becomes a second activation authority.
+3. Risk: consent commits while another onboarding owner still has work.
+   Mitigation: return committed consent with a request-scoped deferred result
+   and refresh into the existing messaging or billing owner. Preserve errors
+   only for unexpected or genuinely retryable Starter failures.
+4. Risk: a stale page races Family recovery and appends Starter capacity.
+   Mitigation: re-read every Family recovery state under the existing
+   member/beneficiary lock before the grant boundary.
+5. Risk: a Privy authentication webhook becomes a second activation authority.
    Mitigation: do not add it. Privy proves authentication, not Murph consent,
    invite ownership, messaging readiness, or billing eligibility.
 
@@ -78,15 +85,19 @@ Updated: 2026-08-22
 - Use the existing legal-consent POST as the continuation boundary instead of
   a Privy webhook. The server already has the authenticated member and the
   authoritative post-commit consent status there.
-- Reuse `ensureHostedStarterUsageEnrollment`; do not move or copy activation
-  logic and do not make page rendering mutate state.
+- Reuse the existing Starter enrollment implementation and return one
+  request-scoped enrolled-versus-deferred branch; do not move or copy
+  activation logic and do not make page rendering mutate state.
+- Reuse the existing Family recovery resolver under the Starter member lock and
+  the existing browser full-document/group-start handoff after enrollment.
 - Keep the current Starter island as recovery for already-consented historical
   or interrupted states; the ordinary fresh path no longer depends on it.
 
 ## Product UX
 
-- Outcome: accepting the final required consent finishes the existing Starter
-  setup even if the browser cannot run another effect.
+- Outcome: accepting the final required consent either finishes Starter or
+  advances to the existing messaging or billing recovery owner without relying
+  on another enrollment effect.
 - Reaches: fresh invited members, retries after an ambiguous response, and
   existing non-onboarding consent callers whose behavior remains unchanged.
 - Proof: exercise the real two-request consent card, verify enrollment occurs
@@ -95,9 +106,12 @@ Updated: 2026-08-22
 
 ## Product UX walkthrough
 
-- Fresh invited member: the same consent card and copy remain visible. The
-  first scope records consent only; the final scope finishes Starter setup on
-  the server before the card enters its existing `Continuing...` handoff.
+- Fresh Starter-ready member: the same consent card and copy remain visible.
+  The first scope records consent only; the final scope finishes Starter on the
+  server, then performs the established full-document Home or group-start
+  handoff.
+- Messaging or billing recovery: consent succeeds, creates no Starter grant,
+  and refreshes into the current server-owned setup or recovery screen.
 - Ambiguous response or retry: consent may already be current, but the repeated
   request reaches the same semantic Starter grant and activation owner. The
   existing retry message remains available if that owner returns a retryable
@@ -105,11 +119,12 @@ Updated: 2026-08-22
 - Other consent callers: requests without the explicit invite continuation do
   not enter enrollment and retain the existing consent and health-runtime
   ordering.
-- Evidence: 74 focused Vitest cases passed across the consent route, real join
+- Evidence: 86 focused Vitest cases passed across the consent route, real join
   island, join page/view, and canonical Starter enrollment service; Web
-  typechecking passed after generated-client preparation.
-- Verdict: Ready. No visible layout, wording, interaction count, or responsive
-  behavior changed, so screenshots would add no material proof.
+  typechecking and rendered browser proof remain to be refreshed on the final
+  candidate head.
+- Verdict: implementation proof passes; final browser and exact-head review
+  evidence remain pending.
 
 ## Verification
 

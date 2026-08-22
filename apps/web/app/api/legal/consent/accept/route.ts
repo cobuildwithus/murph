@@ -16,7 +16,10 @@ import {
 } from "@/src/lib/hosted-onboarding/http";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
-import { ensureHostedStarterUsageEnrollment } from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
+import {
+  continueHostedJoinInviteAfterLaunchConsent,
+  type HostedStarterUsageEnrollmentResult,
+} from "@/src/lib/hosted-onboarding/starter-usage-enrollment-service";
 import { getPrisma } from "@/src/lib/prisma";
 
 function isLaunchScope(scope: string): scope is HostedConsentLaunchScope {
@@ -85,8 +88,9 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
+  let starterEnrollment: HostedStarterUsageEnrollmentResult | null = null;
   if (starterInviteCode && isLaunchScope(consent.scope) && status.launchGranted) {
-    await ensureHostedStarterUsageEnrollment({
+    const continuation = await continueHostedJoinInviteAfterLaunchConsent({
       inviteCode: starterInviteCode,
       member: {
         id: auth.member.id,
@@ -94,7 +98,14 @@ export const POST = withJsonError(async (request: Request) => {
       },
       source: "web_onboarding",
     });
+    starterEnrollment = continuation.disposition === "enrolled"
+      ? continuation.enrollment
+      : null;
   }
 
-  return jsonOk(status);
+  return jsonOk(
+    starterInviteCode && isLaunchScope(consent.scope)
+      ? { ...status, starterEnrollment }
+      : status,
+  );
 });
