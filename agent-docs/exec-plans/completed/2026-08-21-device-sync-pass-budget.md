@@ -1,8 +1,8 @@
 # Increase the hosted device-sync pass budget
 
-Status: active
+Status: completed
 Created: 2026-08-21
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Goal
 
@@ -60,7 +60,7 @@ Updated: 2026-08-21
 3. [x] Add focused regression assertions and update the runtime protocol.
 4. [x] Commit and push an exact candidate, open the PR, and start required
    ReviewGPT passes concurrently with exact-head CI.
-5. [ ] Resolve findings, complete parent review, close this plan through
+5. [x] Resolve findings, complete parent review, close this plan through
    `scripts/finish-task`, and prove current-base mergeability.
 
 ## Verification log
@@ -68,7 +68,7 @@ Updated: 2026-08-21
 - `pnpm --dir packages/assistant-runtime typecheck` passes.
 - The corrected three-suite hosted runtime regression passes: 3 files and 412
   tests.
-- The corrected full assistant-runtime suite passes: 90 files and 2,469 tests,
+- The corrected full assistant-runtime suite passes: 90 files and 2,470 tests,
   with five intentionally skipped tests and one intentionally skipped file.
 - Changelog generation and its focused fragment suite pass: 1 file and 7 tests.
 - The PR changelog guard passes all 14 tests. Two initial focused Vitest
@@ -88,3 +88,25 @@ Updated: 2026-08-21
 - The optional diff verifier repeated the same full owner-package pass, then
   was stopped at an unrelated shared-host app-slot wait. Before that wait it
   reported two existing workspace-boundary violations in untouched test files.
+- Parent final review found no remaining defect or proof gap. The corrected-head
+  Product UX replay is `Ready`: the demonstrated promise remains a longer
+  bounded background opportunity with cooperative foreground priority, not
+  guaranteed freshness or catch-up.
+- Exact candidate CI passed package coverage, build/typecheck, runner-bundle,
+  CLI, changelog-policy, repository-hygiene, viewport, billing-boundary, and
+  pull-request-evidence checks. The required release aggregate remains red only
+  because current `main` added
+  `appendHostedMailboxEnvelopeWithIdentityTx` to the shared hosted Web testkit
+  without adding that export to
+  `apps/web/test/hosted-web-testkit-group-email.test.ts`'s module mock. The
+  introducing PR's release-app check failed too, this PR does not change the
+  test, testkit, or mailbox store, and the one-test local reproducer fails with
+  the same missing-mock-export error.
+- Exact candidate hosted-native iOS E2E passed. Hosted-native Android reached
+  the Health Connect handoff, then failed at the permission-state stage before
+  exercising this PR's device-maintenance path; other PR-mode runs on the same
+  pinned Android build fail at the identical stage.
+- The branch contains the fetched current base, and the current-base merge-tree
+  is conflict-free. The final plan-only head still requires the normal pushed
+  check observation before handoff.
+Completed: 2026-08-22
