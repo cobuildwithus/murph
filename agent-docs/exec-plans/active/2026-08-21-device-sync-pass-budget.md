@@ -16,10 +16,11 @@ Updated: 2026-08-21
 - Explicit device-sync mailbox wakes and idle device reconciles both use a
   90-second pass budget.
 - The shared hosted runtime commit timeout remains unchanged.
-- Fresh foreground work and invocation aborts can still end device work before
-  the pass budget expires.
-- Focused tests, package typecheck, required ReviewGPT passes, exact-head CI,
-  and current-base mergeability complete with no accepted finding unresolved.
+- Fresh foreground work and invocation aborts remain wired to end resumable
+  device work at cooperative boundaries before the pass budget expires.
+- Focused tests, package typecheck, required review gates (including the
+  prescribed local fallback if the external gate is unavailable), exact-head
+  CI, and current-base mergeability complete with no accepted finding unresolved.
 
 ## Scope
 
@@ -29,15 +30,17 @@ Updated: 2026-08-21
 
 ## Product UX
 
-- Outcome: Established members with delayed connected-health work catch up
-  faster through the existing background-sync journey.
+- Outcome: Established members with delayed connected-health work get a longer
+  bounded opportunity to make progress through the existing background-sync
+  journey.
 - Reaches: Explicit device mailbox wakes and idle scheduled reconciles; no new
   surface, audience, data source, or permission.
 - Proof: Both production entry paths receive the 90-second budget in focused
-  tests, while the existing cancellation suite proves foreground and abort
-  propagation.
+  tests, while foreground and abort propagation remain intact and atomic
+  dense-raw cleanup retains its prior 45-second admission cap.
 - Walkthrough: Ready. Queued work gets a longer bounded pass, foreground input
-  still preempts it, and partial work retains the existing durable continuation.
+  still preempts it at existing cooperative boundaries, and partial work retains
+  the existing durable continuation.
 
 ## Constraints
 
@@ -45,6 +48,8 @@ Updated: 2026-08-21
   state seam.
 - Do not change the 45-second shared Web/checkpoint request timeout.
 - Keep device maintenance lazy-loaded from foreground runtime code.
+- Keep atomic dense-raw cleanup on its prior 45-second admission cap; the
+  longer device-pass budget is for resumable sync progress.
 
 ## Tasks
 
@@ -53,7 +58,7 @@ Updated: 2026-08-21
 2. [x] Add one lightweight 90-second device-pass limit and apply it to both
    device entry paths.
 3. [x] Add focused regression assertions and update the runtime protocol.
-4. [ ] Commit and push an exact candidate, open the PR, and start required
+4. [x] Commit and push an exact candidate, open the PR, and start required
    ReviewGPT passes concurrently with exact-head CI.
 5. [ ] Resolve findings, complete parent review, close this plan through
    `scripts/finish-task`, and prove current-base mergeability.
@@ -61,10 +66,25 @@ Updated: 2026-08-21
 ## Verification log
 
 - `pnpm --dir packages/assistant-runtime typecheck` passes.
-- The three focused hosted runtime suites pass: 3 files and 317 tests.
-- The full assistant-runtime suite passes: 90 files and 2,467 tests, with five
-  intentionally skipped tests.
+- The corrected three-suite hosted runtime regression passes: 3 files and 412
+  tests.
+- The corrected full assistant-runtime suite passes: 90 files and 2,469 tests,
+  with five intentionally skipped tests and one intentionally skipped file.
 - Changelog generation and its focused fragment suite pass: 1 file and 7 tests.
+- The PR changelog guard passes all 14 tests. Two initial focused Vitest
+  invocations used an app-relative filter from the app working directory and
+  selected no files; the corrected repository-root invocation passed all seven
+  fragment tests.
+- The preliminary external specialist review required narrowing the outcome
+  from guaranteed faster catch-up to a longer bounded opportunity; the plan,
+  protocol, and changelog now use that proven claim.
+- The external final-review wrapper became unrecoverable before returning an
+  answer. The prescribed local deep-review fallback found two accepted gaps:
+  explicit wakes could schedule activity automation after a yielded sync, and
+  the longer pass could enlarge atomic dense-raw cleanup exposure. The explicit
+  path now mirrors the idle skip/signal fence, and cleanup keeps its prior
+  pass-relative 45-second admission window. Targeted final validation reports
+  no remaining code or test finding.
 - The optional diff verifier repeated the same full owner-package pass, then
   was stopped at an unrelated shared-host app-slot wait. Before that wait it
   reported two existing workspace-boundary violations in untouched test files.

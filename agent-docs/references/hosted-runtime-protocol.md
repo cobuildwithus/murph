@@ -2255,9 +2255,11 @@ reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
 pass. A device-sync pass has its own 90-second budget, independent of the shared
 Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
-may still end it sooner. Do not add a separate system-lane active-wake import
-path unless measured latency or product behavior proves the simpler split is
-insufficient.
+may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
+45-second admission cap, and any admitted canonical write finishes its existing
+atomic safety boundary before yielding. Do not add a separate system-lane
+active-wake import path unless measured latency or product behavior proves the
+simpler split is insufficient.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that

@@ -345,9 +345,13 @@ async function executeHostedSystemWake(input: {
         vaultRoot: input.vaultRoot,
         wake: input.wake,
       });
-      const activityAutomation = input.shouldYieldDeviceSync?.() === true
+      const shouldSkipActivityAutomation = deviceSyncMetrics.deviceSyncSkipped
+        || input.signal?.aborted === true
+        || input.shouldYieldDeviceSync?.() === true;
+      const activityAutomation = shouldSkipActivityAutomation
         ? { matched: 0, nextWakeAt: null, scheduled: 0 }
         : await scheduleDeviceActivityTriggeredAutomations({
+          ...(input.signal ? { signal: input.signal } : {}),
           vault: input.vaultRoot,
         }).catch((error: unknown) => {
           emitHostedDeviceActivityAutomationFailureLog({

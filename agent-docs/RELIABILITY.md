@@ -1465,7 +1465,7 @@ Last verified: 2026-08-20
   stage-owner suppression sees both resources; their one-attempt page timeout
   is five seconds, bounding the paired six-page worst case at 30 seconds. A
   typed provider failure therefore reaches ordinary job backoff before the
-  hosted 45-second maintenance cancellation can release it as an unclassified
+  hosted 90-second device-pass cancellation can release it as an unclassified
   yield. Each timeseries attempt owns one canonical resource and one complete
   UTC day under the three-page, single-attempt bound. Page-heavy active-
   calorie and heart-rate days deterministically retry as complete UTC hours;
