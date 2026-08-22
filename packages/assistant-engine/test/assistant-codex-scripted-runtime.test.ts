@@ -55,7 +55,6 @@ import {
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
   MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
@@ -3709,7 +3708,7 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group_chat");
 if (!tool) {
   text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
@@ -3730,7 +3729,7 @@ if (!tool) {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3804,7 +3803,7 @@ if (!tool) {
       configOverrides: [
         'features.code_mode.direct_only_tool_namespaces=["murph"]',
       ],
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...directScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3818,7 +3817,7 @@ if (!tool) {
     expect(directSummary).toMatchObject({
       providerRequestDiagnostics: {
         includesAutomation: true,
-        includesGroup: true,
+        includesGroup: false,
         includesGroupEmail: true,
       },
     })
@@ -9963,7 +9962,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
@@ -10010,7 +10009,7 @@ text(result.output);
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
-      '"name":"group"',
+      '"name":"group_chat"',
     )
     expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
@@ -10143,7 +10142,10 @@ text(result.output);
     const ordinaryResult = await executeCodexAppServerTurn({
       ...ordinaryScenario.turnInput,
       authorizeAcceptedMessageTarget,
-      dynamicTools: [MURPH_GROUP_TOOL, MURPH_RESOLVE_PHYSICAL_NOTE_TOOL],
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
       env: {
         ...ordinaryScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -10167,7 +10169,7 @@ text(result.output);
     const baselineResult = await executeCodexAppServerTurn({
       ...baselineScenario.turnInput,
       authorizeAcceptedMessageTarget,
-      dynamicTools: [MURPH_GROUP_TOOL],
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...baselineScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -10212,7 +10214,10 @@ if (!tool) {
     const recoveryResult = await executeCodexAppServerTurn({
       ...recoveryScenario.turnInput,
       authorizeAcceptedMessageTarget,
-      dynamicTools: [MURPH_GROUP_TOOL, MURPH_RESOLVE_PHYSICAL_NOTE_TOOL],
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
       env: {
         ...recoveryScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,

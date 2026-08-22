@@ -312,8 +312,8 @@ import {
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
   MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_NAME,
   MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME,
-  MURPH_GROUP_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
@@ -790,7 +790,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
 type GroupArguments = z.infer<typeof groupArgumentsSchema>
 
 type GroupToolFamilyName = keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS
-type GroupParserToolName = typeof MURPH_GROUP_TOOL.name | GroupToolFamilyName
+type GroupParserToolName = typeof MURPH_GROUP_TOOL_NAME | GroupToolFamilyName
 
 const sendVaultFileArgumentsSchema = z
   .object({
@@ -1905,7 +1905,7 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_GROUP_TOOL.name:
+    case MURPH_GROUP_TOOL_NAME:
     case 'group_consult':
     case 'group_data':
     case 'group_membership':
@@ -2170,6 +2170,17 @@ export async function executeMurphDynamicToolRequest(input: {
       'computer tools are unavailable without hosted computer-use transport',
     )
   }
+  if (
+    'validationDigest' in input.request
+    && input.request.kind !== 'invalid-automation-arguments'
+  ) {
+    return invalidDynamicToolArgumentsResult(
+      input.request.kind === 'invalid-progress-arguments'
+        ? 'invalid_progress_update_arguments'
+        : input.request.kind.replaceAll('-', '_'),
+      input.request.validationDigest,
+    )
+  }
 
   switch (input.request.kind) {
     case 'invalid-automation-arguments': {
@@ -2210,136 +2221,6 @@ export async function executeMurphDynamicToolRequest(input: {
           )
       }
     }
-    case 'invalid-device-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_device_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-labs-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_labs_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-pending-vault-files-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_pending_vault_files_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-group-room-model-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_group_room_model_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-member-memory-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_member_memory_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-connected-apps-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_connected_apps_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-assistant-style-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_assistant_style_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-generate-image-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_generate_image_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-computer-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_computer_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-generate-voice-memo-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_generate_voice_memo_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-generate-song-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_generate_song_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-analyze-video-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_analyze_video_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-ask-grok-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_ask_grok_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-progress-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_progress_update_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-reaction-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_reaction_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-reply-target-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_reply_target_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-product-feedback-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_product_feedback_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-family-plan-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_family_plan_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-personalization-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_personalization_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-plan-usage-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_plan_usage_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-imessage-contact-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_imessage_contact_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-subscription-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_subscription_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-assistant-configuration-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_assistant_configuration_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-group-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_group_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-finish-without-reply-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_finish_without_reply_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-response-card-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_response_card_arguments',
-        input.request.validationDigest,
-      )
     case 'response-card-envelope-too-large':
       if (input.privateDirectResponseCardAllowed !== true) {
         return toolTextResult(
@@ -2363,31 +2244,6 @@ export async function executeMurphDynamicToolRequest(input: {
         ),
         responseCardTextFallbackPatch: { card: input.request.card },
       }
-    case 'invalid-response-media-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_response_media_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-send-vault-file-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_send_vault_file_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-phone-call-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_phone_call_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-physical-note-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_physical_note_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-clinical-records-connect-link-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_clinical_records_connect_link_arguments',
-        input.request.validationDigest,
-      )
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-group-challenge-response-card':
@@ -7234,7 +7090,7 @@ function parseGroupArguments(
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const qualifiedToolName = `murph.${toolName}`
-  const parser = toolName === MURPH_GROUP_TOOL.name
+  const parser = toolName === MURPH_GROUP_TOOL_NAME
     ? groupArgumentsSchema
     : groupArgumentsSchema.refine((request) => {
         const acceptedActions: readonly GroupArguments['action'][] =

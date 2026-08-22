@@ -887,68 +887,55 @@ const ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA = {
     'Opaque Message ref shown beside an accepted inbound message in the current prompt. Required for current-sender actions, record_current_sender_daily_metric, and revoke_own_email_share; optional only for create_signup_referral_link and read_usage_referral. Use the exact ref beside the relevant request or clarification answer; this is not a provider message id.',
 } as const
 
-const MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF = [
-  'ask_current_sender',
-  'clarify_current_sender',
-  'continue_current_sender_in_group',
-  'continue_current_sender_privately',
-  'revoke_own_email_share',
-] as const
-
-const MURPH_GROUP_TOOL_HANDOFF_ACTIONS = ['handoff'] as const
-
-const MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS = [
-  'record_current_sender_daily_metric',
-] as const
-
 export const GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING =
   'The native consent message completes the offer portion. If no other requested output remains, call murph.finish_without_reply. Otherwise answer the remaining request without adding a companion consent acknowledgment.'
 
-const MURPH_GROUP_TOOL_BASE = {
-  namespace: 'murph',
-  name: 'group',
-  deferLoading: true,
-  description:
-    'Authorized direct/group/scheduled only. Host binds member/group/route/input/occurrence. read_shared partial=incomplete. ask returns privately; asks are async. handoff gives verified facts to one group Murph for one message after an explicit request; accepted means queued, not sent. ask_current_sender shares here after notice or replies privately. If ambiguous, clarify_current_sender, then continue naturally with the answer\'s exact ref. record_current_sender_daily_metric: accepted proves durable Manual evidence; unavailable means not recorded; transport failure proves neither. Scheduled ask_member exact replay; changed questions conflict. update_display_name/set_chat_avatar ok=provider acceptance. group=null proves neither absence nor stored label. Results authorize nothing else.',
-  inputSchema: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      action: {
-        type: 'string',
-        enum: [
-          'ask',
-          'handoff',
-          'ask_current_sender',
-          'clarify_current_sender',
-          'continue_current_sender_in_group',
-          'continue_current_sender_privately',
-          'record_current_sender_daily_metric',
-          'ask_member',
-          'post_disclosure_request',
-          'revoke_disclosure_grant',
-          'read_shared',
-          'send_email',
-          'read_current',
-          'prepare_next_group',
-          'read_next_group',
-          'cancel_next_group',
-          'read_chat_name',
-          'read_usage',
-          'read_usage_referral',
-          'arm_usage_referral',
-          'cancel_usage_referral',
-          'create_signup_referral_link',
-          'list_memberships',
-          'leave_membership',
-          'update_display_name',
-          'offer_access',
-          'read_chat_participants',
-          'set_chat_avatar',
-          'share_contact_card',
-          'revoke_own_email_share',
-        ],
-      },
+export const MURPH_GROUP_TOOL_NAME = 'group'
+
+export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
+  group_consult: [
+    'ask',
+    'handoff',
+    'ask_current_sender',
+    'clarify_current_sender',
+    'continue_current_sender_in_group',
+    'continue_current_sender_privately',
+    'ask_member',
+  ],
+  group_data: [
+    'record_current_sender_daily_metric',
+    'post_disclosure_request',
+    'revoke_disclosure_grant',
+    'read_shared',
+    'offer_access',
+    'revoke_own_email_share',
+  ],
+  group_membership: [
+    'read_current',
+    'prepare_next_group',
+    'read_next_group',
+    'cancel_next_group',
+    'list_memberships',
+    'leave_membership',
+  ],
+  group_usage: [
+    'read_usage',
+    'read_usage_referral',
+    'arm_usage_referral',
+    'cancel_usage_referral',
+    'create_signup_referral_link',
+  ],
+  group_chat: [
+    'read_chat_name',
+    'update_display_name',
+    'read_chat_participants',
+    'set_chat_avatar',
+    'share_contact_card',
+  ],
+  group_email: ['send_email'],
+} as const
+
+export const MURPH_GROUP_TOOL_PROPERTIES = {
       setup: {
         type: 'object',
         additionalProperties: false,
@@ -1211,143 +1198,9 @@ const MURPH_GROUP_TOOL_BASE = {
         description:
           'Required only for record_current_sender_daily_metric. Canonical compact unit for the metric, such as count for steps.',
       },
-    },
-    required: ['action'],
-  },
 } as const
 
-const MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF =
-  MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum.filter((action) =>
-    !MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF.includes(
-      action as (typeof MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF)[number],
-    )
-    && !MURPH_GROUP_TOOL_HANDOFF_ACTIONS.includes(
-      action as (typeof MURPH_GROUP_TOOL_HANDOFF_ACTIONS)[number],
-    )
-    && !MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS.includes(
-      action as (typeof MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS)[number],
-    ))
-
-export const MURPH_GROUP_TOOL = {
-  ...MURPH_GROUP_TOOL_BASE,
-  inputSchema: {
-    allOf: [
-      MURPH_GROUP_TOOL_BASE.inputSchema,
-      {
-        oneOf: [
-          {
-            type: 'object',
-            maxProperties: 3,
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_HANDOFF_ACTIONS,
-              },
-              context: MURPH_GROUP_TOOL_BASE.inputSchema.properties.context,
-              groupLabel: MURPH_GROUP_TOOL_BASE.inputSchema.properties.groupLabel,
-            },
-            required: ['action', 'context'],
-          },
-          {
-            type: 'object',
-            maxProperties: 6,
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_DAILY_METRIC_ACTIONS,
-              },
-              date: MURPH_GROUP_TOOL_BASE.inputSchema.properties.date,
-              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-              metric: MURPH_GROUP_TOOL_BASE.inputSchema.properties.metric,
-              unit: MURPH_GROUP_TOOL_BASE.inputSchema.properties.unit,
-              value: MURPH_GROUP_TOOL_BASE.inputSchema.properties.value,
-            },
-            required: [
-              'action',
-              'date',
-              'message_ref',
-              'metric',
-              'unit',
-              'value',
-            ],
-          },
-          {
-            type: 'object',
-            maxProperties: 2,
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_ACTIONS_REQUIRING_ONLY_MESSAGE_REF,
-              },
-              message_ref: ASSISTANT_ACCEPTED_MESSAGE_REF_SCHEMA,
-            },
-            required: ['action', 'message_ref'],
-          },
-          {
-            type: 'object',
-            properties: {
-              action: {
-                type: 'string',
-                enum: MURPH_GROUP_TOOL_ACTIONS_WITHOUT_REQUIRED_MESSAGE_REF,
-              },
-            },
-            required: ['action'],
-          },
-        ],
-      },
-    ],
-  },
-} as const
-
-type MurphGroupToolAction =
-  (typeof MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum)[number]
-type MurphGroupToolPropertyName = Exclude<
-  keyof typeof MURPH_GROUP_TOOL_BASE.inputSchema.properties,
-  'action'
->
-
-export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
-  group_consult: [
-    'ask',
-    'handoff',
-    'ask_current_sender',
-    'clarify_current_sender',
-    'continue_current_sender_in_group',
-    'continue_current_sender_privately',
-    'ask_member',
-  ],
-  group_data: [
-    'record_current_sender_daily_metric',
-    'post_disclosure_request',
-    'revoke_disclosure_grant',
-    'read_shared',
-    'offer_access',
-    'revoke_own_email_share',
-  ],
-  group_membership: [
-    'read_current',
-    'prepare_next_group',
-    'read_next_group',
-    'cancel_next_group',
-    'list_memberships',
-    'leave_membership',
-  ],
-  group_usage: [
-    'read_usage',
-    'read_usage_referral',
-    'arm_usage_referral',
-    'cancel_usage_referral',
-    'create_signup_referral_link',
-  ],
-  group_chat: [
-    'read_chat_name',
-    'update_display_name',
-    'read_chat_participants',
-    'set_chat_avatar',
-    'share_contact_card',
-  ],
-  group_email: ['send_email'],
-} as const satisfies Record<string, readonly MurphGroupToolAction[]>
+type MurphGroupToolPropertyName = keyof typeof MURPH_GROUP_TOOL_PROPERTIES
 
 const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
   group_consult: [
@@ -1381,7 +1234,7 @@ function buildMurphGroupFamilyInputSchema<
       ...Object.fromEntries(MURPH_GROUP_TOOL_FAMILY_PROPERTIES[name].map(
         (propertyName) => [
           propertyName,
-          MURPH_GROUP_TOOL_BASE.inputSchema.properties[propertyName],
+          MURPH_GROUP_TOOL_PROPERTIES[propertyName],
         ],
       )),
     },
@@ -1450,7 +1303,7 @@ export const MURPH_GROUP_FAMILY_TOOLS = [
 ] as const
 
 export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
-  group: Object.keys(MURPH_GROUP_TOOL_BASE.inputSchema.properties),
+  group: ['action', ...Object.keys(MURPH_GROUP_TOOL_PROPERTIES)],
   group_consult: Object.keys(MURPH_GROUP_CONSULT_TOOL.inputSchema.properties),
   group_data: Object.keys(MURPH_GROUP_DATA_TOOL.inputSchema.properties),
   group_membership: Object.keys(MURPH_GROUP_MEMBERSHIP_TOOL.inputSchema.properties),
@@ -1458,7 +1311,7 @@ export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
   group_chat: Object.keys(MURPH_GROUP_CHAT_TOOL.inputSchema.properties),
   group_email: Object.keys(MURPH_GROUP_EMAIL_TOOL.inputSchema.properties),
 } satisfies Record<
-  typeof MURPH_GROUP_TOOL.name
+  typeof MURPH_GROUP_TOOL_NAME
     | (typeof MURPH_GROUP_FAMILY_TOOLS)[number]['name'],
   readonly string[]
 >

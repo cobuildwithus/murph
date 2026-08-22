@@ -49,8 +49,10 @@ import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_MEMBERSHIP_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_USAGE_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
@@ -2285,7 +2287,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedGroupStatusDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -2327,7 +2329,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           result.jsonEvents,
         ).find((action) =>
           action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
+          && action.tool === MURPH_GROUP_MEMBERSHIP_TOOL.name
         )
 
         expect(groupCall).toBeDefined()
@@ -2401,7 +2403,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const dynamicTools = [
           MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
           MURPH_GENERATE_IMAGE_TOOL,
-          MURPH_GROUP_TOOL,
+          MURPH_GROUP_CHAT_TOOL,
           MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
         ]
         const commonInput = {
@@ -2480,7 +2482,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )).toHaveLength(1)
         expect(generationActions.filter((action) =>
           action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
+          && action.tool === MURPH_GROUP_CHAT_TOOL.name
         )).toHaveLength(0)
         expect(generationActions.filter((action) =>
           action.kind === 'dynamic'
@@ -2555,7 +2557,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )).toHaveLength(0)
         expect(completionActions.filter((action) =>
           action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
+          && action.tool === MURPH_GROUP_CHAT_TOOL.name
         )).toHaveLength(0)
         expect(completionActions.filter((action) =>
           action.kind === 'dynamic'
@@ -2627,7 +2629,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         )
         const groupCalls = avatarUpdateActions.filter((action) =>
           action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
+          && action.tool === MURPH_GROUP_CHAT_TOOL.name
         )
 
         expect(groupCalls).toHaveLength(1)
@@ -2638,7 +2640,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             imageRef: media.ref,
           },
           kind: 'dynamic',
-          tool: MURPH_GROUP_TOOL.name,
+          tool: MURPH_GROUP_CHAT_TOOL.name,
         })
         expect(avatarUpdateActions.filter((action) =>
           action.kind === 'dynamic'
@@ -2964,7 +2966,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildDirectConversationDeveloperInstructions(),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_MEMBERSHIP_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -3017,7 +3019,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         const actions = readCapabilityRoutingActions(result.jsonEvents)
         const groupCall = actions.find((action) =>
           action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
+          && action.tool === MURPH_GROUP_MEMBERSHIP_TOOL.name
         )
 
         expect(
@@ -4997,7 +4999,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
               ],
           developerInstructions:
             buildHostedUsageProgressDeveloperInstructions(channel),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -5060,7 +5062,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
         )
         const usageReads = actions.filter((action) =>
           action.kind === 'dynamic'
-          && action.tool === MURPH_GROUP_TOOL.name
+          && action.tool === MURPH_GROUP_USAGE_TOOL.name
         )
 
         expect(skillReads).toHaveLength(filesystemAccess ? 1 : 0)
@@ -5438,7 +5440,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedUsageOptionsDeveloperInstructions('direct'),
-          dynamicTools: [MURPH_PLAN_USAGE_TOOL, MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_PLAN_USAGE_TOOL, MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: privateSkillsRoot,
@@ -5550,7 +5552,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedUsageOptionsDeveloperInstructions('group'),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: groupSkillsRoot,
@@ -5656,7 +5658,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             'Hosted usage context:',
             "This conversation's remaining Murph usage is running low.",
           ].join('\n\n'),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: fundingPrivacySkillsRoot,
@@ -5757,7 +5759,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
             'Hosted usage context:',
             "This conversation's remaining Murph usage is running low.",
           ].join('\n\n'),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
@@ -5944,7 +5946,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedUsageOptionsDeveloperInstructions('group'),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: healthySkillsRoot,
@@ -6005,7 +6007,7 @@ describeRealCodex('real Codex hosted usage behavior e2e', () => {
           codexHome: config.codexHome,
           developerInstructions:
             buildHostedUsageOptionsDeveloperInstructions('group'),
-          dynamicTools: [MURPH_GROUP_TOOL],
+          dynamicTools: [MURPH_GROUP_USAGE_TOOL],
           env: {
             ...config.env,
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: oneTimeSkillsRoot,

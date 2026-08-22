@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from "@murphai/hosted-execution";
@@ -8,8 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   listMurphDynamicToolNames,
   MURPH_GROUP_FAMILY_TOOLS,
-  MURPH_GROUP_TOOL,
   MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_NAME,
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 
@@ -131,12 +129,11 @@ function groupToolCall(
 describe("murph.group parser-first family compatibility", () => {
   it("partitions all 30 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
-    const advertisedActions = MURPH_GROUP_TOOL
-      .inputSchema.allOf[0].properties.action.enum;
 
     expect(familyActions).toHaveLength(30);
     expect(new Set(familyActions).size).toBe(familyActions.length);
-    expect([...familyActions].sort()).toEqual([...advertisedActions].sort());
+    expect([...familyActions].sort())
+      .toEqual(Object.keys(GROUP_ACTION_FIXTURES).sort());
   });
 
   it("normalizes every family action exactly like the legacy parser", () => {
@@ -144,7 +141,7 @@ describe("murph.group parser-first family compatibility", () => {
       for (const action of actions) {
         const argumentsValue = GROUP_ACTION_FIXTURES[action];
         const legacy = readMurphDynamicToolRequest(
-          groupToolCall(MURPH_GROUP_TOOL.name, argumentsValue),
+          groupToolCall(MURPH_GROUP_TOOL_NAME, argumentsValue),
         );
         const family = readMurphDynamicToolRequest(
           groupToolCall(familyName, argumentsValue),
@@ -232,12 +229,7 @@ describe("murph.group parser-first family compatibility", () => {
     });
   });
 
-  it("keeps the legacy descriptor stable while advertising the six families", () => {
-    expect(createHash("sha256")
-      .update(JSON.stringify(MURPH_GROUP_TOOL))
-      .digest("hex"))
-      .toBe("7ca2e594d2fab08fab1988e18018b70043173be6da2d7ca69d9b981bad77e736");
-
+  it("advertises the six families without the legacy surface", () => {
     const advertisedNames = listMurphDynamicToolNames();
     for (const familyName of Object.keys(GROUP_FAMILY_ACTIONS)) {
       expect(advertisedNames).toContain(`murph.${familyName}`);

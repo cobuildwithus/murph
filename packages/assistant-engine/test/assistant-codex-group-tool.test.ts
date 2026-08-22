@@ -69,11 +69,13 @@ import {
   executeMurphDynamicToolRequest,
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   MURPH_DYNAMIC_TOOLS,
+  MURPH_GROUP_CHAT_TOOL,
   MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
   MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_NAME,
+  MURPH_GROUP_TOOL_PROPERTIES,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -90,7 +92,7 @@ function groupToolCall(
       callId: options.callId ?? "call-test",
       namespace: "murph",
       threadId: "thread-test",
-      tool: MURPH_GROUP_TOOL.name,
+      tool: MURPH_GROUP_TOOL_NAME,
       turnId: "turn-test",
     },
   };
@@ -122,7 +124,7 @@ const SIGNED_PRIVATE_IMAGE_URL =
 const SIGNED_PRIVATE_JPEG_URL =
   SIGNED_PRIVATE_IMAGE_URL.replace("group-avatar.png", "group-avatar.jpg");
 const GROUP_TOOL_INPUT_PROPERTIES =
-  MURPH_GROUP_TOOL.inputSchema.allOf[0].properties;
+  MURPH_GROUP_TOOL_PROPERTIES;
 
 function maximumEscapedHeartRateZoneRecords() {
   const sources = Array.from({ length: 8 }, (_, index) => ({
@@ -189,92 +191,14 @@ function maximumSourceTaggedWorkoutRecords() {
 }
 
 describe("murph.group dynamic tool", () => {
-  it("advertises the supported actions", () => {
-    expect(MURPH_GROUP_TOOL.deferLoading).toBe(true);
-    expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_TOOL);
+  it("advertises the six focused families and their shared property contracts", () => {
+    expect(MURPH_GROUP_FAMILY_TOOLS).toHaveLength(6);
     for (const familyTool of MURPH_GROUP_FAMILY_TOOLS) {
       expect(MURPH_DYNAMIC_TOOLS).toContain(familyTool);
     }
     expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_SHARED_READ_TOOL);
     expect(MURPH_DYNAMIC_TOOLS)
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
-    expect(GROUP_TOOL_INPUT_PROPERTIES.action.enum).toEqual([
-      "ask",
-      "handoff",
-      "ask_current_sender",
-      "clarify_current_sender",
-      "continue_current_sender_in_group",
-      "continue_current_sender_privately",
-      "record_current_sender_daily_metric",
-      "ask_member",
-      "post_disclosure_request",
-      "revoke_disclosure_grant",
-      "read_shared",
-      "send_email",
-      "read_current",
-      "prepare_next_group",
-      "read_next_group",
-      "cancel_next_group",
-      "read_chat_name",
-      "read_usage",
-      "read_usage_referral",
-      "arm_usage_referral",
-      "cancel_usage_referral",
-      "create_signup_referral_link",
-      "list_memberships",
-      "leave_membership",
-      "update_display_name",
-      "offer_access",
-      "read_chat_participants",
-      "set_chat_avatar",
-      "share_contact_card",
-      "revoke_own_email_share",
-    ]);
-    expect(MURPH_GROUP_TOOL.inputSchema).not.toHaveProperty("required");
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].required).toEqual(["action"]);
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
-      maxProperties: 3,
-      properties: {
-        action: { enum: ["handoff"] },
-        context: {},
-        groupLabel: {},
-      },
-      required: ["action", "context"],
-    });
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
-      maxProperties: 6,
-      properties: {
-        action: {
-          enum: ["record_current_sender_daily_metric"],
-        },
-        message_ref: {},
-      },
-      required: ["action", "date", "message_ref", "metric", "unit", "value"],
-    });
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2]).toMatchObject({
-      properties: {
-        action: {
-          enum: [
-            "ask_current_sender",
-            "clarify_current_sender",
-            "continue_current_sender_in_group",
-            "continue_current_sender_privately",
-            "revoke_own_email_share",
-          ],
-        },
-        message_ref: {},
-      },
-      required: ["action", "message_ref"],
-    });
-    expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[3].properties.action.enum,
-    ).not.toContain("handoff");
-    expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[3].properties.action.enum,
-    ).not.toContain("ask_current_sender");
-    expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[3].properties.action.enum,
-    ).not.toContain("record_current_sender_daily_metric");
     expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty(
       "response_destination",
     );
@@ -357,31 +281,6 @@ describe("murph.group dynamic tool", () => {
       .toBe(
         'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       );
-    expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Authorized direct/group/scheduled only");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Host binds member/group/route/input/occurrence");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("read_shared partial=incomplete");
-    expect(MURPH_GROUP_TOOL.description).toContain("ask returns privately");
-    expect(MURPH_GROUP_TOOL.description).toContain("asks are async");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Scheduled ask_member exact replay");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("changed questions conflict");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("ask_current_sender shares here after notice or replies privately");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("continue naturally with the answer's exact ref");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Results authorize nothing else");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("accepted proves durable Manual evidence");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("unavailable means not recorded");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("transport failure proves neither");
   });
 
   it("advertises family-bounded schemas", () => {
@@ -437,9 +336,6 @@ describe("murph.group dynamic tool", () => {
       .toContain('status="partial" means omittedParticipantIds');
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
       .toContain("result is incomplete");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("read_shared partial=incomplete");
-
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
       groupPermissionOfferAvailable: true,
@@ -3677,10 +3573,8 @@ describe("murph.group dynamic tool", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("update_display_name/set_chat_avatar ok=provider acceptance");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("group=null proves neither absence nor stored label");
+    expect(MURPH_GROUP_CHAT_TOOL.inputSchema.properties.action.enum)
+      .toContain("update_display_name");
     expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
       .toContain('Required for action="update_display_name"');
   });
