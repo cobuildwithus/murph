@@ -860,10 +860,6 @@ describe('Codex model catalog', () => {
       earliestAt: '2031-02-15T09:59:58.000Z',
       latestAt: '2031-02-15T09:59:59.900Z',
     })
-    expect(
-      providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
-        ?.workoutFollowUpContextAvailable,
-    ).toBe(true)
   })
 
   it('enforces the output-only boundary at provider execution', async () => {
@@ -997,7 +993,6 @@ describe('Codex model catalog', () => {
       providerThreadEphemeral: true,
       publicInternetFetch: null,
       requireHostedPrivateImageDelivery: false,
-      workoutFollowUpContextAvailable: false,
     })
     expect(providerInput).not.toHaveProperty('processLifetime')
     expect(unsafeDynamicTools).not.toEqual([])
@@ -1785,7 +1780,6 @@ describe('Codex model catalog', () => {
       sessionContext: {
         binding: session.binding,
       },
-      workoutFollowUpContextAvailable: false,
     })
     expect(unsafeProgressDelivery.send).not.toHaveBeenCalled()
   })

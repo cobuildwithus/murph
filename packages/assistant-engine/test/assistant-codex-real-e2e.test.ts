@@ -624,7 +624,6 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
-          workoutFollowUpContextAvailable: true,
           workingDirectory,
         }
 
@@ -721,11 +720,11 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
         })
 
         expect(followUp.responseCard).toBeNull()
-        expect(followUp.finalMessage).not.toContain(finiteWorkout.id)
         expect(followUp.finalMessage).toMatch(/set 8|how.*went|reps/iu)
-        expect(followUp.transcriptMessage).toContain(
+        expect(followUp.finalMessage).toContain(
           `[Murph workout follow-up: ${finiteWorkout.id}]`,
         )
+        expect(followUp.transcriptMessage).toBe(followUp.finalMessage)
 
         // Deliberately do not resume the provider session. The member's terse
         // message carries no id; Murph's preceding transcript supplies the

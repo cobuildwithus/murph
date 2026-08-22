@@ -16,7 +16,6 @@ import {
   readHostedCanonicalWritePort,
   withHostedCanonicalWritePort,
 } from '@murphai/core'
-import { ID_PREFIXES, isContractId } from '@murphai/contracts'
 
 import type {
   AssistantResponseMedia,
@@ -541,7 +540,6 @@ export interface CodexAppServerTurnInput {
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
-  workoutFollowUpContextAvailable?: boolean | null
   analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
@@ -659,77 +657,6 @@ interface CodexAppServerTrailingResponseCandidate
   extends Omit<CodexAppServerResponseSegment, 'transcriptResponse'> {
   card: AssistantResponseCard | null
   cardTextFallback: CompactTableWorkoutResponseCardV1 | null
-}
-
-const ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_NAMESPACE =
-  '[Murph workout follow-up'
-const ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN =
-  /^\[Murph workout follow-up: ([^\]\r\n]{1,64})\]$/u
-
-function splitAssistantWorkoutFollowUpContext(input: {
-  available: boolean
-  message: string
-}): {
-  transcriptMessage: string
-  visibleMessage: string
-} {
-  const { available, message } = input
-  if (!available) {
-    return { transcriptMessage: message, visibleMessage: message }
-  }
-
-  const lines = message.split('\n')
-  let lastContentLineIndex = -1
-  for (let lineIndex = lines.length - 1; lineIndex >= 0; lineIndex -= 1) {
-    if (lines[lineIndex]?.trim() !== '') {
-      lastContentLineIndex = lineIndex
-      break
-    }
-  }
-  const markerCandidates: Array<{
-    lineIndex: number
-    match: RegExpExecArray | null
-    standalone: boolean
-  }> = []
-  const visibleMessage = lines.map((line, lineIndex) => {
-    const markerStart = line.indexOf(
-      ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_NAMESPACE,
-    )
-    if (markerStart < 0) {
-      return line
-    }
-
-    const beforeMarker = line.slice(0, markerStart)
-    markerCandidates.push({
-      lineIndex,
-      match: ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN.exec(
-        line.slice(markerStart).trim(),
-      ),
-      standalone: beforeMarker.trim() === '',
-    })
-    return beforeMarker.trimEnd()
-  }).join('\n').trimEnd()
-
-  if (markerCandidates.length === 0) {
-    return { transcriptMessage: message, visibleMessage: message }
-  }
-
-  const candidate = markerCandidates[0]
-  const workoutId = candidate?.match?.[1] ?? ''
-  if (
-    markerCandidates.length !== 1 ||
-    candidate?.lineIndex !== lastContentLineIndex ||
-    candidate?.standalone !== true ||
-    !isContractId(workoutId, ID_PREFIXES.event)
-  ) {
-    return { transcriptMessage: visibleMessage, visibleMessage }
-  }
-
-  return {
-    transcriptMessage:
-      `${visibleMessage}\n\n[Murph workout follow-up: ${workoutId}]`,
-    visibleMessage,
-  }
 }
 
 export type CodexAppServerSteerInput = {
@@ -3810,24 +3737,20 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const workoutFollowUp = splitAssistantWorkoutFollowUpContext({
-      available: input.workoutFollowUpContextAvailable === true,
-      message: trailingSteerCandidate.response,
-    })
     const response = trailingSteerCandidate.card
       ? renderAssistantResponseCardText(trailingSteerCandidate.card)
       : trailingSteerCandidate.cardTextFallback
         ? renderAssistantWorkoutResponseCardText(
             trailingSteerCandidate.cardTextFallback,
           )
-        : workoutFollowUp.visibleMessage
+        : trailingSteerCandidate.response
     const transcriptResponse = trailingSteerCandidate.card
       ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
       : trailingSteerCandidate.cardTextFallback
         ? renderAssistantWorkoutResponseCardTranscriptText(
             trailingSteerCandidate.cardTextFallback,
           )
-        : workoutFollowUp.transcriptMessage
+        : response
     precedingAgentMessageSegments.push({
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
@@ -5995,15 +5918,11 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const workoutFollowUp = splitAssistantWorkoutFollowUpContext({
-    available: input.workoutFollowUpContextAvailable === true,
-    message: modelFinalMessage,
-  })
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
-      : workoutFollowUp.visibleMessage
+      : modelFinalMessage
   const requiredSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage) ??
     requiredFinalResponseFallback ??
@@ -6029,7 +5948,7 @@ async function runCodexAppServerTurnOnProcess(
       ? renderAssistantWorkoutResponseCardTranscriptText(
           finalResponseCardTextFallback,
         )
-      : normalizeNullableString(workoutFollowUp.transcriptMessage) ??
+      : normalizeNullableString(modelFinalMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
     normalizeNullableString(semanticTranscriptMessage) ??

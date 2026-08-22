@@ -356,10 +356,13 @@ describe('assistant tracked workout table skill', () => {
       '[Murph workout follow-up: <exact evt_id>]',
     )
     expect(skill).toContain(
-      'Runtime removes this line from the delivered',
+      'Deliver and persist the same response',
     )
     expect(skill).toContain(
-      'Do not show or explain the',
+      'The member may see the id',
+    )
+    expect(skill).toContain(
+      'never ask them to supply or retype',
     )
     expect(skill).toContain(
       'The marker carries context, not write authority.',

@@ -36,7 +36,7 @@ Saved target values remain in the workout format. A newly started session contai
 
 ## Required write flow
 
-1. Resolve mutation authority from an exact canonical workout id returned by the current start/read result, the durable tracking marker on the one card being answered, the transcript-only marker on Murph's workout-specific follow-up, or immediate causal context that already names that exact id. There is no global active or focused workout selector. Never choose a workout by recency.
+1. Resolve mutation authority from an exact canonical workout id returned by the current start/read result, the durable tracking marker on the one card being answered, the exact marker on Murph's workout-specific follow-up, or immediate causal context that already names that exact id. There is no global active or focused workout selector. Never choose a workout by recency.
 2. When the exact workout id or set coordinate is genuinely unavailable, ask which workout, exercise, or set the member means. Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.
 3. Pass `--workout-id`, one explicit exercise selector, and `--set-order` on every set mutation. Prefer a stable `--exercise-id`; otherwise use exact exercise order or the exact canonical name. Repeated attempts then converge on the same record and coordinate instead of appending or retargeting.
 4. When the member states one exact repetition count for every set of one exercise, immediately persist that smallest exercise-owned fact with `workout exercise set-reps`. Later terse completions may omit `--reps`; the canonical use case copies the stored member fact into that completed set's actual `reps` field. The stored fact fills only an unlogged coordinate; a note, load, or other correction on an already logged set preserves that set's explicit repetitions unless the member supplies a new repetition result. The fact survives provider-thread loss and bounded transcript replay because it belongs to the workout exercise, not assistant memory. Only an explicit new statement that one exact count applies to every set updates the fact before logging that completion. An exact result for one set changes only that set's actual. Clear the fact only when the member withdraws the every-set instruction.
@@ -51,16 +51,16 @@ A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set
 
 Only in an ordinary private free-form conversation, when Murph asks a question
 whose answer should update one exact workout, end the model-authored response
-with exactly one internal line after a blank line:
+with exactly one line after a blank line:
 
 ```text
 [Murph workout follow-up: <exact evt_id>]
 ```
 
 Use only the exact id from the current successful workout command result or an
-existing exact workout marker. Runtime removes this line from the delivered
-message and keeps it in durable transcript context. Do not show or explain the
-id to the member, and do not ask them to supply it.
+existing exact workout marker. Deliver and persist the same response, including
+this marker. The member may see the id, but never ask them to supply or retype
+it.
 
 Never append this line when the active response contract requires JSON or any
 other structured output, or on a scheduled notification, group, output-only, or
