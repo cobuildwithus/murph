@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-21",
+  "order": 200,
+  "item": {
+    "id": "higher-group-sponsorship-limit",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Sponsor a group up to $50 per month",
+    "summary": "Monthly group sponsorship now offers a $50 maximum alongside the existing $5, $10, and $20 choices.",
+    "details": "Starting still purchases $5 of usage, and later automatic purchases remain fixed at $5 and happen only when the group needs capacity and the selected monthly maximum allows it.",
+    "relevanceTags": ["groups", "billing", "usage", "sponsorship"],
+    "sourcePullRequests": []
+  }
+}

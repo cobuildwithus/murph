@@ -1720,7 +1720,7 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                initialSelectedMonthlyCapMinor={2_000}
+                initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,

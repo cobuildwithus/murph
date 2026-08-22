@@ -79,11 +79,13 @@ import {
   manageHostedGroupSponsorshipAuthorization,
   markHostedGroupSponsorshipRecoveryRequiredForPurchase,
   parseHostedGroupSponsorshipManagementAction,
-  parseHostedGroupSponsorshipMonthlyCapMinor,
   pauseHostedGroupSponsorshipForFinancialReversalTx,
   prepareHostedGroupSponsorshipRecoveryTx,
   type HostedGroupSponsorshipManagementAction,
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
+import {
+  parseHostedGroupSponsorshipMonthlyCapMinor,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
 import {
   closeExpiredUnattachedHostedUsageCreditPurchasesTx,
 } from "@/src/lib/hosted-onboarding/usage-credit-purchase-status-service";
@@ -577,11 +579,13 @@ function createFailedRecoveryHarness(input: {
 }
 
 describe("hosted capped group sponsorship authorization", () => {
-  it("accepts only the three explicit monthly maximums and closed management payloads", () => {
+  it("accepts only the four explicit monthly maximums and closed management payloads", () => {
     expect(parseHostedGroupSponsorshipMonthlyCapMinor(500)).toBe(500);
     expect(parseHostedGroupSponsorshipMonthlyCapMinor(1_000)).toBe(1_000);
     expect(parseHostedGroupSponsorshipMonthlyCapMinor(2_000)).toBe(2_000);
+    expect(parseHostedGroupSponsorshipMonthlyCapMinor(5_000)).toBe(5_000);
     expect(parseHostedGroupSponsorshipMonthlyCapMinor(1_500)).toBeNull();
+    expect(parseHostedGroupSponsorshipMonthlyCapMinor(5_001)).toBeNull();
     expect(parseHostedGroupSponsorshipManagementAction({
       action: "change_cap",
       authorizationId: "hgsa_abcdefghijklmnop",

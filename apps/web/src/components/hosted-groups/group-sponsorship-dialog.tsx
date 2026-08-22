@@ -34,12 +34,14 @@ import { RadioGroup } from "@/src/components/ui/radio-group";
 import { Textarea } from "@/src/components/ui/textarea";
 import {
   buildHostedGroupSponsorshipDraftInput,
+  parseHostedGroupSponsorshipMonthlyCapMinor,
   HOSTED_GROUP_SPONSORSHIP_CREATIVE_PROMPT_MAX_CODE_POINTS,
   HOSTED_GROUP_SPONSORSHIP_CREATIVE_STYLE_MAX_CODE_POINTS,
   HOSTED_GROUP_SPONSORSHIP_PUBLIC_ALIAS_MAX_CODE_POINTS,
   HOSTED_GROUP_SPONSORSHIP_RUNNING_BIT_MAX_CODE_POINTS,
   type HostedGroupSponsorshipCreativeFormat,
   type HostedGroupSponsorshipDraft,
+  type HostedGroupSponsorshipMonthlyCapMinor,
 } from "@/src/lib/hosted-groups/group-sponsorship-contract";
 import { cn } from "@/src/lib/utils";
 
@@ -50,7 +52,7 @@ type GroupSponsorshipDialogProps = Omit<
   customizationAllowed: boolean;
   frozenSponsorship?: FrozenGroupSponsorship | null;
   mode?: "monthly" | "one_time";
-  monthlyCapMinor?: 500 | 1_000 | 2_000;
+  monthlyCapMinor?: HostedGroupSponsorshipMonthlyCapMinor;
   monthlyCapOptions?: readonly GroupSponsorshipMonthlyCapOption[];
   offers: readonly GroupSponsorshipOffer[];
 };
@@ -63,7 +65,7 @@ type GroupSponsorshipOffer = HostedUsageTopUpOffer & {
 
 type GroupSponsorshipMonthlyCapOption = {
   amountLabel: string;
-  monthlyCapMinor: 500 | 1_000 | 2_000;
+  monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor;
 };
 
 function GroupSponsorshipDialog({
@@ -189,12 +191,14 @@ function GroupSponsorshipDialog({
                 <RadioGroup
                   value={String(selectedMonthlyCapMinor)}
                   onValueChange={(value) => {
-                    const parsed = Number(value);
-                    if (parsed === 500 || parsed === 1_000 || parsed === 2_000) {
+                    const parsed = parseHostedGroupSponsorshipMonthlyCapMinor(
+                      Number(value),
+                    );
+                    if (parsed !== null) {
                       setSelectedMonthlyCapMinor(parsed);
                     }
                   }}
-                  className="hidden gap-3 md:grid md:grid-cols-3"
+                  className="hidden gap-3 md:grid md:grid-cols-4"
                 >
                   {monthlyCapOptions.map((option) => (
                     <ChoiceCard
@@ -430,9 +434,9 @@ function GroupSponsorshipCapDial({
   value,
 }: {
   disabled: boolean;
-  onValueChange: (value: 500 | 1_000 | 2_000) => void;
+  onValueChange: (value: HostedGroupSponsorshipMonthlyCapMinor) => void;
   options: readonly GroupSponsorshipMonthlyCapOption[];
-  value: 500 | 1_000 | 2_000;
+  value: HostedGroupSponsorshipMonthlyCapMinor;
 }) {
   const labelId = useId();
   const interactionHintId = useId();
@@ -514,8 +518,13 @@ function GroupSponsorshipCapDial({
         aria-describedby={interactionHintId}
         aria-disabled={disabled || undefined}
         aria-labelledby={labelId}
-        aria-valuemax={20}
-        aria-valuemin={5}
+        aria-valuemax={
+          (options[options.length - 1]?.monthlyCapMinor ??
+            selectedOption.monthlyCapMinor) / 100
+        }
+        aria-valuemin={
+          (options[0]?.monthlyCapMinor ?? selectedOption.monthlyCapMinor) / 100
+        }
         aria-valuenow={selectedOption.monthlyCapMinor / 100}
         aria-valuetext={`Up to ${selectedOption.amountLabel} per month`}
         className="relative aspect-square w-[calc(100%+2rem)] max-w-96 shrink-0 touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[disabled=true]:opacity-55"

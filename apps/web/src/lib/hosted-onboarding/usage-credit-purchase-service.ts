@@ -109,11 +109,13 @@ import {
 } from "../hosted-groups/group-usage-funding";
 import {
   createHostedGroupSponsorshipAuthorizationTx,
-  parseHostedGroupSponsorshipMonthlyCapMinor,
   prepareHostedGroupSponsorshipRecoveryTx,
-  type HostedGroupSponsorshipMonthlyCapMinor,
   type HostedGroupSponsorshipPaymentAuthority,
 } from "../hosted-groups/group-sponsorship-authorization";
+import {
+  parseHostedGroupSponsorshipMonthlyCapMinor,
+  type HostedGroupSponsorshipMonthlyCapMinor,
+} from "../hosted-groups/group-sponsorship-contract";
 import {
   assertHostedGroupSponsorshipRequestMatchesTx,
   createHostedGroupSponsorshipMomentTx,
@@ -357,7 +359,7 @@ export function parseHostedGroupSponsorshipCheckoutRequest(
     throw hostedOnboardingError({
       code: "HOSTED_GROUP_SPONSORSHIP_CAP_INVALID",
       httpStatus: 400,
-      message: "Monthly sponsorship starts with $5 and needs a $5, $10, or $20 maximum.",
+      message: "Monthly sponsorship starts with $5 and needs a $5, $10, $20, or $50 maximum.",
     });
   }
   return {

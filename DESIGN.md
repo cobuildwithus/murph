@@ -545,11 +545,11 @@ its real component with synthetic states in both the components catalog and
 this section study.
 
 Use `GroupSponsorshipDialog` for the primary monthly choice. Present $5, $10,
-and $20 as visually prominent monthly maximums. On desktop, use the shared
+$20, and $50 as visually prominent monthly maximums. On desktop, use the shared
 choice cards. On phones, use a near-full-height bottom drawer with one large
 circular cap slider. The handle follows a pointer anywhere around the arc and
 snaps to the nearest available maximum on release; Arrow keys and Home/End
-provide the same three-stop selection. Keep the opening explanation to
+provide the same four-stop selection. Keep the opening explanation to
 `Choose your monthly sponsorship limit.` The explicit sponsor action authorizes
 the initial $5 activation purchase, whose amount is shown before payment;
 selecting a maximum alone does not charge the card. Keep both funding actions

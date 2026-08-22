@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const management = {
   authorizationId: "hgsa_design_component",
   chargedThisPeriodMinor: 500,
-  monthlyCapMinor: 2_000,
+  monthlyCapMinor: 5_000,
   pendingThisPeriodMinor: 500,
   pendingMonthlyCapMinor: null,
   periodEnd: "2026-08-30T16:00:00.000Z",
@@ -108,10 +108,12 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   let study = await enableStudy();
 
-  const reviewButton = study.getByRole("button", { name: "Review $20 limit" });
+  const reviewButton = study.getByRole("button", {
+    name: "Review $50 limit",
+  });
   await reviewButton.click();
   let dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $20?",
+    name: "Increase your limit to $50?",
   });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(
@@ -127,7 +129,7 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   await reviewButton.click();
   dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $20?",
+    name: "Increase your limit to $50?",
   });
   await expect(dialog).toBeVisible();
   await page.keyboard.press("Escape");
@@ -137,9 +139,9 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
 
   await reviewButton.click();
   dialog = page.getByRole("alertdialog", {
-    name: "Increase your limit to $20?",
+    name: "Increase your limit to $50?",
   });
-  await dialog.getByRole("button", { name: "Increase to $20" }).click();
+  await dialog.getByRole("button", { name: "Increase to $50" }).click();
   await expect(dialog.getByRole("alert")).toContainText(
     "We’re not sure whether your limit changed",
   );
@@ -147,11 +149,11 @@ test("sponsorship confirmation preserves focus, safe dismissal, and retry", asyn
     dialog.getByRole("button", { name: "Check current setup" }),
   ).toBeVisible();
   await expect(
-    dialog.getByRole("button", { name: "Increase to $20" }),
+    dialog.getByRole("button", { name: "Increase to $50" }),
   ).toBeEnabled();
   expect(limitRequests).toBe(1);
 
-  await dialog.getByRole("button", { name: "Increase to $20" }).click();
+  await dialog.getByRole("button", { name: "Increase to $50" }).click();
   await expect(dialog).toBeHidden();
   expect(limitRequests).toBe(2);
 
