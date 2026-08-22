@@ -541,6 +541,7 @@ export interface CodexAppServerTurnInput {
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  workoutFollowUpContextAvailable?: boolean | null
   analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
@@ -660,34 +661,65 @@ interface CodexAppServerTrailingResponseCandidate
   cardTextFallback: CompactTableWorkoutResponseCardV1 | null
 }
 
+const ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_NAMESPACE =
+  '[Murph workout follow-up'
 const ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN =
-  /(?:^|\n)[ \t]*\[Murph workout follow-up: ([^\]\r\n]{1,64})\][ \t]*$/u
+  /^\[Murph workout follow-up: ([^\]\r\n]{1,64})\]$/u
 
-function splitAssistantWorkoutFollowUpContext(message: string): {
+function splitAssistantWorkoutFollowUpContext(input: {
+  available: boolean
+  message: string
+}): {
   transcriptMessage: string
   visibleMessage: string
 } {
-  const markerIds: string[] = []
-  let visibleMessage = message
-
-  while (true) {
-    const match = ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN.exec(
-      visibleMessage,
-    )
-    if (!match) {
-      break
-    }
-    markerIds.unshift(match[1] ?? '')
-    visibleMessage = visibleMessage.slice(0, match.index).trimEnd()
-  }
-
-  if (markerIds.length === 0) {
+  const { available, message } = input
+  if (!available) {
     return { transcriptMessage: message, visibleMessage: message }
   }
 
-  const workoutId = markerIds[0]
+  const lines = message.split('\n')
+  let lastContentLineIndex = -1
+  for (let lineIndex = lines.length - 1; lineIndex >= 0; lineIndex -= 1) {
+    if (lines[lineIndex]?.trim() !== '') {
+      lastContentLineIndex = lineIndex
+      break
+    }
+  }
+  const markerCandidates: Array<{
+    lineIndex: number
+    match: RegExpExecArray | null
+    standalone: boolean
+  }> = []
+  const visibleMessage = lines.map((line, lineIndex) => {
+    const markerStart = line.indexOf(
+      ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_NAMESPACE,
+    )
+    if (markerStart < 0) {
+      return line
+    }
+
+    const beforeMarker = line.slice(0, markerStart)
+    markerCandidates.push({
+      lineIndex,
+      match: ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN.exec(
+        line.slice(markerStart).trim(),
+      ),
+      standalone: beforeMarker.trim() === '',
+    })
+    return beforeMarker.trimEnd()
+  }).join('\n').trimEnd()
+
+  if (markerCandidates.length === 0) {
+    return { transcriptMessage: message, visibleMessage: message }
+  }
+
+  const candidate = markerCandidates[0]
+  const workoutId = candidate?.match?.[1] ?? ''
   if (
-    markerIds.length !== 1 ||
+    markerCandidates.length !== 1 ||
+    candidate?.lineIndex !== lastContentLineIndex ||
+    candidate?.standalone !== true ||
     !isContractId(workoutId, ID_PREFIXES.event)
   ) {
     return { transcriptMessage: visibleMessage, visibleMessage }
@@ -3778,9 +3810,10 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    const workoutFollowUp = splitAssistantWorkoutFollowUpContext(
-      trailingSteerCandidate.response,
-    )
+    const workoutFollowUp = splitAssistantWorkoutFollowUpContext({
+      available: input.workoutFollowUpContextAvailable === true,
+      message: trailingSteerCandidate.response,
+    })
     const response = trailingSteerCandidate.card
       ? renderAssistantResponseCardText(trailingSteerCandidate.card)
       : trailingSteerCandidate.cardTextFallback
@@ -5962,7 +5995,10 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
-  const workoutFollowUp = splitAssistantWorkoutFollowUpContext(modelFinalMessage)
+  const workoutFollowUp = splitAssistantWorkoutFollowUpContext({
+    available: input.workoutFollowUpContextAvailable === true,
+    message: modelFinalMessage,
+  })
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
     : finalResponseCardTextFallback

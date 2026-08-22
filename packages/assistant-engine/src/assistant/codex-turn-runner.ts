@@ -576,11 +576,18 @@ async function executeAssistantCodexAttempt(input: {
       memberMemoryMaintenanceTurn ||
       readOnlyAutomationTurn
     const audience = executionPlan.sharedPlan.conversationPolicy.audience
+    const conversationScope = resolveAssistantConversationScope(audience)
     const groupConversation =
-      resolveAssistantConversationScope(audience) === 'group'
+      conversationScope === 'group'
     const groupEmailTurn =
       audience.threadIsDirect === false &&
       normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
+    const workoutFollowUpContextAvailable =
+      executionPlan.profile.promptProfile === 'conversation' &&
+      executionPlan.profile.toolProfile === 'provider-turn' &&
+      conversationScope === 'direct' &&
+      executionPlan.input.scheduledInvocationAuthority == null &&
+      executionPlan.input.scheduledOccurrenceAt == null
     const ordinaryHostedWorkspaceTurn =
       Boolean(executionPlan.executionContext?.hosted) &&
       !restrictedOneShotTurn &&
@@ -782,6 +789,7 @@ async function executeAssistantCodexAttempt(input: {
         userPrompt: executionPlan.input.prompt,
         assistantPreferredElevenLabsVoiceId,
         voiceMemoDeliveryChannel,
+        workoutFollowUpContextAvailable,
         workingDirectory: attemptPlan.routePlan.workingDirectory,
       },
     })

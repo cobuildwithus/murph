@@ -323,6 +323,8 @@ export async function executeCodexAssistantTurnAttempt(
     serviceTier: input.serviceTier ?? null,
     vaultRoot: input.vaultRoot ?? null,
     voiceMemoRuntime,
+    workoutFollowUpContextAvailable:
+      input.workoutFollowUpContextAvailable === true,
     analyzeVideoRuntime,
     askGrokRuntime,
   } as const

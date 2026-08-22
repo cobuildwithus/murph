@@ -24,8 +24,9 @@ Updated: 2026-08-22
 ## Scope
 
 - In scope: one transcript-only workout-id marker for model-authored follow-up
-  text, final and steered-response handling, tracked-workout instructions and
-  product contract, focused regressions, and a public changelog item.
+  text in ordinary private conversations, final and steered-response handling,
+  tracked-workout instructions and product contract, focused regressions, and
+  a public changelog item.
 - Out of scope: global active-workout state, recency selection, new persisted
   workout state, card behavior, workout schemas, or changes to canonical write
   authority.
@@ -33,8 +34,12 @@ Updated: 2026-08-22
 ## Constraints
 
 - The marker carries only a valid canonical `evt_<ULID>` returned by the
-  current exact workout command result.
+  current exact workout command result or an existing exact workout marker.
 - Delivery strips the marker; durable assistant transcript text retains it.
+- Structured-output, scheduled, group, output-only, maintenance, and
+  unverified-external turns keep their existing response contract unchanged.
+- Malformed marker-shaped fragments are scrubbed from member-visible and
+  transcript text instead of being retained as durable context.
 - The marker is context, not write authority. Every later mutation still
   exact-reads and targets that id through the canonical workout owner.
 - Preserve unrelated working-tree state and use the task worktree/PR lane.

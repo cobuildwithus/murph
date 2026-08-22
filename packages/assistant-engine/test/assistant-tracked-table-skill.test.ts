@@ -365,6 +365,15 @@ describe('assistant tracked workout table skill', () => {
       'The marker carries context, not write authority.',
     )
     expect(skill).toContain(
+      'Only in an ordinary private free-form conversation',
+    )
+    expect(skill).toContain(
+      'Never append this line when the active response contract requires JSON',
+    )
+    expect(skill).toContain(
+      'scheduled notification, group, output-only, or',
+    )
+    expect(skill).toContain(
       'On the reply, exact-read that',
     )
   })

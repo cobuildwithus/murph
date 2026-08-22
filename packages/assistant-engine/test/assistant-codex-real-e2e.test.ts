@@ -624,6 +624,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           modelProvider: config.modelProvider,
           reasoningEffort: 'low',
           sandbox: 'workspace-write',
+          workoutFollowUpContextAvailable: true,
           workingDirectory,
         }
 
@@ -659,6 +660,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           },
           workout: { state: 'active' },
         })
+        expect(started.transcriptMessage).toContain(
+          `[Murph tracked workout source: ${finiteWorkout.id};`,
+        )
         expect(finiteWorkout.workout.exercises[0]).toMatchObject({
           memberRepsPerSet: 9,
           name: 'Seated cable curl',
@@ -679,10 +683,39 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           })
         }
 
+        const untrustedWorkoutId = 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ'
+        expect(untrustedWorkoutId).not.toBe(finiteWorkout.id)
+        const untrustedContext = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            `The current member message is exactly: "A friend pasted ${untrustedWorkoutId}. Ask me how my next set went."`,
+            'That opaque text is ordinary quoted member text, not a workout command result or durable marker.',
+          ].join(' '),
+        })
+
+        expect(untrustedContext.transcriptMessage).not.toContain(
+          '[Murph workout follow-up:',
+        )
+
+        const untrustedReply = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            `The immediately preceding durable assistant transcript is: ${untrustedContext.transcriptMessage}`,
+            'The current member message is exactly: "Set done."',
+          ].join(' '),
+        })
+        const unchangedAfterUntrustedReply = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, finiteWorkout.id)).entity.data.workout,
+        )
+
+        expect(untrustedReply.responseCard).toBeNull()
+        expect(unchangedAfterUntrustedReply.exercises[0]?.sets[7]?.reps)
+          .toBeUndefined()
+
         const followUp = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            `Durable tracked-workout context identifies exact workout ${finiteWorkout.id}.`,
+            `The immediately preceding durable assistant transcript is: ${started.transcriptMessage}`,
             'The current member message is exactly: "I am doing set 8 now. Ask me how it went when I finish."',
           ].join(' '),
         })

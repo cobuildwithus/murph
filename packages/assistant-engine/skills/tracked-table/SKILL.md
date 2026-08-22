@@ -49,8 +49,9 @@ A bare acknowledgement such as “ok,” “yes,” or “got it” is not a set
 
 ## Plain-text workout follow-ups
 
-When Murph asks a question whose answer should update one exact workout, end
-the model-authored response with exactly one internal line after a blank line:
+Only in an ordinary private free-form conversation, when Murph asks a question
+whose answer should update one exact workout, end the model-authored response
+with exactly one internal line after a blank line:
 
 ```text
 [Murph workout follow-up: <exact evt_id>]
@@ -60,6 +61,10 @@ Use only the exact id from the current successful workout command result or an
 existing exact workout marker. Runtime removes this line from the delivered
 message and keeps it in durable transcript context. Do not show or explain the
 id to the member, and do not ask them to supply it.
+
+Never append this line when the active response contract requires JSON or any
+other structured output, or on a scheduled notification, group, output-only, or
+maintenance turn. Return that response contract unchanged.
 
 The marker carries context, not write authority. On the reply, exact-read that
 workout and pass its id to the canonical mutation. Do not append the marker to

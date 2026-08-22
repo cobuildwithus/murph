@@ -171,14 +171,16 @@ causal context, Murph asks which workout or set is intended. It does not select
 by recency, create a recovery workout, close another workout, or demand
 unrelated finish metadata.
 
-When Murph asks a question whose answer should update one exact workout, its
-model-authored response ends with `[Murph workout follow-up: <evt_id>]` using
-the exact id already returned by the current workout command or carried by an
-existing exact marker. Runtime removes that line from the member-visible
-message and preserves it in durable transcript context. The marker is only a
-handoff: the reply still exact-reads and mutates that workout through the
-canonical owner. It creates no active-workout selector, focused-workout state,
-or recency fallback.
+In an ordinary private conversation, when Murph asks a question whose answer
+should update one exact workout, its model-authored response ends with
+`[Murph workout follow-up: <evt_id>]` using the exact id already returned by the
+current workout command or carried by an existing exact marker. Runtime removes
+that line from the member-visible message and preserves it in durable transcript
+context. Structured-output, scheduled-notification, group, output-only, and
+maintenance turns keep their existing output contract unchanged and never use
+this marker. The marker is only a handoff: the reply still exact-reads and
+mutates that workout through the canonical owner. It creates no active-workout
+selector, focused-workout state, or recency fallback.
 
 Starting or logging a new workout is independent of older unfinished workouts.
 Every mutation carries the exact canonical workout id and uses that workout's

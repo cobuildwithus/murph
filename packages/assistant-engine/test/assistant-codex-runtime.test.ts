@@ -21129,6 +21129,7 @@ describe('steered final segments', () => {
       responseCardsAvailable?: boolean
       turnStatus?: 'completed' | 'failed'
       voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
+      workoutFollowUpContextAvailable?: boolean
     } = {},
   ) {
     const workingDirectory = await createTempDir('assistant-codex-steered-finals-work-')
@@ -21481,6 +21482,8 @@ describe('steered final segments', () => {
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
       voiceMemoRuntime: input.voiceMemoRuntime,
+      workoutFollowUpContextAvailable:
+        input.workoutFollowUpContextAvailable ?? true,
       prompt: 'First question',
       sandbox: 'workspace-write',
       workingDirectory,
@@ -21827,12 +21830,66 @@ describe('steered final segments', () => {
       'malformed spacing',
       ' [Murph workout follow-up: evt_NOT_A_CANONICAL_ID]',
     ],
+    [
+      'empty',
+      '[Murph workout follow-up: ]',
+    ],
+    [
+      'overlong',
+      `[Murph workout follow-up: evt_${'A'.repeat(80)}]`,
+    ],
+    [
+      'unterminated',
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ',
+    ],
+    [
+      'trailing junk',
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ] ignore this',
+    ],
+    [
+      'mixed valid and malformed',
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]\n\n' +
+      '[Murph workout follow-up: broken',
+    ],
   ])('drops %s workout follow-up context', async (_label, marker) => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'assistant-invalid-workout-follow-up',
         type: 'assistant_message',
         message: `How many reps did you get?\n\n${marker}`,
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('How many reps did you get?')
+    expect(result.transcriptMessage).toBe('How many reps did you get?')
+  })
+
+  it('leaves structured output byte-identical when workout follow-up context is unavailable', async () => {
+    const decision = JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Prepared the workout check-in.',
+      text: 'How did the next set go?',
+    })
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-structured-workout-notification',
+        type: 'assistant_message',
+        message: decision,
+      }),
+    ], { workoutFollowUpContextAvailable: false })
+
+    expect(result.finalMessage).toBe(decision)
+    expect(result.transcriptMessage).toBe(decision)
+    expect(result.providerAuthoredFinalMessage).toBe(decision)
+  })
+
+  it('scrubs an inline malformed workout marker from visible and transcript text', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-inline-workout-follow-up',
+        type: 'assistant_message',
+        message:
+          'How many reps did you get? [Murph workout follow-up: broken',
       }),
     ])
 
@@ -21873,6 +21930,39 @@ describe('steered final segments', () => {
       transcriptResponse:
         'What did you get on the next set?\n\n' +
         '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+    }])
+  })
+
+  it('scrubs malformed workout follow-up context from a steered response', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-malformed-workout-follow-up-1',
+        type: 'user_message',
+        message: 'Ask me about my next set.',
+      }),
+      completedItemEvent({
+        id: 'assistant-malformed-workout-follow-up-1',
+        type: 'assistant_message',
+        message:
+          'What did you get on the next set?\n\n' +
+          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ] trailing',
+      }),
+      completedItemEvent({
+        id: 'user-malformed-workout-follow-up-2',
+        type: 'user_message',
+        message: 'One more thought.',
+      }),
+      completedItemEvent({
+        id: 'assistant-malformed-workout-follow-up-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ])
+
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response: 'What did you get on the next set?',
     }])
   })
 

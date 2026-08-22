@@ -190,6 +190,7 @@ export interface AssistantProviderTurn {
   assistantPreferredElevenLabsVoiceId?: string | null
   voiceMemoDeliveryChannel?: 'linq' | 'telegram' | null
   vaultRoot?: string | null
+  workoutFollowUpContextAvailable?: boolean | null
   workingDirectory: string
 }
 
