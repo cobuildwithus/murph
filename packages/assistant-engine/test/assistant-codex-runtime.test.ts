@@ -21793,6 +21793,89 @@ describe('steered final segments', () => {
     )
   })
 
+  it('keeps a plain workout follow-up id only in the final transcript message', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-workout-follow-up',
+        type: 'assistant_message',
+        message:
+          'How many reps did you get on set 2?\n\n' +
+          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+      }),
+    ])
+
+    expect(result.responseCard).toBeNull()
+    expect(result.finalMessage).toBe('How many reps did you get on set 2?')
+    expect(result.finalMessage).not.toContain('evt_')
+    expect(result.transcriptMessage).toBe(
+      'How many reps did you get on set 2?\n\n' +
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+    )
+  })
+
+  it.each([
+    [
+      'invalid',
+      '[Murph workout follow-up: evt_NOT_A_CANONICAL_ID]',
+    ],
+    [
+      'duplicate',
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]\n\n' +
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+    ],
+    [
+      'malformed spacing',
+      ' [Murph workout follow-up: evt_NOT_A_CANONICAL_ID]',
+    ],
+  ])('drops %s workout follow-up context', async (_label, marker) => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-invalid-workout-follow-up',
+        type: 'assistant_message',
+        message: `How many reps did you get?\n\n${marker}`,
+      }),
+    ])
+
+    expect(result.finalMessage).toBe('How many reps did you get?')
+    expect(result.transcriptMessage).toBe('How many reps did you get?')
+  })
+
+  it('preserves a steered workout follow-up id without delivering it', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-workout-follow-up-1',
+        type: 'user_message',
+        message: 'Ask me about my next set.',
+      }),
+      completedItemEvent({
+        id: 'assistant-workout-follow-up-1',
+        type: 'assistant_message',
+        message:
+          'What did you get on the next set?\n\n' +
+          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+      }),
+      completedItemEvent({
+        id: 'user-workout-follow-up-2',
+        type: 'user_message',
+        message: 'One more thought.',
+      }),
+      completedItemEvent({
+        id: 'assistant-workout-follow-up-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ])
+
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response: 'What did you get on the next set?',
+      transcriptResponse:
+        'What did you get on the next set?\n\n' +
+        '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+    }])
+  })
+
   it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {
     const result = await runScriptedSteeredFinalSegmentsTurn([
       {

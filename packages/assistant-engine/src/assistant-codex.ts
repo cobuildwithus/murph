@@ -16,6 +16,7 @@ import {
   readHostedCanonicalWritePort,
   withHostedCanonicalWritePort,
 } from '@murphai/core'
+import { ID_PREFIXES, isContractId } from '@murphai/contracts'
 
 import type {
   AssistantResponseMedia,
@@ -657,6 +658,46 @@ interface CodexAppServerTrailingResponseCandidate
   extends Omit<CodexAppServerResponseSegment, 'transcriptResponse'> {
   card: AssistantResponseCard | null
   cardTextFallback: CompactTableWorkoutResponseCardV1 | null
+}
+
+const ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN =
+  /(?:^|\n)[ \t]*\[Murph workout follow-up: ([^\]\r\n]{1,64})\][ \t]*$/u
+
+function splitAssistantWorkoutFollowUpContext(message: string): {
+  transcriptMessage: string
+  visibleMessage: string
+} {
+  const markerIds: string[] = []
+  let visibleMessage = message
+
+  while (true) {
+    const match = ASSISTANT_WORKOUT_FOLLOW_UP_CONTEXT_MARKER_PATTERN.exec(
+      visibleMessage,
+    )
+    if (!match) {
+      break
+    }
+    markerIds.unshift(match[1] ?? '')
+    visibleMessage = visibleMessage.slice(0, match.index).trimEnd()
+  }
+
+  if (markerIds.length === 0) {
+    return { transcriptMessage: message, visibleMessage: message }
+  }
+
+  const workoutId = markerIds[0]
+  if (
+    markerIds.length !== 1 ||
+    !isContractId(workoutId, ID_PREFIXES.event)
+  ) {
+    return { transcriptMessage: visibleMessage, visibleMessage }
+  }
+
+  return {
+    transcriptMessage:
+      `${visibleMessage}\n\n[Murph workout follow-up: ${workoutId}]`,
+    visibleMessage,
+  }
 }
 
 export type CodexAppServerSteerInput = {
@@ -3737,20 +3778,23 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    const workoutFollowUp = splitAssistantWorkoutFollowUpContext(
+      trailingSteerCandidate.response,
+    )
     const response = trailingSteerCandidate.card
       ? renderAssistantResponseCardText(trailingSteerCandidate.card)
       : trailingSteerCandidate.cardTextFallback
         ? renderAssistantWorkoutResponseCardText(
             trailingSteerCandidate.cardTextFallback,
           )
-        : trailingSteerCandidate.response
+        : workoutFollowUp.visibleMessage
     const transcriptResponse = trailingSteerCandidate.card
       ? renderAssistantResponseCardTranscriptText(trailingSteerCandidate.card)
       : trailingSteerCandidate.cardTextFallback
         ? renderAssistantWorkoutResponseCardTranscriptText(
             trailingSteerCandidate.cardTextFallback,
           )
-        : response
+        : workoutFollowUp.transcriptMessage
     precedingAgentMessageSegments.push({
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
@@ -5918,11 +5962,12 @@ async function runCodexAppServerTurnOnProcess(
     noReplySelected || suppressTrailingSteerCandidateForEarlierNoReply
       ? ''
       : selectedFinalMessage
+  const workoutFollowUp = splitAssistantWorkoutFollowUpContext(modelFinalMessage)
   const semanticFinalMessage = finalResponseCard
     ? renderAssistantResponseCardText(finalResponseCard)
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
-      : modelFinalMessage
+      : workoutFollowUp.visibleMessage
   const requiredSemanticFinalMessage =
     normalizeNullableString(semanticFinalMessage) ??
     requiredFinalResponseFallback ??
@@ -5948,7 +5993,7 @@ async function runCodexAppServerTurnOnProcess(
       ? renderAssistantWorkoutResponseCardTranscriptText(
           finalResponseCardTextFallback,
         )
-      : normalizeNullableString(modelFinalMessage) ??
+      : normalizeNullableString(workoutFollowUp.transcriptMessage) ??
         (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
     normalizeNullableString(semanticTranscriptMessage) ??

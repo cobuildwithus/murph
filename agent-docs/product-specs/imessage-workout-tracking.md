@@ -166,9 +166,19 @@ A short acknowledgement after a set message or assistant reply is not another
 set completion and cannot advance the coordinate. The last exact workout,
 exercise, and set the member identified remain the only candidate. If an exact
 coordinate is not available from a current command result, durable card marker,
-or immediate causal context, Murph asks which workout or set is intended. It
-does not select by recency, create a recovery workout, close another workout,
-or demand unrelated finish metadata.
+the transcript-only marker on Murph's workout-specific follow-up, or immediate
+causal context, Murph asks which workout or set is intended. It does not select
+by recency, create a recovery workout, close another workout, or demand
+unrelated finish metadata.
+
+When Murph asks a question whose answer should update one exact workout, its
+model-authored response ends with `[Murph workout follow-up: <evt_id>]` using
+the exact id already returned by the current workout command or carried by an
+existing exact marker. Runtime removes that line from the member-visible
+message and preserves it in durable transcript context. The marker is only a
+handoff: the reply still exact-reads and mutates that workout through the
+canonical owner. It creates no active-workout selector, focused-workout state,
+or recency fallback.
 
 Starting or logging a new workout is independent of older unfinished workouts.
 Every mutation carries the exact canonical workout id and uses that workout's

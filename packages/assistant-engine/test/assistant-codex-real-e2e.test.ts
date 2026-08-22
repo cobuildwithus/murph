@@ -679,13 +679,28 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           })
         }
 
+        const followUp = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            `Durable tracked-workout context identifies exact workout ${finiteWorkout.id}.`,
+            'The current member message is exactly: "I am doing set 8 now. Ask me how it went when I finish."',
+          ].join(' '),
+        })
+
+        expect(followUp.responseCard).toBeNull()
+        expect(followUp.finalMessage).not.toContain(finiteWorkout.id)
+        expect(followUp.finalMessage).toMatch(/set 8|how.*went|reps/iu)
+        expect(followUp.transcriptMessage).toContain(
+          `[Murph workout follow-up: ${finiteWorkout.id}]`,
+        )
+
         // Deliberately do not resume the provider session. The member's terse
-        // message carries no id; production reply-card context supplies the exact
-        // durable marker, while the exercise prescription remains canonical.
+        // message carries no id; Murph's preceding transcript supplies the
+        // exact workout id, while the exercise prescription remains canonical.
         const finalSet = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: [
-            `Durable reply-card context identifies exact workout ${finiteWorkout.id}.`,
+            `The immediately preceding durable assistant transcript is: ${followUp.transcriptMessage}`,
             'The current member message is exactly: "Set 8 done."',
           ].join(' '),
         })
