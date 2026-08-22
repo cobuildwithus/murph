@@ -56,14 +56,20 @@ ambiguous histories must remain safe.
 
 ## State
 
-Active. The user explicitly continued after ReviewGPT round eight found that
-the round-seven ordinary-entry preflight resolved against the index before
-repairs mutated it. The focused regression now proves that an ordinary entry
-can become compatible with a repair survivor only after that mutation, and the
-local correction removes the stale preflight in favor of checking the
-production resolver's actual use-site result. Focused verification, a scoped
-push, round nine, and exact-head CI remain. The one allowed base refresh is
-still consumed; do not refresh the base again.
+Implementation complete. The user explicitly continued after ReviewGPT round
+eight found that the round-seven ordinary-entry preflight resolved against the
+index before repairs mutated it. The focused regression proves that an
+ordinary entry can become compatible with a repair survivor only after that
+mutation, and the correction checks the production resolver's actual use-site
+result. ReviewGPT round nine passed the corrected exact head with no findings.
+
+After the prior Codex session ended, the user explicitly authorized one final
+current-base reconciliation. The two bundle-budget conflicts preserved main's
+UTF-8 and newer CLI graph changes, retained the reviewed alias-repair graph,
+and ratcheted only the composed measured bundle boundaries. Focused importer
+tests, package typechecks, bundle-policy tests, and the complete local runner
+assembly pass. Exact-head CI and the authorized merge remain external gates
+after plan closure.
 
 ## Working set
 
@@ -72,7 +78,12 @@ still consumed; do not refresh the base again.
 - `packages/importers/test/device-providers-junction.test.ts`
 - `packages/importers/test/device-providers.test.ts`
 - `apps/cloudflare/scripts/runner-bundle/bundle-cli.ts`
+- `apps/cloudflare/scripts/runner-bundle/bundle-entrypoint.ts`
 - `apps/cloudflare/test/runner-bundle-cli-bundle.test.ts`
+- `apps/cloudflare/test/runner-bundle-entrypoint-bundle.test.ts`
 - `apps/web/changelog/entries/2026-08-20/connected-health-daily-record-recovery.json`
 - relevant focused core/importer tests discovered during tracing
 - ReviewGPT WIP artifact under the ignored task audit package
+Status: completed
+Updated: 2026-08-21
+Completed: 2026-08-21
