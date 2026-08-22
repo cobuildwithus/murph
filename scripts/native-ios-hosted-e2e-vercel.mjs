@@ -222,8 +222,62 @@ export async function retireE2eDeployments(candidateDeploymentId) {
       { customEnvironmentId, projectId },
     ));
   }
-  for (const id of owned) await deleteDeployment(id);
+  const retirements = [];
+  for (const id of owned) {
+    retirements.push({ aliasIds: await listDeploymentAliasIds(id), deploymentId: id });
+  }
+  let retiredAliasCount = 0;
+  for (const { aliasIds, deploymentId } of retirements) {
+    for (const aliasId of aliasIds) {
+      await deleteDeploymentAlias(aliasId);
+      retiredAliasCount += 1;
+    }
+    await deleteDeployment(deploymentId);
+  }
+  console.log(`::notice::native-ios-e2e stage=web_alias_retire result=${retiredAliasCount === 0 ? "absent" : "success"}`);
   console.log(`::notice::native-ios-e2e stage=web_retire_stale result=${owned.length === 0 ? "absent" : "success"}`);
+}
+
+async function listDeploymentAliasIds(deploymentId) {
+  const listed = await fetchJson(vercelUrl(
+    `https://api.vercel.com/v2/deployments/${encodeURIComponent(deploymentId)}/aliases`,
+  ), {
+    headers: vercelHeaders(requiredEnv("NATIVE_IOS_E2E_VERCEL_TOKEN")),
+  }, "Vercel E2E deployment alias list");
+  return inspectRetirableE2eDeploymentAliases(listed);
+}
+
+export function inspectRetirableE2eDeploymentAliases(listed) {
+  assertRecord(listed, "Vercel deployment alias list");
+  if (!Array.isArray(listed.aliases)) {
+    throw new Error("Vercel deployment alias list was invalid.");
+  }
+  if (listed.pagination != null) {
+    assertRecord(listed.pagination, "Vercel deployment alias pagination");
+    if (listed.pagination.next != null) {
+      throw new Error("Vercel deployment alias list was incomplete; refusing destructive reset.");
+    }
+  }
+  return listed.aliases.map((item) => {
+    assertRecord(item, "Vercel deployment alias");
+    requiredString(item.alias, "Vercel deployment alias name");
+    return requiredString(item.uid, "Vercel deployment alias id");
+  });
+}
+
+async function deleteDeploymentAlias(aliasId) {
+  const response = await fetch(vercelUrl(
+    `https://api.vercel.com/v2/aliases/${encodeURIComponent(aliasId)}`,
+  ), {
+    headers: vercelHeaders(requiredEnv("NATIVE_IOS_E2E_VERCEL_TOKEN")),
+    method: "DELETE",
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+  });
+  if (!response.ok && response.status !== 404) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`Vercel E2E alias cleanup failed with HTTP ${response.status}.`);
+  }
+  await response.body?.cancel().catch(() => undefined);
 }
 
 async function provePublicCandidateReachability(baseUrl) {

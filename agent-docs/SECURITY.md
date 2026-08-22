@@ -1472,6 +1472,10 @@ Last verified: 2026-08-20
   dispatch. Cleanup must completely enumerate and validate the configured team,
   ignore every unrelated namespace, delete at most one exact namespace-owned
   user, and prove that namespace empty before resetting the isolated database.
+  Deployment retirement must first enumerate aliases through each already
+  validated lane-owned deployment, reject malformed alias responses, and delete
+  those exact alias ids before deleting the deployment so the reusable custom
+  environment cannot retain an alias to deleted state.
   This namespace limits trusted cleanup; it does not scope the Junction Team API
   key, which retains full team data access. A second key on the same team is not
   a least-privilege boundary, so the shared sandbox must contain only disposable
