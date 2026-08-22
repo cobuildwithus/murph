@@ -1163,6 +1163,14 @@ runner. Its entries are compatibility material only; the required
 key.
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The versioned Temporal worker must not register pollers until both signed,
+uncached owner checks succeed: Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and this
+Worker at `/internal/temporal-worker/binding-admission`. Deploy Web and
+Cloudflare first, configure the two exact production URLs on both inactive
+Render colors, then allow the private exact-SHA blue/green controller to ramp.
+Rollback the Temporal candidate before either owner route; keep both owner
+routes through the whole retained-color rollback window.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
 hosted Web; the Worker and runner carry only the normalized semantic

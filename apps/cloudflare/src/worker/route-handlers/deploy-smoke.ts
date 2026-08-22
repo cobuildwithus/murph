@@ -3,6 +3,11 @@ import {
   emitHostedExecutionStructuredLog,
   readHostedExecutionSafeErrorName,
 } from "@murphai/hosted-execution";
+import {
+  HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND,
+  HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION,
+  type HostedTemporalWorkerBindingAdmission,
+} from "@murphai/hosted-execution/contracts";
 
 import {
   json,
@@ -40,8 +45,18 @@ import {
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_BYTES = 160 * 1024 * 1024;
 const DEPLOY_DIRECT_R2_PRESIGNED_PUT_SMOKE_KEY_PREFIX =
   "deploy-smoke/direct-r2-presigned-put";
+const TEMPORAL_WORKER_BINDING_ADMISSION_BODY_LIMIT_BYTES = 0;
 
 export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
+  {
+    authorization: "web-callback-signature",
+    handle: handleTemporalWorkerBindingAdmissionRoute,
+    match: matchExactPath("/internal/temporal-worker/binding-admission"),
+    methods: ["GET"],
+    name: "temporal-worker-binding-admission",
+    signatureBodyLimitBytes: TEMPORAL_WORKER_BINDING_ADMISSION_BODY_LIMIT_BYTES,
+    wrongMethodResponse: "method-not-allowed",
+  },
   {
     authorization: "web-callback-signature",
     async handle(context) {
@@ -54,6 +69,22 @@ export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] 
     wrongMethodResponse: "method-not-allowed",
   },
 ];
+
+export function handleTemporalWorkerBindingAdmissionRoute(
+  context: WorkerRouteContext,
+): Response {
+  const admission = {
+    bindingContractRevision: HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION,
+    environment: "production",
+    kind: HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND,
+    owner: "cloudflare",
+    signingKeyId: context.environment.webCallbackSigning.keyId,
+  } satisfies HostedTemporalWorkerBindingAdmission;
+  const response = json(admission);
+  response.headers.set("cache-control", "no-store");
+  response.headers.set("pragma", "no-cache");
+  return response;
+}
 
 export async function handleDeployContainerSmokeRoute(
   context: WorkerRouteContext,
