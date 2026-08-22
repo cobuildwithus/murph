@@ -107,5 +107,10 @@ and bounded safety recovery.
   response-card authority wording at 59,022 characters, 112 above the prior
   ratchet; the ratchet was updated to that exact value and its focused file
   passed 74 tests without changing provider behavior.
+- Exact-head app verification then exposed a current-base test-harness mismatch:
+  the group-email test mocked the mailbox store without the new
+  `appendHostedMailboxEnvelopeWithIdentityTx` export now loaded by the shared
+  hosted-Web testkit. The branch adds that missing test-only mock; the failure
+  is outside the nutrition runtime path and changes no production behavior.
 - Exact-head ReviewGPT round after the substantive remediation and required
   GitHub checks.
