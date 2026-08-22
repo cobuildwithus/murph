@@ -474,6 +474,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           queryRuntime: {
             readVault: async () => ({}),
             lookupEntityById: () => eventRecord,
+            resolveCanonicalEntityInFamily: async () => eventRecord,
           },
           run: async ({ records }) => {
             const { editEventRecord } = records;
@@ -558,6 +559,7 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
     queryRuntime: {
       readVault: async () => ({}),
       lookupEntityById: () => eventRecord,
+      resolveCanonicalEntityInFamily: async () => eventRecord,
     },
     run: async ({ records }) => {
       const { editEventRecord } = records;
@@ -591,6 +593,10 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
     queryRuntime: {
       readVault: async () => ({}),
       lookupEntityById: () => ({
+        family: "experiment",
+        path: "experiments/focus-sprint.md",
+      }),
+      resolveCanonicalEntityInFamily: async () => ({
         family: "experiment",
         path: "experiments/focus-sprint.md",
       }),

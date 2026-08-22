@@ -305,7 +305,21 @@ export function lookupEntityById(
   vault: VaultReadModel,
   entityId: string,
 ): CanonicalEntity | null {
-  return lookupById(getVaultEntities(vault), entityId, (entity) => entity.entityId);
+  return lookupCanonicalEntityById(getVaultEntities(vault), entityId);
+}
+
+/**
+ * Resolve one canonical entity from an already-bounded source family.
+ *
+ * Exact ids retain precedence over family-local aliases, matching the full
+ * VaultReadModel lookup contract without requiring callers to construct or
+ * hydrate that model.
+ */
+export function lookupCanonicalEntityById(
+  entities: readonly CanonicalEntity[],
+  entityId: string,
+): CanonicalEntity | null {
+  return lookupById(entities, entityId, (entity) => entity.entityId);
 }
 
 export function listEntities(

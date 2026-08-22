@@ -7,10 +7,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { CURRENT_VAULT_FORMAT_VERSION } from "@murphai/contracts";
-import {
-  createVaultReadModel,
-  type ProtocolSummary,
-} from "@murphai/query";
+import type { ProtocolSummary } from "@murphai/query";
 import * as queryRuntime from "@murphai/query";
 
 import {
@@ -197,6 +194,17 @@ async function loadManifestReadUsecases(queryRuntime: {
   readVault: (vault: string) => Promise<unknown>;
   lookupEntityById: (readModel: unknown, lookup: string) => QueryRecord | null;
 }) {
+  const readExactEventRecord = vi.fn(async (input: {
+    lookup: string
+    expectedKinds?: readonly string[]
+  }) => {
+    const readModel = await queryRuntime.readVault('./vault')
+    const record = queryRuntime.lookupEntityById(readModel, input.lookup)
+    if (!record || (input.expectedKinds && !input.expectedKinds.includes(record.kind))) {
+      throw new VaultCliError('not_found', `No event found for "${input.lookup}".`)
+    }
+    return { event: record.attributes, ledgerFile: record.path, record }
+  })
   const readOwnedEventRecord = vi.fn(async (input: { lookup: string; kind: string }) => {
     const readModel = await queryRuntime.readVault('./vault')
     const record = queryRuntime.lookupEntityById(readModel, input.lookup)
@@ -229,6 +237,9 @@ async function loadManifestReadUsecases(queryRuntime: {
         loadQueryRuntime: vi.fn(async () => queryRuntime),
       }),
     ),
+    "../src/usecases/exact-event-record.ts": () => ({
+      readExactEventRecord,
+    }),
   });
 
   return { documentMeal, workoutRead };
@@ -637,7 +648,7 @@ describe("record service seams", () => {
                 })
             : null,
       ),
-      listEntities: vi.fn(() => [
+      listCanonicalEntities: vi.fn(async () => [
         sampleQueryRecord({
           kind: "document",
           family: "event",
@@ -776,8 +787,7 @@ describe("record service seams", () => {
 
   test("event mutations require the requested id to identify the event directly", async () => {
     const queryRuntime = {
-      readVault: vi.fn(async () => ({ vault: "./vault" })),
-      lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
+      resolveCanonicalEntityInFamily: vi.fn((_vault: string, _family: string, lookup: string) =>
         lookup === "media_1"
           ? sampleQueryRecord({
               kind: "activity_session",
@@ -1287,12 +1297,7 @@ describe("record service seams", () => {
   test("private protocol listing filters by Health Commons protocol references", async () => {
     const query = {
       ...queryRuntime,
-      readVault: vi.fn(async () =>
-        createVaultReadModel({
-          vaultRoot: "./vault",
-          entities: [],
-        })
-      ),
+      readCanonicalEntityFamilySource: vi.fn(async () => []),
       listProtocolSummaries: vi.fn((): ProtocolSummary[] => [
         {
           id: "protocol_1",
@@ -1526,6 +1531,34 @@ describe("record service seams", () => {
         family: "experiment",
         kind: "experiment",
       })),
+      resolveCanonicalEntityInFamily: vi.fn(async (
+        _vault: string,
+        family: string,
+      ) => sampleQueryRecord({
+        entityId: family === "journal" ? "journal:2026-04-08" : "exp_1",
+        primaryLookupId: family === "journal" ? "journal:2026-04-08" : "exp_1",
+        family: family === "journal" ? "journal" : "experiment",
+        kind: family === "journal" ? "journal_day" : "experiment",
+      })),
+      readVaultMetadataSource: vi.fn(async () => ({
+        formatVersion: CURRENT_VAULT_FORMAT_VERSION,
+        vaultId: "vault_1",
+        title: "Vault",
+        timezone: "UTC",
+        createdAt: "2026-04-08T12:00:00.000Z",
+      })),
+      readCanonicalEntityFamilySource: vi.fn(async (_vault: string, family: string) =>
+        family === "core"
+          ? [sampleQueryRecord({
+              entityId: "vault_1",
+              primaryLookupId: "vault_1",
+              family: "core",
+              kind: "core_document",
+              path: "core.md",
+              title: "Core",
+              occurredAt: "2026-04-08T11:00:00.000Z",
+            })]
+          : []),
       listEntities: vi.fn(() => [sampleQueryRecord({
         entityId: "exp_1",
         primaryLookupId: "exp_1",
@@ -1689,6 +1722,7 @@ describe("record service seams", () => {
     const anchoredMetricQuery = {
       readVault: vi.fn(async () => journalQuery.readVault()),
       lookupEntityById: vi.fn(() => anchoredExperiment),
+      resolveCanonicalEntityInFamily: vi.fn(async () => anchoredExperiment),
       listMetricPoints: vi.fn(async (_vault: string, filters: unknown) => {
         anchoredMetricPointFilters.push(filters);
         return [];

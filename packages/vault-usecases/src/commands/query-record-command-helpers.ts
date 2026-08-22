@@ -4,6 +4,7 @@ import {
   extractIsoDatePrefix,
   type EventRecord,
 } from '@murphai/contracts'
+import { deriveVaultRecordIdentity } from '@murphai/query/id-families'
 import {
   loadQueryRuntime as loadBaseQueryRuntime,
   type QueryRuntimeModule,
@@ -110,11 +111,12 @@ export function toExactEventQueryRecord(
   event: EventRecord,
   ledgerFile: string,
 ): QueryRecord {
-  const displayId = event.kind === 'document'
-    ? event.documentId
-    : event.kind === 'meal'
-      ? event.mealId
-      : event.id
+  const identity = deriveVaultRecordIdentity(
+    'event',
+    event as unknown as Record<string, unknown>,
+    event.id,
+  )
+  const displayId = identity.displayId
   const relatedIds = [...new Set((event.links ?? []).map((link) => link.targetId))]
   const attributes: JsonObject = structuredClone(event) as JsonObject
   const storedLifecycle = attributes.lifecycle
@@ -134,7 +136,7 @@ export function toExactEventQueryRecord(
 
   return {
     entityId: displayId,
-    primaryLookupId: displayId,
+    primaryLookupId: identity.primaryLookupId,
     lookupIds: [...new Set([displayId, event.id, ...relatedIds])],
     family: 'event',
     recordClass: 'ledger',

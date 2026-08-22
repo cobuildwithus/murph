@@ -1384,8 +1384,17 @@ export function createExplicitHealthQueryServices(
     },
     async showPrivateProtocol(input: EntityLookupInput) {
       const { query } = await loadRuntime();
-      const vault = await query.readVault(input.vault);
-      const summary = query.getProtocolSummary(vault, input.id);
+      const entities = await query.readCanonicalEntityFamilySource(
+        input.vault,
+        "protocol",
+      );
+      const summary = query.getProtocolSummary(
+        query.createVaultReadModel({
+          entities,
+          vaultRoot: input.vault,
+        }),
+        input.id,
+      );
       if (!summary) {
         throw new VaultCliError("not_found", `No protocol found for "${input.id}".`);
       }
@@ -1397,7 +1406,14 @@ export function createExplicitHealthQueryServices(
     },
     async listPrivateProtocols(input: PrivateProtocolListInput) {
       const { query } = await loadRuntime();
-      const vault = await query.readVault(input.vault);
+      const entities = await query.readCanonicalEntityFamilySource(
+        input.vault,
+        "protocol",
+      );
+      const vault = query.createVaultReadModel({
+        entities,
+        vaultRoot: input.vault,
+      });
       const summaries = query
         .listProtocolSummaries(vault, {
           statuses: input.status ? [input.status] : undefined,
