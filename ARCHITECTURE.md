@@ -3020,6 +3020,14 @@ and repeated checks within one window cannot create duplicate refresh pressure.
 Delayed and reload recovery reuse the same voice-processing and replica-refresh
 owners, with no second result store.
 
+Environment live weather and outdoor-air context uses the fixed OpenWeather
+geocoding, current-weather, and current-air-pollution endpoints directly from
+Web with the server-owned key. The authenticated same-origin route caches the
+public city-to-coordinate result for 30 days and the combined current
+conditions for 10 minutes; weather and air reads run in parallel on a cache
+miss. Cache keys contain normalized city or coordinates, never the provider key
+or member identity, and the results remain transient rather than Habitat facts.
+
 Hosted dynamic image generation launches as invocation-local background work so
 the current tool call returns immediately. Provider work stays detached, while
 the canonical capture save waits for an invocation boundary and rebases its

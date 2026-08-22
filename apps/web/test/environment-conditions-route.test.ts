@@ -48,7 +48,6 @@ describe("environment conditions route", () => {
     expect(response.status).toBe(200);
     expect(mocks.loadEnvironmentConditions).toHaveBeenCalledWith({
       location: "Warsaw, Poland",
-      memberId: "member_123",
     });
   });
 });
