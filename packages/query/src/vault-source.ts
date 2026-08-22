@@ -23,12 +23,18 @@ import {
   resolveCanonicalRecordClass,
   uniqueStrings,
   type CanonicalEntity,
+  type CanonicalEntityFamily,
 } from "./canonical-entities.ts";
-import { collectCanonicalEntities } from "./health/canonical-collector.ts";
+import {
+  collectCanonicalEntities,
+  readCanonicalHealthFamilyEntities,
+} from "./health/canonical-collector.ts";
 import { walkRelativeFiles } from "./health/loaders.ts";
 import { collapseEventLedgerEntities } from "./health/projectors/history.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
 import { parseMarkdownDocument } from "./markdown.ts";
+import { lookupCanonicalEntityById } from "./read-model.ts";
+import { isDefaultProjectedQueryEntity } from "./query-visibility.ts";
 import {
   PROTOCOL_DIRECTORY,
   PROTOCOL_DOC_TYPE,
@@ -126,6 +132,81 @@ export async function readVaultSourceTolerant(
     metadata,
     entities: [...baseEntities, ...healthEntities.entities].sort(compareCanonicalEntities),
   };
+}
+
+/**
+ * Read one canonical family directly from its source owner without consulting
+ * or rebuilding the shared query projection.
+ */
+export async function readCanonicalEntityFamilySource(
+  vaultRoot: string,
+  family: CanonicalEntityFamily,
+): Promise<CanonicalEntity[]> {
+  let entities: CanonicalEntity[];
+
+  switch (family) {
+    case "core": {
+      const metadata = await readOptionalVaultMetadata(
+        path.join(vaultRoot, VAULT_LAYOUT.metadata),
+      );
+      const entity = await readOptionalCoreEntity(vaultRoot, metadata);
+      entities = entity ? [entity] : [];
+      break;
+    }
+    case "experiment":
+      entities = await readExperimentEntities(vaultRoot);
+      break;
+    case "protocol":
+      entities = await readProtocolEntities(vaultRoot);
+      break;
+    case "journal":
+      entities = await readJournalEntities(vaultRoot);
+      break;
+    case "event":
+      entities = await readJsonlRecordFamily(
+        vaultRoot,
+        VAULT_LAYOUT.eventLedgerDirectory,
+        "event",
+      );
+      break;
+    case "sample":
+      entities = await readMetricSampleEntities(vaultRoot);
+      break;
+    case "audit":
+      entities = await readJsonlRecordFamily(
+        vaultRoot,
+        VAULT_LAYOUT.auditDirectory,
+        "audit",
+      );
+      break;
+    default:
+      entities = await readCanonicalHealthFamilyEntities(vaultRoot, family);
+      break;
+  }
+
+  return entities.filter(isDefaultProjectedQueryEntity);
+}
+
+/**
+ * Resolve an exact id or a documented alias inside one canonical family.
+ * Exact entity ids retain precedence over aliases, matching readVault().
+ */
+export async function resolveCanonicalEntityInFamily(
+  vaultRoot: string,
+  family: CanonicalEntityFamily,
+  lookup: string,
+): Promise<CanonicalEntity | null> {
+  return lookupCanonicalEntityById(
+    await readCanonicalEntityFamilySource(vaultRoot, family),
+    lookup,
+  );
+}
+
+/** Read only vault metadata; no canonical family or projection is traversed. */
+export async function readVaultMetadataSource(
+  vaultRoot: string,
+): Promise<QueryRecordData | null> {
+  return readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
 }
 
 export async function listCanonicalSourceManifest(

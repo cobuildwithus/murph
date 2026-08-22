@@ -150,40 +150,45 @@ describe('assistant automatic meal capture skill', () => {
       'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactSkill).toContain(
-      'requires both `vault-cli condition list --status active --limit 200 --format json` and `vault-cli regimen list --status active --limit 200 --format json`.',
+      'as the complete safety gate before deriving or presenting numeric values, any Goal write, totals, or a card.',
     )
     expect(compactSkill).toContain(
-      'If either returns exactly 200 records or fails, run no condition or regimen detail reads, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+      'When that gate suppresses numeric output or any required safety read is incomplete, unavailable, or unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+    )
+    expect(compactSkill).not.toContain('`vault-cli memory show --format json`')
+    expect(compactSkill).not.toContain(
+      '`vault-cli condition list --status active --limit 200 --format json`',
+    )
+    expect(compactSkill).not.toContain(
+      '`vault-cli regimen list --status active --limit 200 --format json`',
+    )
+    expect(compactSkill).not.toContain('`vault-cli show <same-id> --format json`')
+    expect(compactSkill).not.toContain(
+      '`vault-cli event list --kind procedure --limit 200 --format json`',
+    )
+    expect(compactSkill).not.toContain(
+      '`vault-cli event list --kind encounter --limit 200 --format json`',
+    )
+    expect(compactSkill).not.toContain(
+      '`vault-cli measurement entry list --metric pregnancy-test',
     )
     expect(compactSkill).toContain(
-      'run `vault-cli condition show <condition-id> --format json` for every returned condition and `vault-cli regimen show <regimen-id> --format json` for every returned regimen before applying the safety gate.',
+      'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
     )
     expect(compactSkill).toContain(
-      'Never use the five-record context projection, a title, substance, severity, or the default list prefix to select the safety set.',
+      'New authoring uses `dietary-calories`. Resolve that canonical owner first; when it exists, use it and ignore every globally ambiguous `calories` target.',
     )
     expect(compactSkill).toContain(
-      'If any required detail read fails or is unreadable, use the same ordinary-text, no-write, no-question, no-card failure behavior.',
+      'Only without a canonical owner may an applicable exact-point `calories` target in `kcal` fill the card\'s calorie slot when its `targetId` is `daily-calories`.',
     )
     expect(compactSkill).toContain(
-      'Also run `vault-cli event list --kind procedure --limit 200 --format json` and follow the shared gate\'s procedure-item inspection and conditional detail reads.',
+      '`daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` / `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` / `fiber-grams` / `g`.',
     )
     expect(compactSkill).toContain(
-      'A completed bariatric procedure uses the same non-numeric, no-write, no-question, no-card path; failed, unreadable, or saturated procedure discovery uses the failure path.',
+      'never rename or mutate a Goal just to repair this key.',
     )
     expect(compactSkill).toContain(
-      'Also run `vault-cli event list --kind encounter --limit 200 --format json`, detail-read every returned item with nonzero `data.diagnosesCount`, and apply the shared gate\'s current active diagnosis rules.',
-    )
-    expect(compactSkill).toContain(
-      'A relevant active documented or suspected diagnosis uses the same non-numeric path; failed, unreadable, saturated, required-detail, or unresolved safety-relevant diagnosis discovery uses the failure path.',
-    )
-    expect(compactSkill).toContain(
-      'Then run the shared gate\'s bounded body-measurement read, separate `pregnancy-test` measurement read, and bounded canonical test-event list plus every required test detail read. A failed read, a body-measurement read saturated without resolving usable BMI evidence, or a saturated pregnancy-evidence read uses the same failure behavior.',
-    )
-    expect(compactSkill).toContain(
-      'Only when all five qualifying exact point targets resolve from active canonical Goals',
-    )
-    expect(compactSkill).toContain(
-      'A card-qualifying target must use the exact canonical metric/unit pair: `dietary-calories` with `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
+      'Any other `calories` target is not dietary authority even when the four nutrition metrics share its Goal',
     )
     expect(compactSkill).toContain(
       'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
@@ -222,19 +227,7 @@ describe('assistant automatic meal capture skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
     )
     expect(compactSkill).toContain(
-      'before resolving a card, even when five accepted goals already exist.',
-    )
-    expect(compactSkill).toContain(
-      'first requires `vault-cli memory show --format json`; if that complete canonical memory read fails or is unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
-    )
-    expect(compactSkill).toContain(
-      'A clearly current saved age under 18 or clearly current intuitive-eating or number-sensitive preference uses the same non-numeric, no-write, no-question, no-card path.',
-    )
-    expect(compactSkill).toContain(
-      'Missing or ambiguous age alone does not block a scheduled closeout and never authorizes a question.',
-    )
-    expect(compactSkill).toContain(
-      'the first eligible managed closeout has one proposal-only exception',
+      'does the first eligible managed closeout have one proposal-only exception',
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
@@ -256,6 +249,12 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(compactSkill).toContain(
       'If numeric presentation is suppressed, or the active target bundle is ambiguous, unit-incompatible, or comparator-incompatible, retain the ordinary compact closeout and do not attach a card.',
+    )
+    expect(compactSkill).toContain(
+      'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
+    )
+    expect(compactSkill).not.toContain(
+      'Only when all five qualifying exact point targets resolve from active canonical Goals',
     )
     expect(compactSkill).not.toContain(
       'follow it exactly. Resolve all five targets from active canonical Goals.',
@@ -294,9 +293,6 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain(
       'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
     )
-    expect(compactSkill).toContain(
-      'An explicit positive pregnancy-test result from either canonical owner uses the same non-numeric, no-write, no-question, no-card path.',
-    )
     expect(compactSafety).toContain(
       'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
     )
@@ -322,9 +318,9 @@ describe('assistant automatic meal capture skill', () => {
       'Never ask a scheduled occurrence for these measurements and never mutate measurement records during this check.',
     )
     expect(compactSafety).toContain('below 1,200 kcal/day')
-    expect(compactSafety).toContain('active canonical target at card time')
+    expect(compactSafety).toContain('active resolved target at card time')
     expect(compactSafety).toContain(
-      'Evaluate the boundary only for an exact point `dietary-calories` target in canonical `kcal`: its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the historical `daily-calories` / `calories` member of the complete stable `daily-*` nutrition target set, in `kcal`.',
     )
     expect(compactSafety).toContain(
       'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
@@ -368,10 +364,17 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
       .toBeLessThan(attachCardIndex)
     expect(
+      compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
+    ).toBeLessThan(
+      compactSkill.indexOf('daily-nutrition-card-safety.md'),
+    )
+    expect(
       compactSkill.indexOf(
         'vault-cli goal list --status active --limit 200 --format json',
       ),
-    ).toBeLessThan(attachCardIndex)
+    ).toBeLessThan(compactSkill.indexOf('daily-nutrition-card-safety.md'))
+    expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
+      .toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')

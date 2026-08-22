@@ -394,6 +394,7 @@ export async function withCodexRpcTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   method: string,
+  onTimeout?: () => void,
 ): Promise<T> {
   let timeoutId: NodeJS.Timeout | undefined
   try {
@@ -401,6 +402,7 @@ export async function withCodexRpcTimeout<T>(
       promise,
       new Promise<T>((_, reject) => {
         timeoutId = setTimeout(() => {
+          onTimeout?.()
           reject(
             new VaultCliError(
               'ASSISTANT_CODEX_APP_SERVER_TIMEOUT',

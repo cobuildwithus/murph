@@ -1,12 +1,17 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
   chromium,
+  type Browser,
+  type BrowserContext,
   type Locator,
   type Page,
   type Response,
 } from "@playwright/test";
 
+import { KernelComputerClient } from "../src/lib/computer-use/kernel-client.ts";
 import {
   buildHostedLocalBrowserSessionCookie,
   clearHostedLocalBrowserEnvironment,
@@ -18,10 +23,13 @@ import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-c
 
 interface BrowserConfig {
   browserChannel: "chrome" | undefined;
+  browserTransport: "kernel" | "local";
   disclosureSourceName: "Oura" | "Whoop";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
+  kernelApiKey: string | null;
+  kernelCliPath: string | null;
   label: "Oura" | "WHOOP";
   manualAuthorizationAllowed: boolean;
   otp: string | null;
@@ -31,6 +39,21 @@ interface BrowserConfig {
   timeoutMs: number;
   webBaseUrl: string;
   webOrigin: string;
+}
+
+interface BrowserSession {
+  browser: Browser;
+  context: BrowserContext;
+  kernelClient: KernelComputerClient | null;
+  kernelSessionId: string | null;
+  kernelTunnel: OwnedKernelTunnel | null;
+}
+
+interface OwnedKernelTunnel {
+  child: ChildProcess;
+  processId: number;
+  removeParentExitHandler: () => void;
+  spawnFailed: boolean;
 }
 
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
@@ -68,14 +91,20 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
+const KERNEL_CANARY_PROFILE = "murph-junction-whoop-canary";
+const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
+const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "JUNCTION_WEBHOOK_SECRET",
+  "KERNEL_API_KEY",
   "MURPH_E2E_CONNECT_URL",
   "MURPH_E2E_HOSTED_SESSION_COOKIE",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_PROVIDER_EMAIL",
+  "MURPH_E2E_PROVIDER_BROWSER",
   "MURPH_E2E_PROVIDER_HEADLESS",
   "MURPH_E2E_PROVIDER_OTP",
   "MURPH_E2E_PROVIDER_PASSWORD",
@@ -103,30 +132,23 @@ async function main(): Promise<void> {
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
   stage = "browser_launch";
-  const browser = await chromium.launch({
-    channel: config.browserChannel,
-    headless: config.headless,
-  });
+  const session = await openBrowserSession(config);
+  let failure: unknown;
+  let failed = false;
   try {
-    const context = await browser.newContext({
-      locale: "en-US",
-      reducedMotion: "reduce",
-    });
-    await context.addCookies([
+    await session.context.addCookies([
       buildHostedLocalBrowserSessionCookie({
         sessionCookie: config.hostedSessionCookie,
         webBaseUrl: config.webBaseUrl,
       }),
     ]);
-    const page = await context.newPage();
+    const page = await session.context.newPage();
     activePage = page;
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
     stage = "murph_connect_intent";
-    await page.goto(config.startUrl, {
-      waitUntil: "domcontentloaded",
-    });
+    await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
     stage = "murph_vital_disclosure";
     await page
@@ -165,17 +187,301 @@ async function main(): Promise<void> {
     stage = "junction_cleanup";
     await disconnectJunctionAccount(page, config);
 
-    process.stdout.write(formatHostedLocalBrowserResult({
-      callbackAutoCompleted: true,
-      connectedAfterCallback: true,
-      connectedAfterReload: true,
-      disconnectedDuringCleanup: true,
-      provider: "junction",
-      source: config.source,
-    }));
-  } finally {
-    await browser.close();
+  } catch (error) {
+    failed = true;
+    failure = error;
   }
+
+  try {
+    stage = failed ? `${stage}_cleanup` : "browser_cleanup";
+    await closeBrowserSession(session, config);
+  } catch (error) {
+    if (!failed) {
+      failed = true;
+      failure = error;
+    }
+  }
+
+  if (failed) {
+    throw failure;
+  }
+
+  process.stdout.write(formatHostedLocalBrowserResult({
+    callbackAutoCompleted: true,
+    connectedAfterCallback: true,
+    connectedAfterReload: true,
+    disconnectedDuringCleanup: true,
+    provider: "junction",
+    source: config.source,
+  }));
+}
+
+async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession> {
+  if (config.browserTransport === "local") {
+    const browser = await chromium.launch({
+      channel: config.browserChannel,
+      headless: config.headless,
+    });
+    try {
+      const context = await browser.newContext({
+        locale: "en-US",
+        reducedMotion: "reduce",
+      });
+      return {
+        browser,
+        context,
+        kernelClient: null,
+        kernelSessionId: null,
+        kernelTunnel: null,
+      };
+    } catch (error) {
+      await browser.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  const apiKey = config.kernelApiKey;
+  const cliPath = config.kernelCliPath;
+  if (!apiKey || !cliPath) {
+    throw new Error("Kernel browser configuration lost its required authority or CLI path.");
+  }
+  const tunnelPort = requireKernelTunnelPort(config.webBaseUrl);
+  const kernelClient = new KernelComputerClient({ apiKey });
+  await kernelClient.ensureProfile(KERNEL_CANARY_PROFILE);
+  const kernelBrowser = await kernelClient.createAutomationBrowser({
+    headless: config.headless,
+    profileName: KERNEL_CANARY_PROFILE,
+    saveChanges: true,
+    timeoutSeconds: Math.ceil((config.timeoutMs + 60_000) / 1_000),
+  });
+  let kernelTunnel: OwnedKernelTunnel | null = null;
+
+  try {
+    kernelTunnel = startKernelTunnel({
+      apiKey,
+      cliPath,
+      port: tunnelPort,
+      sessionId: kernelBrowser.sessionId,
+    });
+    const browser = await chromium.connectOverCDP(kernelBrowser.cdpWsUrl, {
+      timeout: config.timeoutMs,
+    });
+    const context = browser.contexts()[0];
+    if (!context) {
+      throw new Error("Kernel browser did not expose its persistent context.");
+    }
+    return {
+      browser,
+      context,
+      kernelClient,
+      kernelSessionId: kernelBrowser.sessionId,
+      kernelTunnel,
+    };
+  } catch (error) {
+    if (kernelTunnel) {
+      await stopKernelTunnel(kernelTunnel).catch(() => undefined);
+    }
+    await kernelClient.deleteBrowserByIdOrName(kernelBrowser.sessionId)
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
+async function closeBrowserSession(
+  session: BrowserSession,
+  config: BrowserConfig,
+): Promise<void> {
+  if (!session.kernelClient || !session.kernelSessionId || !session.kernelTunnel) {
+    await session.browser.close();
+    return;
+  }
+
+  const cleanupErrors: unknown[] = [];
+  await session.context.clearCookies({
+    domain: new URL(config.webBaseUrl).hostname,
+  }).catch((error: unknown) => cleanupErrors.push(error));
+  await stopKernelTunnel(session.kernelTunnel)
+    .catch((error: unknown) => cleanupErrors.push(error));
+  try {
+    await session.kernelClient.deleteBrowserByIdOrName(session.kernelSessionId);
+  } catch (error) {
+    cleanupErrors.push(error);
+    await session.browser.close()
+      .catch((browserError: unknown) => cleanupErrors.push(browserError));
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new Error("Kernel browser cleanup did not complete.");
+  }
+}
+
+function startKernelTunnel(input: {
+  apiKey: string;
+  cliPath: string;
+  port: number;
+  sessionId: string;
+}): OwnedKernelTunnel {
+  const child = spawn(
+    input.cliPath,
+    buildKernelTunnelArguments(input.sessionId, input.port),
+    {
+      detached: true,
+      env: buildKernelCliEnvironment(input.apiKey, process.env),
+      // Kernel's SSH command opens a remote shell in addition to the reverse
+      // forward. Keep its stdin open so EOF does not close that shell and tear
+      // down the tunnel before the browser reaches hosted-local Web.
+      stdio: ["pipe", "ignore", "ignore"],
+    },
+  );
+  if (child.pid === undefined) {
+    child.once("error", () => undefined);
+    throw new Error("Kernel reverse tunnel did not start.");
+  }
+  const tunnel: OwnedKernelTunnel = {
+    child,
+    processId: child.pid,
+    removeParentExitHandler: () => undefined,
+    spawnFailed: false,
+  };
+  const handleParentExit = () => {
+    signalOwnedKernelTunnel(tunnel, "SIGTERM");
+  };
+  process.once("exit", handleParentExit);
+  tunnel.removeParentExitHandler = () => {
+    process.off("exit", handleParentExit);
+  };
+  child.once("error", () => {
+    tunnel.spawnFailed = true;
+  });
+  return tunnel;
+}
+
+function buildKernelTunnelArguments(sessionId: string, port: number): string[] {
+  return [
+    "browsers",
+    "ssh",
+    sessionId,
+    "-R",
+    `${port}:localhost:${port}`,
+  ];
+}
+
+function buildKernelCliEnvironment(
+  apiKey: string,
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const childEnvironment: NodeJS.ProcessEnv = {
+    KERNEL_API_KEY: apiKey,
+    NODE_ENV: environment.NODE_ENV ?? "production",
+  };
+  for (const key of ["HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"] as const) {
+    const value = environment[key];
+    if (value !== undefined) {
+      childEnvironment[key] = value;
+    }
+  }
+  return childEnvironment;
+}
+
+function requireKernelTunnelPort(webBaseUrl: string): number {
+  const url = new URL(webBaseUrl);
+  const port = Number(url.port);
+  if (
+    url.protocol !== "http:"
+    || url.hostname !== "localhost"
+    || !Number.isInteger(port)
+    || port < 1
+    || port > 65_535
+  ) {
+    throw new Error(
+      "Kernel browser transport requires an explicit http://localhost:<port> hosted-local Web URL.",
+    );
+  }
+  return port;
+}
+
+async function navigateToHostedLocalStart(
+  page: Page,
+  config: BrowserConfig,
+  tunnel: OwnedKernelTunnel | null,
+): Promise<void> {
+  if (!tunnel) {
+    await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
+    return;
+  }
+
+  const deadline = Date.now() + Math.min(
+    config.timeoutMs,
+    KERNEL_TUNNEL_SETUP_TIMEOUT_MS,
+  );
+  while (Date.now() < deadline) {
+    if (
+      tunnel.spawnFailed
+      || tunnel.child.exitCode !== null
+      || tunnel.child.signalCode !== null
+    ) {
+      throw new Error("Kernel reverse tunnel exited before reaching hosted-local Web.");
+    }
+    const remainingMs = deadline - Date.now();
+    try {
+      await page.goto(config.startUrl, {
+        timeout: Math.min(5_000, remainingMs),
+        waitUntil: "domcontentloaded",
+      });
+      return;
+    } catch {
+      await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
+    }
+  }
+  throw new Error("Kernel reverse tunnel did not reach hosted-local Web in time.");
+}
+
+async function stopKernelTunnel(tunnel: OwnedKernelTunnel): Promise<void> {
+  tunnel.removeParentExitHandler();
+  if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) {
+    return;
+  }
+
+  const exited = new Promise<void>((resolve) => {
+    tunnel.child.once("exit", () => resolve());
+    tunnel.child.once("error", () => resolve());
+  });
+  tunnel.child.kill("SIGTERM");
+  if (await resolvesWithin(exited, KERNEL_TUNNEL_STOP_GRACE_MS)) {
+    return;
+  }
+
+  // This detached process group contains only the Kernel CLI process started
+  // above and its SSH child, so its complete ownership is explicit.
+  signalOwnedKernelTunnel(tunnel, "SIGKILL");
+  if (!await resolvesWithin(exited, KERNEL_TUNNEL_STOP_GRACE_MS)) {
+    throw new Error("Kernel reverse tunnel did not stop.");
+  }
+}
+
+function signalOwnedKernelTunnel(
+  tunnel: OwnedKernelTunnel,
+  signal: NodeJS.Signals,
+): void {
+  try {
+    process.kill(-tunnel.processId, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
+async function resolvesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<false>((resolve) => {
+    timeout = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const result = await Promise.race([promise.then(() => true as const), timedOut]);
+  if (timeout !== undefined) {
+    clearTimeout(timeout);
+  }
+  return result;
 }
 
 async function completeExternalAuthorization(
@@ -604,6 +910,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
   const label = source === "oura" ? "Oura" : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
+  const browserTransport = requireBrowserTransport(
+    environment.MURPH_E2E_PROVIDER_BROWSER,
+  );
   const ci = environment.CI?.trim().toLowerCase();
   const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
@@ -618,12 +927,37 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
+  if (browserTransport === "kernel" && (source !== "whoop" || !headless)) {
+    throw new Error(
+      "Kernel browser transport is reserved for the unattended headless WHOOP canary.",
+    );
+  }
+  const kernelApiKey = browserTransport === "kernel"
+    ? readHostedLocalBrowserEnvironmentValue(
+      environment,
+      "KERNEL_API_KEY",
+      RUNNER_NAME,
+    )
+    : null;
+  const kernelCliPath = browserTransport === "kernel"
+    ? readHostedLocalBrowserEnvironmentValue(
+      environment,
+      "MURPH_E2E_KERNEL_CLI_PATH",
+      RUNNER_NAME,
+    )
+    : null;
+  if (kernelCliPath && !path.isAbsolute(kernelCliPath)) {
+    throw new Error("MURPH_E2E_KERNEL_CLI_PATH must be an absolute path.");
+  }
   const webBaseUrl = readHostedLocalBrowserEnvironmentValue(
     environment,
     "MURPH_E2E_WEB_BASE_URL",
     RUNNER_NAME,
   );
   const parsedWebBaseUrl = new URL(webBaseUrl);
+  if (browserTransport === "kernel") {
+    requireKernelTunnelPort(parsedWebBaseUrl.toString());
+  }
   const startUrl = new URL(readHostedLocalBrowserEnvironmentValue(
     environment,
     "MURPH_E2E_CONNECT_URL",
@@ -642,7 +976,12 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
-    browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,
+    browserChannel: browserTransport === "local"
+        && !headless
+        && !manualAuthorizationAllowed
+      ? "chrome"
+      : undefined,
+    browserTransport,
     disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
@@ -655,6 +994,8 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "MURPH_E2E_HOSTED_SESSION_COOKIE",
       RUNNER_NAME,
     ),
+    kernelApiKey,
+    kernelCliPath,
     label,
     manualAuthorizationAllowed,
     otp,
@@ -675,9 +1016,15 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
 }
 
 export {
+  buildKernelCliEnvironment as buildKernelCliEnvironmentForTest,
+  buildKernelTunnelArguments as buildKernelTunnelArgumentsForTest,
+  closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
+  stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
 };
 
 function assertTrustedAuthorizationUrl(
@@ -714,6 +1061,16 @@ function requireWearableSource(value: string | undefined): "oura" | "whoop" {
   throw new Error("MURPH_E2E_PROVIDER_SOURCE must be oura or whoop.");
 }
 
+function requireBrowserTransport(
+  value: string | undefined,
+): "kernel" | "local" {
+  const transport = value?.trim() || "local";
+  if (transport === "kernel" || transport === "local") {
+    return transport;
+  }
+  throw new Error("MURPH_E2E_PROVIDER_BROWSER must be kernel or local.");
+}
+
 function readOrigin(value: string): string | null {
   try {
     return new URL(value).origin;
@@ -738,15 +1095,19 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
     config?.password,
     config?.otp,
     config?.hostedSessionCookie,
+    config?.kernelApiKey,
     config?.startUrl,
   ]) {
     if (secret) {
       message = message.replaceAll(secret, "[redacted]");
     }
   }
-  message = message.replace(/https?:\/\/[^\s)"']+/gu, (rawUrl) => {
+  message = message.replace(/(?:https?|wss?):\/\/[^\s)"']+/gu, (rawUrl) => {
     try {
       const url = new URL(rawUrl);
+      if (url.protocol === "ws:" || url.protocol === "wss:") {
+        return "[redacted-url]";
+      }
       return `${url.origin}${url.pathname}`;
     } catch {
       return "[url]";

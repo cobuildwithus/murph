@@ -882,9 +882,11 @@ promise. That call launches a separate one-shot App Server process with the
 native `murph-group-read` profile, exact runtime workspace roots, `.runtime/**`,
 `.codex/**`, and environment-file denial, no tool network or inherited shell
 secrets, and only the consent-aware lazy `murph.group/read_shared` dynamic
-tool, with no mutation or delivery authority. Thread-start attestation
-must confirm the exact profile, roots, sealed empty working directory, empty
-instruction sources, and approval policy before model work. Further asks stay
+tool, with no mutation or delivery authority. The thread request supplies the
+exact profile, roots, sealed empty working directory, disabled instruction
+sources, and approval policy. Its response is not an authorization boundary;
+production-like Linux smoke proves the resulting filesystem, environment, and
+network enforcement. Further asks stay
 pending in the mailbox. The resident process remains the sole model-authored
 canonical-content writer and sender, and foreground start, steering, and
 delivery never await the child. The child also receives the server-bound
@@ -2253,8 +2255,13 @@ payloads or become the device-sync queue. Active foreground wake handling stays
 conversation-focused; system-lane work runs through normal invocation and
 reconciliation when no fresh conversation input is pending, and reschedules a
 short `device-sync.reconcile` wake if foreground work preempts that background
-pass. Do not add a separate system-lane active-wake import path unless measured
-latency or product behavior proves the simpler split is insufficient.
+pass. A device-sync pass has its own 90-second budget, independent of the shared
+Web/checkpoint request timeout; the foreground-yield and invocation-abort paths
+may still end it sooner at cooperative boundaries. Dense-raw cleanup retains a
+45-second admission cap, and any admitted canonical write finishes its existing
+atomic safety boundary before yielding. Do not add a separate system-lane
+active-wake import path unless measured latency or product behavior proves the
+simpler split is insufficient.
 The scheduled-wake sweep is the bounded backstop for active connections whose
 canonical `nextReconcileAt` is due. Temporal owns that cadence through a global
 scheduled reconciler workflow, but web owns the signed legacy-named command that

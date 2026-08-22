@@ -685,6 +685,7 @@ export async function sendAssistantNotificationLocal(
             response: null,
           })
           const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptStandaloneContext: true,
             assistantTranscriptText: null,
             input: messageInput,
             plan: sharedPlan,
@@ -749,6 +750,7 @@ export async function sendAssistantNotificationLocal(
         if (input.deferCommitUntilDeliveryAccepted !== true) {
           await createNotificationReceipt(providerResult.session)
           const savedSession = await persistAssistantTurnAndSession({
+            assistantTranscriptStandaloneContext: true,
             assistantTranscriptText: transcriptText,
             input: messageInput,
             plan: sharedPlan,
@@ -858,6 +860,7 @@ export async function sendAssistantNotificationLocal(
             }
             await createNotificationReceipt(deliveryOutcome.session)
             const savedSession = await persistAssistantTurnAndSession({
+              assistantTranscriptStandaloneContext: true,
               assistantTranscriptText: transcriptText,
               input: messageInput,
               plan: sharedPlan,
@@ -1233,6 +1236,7 @@ async function persistAssistantExactTextNotificationSession(input: {
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: input.responseText,
         createdAt: input.turnCreatedAt,
       },

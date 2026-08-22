@@ -16,13 +16,18 @@ import {
 } from "@/src/components/ui/field";
 import { RadioGroup } from "@/src/components/ui/radio-group";
 import { Spinner } from "@/src/components/ui/spinner";
+import {
+  HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR,
+  parseHostedGroupSponsorshipMonthlyCapMinor,
+  type HostedGroupSponsorshipMonthlyCapMinor,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
 
 export interface GroupSponsorshipManagementProjection {
   authorizationId: string;
   chargedThisPeriodMinor: number;
-  monthlyCapMinor: 500 | 1_000 | 2_000;
+  monthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor;
   pendingThisPeriodMinor: number;
-  pendingMonthlyCapMinor: 500 | 1_000 | 2_000 | null;
+  pendingMonthlyCapMinor: HostedGroupSponsorshipMonthlyCapMinor | null;
   periodEnd: string;
   status: "active" | "paused" | "pending_activation" | "recovery_required";
 }
@@ -419,32 +424,36 @@ export function GroupSponsorshipManagementCard({
           <RadioGroup
             value={String(selectedMonthlyCapMinor)}
             onValueChange={(value) => {
-              const parsed = Number(value);
-              if (parsed === 500 || parsed === 1_000 || parsed === 2_000) {
+              const parsed = parseHostedGroupSponsorshipMonthlyCapMinor(
+                Number(value),
+              );
+              if (parsed !== null) {
                 setSelectedMonthlyCapMinor(parsed);
               }
             }}
-            className="grid grid-cols-3 gap-2"
+            className="grid grid-cols-4 gap-2"
           >
-            {([500, 1_000, 2_000] as const).map((monthlyCapMinor) => (
-              <ChoiceCard
-                className="[&>[data-slot=field]]:gap-1 [&>[data-slot=field]]:p-2 [&_[data-slot=field-content]]:gap-1 min-[360px]:[&>[data-slot=field]]:gap-1.5 min-[360px]:[&>[data-slot=field]]:p-3"
-                key={monthlyCapMinor}
-                id={`managed-group-sponsorship-cap-${monthlyCapMinor}`}
-                value={String(monthlyCapMinor)}
-                disabled={busy || inert}
-                title={(
-                  <span className="font-serif text-lg font-semibold leading-none tabular-nums min-[360px]:text-xl sm:text-2xl">
-                    {formatMoney(monthlyCapMinor)}
-                  </span>
-                )}
-                description={(
-                  <span className="hidden text-xs font-medium text-muted-foreground min-[360px]:inline">
-                    per month
-                  </span>
-                )}
-              />
-            ))}
+            {HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map(
+              (monthlyCapMinor) => (
+                <ChoiceCard
+                  className="[&>[data-slot=field]]:gap-1 [&>[data-slot=field]]:p-2 [&_[data-slot=field-content]]:gap-1 min-[360px]:[&>[data-slot=field]]:gap-1.5 min-[360px]:[&>[data-slot=field]]:p-3"
+                  key={monthlyCapMinor}
+                  id={`managed-group-sponsorship-cap-${monthlyCapMinor}`}
+                  value={String(monthlyCapMinor)}
+                  disabled={busy || inert}
+                  title={(
+                    <span className="font-serif text-lg font-semibold leading-none tabular-nums min-[360px]:text-xl sm:text-2xl">
+                      {formatMoney(monthlyCapMinor)}
+                    </span>
+                  )}
+                  description={(
+                    <span className="hidden text-xs font-medium text-muted-foreground min-[360px]:inline">
+                      per month
+                    </span>
+                  )}
+                />
+              ),
+            )}
           </RadioGroup>
           {capChanged || management.pendingMonthlyCapMinor !== null ? (
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -740,7 +749,7 @@ function readManagementErrorMessage(value: unknown): string {
 }
 
 function readCap(value: unknown): MonthlyCapMinor | null {
-  return value === 500 || value === 1_000 || value === 2_000 ? value : null;
+  return parseHostedGroupSponsorshipMonthlyCapMinor(value);
 }
 
 function isNonNegativeInteger(value: unknown): value is number {

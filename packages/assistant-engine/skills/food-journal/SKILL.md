@@ -91,10 +91,14 @@ mandatory before deriving, saving, or surfacing a proposal and again before
 activating one. Also read and follow the
 target-authority and complete active-Goal discovery contract in
 `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`
-before deciding that the five canonical daily goals are complete. Use its
+before deciding that the accepted active bundle is complete for the card. Use its
 proposal workflow only if a target is genuinely missing after that read and the
 member made an explicit numeric-card or target-setting request. Default meal-card
 intent never invokes it.
+Treat a routine daily-card request, including a requested meal estimate needed
+for that card, as one fulfillment workflow. Reply once with the card or one
+concise truthful fallback. Never narrate individual safety, totals, estimation,
+or target-resolution mechanics.
 The first setup response explains a paused canonical proposal in ordinary text;
 it does not attach a goal-less card. An unambiguous acceptance may complete the
 pending explicit card request in that next response after the complete safety

@@ -93,10 +93,13 @@ describe("hosted local device connect e2e", () => {
     // login values. Capture them at module load and exclude them from every
     // Web, Worker, runner, and Temporal child process started by the harness.
     const restoreProviderLoginEnvironment = temporarilyRemoveProcessEnvironment([
+      "KERNEL_API_KEY",
       "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+      "MURPH_E2E_KERNEL_CLI_PATH",
       "MURPH_E2E_OURA_EMAIL",
       "MURPH_E2E_OURA_OTP",
       "MURPH_E2E_OURA_PASSWORD",
+      "MURPH_E2E_PROVIDER_BROWSER",
       "MURPH_E2E_WHOOP_EMAIL",
       "MURPH_E2E_WHOOP_OTP",
       "MURPH_E2E_WHOOP_PASSWORD",
@@ -391,8 +394,11 @@ interface LiveProviderCredentials {
 
 interface LiveJunctionWearableConfig {
   apiKey: string;
+  browserTransport: "kernel" | "local";
   clientUserIdSecret: string;
   headless: boolean;
+  kernelApiKey: string | null;
+  kernelCliPath: string | null;
   providers: Partial<Record<LiveWearableSource, LiveProviderCredentials>>;
   region: "eu" | "us";
   sources: readonly LiveWearableSource[];
@@ -437,6 +443,17 @@ function readLiveJunctionWearableConfig(
   const sources = readLiveWearableSources(
     env.MURPH_E2E_JUNCTION_WEARABLE_SOURCES,
   );
+  const browserTransport = readLiveBrowserTransport(
+    env.MURPH_E2E_PROVIDER_BROWSER,
+  );
+  if (
+    browserTransport === "kernel"
+    && (!headless || sources.length !== 1 || sources[0] !== "whoop")
+  ) {
+    throw new Error(
+      "Live Junction Kernel browser transport is reserved for the unattended headless WHOOP canary.",
+    );
+  }
   const providers: Partial<Record<LiveWearableSource, LiveProviderCredentials>> = {};
   for (const source of sources) {
     providers[source] = readLiveProviderCredentials(env, source, headless);
@@ -444,16 +461,33 @@ function readLiveJunctionWearableConfig(
 
   return {
     apiKey,
+    browserTransport,
     clientUserIdSecret: requireLiveEnvironmentValue(
       env,
       "JUNCTION_CLIENT_USER_ID_SECRET",
     ),
     headless,
+    kernelApiKey: browserTransport === "kernel"
+      ? requireLiveEnvironmentValue(env, "KERNEL_API_KEY")
+      : null,
+    kernelCliPath: browserTransport === "kernel"
+      ? requireLiveEnvironmentValue(env, "MURPH_E2E_KERNEL_CLI_PATH")
+      : null,
     providers,
     region,
     sources,
     timeoutMs: readLiveTimeoutMs(env.MURPH_E2E_WEARABLE_TIMEOUT_MS),
   };
+}
+
+function readLiveBrowserTransport(
+  value: string | undefined,
+): "kernel" | "local" {
+  const transport = value?.trim() || "local";
+  if (transport === "kernel" || transport === "local") {
+    return transport;
+  }
+  throw new Error("MURPH_E2E_PROVIDER_BROWSER must be kernel or local.");
 }
 
 function readLiveWearableSources(value: string | undefined): readonly LiveWearableSource[] {
@@ -722,10 +756,17 @@ async function runJunctionWearableBrowser(input: {
       encoding: "utf8",
       env: {
         ...buildBrowserProcessEnvironment(),
+        ...(input.config.kernelApiKey
+          ? { KERNEL_API_KEY: input.config.kernelApiKey }
+          : {}),
         MURPH_E2E_CONNECT_URL: input.startUrl,
         MURPH_E2E_HOSTED_SESSION_COOKIE: input.hostedSessionCookie,
+        ...(input.config.kernelCliPath
+          ? { MURPH_E2E_KERNEL_CLI_PATH: input.config.kernelCliPath }
+          : {}),
         MURPH_E2E_WEB_BASE_URL: input.webBaseUrl,
         MURPH_E2E_PROVIDER_EMAIL: providerCredentials.email,
+        MURPH_E2E_PROVIDER_BROWSER: input.config.browserTransport,
         MURPH_E2E_PROVIDER_HEADLESS: input.config.headless ? "1" : "0",
         ...(providerCredentials.otp
           ? { MURPH_E2E_PROVIDER_OTP: providerCredentials.otp }
@@ -759,13 +800,16 @@ function buildBrowserProcessEnvironment(): NodeJS.ProcessEnv {
     "JUNCTION_API_KEY",
     "JUNCTION_CLIENT_USER_ID_SECRET",
     "JUNCTION_WEBHOOK_SECRET",
+    "KERNEL_API_KEY",
     "MURPH_E2E_CONNECT_URL",
     "MURPH_E2E_HOSTED_SESSION_COOKIE",
     "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+    "MURPH_E2E_KERNEL_CLI_PATH",
     "MURPH_E2E_OURA_EMAIL",
     "MURPH_E2E_OURA_OTP",
     "MURPH_E2E_OURA_PASSWORD",
     "MURPH_E2E_PROVIDER_EMAIL",
+    "MURPH_E2E_PROVIDER_BROWSER",
     "MURPH_E2E_PROVIDER_HEADLESS",
     "MURPH_E2E_PROVIDER_OTP",
     "MURPH_E2E_PROVIDER_PASSWORD",

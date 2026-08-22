@@ -2236,8 +2236,33 @@ describe('monorepo release flow coverage audit', () => {
       const defaultResult = runDry()
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
       expect(defaultResult.stdout).toContain(
-        'Response capture: enabled (10800000ms timeout)',
+        'Response capture: enabled (15000000ms timeout)',
       )
+      const responseTimeoutMatch = defaultResult.stdout.match(
+        /Response capture: enabled \((\d+)ms timeout\)/,
+      )
+      if (!responseTimeoutMatch?.[1]) {
+        throw new Error('ReviewGPT dry run omitted its response timeout')
+      }
+      const responseTimeoutMs = Number(responseTimeoutMatch[1])
+
+      for (const guidancePath of [
+        'AGENTS.md',
+        'agent-docs/operations/pr-reviewgpt-loop.md',
+      ]) {
+        const guidance = readFileSync(path.join(repoRoot, guidancePath), 'utf8')
+        const pollIntervalMatch = guidance.match(/--poll-interval (\d+)m/)
+        const wakeTimeoutMatch = guidance.match(/--poll-timeout (\d+)m/)
+        if (!pollIntervalMatch?.[1] || !wakeTimeoutMatch?.[1]) {
+          throw new Error(`${guidancePath} omitted the ReviewGPT wake defaults`)
+        }
+        expect(
+          Number(wakeTimeoutMatch[1]) * 60_000,
+          guidancePath,
+        ).toBeGreaterThanOrEqual(
+          responseTimeoutMs + Number(pollIntervalMatch[1]) * 60_000,
+        )
+      }
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )

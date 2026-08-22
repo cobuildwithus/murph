@@ -15,15 +15,20 @@ card, and never activates the proposal. Once the managed Goal exists in any
 status, later scheduled closeouts may use an accepted active bundle but never
 create, change, or automatically repeat a numeric proposal.
 
-Before using this workflow, read and apply `daily-nutrition-card-safety.md`,
-including its complete canonical memory document, bounded active-condition and
-active-regimen discovery, lifetime procedure-event and encounter-diagnosis
-discovery, 45-day body-measurement read, separate 300-day `pregnancy-test`
-measurement read, and 300-day canonical test-event list plus required detail
-reads. The context snapshot is not completeness proof for any of these owners.
-If any required canonical read is saturated or unavailable,
-or the gate suppresses numeric goals, stop here with no Goal or measurement
-mutation and keep the owning non-numeric or clinical path.
+Run the cheap read-only target-authority discovery below before the complete
+clinical-history fanout. If that discovery proves that no card or responsible
+proposal can be produced, stop on the owning non-numeric path without unrelated
+safety reads. When a complete accepted bundle or a responsible proposal
+candidate remains, read and apply `daily-nutrition-card-safety.md` before
+deriving, surfacing, writing, or activating numeric goals, reading card totals,
+or attaching a card. That gate includes its complete canonical memory document,
+bounded active-condition and active-regimen discovery, lifetime procedure-event
+and encounter-diagnosis discovery, 45-day body-measurement read, separate
+300-day `pregnancy-test` measurement read, and 300-day canonical test-event list
+plus required detail reads. The context snapshot is not completeness proof for
+any of these owners. If any required canonical read is saturated or unavailable,
+or the gate suppresses numeric goals, stop with no Goal or measurement mutation
+and keep the owning non-numeric or clinical path.
 
 A numeric card request explicitly asks for Murph's goal-aware daily-card
 experience. It authorizes only the one paused canonical proposal below so the
@@ -71,9 +76,32 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   question without mutation; a scheduled closeout asks nothing and sends no
   card. Apply this rule before any low-energy check or derivation. Multiple
   active explicit owners are also ambiguous.
+- Calorie metric compatibility has one narrow read-only exception for an
+  existing complete nutrition Goal. New authoring uses `dietary-calories`.
+  First resolve applicable canonical `dietary-calories` authority under the
+  date, comparator, and unit rules here. When exactly one compatible canonical
+  owner remains, use it and ignore every `calories` target; that globally
+  ambiguous key neither overrides nor conflicts with canonical dietary
+  authority. Only when no canonical owner exists may the historical target
+  `daily-calories` with metric `calories` and unit `kcal` fill the card's calorie
+  slot. Its same containing Goal must also own exactly one applicable compatible
+  exact-point target for each historical id, metric, and unit pair:
+  `daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` /
+  `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` /
+  `fiber-grams` / `g`. Require exactly one complete historical set. Any other
+  `calories` target is not dietary authority, even when co-located with all four
+  macro and fiber metrics. Never combine the historical calorie target with
+  targets from another Goal or a managed proposal. Multiple qualifying sets or
+  ambiguity or incompatibility inside the qualifying Goal means no card and no
+  managed Goal mutation. Do not use titles, slugs, domains, descriptions, or
+  guessed intent as authority. Apply the 1,200-kcal boundary and residual-energy
+  calculations to the one resolved calorie value exactly as if it came from
+  `dietary-calories`. Never rename or mutate the Goal, extend this exception to
+  another workflow, or author new `calories` targets.
 - Unit compatibility is part of target authority. This fixed-unit workflow
-  accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`,
-  `fat-grams`, and `fiber-grams` in `g`. An explicit target in another unit
+  accepts the resolved calorie owner above in `kcal`, and `protein-grams`,
+  `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`. An explicit target in
+  another unit
   remains authoritative and must not be overwritten, but its raw value must not
   be compared with the 1,200 kcal boundary, copied into a card, or used by the
   residual-energy or fiber calculations. Do not invent a card-specific
@@ -266,11 +294,13 @@ Use the existing canonical Goal owner; add no new state surface.
    in that acceptance response when the pending
    request is still unambiguous and the card alone completes it. A
    target-setting-only request, correction, decline, ambiguous acceptance, or
-   compound request remains ordinary text with no card. Otherwise, only a later
-   eligible response with five exact point values in the exact canonical
-   metric/unit pairs resolved from active canonical goals may attach the card.
-   On an interactive card request, explain an existing paused proposal again
-   unless the member is accepting or changing it.
+   compound request remains ordinary text with no card. Otherwise, a later
+   eligible response may attach the card only when the target-authority read
+   above resolves one complete, unambiguous card-authorizing bundle. Consume
+   that resolved bundle directly; do not restate accepted metric keys or require
+   a second `dietary-calories` owner after calorie resolution. On an interactive
+   card request, explain an existing paused proposal again unless the member is
+   accepting or changing it.
 
 ## Evidence register
 
