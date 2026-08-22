@@ -1809,8 +1809,7 @@ export async function captureHostedGrowthDailySnapshot(
       coveredMembers: current.coveredMembers,
       familyMrrUsdCents: current.familyMrrUsdCents,
       inboundMessagesPriorDay,
-      individualMrrUsdCents:
-        current.pulseMrrUsdCents + current.edgeMrrUsdCents,
+      individualMrrUsdCents: current.mrrUsdCents - current.familyMrrUsdCents,
       mrrUsdCents: current.mrrUsdCents,
       outboundMessagesPriorDay,
       payingCustomers: current.payingCustomers,
@@ -1833,8 +1832,7 @@ export async function captureHostedGrowthDailySnapshot(
       coveredMembers: current.coveredMembers,
       familyMrrUsdCents: current.familyMrrUsdCents,
       inboundMessagesPriorDay,
-      individualMrrUsdCents:
-        current.pulseMrrUsdCents + current.edgeMrrUsdCents,
+      individualMrrUsdCents: current.mrrUsdCents - current.familyMrrUsdCents,
       mrrUsdCents: current.mrrUsdCents,
       outboundMessagesPriorDay,
       payingCustomers: current.payingCustomers,
