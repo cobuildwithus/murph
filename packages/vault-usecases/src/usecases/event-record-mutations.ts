@@ -171,10 +171,13 @@ async function requireEventRecord(
   }
 
   const query = await loadQueryRuntime()
-  const readModel = await query.readVault(input.vault)
-  const record = query.lookupEntityById(readModel, input.lookup)
+  const record = await query.resolveCanonicalEntityInFamily(
+    input.vault,
+    'event',
+    input.lookup,
+  )
 
-  if (!record || record.family !== 'event') {
+  if (!record) {
     throw new VaultCliError(
       'not_found',
       `No ${input.entityLabel} found for "${input.lookup}".`,

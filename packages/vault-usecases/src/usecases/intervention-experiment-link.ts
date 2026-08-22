@@ -9,9 +9,9 @@ import type { JsonObject } from '../health-cli-method-types.js'
 import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
-  type QueryVaultReadModel,
 } from '../query-runtime.js'
 import { editEventRecord } from './event-record-mutations.js'
+import { readExactEventRecord } from './exact-event-record.js'
 import { showEventRecord } from './provider-event.js'
 import { normalizeOptionalText } from './vault-usecase-helpers.js'
 
@@ -73,12 +73,15 @@ export async function resolveInterventionExperimentLink(
   }
 
   const query = await loadQueryRuntime()
-  const readModel = await query.readVault(input.vault)
-  const localDate = resolveEventLocalDate(readModel, input.occurredAt)
+  const [metadata, experiments] = await Promise.all([
+    query.readVaultMetadataSource(input.vault),
+    query.readCanonicalEntityFamilySource(input.vault, 'experiment'),
+  ])
+  const localDate = resolveEventLocalDate(metadata, input.occurredAt)
 
   if (input.experiment !== undefined) {
     const experiment = requireExperimentCandidateByLookup(
-      readModel,
+      experiments,
       input.experiment,
     )
     assertExperimentCanBeLinked({
@@ -99,7 +102,7 @@ export async function resolveInterventionExperimentLink(
     }
   }
 
-  const candidates = readModel.experiments
+  const candidates = experiments
     .map(toExperimentCandidate)
     .filter((candidate): candidate is ExperimentCandidate => candidate !== null)
     .filter((candidate) => candidate.frontmatter.status === 'active')
@@ -156,10 +159,19 @@ export async function attachInterventionSessionToExperiment(input: {
   allowOutOfWindow?: boolean
 }) {
   const query = await loadQueryRuntime()
-  const readModel = await query.readVault(input.vault)
-  const event = requireInterventionSessionEvent(readModel, input.eventId)
-  const experiment = requireExperimentCandidateByLookup(readModel, input.experiment)
-  const localDate = resolveExistingEventLocalDate(readModel, event)
+  const [exactEvent, metadata, experiments] = await Promise.all([
+    readExactEventRecord({
+      vault: input.vault,
+      lookup: input.eventId,
+      entityLabel: 'intervention',
+      expectedKinds: ['intervention_session'],
+    }),
+    query.readVaultMetadataSource(input.vault),
+    query.readCanonicalEntityFamilySource(input.vault, 'experiment'),
+  ])
+  const event = requireInterventionSessionEvent(exactEvent.record, input.eventId)
+  const experiment = requireExperimentCandidateByLookup(experiments, input.experiment)
+  const localDate = resolveExistingEventLocalDate(metadata, event)
   const interventionType = readInterventionType(event)
 
   assertExperimentCanBeLinked({
@@ -191,6 +203,10 @@ export async function attachInterventionSessionToExperiment(input: {
       `experimentSlug=${JSON.stringify(experiment.experimentSlug)}`,
       `links=${JSON.stringify(links)}`,
     ],
+    validatedEvent: {
+      event: exactEvent.event,
+      ledgerFile: exactEvent.ledgerFile,
+    },
   })
 
   return {
@@ -207,9 +223,13 @@ export async function detachInterventionSessionFromExperiment(input: {
   vault: string
   eventId: string
 }) {
-  const query = await loadQueryRuntime()
-  const readModel = await query.readVault(input.vault)
-  const event = requireInterventionSessionEvent(readModel, input.eventId)
+  const exactEvent = await readExactEventRecord({
+    vault: input.vault,
+    lookup: input.eventId,
+    entityLabel: 'intervention',
+    expectedKinds: ['intervention_session'],
+  })
+  const event = requireInterventionSessionEvent(exactEvent.record, input.eventId)
   const links = replaceExperimentLink(event.links, null)
   const hasExperimentState =
     readCurrentExperimentLink(event) !== null ||
@@ -235,6 +255,10 @@ export async function detachInterventionSessionFromExperiment(input: {
     clear: links.length > 0
       ? ['experimentId', 'experimentSlug']
       : ['experimentId', 'experimentSlug', 'links'],
+    validatedEvent: {
+      event: exactEvent.event,
+      ledgerFile: exactEvent.ledgerFile,
+    },
   })
 
   return {
@@ -265,16 +289,17 @@ export function replaceExperimentLink(
 }
 
 function requireInterventionSessionEvent(
-  readModel: QueryVaultReadModel,
+  event: QueryCanonicalEntity,
   eventId: string,
 ): QueryCanonicalEntity {
-  const event = readModel.events.find((candidate) =>
-    candidate.entityId === eventId ||
-    candidate.primaryLookupId === eventId ||
-    candidate.lookupIds.includes(eventId),
-  )
-
-  if (!event || event.kind !== 'intervention_session') {
+  if (
+    event.kind !== 'intervention_session'
+    || (
+      event.entityId !== eventId
+      && event.primaryLookupId !== eventId
+      && !event.lookupIds.includes(eventId)
+    )
+  ) {
     throw new VaultCliError(
       'not_found',
       `No intervention found for "${eventId}".`,
@@ -297,12 +322,12 @@ function readInterventionType(event: QueryCanonicalEntity): string {
 }
 
 function requireExperimentCandidateByLookup(
-  readModel: QueryVaultReadModel,
+  experiments: readonly QueryCanonicalEntity[],
   lookup: string,
 ): ExperimentCandidate {
   const experiment =
-    readModel.experiments.find((candidate) => candidate.experimentSlug === lookup) ??
-    readModel.experiments.find((candidate) =>
+    experiments.find((candidate) => candidate.experimentSlug === lookup) ??
+    experiments.find((candidate) =>
       candidate.entityId === lookup ||
       candidate.primaryLookupId === lookup ||
       candidate.lookupIds.includes(lookup),
@@ -447,7 +472,7 @@ function slugifyInterventionValue(value: string | null | undefined): string | nu
 }
 
 function resolveExistingEventLocalDate(
-  readModel: QueryVaultReadModel,
+  metadata: Record<string, unknown> | null,
   event: QueryCanonicalEntity,
 ): string {
   const date =
@@ -465,15 +490,15 @@ function resolveExistingEventLocalDate(
     )
   }
 
-  return resolveEventLocalDate(readModel, event.occurredAt)
+  return resolveEventLocalDate(metadata, event.occurredAt)
 }
 
 function resolveEventLocalDate(
-  readModel: QueryVaultReadModel,
+  metadata: Record<string, unknown> | null,
   occurredAt: string,
 ): string {
-  const timeZone = typeof readModel.metadata?.timezone === 'string'
-    ? readModel.metadata.timezone
+  const timeZone = typeof metadata?.timezone === 'string'
+    ? metadata.timezone
     : 'UTC'
 
   return toLocalDayKey(occurredAt, timeZone)

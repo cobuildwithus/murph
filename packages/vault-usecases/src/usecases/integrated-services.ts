@@ -15,6 +15,7 @@ import type {
   CommandContext,
   JsonObject,
 } from "../health-cli-method-types.js"
+import type { QueryEntityFamily } from "../query-runtime.js"
 import type {
   CoreWriteServices,
   ImporterServices,
@@ -37,6 +38,7 @@ import {
   asEntityEnvelope,
   asListEnvelope,
   describeLookupConstraint,
+  inferEntityKind,
   materializeExportPack,
   matchesGenericKindFilter,
   normalizeIssues,
@@ -134,6 +136,53 @@ const COMPACT_WEARABLE_ARRAY_LIMIT = 8
 const COMPACT_WEARABLE_DRIFT_SIGNAL_LIMIT = 8
 const COMPACT_WEARABLE_TREND_POINT_LIMIT = 14
 const COMPACT_WEARABLE_STRING_LENGTH = 160
+
+function genericShowFamily(id: string): QueryEntityFamily | null {
+  switch (inferEntityKind(id)) {
+    case "allergy":
+      return "allergy"
+    case "assessment":
+      return "assessment"
+    case "audit":
+      return "audit"
+    case "condition":
+      return "condition"
+    case "core":
+      return "core"
+    case "document":
+    case "event":
+    case "meal":
+      return "event"
+    case "experiment":
+      return "experiment"
+    case "family":
+      return "family"
+    case "food":
+      return "food"
+    case "genetics":
+      return "genetics"
+    case "goal":
+      return "goal"
+    case "habitat":
+      return "habitat"
+    case "journal":
+      return "journal"
+    case "protocol":
+      return "protocol"
+    case "provider":
+      return "provider"
+    case "recipe":
+      return "recipe"
+    case "regimen":
+      return "regimen"
+    case "sample":
+      return "sample"
+    case "workout_format":
+      return "workout_format"
+    default:
+      return null
+  }
+}
 
 type CompactWearableValue = JsonValue | typeof OMIT_COMPACT_WEARABLE_VALUE
 
@@ -1226,8 +1275,10 @@ function createIntegratedQueryServices(): QueryServices {
       }
 
       const query = await loadQueryRuntime()
-      const readModel = await query.readVault(vault)
-      const entity = query.lookupEntityById(readModel, id)
+      const family = genericShowFamily(id)
+      const entity = family
+        ? await query.resolveCanonicalEntityInFamily(vault, family, id)
+        : null
 
       if (!entity) {
         throw new VaultCliError("not_found", `No entity found for "${id}".`)
