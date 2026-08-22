@@ -1462,7 +1462,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and
   payer/beneficiary split, but its primary flow is a durable payer authorization
-  for one group with a $5, $10, or $20 calendar-month maximum. Activation is an
+  for one group with a $5, $10, $20, or $50 calendar-month maximum. Activation is an
   ordinary $5 usage-credit purchase available at any current group-capacity
   state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
   rows admitted only at the existing beneficiary-serialized

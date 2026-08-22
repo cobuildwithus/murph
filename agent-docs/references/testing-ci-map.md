@@ -754,7 +754,10 @@ supported provider credential.
   restrict it to its constraint replacement, static migration tests pin the
   required shape, and the opt-in real-PostgreSQL suite proves sessionless
   fulfilled detachment succeeds while missing PaymentIntent or Charge lookup
-  proof is rejected. Destructive hosted web contract cleanup
+  proof is rejected. The group-sponsorship $50-cap migration is likewise a
+  tested backward-compatible exception: it replaces the existing cap check
+  with a strict superset before the new Web build can write the added value,
+  while every old writer remains valid. Destructive hosted web contract cleanup
   is applied by `.github/workflows/hosted-web-contract-migrations.yml` after a
   successful Vercel-originated completed production deployment status; that
   workflow checks out the deployed SHA, verifies it is reachable from

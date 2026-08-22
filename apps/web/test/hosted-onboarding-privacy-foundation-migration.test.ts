@@ -1157,6 +1157,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260820010000_hosted_email_public_bootstrap",
       "20260820020000_hosted_signup_notification_context",
       "20260820190000_hosted_ops_usage_reset_receipt",
+      "20260821120000_hosted_group_sponsorship_fifty_cap",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(
