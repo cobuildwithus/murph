@@ -897,13 +897,13 @@ describe('murph.attach_response_card', () => {
       'progress owner',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'resolve calories from dietary-calories or read-only legacy calories in kcal',
+      'When exactly one compatible canonical calorie owner exists, use it and ignore every globally ambiguous calories target.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Without it, accept one compatible legacy owner',
+      'Only without a canonical owner may calories in kcal substitute, and only inside one same containing Goal that also owns exactly one compatible applicable point for each of the four gram metrics.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'with it, ignore only identical compatible legacy aliases',
+      'Ignore alias-only and cross-Goal calories targets; never combine one with another Goal or managed proposal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Never mutate a Goal to repair its key.',
@@ -922,7 +922,7 @@ describe('murph.attach_response_card', () => {
     )
     expect(
       MURPH_ATTACH_RESPONSE_CARD_TOOL.description
-        .split('resolve calories from').length - 1,
+        .split('globally ambiguous calories target').length - 1,
     ).toBe(1)
     expect(
       MURPH_ATTACH_RESPONSE_CARD_TOOL.description
@@ -951,7 +951,7 @@ describe('murph.attach_response_card', () => {
       'Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active canonical Goals',
+      'canonical dietary-calories in kcal plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Each target must use selected-value comparator between with identical numeric value and highValue',

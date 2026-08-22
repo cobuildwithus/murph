@@ -176,16 +176,19 @@ describe('assistant automatic meal capture skill', () => {
       'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
     )
     expect(compactSkill).toContain(
-      'New authoring uses `dietary-calories`. For the card\'s calorie slot only, an existing applicable active exact-point `calories` target in `kcal` is a read-only legacy alias when no `dietary-calories` owner exists.',
+      'New authoring uses `dietary-calories`. Resolve that canonical owner first; when it exists, use it and ignore every globally ambiguous `calories` target.',
     )
     expect(compactSkill).toContain(
-      'When the canonical owner also exists, use it only if every legacy alias is an identical compatible point; any different value, incompatible alias, or multiple legacy-only owners is a conflict.',
+      'Only without a canonical owner may an applicable exact-point `calories` target in `kcal` fill the card\'s calorie slot, and only when the same containing Goal also owns exactly one applicable compatible point for each of the four card metrics below.',
     )
     expect(compactSkill).toContain(
-      'Never rename or mutate a Goal just to repair this key.',
+      'ignore alias-only or cross-Goal `calories` targets and never combine one with a managed proposal.',
     )
     expect(compactSkill).toContain(
-      'The other card-qualifying targets must use the exact canonical metric/unit pairs: `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
+      'never rename or mutate a Goal just to repair this key.',
+    )
+    expect(compactSkill).toContain(
+      'The other card-qualifying targets use the exact canonical metric/unit pairs: `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
     )
     expect(compactSkill).toContain(
       'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
@@ -317,7 +320,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('below 1,200 kcal/day')
     expect(compactSafety).toContain('active resolved target at card time')
     expect(compactSafety).toContain(
-      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories` or its narrow read-only legacy `calories` alias, in `kcal`.',
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the same-Goal legacy `calories` member of one complete nutrition bundle, in `kcal`.',
     )
     expect(compactSafety).toContain(
       'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',

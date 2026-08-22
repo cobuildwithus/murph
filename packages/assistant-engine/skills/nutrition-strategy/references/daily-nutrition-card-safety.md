@@ -185,9 +185,9 @@ context.
   window and target-level dates include the exact card `localDate`; an
   out-of-window target must neither trigger nor satisfy this gate. Evaluate the
   boundary only for the exact point calorie target resolved under
-  `daily-nutrition-card-goals.md`: canonical `dietary-calories` or its narrow
-  read-only legacy `calories` alias, in `kcal`. Its selected-value comparator
-  must be `between` with identical
+  `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the
+  same-Goal legacy `calories` member of one complete nutrition bundle, in
+  `kcal`. Its selected-value comparator must be `between` with identical
   numeric `value` and `highValue`. A one-sided threshold, non-identical range,
   or calorie target in any other unit makes the point-target card bundle
   incompatible. Never compare a threshold bound or incompatible raw number

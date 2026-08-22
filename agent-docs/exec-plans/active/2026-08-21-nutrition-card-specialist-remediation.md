@@ -31,6 +31,11 @@ and bounded safety recovery.
   safety gate it already required from the shared nutrition-card safety
   reference. The duplicate made future safety changes vulnerable to drift and
   made the dynamically loaded skill larger without adding an authority owner.
+- Final ReviewGPT round 6 found that the raw `calories` key also names total
+  wearable energy expenditure, so a global key-only alias could adopt a burn
+  Goal as dietary intake or let it conflict with a valid canonical target. The
+  original production evidence instead proves one accepted Goal containing the
+  older calorie target together with all four nutrition-specific targets.
 
 ## Tasks
 
@@ -49,12 +54,16 @@ and bounded safety recovery.
 6. Keep the shared nutrition-card safety reference as the only complete safety
    owner; reduce automatic closeout to ordering that gate before target and card
    work plus its scheduled fail-closed disposition.
+7. Narrow legacy compatibility to one complete same-Goal nutrition bundle.
+   Canonical dietary authority ignores every ambiguous raw calorie target;
+   alias-only activity Goals and cross-Goal combinations cannot authorize or
+   conflict with a card.
 
 ## Constraints
 
 - Do not change Goal state, card validation, or the safety exclusion set.
-- Keep the compatibility alias read-only and limited to the daily-card calorie
-  slot.
+- Keep the compatibility alias read-only, limited to the daily-card calorie
+  slot, and authorized only by its complete same-Goal nutrition bundle.
 - Add no new runtime state owner, progress tool, queue, or reconciliation path.
 - Keep all fixtures synthetic and free of member identifiers or transcript
   wording.
@@ -86,5 +95,14 @@ and bounded safety recovery.
   payload itself shrank by 2,598 serialized bytes and 34 net production lines;
   the initial direct/group measurements therefore remain 16,046 / 72,075 and
   14,168 / 61,489.
+- Round-6 remediation proof covers the intended same-Goal legacy bundle,
+  canonical dietary authority beside a separate calorie-burn Goal, and an
+  alias-only burn Goal beside separate macros. Each path proves the expected
+  card or fallback and no Goal mutation through the complete App Server tool
+  surface; the opt-in real-model fixture retains the same semantic matrix. The
+  focused remediation run passed 5 files and 137 tests, with 75 credential-
+  gated real-provider cases skipped; assistant-engine typecheck and
+  `git diff --check` passed. Changelog generation and its four focused files
+  passed 57 tests.
 - Exact-head ReviewGPT round after the substantive remediation and required
   GitHub checks.

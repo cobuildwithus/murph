@@ -226,14 +226,17 @@ On a scheduled run:
    out-of-window target for current authority and conflict resolution; never
    copy, expose, derive from, or mutate a Goal because of it. If fewer than five
    applicable targets remain, ask no question and use ordinary closeout text.
-   New authoring uses `dietary-calories`. For the card's calorie slot only, an
-   existing applicable active exact-point `calories` target in `kcal` is a
-   read-only legacy alias when no `dietary-calories` owner exists. Require one
-   legacy owner. When the canonical owner also exists, use it only if every
-   legacy alias is an identical compatible point; any different value,
-   incompatible alias, or multiple legacy-only owners is a conflict. Never
-   rename or mutate a Goal just to repair this key. The other card-qualifying
-   targets must use the exact canonical metric/unit pairs:
+   New authoring uses `dietary-calories`. Resolve that canonical owner first;
+   when it exists, use it and ignore every globally ambiguous `calories`
+   target. Only without a canonical owner may an applicable exact-point
+   `calories` target in `kcal` fill the card's calorie slot, and only when the
+   same containing Goal also owns exactly one applicable compatible point for
+   each of the four card metrics below. Require one complete same-Goal legacy
+   nutrition bundle; ignore alias-only or cross-Goal `calories` targets and
+   never combine one with a managed proposal. Never infer ownership from a
+   title, slug, domain, or description, and never rename or mutate a Goal just
+   to repair this key. The other card-qualifying targets use the exact
+   canonical metric/unit pairs:
    `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.
    A target in another unit remains authoritative, but never compare, convert,
    or copy its raw value into this fixed-unit card; on a scheduled occurrence,

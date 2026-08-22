@@ -71,20 +71,26 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   question without mutation; a scheduled closeout asks nothing and sends no
   card. Apply this rule before any low-energy check or derivation. Multiple
   active explicit owners are also ambiguous.
-- Calorie metric compatibility has one narrow read-only exception for existing
-  Goals. New authoring uses `dietary-calories`. When resolving the card's
-  calorie slot, an applicable active `calories` target in `kcal` is a legacy
-  alias only when it is an exact point under the comparator rule above. If no
-  applicable `dietary-calories` owner exists, require exactly one compatible
-  legacy owner and use its value without renaming or mutating the Goal. If a
-  canonical owner exists, prefer it only when every applicable legacy alias is
-  also a compatible exact point with the identical value; ignore those
-  identical aliases for card resolution. A different legacy value, an
-  incompatible legacy unit or comparator, or multiple legacy-only owners is a
-  conflict: attach no card and perform no managed Goal mutation. Apply the
-  1,200-kcal boundary and residual-energy calculations to the one resolved
-  calorie value exactly as if it came from `dietary-calories`. Do not extend
-  this alias to another workflow or author new `calories` targets.
+- Calorie metric compatibility has one narrow read-only exception for an
+  existing complete nutrition Goal. New authoring uses `dietary-calories`.
+  First resolve applicable canonical `dietary-calories` authority under the
+  date, comparator, and unit rules here. When exactly one compatible canonical
+  owner remains, use it and ignore every `calories` target; that globally
+  ambiguous key neither overrides nor conflicts with canonical dietary
+  authority. Only when no canonical owner exists may one applicable active
+  exact-point `calories` target in `kcal` fill the card's calorie slot, and only
+  when its same containing Goal also owns exactly one applicable compatible
+  exact-point target for each of `protein-grams`, `carbs-grams`, `fat-grams`,
+  and `fiber-grams` in `g`. Require exactly one such complete same-Goal legacy
+  nutrition bundle. Ignore `calories` targets outside a complete same-Goal
+  nutrition bundle; never combine one with macro or fiber targets from another
+  Goal or a managed proposal. Multiple qualifying legacy bundles or ambiguity
+  or incompatibility inside the qualifying Goal means no card and no managed
+  Goal mutation. Do not use titles, slugs, domains, descriptions, or guessed
+  intent as authority. Apply the 1,200-kcal boundary and residual-energy
+  calculations to the one resolved calorie value exactly as if it came from
+  `dietary-calories`. Never rename or mutate the Goal, extend this exception to
+  another workflow, or author new `calories` targets.
 - Unit compatibility is part of target authority. This fixed-unit workflow
   accepts the resolved calorie owner above in `kcal`, and `protein-grams`,
   `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`. An explicit target in

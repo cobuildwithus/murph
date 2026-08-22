@@ -8281,75 +8281,89 @@ text(result.output);
       nextCursor: null,
       vault: 'synthetic-vault',
     }
-    const legacyCaloriesGoalShowCommand =
-      'goal show goal_legacy_calories --format json'
-    const conflictingLegacyGoalShowCommand =
-      'goal show goal_legacy_calories_conflict --format json'
-    const legacyCaloriesGoal = {
+    const legacyNutritionGoalShowCommand =
+      'goal show goal_legacy_nutrition --format json'
+    const activityCaloriesGoalShowCommand =
+      'goal show goal_activity_calories --format json'
+    const legacyNutritionTargets = completeTargets.map((target) =>
+      target.metric === 'dietary-calories'
+        ? pointTarget('target_legacy_calories', 'calories', 'kcal', 1_800)
+        : target)
+    const legacyNutritionGoal = {
       entity: {
         data: {
-          metricTargets: [
-            pointTarget('target_legacy_calories', 'calories', 'kcal', 1_800),
-          ],
+          metricTargets: legacyNutritionTargets,
           status: 'active',
           windowStartAt: '2026-07-01',
         },
-        id: 'goal_legacy_calories',
+        id: 'goal_legacy_nutrition',
         kind: 'goal',
-        title: 'Existing calorie target',
+        title: 'Accepted daily nutrition targets',
       },
       vault: 'synthetic-vault',
     }
-    const legacyManagedTargets = completeTargets.filter(
+    const macroOnlyTargets = completeTargets.filter(
       ({ metric }) => metric !== 'dietary-calories',
     )
-    const legacyPausedManagedGoal = {
+    const macroOnlyActiveGoal = {
       ...pausedGoal,
       entity: {
         ...pausedGoal.entity,
         data: {
           ...pausedGoal.entity.data,
-          metricTargets: legacyManagedTargets,
-        },
-      },
-    }
-    const legacyActiveManagedGoal = {
-      ...legacyPausedManagedGoal,
-      entity: {
-        ...legacyPausedManagedGoal.entity,
-        data: {
-          ...legacyPausedManagedGoal.entity.data,
+          metricTargets: macroOnlyTargets,
           status: 'active',
         },
       },
     }
-    const legacyOnlyActiveList = {
+    const activityCaloriesGoal = {
+      entity: {
+        data: {
+          metricTargets: [
+            pointTarget('target_total_calories_burned', 'calories', 'kcal', 2_200),
+          ],
+          status: 'active',
+          windowStartAt: '2026-07-01',
+        },
+        id: 'goal_activity_calories',
+        kind: 'goal',
+        title: 'Daily energy expenditure',
+      },
+      vault: 'synthetic-vault',
+    }
+    const legacyNutritionActiveList = {
       count: 1,
       filters: { limit: 200, status: 'active' },
       items: [{
-        data: { metricTargetsCount: 1, status: 'active' },
-        id: 'goal_legacy_calories',
+        data: { metricTargetsCount: 5, status: 'active' },
+        id: 'goal_legacy_nutrition',
         kind: 'goal',
-        title: 'Existing calorie target',
+        title: 'Accepted daily nutrition targets',
       }],
       nextCursor: null,
       vault: 'synthetic-vault',
     }
-    const legacyPausedManagedGoalList = {
-      ...pausedManagedGoalList,
-      items: [{
-        ...pausedManagedGoalList.items[0],
-        data: {
-          ...pausedManagedGoalList.items[0]!.data,
-          metricTargetsCount: 4,
-        },
-      }],
+    const activityCaloriesListItem = {
+      data: { metricTargetsCount: 1, status: 'active' },
+      id: 'goal_activity_calories',
+      kind: 'goal',
+      title: 'Daily energy expenditure',
     }
-    const legacyCombinedActiveList = {
+    const canonicalWithActivityActiveList = {
       count: 2,
       filters: { limit: 200, status: 'active' },
       items: [
-        legacyOnlyActiveList.items[0],
+        completeList.items[0],
+        activityCaloriesListItem,
+      ],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
+    const activityWithSeparateMacrosActiveList = {
+      count: 2,
+      filters: { limit: 200, status: 'active' },
+      items: [
+        activityCaloriesListItem,
         {
           data: {
             metricTargetsCount: 4,
@@ -8363,38 +8377,6 @@ text(result.output);
       ],
       nextCursor: null,
       vault: 'synthetic-vault',
-    }
-    const conflictingLegacyCaloriesGoal = {
-      ...legacyCaloriesGoal,
-      entity: {
-        ...legacyCaloriesGoal.entity,
-        data: {
-          ...legacyCaloriesGoal.entity.data,
-          metricTargets: [
-            pointTarget(
-              'target_legacy_calories_conflict',
-              'calories',
-              'kcal',
-              1_700,
-            ),
-          ],
-        },
-        id: 'goal_legacy_calories_conflict',
-        title: 'Conflicting calorie target',
-      },
-    }
-    const legacyConflictActiveList = {
-      ...legacyCombinedActiveList,
-      count: 3,
-      items: [
-        ...legacyCombinedActiveList.items,
-        {
-          data: { metricTargetsCount: 1, status: 'active' },
-          id: 'goal_legacy_calories_conflict',
-          kind: 'goal',
-          title: 'Conflicting calorie target',
-        },
-      ],
     }
 
     await runCase({
@@ -9362,48 +9344,10 @@ text(result.output);
     })
 
     await runCase({
-      commandOutputs: [
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
-        [activeListCommand, legacyOnlyActiveList],
-        [legacyCaloriesGoalShowCommand, legacyCaloriesGoal],
-        [allStatusGoalListCommand, legacyPausedManagedGoalList],
-        [activateGoalCommand, legacyActiveManagedGoal],
-        [pausedGoalShowCommand, legacyActiveManagedGoal],
-      ],
-      expectedCommands: [
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
-        activeListCommand,
-        legacyCaloriesGoalShowCommand,
-        allStatusGoalListCommand,
-        activateGoalCommand,
-        pausedGoalShowCommand,
-      ],
-      finalMessage: 'Accepted the four proposed macro and fiber targets. Your existing calorie target is unchanged.',
-      prompt: 'Yes, accept the paused macro and fiber proposal. This was target setting only, so do not attach a card yet.',
-      scheduled: false,
-      skillReadCommands: interactiveSkillReads,
-      skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'A paused four-target managed proposal is awaiting acceptance; one separate active calories/kcal target supplies the calorie slot.',
-    })
-
-    await runCase({
       card: eligibleCard,
       commandOutputs: [
-        [activeListCommand, legacyCombinedActiveList],
-        [legacyCaloriesGoalShowCommand, legacyCaloriesGoal],
-        [pausedGoalShowCommand, legacyActiveManagedGoal],
+        [activeListCommand, legacyNutritionActiveList],
+        [legacyNutritionGoalShowCommand, legacyNutritionGoal],
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [procedureListCommand, noProcedures],
@@ -9415,8 +9359,7 @@ text(result.output);
       ],
       expectedCommands: [
         activeListCommand,
-        legacyCaloriesGoalShowCommand,
-        pausedGoalShowCommand,
+        legacyNutritionGoalShowCommand,
         memoryCommand,
         ...emptySafetyCommands,
         procedureListCommand,
@@ -9426,29 +9369,61 @@ text(result.output);
         testEventListCommand,
         totalsCommand,
       ],
-      finalMessage: 'CARD_ATTACHED_FROM_RESOLVED_LEGACY_BUNDLE',
-      prompt: 'Now show my 2026-07-30 nutrition card from the accepted targets. Do not rename or rewrite my existing calorie Goal.',
+      finalMessage: 'CARD_ATTACHED_FROM_SAME_GOAL_LEGACY_NUTRITION_BUNDLE',
+      prompt: 'Show my 2026-07-30 nutrition card from the accepted same-Goal nutrition targets. Do not rename or rewrite the legacy calorie target.',
       scheduled: false,
       skillReadCommands: interactiveSkillReads,
       skillSlugs: ['food-journal', 'nutrition-strategy'],
-      snapshotPrompt: 'The prior target-setting turn activated four managed macro and fiber targets; a separate active calories/kcal target remains unchanged.',
+    })
+
+    await runCase({
+      card: eligibleCard,
+      commandOutputs: [
+        [activeListCommand, canonicalWithActivityActiveList],
+        [visibleGoalShowCommand, visibleGoal],
+        [activityCaloriesGoalShowCommand, activityCaloriesGoal],
+        [memoryCommand, adultMemory],
+        ...emptySafetyOutputs,
+        [procedureListCommand, noProcedures],
+        [encounterListCommand, noEncounters],
+        [measurementCommand, normalBmiMeasurements],
+        [pregnancyMeasurementCommand, noPregnancyMeasurements],
+        [testEventListCommand, noTestEvents],
+        [totalsCommand, canonicalTotals],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        visibleGoalShowCommand,
+        activityCaloriesGoalShowCommand,
+        memoryCommand,
+        ...emptySafetyCommands,
+        procedureListCommand,
+        encounterListCommand,
+        measurementCommand,
+        pregnancyMeasurementCommand,
+        testEventListCommand,
+        totalsCommand,
+      ],
+      finalMessage: 'CARD_ATTACHED_FROM_CANONICAL_NUTRITION_TARGET',
+      prompt: 'Show my 2026-07-30 nutrition card. Use the canonical dietary target and ignore the separate total-calories-burned Goal.',
+      scheduled: false,
+      skillReadCommands: interactiveSkillReads,
+      skillSlugs: ['food-journal', 'nutrition-strategy'],
     })
 
     await runCase({
       commandOutputs: [
-        [activeListCommand, legacyConflictActiveList],
-        [legacyCaloriesGoalShowCommand, legacyCaloriesGoal],
-        [pausedGoalShowCommand, legacyActiveManagedGoal],
-        [conflictingLegacyGoalShowCommand, conflictingLegacyCaloriesGoal],
+        [activeListCommand, activityWithSeparateMacrosActiveList],
+        [activityCaloriesGoalShowCommand, activityCaloriesGoal],
+        [pausedGoalShowCommand, macroOnlyActiveGoal],
       ],
       expectedCommands: [
         activeListCommand,
-        legacyCaloriesGoalShowCommand,
+        activityCaloriesGoalShowCommand,
         pausedGoalShowCommand,
-        conflictingLegacyGoalShowCommand,
       ],
-      finalMessage: 'I found conflicting active calorie targets, so I did not attach a card or change either Goal.',
-      prompt: 'Show my nutrition card, but fail closed without Goal mutation if the resolved legacy calorie owner conflicts.',
+      finalMessage: 'I could not verify a dietary calorie target, so I did not attach a card or change either Goal.',
+      prompt: 'Show my nutrition card, but do not treat a separate total-calories-burned Goal as dietary intake or combine it with the macro-only Goal.',
       scheduled: false,
       skillReadCommands: interactiveSkillReads,
       skillSlugs: ['food-journal', 'nutrition-strategy'],

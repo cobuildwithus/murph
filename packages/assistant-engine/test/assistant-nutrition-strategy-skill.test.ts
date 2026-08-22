@@ -427,16 +427,19 @@ describe('assistant nutrition strategy skill', () => {
       'Unit compatibility is part of target authority.',
     )
     expect(compactGoals).toContain(
-      'Calorie metric compatibility has one narrow read-only exception for existing Goals.',
+      'Calorie metric compatibility has one narrow read-only exception for an existing complete nutrition Goal.',
     )
     expect(compactGoals).toContain(
-      'When resolving the card\'s calorie slot, an applicable active `calories` target in `kcal` is a legacy alias only when it is an exact point',
+      'When exactly one compatible canonical owner remains, use it and ignore every `calories` target',
     )
     expect(compactGoals).toContain(
-      'If a canonical owner exists, prefer it only when every applicable legacy alias is also a compatible exact point with the identical value',
+      'only when its same containing Goal also owns exactly one applicable compatible exact-point target for each of `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
     )
     expect(compactGoals).toContain(
-      'Do not extend this alias to another workflow or author new `calories` targets.',
+      'Ignore `calories` targets outside a complete same-Goal nutrition bundle; never combine one with macro or fiber targets from another Goal or a managed proposal.',
+    )
+    expect(compactGoals).toContain(
+      'Do not use titles, slugs, domains, descriptions, or guessed intent as authority.',
     )
     expect(compactGoals).not.toContain(
       'five exact point values in the exact canonical metric/unit pairs resolved from active canonical goals',
@@ -605,7 +608,7 @@ describe('assistant nutrition strategy skill', () => {
       'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
     )
     expect(compactSafety).toContain(
-      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories` or its narrow read-only legacy `calories` alias, in `kcal`.',
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the same-Goal legacy `calories` member of one complete nutrition bundle, in `kcal`.',
     )
     expect(compactSafety).toContain(
       'A scheduled occurrence never gains authority to ask safety-profile questions, solicit target inputs, activate a proposal, or attach a card from provisional targets.',

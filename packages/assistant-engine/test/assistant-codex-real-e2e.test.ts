@@ -7812,7 +7812,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       const legacy = await runRealNutritionCardAuthorityScenario({
         config,
         conditionRecovery: 'none',
-        conflictingCalories: false,
+        goalScenario: 'legacy',
       })
       expect(legacy.card).toMatchObject({
         goals: { calories: { target: 1_800 } },
@@ -7823,19 +7823,33 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       expect(legacy.progressUpdates).toEqual([])
       expect(readNutritionGoalMutationCommands(legacy.commands)).toEqual([])
 
-      const conflict = await runRealNutritionCardAuthorityScenario({
+      const canonicalWithActivity = await runRealNutritionCardAuthorityScenario({
         config,
         conditionRecovery: 'none',
-        conflictingCalories: true,
+        goalScenario: 'canonical-with-activity',
       })
-      expect(conflict.card).toBeNull()
-      expect(conflict.progressUpdates).toEqual([])
-      expect(readNutritionGoalMutationCommands(conflict.commands)).toEqual([])
+      expect(canonicalWithActivity.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+      })
+      expect(canonicalWithActivity.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(canonicalWithActivity.commands),
+      ).toEqual([])
+
+      const activityOnly = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'activity-only',
+      })
+      expect(activityOnly.card).toBeNull()
+      expect(activityOnly.progressUpdates).toEqual([])
+      expect(readNutritionGoalMutationCommands(activityOnly.commands)).toEqual([])
 
       const recovered = await runRealNutritionCardAuthorityScenario({
         config,
         conditionRecovery: 'complete',
-        conflictingCalories: false,
+        goalScenario: 'legacy',
       })
       expect(recovered.card).toMatchObject({
         goals: { calories: { target: 1_800 } },
@@ -7855,7 +7869,7 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
         const rejected = await runRealNutritionCardAuthorityScenario({
           config,
           conditionRecovery,
-          conflictingCalories: false,
+          goalScenario: 'legacy',
         })
         expect(rejected.card, conditionRecovery).toBeNull()
         expect(
@@ -7883,10 +7897,15 @@ type NutritionConditionRecovery =
   | 'truncated'
   | 'wrong-id'
 
+type NutritionGoalScenario =
+  | 'activity-only'
+  | 'canonical-with-activity'
+  | 'legacy'
+
 async function runRealNutritionCardAuthorityScenario(input: {
   config: RealCodexE2eConfig
   conditionRecovery: NutritionConditionRecovery
-  conflictingCalories: boolean
+  goalScenario: NutritionGoalScenario
 }): Promise<{
   card: unknown
   commands: string[]
@@ -7914,8 +7933,8 @@ async function runRealNutritionCardAuthorityScenario(input: {
     await materializeNutritionCardVaultCli({
       commandLog,
       conditionRecovery: input.conditionRecovery,
-      conflictingCalories: input.conflictingCalories,
       executablePath: path.join(binDirectory, 'vault-cli'),
+      goalScenario: input.goalScenario,
     })
 
     const progressUpdates: string[] = []
@@ -7994,8 +8013,8 @@ async function runRealNutritionCardAuthorityScenario(input: {
 async function materializeNutritionCardVaultCli(input: {
   commandLog: string
   conditionRecovery: NutritionConditionRecovery
-  conflictingCalories: boolean
   executablePath: string
+  goalScenario: NutritionGoalScenario
 }): Promise<void> {
   const pointTarget = (
     id: string,
@@ -8033,42 +8052,75 @@ async function materializeNutritionCardVaultCli(input: {
     },
     vault: 'synthetic-vault',
   }
-  const canonicalConflictGoal = {
+  const canonicalNutritionGoal = {
+    ...legacyGoal,
+    entity: {
+      ...legacyGoal.entity,
+      data: {
+        ...legacyGoal.entity.data,
+        metricTargets: legacyGoal.entity.data.metricTargets.map((target) =>
+          target.metric === 'calories'
+            ? pointTarget(
+                'target_dietary_calories',
+                'dietary-calories',
+                'kcal',
+                1_800,
+              )
+            : target),
+      },
+      id: 'goal_canonical_nutrition',
+      kind: 'goal',
+      title: 'Canonical daily nutrition targets',
+    },
+  }
+  const activityCaloriesGoal = {
     entity: {
       data: {
         metricTargets: [
           pointTarget(
-            'target_canonical_calories',
-            'dietary-calories',
+            'target_total_calories_burned',
+            'calories',
             'kcal',
-            1_700,
+            2_200,
           ),
         ],
         status: 'active',
         windowStartAt: '2026-07-01',
       },
-      id: 'goal_canonical_conflict',
+      id: 'goal_activity_calories',
       kind: 'goal',
-      title: 'Conflicting calorie target',
+      title: 'Daily energy expenditure',
     },
     vault: 'synthetic-vault',
   }
-  const activeGoalItems = [
-    {
-      data: { metricTargetsCount: 5, status: 'active' },
-      id: 'goal_legacy_bundle',
-      kind: 'goal',
-      title: 'Accepted daily nutrition targets',
+  const macroOnlyGoal = {
+    ...canonicalNutritionGoal,
+    entity: {
+      ...canonicalNutritionGoal.entity,
+      data: {
+        ...canonicalNutritionGoal.entity.data,
+        metricTargets: canonicalNutritionGoal.entity.data.metricTargets.filter(
+          (target) => target.metric !== 'dietary-calories',
+        ),
+      },
+      id: 'goal_macro_bundle',
+      title: 'Accepted macro targets',
     },
-    ...(input.conflictingCalories
-      ? [{
-          data: { metricTargetsCount: 1, status: 'active' },
-          id: 'goal_canonical_conflict',
-          kind: 'goal',
-          title: 'Conflicting calorie target',
-        }]
-      : []),
-  ]
+  }
+  const activeGoals = input.goalScenario === 'legacy'
+    ? [legacyGoal]
+    : input.goalScenario === 'canonical-with-activity'
+      ? [canonicalNutritionGoal, activityCaloriesGoal]
+      : [macroOnlyGoal, activityCaloriesGoal]
+  const activeGoalItems = activeGoals.map((goal) => ({
+    data: {
+      metricTargetsCount: goal.entity.data.metricTargets.length,
+      status: 'active',
+    },
+    id: goal.entity.id,
+    kind: goal.entity.kind,
+    title: goal.entity.title,
+  }))
   const emptyList = {
     count: 0,
     items: [],
@@ -8159,7 +8211,9 @@ async function materializeNutritionCardVaultCli(input: {
       vault: 'synthetic-vault',
     })} ;;`,
     `  "goal show goal_legacy_bundle --format json") ${emit(legacyGoal)} ;;`,
-    `  "goal show goal_canonical_conflict --format json") ${emit(canonicalConflictGoal)} ;;`,
+    `  "goal show goal_canonical_nutrition --format json") ${emit(canonicalNutritionGoal)} ;;`,
+    `  "goal show goal_activity_calories --format json") ${emit(activityCaloriesGoal)} ;;`,
+    `  "goal show goal_macro_bundle --format json") ${emit(macroOnlyGoal)} ;;`,
     `  "memory show --format json") ${emit({
       document: {
         records: [{
