@@ -633,6 +633,7 @@ model HostedMember {
   hostedMailboxLaneCounters      HostedMailboxLaneCounter[]
   hostedWorkspace                HostedWorkspace?
   hostedAiUsagePeriods           HostedAiUsagePeriod[]
+  opsUsageResetReceipts          HostedOpsUsageResetReceipt[]
   usageCreditPurchasesPaid       HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchasePayer")
   usageCreditPurchasesReceived   HostedUsageCreditPurchase[]     @relation("HostedUsageCreditPurchaseBeneficiary")
   groupSponsorshipsPaid          HostedGroupSponsorshipAuthorization[] @relation("HostedGroupSponsorshipAuthorizationPayer")
@@ -2337,6 +2338,29 @@ model HostedAiUsagePeriod {
   @@index([blockedAt])
   @@index([periodEnd])
   @@map("hosted_ai_usage_period")
+}
+
+/// Append-only per-member receipt for one operator-wide usage reset. The
+/// compound key is the effect identity across response loss, retry, restart,
+/// and overlap; member deletion cascades the private operational history.
+model HostedOpsUsageResetReceipt {
+  operationId                    String       @map("operation_id") @db.Uuid
+  memberId                       String       @map("member_id")
+  outcome                        String
+  resetMode                      String?      @map("reset_mode")
+  runtimeRecheckRequired         Boolean      @map("runtime_recheck_required")
+  noticeClaimReleased            Boolean      @default(false) @map("notice_claim_released")
+  periodStart                    DateTime?    @map("period_start")
+  previousSpentUsdMicros         BigInt?      @map("previous_spent_usd_micros")
+  resetAt                        DateTime     @map("reset_at")
+  updatedAt                      DateTime?    @map("updated_at")
+  usageCreditGrantedUsdMicros    BigInt       @default(0) @map("usage_credit_granted_usd_micros")
+  createdAt                      DateTime     @default(now()) @map("created_at")
+  member                         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([operationId, memberId])
+  @@index([memberId, createdAt], map: "hosted_ops_usage_reset_receipt_member_created_idx")
+  @@map("hosted_ops_usage_reset_receipt")
 }
 
 model HostedAssistantRuntimeIssue {

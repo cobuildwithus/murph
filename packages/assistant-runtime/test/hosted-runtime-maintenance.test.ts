@@ -2787,7 +2787,10 @@ describe("runHostedDeviceSyncPass", () => {
     const close = vi.fn();
     const logRequests: HostedRuntimeLogRequest[] = [];
     const runSchedulerOnce = vi.fn(async () => undefined);
-    const drainWorker = vi.fn(async () => 2);
+    const drainWorker = vi.fn(async () => {
+      vi.advanceTimersByTime(40_000);
+      return 2;
+    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
@@ -2814,30 +2817,32 @@ describe("runHostedDeviceSyncPass", () => {
       touchedPaths: ["raw/integrations/wearable-provider/2026/04/import/01.json"],
     });
 
-    const result = await runHostedDeviceSyncPass(
-      {
-        eventId: "evt_device_sync_dense_raw_retention",
-        kind: "runtime.timer",
-        occurredAt: "2026-04-08T00:00:00.000Z",
-        triggerKind: "runtime_timer",
-        userId: "member_123",
-      },
-      "/tmp/vault-root",
-      DEVICE_SYNC_CONFIG,
-      createMaintenanceDeviceSyncPortStub(),
-      45_000,
-      {
-        runtimeLogPlatform: {
-          logPort: {
-            async write(request) {
-              logRequests.push(request);
-              return {
-                loggedCount: request.entries.length,
-              };
+    const result = await withHostedMaintenanceNow("2026-04-08T00:00:00.000Z", async () =>
+      runHostedDeviceSyncPass(
+        {
+          eventId: "evt_device_sync_dense_raw_retention",
+          kind: "runtime.timer",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          triggerKind: "runtime_timer",
+          userId: "member_123",
+        },
+        "/tmp/vault-root",
+        DEVICE_SYNC_CONFIG,
+        createMaintenanceDeviceSyncPortStub(),
+        90_000,
+        {
+          runtimeLogPlatform: {
+            logPort: {
+              async write(request) {
+                logRequests.push(request);
+                return {
+                  loggedCount: request.entries.length,
+                };
+              },
             },
           },
         },
-      },
+      )
     );
 
     assert.deepEqual(result, {
@@ -2854,8 +2859,8 @@ describe("runHostedDeviceSyncPass", () => {
       vaultRoot: "/tmp/vault-root",
     }));
     assert.equal(
-      typeof mocks.pruneWearableDenseRawTimeseries.mock.calls[0]?.[0]?.deadlineMs,
-      "number",
+      mocks.pruneWearableDenseRawTimeseries.mock.calls[0]?.[0]?.deadlineMs,
+      5_000,
     );
 
     assert.equal(logRequests.length, 1);
@@ -3072,7 +3077,10 @@ describe("runHostedDeviceSyncPass", () => {
   it("does not start dense raw retention when the maintenance deadline is exhausted", async () => {
     const close = vi.fn();
     const runSchedulerOnce = vi.fn(async () => undefined);
-    const drainWorker = vi.fn(async () => 0);
+    const drainWorker = vi.fn(async () => {
+      vi.advanceTimersByTime(45_000);
+      return 0;
+    });
 
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close,
@@ -3096,17 +3104,17 @@ describe("runHostedDeviceSyncPass", () => {
         "/tmp/vault-root",
         DEVICE_SYNC_CONFIG,
         createMaintenanceDeviceSyncPortStub(),
-        0,
+        90_000,
       )
     );
 
     assert.deepEqual(result, {
-      nextWakeAt: "2026-04-08T00:00:30.000Z",
+      nextWakeAt: "2026-04-08T00:01:15.000Z",
       postCheckpointRecord: null,
       processedJobs: 0,
       skipped: false,
     });
-    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:00:30.000Z");
+    await expectDenseRawRetentionMailboxWakeAt("2026-04-08T00:01:15.000Z");
     expect(mocks.pruneWearableDenseRawTimeseries).not.toHaveBeenCalled();
     expect(mocks.detectWearableStorageMigrationCandidates).not.toHaveBeenCalled();
   });

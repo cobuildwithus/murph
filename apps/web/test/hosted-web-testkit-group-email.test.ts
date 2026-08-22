@@ -44,6 +44,7 @@ vi.mock("@/src/lib/prisma", () => ({
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   advanceHostedMailboxConsumedSeqByLane: vi.fn(),
   appendHostedMailboxEnvelopeTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-workspace/store", () => ({

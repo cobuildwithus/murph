@@ -85,6 +85,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'initialOnboardingCompletedAt DateTime? @default(now()) @map("initial_onboarding_completed_at")',
     "linqContactCardShares HostedLinqContactCardShare[]",
     "mealPhotoCaptureEnrollments HostedMealPhotoCaptureEnrollment[]",
+    "opsUsageResetReceipts HostedOpsUsageResetReceipt[]",
     'pendingActivationTimeZone String? @map("pending_activation_time_zone")',
     'signupNotificationContextEncrypted String? @map("signup_notification_context_encrypted")',
     'signupNotificationContextExpiresAt DateTime? @map("signup_notification_context_expires_at")',
@@ -1155,6 +1156,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260815190000_outbound_message_volume_receipts",
       "20260820010000_hosted_email_public_bootstrap",
       "20260820020000_hosted_signup_notification_context",
+      "20260820190000_hosted_ops_usage_reset_receipt",
       "migration_lock.toml",
     ]);
     expect(migrationEntries).toEqual(

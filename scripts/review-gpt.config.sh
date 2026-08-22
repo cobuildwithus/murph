@@ -273,7 +273,7 @@ package_script="scripts/package-audit-context-full.sh"
 app_connector="current"
 model="gpt-5.6-sol"
 thinking="current"
-response_timeout_ms="${response_timeout_ms:-$((180 * 60 * 1000))}"
+response_timeout_ms="${response_timeout_ms:-$((250 * 60 * 1000))}"
 
 review_gpt_register_dir_preset "security" "security-audit.md" \
   "General correctness and security audit focused on trust boundaries." \

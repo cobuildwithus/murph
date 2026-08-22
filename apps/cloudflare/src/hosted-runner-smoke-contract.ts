@@ -1,4 +1,4 @@
-export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v1";
+export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v2";
 export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 4;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 12;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_WRITE_PROOF_COUNT = 2;
@@ -23,7 +23,6 @@ export interface HostedRunnerSmokeResult {
   codexGroupReadGroupWriteDenied: boolean;
   codexGroupReadNetworkDenied: boolean;
   codexGroupReadOutsideRootReadDenied: boolean;
-  codexGroupReadPermissionProfileAttested: boolean;
   codexGroupReadRuntimeReadDenied: boolean;
   codexGroupReadSecretEnvironmentDenied: boolean;
   codexGroupReadSiblingRootReadDenied: boolean;
@@ -31,7 +30,6 @@ export interface HostedRunnerSmokeResult {
   codexMemberWorkspaceAutomationReadProofCount: number;
   codexMemberWorkspaceAutomationTreeUnchanged: boolean;
   codexMemberWorkspaceLocalMutationProofCount: number;
-  codexMemberWorkspacePermissionProfileAttested: boolean;
   codexMemberWorkspacePreloadBypassDenied: boolean;
   codexMemberWorkspaceTempWriteAllowed: boolean;
   codexMemberWorkspaceVaultWriteAllowed: boolean;
@@ -75,7 +73,6 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexGroupReadGroupWriteDenied",
   "codexGroupReadNetworkDenied",
   "codexGroupReadOutsideRootReadDenied",
-  "codexGroupReadPermissionProfileAttested",
   "codexGroupReadRuntimeReadDenied",
   "codexGroupReadSecretEnvironmentDenied",
   "codexGroupReadSiblingRootReadDenied",
@@ -83,7 +80,6 @@ const HOSTED_RUNNER_SMOKE_RESULT_KEYS = new Set([
   "codexMemberWorkspaceAutomationReadProofCount",
   "codexMemberWorkspaceAutomationTreeUnchanged",
   "codexMemberWorkspaceLocalMutationProofCount",
-  "codexMemberWorkspacePermissionProfileAttested",
   "codexMemberWorkspacePreloadBypassDenied",
   "codexMemberWorkspaceTempWriteAllowed",
   "codexMemberWorkspaceVaultWriteAllowed",
@@ -183,10 +179,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.codexGroupReadOutsideRootReadDenied,
       "Hosted runner smoke result.codexGroupReadOutsideRootReadDenied",
     ),
-    codexGroupReadPermissionProfileAttested: readTrue(
-      record.codexGroupReadPermissionProfileAttested,
-      "Hosted runner smoke result.codexGroupReadPermissionProfileAttested",
-    ),
     codexGroupReadRuntimeReadDenied: readTrue(
       record.codexGroupReadRuntimeReadDenied,
       "Hosted runner smoke result.codexGroupReadRuntimeReadDenied",
@@ -217,10 +209,6 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
       record.codexMemberWorkspaceLocalMutationProofCount,
       "Hosted runner smoke result.codexMemberWorkspaceLocalMutationProofCount",
       HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
-    ),
-    codexMemberWorkspacePermissionProfileAttested: readTrue(
-      record.codexMemberWorkspacePermissionProfileAttested,
-      "Hosted runner smoke result.codexMemberWorkspacePermissionProfileAttested",
     ),
     codexMemberWorkspacePreloadBypassDenied: readTrue(
       record.codexMemberWorkspacePreloadBypassDenied,

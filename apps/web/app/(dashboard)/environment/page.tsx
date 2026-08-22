@@ -28,7 +28,7 @@ async function resolveEnvironmentContactOptions() {
   try {
     const options = await resolveHostedMurphContactOptions({
       message: {
-        body: "I want to update what you know about my home environment.",
+        body: "I want to fill in the missing details in my Environment report.",
       },
     });
     return options.filter(

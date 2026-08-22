@@ -91,6 +91,9 @@ import {
   createHostedBackgroundMaintenanceCancellation,
   type HostedBackgroundMaintenanceCancellationReason,
 } from "./background-maintenance-cancellation.ts";
+import {
+  HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS,
+} from "./device-sync-maintenance-limits.ts";
 
 const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
@@ -419,7 +422,10 @@ export async function runHostedDeviceSyncPass(
 
     options.onStage?.("dense_raw_retention");
     const denseRawRetention = await runHostedDeviceSyncDenseRawRetention({
-      deadlineMs: remainingHostedDeviceSyncDeadlineMs(startedAtMs, timeoutMs),
+      deadlineMs: remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
+        startedAtMs,
+        timeoutMs,
+      ),
       platform: options.runtimeLogPlatform ?? null,
       processedJobs,
       shouldYield,
@@ -874,14 +880,15 @@ function resolveHostedDeviceSyncYieldRetryAt(now = new Date()): string {
   return new Date(now.getTime() + HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS).toISOString();
 }
 
-function remainingHostedDeviceSyncDeadlineMs(
+function remainingHostedDeviceSyncDenseRawRetentionDeadlineMs(
   startedAtMs: number,
   timeoutMs: number | null,
-): number | undefined {
-  if (timeoutMs === null) {
-    return undefined;
-  }
-  return Math.max(0, timeoutMs - (Date.now() - startedAtMs));
+): number {
+  const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+  const passRelativeTimeoutMs = timeoutMs === null
+    ? HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS
+    : Math.min(timeoutMs, HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_TIMEOUT_MS);
+  return Math.max(0, passRelativeTimeoutMs - elapsedMs);
 }
 
 async function drainHostedDeviceSyncWorker(input: {

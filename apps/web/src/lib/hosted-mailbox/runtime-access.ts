@@ -167,8 +167,11 @@ export async function hasHostedRuntimeActiveAccessForUpdateTx(
   try {
     await requireHostedRuntimeActiveAccessForUpdateTx(userId, options);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isHostedRuntimeInactiveAccessError(error)) {
+      return false;
+    }
+    throw error;
   }
 }
 

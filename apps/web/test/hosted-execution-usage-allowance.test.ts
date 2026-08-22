@@ -391,7 +391,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
     });
   });
 
@@ -410,7 +410,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
     });
   });
 
@@ -436,7 +436,7 @@ describe("hosted AI usage allowance pricing", () => {
         servedModel: "openai/gpt-5.6-terra-2026-07-08",
         tokenPricingBasis: "standard",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
     });
 
     expect(priceHostedAiUsageForAllowance({
@@ -463,7 +463,7 @@ describe("hosted AI usage allowance pricing", () => {
         },
         tokenPricingBasis: "openai-flex",
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-openai-flex",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
     });
   });
 
@@ -473,7 +473,7 @@ describe("hosted AI usage allowance pricing", () => {
       requestedModel: "gpt-5.6-luna",
       servedModel: "gpt-5.6-sol",
     })).toMatchObject({
-      costUsdMicros: 1_896n,
+      costUsdMicros: 1_337n,
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-sol",
@@ -563,38 +563,69 @@ describe("hosted AI usage allowance pricing", () => {
     }
   });
 
-  it("prices GPT-5.6 cache-write tokens at the official write rate", () => {
+  it("prices GPT-5.6 Sol tokens at the current Standard and Flex rates", () => {
     expect(priceHostedAiUsageForAllowance({
       ...BASE_USAGE_RECORD,
-      cacheWriteTokens: 1_000,
-      cachedInputTokens: 0,
-      inputTokens: 1_000,
-      outputTokens: 0,
+      cacheWriteTokens: 1_000_000,
+      cachedInputTokens: 1_000_000,
+      inputTokens: 3_000_000,
+      outputTokens: 1_000_000,
       requestedModel: "gpt-5.6-sol",
       servedModel: "gpt-5.6-sol",
-      totalTokens: 1_000,
+      totalTokens: 4_000_000,
     })).toMatchObject({
-      costUsdMicros: 6_250n,
+      costUsdMicros: 29_400_000n,
       counted: true,
       pricingSnapshot: {
         model: "gpt-5.6-sol",
         ratesUsdMicrosPerMillionTokens: {
-          cachedInput: "500000",
-          cacheWrite: "6250000",
-          input: "5000000",
-          output: "30000000",
+          cachedInput: "400000",
+          cacheWrite: "5000000",
+          input: "4000000",
+          output: "20000000",
         },
-        standardCostUsdMicros: "6250",
+        standardCostUsdMicros: "29400000",
         tokenPricingBasis: "standard",
         tokens: {
-          billableInput: "0",
-          cacheWrite: "1000",
-          cachedInput: "0",
-          input: "1000",
-          output: "0",
+          billableInput: "1000000",
+          cacheWrite: "1000000",
+          cachedInput: "1000000",
+          input: "3000000",
+          output: "1000000",
         },
       },
-      pricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
+    });
+
+    expect(priceHostedAiUsageForAllowance({
+      ...BASE_USAGE_RECORD,
+      cacheWriteTokens: 1_000_000,
+      cachedInputTokens: 1_000_000,
+      inputTokens: 3_000_000,
+      outputTokens: 1_000_000,
+      requestedModel: "gpt-5.6-sol",
+      servedModel: "gpt-5.6-sol",
+      tokenPricingBasis: "openai-flex",
+      totalTokens: 4_000_000,
+    })).toMatchObject({
+      costUsdMicros: 14_700_000n,
+      counted: true,
+      pricingSnapshot: {
+        model: "gpt-5.6-sol",
+        ratesUsdMicrosPerMillionTokens: {
+          cachedInput: "400000",
+          cacheWrite: "5000000",
+          input: "4000000",
+          output: "20000000",
+        },
+        standardCostUsdMicros: "29400000",
+        tokenPricingAdjustment: {
+          denominator: "2",
+          numerator: "1",
+        },
+        tokenPricingBasis: "openai-flex",
+      },
+      pricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-openai-flex",
     });
   });
 
@@ -2304,7 +2335,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
-        allowancePricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+        allowancePricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
       }),
     }));
     expect(countPeriodMetadataUpdateCalls(tx)).toBe(1);
@@ -2345,7 +2376,7 @@ describe("accountHostedAiUsageForAllowanceTx", () => {
         allowanceCounted: true,
         allowancePeriodEnd: new Date("2026-05-01T00:00:00.000Z"),
         allowancePeriodStart: new Date("2026-04-01T00:00:00.000Z"),
-        allowancePricingVersion: "openai-api-pricing-2026-07-30-gpt-5.6-standard",
+        allowancePricingVersion: "openai-api-pricing-2026-08-21-gpt-5.6-standard",
       }),
     }));
     expect(tx.hostedAiUsagePeriod.createMany).toHaveBeenCalledWith(expect.objectContaining({
