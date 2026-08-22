@@ -46,9 +46,11 @@ import {
   createE2eDeployment,
   inspectPublicCandidateResponse,
   inspectRetirableE2eDeployment,
+  inspectRetirableE2eDeploymentAliases,
   inspectVercelCustomEnvironment,
   inspectVercelDeployment,
   inspectVercelJunctionNamespaceVariable,
+  retireE2eDeployments,
 } from "./native-ios-hosted-e2e-vercel.mjs";
 
 const SHA = "a".repeat(40);
@@ -707,6 +709,120 @@ test("destructive reset admits only lane-owned non-production deployments in the
       ...mutation,
     }, expected), /unrelated active deployment/u);
   }
+});
+
+test("Vercel retirement deletes exact aliases first and preserves the deployment when alias cleanup fails", async () => {
+  const env = {
+    NATIVE_IOS_E2E_VERCEL_CUSTOM_ENVIRONMENT_ID: "env_e2e",
+    NATIVE_IOS_E2E_VERCEL_PROJECT_ID: "prj_e2e",
+    NATIVE_IOS_E2E_VERCEL_TOKEN: "vercel_test_token",
+  };
+  const originalEnv = new Map(Object.keys(env).map((name) => [name, process.env[name]]));
+  const originalFetch = globalThis.fetch;
+  const originalLog = console.log;
+  const destructiveCalls = [];
+  const aliasDeleteStatuses = { alias_one: 204, alias_two: 204 };
+  let paginationNext = null;
+  try {
+    Object.assign(process.env, env);
+    globalThis.fetch = async (url, init = {}) => {
+      const value = String(url);
+      const method = init.method ?? "GET";
+      if (value.includes("/custom-environments/env_e2e")) {
+        return jsonResponse({ id: "env_e2e", slug: "native-ios-e2e", type: "preview" });
+      }
+      if (value.includes("/v6/deployments")) {
+        const state = new URL(value).searchParams.get("state");
+        return jsonResponse({
+          deployments: state === "READY" ? [{ id: "dpl_owned" }] : [],
+          pagination: { next: null },
+        });
+      }
+      if (value.includes("/v13/deployments/dpl_owned") && method === "GET") {
+        return jsonResponse({
+          customEnvironment: { id: "env_e2e" },
+          id: "dpl_owned",
+          meta: { murphNativeIosE2e: NATIVE_IOS_HOSTED_E2E_LANE_MARKER },
+          projectId: "prj_e2e",
+          target: null,
+        });
+      }
+      if (value.includes("/v2/deployments/dpl_owned/aliases")) {
+        return jsonResponse({
+          aliases: ["one", "two"].map((suffix) => ({
+            alias: `native-e2e-${suffix}.example.test`,
+            created: "2026-08-22T00:00:00.000Z",
+            redirect: null,
+            uid: `alias_${suffix}`,
+          })),
+          pagination: { next: paginationNext },
+        });
+      }
+      const aliasId = value.match(/\/v2\/aliases\/(alias_(?:one|two))/u)?.[1];
+      if (aliasId && method === "DELETE") {
+        destructiveCalls.push(aliasId);
+        return new Response(null, { status: aliasDeleteStatuses[aliasId] });
+      }
+      if (value.includes("/v13/deployments/dpl_owned") && method === "DELETE") {
+        destructiveCalls.push("deployment");
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected ${method} ${value}`);
+    };
+    console.log = () => undefined;
+
+    await retireE2eDeployments(null);
+    assert.deepEqual(destructiveCalls, ["alias_one", "alias_two", "deployment"]);
+
+    destructiveCalls.length = 0;
+    aliasDeleteStatuses.alias_two = 500;
+    await assert.rejects(
+      () => retireE2eDeployments(null),
+      /Vercel E2E alias cleanup failed with HTTP 500/u,
+    );
+    assert.deepEqual(destructiveCalls, ["alias_one", "alias_two"]);
+
+    destructiveCalls.length = 0;
+    aliasDeleteStatuses.alias_two = 204;
+    paginationNext = "next-page";
+    await assert.rejects(
+      () => retireE2eDeployments(null),
+      /deployment alias list was incomplete/u,
+    );
+    assert.deepEqual(destructiveCalls, []);
+  } finally {
+    console.log = originalLog;
+    globalThis.fetch = originalFetch;
+    for (const [name, value] of originalEnv) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
+
+test("Vercel retirement validates the complete exact-deployment alias response", () => {
+  const owned = {
+    alias: "native-e2e.example.test",
+    created: "2026-08-22T00:00:00.000Z",
+    redirect: null,
+    uid: "alias_owned",
+  };
+  assert.deepEqual(inspectRetirableE2eDeploymentAliases({ aliases: [owned] }), ["alias_owned"]);
+  assert.throws(
+    () => inspectRetirableE2eDeploymentAliases({ aliases: [{ ...owned, uid: undefined }] }),
+    /deployment alias id is missing or invalid/u,
+  );
+  assert.throws(
+    () => inspectRetirableE2eDeploymentAliases({ aliases: null }),
+    /deployment alias list was invalid/u,
+  );
+  assert.throws(
+    () => inspectRetirableE2eDeploymentAliases({
+      aliases: [owned],
+      pagination: { next: "next-page" },
+    }),
+    /deployment alias list was incomplete/u,
+  );
 });
 
 test("private iOS dispatch revalidates the Web head after tag proof and before dispatch", async () => {

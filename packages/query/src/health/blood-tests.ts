@@ -4,6 +4,7 @@ import {
 } from "@murphai/contracts";
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { listCanonicalEntitiesRuntime } from "../query-projection.ts";
+import { readCanonicalEntityFamilySource } from "../vault-source.ts";
 import {
   applyLimit,
   asObject,
@@ -201,7 +202,9 @@ export async function readBloodTest(
   vaultRoot: string,
   eventId: string,
 ): Promise<BloodTestQueryRecord | null> {
-  const records = await listBloodTests(vaultRoot);
+  const records = selectProjectedBloodTests(
+    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+  );
   return records.find((record) => record.id === eventId) ?? null;
 }
 
@@ -209,7 +212,9 @@ export async function showBloodTest(
   vaultRoot: string,
   lookup: string,
 ): Promise<BloodTestQueryRecord | null> {
-  const records = await listBloodTests(vaultRoot);
+  const records = selectProjectedBloodTests(
+    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+  );
   return (
     records.find((record) =>
       matchesLookup(lookup, record.id, record.title, record.testName, record.labPanelId),

@@ -66,6 +66,7 @@ import {
 import type {
   CodexAppServerLiveTurn,
   CodexAppServerTurnInput,
+  CodexAppServerTurnResult,
 } from '../src/assistant-codex.ts'
 import type {
   AssistantRuntimeIssueInput,
@@ -85,6 +86,7 @@ import {
 import {
   attachCodexAppServerProcessExitCleanup,
   stopCodexAppServerChild,
+  withCodexRpcTimeout,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
   extractCodexAppServerUserMessageImages,
@@ -262,8 +264,10 @@ function createProgressDeliveryMock(
 function createHostedToolContext(input: {
   beforeToolExecution?: AssistantHostedToolContext['beforeToolExecution']
   computerToolsAvailable?: boolean
+  currentAssistantInputId?: AssistantHostedToolContext['currentAssistantInputId']
   groupTool?: AssistantHostedToolContext['groupTool']
   imageGenerationLauncher?: AssistantHostedToolContext['imageGenerationLauncher']
+  recordDetachedUsage?: AssistantHostedToolContext['recordDetachedUsage']
   sendVaultFile?: AssistantHostedToolContext['sendVaultFile']
   vaultFileSendAvailable?: boolean
 } = {}): AssistantHostedToolContext {
@@ -272,11 +276,17 @@ function createHostedToolContext(input: {
       ? { beforeToolExecution: input.beforeToolExecution }
       : {}),
     computerToolsAvailable: input.computerToolsAvailable ?? true,
+    ...(input.currentAssistantInputId
+      ? { currentAssistantInputId: input.currentAssistantInputId }
+      : {}),
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
     groupTool: input.groupTool ?? null,
     imageGenerationLauncher: input.imageGenerationLauncher ?? null,
     persistGeneratedImageCapture: async (write) => await write(),
+    ...(input.recordDetachedUsage
+      ? { recordDetachedUsage: input.recordDetachedUsage }
+      : {}),
     sendVaultFile: input.sendVaultFile ?? vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
     }),
@@ -775,6 +785,37 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
 }
 
 describe('assistant codex runtime', () => {
+  it('runs RPC timeout cleanup only when the timeout wins', async () => {
+    vi.useFakeTimers()
+    try {
+      const timedOutCleanup = vi.fn()
+      const timedOutRequest = withCodexRpcTimeout(
+        new Promise<never>(() => undefined),
+        25,
+        'subagent thread/resume',
+        timedOutCleanup,
+      )
+      const timeoutExpectation = expect(timedOutRequest).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT',
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+      await timeoutExpectation
+      expect(timedOutCleanup).toHaveBeenCalledOnce()
+
+      const completedCleanup = vi.fn()
+      await expect(withCodexRpcTimeout(
+        Promise.resolve('metadata'),
+        25,
+        'subagent thread/resume',
+        completedCleanup,
+      )).resolves.toBe('metadata')
+      expect(completedCleanup).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('builds Codex app-server args for configured turns', () => {
     expect(
       buildCodexAppServerArgs({
@@ -854,6 +895,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -1052,6 +1094,7 @@ describe('assistant codex runtime', () => {
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       ephemeral: true,
+      experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       permissions: 'murph-group-read',
@@ -1212,6 +1255,7 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+              experimentalRawEvents: true,
               model,
               modelProvider,
               sandbox: 'workspace-write',
@@ -6395,9 +6439,9 @@ describe('assistant codex runtime', () => {
     expect(process.kill).toHaveBeenCalledWith(-27_250, 'SIGTERM')
   })
 
-  it('fails closed before turn start when permission attestation drifts', async () => {
-    const workingDirectory = await createTempDir('assistant-codex-attest-work-')
-    const workspaceRoot = await createTempDir('assistant-codex-attest-root-')
+  it('starts fresh named-permission turns without response metadata', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-permission-work-')
+    const workspaceRoot = await createTempDir('assistant-codex-permission-root-')
     const children: MockChildProcess[] = []
     mockProcessGroupSignalsForChildren(children)
 
@@ -6413,15 +6457,36 @@ describe('assistant codex runtime', () => {
           child.stdout.write(jsonLine({
             id: threadStart.id,
             result: {
-              activePermissionProfile: {
-                id: 'murph-group-read',
-              },
-              approvalPolicy: 'never',
-              cwd: workingDirectory,
-              instructionSources: [{ source: 'workspace' }],
-              runtimeWorkspaceRoots: [workspaceRoot],
               thread: {
-                id: 'thread-attestation-drift',
+                id: 'thread-permission-metadata-free',
+              },
+            },
+          }))
+          const turnStart = await waitForRpcMethod(child, 'turn/start')
+          child.stdout.write(jsonLine({
+            id: turnStart.id,
+            result: {
+              turn: {
+                id: 'turn-permission-metadata-free',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'item/completed',
+            params: {
+              item: {
+                id: 'assistant-permission-metadata-free',
+                text: 'Completed without response metadata.',
+                type: 'agentMessage',
+              },
+            },
+          }))
+          child.stdout.write(jsonLine({
+            method: 'turn/completed',
+            params: {
+              turn: {
+                id: 'turn-permission-metadata-free',
+                status: 'completed',
               },
             },
           }))
@@ -6437,22 +6502,28 @@ describe('assistant codex runtime', () => {
         ephemeral: true,
         permissions: 'murph-group-read',
         processLifetime: 'one-shot',
-        prompt: 'must never reach turn start',
+        prompt: 'continue without response metadata',
         runtimeWorkspaceRoots: [workspaceRoot],
         workingDirectory,
       }),
-    ).rejects.toMatchObject({
-      code: 'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-      context: {
-        mismatchedFields: ['instructionSources'],
-        retryable: false,
-      },
+    ).resolves.toMatchObject({
+      finalMessage: 'Completed without response metadata.',
+      sessionId: 'thread-permission-metadata-free',
+      turnId: 'turn-permission-metadata-free',
     })
 
     const child = requireMockChildProcess(children[0] ?? null)
+    expect(asRecord(
+      (await waitForRpcMethod(child, 'thread/start')).params,
+    )).toMatchObject({
+      approvalPolicy: 'never',
+      cwd: workingDirectory,
+      permissions: 'murph-group-read',
+      runtimeWorkspaceRoots: [workspaceRoot],
+    })
     expect(readWrittenRpcMessages(child).some(
       (message) => message.method === 'turn/start',
-    )).toBe(false)
+    )).toBe(true)
     expect(child.signalCode).toBe('SIGTERM')
   })
 
@@ -15056,6 +15127,7 @@ describe('assistant codex runtime', () => {
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
         dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+        experimentalRawEvents: true,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -18584,6 +18656,523 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
+    it('buffers exact child usage while resolving metadata and rejects foreign child lifecycles', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-raw-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-raw-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_050 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-subagent-raw-parent',
+              turnId: 'turn-subagent-raw-parent',
+            })
+            child.stdout.write(jsonLine({
+              method: 'rawResponseItem/completed',
+              params: {
+                item: {
+                  content: 'must-not-enter-parent-events-from-raw-item',
+                  type: 'reasoning',
+                },
+                threadId: 'thread-subagent-raw-parent',
+                turnId: 'turn-subagent-raw-parent',
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                threadId: 'thread-subagent-foreign',
+                turn: { id: 'turn-subagent-foreign' },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'collab-spawn-raw-child',
+                  type: 'collabAgentToolCall',
+                  tool: 'spawnAgent',
+                  status: 'completed',
+                  senderThreadId: 'thread-subagent-raw-parent',
+                  receiverThreadIds: ['thread-subagent-raw-child'],
+                  model: 'gpt-5.6-terra',
+                },
+                threadId: 'thread-subagent-raw-parent',
+                turnId: 'turn-subagent-raw-parent',
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'turn/started',
+              params: {
+                threadId: 'thread-subagent-raw-child',
+                turn: { id: 'turn-subagent-raw-child' },
+              },
+            }))
+            const rawResponse = {
+              method: 'rawResponse/completed',
+              params: {
+                responseId: 'response-subagent-raw-1',
+                threadId: 'thread-subagent-raw-child',
+                turnId: 'turn-subagent-raw-child',
+                usage: {
+                  cacheWriteInputTokens: 0,
+                  cachedInputTokens: 300,
+                  inputTokens: 900,
+                  outputTokens: 300,
+                  reasoningOutputTokens: 40,
+                  totalTokens: 1_200,
+                },
+              },
+            }
+            // Usage may arrive before the metadata-only resume response.
+            child.stdout.write(jsonLine(rawResponse))
+            child.stdout.write(jsonLine(rawResponse))
+            writeTokenUsage({
+              child,
+              last: {
+                cachedInputTokens: 0,
+                inputTokens: 9_000,
+                outputTokens: 999,
+                reasoningOutputTokens: 0,
+                totalTokens: 9_999,
+              },
+              threadId: 'thread-subagent-raw-child',
+              total: {
+                cachedInputTokens: 0,
+                inputTokens: 9_000,
+                outputTokens: 999,
+                reasoningOutputTokens: 0,
+                totalTokens: 9_999,
+              },
+              turnId: 'turn-subagent-raw-child',
+            })
+
+            const metadataResume = await waitForRpcMethod(child, 'thread/resume')
+            child.stdout.write(jsonLine({
+              id: metadataResume.id,
+              result: {
+                model: 'gpt-5.6-sol',
+                modelProvider: 'openai',
+                reasoningEffort: 'high',
+                serviceTier: 'flex',
+                thread: {
+                  id: 'thread-subagent-raw-child',
+                  preview: 'must-not-enter-parent-events',
+                },
+              },
+            }))
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Exact child usage recorded',
+              threadId: 'thread-subagent-raw-parent',
+              turnId: 'turn-subagent-raw-parent',
+            })
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        model: 'gpt-5.6-sol',
+        modelProvider: 'local-test-provider',
+        prompt: 'delegate one exact child operation',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      expect(result.additionalUsages).toMatchObject([
+        {
+          provider: 'codex-cli',
+          providerRequestOrdinal: 1,
+          usage: {
+            cachedInputTokens: 300,
+            inputTokens: 900,
+            outputTokens: 300,
+            providerMetadataJson: {
+              reasoningEffort: 'high',
+              requestedServiceTier: 'flex',
+            },
+            providerName: 'openai',
+            providerRequestId: 'response-subagent-raw-1',
+            reasoningTokens: 40,
+            requestedModel: 'gpt-5.6-terra',
+            servedModel: 'gpt-5.6-sol',
+            tokenPricingBasis: 'openai-flex',
+            totalTokens: 1_200,
+            usageExtractionSourcePath:
+              'subagent.rawResponse.completed.usage',
+          },
+        },
+      ])
+      expect(result.additionalUsages).toHaveLength(1)
+      const written = readWrittenRpcMessages(
+        requireMockChildProcess(spawnedChildren[0] ?? null),
+      )
+      expect(
+        written
+          .filter((message) => message.method === 'thread/resume')
+          .map((message) => message.params),
+      ).toEqual([{
+        excludeTurns: true,
+        threadId: 'thread-subagent-raw-child',
+      }])
+      expect(JSON.stringify(result.jsonEvents)).not.toContain(
+        'must-not-enter-parent-events',
+      )
+      expect(
+        result.additionalUsages.map((draft) => draft.usage.totalTokens),
+      ).toEqual([1_200])
+    })
+
+    it.each(['raw', 'cumulative'] as const)(
+      'captures %s child usage before parent authorization evidence',
+      async (usageSource) => {
+        const workingDirectory = await createTempDir(
+          `assistant-codex-subagent-${usageSource}-before-evidence-work-`,
+        )
+        const codexHome = await createTempDir(
+          `assistant-codex-subagent-${usageSource}-before-evidence-home-`,
+        )
+        const spawnedChildren: MockChildProcess[] = []
+        mockProcessGroupSignalsForChildren(spawnedChildren)
+        let metadataRequestedBeforeEvidence = false
+
+        codexMocks.spawn.mockImplementation(() => {
+          const child = new MockChildProcess()
+          child.pid = 31_060 + spawnedChildren.length
+          spawnedChildren.push(child)
+
+          queueMicrotask(() => {
+            void (async () => {
+              const initialize = await waitForRpcMethod(child, 'initialize')
+              child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+              await writeWarmTurnStarted({
+                child,
+                requestCount: 1,
+                threadId: 'thread-subagent-before-evidence-parent',
+                turnId: 'turn-subagent-before-evidence-parent',
+              })
+              writeStartedTurn(
+                child,
+                'thread-subagent-before-evidence-child',
+                'turn-subagent-before-evidence-child',
+              )
+              if (usageSource === 'raw') {
+                child.stdout.write(jsonLine({
+                  method: 'rawResponse/completed',
+                  params: {
+                    responseId: 'response-subagent-before-evidence',
+                    threadId: 'thread-subagent-before-evidence-child',
+                    turnId: 'turn-subagent-before-evidence-child',
+                    usage: {
+                      cacheWriteInputTokens: 0,
+                      cachedInputTokens: 10,
+                      inputTokens: 80,
+                      outputTokens: 20,
+                      reasoningOutputTokens: 5,
+                      totalTokens: 100,
+                    },
+                  },
+                }))
+              } else {
+                writeTokenUsage({
+                  child,
+                  last: {
+                    cacheWriteInputTokens: 0,
+                    cachedInputTokens: 10,
+                    inputTokens: 80,
+                    outputTokens: 20,
+                    reasoningOutputTokens: 5,
+                    totalTokens: 100,
+                  },
+                  threadId: 'thread-subagent-before-evidence-child',
+                  total: {
+                    cacheWriteInputTokens: 0,
+                    cachedInputTokens: 10,
+                    inputTokens: 80,
+                    outputTokens: 20,
+                    reasoningOutputTokens: 5,
+                    totalTokens: 100,
+                  },
+                  turnId: 'turn-subagent-before-evidence-child',
+                })
+              }
+              metadataRequestedBeforeEvidence = readWrittenRpcMessages(child)
+                .some((message) => message.method === 'thread/resume')
+
+              child.stdout.write(jsonLine({
+                method: 'item/completed',
+                params: {
+                  item: {
+                    id: 'collab-spawn-before-evidence-child',
+                    type: 'collabAgentToolCall',
+                    tool: 'spawnAgent',
+                    status: 'completed',
+                    senderThreadId: 'thread-subagent-before-evidence-parent',
+                    receiverThreadIds: [
+                      'thread-subagent-before-evidence-child',
+                    ],
+                    model: 'gpt-5.6-terra',
+                  },
+                  threadId: 'thread-subagent-before-evidence-parent',
+                  turnId: 'turn-subagent-before-evidence-parent',
+                },
+              }))
+              const metadataResume = await waitForRpcMethod(
+                child,
+                'thread/resume',
+              )
+              child.stdout.write(jsonLine({
+                id: metadataResume.id,
+                result: {
+                  model: 'gpt-5.6-sol',
+                  modelProvider: 'openai',
+                  reasoningEffort: 'high',
+                  serviceTier: 'flex',
+                  thread: {
+                    id: 'thread-subagent-before-evidence-child',
+                  },
+                },
+              }))
+              writeCodexV2AssistantEventTurn({
+                child,
+                finalMessage: 'Captured child usage before evidence',
+                threadId: 'thread-subagent-before-evidence-parent',
+                turnId: 'turn-subagent-before-evidence-parent',
+              })
+            })()
+          })
+
+          return child
+        })
+
+        const result = await executeCodexAppServerTurn({
+          approvalPolicy: 'never',
+          codexHome,
+          env: { PATH: '/custom/bin' },
+          model: 'gpt-5.6-sol',
+          modelProvider: 'local-test-provider',
+          prompt: 'child usage arrives before parent evidence',
+          sandbox: 'workspace-write',
+          workingDirectory,
+        })
+
+        expect(metadataRequestedBeforeEvidence).toBe(false)
+        expect(result.additionalUsages).toMatchObject([{
+          providerRequestOrdinal: 1,
+          usage: {
+            inputTokens: 80,
+            outputTokens: 20,
+            providerMetadataJson: {
+              reasoningEffort: 'high',
+              requestedServiceTier: 'flex',
+            },
+            providerName: 'openai',
+            providerRequestId: usageSource === 'raw'
+              ? 'response-subagent-before-evidence'
+              : null,
+            reasoningTokens: 5,
+            requestedModel: 'gpt-5.6-terra',
+            servedModel: 'gpt-5.6-sol',
+            totalTokens: 100,
+            usageExtractionSourcePath: usageSource === 'raw'
+              ? 'subagent.rawResponse.completed.usage'
+              : 'subagent.turn.tokenUsage.total.delta',
+          },
+        }])
+        expect(result.additionalUsages).toHaveLength(1)
+        expect(
+          readWrittenRpcMessages(
+            requireMockChildProcess(spawnedChildren[0] ?? null),
+          ).filter((message) => message.method === 'thread/resume'),
+        ).toHaveLength(1)
+      },
+    )
+
+    it.each(['completed', 'failed'] as const)(
+      'does not delay a %s parent terminal on unresolved child metadata',
+      async (parentOutcome) => {
+        const workingDirectory = await createTempDir(
+          `assistant-codex-subagent-metadata-${parentOutcome}-work-`,
+        )
+        const codexHome = await createTempDir(
+          `assistant-codex-subagent-metadata-${parentOutcome}-home-`,
+        )
+        const spawnedChildren: MockChildProcess[] = []
+        mockProcessGroupSignalsForChildren(spawnedChildren)
+        let metadataResumeId: unknown = null
+        let parentTerminalAt = 0
+
+        codexMocks.spawn.mockImplementation(() => {
+          const child = new MockChildProcess()
+          child.pid = 31_075 + spawnedChildren.length
+          spawnedChildren.push(child)
+
+          queueMicrotask(() => {
+            void (async () => {
+              const initialize = await waitForRpcMethod(child, 'initialize')
+              child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+              await writeWarmTurnStarted({
+                child,
+                requestCount: 1,
+                threadId: 'thread-subagent-metadata-parent',
+                turnId: 'turn-subagent-metadata-parent',
+              })
+              child.stdout.write(jsonLine({
+                method: 'item/completed',
+                params: {
+                  item: {
+                    id: 'collab-spawn-metadata-child',
+                    type: 'collabAgentToolCall',
+                    tool: 'spawnAgent',
+                    status: 'completed',
+                    senderThreadId: 'thread-subagent-metadata-parent',
+                    receiverThreadIds: ['thread-subagent-metadata-child'],
+                    model: 'gpt-5.6-terra',
+                  },
+                  threadId: 'thread-subagent-metadata-parent',
+                  turnId: 'turn-subagent-metadata-parent',
+                },
+              }))
+              writeStartedTurn(
+                child,
+                'thread-subagent-metadata-child',
+                'turn-subagent-metadata-child',
+              )
+              child.stdout.write(jsonLine({
+                method: 'rawResponse/completed',
+                params: {
+                  responseId: 'response-subagent-metadata-child',
+                  threadId: 'thread-subagent-metadata-child',
+                  turnId: 'turn-subagent-metadata-child',
+                  usage: {
+                    cacheWriteInputTokens: 0,
+                    cachedInputTokens: 12,
+                    inputTokens: 80,
+                    outputTokens: 20,
+                    reasoningOutputTokens: 4,
+                    totalTokens: 100,
+                  },
+                },
+              }))
+              metadataResumeId = (
+                await waitForRpcMethod(child, 'thread/resume')
+              ).id
+              parentTerminalAt = Date.now()
+              if (parentOutcome === 'completed') {
+                writeCodexV2AssistantEventTurn({
+                  child,
+                  finalMessage: 'Parent settled without metadata',
+                  threadId: 'thread-subagent-metadata-parent',
+                  turnId: 'turn-subagent-metadata-parent',
+                })
+              } else {
+                writeCompletedTurn(
+                  child,
+                  'thread-subagent-metadata-parent',
+                  'turn-subagent-metadata-parent',
+                  'failed',
+                )
+              }
+            })()
+          })
+
+          return child
+        })
+
+        let result: CodexAppServerTurnResult | null = null
+        let turnError: unknown = null
+        try {
+          result = await executeCodexAppServerTurn({
+            approvalPolicy: 'never',
+            codexHome,
+            env: { PATH: '/custom/bin' },
+            model: 'gpt-5.6-sol',
+            modelProvider: 'local-test-provider',
+            prompt: 'settle without waiting for child metadata',
+            sandbox: 'workspace-write',
+            workingDirectory,
+          })
+        } catch (error) {
+          turnError = error
+        }
+
+        expect(parentTerminalAt).toBeGreaterThan(0)
+        expect(Date.now() - parentTerminalAt).toBeLessThan(2_000)
+        if (parentOutcome === 'completed') {
+          expect(turnError).toBeNull()
+          expect(result?.finalMessage).toBe('Parent settled without metadata')
+        } else {
+          expect(result).toBeNull()
+          expect(turnError).toBeInstanceOf(Error)
+        }
+        const failureContext = readCodexAppServerTurnFailureContext(turnError)
+        const additionalUsages = result?.additionalUsages
+          ?? failureContext?.additionalUsages
+        const jsonEvents = result?.jsonEvents ?? failureContext?.jsonEvents
+        expect(additionalUsages).toMatchObject([{
+          providerRequestOrdinal: 1,
+          usage: {
+            inputTokens: 80,
+            outputTokens: 20,
+            providerMetadataJson: null,
+            providerName: 'local-test-provider',
+            providerRequestId: 'response-subagent-metadata-child',
+            reasoningTokens: 4,
+            requestedModel: 'gpt-5.6-terra',
+            servedModel: 'gpt-5.6-terra',
+            totalTokens: 100,
+            usageExtractionSourcePath:
+              'subagent.rawResponse.completed.usage',
+          },
+        }])
+        expect(additionalUsages).toHaveLength(1)
+        const usageSnapshot = JSON.stringify(additionalUsages)
+
+        const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+        expect(metadataResumeId).not.toBeNull()
+        child.stdout.write(jsonLine({
+          id: metadataResumeId,
+          result: {
+            model: 'late-model-must-not-mutate-result',
+            modelProvider: 'late-provider-must-not-mutate-result',
+            reasoningEffort: 'high',
+            serviceTier: 'flex',
+            thread: {
+              id: 'thread-subagent-metadata-child',
+              preview: 'late-metadata-must-not-enter-parent-events',
+            },
+          },
+        }))
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve)
+        })
+
+        expect(JSON.stringify(additionalUsages)).toBe(usageSnapshot)
+        expect(JSON.stringify(jsonEvents)).not.toContain(
+          'late-metadata-must-not-enter-parent-events',
+        )
+      },
+    )
+
     it('inherits the parent model for activity-only children and uses collab spawn models', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
@@ -18592,6 +19181,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_100 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -18802,8 +19392,19 @@ describe('assistant codex event shaping', () => {
       expect(
         readWrittenRpcMessages(
           requireMockChildProcess(spawnedChildren[0] ?? null),
-        ).filter((message) => message.method === 'thread/resume'),
-      ).toHaveLength(0)
+        )
+          .filter((message) => message.method === 'thread/resume')
+          .map((message) => message.params),
+      ).toEqual([
+        {
+          excludeTurns: true,
+          threadId: 'thread-subagent-child-a',
+        },
+        {
+          excludeTurns: true,
+          threadId: 'thread-subagent-child-b',
+        },
+      ])
     })
 
     it.each(['completed', 'failed'] as const)(
@@ -18825,6 +19426,7 @@ describe('assistant codex event shaping', () => {
         try {
           codexMocks.spawn.mockImplementation(() => {
             const child = new MockChildProcess()
+            respondToSubagentMetadataRequestsWithoutMetadata(child)
             child.pid = 31_150 + spawnedChildren.length
             spawnedChildren.push(child)
 
@@ -19031,6 +19633,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_175 + spawnedChildren.length
         spawnedChildren.push(child)
         queueMicrotask(() => {
@@ -19094,6 +19697,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_200 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19162,6 +19766,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_400 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19279,6 +19884,119 @@ describe('assistant codex event shaping', () => {
       })
     })
 
+    it('records exact hosted detached usage when the root turn fails', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-hosted-subagent-fail-work-')
+      const codexHome = await createTempDir('assistant-codex-hosted-subagent-fail-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const originAssistantInputId = `ain_${'b'.repeat(32)}`
+      const recordDetachedUsage = vi.fn()
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_450 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-hosted-subagent-fail-parent',
+              turnId: 'turn-hosted-subagent-fail-parent',
+            })
+            writeSubAgentActivity(
+              child,
+              'thread-hosted-subagent-fail-parent',
+              'thread-hosted-subagent-fail-child',
+              'started',
+              { turnId: 'turn-hosted-subagent-fail-parent' },
+            )
+            writeStartedTurn(
+              child,
+              'thread-hosted-subagent-fail-child',
+              'turn-hosted-subagent-fail-child',
+            )
+            child.stdout.write(jsonLine({
+              method: 'rawResponse/completed',
+              params: {
+                responseId: 'response-hosted-subagent-fail-child',
+                threadId: 'thread-hosted-subagent-fail-child',
+                turnId: 'turn-hosted-subagent-fail-child',
+                usage: {
+                  cacheWriteInputTokens: 3,
+                  cachedInputTokens: 11,
+                  inputTokens: 91,
+                  outputTokens: 23,
+                  reasoningOutputTokens: 7,
+                  totalTokens: 114,
+                },
+              },
+            }))
+            writeCompletedTurn(
+              child,
+              'thread-hosted-subagent-fail-child',
+              'turn-hosted-subagent-fail-child',
+            )
+            writeCompletedTurn(
+              child,
+              'thread-hosted-subagent-fail-parent',
+              'turn-hosted-subagent-fail-parent',
+              'failed',
+            )
+          })()
+        })
+
+        return child
+      })
+
+      const error: unknown = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        hostedToolContext: createHostedToolContext({
+          currentAssistantInputId: () => originAssistantInputId,
+          recordDetachedUsage,
+        }),
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        prompt: 'fail after exact hosted child usage arrives',
+        sandbox: 'workspace-write',
+        usageOperationId: 'turn-hosted-subagent-failure-usage',
+        workingDirectory,
+      }).then(
+        () => {
+          throw new Error('expected the Codex turn to fail')
+        },
+        (turnError: unknown) => turnError,
+      )
+
+      expect(error).toMatchObject({ code: 'ASSISTANT_CODEX_FAILED' })
+      expect(
+        readCodexAppServerTurnFailureContext(error)?.additionalUsages,
+      ).toEqual([])
+      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
+      expect(recordDetachedUsage.mock.calls[0]?.[0]).toMatchObject({
+        operationId: 'turn-hosted-subagent-failure-usage',
+        originAssistantInputId,
+        usageDraft: {
+          provider: 'codex-cli',
+          providerRequestOrdinal: 1,
+          usage: {
+            inputTokens: 91,
+            outputTokens: 23,
+            providerRequestId: 'response-hosted-subagent-fail-child',
+            reasoningTokens: 7,
+            totalTokens: 114,
+            usageExtractionSourcePath:
+              'subagent.rawResponse.completed.usage',
+          },
+        },
+      })
+    })
+
     it('includes pending reactions in the failure context when a no-reply turn fails', async () => {
       const workingDirectory = await createTempDir('assistant-codex-reaction-fail-work-')
       const codexHome = await createTempDir('assistant-codex-reaction-fail-home-')
@@ -19290,6 +20008,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_450 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19416,6 +20135,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_550 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19560,6 +20280,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_475 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19665,6 +20386,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_500 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19848,6 +20570,7 @@ describe('assistant codex event shaping', () => {
         }))
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_600 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -19994,6 +20717,7 @@ describe('assistant codex event shaping', () => {
 
       codexMocks.spawn.mockImplementation(() => {
         const child = new MockChildProcess()
+        respondToSubagentMetadataRequestsWithoutMetadata(child)
         child.pid = 31_700 + spawnedChildren.length
         spawnedChildren.push(child)
 
@@ -20115,6 +20839,94 @@ describe('assistant codex event shaping', () => {
       expect(spawnedChildren).toHaveLength(1)
     })
 
+    it('flushes parsed hosted child usage when the idle process exits', async () => {
+      const workingDirectory = await createTempDir('assistant-codex-idle-exit-usage-work-')
+      const codexHome = await createTempDir('assistant-codex-idle-exit-usage-home-')
+      const spawnedChildren: MockChildProcess[] = []
+      const releaseChild = createDeferred<void>()
+      const processClosed = createDeferred<void>()
+      const originAssistantInputId = `ain_${'c'.repeat(32)}`
+      const recordDetachedUsage = vi.fn()
+      mockWarmCodexProcess(spawnedChildren, 31_825, async (child) => {
+        await initializeWarmTurn(
+          child,
+          'thread-idle-exit-usage-parent',
+          'turn-idle-exit-usage-parent',
+        )
+        writeSubAgentActivity(
+          child,
+          'thread-idle-exit-usage-parent',
+          'thread-idle-exit-usage-child',
+          'started',
+          { turnId: 'turn-idle-exit-usage-parent' },
+        )
+        writeCompletedTurn(
+          child,
+          'thread-idle-exit-usage-parent',
+          'turn-idle-exit-usage-parent',
+        )
+        await releaseChild.promise
+        writeStartedTurn(
+          child,
+          'thread-idle-exit-usage-child',
+          'turn-idle-exit-usage-child',
+        )
+        child.stdout.write(jsonLine({
+          method: 'rawResponse/completed',
+          params: {
+            responseId: 'response-idle-exit-usage-child',
+            threadId: 'thread-idle-exit-usage-child',
+            turnId: 'turn-idle-exit-usage-child',
+            usage: {
+              cacheWriteInputTokens: 0,
+              cachedInputTokens: 9,
+              inputTokens: 71,
+              outputTokens: 17,
+              reasoningOutputTokens: 4,
+              totalTokens: 88,
+            },
+          },
+        }))
+        child.emit('exit', 1, null)
+        child.emit('close', 1, null)
+        processClosed.resolve(undefined)
+      })
+
+      const result = await executeBackgroundBoundaryTurn(
+        codexHome,
+        workingDirectory,
+        'reply before the detached child finishes',
+        {
+          hostedToolContext: createHostedToolContext({
+            currentAssistantInputId: () => originAssistantInputId,
+            recordDetachedUsage,
+          }),
+          usageOperationId: 'turn-idle-process-exit-usage',
+        },
+      )
+      expect(result.finalMessage).toBe('')
+      expect(result.additionalUsages).toEqual([])
+      expect(recordDetachedUsage).not.toHaveBeenCalled()
+
+      releaseChild.resolve(undefined)
+      await processClosed.promise
+      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
+      expect(recordDetachedUsage.mock.calls[0]?.[0]).toMatchObject({
+        operationId: 'turn-idle-process-exit-usage',
+        originAssistantInputId,
+        usageDraft: {
+          providerRequestOrdinal: 1,
+          usage: {
+            inputTokens: 71,
+            outputTokens: 17,
+            providerRequestId: 'response-idle-exit-usage-child',
+            reasoningTokens: 4,
+            totalTokens: 88,
+          },
+        },
+      })
+    })
+
     it('keeps the root reply nonblocking while the workspace boundary waits for descendants', async () => {
       const workingDirectory = await createTempDir('assistant-codex-background-boundary-work-')
       const codexHome = await createTempDir('assistant-codex-background-boundary-home-')
@@ -20123,6 +20935,8 @@ describe('assistant codex event shaping', () => {
       const childStarted = createDeferred<void>()
       const completeChild = createDeferred<void>()
       const terminalScanObserved = createDeferred<void>()
+      const originAssistantInputId = `ain_${'8'.repeat(32)}`
+      const recordDetachedUsage = vi.fn()
       mockWarmCodexProcess(spawnedChildren, 31_850, async (child) => {
         await initializeWarmTurn(
           child,
@@ -20153,6 +20967,24 @@ describe('assistant codex event shaping', () => {
         )
         childStarted.resolve(undefined)
         await completeChild.promise
+        const rawResponse = {
+          method: 'rawResponse/completed',
+          params: {
+            responseId: 'response-background-boundary-child',
+            threadId: 'thread-background-boundary-child',
+            turnId: 'turn-background-boundary-child',
+            usage: {
+              cacheWriteInputTokens: 0,
+              cachedInputTokens: 10,
+              inputTokens: 80,
+              outputTokens: 20,
+              reasoningOutputTokens: 5,
+              totalTokens: 100,
+            },
+          },
+        }
+        child.stdout.write(jsonLine(rawResponse))
+        child.stdout.write(jsonLine(rawResponse))
         writeCompletedTurn(
           child,
           'thread-background-boundary-child',
@@ -20169,8 +21001,16 @@ describe('assistant codex event shaping', () => {
         codexHome,
         workingDirectory,
         'delegate ingestion and reply now',
+        {
+          hostedToolContext: createHostedToolContext({
+            currentAssistantInputId: () => originAssistantInputId,
+            recordDetachedUsage,
+          }),
+          usageOperationId: 'turn-hosted-detached-subagent-usage',
+        },
       )
       expect(result.turnId).toBe('turn-background-boundary-parent')
+      expect(result.additionalUsages).toEqual([])
 
       let boundaryResolved = false
       const boundary = waitForWarmCodexBackgroundWork().then(() => {
@@ -20186,6 +21026,21 @@ describe('assistant codex event shaping', () => {
       await terminalScanObserved.promise
       await expect(boundary).resolves.toBeUndefined()
       expect(boundaryResolved).toBe(true)
+      expect(recordDetachedUsage).toHaveBeenCalledExactlyOnceWith({
+        effectiveEnv: expect.objectContaining({ PATH: '/custom/bin' }),
+        operationId: 'turn-hosted-detached-subagent-usage',
+        originAssistantInputId,
+        usageDraft: expect.objectContaining({
+          provider: 'codex-cli',
+          providerRequestOrdinal: 1,
+          usage: expect.objectContaining({
+            providerRequestId: 'response-background-boundary-child',
+            totalTokens: 100,
+            usageExtractionSourcePath:
+              'subagent.rawResponse.completed.usage',
+          }),
+        }),
+      })
       expect(spawnedChildren).toHaveLength(1)
     })
 
@@ -20934,6 +21789,16 @@ describe('assistant codex event shaping', () => {
         reasoningOutputTokens: 0,
         totalTokens: 2_500,
       })
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        )
+          .filter((message) => message.method === 'thread/resume')
+          .map((message) => message.params),
+      ).toEqual([{
+        excludeTurns: true,
+        threadId: 'thread-subagent-evict-child',
+      }])
     })
   })
 })
@@ -23357,6 +24222,34 @@ class MockStdin extends EventEmitter {
   }
 }
 
+function respondToSubagentMetadataRequestsWithoutMetadata(
+  child: MockChildProcess,
+): void {
+  const precedingOnWrite = child.stdin.onWrite
+  child.stdin.onWrite = (write) => {
+    precedingOnWrite?.(write)
+    for (const line of write.split('\n')) {
+      if (line.trim().length === 0) {
+        continue
+      }
+      const message = asRecord(JSON.parse(line))
+      const params = isTestRecord(message.params)
+        ? asRecord(message.params)
+        : null
+      if (
+        message.method !== 'thread/resume' ||
+        params?.excludeTurns !== true ||
+        typeof params?.threadId !== 'string'
+      ) {
+        continue
+      }
+      queueMicrotask(() => {
+        child.stdout.write(jsonLine({ id: message.id, result: {} }))
+      })
+    }
+  }
+}
+
 async function createTempDir(prefix: string): Promise<string> {
   const rootPath = await mkdtemp(path.join(tmpdir(), prefix))
   tempRoots.push(rootPath)
@@ -23990,6 +24883,7 @@ async function executeBackgroundBoundaryTurn(
   codexHome: string,
   workingDirectory: string,
   prompt: string,
+  overrides: Partial<CodexAppServerTurnInput> = {},
 ) {
   return await executeCodexAppServerTurn({
     approvalPolicy: 'never',
@@ -23998,6 +24892,7 @@ async function executeBackgroundBoundaryTurn(
     prompt,
     sandbox: 'workspace-write',
     workingDirectory,
+    ...overrides,
   })
 }
 

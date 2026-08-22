@@ -18,7 +18,10 @@ import {
   GroupUsageFundingActions,
   GroupUsageFundingShell,
 } from "@/src/components/hosted-groups/group-usage-funding-shell";
-import { GroupSponsorshipDialog } from "@/src/components/hosted-groups/group-sponsorship-dialog";
+import {
+  GroupSponsorshipDialog,
+  type GroupSponsorshipMonthlyCapOption,
+} from "@/src/components/hosted-groups/group-sponsorship-dialog";
 import {
   GroupSponsorshipCanceledReceipt,
   GroupSponsorshipManagementCard,
@@ -29,6 +32,9 @@ import { HostedBillingSettings } from "@/src/components/settings/hosted-billing-
 import { HostedUsageTopUpDialog } from "@/src/components/settings/hosted-usage-top-up-dialog";
 import { Button } from "@/src/components/ui/button";
 import type { HostedAiUsageActivitySnapshot } from "@/src/lib/hosted-execution/usage-activity-types";
+import {
+  HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
 import {
   buildMurphSmsHref,
   type MurphContactOption,
@@ -60,11 +66,11 @@ const DESIGN_GROUP_SPONSORSHIP_OFFERS = [
   },
 ] as const;
 
-const DESIGN_GROUP_MONTHLY_CAPS = [
-  { amountLabel: "$5", monthlyCapMinor: 500 },
-  { amountLabel: "$10", monthlyCapMinor: 1_000 },
-  { amountLabel: "$20", monthlyCapMinor: 2_000 },
-] as const;
+const DESIGN_GROUP_MONTHLY_CAPS =
+  HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map((monthlyCapMinor) => ({
+    amountLabel: `$${monthlyCapMinor / 100}`,
+    monthlyCapMinor,
+  })) satisfies readonly GroupSponsorshipMonthlyCapOption[];
 
 const DESIGN_GROUP_FUNDING_SUPPORTERS = {
   monthlySponsor: {
@@ -473,7 +479,7 @@ function GroupUsageFundingStudy() {
           <div inert>
             <GroupSponsorshipManagementCard
               endpoint={endpoint}
-              initialSelectedMonthlyCapMinor={2_000}
+              initialSelectedMonthlyCapMinor={5_000}
               management={{
                 authorizationId: "hgsa_design_active",
                 chargedThisPeriodMinor: 500,
@@ -590,7 +596,7 @@ export function GroupSponsorshipManagementConfirmationStudy() {
         Preview the payer confirmation shown before a monthly limit increase.
       </p>
       <Button onClick={() => setOpen(true)} variant="outline">
-        Preview $20 limit confirmation
+        Preview $50 limit confirmation
       </Button>
       <GroupSponsorshipManagementConfirmationDialog
         busy={false}
@@ -598,7 +604,7 @@ export function GroupSponsorshipManagementConfirmationStudy() {
           ? {
             currentMonthlyCapMinor: 1_000,
             kind: "increase",
-            nextMonthlyCapMinor: 2_000,
+            nextMonthlyCapMinor: 5_000,
           }
           : null}
         inert

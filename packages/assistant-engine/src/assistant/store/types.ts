@@ -77,6 +77,7 @@ export interface AssistantTranscriptEntryInput {
   createdAt?: string | null
   kind: AssistantTranscriptEntryKind
   sourceOutboxIntentId?: string | null
+  standaloneAssistantContext?: true | null
   text: string
 }
 

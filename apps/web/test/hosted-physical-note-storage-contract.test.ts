@@ -19,6 +19,19 @@ const APPROVED_FIELDS = [
   "updatedAt",
 ].sort();
 
+const APPROVED_RECOVERY_FIELDS = [
+  "createdAt",
+  "memberId",
+  "originAssistantInputId",
+  "physicalNoteId",
+  "remainingUnresolved",
+  "requestFingerprint",
+  "resultStatus",
+  "retryAfter",
+  "settledUsageCostUsdMicros",
+  "updatedAt",
+].sort();
+
 describe("HostedPhysicalNote storage contract", () => {
   it("stores only bounded operational facts, never the address or artwork", () => {
     const schema = readFileSync(
@@ -76,6 +89,42 @@ describe("HostedPhysicalNote storage contract", () => {
       'ON "hosted_physical_note"("member_id", "status", "failure_reason", "created_at")',
     );
     expect(migration).not.toMatch(/message|address_line|artwork_url/iu);
+  });
+
+  it("stores only a replay-stable recovery binding and bounded result", () => {
+    const schema = readFileSync(
+      new URL("../prisma/schema.prisma", import.meta.url),
+      "utf8",
+    );
+    expect(readModelScalarFields(schema, "HostedPhysicalNoteRecovery").sort())
+      .toEqual(APPROVED_RECOVERY_FIELDS);
+    const body = schema.match(
+      /model HostedPhysicalNoteRecovery \{([\s\S]*?)\n\}/u,
+    )?.[1] ?? "";
+    expect(body).not.toMatch(
+      /address|recipient|artwork|image_url|file_url|message|note_text/iu,
+    );
+
+    const migration = readFileSync(
+      new URL(
+        "../prisma/migrations/20260820170000_hosted_physical_note_recovery/migration.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    expect(migration).toContain(
+      'PRIMARY KEY ("origin_assistant_input_id")',
+    );
+    expect(migration).toContain('"request_fingerprint" TEXT NOT NULL');
+    expect(migration).toContain(
+      '"result_status" IN (\'accepted\', \'clear\', \'pending\', \'unavailable\')',
+    );
+    expect(migration).toContain('"settled_usage_cost_usd_micros" BIGINT');
+    expect(migration).toContain('"settled_usage_cost_usd_micros" >= 0');
+    expect(migration).toContain("ON DELETE SET NULL");
+    expect(migration).not.toMatch(
+      /address|recipient|artwork|image_url|file_url|message|note_text/iu,
+    );
   });
 
   it("pins compatible Web as the no-send authority rollback floor", () => {

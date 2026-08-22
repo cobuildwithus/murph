@@ -153,14 +153,14 @@ async function listOwnedRecords(input: {
 }) {
   const limit = input.limit ?? DEFAULT_LIST_LIMIT
   const query = await loadQueryRuntime('document/meal query reads')
-  const readModel = await query.readVault(input.vault)
-  const items = query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: [input.expectedKind],
-      from: input.from,
-      to: input.to,
-    })
+  const records = await query.listCanonicalEntities(input.vault, {
+    family: 'event',
+    kinds: [input.expectedKind],
+    from: input.from,
+    to: input.to,
+    limit: null,
+  })
+  const items = records
     .slice(0, limit)
     .map((record: QueryRecord) => {
       const entity = toOwnedEventCommandShowEntity(record, OWNED_EVENT_LINK_KEYS)
@@ -191,13 +191,13 @@ export async function listAutomaticMealPhotoCloseoutWorkRecords(input: {
   }
   const occurrenceTime = occurrenceAt.getTime()
   const query = await loadQueryRuntime('automatic meal photo closeout reads')
-  const readModel = await query.readVault(input.vault)
-  const automaticCaptures = query
-    .listEntities(readModel, {
-      families: ['event'],
-      kinds: ['meal'],
-      to: input.to,
-    })
+  const records = await query.listCanonicalEntities(input.vault, {
+    family: 'event',
+    kinds: ['meal'],
+    to: input.to,
+    limit: null,
+  })
+  const automaticCaptures = records
     .filter(isAutomaticMealCapture)
   const retryEvidence = automaticCaptures.filter(
     (record) => readTimestamp(record.attributes.recordedAt) >= occurrenceTime,

@@ -345,6 +345,16 @@ snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
+Assistant-engine also accepts six parser-only group family names:
+`murph.group_consult`, `murph.group_data`, `murph.group_membership`,
+`murph.group_usage`, `murph.group_chat`, and `murph.group_email`. Each is a
+strict action subset derived from the canonical `murph.group` argument parser
+and normalizes into the same existing group request/executor path. These names
+remain absent from the dynamic-tool catalog, so this consumer-first deployment
+does not change provider input or the assistant contract fingerprint. A later
+catalog cutover may advertise them only after parser compatibility is deployed
+everywhere; until then `murph.group` remains the sole advertised full surface.
+
 `murph.group action="read_chat_name"` is the on-demand provider-title primitive.
 Web resolves the signed callback member's single encrypted thread-container
 route only after the model invokes it, then performs one bounded Linq chat read
@@ -770,8 +780,10 @@ retired vault-share projection roots, and environment files are denied; tool
 network is off, shell commands inherit no secrets, and the child receives only
 the consent-aware lazy `murph.group/read_shared` dynamic tool, with no mutation
 or delivery authority.
-Thread-start attestation must confirm the exact profile, roots, empty working
-directory, empty instruction sources, and approval policy before model work.
+The thread request supplies the exact profile, roots, empty working directory,
+disabled instruction sources, and approval policy. The App Server response is
+not an authorization boundary; production-like Linux smoke proves the
+profile's actual filesystem, environment, and network enforcement.
 The child never shares the resident process, provider thread, interruption
 domain, or route grant. Before checkpoint, invocation return, fence loss,
 workspace replacement, or shutdown, the runtime aborts and awaits the exact
@@ -1317,7 +1329,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/health-metrics`: workspace-private neutral MetricPoint contract owner for health metric definitions, source metadata, unit normalization, display formatting, and selection policy reused by query projections and browser-vault exports
 - `packages/vault-usecases`: workspace-private CLI/headless vault usecase orchestration owner over `packages/core`, `packages/importers`, and `packages/query`. It owns command-shaped service interfaces, shared CLI-style input normalization, lazy runtime loaders, assistant-safe vault path helpers, the narrow manifest-receipt/removal seam for derived export packs, and the neutral `@murphai/vault-usecases/vault-services` factory used by CLI, assistant, daemon, setup, hosted runtime, and inbox-service callers that need one composed vault service surface without importing owner internals. For workout CSVs it composes the importer plan with bounded source-independent raw-manifest verification and one attached-event lookup, reconciles provider-neutral session overlap across refreshed snapshots, preserves authoritative external references, and patches correction-owned fields onto the latest canonical events instead of rebuilding them from CSV. It runs one core batch preview, reuses exact raw evidence, stores immutable raw data only for a new valid snapshot, and applies one canonical batch; it does not parse source rows or write events itself. It composes the compact Health Commons desired-direction lookup into experiment progress-card snapshots without making query depend on the filesystem-backed Health Commons runtime. It must stay a thin composition layer: canonical record schemas and static lookup-ID family classification stay in `packages/contracts`, canonical writes stay in `packages/core`, imports stay in `packages/importers`, query projections and event display identity stay in `packages/query`, device runtime and control-plane composition stay in `packages/device-syncd`/`packages/cli`, inbox daemon behavior stays in `packages/inboxd` and `packages/inbox-services`, and assistant/session state stays in the assistant runtime packages.
 - `packages/health-commons`: workspace-private public Health Commons owner for protocol pages, biomarker pages, source pages, source-backed health guidance and symptom-safety decisions, exact protocol revisions, generated catalogs, a read-only generated SQLite FTS claim projection that resolves a full health question to one authored topic before retrieving sourced claims, typed-target source findings, and matching safety within that owner, and future aggregate outcome summaries consumed across local and hosted surfaces. Assistant skills must not become a second owner for topic-specific public health knowledge; they remain for tool procedures and stateful product workflows.
-- `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. Broad low-frequency native tools keep their argument contracts and set Codex `deferLoading` at `thread/start`, leaving direct-model `tool_search` and code-mode `ALL_TOOLS` discovery to the pinned App Server rather than adding a Murph-owned discovery protocol. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
+- `packages/assistant-engine`: workspace-private headless assistant execution runtime that owns provider-turn execution, tool/runtime assembly, assistant state/outbox/status/store surfaces, assistant automation, the single assistant input spine, assistant-specific vault/inbox/knowledge tool surfaces, hosted computer-use dynamic tools, Murph-managed package skill assets under `skills/**`, attachment prompt-bundle audit support, and active-outbox reconciliation for assistant-owned one-time delivery staging under the exact flat assistant-runtime generated-delivery directory. Broad low-frequency native tools keep their argument contracts and set Codex `deferLoading` at `thread/start`, leaving direct-model `tool_search` and code-mode `ALL_TOOLS` discovery to the pinned App Server rather than adding a Murph-owned discovery protocol. The automation tool keeps its full generated schema as the sole runtime-validation and diagnostic contract, while its deferred model advertisement mechanically derives one inline property catalog plus strict per-action allowed/required-field contracts and action-specific value refinements from that exact schema. Top-level field prose remains in the tool description instead of being lifted from one action into a misleading global description; unsupported generated shapes fail visibly by advertising the full schema instead of dropping capability. Because the complete dynamic-tool catalog participates in the native-thread contract fingerprint, deploying the compact descriptor intentionally starts one fresh provider thread for an existing resumable automation-enabled session. That transition reuses the bounded committed-transcript replay, removes a leading orphaned assistant reply when an omitted prefix precedes retained member/assistant exchanges, and marks omitted older context as incomplete with an instruction to inspect authoritative state or clarify rather than invent prior intent. If no member message survives, replay drops ordinary dependent assistant output but retains transcript entries marked as standalone assistant context by the existing transcript owner. Scheduled notifications, Assistant Ask continuations, and imported private completions share that semantic fact; durable outbox provenance remains only as compatibility for private completions persisted before the additive field. After the successful turn persists the compact contract fingerprint, later turns resume the new thread normally. The stable assistant prompt may route to those package-owned skill files through `$MURPH_ASSISTANT_SKILLS_ROOT`; local and hosted runtime env setup stamps that var to the canonical package-owned skill root. Hosted native Codex skill rendering stays disabled because rendered runner-local paths can break hosted prompt-cache stability. It consumes neutral vault usecase services, runtime loaders, and assistant vault path helpers from `@murphai/vault-usecases`, and consumes provider-target normalization plus hosted provider-preset/config helpers from `@murphai/operator-config` instead of owning duplicate copies.
 - `packages/operator-config`: workspace-private operator and setup configuration surface that owns persisted operator defaults, hosted assistant config, assistant backend target normalization, hosted provider-preset/config helpers, setup/runtime-env helpers, device/channel readiness helpers, and CLI/shared command contracts
 - `packages/assistant-cli`: workspace-private CLI-only assistant surface that owns the daemon-aware assistant wrappers, assistant command registration, foreground terminal logging, and the Ink chat UI
 - `packages/setup-cli`: workspace-private CLI-only onboarding and host-setup surface that owns the setup wizard, host provisioning helpers, and assistant/channel/wearable onboarding flows
@@ -1450,7 +1462,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and
   payer/beneficiary split, but its primary flow is a durable payer authorization
-  for one group with a $5, $10, or $20 calendar-month maximum. Activation is an
+  for one group with a $5, $10, $20, or $50 calendar-month maximum. Activation is an
   ordinary $5 usage-credit purchase available at any current group-capacity
   state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
   rows admitted only at the existing beneficiary-serialized
@@ -3847,6 +3859,29 @@ the frozen batch also contains later same-route conversation input; compound bat
 does not erase generated-image provenance. That later input may use the retained
 `raw/captures/**` ref through an independently authorized action such as the existing
 group-avatar path.
+A separately exposed physical-note recovery action is accepted-message-only and
+does not depend on image completion. It authorizes one Web-owned provider metadata
+reconciliation for the oldest unresolved guard, never a provider create or recall.
+Web first claims the exact accepted assistant input in a durable recovery row
+under the member lock and binds it to a versioned fingerprint of the normalized
+target kind and reference, including the explicit no-target case, plus that
+selected guard. Reusing the accepted input with a different target selector
+fails closed as unconfirmed under the same lock without a provider read or
+state transition. A completed exact-selector replay
+returns the stored bounded response without another provider read or transition;
+an interrupted pre-terminal claim remains unconfirmed and fails closed. When
+provider evidence permits a terminal result, Web commits the note transition,
+paid-usage settlement, blocker narrowing, remaining-guard fact, and stored
+recovery response in the same member-locked transaction. A result-write failure
+therefore rolls back every terminal mutation and leaves the same note eligible
+for a new accepted recovery input. Thus a restarted
+assistant turn cannot use one accepted request to advance a second guard, and a
+new accepted input is required for each additional reconciliation.
+Direct and authenticated-group authority is rechecked at the Web boundary; recent
+absence and indeterminate evidence remain pending, while only aged proven absence
+can clear the guard. Web returns the checked guard's outcome separately from a
+derived remaining-unresolved fact, so clearing one legacy guard cannot be reported
+as an indeterminate check merely because another independent guard still blocks.
 Native provider resume is only the fast path: the transcript owner also commits a
 bounded runtime-authored provenance marker for every trusted ready generated-image
 completion. An attached image retains its actual response ordinal; a completion

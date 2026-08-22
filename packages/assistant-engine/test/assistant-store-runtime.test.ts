@@ -508,6 +508,7 @@ describe('assistant store seam', () => {
         {
           createdAt: null,
           kind: 'assistant',
+          standaloneAssistantContext: true,
           text: 'Follow-up reply',
         },
       ],
@@ -516,6 +517,7 @@ describe('assistant store seam', () => {
     expect(appendedEntries[0]?.createdAt).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u,
     )
+    expect(appendedEntries[0]?.standaloneAssistantContext).toBe(true)
     await expect(
       store.appendAssistantTranscriptEntries(vaultRoot, created.session.sessionId, []),
     ).resolves.toEqual([])

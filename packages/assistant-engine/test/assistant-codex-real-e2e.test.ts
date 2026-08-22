@@ -8,6 +8,7 @@ import {
   eventRecordSchema,
   experimentFrontmatterSchema,
   experimentProgressSnapshotSchema,
+  goalMetricTargetSchema,
   regimenFrontmatterSchema,
   workoutSessionSchema,
 } from '@murphai/contracts'
@@ -52,6 +53,7 @@ import {
   MURPH_GROUP_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
+  MURPH_SEND_PROGRESS_UPDATE_TOOL,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
@@ -7800,6 +7802,510 @@ describe('real Codex app-server cache usage e2e harness', () => {
     ])
   })
 })
+
+describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
+  it('lets the model resolve legacy calories and recover only complete same-id safety records', {
+    timeout: 1_800_000,
+  }, async () => {
+    const config = await resolveRealCodexE2eConfig()
+
+    try {
+      const legacy = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'legacy',
+      })
+      expect(legacy.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+        localDate: '2026-07-30',
+        version: 2,
+      })
+      expect(legacy.progressUpdates).toEqual([])
+      expect(readNutritionGoalMutationCommands(legacy.commands)).toEqual([])
+
+      const canonicalWithActivity = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'canonical-with-activity',
+      })
+      expect(canonicalWithActivity.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+      })
+      expect(canonicalWithActivity.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(canonicalWithActivity.commands),
+      ).toEqual([])
+
+      const activityOnly = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'activity-only',
+      })
+      expect(activityOnly.card).toBeNull()
+      expect(activityOnly.progressUpdates).toEqual([])
+      expect(readNutritionGoalMutationCommands(activityOnly.commands)).toEqual([])
+
+      const activitySameGoal = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'activity-same-goal',
+      })
+      expect(activitySameGoal.card).toBeNull()
+      expect(activitySameGoal.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(activitySameGoal.commands),
+      ).toEqual([])
+
+      const recovered = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'complete',
+        goalScenario: 'legacy',
+      })
+      expect(recovered.card).toMatchObject({
+        goals: { calories: { target: 1_800 } },
+        kind: 'daily_nutrition',
+      })
+      expect(readConditionRecoveryCommands(recovered.commands)).toEqual([
+        'condition show condition_one --format json',
+        'show condition_one --format json',
+      ])
+      expect(readNutritionGoalMutationCommands(recovered.commands)).toEqual([])
+
+      for (const conditionRecovery of [
+        'truncated',
+        'wrong-id',
+        'ambiguous',
+      ] as const) {
+        const rejected = await runRealNutritionCardAuthorityScenario({
+          config,
+          conditionRecovery,
+          goalScenario: 'legacy',
+        })
+        expect(rejected.card, conditionRecovery).toBeNull()
+        expect(
+          readConditionRecoveryCommands(rejected.commands),
+          conditionRecovery,
+        ).toEqual([
+          'condition show condition_one --format json',
+          'show condition_one --format json',
+        ])
+        expect(
+          readNutritionGoalMutationCommands(rejected.commands),
+          conditionRecovery,
+        ).toEqual([])
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  })
+})
+
+type NutritionConditionRecovery =
+  | 'ambiguous'
+  | 'complete'
+  | 'none'
+  | 'truncated'
+  | 'wrong-id'
+
+type NutritionGoalScenario =
+  | 'activity-only'
+  | 'activity-same-goal'
+  | 'canonical-with-activity'
+  | 'legacy'
+
+async function runRealNutritionCardAuthorityScenario(input: {
+  config: RealCodexE2eConfig
+  conditionRecovery: NutritionConditionRecovery
+  goalScenario: NutritionGoalScenario
+}): Promise<{
+  card: unknown
+  commands: string[]
+  progressUpdates: string[]
+}> {
+  const workingDirectory = await mkdtemp(
+    path.join(tmpdir(), 'murph-nutrition-card-real-e2e-'),
+  )
+
+  try {
+    const binDirectory = path.join(workingDirectory, 'bin')
+    const skillsRoot = path.join(workingDirectory, 'skills')
+    const commandLog = path.join(workingDirectory, 'vault-commands.log')
+    await Promise.all([
+      mkdir(binDirectory, { recursive: true }),
+      mkdir(skillsRoot, { recursive: true }),
+      writeFile(commandLog, '', 'utf8'),
+      ...(['food-journal', 'nutrition-strategy'] as const).map((slug) =>
+        cp(
+          path.join(resolveAssistantSkillsRoot(), slug),
+          path.join(skillsRoot, slug),
+          { recursive: true },
+        )),
+    ])
+    await materializeNutritionCardVaultCli({
+      commandLog,
+      conditionRecovery: input.conditionRecovery,
+      executablePath: path.join(binDirectory, 'vault-cli'),
+      goalScenario: input.goalScenario,
+    })
+
+    const progressUpdates: string[] = []
+    const inheritedPath = normalizeEnvString(input.config.env.PATH)
+    const result = await executeRealCodexAppServerTurn({
+      approvalPolicy: 'never',
+      baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+        ?? undefined,
+      codexHome: input.config.codexHome,
+      developerInstructions: buildAssistantSystemPrompt({
+        assistantCliContract: [
+          'Use vault-cli for canonical member data.',
+          'The nutrition skills own exact card, safety, and target-authority commands.',
+        ].join('\n'),
+        assistantContextSnapshotPrompt: null,
+        assistantHostedDeviceConnectAvailable: false,
+        assistantHostedDeviceConnectProviders: [],
+        assistantKnowledgeToolsAvailable: false,
+        assistantProgressUpdatesAvailable: true,
+        channel: 'linq',
+        cliAccess: {
+          rawCommand: 'vault-cli',
+          setupCommand: 'murph',
+        },
+        conversationScope: 'direct',
+        currentLocalDate: '2026-07-30',
+        currentTimeZone: 'America/New_York',
+        hostedRuntime: true,
+        modelBehaviorProfile: 'gpt5-agentic',
+        onboardingGuidance: false,
+        ordinaryInboundTurn: true,
+        turnTrigger: 'automation-auto-reply',
+      }),
+      dynamicTools: [
+        MURPH_ATTACH_RESPONSE_CARD_TOOL,
+        MURPH_SEND_PROGRESS_UPDATE_TOOL,
+      ],
+      env: {
+        ...input.config.env,
+        [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
+        PATH: inheritedPath
+          ? `${binDirectory}${path.delimiter}${inheritedPath}`
+          : binDirectory,
+      },
+      excludeResumeTurns: true,
+      model: input.config.model,
+      modelProvider: input.config.modelProvider,
+      progressDelivery: {
+        async send(text) {
+          progressUpdates.push(text)
+          return { kind: 'sent', source: 'model' }
+        },
+      },
+      prompt: [
+        'Send my daily nutrition card for 2026-07-30.',
+        'The meal totals and my accepted targets are already saved.',
+        'Do not create, rename, or change a Goal.',
+      ].join(' '),
+      reasoningEffort: 'medium',
+      sandbox: 'workspace-write',
+      workingDirectory,
+    })
+    const commandText = (await readFile(commandLog, 'utf8')).trim()
+
+    return {
+      card: result.responseCard,
+      commands: commandText === '' ? [] : commandText.split('\n'),
+      progressUpdates,
+    }
+  } finally {
+    await removeRealCodexTemporaryPaths([workingDirectory])
+  }
+}
+
+async function materializeNutritionCardVaultCli(input: {
+  commandLog: string
+  conditionRecovery: NutritionConditionRecovery
+  executablePath: string
+  goalScenario: NutritionGoalScenario
+}): Promise<void> {
+  const pointTarget = (
+    targetId: string,
+    metricKey: string,
+    unit: string,
+    value: number,
+  ) => goalMetricTargetSchema.parse({
+    comparator: 'between',
+    evaluation: { kind: 'selected-value' },
+    highValue: value,
+    kind: 'metric',
+    metricKey,
+    targetId,
+    unit,
+    value,
+  })
+  const legacyGoal = {
+    entity: {
+      data: {
+        metricTargets: [
+          pointTarget('daily-calories', 'calories', 'kcal', 1_800),
+          pointTarget('daily-protein', 'protein-grams', 'g', 140),
+          pointTarget('daily-carbohydrates', 'carbs-grams', 'g', 190),
+          pointTarget('daily-fat', 'fat-grams', 'g', 55),
+          pointTarget('daily-fiber', 'fiber-grams', 'g', 25),
+        ],
+        status: 'active',
+        windowStartAt: '2026-07-01',
+      },
+      id: 'goal_legacy_bundle',
+      kind: 'goal',
+      title: 'Accepted daily nutrition targets',
+    },
+    vault: 'synthetic-vault',
+  }
+  const canonicalNutritionGoal = {
+    ...legacyGoal,
+    entity: {
+      ...legacyGoal.entity,
+      data: {
+        ...legacyGoal.entity.data,
+        metricTargets: legacyGoal.entity.data.metricTargets.map((target) =>
+          target.metricKey === 'calories'
+            ? pointTarget(
+                'target-dietary-calories',
+                'dietary-calories',
+                'kcal',
+                1_800,
+              )
+            : target),
+      },
+      id: 'goal_canonical_nutrition',
+      kind: 'goal',
+      title: 'Canonical daily nutrition targets',
+    },
+  }
+  const activityCaloriesGoal = {
+    entity: {
+      data: {
+        metricTargets: [
+          pointTarget(
+            'target-total-calories-burned',
+            'calories',
+            'kcal',
+            2_200,
+          ),
+        ],
+        status: 'active',
+        windowStartAt: '2026-07-01',
+      },
+      id: 'goal_activity_calories',
+      kind: 'goal',
+      title: 'Daily energy expenditure',
+    },
+    vault: 'synthetic-vault',
+  }
+  const activitySameGoal = {
+    entity: {
+      data: {
+        metricTargets: [
+          pointTarget(
+            'target-total-calories-burned',
+            'calories',
+            'kcal',
+            2_200,
+          ),
+          ...canonicalNutritionGoal.entity.data.metricTargets.filter(
+            (target) => target.metricKey !== 'dietary-calories',
+          ),
+        ],
+        status: 'active',
+        windowStartAt: '2026-07-01',
+      },
+      id: 'goal_activity_same_goal',
+      kind: 'goal',
+      title: 'Combined training and nutrition targets',
+    },
+    vault: 'synthetic-vault',
+  }
+  const macroOnlyGoal = {
+    ...canonicalNutritionGoal,
+    entity: {
+      ...canonicalNutritionGoal.entity,
+      data: {
+        ...canonicalNutritionGoal.entity.data,
+        metricTargets: canonicalNutritionGoal.entity.data.metricTargets.filter(
+          (target) => target.metricKey !== 'dietary-calories',
+        ),
+      },
+      id: 'goal_macro_bundle',
+      title: 'Accepted macro targets',
+    },
+  }
+  const activeGoals = input.goalScenario === 'legacy'
+    ? [legacyGoal]
+    : input.goalScenario === 'activity-same-goal'
+      ? [activitySameGoal]
+    : input.goalScenario === 'canonical-with-activity'
+      ? [canonicalNutritionGoal, activityCaloriesGoal]
+      : [macroOnlyGoal, activityCaloriesGoal]
+  const activeGoalItems = activeGoals.map((goal) => ({
+    data: {
+      metricTargetsCount: goal.entity.data.metricTargets.length,
+      status: 'active',
+    },
+    id: goal.entity.id,
+    kind: goal.entity.kind,
+    title: goal.entity.title,
+  }))
+  const emptyList = {
+    count: 0,
+    items: [],
+    nextCursor: null,
+    vault: 'synthetic-vault',
+  }
+  const completeCondition = {
+    entity: {
+      data: {
+        clinicalStatus: 'active',
+        code: { text: 'Seasonal allergic rhinitis' },
+      },
+      id: 'condition_one',
+      kind: 'condition',
+      title: 'Seasonal allergies',
+    },
+    vault: 'synthetic-vault',
+  }
+  const conditionFallback = input.conditionRecovery === 'complete'
+    ? completeCondition
+    : input.conditionRecovery === 'truncated'
+      ? {
+          entity: {
+            data: { clinicalStatus: 'active' },
+            id: 'condition_one',
+            kind: 'condition',
+          },
+          truncated: true,
+          vault: 'synthetic-vault',
+        }
+      : input.conditionRecovery === 'wrong-id'
+        ? {
+            ...completeCondition,
+            entity: {
+              ...completeCondition.entity,
+              id: 'condition_other',
+            },
+          }
+        : {
+            items: [
+              completeCondition.entity,
+              {
+                ...completeCondition.entity,
+                id: 'condition_other',
+              },
+            ],
+            vault: 'synthetic-vault',
+          }
+  const conditionList = input.conditionRecovery === 'none'
+    ? emptyList
+    : {
+        count: 1,
+        filters: { limit: 200, status: 'active' },
+        items: [{
+          data: { clinicalStatus: 'active' },
+          id: 'condition_one',
+          kind: 'condition',
+          title: 'Condition one',
+        }],
+        nextCursor: null,
+        vault: 'synthetic-vault',
+      }
+  const totals = {
+    from: '2026-07-30',
+    mealCount: 3,
+    metrics: {
+      calories: { mealCount: 3, total: 1_760 },
+      carbsGrams: { mealCount: 3, total: 185 },
+      fatGrams: { mealCount: 3, total: 54 },
+      fiberGrams: { mealCount: 3, total: 24 },
+      proteinGrams: { mealCount: 3, total: 137 },
+    },
+    to: '2026-07-30',
+    vault: 'synthetic-vault',
+  }
+  const emit = (value: unknown) =>
+    `printf '%s\\n' ${quoteNutritionShellLiteral(JSON.stringify(value))}`
+  const lines = [
+    '#!/bin/sh',
+    'set -eu',
+    `printf '%s\\n' "$*" >> ${quoteNutritionShellLiteral(input.commandLog)}`,
+    'case "$*" in',
+    `  "goal list --status active --limit 200 --format json") ${emit({
+      count: activeGoalItems.length,
+      filters: { limit: 200, status: 'active' },
+      items: activeGoalItems,
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    })} ;;`,
+    `  "goal show goal_legacy_bundle --format json") ${emit(legacyGoal)} ;;`,
+    `  "goal show goal_canonical_nutrition --format json") ${emit(canonicalNutritionGoal)} ;;`,
+    `  "goal show goal_activity_calories --format json") ${emit(activityCaloriesGoal)} ;;`,
+    `  "goal show goal_activity_same_goal --format json") ${emit(activitySameGoal)} ;;`,
+    `  "goal show goal_macro_bundle --format json") ${emit(macroOnlyGoal)} ;;`,
+    `  "memory show --format json") ${emit({
+      document: {
+        records: [{
+          id: 'memory_adult',
+          section: 'Identity',
+          text: 'Age: 34',
+          updatedAt: '2026-07-29T12:00:00.000Z',
+        }],
+      },
+      memory: null,
+      vault: 'synthetic-vault',
+    })} ;;`,
+    `  "condition list --status active --limit 200 --format json") ${emit(conditionList)} ;;`,
+    ...(input.conditionRecovery === 'none'
+      ? []
+      : [
+          '  "condition show condition_one --format json") printf \'%s\\n\' \'condition detail unavailable\' >&2; exit 2 ;;',
+          `  "show condition_one --format json") ${emit(conditionFallback)} ;;`,
+        ]),
+    `  "regimen list --status active --limit 200 --format json") ${emit(emptyList)} ;;`,
+    `  "event list --kind procedure --limit 200 --format json") ${emit(emptyList)} ;;`,
+    `  "event list --kind encounter --limit 200 --format json") ${emit(emptyList)} ;;`,
+    `  event\ list\ --kind\ test\ *) ${emit(emptyList)} ;;`,
+    `  measurement\ entry\ list\ *) ${emit(emptyList)} ;;`,
+    `  meal\ totals\ --from\ 2026-07-30\ --to\ 2026-07-30*) ${emit(totals)} ;;`,
+    '  goal\\ save*|goal\\ import-json*) printf \'%s\\n\' \'Goal mutation forbidden in this fixture\' >&2; exit 17 ;;',
+    '  *) printf \'unsupported nutrition fixture command: %s\\n\' "$*" >&2; exit 64 ;;',
+    'esac',
+    '',
+  ]
+  await writeFile(input.executablePath, lines.join('\n'), {
+    encoding: 'utf8',
+    mode: 0o700,
+  })
+  await chmod(input.executablePath, 0o700)
+}
+
+function quoteNutritionShellLiteral(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`
+}
+
+function readConditionRecoveryCommands(commands: readonly string[]): string[] {
+  return commands.filter((command) =>
+    command === 'condition show condition_one --format json'
+    || command === 'show condition_one --format json'
+  )
+}
+
+function readNutritionGoalMutationCommands(
+  commands: readonly string[],
+): string[] {
+  return commands.filter((command) =>
+    /^goal (?:save|import-json)\b/u.test(command)
+  )
+}
 
 const CAPABILITY_ROUTING_PROBES: readonly CapabilityRoutingProbe[] = [
   {

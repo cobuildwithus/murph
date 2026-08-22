@@ -41,6 +41,7 @@ import {
   collectSafeJsonSchemaValidationPaths,
   type SafeToolCallValidationDigest,
 } from '../../assistant/tool-validation-digest.js'
+import { deriveAutomationModelInputSchema } from './automation-model-input-schema.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const AUTOMATION_TOOL_RESULT_MAX_BYTES = 24_000
@@ -411,6 +412,11 @@ const AUTOMATION_ARGUMENT_ROOT_KEYS = [
   'desiredAutomationIds',
 ] as const
 
+export const MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA = z.toJSONSchema(
+  automationArgumentsSchema,
+  { io: 'input' },
+)
+
 export const MURPH_AUTOMATION_TOOL = {
   namespace: 'murph',
   name: 'automation',
@@ -421,11 +427,13 @@ export const MURPH_AUTOMATION_TOOL = {
       'A save or patch result already includes one host-owned read-only timing readback. When timingVerified=false, confirm that the write succeeded and report the returned stored schedule and status, briefly state that timing remains unconfirmed, and make no next-occurrence claim. When timingVerificationIssues includes record_readback_mismatch, say the record changed during verification and treat the returned schedule and status as current instead of claiming the requested mutation still holds. Do not inspect again, retry the write, create a fallback automation, ask the member to authorize another inspection, or offer another inspection. Interpret runtime_state_pending as the scheduler finishing existing work, stale_recurring_occurrence as a fresh recurring run not yet projected, projection_unavailable as scheduler timing unavailable, record_readback_mismatch as the stored schedule and scheduler projection not yet aligned, and default_timezone_unverified as the schedule timezone not yet confirmed. Do not expose these internal code names.',
       'For recurring time-based schedules, use these exact canonical shapes: every `{"kind":"every","everyMs":3600000}`; cron `{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`; dailyLocal `{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`. Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation. Never invent schedule, update, or timezone fields outside the schema. The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules; never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field.',
     ].join(' '),
-  inputSchema: z.toJSONSchema(automationArgumentsSchema, { io: 'input' }),
+  inputSchema: deriveAutomationModelInputSchema(
+    MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
+  ),
 } as const
 
 const AUTOMATION_VALIDATION_PATHS =
-  collectSafeJsonSchemaValidationPaths(MURPH_AUTOMATION_TOOL.inputSchema)
+  collectSafeJsonSchemaValidationPaths(MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA)
 
 export type AutomationDynamicToolRequest =
   | {
