@@ -2236,7 +2236,7 @@ describe('monorepo release flow coverage audit', () => {
       const defaultResult = runDry()
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
       expect(defaultResult.stdout).toContain(
-        'Response capture: enabled (10800000ms timeout)',
+        'Response capture: enabled (15000000ms timeout)',
       )
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',

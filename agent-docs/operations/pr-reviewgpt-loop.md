@@ -96,7 +96,7 @@ loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
 every five minutes. Unless an explicit caller- or user-supplied per-run bound
 already applies, use `--poll-timeout 240m`; preserve any explicit bound. That
 wake timeout is independent of the normal ReviewGPT response-capture timeout,
-which defaults to 180 minutes.
+which defaults to 250 minutes.
 
 Manual status polling is a fallback only when neither a completion-returning
 wait nor a completion watcher can notify the owning model and the task cannot
@@ -168,7 +168,7 @@ or advance the final gate's baseline.
 
 Run the preliminary preset with exact-head packaging:
 
-The repo config defaults response capture to 180 minutes. The workflow commands
+The repo config defaults response capture to 250 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
