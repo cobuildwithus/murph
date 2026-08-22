@@ -1,6 +1,6 @@
 # Include Max in ops growth individual MRR breakdown
 
-Status: active
+Status: completed
 Created: 2026-08-22
 Updated: 2026-08-22
 
@@ -57,3 +57,14 @@ Updated: 2026-08-22
   - `git diff --check`
 - Direct proof: the snapshot fixture records direct individual MRR including
   Max and reconciles individual plus Family MRR to total on create and update.
+
+## Completion evidence
+
+- Preliminary completion-specialists ReviewGPT: PASS with no findings.
+- Final cross-cutting ReviewGPT round 1: PASS with no findings on the exact
+  pushed candidate head.
+- Parent review: the two snapshot write branches use the same total-minus-Family
+  derivation; no query, schema, runtime boundary, or historical rewrite changed.
+- Current-base merge proof: `git merge-tree --write-tree origin/main HEAD`
+  completed cleanly after the reviewed candidate's base advanced.
+Completed: 2026-08-22
