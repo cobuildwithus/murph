@@ -151,9 +151,20 @@ function inspectDraftReset(source) {
   assert.doesNotMatch(source, /contents: write|actions\/checkout|pull_request_target/u);
   assert.match(
     source,
-    /^    if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && github\.event\.workflow_run\.event == 'pull_request' && github\.event\.workflow_run\.pull_requests\[0\] != null \}\}$/mu,
+    /^    if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && github\.event\.workflow_run\.event == 'pull_request' \}\}$/mu,
   );
-  assert.match(source, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.workflow_run\.pull_requests\[0\]\.head\.sha \}\}/u);
+  assert.match(source, /EXPECTED_HEAD_SHA: \$\{\{ github\.event\.workflow_run\.head_sha \}\}/u);
+  assert.match(source, /HEAD_BRANCH: \$\{\{ github\.event\.workflow_run\.head_branch \}\}/u);
+  assert.match(source, /HEAD_REPOSITORY: \$\{\{ github\.event\.workflow_run\.head_repository\.full_name \}\}/u);
+  assert.doesNotMatch(source, /workflow_run\.pull_requests\[0\]/u);
+  assert.match(source, /repos\/\$\{HEAD_REPOSITORY\}\/commits\/\$\{EXPECTED_HEAD_SHA\}\/pulls/u);
+  assert.match(source, /candidate_count/u);
+  assert.match(source, /candidate_count\}" != 1/u);
+  assert.match(source, /\.base\.repo\.full_name == \$base_repository/u);
+  assert.match(source, /\.head\.repo\.full_name == \$head_repository/u);
+  assert.match(source, /\.head\.ref == \$head_branch/u);
+  assert.match(source, /\.head\.sha == \$head_sha/u);
+  assert.match(source, /\.state == "open"/u);
   assert.match(source, /current_head_sha="\$\(jq -r '\.head\.sha \/\/ empty'/u);
   assert.match(source, /if \[\[ "\$\{current_head_sha\}" != "\$\{EXPECTED_HEAD_SHA\}" \]\]; then/u);
   assert.match(source, /convertPullRequestToDraft/u);
@@ -216,6 +227,51 @@ test("draft reset executes only for an event-time ready receipt and current elig
   }), 1, "an unconfirmed GraphQL mutation must fail after exactly one write attempt");
 });
 
+test("draft reset resolves fork and same-repository heads without workflow-run PR associations", async () => {
+  const currentReadyPullRequest = {
+    draft: false,
+    head: { sha: "a".repeat(40) },
+    node_id: "PR_node",
+    state: "open",
+  };
+  for (const headRepository of ["cobuildwithus/murph", "contributor/murph"]) {
+    assert.equal(await runDraftResetScenario({
+      currentPullRequest: currentReadyPullRequest,
+      headRepository,
+      synchronizedWhileDraft: false,
+    }), 1, `${headRepository} must resolve to exactly one draft conversion`);
+  }
+});
+
+test("draft reset rejects missing, ambiguous, or mismatched head candidates before mutation", async () => {
+  const sha = "a".repeat(40);
+  const headRepository = "contributor/murph";
+  const candidate = associatedPullRequest({ headRepository, sha });
+  const currentPullRequest = {
+    draft: false,
+    head: { sha },
+    node_id: "PR_node",
+    state: "open",
+  };
+  for (const associatedPullRequests of [
+    [],
+    [candidate, { ...candidate, number: 43 }],
+    [{ ...candidate, base: { repo: { full_name: "outside/repository" } } }],
+    [{ ...candidate, head: { ...candidate.head, repo: { full_name: "outside/fork" } } }],
+    [{ ...candidate, head: { ...candidate.head, ref: "other-branch" } }],
+    [{ ...candidate, head: { ...candidate.head, sha: "b".repeat(40) } }],
+    [{ ...candidate, state: "closed" }],
+  ]) {
+    assert.equal(await runDraftResetScenario({
+      associatedPullRequests,
+      currentPullRequest,
+      expectSuccess: false,
+      headRepository,
+      synchronizedWhileDraft: false,
+    }), 0);
+  }
+});
+
 test("repository-created pull requests remain draft-first", async () => {
   const frog = await readFile(path.join(REPO_ROOT, "scripts", "frog-autofix.ts"), "utf8");
   const createCalls = [...frog.matchAll(/"pr",\n\s+"create",(?<args>[\s\S]*?)\n\s+\],/gu)];
@@ -265,8 +321,12 @@ function extractWorkflowStepScript(source, stepName) {
 }
 
 async function runDraftResetScenario({
+  associatedPullRequests,
   confirmMutation = true,
   currentPullRequest,
+  expectSuccess = confirmMutation,
+  headBranch = "feature",
+  headRepository = "cobuildwithus/murph",
   synchronizedWhileDraft,
 }) {
   const observer = await workflow("pr-head-change.yml");
@@ -278,6 +338,12 @@ async function runDraftResetScenario({
   inspectDraftReset(controller);
   if (observerConclusion !== "success") return 0;
 
+  const candidates = associatedPullRequests ?? [associatedPullRequest({
+    headBranch,
+    headRepository,
+    sha: "a".repeat(40),
+  })];
+
   const tempDir = await mkdtemp(path.join(tmpdir(), "pr-draft-reset-proof-"));
   const capturePath = path.join(tempDir, "graphql.calls");
   try {
@@ -285,6 +351,9 @@ async function runDraftResetScenario({
 set -euo pipefail
 [[ "$1" == api ]]
 case "$2" in
+  --paginate)
+    printf '%s\n' "\${GH_ASSOCIATED_JSON}"
+    ;;
   repos/*/pulls/*)
     printf '%s\n' "\${GH_PR_JSON}"
     ;;
@@ -307,6 +376,7 @@ esac
       env: {
         ...process.env,
         EXPECTED_HEAD_SHA: "a".repeat(40),
+        GH_ASSOCIATED_JSON: JSON.stringify([candidates]),
         GH_MUTATION_CAPTURE: capturePath,
         GH_MUTATION_JSON: JSON.stringify({
           data: {
@@ -318,14 +388,15 @@ esac
         GH_PR_JSON: JSON.stringify(currentPullRequest),
         GH_TOKEN: "synthetic-token",
         GITHUB_REPOSITORY: "cobuildwithus/murph",
+        HEAD_BRANCH: headBranch,
+        HEAD_REPOSITORY: headRepository,
         PATH: `${tempDir}:${process.env.PATH ?? ""}`,
-        PR_NUMBER: "42",
       },
     });
-    if (confirmMutation) {
+    if (expectSuccess) {
       assert.equal(result.status, 0, result.stderr);
     } else {
-      assert.notEqual(result.status, 0, "an unconfirmed mutation must fail closed");
+      assert.notEqual(result.status, 0, "the controller must fail closed");
     }
     const capture = await readFile(capturePath, "utf8").catch((error) => {
       if (error?.code === "ENOENT") return "";
@@ -335,4 +406,21 @@ esac
   } finally {
     await rm(tempDir, { force: true, recursive: true });
   }
+}
+
+function associatedPullRequest({
+  headBranch = "feature",
+  headRepository = "cobuildwithus/murph",
+  sha = "a".repeat(40),
+} = {}) {
+  return {
+    base: { repo: { full_name: "cobuildwithus/murph" } },
+    head: {
+      ref: headBranch,
+      repo: { full_name: headRepository },
+      sha,
+    },
+    number: 42,
+    state: "open",
+  };
 }

@@ -110,6 +110,13 @@ Updated: 2026-08-21
   retain commit status as the one delivery surface and Repo Hygiene as the one
   retry owner, and enforce the provider bound in the existing shell tests. Add
   no new owner, queue, state, or recovery surface.
+- Accept the final round-three fork finding: GitHub may omit
+  `workflow_run.pull_requests` for a fork synchronize receipt, which bypasses
+  the only ready-PR return-to-draft path. Resolve exactly one open target PR
+  from the trusted workflow-run head repository, branch, and SHA, then reuse
+  the existing current-state, exact-head, and sole GraphQL mutation checks.
+  Reject missing, ambiguous, or mismatched candidates before mutation; add no
+  second controller, mutation owner, queue, or persisted state.
 
 ## Verification
 

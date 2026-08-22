@@ -11,15 +11,16 @@ permissions:
 jobs:
   return-to-draft:
     name: Return synchronized pull request to draft
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Convert the exact synchronized head to draft
         env:
-          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -27,8 +28,37 @@ jobs:
             echo "::error::Head-change receipt did not expose an exact PR head SHA."
             exit 1
           }
+          [[ "${HEAD_REPOSITORY}" =~ ^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$ ]] || {
+            echo "::error::Head-change receipt did not expose a valid head repository."
+            exit 1
+          }
+          [[ -n "${HEAD_BRANCH}" && ${#HEAD_BRANCH} -le 255 && "${HEAD_BRANCH}" != *$'\n'* && "${HEAD_BRANCH}" != *$'\r'* ]] || {
+            echo "::error::Head-change receipt did not expose a valid head branch."
+            exit 1
+          }
+
+          candidates="$(gh api --paginate --slurp \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${HEAD_REPOSITORY}/commits/${EXPECTED_HEAD_SHA}/pulls" | jq -c \
+            --arg base_repository "${GITHUB_REPOSITORY}" \
+            --arg head_branch "${HEAD_BRANCH}" \
+            --arg head_repository "${HEAD_REPOSITORY}" \
+            --arg head_sha "${EXPECTED_HEAD_SHA}" \
+            '[.[][] | select(
+              .state == "open" and
+              .base.repo.full_name == $base_repository and
+              .head.repo.full_name == $head_repository and
+              .head.ref == $head_branch and
+              .head.sha == $head_sha
+            )]')"
+          candidate_count="$(jq -r 'length' <<<"${candidates}")"
+          if [[ "${candidate_count}" != 1 ]]; then
+            echo "::error::Expected one open pull request for the exact workflow-run head; found ${candidate_count}."
+            exit 1
+          fi
+          PR_NUMBER="$(jq -r '.[0].number // empty' <<<"${candidates}")"
           [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]] || {
-            echo "::error::Head-change receipt did not expose a valid PR number."
+            echo "::error::GitHub did not return a valid pull request number."
             exit 1
           }
 

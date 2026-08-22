@@ -469,12 +469,21 @@ function isAllowedPrHeadDraftResetHandoff(
     && Object.keys(permissions).join(',') === 'pull-requests'
     && permissions['pull-requests'] === 'write'
     && resetJob.permissions === undefined
-    && resetJob.if === "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
+    && resetJob.if === "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}"
     && resetStep.name === 'Convert the exact synchronized head to draft'
     && resetStep.shell === 'bash'
-    && resetStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.pull_requests[0].head.sha }}'
+    && resetStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'
     && resetStep.env.GH_TOKEN === '${{ github.token }}'
-    && resetStep.env.PR_NUMBER === '${{ github.event.workflow_run.pull_requests[0].number }}'
+    && resetStep.env.HEAD_BRANCH === '${{ github.event.workflow_run.head_branch }}'
+    && resetStep.env.HEAD_REPOSITORY === '${{ github.event.workflow_run.head_repository.full_name }}'
+    && !workflow.includes('github.event.workflow_run.pull_requests[0]')
+    && resetStep.run.includes('repos/${HEAD_REPOSITORY}/commits/${EXPECTED_HEAD_SHA}/pulls')
+    && resetStep.run.includes('if [[ "${candidate_count}" != 1 ]]; then')
+    && resetStep.run.includes('.base.repo.full_name == $base_repository')
+    && resetStep.run.includes('.head.repo.full_name == $head_repository')
+    && resetStep.run.includes('.head.ref == $head_branch')
+    && resetStep.run.includes('.head.sha == $head_sha')
+    && resetStep.run.includes('.state == "open"')
     && resetStep.run.includes('gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"')
     && resetStep.run.includes('if [[ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then')
     && resetStep.run.includes('if [[ "${state}" != open ]]; then')
