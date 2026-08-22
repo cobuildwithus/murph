@@ -41,6 +41,7 @@ import {
   summarizeHostedTelegramWebhook,
 } from "./telegram";
 import {
+  buildHostedLinqFirstContactAdmissionRequest,
   HOSTED_LINQ_MESSAGE_EDIT_MAX_SOURCE_ROWS,
   planHostedLinqMessageEditedWebhook,
   planHostedOnboardingLinqWebhook,
@@ -126,6 +127,11 @@ import {
   tryHostedLinqFirstContactAdmissionDeterministicDecision,
   type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
+import {
+  completeHostedLinqInstantFirstTurn,
+  startHostedLinqInstantFirstTurnGeneration,
+  type HostedLinqInstantFirstTurnGeneration,
+} from "./linq-instant-first-turn";
 import {
   ensureHostedLinqInstantStartStarterUsageEnrollment,
   runHostedLinqInstantStartDeferredActivationWakeBestEffort,
@@ -574,6 +580,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     const firstContactAdmissionMode = readHostedLinqFirstContactAdmissionMode();
     const requireFirstContactAdmission = firstContactAdmissionMode === "enforce";
     let firstContactAdmissionClassified = false;
+    let instantFirstTurnGeneration:
+      Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
     try {
       const shouldReuseRecordedFirstContactAdmission =
         planningEvent.event_type === "message.received"
@@ -592,6 +600,41 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
+      const startInstantFirstTurnGeneration = (memberId: string): void => {
+        if (
+          instantFirstTurnGeneration
+          || firstContactAdmissionDecision?.kind !== "allow"
+          || firstContactAdmissionDecision.source !== "model"
+          || planningEvent.event_type !== "message.received"
+          || !isHostedLinqInstantStartEventCandidate({
+            event: requireHostedLinqMessageReceivedEvent(planningEvent),
+            phonePrefixes:
+              getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
+          })
+        ) {
+          return;
+        }
+        const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+        if (!context.participantContact) {
+          return;
+        }
+        const generation = startHostedLinqInstantFirstTurnGeneration({
+          memberId,
+          prisma,
+          request: buildHostedLinqFirstContactAdmissionRequest({
+            context,
+            event: planningEvent,
+            participantContact: context.participantContact,
+          }),
+          ...(input.signal ? { signal: input.signal } : {}),
+        });
+        // Enrollment or later planning can still choose the ordinary signup
+        // path. Observe a rejected speculative generation even when there is
+        // then no active-member handoff to await it; the original promise is
+        // retained so the eligible path still receives the exact error.
+        void generation.catch(() => undefined);
+        instantFirstTurnGeneration = generation;
+      };
       let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = async (instantStartAllowed = true) => {
         let reusableDirectCryptoDomainRoots: {
@@ -820,6 +863,11 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.instantStartEnrollment) {
         const instantStartEnrollment = plan.instantStartEnrollment;
+        // Start the tool-free Luna turn as soon as the exact model-source
+        // admission has produced a member target. Enrollment and container
+        // prewarm continue in parallel; delivery still waits for active access
+        // and the canonical inbound mailbox append below.
+        startInstantFirstTurnGeneration(instantStartEnrollment.memberId);
         // The member row is committed, so show feedback immediately while
         // enrollment and the cold runtime path continue. This hint carries no
         // authority and has no effect on the reply path.
@@ -883,6 +931,13 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         throw new Error(
           "Hosted Linq instant-start enrollment remained unresolved after fallback.",
         );
+      }
+      const activeWakeHandoff = plan.wakeHandoffs?.[0];
+      if (activeWakeHandoff) {
+        // Exact-event webhook recovery can arrive after enrollment already
+        // committed, so it no longer sees the enrollment plan above. Reusing
+        // the same Luna idempotency key here recovers that accepted first turn.
+        startInstantFirstTurnGeneration(activeWakeHandoff.userId);
       }
     } catch (error) {
       // A recognized home-route owner whose permanent route no longer matches
@@ -1009,14 +1064,53 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       }
     }
 
+    responseReason = plan.response.reason ?? null;
+    let wakeHandoff = plan.wakeHandoffs?.[0];
+    if (
+      wakeHandoff
+      && instantFirstTurnGeneration
+      && planningEvent.event_type === "message.received"
+    ) {
+      const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+      if (
+        context.participantContact
+        && context.recipientPhoneNumber
+      ) {
+        try {
+          const instantFirstTurn = await completeHostedLinqInstantFirstTurn({
+            generation: await instantFirstTurnGeneration,
+            inboundMessageId: context.summary.messageId,
+            participantContact: context.participantContact,
+            prisma,
+            recipientPhoneNumber: context.recipientPhoneNumber,
+            service: context.messageEvent.data.service ?? null,
+            wakeHandoff,
+          });
+          if (instantFirstTurn.kind === "accepted") {
+            wakeHandoff = instantFirstTurn.wakeHandoff;
+          }
+        } catch (error) {
+          if (
+            isHostedOnboardingError(error)
+            && error.code === "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY"
+          ) {
+            // The conversation checkpoint will import activation as well once
+            // the exact provider delivery is reconciled. Signaling activation
+            // alone here could let the runtime answer the same inbound while
+            // the Luna send is still ambiguous.
+            pendingInstantStartActivationWake = null;
+          }
+          throw error;
+        }
+      }
+    }
+
     scheduleHostedLinqProviderEventIngestionBestEffort({
       event: providerEvent,
       prisma,
       scheduleAfterResponse: input.scheduleAfterResponse,
     });
 
-    responseReason = plan.response.reason ?? null;
-    const wakeHandoff = plan.wakeHandoffs?.[0];
     const confirmationDeadlineMs = createHostedPostCommitDeadline(undefined);
     const wakeHandoffResult = await (async () => {
       try {

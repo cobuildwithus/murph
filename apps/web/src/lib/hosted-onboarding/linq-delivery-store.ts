@@ -52,6 +52,8 @@ const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
   "provider_dispatch_started";
 export const HOSTED_LINQ_RICH_LINK_PARTIAL_DELIVERY_FAILURE_CODE =
   "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY";
+export const HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE =
+  "instant_first_turn_v1";
 type HostedLinqDeliveryProviderDispatchData = {
   attemptedAt: Date;
   failedAt: null;
@@ -3355,6 +3357,7 @@ function isHostedLinqPinnedTargetDeliveryTemplate(
   template: string | null | undefined,
 ): boolean {
   return isHostedLinqInviteSignupDeliveryTemplate(template)
+    || template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
     || template === HOSTED_LINQ_GROUP_LINE_RECOVERY_TEMPLATE
     || template === HOSTED_LINQ_GROUP_SETUP_TEMPLATE;
 }

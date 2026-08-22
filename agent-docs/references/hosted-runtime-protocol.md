@@ -1535,10 +1535,21 @@ does not select a mailbox owner, create a write fence, wait for health
 readiness, or invoke workspace work. Withdrawal and account deletion consume
 the reserved exact target, and `destroyInstance()` supersedes an in-progress
 hint before stopping that container. A denied admission starts nothing. The
-active-member replan durably
-appends the original conversation item and Web awaits that conversation-mailbox
-Temporal signal; only then may the ordinary Linq direct ensure start and own
-readiness plus all runtime authority. The shell hint does not read the persisted
+  active-member replan durably
+appends the original conversation item. For an exact model-approved instant
+start, Web may already have a bounded tool-free Luna result generated beside
+enrollment. A deferred or unavailable result leaves the original conversation
+checkpoint unchanged. An accepted result instead passes through the existing
+Linq delivery ledger, then Web atomically appends its ordinary self-authored
+conversation row, stamps the original inbound and that outbound row consumed,
+clears the encrypted pending body, and substitutes the outbound checkpoint for
+the handoff. Web awaits that conversation-mailbox Temporal signal; only then
+may the ordinary Linq direct ensure start and own readiness plus all runtime
+authority. The runtime imports both consumed rows as context with null reply
+targets, so the first exchange is available to later normal turns without
+answering the original inbound again. An ambiguous provider outcome starts no
+runtime wake and retains the exact encrypted reply for same-event recovery. The
+shell hint does not read the persisted
 container state; it delegates the already-running check and concurrent-start
 coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.
 Authoritative readiness aborts an in-progress hint before entering the container

@@ -4115,7 +4115,7 @@ function buildFirstContactAdmissionRequiredPlan(input: {
   };
 }
 
-function buildHostedLinqFirstContactAdmissionRequest(input: {
+export function buildHostedLinqFirstContactAdmissionRequest(input: {
   context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
   event: HostedLinqWebhookEvent;
   participantContact: HostedLinqParticipantContact;

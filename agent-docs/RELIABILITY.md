@@ -779,6 +779,28 @@ Last verified: 2026-08-20
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
+  Once the exact persisted admission is a model-source allow, Web may run one
+  bounded tool-free Luna generation beside enrollment and shell prewarm. The
+  active-member replan still owns route promotion, inbound accounting, and the
+  canonical inbound mailbox append before any generated reply can be sent.
+  A reply claim extends the existing `HostedLinqDelivery` row with the exact
+  encrypted body in the same short database transaction that claims provider
+  dispatch. Linq receives the stable event-derived idempotency key. An
+  ambiguous or retryable send retains that ciphertext, suppresses both the
+  conversation and deferred activation wakes, and replays only the same body;
+  it never regenerates the reply. A definitive pre-acceptance rejection clears
+  the payload and returns to the ordinary runtime. After provider acceptance,
+  one short transaction records the delivery milestone, appends the ordinary
+  self-authored Linq conversation envelope, stamps both that row and the exact
+  inbound row consumed, and clears the encrypted delivery payload. The runtime
+  is then signaled from the consumed outbound checkpoint, so mailbox replay
+  imports both rows as context with null reply targets and the next member
+  message continues through the normal runtime without a duplicate first
+  response. Generation timeout, unavailable configuration, unsafe output, or a
+  model `defer` leaves the existing inbound runtime path unchanged. This adds no
+  second queue, transcript store, workflow kind, or runtime state owner; all
+  database work remains exact-event and single-row rather than collection
+  fanout.
 - Linq signup-link terminal failures recompute suppression under the existing
   member-row lock without reading delivery history into application memory.
   One scalar statement checks only the exact five source references for the

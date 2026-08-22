@@ -77,6 +77,7 @@ const mocks = vi.hoisted(() => {
     claimHostedLinqQuotaReplyNotice: vi.fn(),
     markHostedLinqOnboardingLinkNoticeSent: vi.fn(),
     classifyHostedLinqFirstContactAdmission: vi.fn(),
+    completeHostedLinqInstantFirstTurn: vi.fn(),
     ensureHostedLinqInstantStartStarterUsageEnrollment: vi.fn(),
     runHostedLinqInstantStartDeferredActivationWakeBestEffort: vi.fn(),
     releaseHostedLinqOnboardingLinkNoticeClaim: vi.fn(),
@@ -148,6 +149,7 @@ const mocks = vi.hoisted(() => {
     createHostedLinqChat: vi.fn(),
     sendHostedLinqReadReceipt: vi.fn(),
     startHostedLinqChatTypingIndicator: vi.fn(),
+    startHostedLinqInstantFirstTurnGeneration: vi.fn(),
     stopHostedLinqChatTypingIndicator: vi.fn(),
     shareMurphHostedLinqNativeContactCardToChat: vi.fn().mockResolvedValue({
       status: "sent",
@@ -377,6 +379,13 @@ vi.mock("@/src/lib/hosted-onboarding/linq-first-contact-admission", async () => 
       mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode,
   };
 });
+
+vi.mock("@/src/lib/hosted-onboarding/linq-instant-first-turn", () => ({
+  completeHostedLinqInstantFirstTurn:
+    mocks.completeHostedLinqInstantFirstTurn,
+  startHostedLinqInstantFirstTurnGeneration:
+    mocks.startHostedLinqInstantFirstTurnGeneration,
+}));
 
 vi.mock("@/src/lib/hosted-onboarding/starter-usage-enrollment-service", async () => {
   const actual = await vi.importActual<
@@ -1092,6 +1101,12 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       confidence: 0.9,
       kind: "allow",
       source: "model",
+    });
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValue({
+      kind: "unavailable",
+    });
+    mocks.completeHostedLinqInstantFirstTurn.mockResolvedValue({
+      kind: "fallback",
     });
     mocks.ensureHostedLinqInstantStartStarterUsageEnrollment.mockResolvedValue({
       deferredActivationWake: {
@@ -7918,7 +7933,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("starts only the owner-neutral shell before enrollment and keeps runtime authority after the conversation signal", async () => {
+  it("starts Luna beside shell prewarm and wakes the runtime from the completed first turn", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_prewarm";
     const eventId = "evt_instant_start_prewarm";
@@ -8059,6 +8074,26 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       .mockImplementationOnce(async () => {
         callOrder.push("activation-continuation");
       });
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+      kind: "reply",
+      message: "Hey! What would you like help with?",
+      persisted: false,
+      usage: null,
+    });
+    mocks.completeHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+      kind: "accepted",
+      wakeHandoff: {
+        eventId,
+        linqChatId: "chat_123",
+        mailboxItemId: "mailbox_instant_first_turn_outbound",
+        source: "linq",
+        userId: memberId,
+        wakeMailboxCheckpoint: {
+          lane: "conversation",
+          laneSeq: "2",
+        },
+      },
+    });
 
     const response = await handleHostedOnboardingLinqWebhook({
       prisma,
@@ -8107,7 +8142,10 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       source: "linq-instant-start",
       userId: memberId,
     });
-    expect(ensureRuntimeProcessing).not.toHaveBeenCalled();
+    expect(ensureRuntimeProcessing).toHaveBeenCalledOnce();
+    expect(ensureRuntimeProcessing).toHaveBeenCalledWith(expect.objectContaining({
+      userId: memberId,
+    }));
     expect(mocks.startHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
       chatId: "chat_123",
       timeoutMs: 2_500,
@@ -8120,6 +8158,37 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         },
         prisma,
       });
+    expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
+      memberId,
+      prisma,
+      request: expect.objectContaining({
+        eventId,
+        text: "Hey Murph",
+      }),
+    });
+    expect(mocks.completeHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      generation: expect.objectContaining({ kind: "reply" }),
+      inboundMessageId: "msg_123",
+      participantContact: expect.objectContaining({ kind: "phone" }),
+      prisma,
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: expect.objectContaining({
+        eventId,
+        mailboxItemId: `mailbox_${eventId}`,
+        userId: memberId,
+      }),
+    });
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: memberId,
+      knownCheckpoint: {
+        lane: "conversation",
+        laneSeq: "2",
+        userId: memberId,
+      },
+      mailboxItemId: "mailbox_instant_first_turn_outbound",
+    });
 
     typingResult.resolve({ ok: false, status: 503 });
     await typingResult.promise;
@@ -8423,7 +8492,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
-  it("clears the typing hint once when the wake handoff fails after enrollment", async () => {
+  it("withholds every runtime wake while the instant first reply is ambiguous", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     const memberId = "member_instant_start_handoff_fail";
     const eventId = "evt_instant_start_handoff_fail";
@@ -8530,8 +8599,19 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         };
       },
     );
-    mocks.signalHostedMailboxAppendRuntime.mockRejectedValueOnce(
-      new Error("temporal unavailable"),
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+      kind: "reply",
+      message: "Hey! What would you like help with?",
+      persisted: false,
+      usage: null,
+    });
+    mocks.completeHostedLinqInstantFirstTurn.mockRejectedValueOnce(
+      hostedOnboardingError({
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+        httpStatus: 503,
+        message: "The provider result is still ambiguous.",
+        retryable: true,
+      }),
     );
     const afterResponseTasks: Array<() => Promise<void>> = [];
 
@@ -8559,16 +8639,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       },
       signature: null,
       timestamp: null,
-    })).rejects.toThrow("temporal unavailable");
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+      retryable: true,
+    });
 
     expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
-      .toHaveBeenCalledWith({
-        continuation: {
-          hostedExecutionEventId: "member.activated:instant-start",
-          memberId,
-        },
-        prisma,
-      });
+      .not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.stopHostedLinqChatTypingIndicator).not.toHaveBeenCalled();
     await Promise.all(afterResponseTasks.map((task) => task()));
     expect(mocks.stopHostedLinqChatTypingIndicator).toHaveBeenCalledWith({
