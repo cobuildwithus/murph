@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-22",
+  "order": 300,
+  "item": {
+    "id": "quicker-first-imessage-replies",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "A quicker first text from Murph",
+    "summary": "When you start Murph by texting, simple first messages can now get a faster reply while the full assistant starts in the background.",
+    "details": "Requests that need personal context, current information, tools, or health judgment still wait for the full assistant. Your next message continues with the first exchange in context.",
+    "relevanceTags": [
+      "assistant",
+      "imessage",
+      "performance"
+    ],
+    "sourcePullRequests": [
+      2173
+    ]
+  }
+}

@@ -97,16 +97,18 @@ was delivered.
   request at 339 tokens / 1,481 UTF-8 bytes at base and head. The new second,
   direct-only Luna request is 381 tokens / 1,634 bytes; group turns never enter
   this path. Temporary capture code and payloads were removed.
+- Public changelog fragment validation passes 7 tests, and the Web typecheck
+  passes with source PR 2173 included.
 - Required exact-head PR CI and preliminary Product UX, prompt, and coverage
   specialist review, plus the cross-cutting final ReviewGPT gate.
 
 ## State
 
-Active. Implementation and focused local proof are complete. The design reuses
+Active. Implementation, focused local proof, and changelog packaging are complete. The design reuses
 the existing delivery ledger as the only provider outbox, stores the exact
 pending body encrypted for ambiguous recovery, and represents the completed
-exchange as two ordinary consumed conversation rows. Changelog packaging,
-candidate review, exact-head gates, and completion remain.
+exchange as two ordinary consumed conversation rows. Candidate review,
+exact-head gates, and completion remain.
 
 ## Working Set
 
