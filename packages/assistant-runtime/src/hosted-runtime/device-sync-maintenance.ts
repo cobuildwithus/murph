@@ -18,6 +18,7 @@ import type {
 import type {
   DeviceSyncJobFailureDiagnostic,
   DeviceSyncJobFailureEventOrigin,
+  DeviceSyncJobRecord,
 } from "@murphai/device-syncd/types";
 import {
   resolveDeviceSyncStoreNextJobWakeAt,
@@ -99,6 +100,8 @@ const HOSTED_DEVICE_SYNC_YIELDED_RETRY_DELAY_MS = 30_000;
 const HOSTED_DEVICE_SYNC_JOB_FAILURE_DIAGNOSTIC_FALLBACK = "Hosted device-sync job failed.";
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_FILES = 25;
 const HOSTED_DEVICE_SYNC_DENSE_RAW_RETENTION_MAX_BYTES = 512 * 1024 * 1024;
+const HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT = HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT;
+const HOSTED_DEVICE_SYNC_QUEUE_READ_LIMIT = HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT + 1;
 type HostedDeviceSyncPassStage =
   | "completed"
   | "control_plane_reconcile"
@@ -127,6 +130,26 @@ type HostedDeviceSyncYieldReason =
   | HostedBackgroundMaintenanceCancellationReason
   | "unknown";
 
+type HostedDeviceSyncQueueKindCount = {
+  count: number;
+  jobKind: string;
+};
+
+type HostedDeviceSyncQueueSnapshot = {
+  jobCount: number;
+  jobCountTruncated: boolean;
+  jobKindCounts: HostedDeviceSyncQueueKindCount[];
+  maxJobAttempts: number | null;
+  oldestJobAgeMs: number | null;
+  queuedJobCount: number;
+  runningJobCount: number;
+};
+
+type HostedDeviceSyncPassQueueSnapshots = {
+  after: HostedDeviceSyncQueueSnapshot | null;
+  before: HostedDeviceSyncQueueSnapshot | null;
+};
+
 const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_MAX_ATTEMPTS_PER_PASS = 4;
 const HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_RETRY_DELAY_MS = 30_000;
 type HostedDeviceSyncMaintenanceStore = ReturnType<
@@ -141,6 +164,7 @@ export async function runHostedDeviceSyncPass(
   timeoutMs: number | null,
   options: {
     onProcessedJobs?: ((processedJobs: number) => void) | null;
+    onQueueSnapshots?: ((snapshots: HostedDeviceSyncPassQueueSnapshots) => void) | null;
     platformEnv?: Readonly<Record<string, string>>;
     runtimeLogPlatform?: Pick<HostedRuntimePlatform, "logPort"> | null;
     onStage?: ((stage: HostedDeviceSyncPassStage) => void) | null;
@@ -331,11 +355,32 @@ export async function runHostedDeviceSyncPass(
     }
 
     options.onStage?.("worker_drain");
-    processedJobs = await drainHostedDeviceSyncWorker({
-      accountId: wakeLocalAccountId,
-      service,
-      shouldYield,
-    });
+    const queueSnapshotBefore = options.onQueueSnapshots
+      ? readHostedDeviceSyncQueueSnapshot({
+          accountId: wakeLocalAccountId,
+          service,
+        })
+      : null;
+    try {
+      processedJobs = await drainHostedDeviceSyncWorker({
+        accountId: wakeLocalAccountId,
+        service,
+        shouldYield,
+      });
+    } finally {
+      const queueSnapshotAfter = options.onQueueSnapshots
+        ? readHostedDeviceSyncQueueSnapshot({
+            accountId: wakeLocalAccountId,
+            service,
+          })
+        : null;
+      if (queueSnapshotBefore || queueSnapshotAfter) {
+        options.onQueueSnapshots?.({
+          after: queueSnapshotAfter,
+          before: queueSnapshotBefore,
+        });
+      }
+    }
     options.onProcessedJobs?.(processedJobs);
     const completedImports = promoteHostedCompletedDirtyPayloadAcks({
       service,
@@ -923,6 +968,68 @@ async function drainHostedDeviceSyncWorker(input: {
   return processedJobs;
 }
 
+function readHostedDeviceSyncQueueSnapshot(input: {
+  accountId: string | null;
+  service: DeviceSyncService;
+}): HostedDeviceSyncQueueSnapshot | null {
+  if (!input.accountId) {
+    return null;
+  }
+
+  try {
+    const pendingJobs = requireHostedRuntimeDeviceSyncStore(input.service)
+      .listPendingJobsForAccount(
+        input.accountId,
+        HOSTED_DEVICE_SYNC_QUEUE_READ_LIMIT,
+      );
+    return buildHostedDeviceSyncQueueSnapshot(pendingJobs, Date.now());
+  } catch {
+    // Queue diagnostics must never become another device-sync failure mode.
+    return null;
+  }
+}
+
+function buildHostedDeviceSyncQueueSnapshot(
+  pendingJobs: readonly DeviceSyncJobRecord[],
+  nowMs: number,
+): HostedDeviceSyncQueueSnapshot {
+  const sampledJobs = pendingJobs.slice(0, HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT);
+  const jobKindCounts = new Map<string, number>();
+  let maxJobAttempts: number | null = null;
+  let oldestCreatedAtMs: number | null = null;
+  let queuedJobCount = 0;
+  let runningJobCount = 0;
+
+  for (const job of sampledJobs) {
+    const jobKind = toHostedRuntimeLogCode(job.kind);
+    jobKindCounts.set(jobKind, (jobKindCounts.get(jobKind) ?? 0) + 1);
+    maxJobAttempts = Math.max(maxJobAttempts ?? 0, job.attempts);
+    const createdAtMs = Date.parse(job.createdAt);
+    if (Number.isFinite(createdAtMs)) {
+      oldestCreatedAtMs = Math.min(oldestCreatedAtMs ?? createdAtMs, createdAtMs);
+    }
+    if (job.status === "queued") {
+      queuedJobCount += 1;
+    } else if (job.status === "running") {
+      runningJobCount += 1;
+    }
+  }
+
+  return {
+    jobCount: sampledJobs.length,
+    jobCountTruncated: pendingJobs.length > sampledJobs.length,
+    jobKindCounts: [...jobKindCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([jobKind, count]) => ({ count, jobKind })),
+    maxJobAttempts,
+    oldestJobAgeMs: oldestCreatedAtMs === null
+      ? null
+      : Math.max(0, nowMs - oldestCreatedAtMs),
+    queuedJobCount,
+    runningJobCount,
+  };
+}
+
 async function runHostedDeviceSyncDenseRawRetention(input: {
   deadlineMs?: number;
   platform: Pick<HostedRuntimePlatform, "logPort"> | null;
@@ -1135,6 +1242,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
   const startedAtMs = Date.now();
   let passStage: HostedDeviceSyncPassStage = "starting";
   let processedJobs = 0;
+  let queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null = null;
   let foregroundYieldObserved = false;
   const shouldYieldDeviceSync = input.shouldYieldDeviceSync
     ? () => {
@@ -1156,6 +1264,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome: null,
       passStage,
       processedJobs: 0,
+      queueSnapshots,
       result: null,
       startedAtMs,
       yieldReason: null,
@@ -1173,6 +1282,13 @@ export async function runHostedDeviceSyncWakeLane(input: {
           onProcessedJobs: (observedProcessedJobs) => {
             processedJobs = observedProcessedJobs;
           },
+          ...(input.runtimeLogPlatform?.logPort
+            ? {
+                onQueueSnapshots: (observedQueueSnapshots: HostedDeviceSyncPassQueueSnapshots) => {
+                  queueSnapshots = observedQueueSnapshots;
+                },
+              }
+            : {}),
           onStage: (stage) => {
             passStage = stage;
           },
@@ -1193,6 +1309,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
         outcome: "failed",
         passStage,
         processedJobs,
+        queueSnapshots,
         result: null,
         startedAtMs,
         yieldReason: cancellation.readReason(),
@@ -1238,6 +1355,7 @@ export async function runHostedDeviceSyncWakeLane(input: {
       outcome,
       passStage,
       processedJobs: deviceSyncResult.processedJobs,
+      queueSnapshots,
       result: metrics,
       startedAtMs,
       yieldReason,
@@ -1292,6 +1410,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
   outcome: HostedDeviceSyncPassOutcome | null;
   passStage: HostedDeviceSyncPassStage;
   processedJobs: number;
+  queueSnapshots: HostedDeviceSyncPassQueueSnapshots | null;
   result: HostedMaintenanceMetrics | null;
   startedAtMs: number;
   yieldReason: HostedDeviceSyncYieldReason | null;
@@ -1305,6 +1424,8 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
     : input.input.wake.kind === "runtime.timer"
     ? input.input.wake.triggerKind
     : "other";
+  const queueSnapshotBefore = input.queueSnapshots?.before ?? null;
+  const queueSnapshotAfter = input.queueSnapshots?.after ?? null;
   void writeHostedRuntimeLogBestEffort({
     entry: {
       ...buildHostedRuntimeLogContextFields(input.input.runtimeLogContext),
@@ -1323,6 +1444,31 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
         passStage: input.passStage,
         postCheckpointRecordPresent: input.result?.postCheckpointRecord != null,
         processedJobs: input.processedJobs,
+        ...(input.lifecycle === "finished"
+          ? {
+              pendingJobCountAfter: queueSnapshotAfter?.jobCount ?? null,
+              pendingJobCountAfterTruncated:
+                queueSnapshotAfter?.jobCountTruncated ?? null,
+              pendingJobCountBefore: queueSnapshotBefore?.jobCount ?? null,
+              pendingJobCountBeforeTruncated:
+                queueSnapshotBefore?.jobCountTruncated ?? null,
+              pendingJobKindCountsAfter: queueSnapshotAfter?.jobKindCounts ?? [],
+              pendingJobKindCountsBefore: queueSnapshotBefore?.jobKindCounts ?? [],
+              pendingJobMaxAttemptsAfter: queueSnapshotAfter?.maxJobAttempts ?? null,
+              pendingJobMaxAttemptsBefore: queueSnapshotBefore?.maxJobAttempts ?? null,
+              pendingJobOldestAgeMsAfter: queueSnapshotAfter?.oldestJobAgeMs ?? null,
+              pendingJobOldestAgeMsBefore: queueSnapshotBefore?.oldestJobAgeMs ?? null,
+              pendingJobQueueSampleLimit: HOSTED_DEVICE_SYNC_QUEUE_SAMPLE_LIMIT,
+              pendingQueuedJobCountAfter: queueSnapshotAfter?.queuedJobCount ?? null,
+              pendingQueuedJobCountBefore: queueSnapshotBefore?.queuedJobCount ?? null,
+              pendingRunningJobCountAfter: queueSnapshotAfter?.runningJobCount ?? null,
+              pendingRunningJobCountBefore: queueSnapshotBefore?.runningJobCount ?? null,
+              queueSnapshotAfterPresent: queueSnapshotAfter !== null,
+              queueSnapshotBeforePresent: queueSnapshotBefore !== null,
+              workerJobLimitReached:
+                input.processedJobs >= HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+            }
+          : {}),
         retainFollowUpWakeUntilCheckpoint:
           input.input.retainFollowUpWakeUntilCheckpoint === true,
         skipped: input.result?.deviceSyncSkipped ?? null,
