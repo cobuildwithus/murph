@@ -253,6 +253,27 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(config.manualAuthorizationAllowed).toBe(false);
   });
 
+  it("accepts a headless Garmin Kernel browser with a password", () => {
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+
+    expect(config).toMatchObject({
+      browserTransport: "kernel",
+      disclosureSourceName: "Garmin",
+      label: "Garmin",
+      manualAuthorizationAllowed: false,
+      source: "garmin",
+    });
+  });
+
   it("rejects Kernel without its exact authority and loopback CLI contract", () => {
     expect(() => createConfig({
       MURPH_E2E_PROVIDER_BROWSER: "kernel",
@@ -293,7 +314,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     });
   });
 
-  it("creates and tears down the exact owned Kernel browser and tunnel", async () => {
+  it("creates and tears down the exact owned Garmin Kernel browser and tunnel", async () => {
     const child = createKernelTunnelChild();
     const clearCookies = vi.fn(async () => undefined);
     const browser = {
@@ -303,10 +324,11 @@ describe("hosted-local Junction wearable browser authorization", () => {
     const config = createConfig({
       KERNEL_API_KEY: "kernel-test-key",
       MURPH_E2E_CONNECT_URL:
-        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
       MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
       MURPH_E2E_PROVIDER_BROWSER: "kernel",
       MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
       MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
     });
     const parentExitListenersBefore = process.listenerCount("exit");
@@ -340,11 +362,11 @@ describe("hosted-local Junction wearable browser authorization", () => {
     await closeHostedLocalJunctionBrowserSessionForTest(session, config);
 
     expect(kernelLifecycleMocks.ensureProfile).toHaveBeenCalledWith(
-      "murph-junction-whoop-canary",
+      "murph-junction-garmin-canary",
     );
     expect(kernelLifecycleMocks.createAutomationBrowser).toHaveBeenCalledWith({
       headless: true,
-      profileName: "murph-junction-whoop-canary",
+      profileName: "murph-junction-garmin-canary",
       saveChanges: true,
       timeoutSeconds: 90,
     });
@@ -689,6 +711,16 @@ describe("hosted-local Junction wearable browser authorization", () => {
       text: "GRANT",
       value: undefined,
     },
+    {
+      environment: {
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      },
+      providerUrl: "https://connect.garmin.com/oauth2Confirm",
+      text: "GRANT",
+      value: undefined,
+    },
   ])("does not broaden rendered fallback outside the WHOOP GRANT button", async ({
     environment,
     providerUrl,
@@ -806,6 +838,17 @@ describe("hosted-local Junction wearable browser authorization", () => {
       CI: undefined,
       MURPH_E2E_PROVIDER_HEADLESS: "1",
     }).manualAuthorizationAllowed).toBe(false);
+  });
+
+  it("requires a password for Garmin", () => {
+    expect(() => createConfig({
+      MURPH_E2E_CONNECT_URL:
+        "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_PROVIDER_PASSWORD: undefined,
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+    })).toThrow(
+      "Hosted-local Junction Garmin browser runner requires MURPH_E2E_PROVIDER_PASSWORD",
+    );
   });
 
   it("uses stable Chrome only for automated headed CI authorization", () => {

@@ -21,20 +21,22 @@ import {
 } from "./hosted-local-browser-process.ts";
 import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-challenge.ts";
 
+type WearableSource = "garmin" | "oura" | "whoop";
+
 interface BrowserConfig {
   browserChannel: "chrome" | undefined;
   browserTransport: "kernel" | "local";
-  disclosureSourceName: "Oura" | "Whoop";
+  disclosureSourceName: "Garmin" | "Oura" | "Whoop";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
   kernelApiKey: string | null;
   kernelCliPath: string | null;
-  label: "Oura" | "WHOOP";
+  label: "Garmin" | "Oura" | "WHOOP";
   manualAuthorizationAllowed: boolean;
   otp: string | null;
   password: string | null;
-  source: "oura" | "whoop";
+  source: WearableSource;
   startUrl: string;
   timeoutMs: number;
   webBaseUrl: string;
@@ -85,13 +87,13 @@ const TRUSTED_AUTHORIZATION_DOMAINS = [
   "tryvital.io",
 ] as const;
 const PROVIDER_AUTHORIZATION_DOMAINS = {
+  garmin: ["garmin.com"],
   oura: ["ouraring.com"],
   whoop: ["whoop.com"],
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
-const KERNEL_CANARY_PROFILE = "murph-junction-whoop-canary";
 const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
 const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
@@ -100,6 +102,8 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_WEBHOOK_SECRET",
   "KERNEL_API_KEY",
   "MURPH_E2E_CONNECT_URL",
+  "MURPH_E2E_GARMIN_EMAIL",
+  "MURPH_E2E_GARMIN_PASSWORD",
   "MURPH_E2E_HOSTED_SESSION_COOKIE",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
   "MURPH_E2E_KERNEL_CLI_PATH",
@@ -247,10 +251,11 @@ async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession
   }
   const tunnelPort = requireKernelTunnelPort(config.webBaseUrl);
   const kernelClient = new KernelComputerClient({ apiKey });
-  await kernelClient.ensureProfile(KERNEL_CANARY_PROFILE);
+  const kernelProfile = `murph-junction-${config.source}-canary`;
+  await kernelClient.ensureProfile(kernelProfile);
   const kernelBrowser = await kernelClient.createAutomationBrowser({
     headless: config.headless,
-    profileName: KERNEL_CANARY_PROFILE,
+    profileName: kernelProfile,
     saveChanges: true,
     timeoutSeconds: Math.ceil((config.timeoutMs + 60_000) / 1_000),
   });
@@ -908,7 +913,11 @@ async function disconnectJunctionAccount(
 
 function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
-  const label = source === "oura" ? "Oura" : "WHOOP";
+  const label = source === "garmin"
+    ? "Garmin"
+    : source === "oura"
+    ? "Oura"
+    : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
   const browserTransport = requireBrowserTransport(
     environment.MURPH_E2E_PROVIDER_BROWSER,
@@ -917,9 +926,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
   const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
-  if (source === "whoop" && !password) {
+  if ((source === "garmin" || source === "whoop") && !password) {
     throw new Error(
-      "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
+      `Hosted-local Junction ${label} browser runner requires MURPH_E2E_PROVIDER_PASSWORD.`,
     );
   }
   if (source === "oura" && !manualAuthorizationAllowed && !otp) {
@@ -927,9 +936,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
-  if (browserTransport === "kernel" && (source !== "whoop" || !headless)) {
+  if (browserTransport === "kernel" && (source === "oura" || !headless)) {
     throw new Error(
-      "Kernel browser transport is reserved for the unattended headless WHOOP canary.",
+      "Kernel browser transport is reserved for unattended headless Garmin or WHOOP canaries.",
     );
   }
   const kernelApiKey = browserTransport === "kernel"
@@ -982,7 +991,11 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       ? "chrome"
       : undefined,
     browserTransport,
-    disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
+    disclosureSourceName: source === "garmin"
+      ? "Garmin"
+      : source === "oura"
+      ? "Oura"
+      : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
       "MURPH_E2E_PROVIDER_EMAIL",
@@ -1053,12 +1066,12 @@ function assertTrustedAuthorizationUrl(
   }
 }
 
-function requireWearableSource(value: string | undefined): "oura" | "whoop" {
+function requireWearableSource(value: string | undefined): WearableSource {
   const source = value?.trim();
-  if (source === "oura" || source === "whoop") {
+  if (source === "garmin" || source === "oura" || source === "whoop") {
     return source;
   }
-  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be oura or whoop.");
+  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be garmin, oura, or whoop.");
 }
 
 function requireBrowserTransport(
