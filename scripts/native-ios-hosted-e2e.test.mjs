@@ -224,7 +224,7 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(
     workflow,
-    /Retry only xcodebuild_failed with node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\} --failure-code xcodebuild_failed; native reruns do not enter the live queue\./u,
+    /Retry: node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\} --failure-code xcodebuild_failed/u,
   );
   assert.doesNotMatch(
     workflow,
@@ -284,9 +284,10 @@ test("commit status descriptions distinguish real-run proof from every non-run p
     "utf8",
   );
   const script = extractWorkflowStepScript(workflow, "Publish stable commit status");
+  const prNumber = String(Number.MAX_SAFE_INTEGER);
   const baseEnv = {
     LIVE_RESULT: "skipped",
-    PR_NUMBER: "42",
+    PR_NUMBER: prNumber,
     RUN_ATTEMPT: "1",
     SELECT_RESULT: "success",
     SELECTED: "true",
@@ -297,7 +298,7 @@ test("commit status descriptions distinguish real-run proof from every non-run p
     [
       { RUN_ATTEMPT: "2" },
       "failure",
-      "Retry only xcodebuild_failed with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42 --failure-code xcodebuild_failed; native reruns do not enter the live queue.",
+      `Retry: node scripts/native-ios-hosted-e2e-retry.mjs --pr ${prNumber} --failure-code xcodebuild_failed`,
     ],
     [
       { SELECT_RESULT: "failure" },
@@ -356,7 +357,10 @@ printf '%s\n' "$@" > "$GH_CAPTURE"
       assert.equal(result.status, expectedState === "success" ? 0 : 1, result.stderr);
       const ghArgs = (await readFile(capturePath, "utf8")).trimEnd().split("\n");
       assert.ok(ghArgs.includes(`state=${expectedState}`));
-      assert.ok(ghArgs.includes(`description=${expectedDescription}`));
+      const description = ghArgs.find((argument) => argument.startsWith("description="))
+        ?.slice("description=".length);
+      assert.equal(description, expectedDescription);
+      assert.ok(description.length <= 140, `commit status description is ${description.length} characters`);
     }
   } finally {
     await rm(tempDir, { recursive: true, force: true });

@@ -104,6 +104,12 @@ Updated: 2026-08-21
 - Accept the shared-retry finding: keep one Repo Hygiene retry owner and add the
   explicit `android_workflow_rerun` infrastructure reason used by the current
   Android status instead of making Android operators claim an iOS failure.
+- Round-two anomaly retrospective: the revised Android recovery command moved
+  the same delivery failure from the shared parser to GitHub's bounded commit
+  status field. Shrink both status descriptions to the exact accepted commands,
+  retain commit status as the one delivery surface and Repo Hygiene as the one
+  retry owner, and enforce the provider bound in the existing shell tests. Add
+  no new owner, queue, state, or recovery surface.
 
 ## Verification
 

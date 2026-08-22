@@ -229,7 +229,7 @@ jobs:
           state=failure
           description='This controller run did not execute real native iOS hosted E2E: selection failed.'
           if [[ "${RUN_ATTEMPT}" != 1 ]]; then
-            description="Retry only xcodebuild_failed with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER} --failure-code xcodebuild_failed; native reruns do not enter the live queue."
+            description="Retry: node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER} --failure-code xcodebuild_failed"
           elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
             description='This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then
