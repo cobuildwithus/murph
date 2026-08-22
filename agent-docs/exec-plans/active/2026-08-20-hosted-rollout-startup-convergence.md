@@ -116,15 +116,15 @@ That premise is now invalidated. The corrective decision is:
 ## State
 
 Active. ReviewGPT round 6 returned one material startup-ownership finding, and
-its smallest single-record correction is implemented locally. The focused
-runner-container suite passes all 208 tests, including the production-faithful
-health-timeout and later warm-recycle proof, and the Cloudflare package
-typecheck passes. The previously recorded five-file Cloudflare gate, focused
-web orchestration tests, hosted-execution package suite/typecheck, and
-diff-aware verification remain the last broad evidence until current `main` is
-merged. Current-base reconciliation, the affected focused gates, exact-head CI,
-and substantive ReviewGPT round 7 remain. The PR remains draft and no
-production action is authorized.
+its smallest single-record correction is implemented. Current `main` merged
+cleanly without manual conflict resolution. The merge exposed one synthetic
+preemption fixture that changed `lastChange` on every read and omitted the real
+`onStart` hook; the fixture now uses one stable platform timestamp and the
+existing lifecycle callback, with no production-code expansion. The merged
+head passes 423 focused Cloudflare tests, 550 hosted-execution tests, 31 focused
+Web orchestration tests, and the Cloudflare and hosted-execution typechecks.
+Exact-head CI and substantive ReviewGPT round 7 remain. The PR remains draft
+and no production action is authorized.
 
 ## Working Set
 

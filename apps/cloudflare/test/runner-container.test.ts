@@ -5367,12 +5367,15 @@ describe("RunnerContainer", () => {
   it("aborts a preempted workspace invocation while cold-starting", async () => {
     const startAbortSignal = createDeferred<AbortSignal>();
     let status: "running" | "stopped" = "stopped";
+    let lastChange = Date.now();
+    let container: RunnerContainer;
     const getState = vi.fn(async () => ({
-      lastChange: Date.now(),
+      lastChange,
       status,
     }));
     const destroy = vi.fn(async () => {
       status = "stopped";
+      lastChange = Date.now();
     });
     const startAndWaitForPorts = vi.fn(async (options?: {
       cancellationOptions?: {
@@ -5380,6 +5383,8 @@ describe("RunnerContainer", () => {
       };
     }) => {
       status = "running";
+      lastChange = Date.now();
+      container.onStart();
       const signal = options?.cancellationOptions?.abort;
       if (!(signal instanceof AbortSignal)) {
         throw new Error("Expected cold start to receive an abort signal.");
@@ -5393,11 +5398,11 @@ describe("RunnerContainer", () => {
         }, { once: true });
       });
     });
-    const { container } = createContainerDouble({
+    ({ container } = createContainerDouble({
       destroy,
       getState,
       startAndWaitForPorts,
-    });
+    }));
     const request = createRunnerRequest("evt_preempt_during_cold_start");
 
     const invokeResultPromise = container.invoke({
