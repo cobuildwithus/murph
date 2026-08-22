@@ -276,6 +276,20 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     expect(
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
+        workflow.replace('      actions: read\n', ''),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('      actions: read', '      actions: none'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
         workflow.replace(
           '      pull-requests: read\n    steps:',
           '      pull-requests: read\n      statuses: write\n    steps:',
@@ -479,7 +493,7 @@ function isAllowedTemporalCompatibilityHandoff(
     && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
     && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
     && compatibility.environment === 'temporal-compatibility'
-    && hasExactReadOnlyPrLivePermissions(compatibility.permissions)
+    && hasTemporalCompatibilityPermissions(compatibility.permissions)
     && hasEarlyExactPrHeadRevalidation(
       compatibility.steps,
       'Checkout trusted controller',
@@ -533,6 +547,17 @@ function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
   }
 
   return Object.keys(value).sort().join(',') === 'contents,pull-requests'
+    && value.contents === 'read'
+    && value['pull-requests'] === 'read'
+}
+
+function hasTemporalCompatibilityPermissions(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return Object.keys(value).sort().join(',') === 'actions,contents,pull-requests'
+    && value.actions === 'read'
     && value.contents === 'read'
     && value['pull-requests'] === 'read'
 }
