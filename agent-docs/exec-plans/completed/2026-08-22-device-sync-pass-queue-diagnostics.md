@@ -1,6 +1,6 @@
 # Expose bounded hosted device-sync pass queue diagnostics
 
-Status: active
+Status: completed
 Created: 2026-08-22
 Updated: 2026-08-22
 
@@ -73,9 +73,9 @@ Updated: 2026-08-22
 2. [x] Add the bounded queue snapshot and propagate it only to the existing pass
    lifecycle log.
 3. [x] Add focused coverage for completed and yielded/failed lifecycle visibility.
-4. [ ] Run focused tests, typecheck, inspect the diff, and complete the PR review
+4. [x] Run focused tests, typecheck, inspect the diff, and complete the PR review
    and CI gates.
-5. [ ] Merge, deploy the exact reviewed head, verify the new production fields,
+5. [x] Merge, deploy the exact reviewed head, verify the new production fields,
    and use them to evaluate whether any timeout increase is justified.
 
 ## Decisions
@@ -107,3 +107,4 @@ Updated: 2026-08-22
   - finished pass logs expose bounded queue deltas with no private fields;
   - production smoke proves the reviewed runner bundle is active;
   - live logs provide enough evidence to distinguish recovery from stuck work.
+Completed: 2026-08-22
