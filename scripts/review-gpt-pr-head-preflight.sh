@@ -409,8 +409,8 @@ review_gpt_run() {
 
   exec pnpm exec cobuild-review-gpt \
     --config scripts/review-gpt.config.sh \
-    "$@" \
-    --minimum-marked-response-time 5m
+    --minimum-marked-response-time 5m \
+    "$@"
 }
 
 review_gpt_main() {

@@ -10,6 +10,7 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import {
+  buildCodexSubagentRawUsageDraft,
   type CodexSubagentEffectiveMetadata,
   type CodexSubagentRawUsageSample,
   type CodexSubagentTurnTokenUsageSample,
@@ -98,7 +99,6 @@ function sampleFromEvents(
 function rawUsageSample(input: {
   occurredAt?: string
   responseId: string
-  servedModel?: string | null
   threadId: string
   turnId: string
   usage?: Partial<CodexSubagentRawUsageSample['usage']>
@@ -106,9 +106,6 @@ function rawUsageSample(input: {
   return {
     occurredAt: input.occurredAt ?? SUBAGENT_PROVIDER_REQUEST_STARTED_AT,
     responseId: input.responseId,
-    ...(input.servedModel === undefined
-      ? {}
-      : { servedModel: input.servedModel }),
     threadId: input.threadId,
     turnId: input.turnId,
     usage: {
@@ -217,7 +214,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
     })
   })
 
-  it('records exact raw child usage with effective metadata and the rerouted served model', () => {
+  it('builds exact raw child usage from strict effective metadata', () => {
     const threadId = 'thread-raw-child'
     const responseId = 'resp_raw_child_1'
     const effectiveMetadata: CodexSubagentEffectiveMetadata = {
@@ -226,39 +223,25 @@ describe('extractCodexSubagentUsageDrafts', () => {
       reasoningEffort: 'high',
       serviceTier: 'flex',
     }
-    const drafts = extractCodexSubagentUsageDrafts({
-      modelProvider: 'openai',
-      ordinalStart: 2,
-      parentModel: 'gpt-5.6-terra',
-      parentRawEvents: [spawnEndEvent({
-        model: 'gpt-5.6-terra-mini',
-        receiverThreadIds: [threadId],
-      })],
-      parentReasoningEffort: 'medium',
-      subagentEffectiveMetadataByThreadId: new Map([
-        [threadId, effectiveMetadata],
-      ]),
-      subagentRawUsageByResponseId: new Map([
-        [responseId, rawUsageSample({
-          responseId,
-          servedModel: 'gpt-5.2',
-          threadId,
-          turnId: 'turn-raw-child',
-          usage: {
-            cacheWriteInputTokens: 9,
-            cachedInputTokens: 40,
-            inputTokens: 120,
-            outputTokens: 30,
-            reasoningOutputTokens: 7,
-            totalTokens: 150,
-          },
-        })],
-      ]),
-      subagentTokenUsageByTurn: new Map(),
+    const draft = buildCodexSubagentRawUsageDraft({
+      metadata: effectiveMetadata,
+      ordinal: 2,
+      sample: rawUsageSample({
+        responseId,
+        threadId,
+        turnId: 'turn-raw-child',
+        usage: {
+          cacheWriteInputTokens: 9,
+          cachedInputTokens: 40,
+          inputTokens: 120,
+          outputTokens: 30,
+          reasoningOutputTokens: 7,
+          totalTokens: 150,
+        },
+      }),
     })
 
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]).toMatchObject({
+    expect(draft).toMatchObject({
       provider: 'codex-cli',
       providerRequestOrdinal: 2,
       providerRequestOutcome: 'succeeded',
@@ -270,27 +253,26 @@ describe('extractCodexSubagentUsageDrafts', () => {
         providerName: 'hosted-openai',
         providerRequestId: responseId,
         reasoningTokens: 7,
-        requestedModel: 'gpt-5.6-terra-mini',
-        servedModel: 'gpt-5.2',
-        tokenPricingBasis: 'standard',
+        requestedModel: 'gpt-5.6-sol',
+        servedModel: 'gpt-5.6-sol',
+        tokenPricingBasis: 'openai-flex',
         totalTokens: 150,
         usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
       },
     })
-    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+    expect(draft.usage.rawUsageJson).toEqual({
       input_tokens: 120,
       input_tokens_details: { cached_tokens: 40 },
       output_tokens: 30,
       output_tokens_details: { reasoning_tokens: 7 },
       total_tokens: 150,
     })
-    expect(drafts[0]?.usage.turnProfileJson).toMatchObject({
+    expect(draft.usage.turnProfileJson).toMatchObject({
       reasoningEffort: 'high',
       requestCount: 1,
       requests: [{ cachedInput: 40, input: 120, output: 30 }],
     })
 
-    const draft = drafts[0]!
     const parsed = parseAssistantUsageRecord({
       ...draft.usage,
       attemptCount: 1,
@@ -312,111 +294,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(parsed.turnProfileJson).toMatchObject({
       reasoningEffort: 'high',
     })
-  })
-
-  it('deduplicates repeated raw completions by provider response id', () => {
-    const responseId = 'resp_duplicate_child'
-    const sample = rawUsageSample({
-      responseId,
-      threadId: 'thread-duplicate-child',
-      turnId: 'turn-duplicate-child',
-    })
-    const drafts = extractCodexSubagentUsageDrafts({
-      modelProvider: 'openai',
-      ordinalStart: 1,
-      parentRawEvents: [spawnEndEvent({
-        receiverThreadIds: ['thread-duplicate-child'],
-      })],
-      subagentRawUsageByResponseId: new Map([
-        ['first-delivery', sample],
-        ['duplicate-delivery', { ...sample }],
-      ]),
-      subagentTokenUsageByTurn: new Map(),
-    })
-
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]?.usage.providerRequestId).toBe(responseId)
-  })
-
-  it('selects raw usage over cumulative checkpoints for one child lifecycle', () => {
-    const threadId = 'thread-raw-wins'
-    const cumulativeEvents = [tokenUsageEvent({
-      threadId,
-      turnId: 'turn-cumulative-ignored',
-      total: { inputTokens: 900, outputTokens: 100, totalTokens: 1_000 },
-      last: { inputTokens: 900, outputTokens: 100, totalTokens: 1_000 },
-    })]
-    const drafts = extractCodexSubagentUsageDrafts({
-      modelProvider: 'openai',
-      ordinalStart: 1,
-      parentRawEvents: [spawnEndEvent({ receiverThreadIds: [threadId] })],
-      subagentRawUsageByResponseId: new Map([
-        ['resp-raw-wins', rawUsageSample({
-          responseId: 'resp-raw-wins',
-          threadId,
-          turnId: 'turn-raw-wins',
-          usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
-        })],
-      ]),
-      subagentTokenUsageByTurn: new Map([
-        ['cumulative', sampleFromEvents(cumulativeEvents)],
-      ]),
-    })
-
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]?.usage).toMatchObject({
-      inputTokens: 80,
-      outputTokens: 20,
-      providerRequestId: 'resp-raw-wins',
-      totalTokens: 100,
-      usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
-    })
-  })
-
-  it('uses cumulative token deltas when a cold-resumed child emits no raw completion', () => {
-    const threadId = 'thread-cold-resume-child'
-    const cumulativeEvents = [tokenUsageEvent({
-      threadId,
-      turnId: 'turn-cold-resume-child',
-      total: { inputTokens: 70, outputTokens: 30, totalTokens: 100 },
-      last: { inputTokens: 70, outputTokens: 30, totalTokens: 100 },
-    })]
-    const drafts = extractCodexSubagentUsageDrafts({
-      modelProvider: 'openai',
-      ordinalStart: 1,
-      parentRawEvents: [spawnEndEvent({ receiverThreadIds: [threadId] })],
-      subagentRawUsageByResponseId: new Map(),
-      subagentTokenUsageByTurn: new Map([
-        ['cold-resume', sampleFromEvents(cumulativeEvents)],
-      ]),
-    })
-
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]?.usage).toMatchObject({
-      inputTokens: 70,
-      outputTokens: 30,
-      providerRequestId: null,
-      totalTokens: 100,
-      usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
-    })
-  })
-
-  it('rejects raw usage from a foreign child without canonical spawn evidence', () => {
-    const drafts = extractCodexSubagentUsageDrafts({
-      modelProvider: 'openai',
-      ordinalStart: 1,
-      parentRawEvents: [],
-      subagentRawUsageByResponseId: new Map([
-        ['resp-foreign-child', rawUsageSample({
-          responseId: 'resp-foreign-child',
-          threadId: 'thread-foreign-child',
-          turnId: 'turn-foreign-child',
-        })],
-      ]),
-      subagentTokenUsageByTurn: new Map(),
-    })
-
-    expect(drafts).toEqual([])
   })
 
   it('builds per-turn total deltas with spawn-attributed models', () => {
@@ -479,27 +356,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
       }),
     ]
 
-    const ghostThread = [
-      tokenUsageEvent({
-        threadId: 'thread-child-ghost',
-        turnId: 'turn-child-ghost',
-        total: {
-          totalTokens: 9_999,
-          inputTokens: 9_000,
-          cachedInputTokens: 0,
-          outputTokens: 999,
-          reasoningOutputTokens: 0,
-        },
-        last: {
-          totalTokens: 9_999,
-          inputTokens: 9_000,
-          cachedInputTokens: 0,
-          outputTokens: 999,
-          reasoningOutputTokens: 0,
-        },
-      }),
-    ]
-
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: 'openai',
       ordinalStart: 3,
@@ -516,9 +372,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
       subagentTokenUsageByTurn: new Map([
         ['thread-child-a', sampleFromEvents(childA)],
         ['thread-child-b', sampleFromEvents(childB)],
-        // No spawn item names this thread (e.g. a stale flush from a
-        // previous thread on a reused warm process): never billed.
-        ['thread-child-ghost', sampleFromEvents(ghostThread)],
       ]),
     })
 
@@ -600,9 +453,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     )
     expect(parsed.rawUsageJson).toEqual(draft.usage.rawUsageJson)
     expect(parsed.rawUsageJsonHash).toBe(draft.usage.rawUsageJsonHash)
-
-    // The ghost thread never bills.
-    expect(JSON.stringify(drafts)).not.toContain('thread-child-ghost')
   })
 
   it('keeps reused child turns as distinct provider operations', () => {
@@ -750,7 +600,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(JSON.stringify(drafts)).not.toContain('summarize private context')
   })
 
-  it('rejects non-spawn collab authorization and keeps spawn-attributed models', () => {
+  it('uses spawn models as optional metadata rather than authorization', () => {
     const usageFor = (threadId: string) =>
       sampleFromEvents([
         tokenUsageEvent({
@@ -777,8 +627,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
       modelProvider: 'openai',
       ordinalStart: 1,
       parentRawEvents: [
-        // A reused child only appears via sendInput: this is not canonical
-        // Murph spawn evidence and must not authorize billing.
+        // A reused child only appears via sendInput: billable, model unknown.
         {
           method: 'item/completed',
           params: {
@@ -811,8 +660,15 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ]),
     })
 
-    expect(drafts).toHaveLength(1)
+    expect(drafts).toHaveLength(2)
     expect(drafts[0]).toMatchObject({
+      usage: {
+        requestedModel: null,
+        servedModel: null,
+        totalTokens: 100,
+      },
+    })
+    expect(drafts[1]).toMatchObject({
       usage: {
         requestedModel: 'gpt-5.6-terra-mini',
         servedModel: 'gpt-5.6-terra-mini',
@@ -820,12 +676,11 @@ describe('extractCodexSubagentUsageDrafts', () => {
     })
   })
 
-  it('never bills foreign-thread usage without spawn evidence', () => {
-    // Warm processes are reused across threads; a stale tokenUsage flush from
-    // a previous thread carries a foreign thread id but is not a subagent.
+  it('formats process-correlated usage without requiring parent collab evidence', () => {
     const drafts = extractCodexSubagentUsageDrafts({
       modelProvider: 'openai',
       ordinalStart: 1,
+      parentModel: 'gpt-5.6-terra',
       parentRawEvents: [],
       subagentTokenUsageByTurn: new Map([
         [
@@ -854,7 +709,14 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ]),
     })
 
-    expect(drafts).toEqual([])
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toMatchObject({
+      usage: {
+        requestedModel: 'gpt-5.6-terra',
+        servedModel: 'gpt-5.6-terra',
+        totalTokens: 1_234,
+      },
+    })
   })
 
   it('rejects snake-case subagent aliases at the pinned protocol boundary', () => {
@@ -983,134 +845,6 @@ describe('extractCodexSubagentUsageDrafts', () => {
     })
 
     expect(drafts).toEqual([])
-  })
-
-  // Multi-agent V2 emits subAgentActivity items instead of collab tool calls.
-  // The canonical item carries no model, so the child inherits the parent
-  // model by default; alternate item aliases must not authorize billing.
-  it('authorizes exact V2 subAgentActivity items and rejects alternate aliases', () => {
-    const childEvents = [
-      tokenUsageEvent({
-        threadId: 'thread-child-v2',
-        turnId: 'turn-child-v2',
-        total: {
-          totalTokens: 900,
-          inputTokens: 700,
-          cachedInputTokens: 300,
-          outputTokens: 200,
-          reasoningOutputTokens: 40,
-        },
-        last: {
-          totalTokens: 900,
-          inputTokens: 700,
-          cachedInputTokens: 300,
-          outputTokens: 200,
-          reasoningOutputTokens: 40,
-        },
-      }),
-    ]
-    const snakeCaseChildEvents = [
-      tokenUsageEvent({
-        threadId: 'thread-child-v2-snake',
-        turnId: 'turn-child-v2-snake',
-        total: {
-          totalTokens: 300,
-          inputTokens: 250,
-          cachedInputTokens: 0,
-          outputTokens: 50,
-          reasoningOutputTokens: 0,
-        },
-        last: {
-          totalTokens: 300,
-          inputTokens: 250,
-          cachedInputTokens: 0,
-          outputTokens: 50,
-          reasoningOutputTokens: 0,
-        },
-      }),
-    ]
-    const ghostEvents = [
-      tokenUsageEvent({
-        threadId: 'thread-child-ghost',
-        turnId: 'turn-child-ghost',
-        total: {
-          totalTokens: 400,
-          inputTokens: 300,
-          cachedInputTokens: 0,
-          outputTokens: 100,
-          reasoningOutputTokens: 0,
-        },
-        last: {
-          totalTokens: 400,
-          inputTokens: 300,
-          cachedInputTokens: 0,
-          outputTokens: 100,
-          reasoningOutputTokens: 0,
-        },
-      }),
-    ]
-
-    const drafts = extractCodexSubagentUsageDrafts({
-      modelProvider: 'openai',
-      ordinalStart: 3,
-      parentModel: 'gpt-5.6-terra',
-      parentRawEvents: [
-        {
-          method: 'item/completed',
-          params: {
-            threadId: 'thread-parent',
-            turnId: 'turn-parent',
-            item: {
-              id: 'activity-1',
-              type: 'subAgentActivity',
-              kind: 'started',
-              agentThreadId: 'thread-child-v2',
-              agentPath: 'root/child-1',
-            },
-          },
-        },
-        {
-          method: 'item/completed',
-          params: {
-            threadId: 'thread-parent',
-            turnId: 'turn-parent',
-            item: {
-              id: 'activity-2',
-              type: 'sub_agent_activity',
-              kind: 'interacted',
-              agent_thread_id: 'thread-child-v2-snake',
-              agent_path: 'root/child-2',
-            },
-          },
-        },
-      ],
-      subagentTokenUsageByTurn: new Map([
-        ['thread-child-v2', sampleFromEvents(childEvents)],
-        ['thread-child-v2-snake', sampleFromEvents(snakeCaseChildEvents)],
-        ['thread-child-ghost', sampleFromEvents(ghostEvents)],
-      ]),
-    })
-
-    expect(drafts).toHaveLength(1)
-    expect(drafts[0]?.usage.servedModel).toBe('gpt-5.6-terra')
-    expect(drafts[0]?.usage.requestedModel).toBe('gpt-5.6-terra')
-    expect(drafts[0]?.providerRequestOrdinal).toBe(3)
-    expect(drafts[0]?.usage.inputTokens).toBe(700)
-    expect(drafts[0]?.usage.outputTokens).toBe(200)
-    expect(drafts[0]?.usage.rawUsageJson).toEqual({
-      cacheWriteInputTokens: 0,
-      cachedInputTokens: 300,
-      inputTokens: 700,
-      outputTokens: 200,
-      reasoningOutputTokens: 40,
-      totalTokens: 900,
-    })
-    expect(
-      drafts.reduce(
-        (total, draft) => total + (draft.usage.totalTokens ?? 0),
-        0,
-      ),
-    ).toBe(900)
   })
 
   it('ignores unsupported V2 activity model metadata and inherits the parent model', () => {

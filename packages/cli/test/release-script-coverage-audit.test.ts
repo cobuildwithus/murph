@@ -1196,7 +1196,7 @@ describe('monorepo release flow coverage audit', () => {
       'review_gpt_reject_repository_policy_overrides "$@"',
     )
     expect(reviewGptPrHeadPreflight).toContain(
-      '"$@" \\\n    --minimum-marked-response-time 5m',
+      '--minimum-marked-response-time 5m \\\n    "$@"',
     )
     expect(reviewGptPrHeadPreflight).not.toContain(
       'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',

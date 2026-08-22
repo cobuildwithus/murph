@@ -80,9 +80,9 @@ Updated: 2026-08-22
 7. [x] Recover, integrity-check, apply, and locally audit the ReviewGPT metering
    patch; fix the billing-order, rerouted-model, and raw-content-retention gaps
    found by the parent review.
-8. [ ] Push a fresh review candidate, run the preliminary coverage lens and
-   sensitive final ReviewGPT gate concurrently with exact-head CI, and resolve
-   all accepted findings.
+8. [ ] Push the corrected candidate and run sensitive final ReviewGPT round 2
+   concurrently with exact-head CI; the one allowed preliminary specialist
+   pass already completed on the immutable first-reviewed head.
 9. [ ] Complete the parent final review, archive this plan, and create the final
    scoped commit.
 
@@ -112,9 +112,11 @@ Updated: 2026-08-22
   current 0.5.132 release and update its release-contract assertions.
 - Make Murph's repository wrapper the sole trust-floor owner: reject later
   `--config` arguments and all kebab-case and camelCase threshold options before
-  launch, then append one fixed `--minimum-marked-response-time 5m` after caller
-  arguments. Leave the sourced config free of policy assignments so ReviewGPT
-  remains configurable for direct callers without creating a second owner.
+  launch, then place one fixed `--minimum-marked-response-time 5m` before caller
+  arguments. This keeps a trailing value-taking caller option from consuming
+  the fixed option as its value. Leave the sourced config free of policy
+  assignments so ReviewGPT remains configurable for direct callers without
+  creating a second owner.
 - Follow the registry to ReviewGPT 0.5.132 when it appears during the gate.
   That release fixes Deep Research conversation identity and timestamped
   submitted-attachment matching; retain Murph's wrapper-owned trust floor.
@@ -124,15 +126,20 @@ Updated: 2026-08-22
   inherited child listeners. Resumed legacy parents intentionally retain the
   cumulative `thread/tokenUsage/updated` fallback because `thread/resume` does
   not accept the raw-event switch.
-- Treat a completed parent `spawnAgent` item (or V2 `subAgentActivity` started
-  item) as the only child billing authorization. A foreign thread notification
-  alone cannot mint usage. One child lifecycle uses either exact raw response
-  usage or cumulative turn deltas, never both.
-- Resolve the child's configured model, provider, service tier, and reasoning
-  effort through a metadata-only `thread/resume` with `excludeTurns: true`.
-  Preserve any child `model/rerouted` evidence as the served model for the
-  affected response. Metadata lookup is one bounded, best-effort request and
-  cannot turn completed provider work into a retry.
+- Treat the exclusively owned app-server process as the trust boundary. A
+  non-root thread notification correlates that child with the active turn; a
+  particular parent collab-item shape is not a second billing-authorization
+  protocol. The process retains the small usage callback after the root reply
+  so detached child usage is still attributed to the originating Murph turn.
+- Fresh hosted turns use exact raw-response usage only. Resumed legacy parents
+  retain their pre-existing cumulative fallback because `thread/resume` cannot
+  enable raw events; no per-child arbitration state is needed.
+- Resolve the child's effective model, provider, service tier, and reasoning
+  effort through one cached metadata-only `thread/resume` with
+  `excludeTurns: true`. Incomplete or failed metadata drops that usage sample
+  without retry or parent-identity fallback. The returned effective model is
+  used for both requested and served fields because there is no separate
+  authoritative requested-model fact on the V2 child lifecycle.
 - Enabling raw events also causes the parent listener to receive full upstream
   response items. Drop `rawResponseItem/completed` before trace or provider
   event buffering; only the strict, usage-only completion shape participates
@@ -143,7 +150,7 @@ Updated: 2026-08-22
 - `pnpm --dir packages/assistant-engine exec vitest run --config
   vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts
   test/assistant-codex-runtime.test.ts` passed on the corrected metering diff:
-  291 tests.
+  287 tests.
 - `pnpm --dir packages/hosted-execution exec vitest run --config
   vitest.config.ts --no-coverage test/assistant-usage.test.ts` passed: 23 tests.
 - `pnpm --dir packages/assistant-engine typecheck` and
@@ -154,11 +161,11 @@ Updated: 2026-08-22
   accounting, and inherited by child listeners from a raw-enabled fresh
   parent. Its running-thread metadata-only resume path returns the current
   config snapshot without replaying historical token usage.
-- The first full runtime run exposed an existing cap-order regression in the
-  generated patch. Stable same-timestamp ordering now preserves observed child
-  order, and the original 32-thread/reused-turn regression passes. Additional
-  proof covers provider reroutes and exclusion of full parent raw response
-  items from buffered/traced events.
+- The simplified path removes the arbitrary 32-thread accounting cap and the
+  raw/cumulative source-arbitration sorter. Focused proof covers post-reply
+  child usage, response-id deduplication, malformed-then-valid completions,
+  strict metadata failure without retry or parent fallback, and exclusion of
+  full raw response items from both buffered and traced events.
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-codex-config.test.ts`
   passed: 44 tests, 4 skipped.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts`
@@ -218,8 +225,28 @@ Updated: 2026-08-22
   caller and repository-gate sides of that boundary.
 - The exact long-running round-5 correction review found that arbitrary sourced
   Bash could redefine a callback invoked after the config-level floor reset.
-  The config-level assignment is now deleted, the wrapper appends the fixed
-  five-minute option after all caller arguments, and the real-package test
-  reproduces the hostile callback while proving the resolved floor remains
-  `300000`. A fresh exact-head final pass remains pending; no Eragon lane was
-  used.
+  The config-level assignment is now deleted and the wrapper owns the fixed
+  five-minute option. A later local review found that appending it after caller
+  arguments let a trailing value-taking option consume it; the option now
+  precedes caller arguments, with invocation-order regression coverage. A
+  fresh exact-head final pass remains pending; no Eragon lane was used.
+- The current PR's one preliminary specialist pass found two medium coverage
+  gaps: metadata failure lacked direct no-retry proof, and raw-response privacy
+  was asserted for buffered events but not traces. Both were accepted and
+  resolved in the adjacent runtime scenario; they added proof only, not a new
+  production concept.
+- Current final ReviewGPT round 1 found three high issues: child accounting died
+  with the parent reply, one valid raw sample suppressed later incomplete raw
+  accounting, and metadata failure fabricated the parent's billing identity.
+  All three were accepted. The corrected shape retains a small callback on the
+  already-resident App Server process, uses exact raw usage only for fresh
+  hosted turns, and drops samples whose child metadata is incomplete. This
+  deletes the parent-event authorization map, raw/cumulative arbitration,
+  reroute state, metadata-drain wait, arbitrary child cap, and parent fallbacks.
+- The canonical completed-parent-spawn requirement was then rejected as an
+  unnecessarily brittle local policy. The revised implementation derives child
+  ownership from the exclusively owned App Server process and non-root thread
+  notifications. The working production-source correction is net deletion
+  relative to the previously pushed head; focused tests cover unrecognized
+  parent item shapes, post-reply delivery, duplicate raw responses, incomplete
+  metadata, privacy, and unbounded observed fan-out.
