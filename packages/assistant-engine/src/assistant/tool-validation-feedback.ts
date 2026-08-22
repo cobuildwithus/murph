@@ -2,7 +2,7 @@ import type {
   SafeToolCallValidationDigest,
 } from './tool-validation-digest.js'
 import {
-  readModelToolCallValidationReason,
+  readModelToolCallValidationIssues,
 } from './tool-validation-digest.js'
 
 const MAX_TOOL_CALL_REPAIR_HINTS = 4
@@ -30,20 +30,16 @@ export function buildToolCallValidationFeedback(
 ): string {
   const error = normalizeFeedbackToken(options.error, 96)
     ?? 'invalid_tool_arguments'
-  const modelValidationReason = readModelToolCallValidationReason(digest)
-  if (modelValidationReason) {
+  const modelValidationIssues = readModelToolCallValidationIssues(digest)
+  if (modelValidationIssues) {
     const detailedFeedback = JSON.stringify({
       error,
-      validationIssues: parseModelValidationReason(modelValidationReason),
+      validationIssues: modelValidationIssues,
     })
     if (Buffer.byteLength(detailedFeedback, 'utf8')
       <= MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH) {
       return detailedFeedback
     }
-    return buildBoundedTruncatedValidationFeedback({
-      error,
-      modelValidationReason,
-    })
   }
   const hints = (digest.pathIssues ?? [])
     .map((issue): ToolCallRepairHint | null => {
@@ -81,40 +77,6 @@ export function buildToolCallValidationFeedback(
   return feedback.length <= MAX_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH
     ? feedback
     : genericFeedback
-}
-
-function buildBoundedTruncatedValidationFeedback(input: {
-  error: string
-  modelValidationReason: string
-}): string {
-  const build = (end: number) => JSON.stringify({
-    error: input.error,
-    validationReason: input.modelValidationReason.slice(0, end),
-    validationReasonTruncated: true,
-  })
-  let lower = 0
-  let upper = input.modelValidationReason.length
-  let result = build(0)
-  while (lower <= upper) {
-    const midpoint = Math.floor((lower + upper) / 2)
-    const candidate = build(midpoint)
-    if (Buffer.byteLength(candidate, 'utf8')
-      <= MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH) {
-      result = candidate
-      lower = midpoint + 1
-    } else {
-      upper = midpoint - 1
-    }
-  }
-  return result
-}
-
-function parseModelValidationReason(reason: string): unknown {
-  try {
-    return JSON.parse(reason)
-  } catch {
-    return reason
-  }
 }
 
 function validationHintRank(code: string): number {

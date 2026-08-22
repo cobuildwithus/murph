@@ -162,7 +162,7 @@ describe('automation model input schema', () => {
     expect(model.allowedByAction).toEqual(canonical.allowedByAction)
     expect(model.requiredByAction).toEqual(canonical.requiredByAction)
     expect(collectKeys(MURPH_AUTOMATION_TOOL.inputSchema, '$ref')).toEqual([])
-    expect(modelBytes).toBeLessThanOrEqual(Math.floor(canonicalBytes * 0.65))
+    expect(modelBytes).toBeLessThanOrEqual(Math.floor(canonicalBytes * 0.55))
   })
 
   it('advertises strict action-specific root contracts', () => {
@@ -213,46 +213,6 @@ describe('automation model input schema', () => {
       .toEqual({})
     expect(asObject(asObject(actionContract(schema, 'patch').properties).lookup))
       .toEqual({})
-  })
-
-  it('preserves runtime cross-field requirements in the provider schema', () => {
-    const rootProperties = asObject(MURPH_AUTOMATION_TOOL.inputSchema.properties)
-    const targetOverride = asObject(rootProperties.assistantTargetOverride)
-    const targetObject = asObjectArray(targetOverride.anyOf)
-      .find((branch) => branch.type === 'object')
-    expect(targetObject).toBeDefined()
-    expect(targetObject?.anyOf).toEqual([
-      { required: ['model'] },
-      { required: ['reasoningEffort'] },
-    ])
-
-    const schedule = asObject(rootProperties.schedule)
-    const localAtSchedule = asObjectArray(schedule.anyOf).find((branch) => {
-      const properties = asObject(branch.properties)
-      return asObject(properties.kind).const === 'at'
-    })
-    expect(localAtSchedule).toBeDefined()
-    if (!localAtSchedule) {
-      throw new Error('Missing local-at schedule.')
-    }
-    const localAt = asObject(asObject(localAtSchedule.properties).localAt)
-    expect(localAt.oneOf).toEqual([
-      { required: ['date'] },
-      { required: ['relativeDay'] },
-    ])
-
-    const patchAllOf = asObjectArray(actionContract(
-      MURPH_AUTOMATION_TOOL.inputSchema,
-      'patch',
-    ).allOf)
-    expect(patchAllOf).toContainEqual({
-      anyOf: expect.arrayContaining([
-        { required: ['status'] },
-        { required: ['title'] },
-      ]),
-    })
-    expect(collectKeys(MURPH_AUTOMATION_TOOL.inputSchema, 'if')).toEqual([])
-    expect(collectKeys(MURPH_AUTOMATION_TOOL.inputSchema, 'then')).toEqual([])
   })
 
   it('returns the full schema instead of adding reference expansion machinery', () => {

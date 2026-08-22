@@ -70,7 +70,6 @@ import {
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   MURPH_DYNAMIC_TOOLS,
   MURPH_GROUP_FAMILY_TOOLS,
-  MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
@@ -385,7 +384,7 @@ describe("murph.group dynamic tool", () => {
       .toContain("transport failure proves neither");
   });
 
-  it("advertises strict family-specific schemas", () => {
+  it("advertises family-bounded schemas", () => {
     const expectedRootKeys = {
       group_consult: [
         "action", "context", "grantId", "groupLabel", "message_ref", "question",
@@ -412,9 +411,7 @@ describe("murph.group dynamic tool", () => {
       });
       expect(Object.keys(tool.inputSchema.properties).sort())
         .toEqual([...expectedRootKeys[tool.name]].sort());
-      expect(tool.inputSchema.oneOf.every((branch) =>
-        branch.additionalProperties === false
-      )).toBe(true);
+      expect(tool.inputSchema).not.toHaveProperty("oneOf");
       for (const forbiddenField of [
         "groupId", "memberId", "providerMessageId", "route", "sender",
       ]) {
@@ -422,25 +419,6 @@ describe("murph.group dynamic tool", () => {
       }
     }
 
-    expect(MURPH_GROUP_DATA_TOOL.inputSchema.oneOf).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          properties: expect.objectContaining({
-            action: { const: "read_shared" },
-            projectionScopes: {},
-          }),
-          required: ["action", "projectionScopes"],
-        }),
-        expect.objectContaining({
-          properties: expect.objectContaining({
-            action: { const: "read_shared" },
-            audience: {},
-            projectionScopes: {},
-          }),
-          required: ["action", "audience", "projectionScopes"],
-        }),
-      ]),
-    );
   });
 
   it("advertises the least-privileged group surface for the available ports", () => {

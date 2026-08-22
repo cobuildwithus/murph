@@ -1349,171 +1349,49 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
   group_email: ['send_email'],
 } as const satisfies Record<string, readonly MurphGroupToolAction[]>
 
-interface MurphGroupToolActionVariant {
-  properties: readonly MurphGroupToolPropertyName[]
-  required?: readonly MurphGroupToolPropertyName[]
-  propertyOverrides?: Partial<
-    Record<MurphGroupToolPropertyName, Record<string, unknown>>
-  >
-}
-
-const MURPH_GROUP_TOOL_ACTION_CONTRACTS = {
-  ask: [{ properties: ['question', 'groupLabel'], required: ['question'] }],
-  handoff: [{ properties: ['context', 'groupLabel'], required: ['context'] }],
-  ask_current_sender: [{
-    properties: ['message_ref'],
-    required: ['message_ref'],
-  }],
-  clarify_current_sender: [{
-    properties: ['message_ref'],
-    required: ['message_ref'],
-  }],
-  continue_current_sender_in_group: [{
-    properties: ['message_ref'],
-    required: ['message_ref'],
-  }],
-  continue_current_sender_privately: [{
-    properties: ['message_ref'],
-    required: ['message_ref'],
-  }],
-  ask_member: [{
-    properties: ['grantId', 'question'],
-    required: ['grantId', 'question'],
-  }],
-  record_current_sender_daily_metric: [{
-    properties: ['date', 'message_ref', 'metric', 'unit', 'value'],
-    required: ['date', 'message_ref', 'metric', 'unit', 'value'],
-  }],
-  post_disclosure_request: [{
-    properties: ['permissionText'],
-    required: ['permissionText'],
-  }],
-  revoke_disclosure_grant: [{
-    properties: ['grantId'],
-    required: ['grantId'],
-  }],
-  read_shared: [
-    {
-      properties: ['projectionScopes'],
-      required: ['projectionScopes'],
-    },
-    {
-      properties: ['audience', 'projectionScopes'],
-      required: ['audience', 'projectionScopes'],
-    },
+const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
+  group_consult: [
+    'context', 'grantId', 'groupLabel', 'message_ref', 'question',
   ],
-  offer_access: [{
-    properties: ['displayName', 'projectionScopes', 'standaloneLink'],
-  }],
-  revoke_own_email_share: [{
-    properties: ['message_ref'],
-    required: ['message_ref'],
-  }],
-  read_current: [{ properties: [] }],
-  prepare_next_group: [{ properties: ['setup'] }],
-  read_next_group: [{ properties: [] }],
-  cancel_next_group: [{ properties: [] }],
-  list_memberships: [{ properties: [] }],
-  leave_membership: [{
-    properties: ['membershipId'],
-    required: ['membershipId'],
-  }],
-  read_usage: [{ properties: [] }],
-  read_usage_referral: [{ properties: ['message_ref'] }],
-  arm_usage_referral: [{
-    properties: ['policyCodes'],
-    required: ['policyCodes'],
-  }],
-  cancel_usage_referral: [{
-    properties: ['policyCode'],
-    required: ['policyCode'],
-  }],
-  create_signup_referral_link: [{ properties: ['message_ref'] }],
-  read_chat_name: [{ properties: [] }],
-  update_display_name: [{
-    properties: ['displayName'],
-    required: ['displayName'],
-  }],
-  read_chat_participants: [{ properties: [] }],
-  set_chat_avatar: [
-    {
-      properties: [
-        'alt',
-        'avatarSource',
-        'outputFormat',
-        'prompt',
-        'quality',
-        'referenceImageRefs',
-        'size',
-      ],
-      required: ['avatarSource', 'prompt'],
-      propertyOverrides: { avatarSource: { const: 'generate' } },
-    },
-    {
-      properties: ['alt', 'avatarSource', 'imageRef'],
-      required: ['avatarSource', 'imageRef'],
-      propertyOverrides: { avatarSource: { const: 'image_ref' } },
-    },
+  group_data: [
+    'audience', 'date', 'displayName', 'grantId', 'message_ref', 'metric',
+    'permissionText', 'projectionScopes', 'standaloneLink', 'unit', 'value',
   ],
-  share_contact_card: [{ properties: ['avatarPrompt'] }],
-  send_email: [{
-    properties: ['html', 'subject', 'text'],
-    required: ['html', 'subject'],
-  }],
+  group_membership: ['membershipId', 'setup'],
+  group_usage: ['message_ref', 'policyCode', 'policyCodes'],
+  group_chat: [
+    'alt', 'avatarPrompt', 'avatarSource', 'displayName', 'imageRef',
+    'outputFormat', 'prompt', 'quality', 'referenceImageRefs', 'size',
+  ],
+  group_email: ['html', 'subject', 'text'],
 } as const satisfies Record<
-  MurphGroupToolAction,
-  readonly MurphGroupToolActionVariant[]
+  keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  readonly MurphGroupToolPropertyName[]
 >
 
-const murphGroupToolActionContracts: Readonly<
-  Record<MurphGroupToolAction, readonly MurphGroupToolActionVariant[]>
-> = MURPH_GROUP_TOOL_ACTION_CONTRACTS
-
-function buildMurphGroupFamilyInputSchema(
-  actions: readonly MurphGroupToolAction[],
-) {
-  const propertyNames = new Set<MurphGroupToolPropertyName>()
-  for (const action of actions) {
-    for (const variant of murphGroupToolActionContracts[action]) {
-      for (const propertyName of variant.properties) {
-        propertyNames.add(propertyName)
-      }
-    }
-  }
-
-  const properties: Record<string, unknown> = {
-    action: { type: 'string', enum: actions },
-  }
-  for (const propertyName of propertyNames) {
-    properties[propertyName] =
-      MURPH_GROUP_TOOL_BASE.inputSchema.properties[propertyName]
-  }
-
+function buildMurphGroupFamilyInputSchema<
+  const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+>(name: Name) {
+  const actions = MURPH_GROUP_TOOL_FAMILY_ACTIONS[name]
   return {
     type: 'object',
     additionalProperties: false,
-    properties,
+    properties: {
+      action: { type: 'string', enum: actions },
+      ...Object.fromEntries(MURPH_GROUP_TOOL_FAMILY_PROPERTIES[name].map(
+        (propertyName) => [
+          propertyName,
+          MURPH_GROUP_TOOL_BASE.inputSchema.properties[propertyName],
+        ],
+      )),
+    },
     required: ['action'],
-    oneOf: actions.flatMap((action) =>
-      murphGroupToolActionContracts[action].map((variant) => ({
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          action: { const: action },
-          ...Object.fromEntries(variant.properties.map((propertyName) => [
-            propertyName,
-            variant.propertyOverrides?.[propertyName] ?? {},
-          ])),
-        },
-        required: ['action', ...(variant.required ?? [])],
-      }))),
   } as const
 }
 
 function buildMurphGroupFamilyTool<
   const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
 >(input: {
-  actions: (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS)[Name]
   description: string
   name: Name
 }) {
@@ -1522,50 +1400,44 @@ function buildMurphGroupFamilyTool<
     name: input.name,
     deferLoading: true,
     description: input.description,
-    inputSchema: buildMurphGroupFamilyInputSchema(input.actions),
+    inputSchema: buildMurphGroupFamilyInputSchema(input.name),
   } as const
 }
 
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
-  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult,
   description:
-    'Ask an authorized group or current sender asynchronously. Host binds authority; supply no identifiers.',
+    'Ask the group, a member, or current sender; continue private/group threads.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
-  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_data,
   description:
-    'Read consented group data, record a sender metric, or manage access. Host binds authority; supply no identifiers.',
+    'Read shared data, record sender metrics, or manage disclosure/access.',
 })
 
 export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
   name: 'group_membership',
-  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_membership,
   description:
-    'Read or change current group membership. Host binds authority; supply no identifiers.',
+    'Read/change membership or next-group setup.',
 })
 
 export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({
   name: 'group_usage',
-  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_usage,
   description:
-    'Read group usage/referrals or apply one explicit referral choice. Supply no identifiers.',
+    'Read usage/referrals or set one referral choice.',
 })
 
 export const MURPH_GROUP_CHAT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_chat',
-  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_chat,
   description:
-    'Read or update the authorized group chat, or share its contact card. Supply no targets.',
+    'Read/update chat, avatar, participants, or contact card.',
 })
 
 export const MURPH_GROUP_EMAIL_TOOL = buildMurphGroupFamilyTool({
   name: 'group_email',
-  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_email,
   description:
-    'Queue an authorized group email after a consent-aware group_data read. Host revalidates recipients.',
+    'Queue email after a consent-aware group_data read.',
 })
 
 export const MURPH_GROUP_FAMILY_TOOLS = [

@@ -792,41 +792,6 @@ type GroupArguments = z.infer<typeof groupArgumentsSchema>
 type GroupToolFamilyName = keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS
 type GroupParserToolName = typeof MURPH_GROUP_TOOL.name | GroupToolFamilyName
 
-function buildGroupFamilyArgumentsSchema(
-  actions: readonly GroupArguments['action'][],
-) {
-  const acceptedActions = new Set<string>(actions)
-  return groupArgumentsSchema.refine(
-    (request) => acceptedActions.has(request.action),
-    {
-      message: 'Action is not accepted by this group tool family.',
-      path: ['action'],
-    },
-  )
-}
-
-const groupArgumentsSchemaByToolName = {
-  [MURPH_GROUP_TOOL.name]: groupArgumentsSchema,
-  group_consult: buildGroupFamilyArgumentsSchema(
-    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult,
-  ),
-  group_data: buildGroupFamilyArgumentsSchema(
-    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_data,
-  ),
-  group_membership: buildGroupFamilyArgumentsSchema(
-    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_membership,
-  ),
-  group_usage: buildGroupFamilyArgumentsSchema(
-    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_usage,
-  ),
-  group_chat: buildGroupFamilyArgumentsSchema(
-    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_chat,
-  ),
-  group_email: buildGroupFamilyArgumentsSchema(
-    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_email,
-  ),
-} as const satisfies Record<GroupParserToolName, unknown>
-
 const sendVaultFileArgumentsSchema = z
   .object({
     ref: z.string().trim().min(1).max(1024),
@@ -7269,7 +7234,17 @@ function parseGroupArguments(
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   const qualifiedToolName = `murph.${toolName}`
-  const parsed = groupArgumentsSchemaByToolName[toolName].safeParse(value)
+  const parser = toolName === MURPH_GROUP_TOOL.name
+    ? groupArgumentsSchema
+    : groupArgumentsSchema.refine((request) => {
+        const acceptedActions: readonly GroupArguments['action'][] =
+          MURPH_GROUP_TOOL_FAMILY_ACTIONS[toolName]
+        return acceptedActions.includes(request.action)
+      }, {
+        message: 'Action is not accepted by this group tool family.',
+        path: ['action'],
+      })
+  const parsed = parser.safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,

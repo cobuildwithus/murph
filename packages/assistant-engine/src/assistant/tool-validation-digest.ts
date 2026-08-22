@@ -64,8 +64,8 @@ const MAX_SCHEMA_NODES = 1_024
 // the safe digest object so the executor can return it to that same model call
 // while JSON serialization and runtime-issue persistence retain only the
 // bounded value-free digest.
-const modelValidationReasonByDigest =
-  new WeakMap<SafeToolCallValidationDigest, string>()
+const modelValidationIssuesByDigest =
+  new WeakMap<SafeToolCallValidationDigest, unknown>()
 
 export function buildSafeToolCallValidationDigest(
   input: BuildSafeToolCallValidationDigestInput,
@@ -124,16 +124,16 @@ export function buildSafeToolCallValidationDigest(
     pathIssues: facts.pathIssues,
     inputShape,
   })
-  if (input.error instanceof z.ZodError && input.error.message.trim()) {
-    modelValidationReasonByDigest.set(digest, input.error.message)
+  if (input.error instanceof z.ZodError) {
+    modelValidationIssuesByDigest.set(digest, input.error.issues)
   }
   return digest
 }
 
-export function readModelToolCallValidationReason(
+export function readModelToolCallValidationIssues(
   digest: SafeToolCallValidationDigest,
-): string | null {
-  return modelValidationReasonByDigest.get(digest) ?? null
+): unknown | null {
+  return modelValidationIssuesByDigest.get(digest) ?? null
 }
 
 export function isSafeSchemaLikeKey(key: string): boolean {

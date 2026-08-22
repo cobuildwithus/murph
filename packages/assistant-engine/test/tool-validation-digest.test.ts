@@ -146,7 +146,7 @@ describe('buildSafeToolCallValidationDigest', () => {
     }))
   })
 
-  it('marks pathological validator reasons as truncated within the result budget', () => {
+  it('falls back to bounded hints for pathological validator reasons', () => {
     const schema = z.object({ value: z.string() }).superRefine((_value, context) => {
       context.addIssue({
         code: 'custom',
@@ -174,7 +174,7 @@ describe('buildSafeToolCallValidationDigest', () => {
     expect(Buffer.byteLength(feedback, 'utf8')).toBeLessThanOrEqual(60_000)
     expect(JSON.parse(feedback)).toMatchObject({
       error: 'invalid_synthetic_arguments',
-      validationReasonTruncated: true,
+      hints: [{ code: 'custom', field: 'value' }],
     })
   })
 
