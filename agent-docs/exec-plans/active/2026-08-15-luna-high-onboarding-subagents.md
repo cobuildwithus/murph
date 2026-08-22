@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-15
-Updated: 2026-08-15
+Updated: 2026-08-22
 
 ## Goal
 
@@ -74,7 +74,17 @@ Updated: 2026-08-15
    privacy and scope.
 5. [x] Finish the initial candidate, push it, open a draft PR, and start the
    preliminary specialist and final ReviewGPT passes concurrently with CI.
-6. [ ] Resolve accepted findings on a new exact head and complete the gates.
+6. [x] Re-open the accounting boundary against the stock Codex app-server
+   protocol and verify that fresh raw-event listeners expose exact per-response
+   child usage while metadata-only resume exposes the effective child config.
+7. [x] Recover, integrity-check, apply, and locally audit the ReviewGPT metering
+   patch; fix the billing-order, rerouted-model, and raw-content-retention gaps
+   found by the parent review.
+8. [ ] Push a fresh review candidate, run the preliminary coverage lens and
+   sensitive final ReviewGPT gate concurrently with exact-head CI, and resolve
+   all accepted findings.
+9. [ ] Complete the parent final review, archive this plan, and create the final
+   scoped commit.
 
 ## Decisions
 
@@ -108,9 +118,47 @@ Updated: 2026-08-15
 - Follow the registry to ReviewGPT 0.5.132 when it appears during the gate.
   That release fixes Deep Research conversation identity and timestamped
   submitted-attachment matching; retain Murph's wrapper-owned trust floor.
+- The earlier no-authoritative-usage conclusion is superseded by stock
+  app-server protocol evidence: `thread/start.experimentalRawEvents` enables
+  exact, non-cumulative `rawResponse/completed` usage on fresh parent and
+  inherited child listeners. Resumed legacy parents intentionally retain the
+  cumulative `thread/tokenUsage/updated` fallback because `thread/resume` does
+  not accept the raw-event switch.
+- Treat a completed parent `spawnAgent` item (or V2 `subAgentActivity` started
+  item) as the only child billing authorization. A foreign thread notification
+  alone cannot mint usage. One child lifecycle uses either exact raw response
+  usage or cumulative turn deltas, never both.
+- Resolve the child's configured model, provider, service tier, and reasoning
+  effort through a metadata-only `thread/resume` with `excludeTurns: true`.
+  Preserve any child `model/rerouted` evidence as the served model for the
+  affected response. Metadata lookup is one bounded, best-effort request and
+  cannot turn completed provider work into a retry.
+- Enabling raw events also causes the parent listener to receive full upstream
+  response items. Drop `rawResponseItem/completed` before trace or provider
+  event buffering; only the strict, usage-only completion shape participates
+  in child accounting.
 
 ## Verification
 
+- `pnpm --dir packages/assistant-engine exec vitest run --config
+  vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts
+  test/assistant-codex-runtime.test.ts` passed on the corrected metering diff:
+  291 tests.
+- `pnpm --dir packages/hosted-execution exec vitest run --config
+  vitest.config.ts --no-coverage test/assistant-usage.test.ts` passed: 23 tests.
+- `pnpm --dir packages/assistant-engine typecheck` and
+  `pnpm --dir packages/hosted-execution typecheck` passed after the final
+  TypeScript edits.
+- The stock Codex source confirms that raw completion usage is optional,
+  per-upstream-response, non-cumulative, emitted before cumulative token
+  accounting, and inherited by child listeners from a raw-enabled fresh
+  parent. Its running-thread metadata-only resume path returns the current
+  config snapshot without replaying historical token usage.
+- The first full runtime run exposed an existing cap-order regression in the
+  generated patch. Stable same-timestamp ordering now preserves observed child
+  order, and the original 32-thread/reused-turn regression passes. Additional
+  proof covers provider reroutes and exclusion of full parent raw response
+  items from buffered/traced events.
 - `pnpm --dir packages/assistant-runtime exec vitest run --config vitest.config.ts --isolate=true --no-coverage test/hosted-runtime-codex-config.test.ts`
   passed: 44 tests, 4 skipped.
 - `pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts`

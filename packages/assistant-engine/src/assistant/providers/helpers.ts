@@ -1083,48 +1083,176 @@ export interface CodexSubagentTurnTokenUsageSample {
   turnId: string
 }
 
-// Codex ships no aggregate usage primitive for spawned subagent threads (no
-// usage RPC, no usage on the protocol Turn, no parent-side aggregation), so
-// the canonical pattern is consuming each child thread's tokenUsage
-// notifications. This converts the buffered first/final tokenUsage samples
-// per child turn into additional usage drafts on the parent turn, using the
-// same total-delta arithmetic as the parent's billed usage. Billing is
-// gated on spawn evidence: only threads named by a parent-thread
-// collabAgentToolCall item's receiverThreadIds (multi-agent V1: spawnAgent,
-// sendInput, wait, resume — covering freshly spawned and reused children) or
-// by a subAgentActivity item's agentThreadId (multi-agent V2, which emits
-// activity items instead of collab tool calls) become drafts. The model is
-// attributed directly from V1 spawn items or optional V2 activity evidence;
-// same-model children without explicit evidence inherit parentModel. Warm
-// processes are reused across threads, so a foreign thread id alone is not
-// proof of a subagent — a stale flush from a previous thread must never mint a
-// usage row.
+export interface CodexSubagentRawUsageSample {
+  occurredAt: string
+  responseId: string
+  servedModel?: string | null
+  threadId: string
+  turnId: string
+  usage: CodexTokenUsageBreakdown
+}
+
+export interface CodexSubagentEffectiveMetadata {
+  model: string | null
+  modelProvider: string | null
+  reasoningEffort: string | null
+  serviceTier: AssistantProviderServiceTier | null
+}
+
+export interface CodexSubagentSpawnEvidence {
+  model: string | null
+  reasoningEffort: string | null
+  threadId: string
+}
+
+interface CodexSubagentSpawnMetadata {
+  model: string | null
+  reasoningEffort: string | null
+}
+
+interface CodexSubagentUsageOperation {
+  occurredAt: string
+  sample: CodexSubagentRawUsageSample | CodexSubagentTurnTokenUsageSample
+  source: 'cumulative' | 'raw'
+}
+
+// A child lifecycle uses exactly one accounting source. Exact upstream
+// rawResponse/completed usage wins for a thread as soon as one valid event is
+// available; cumulative thread/tokenUsage/updated deltas remain the fallback
+// for cold-resumed and legacy threads that never emit a valid raw completion.
+// Both sources are gated by canonical spawn evidence from the parent turn.
 export function extractCodexSubagentUsageDrafts(input: {
   modelProvider: string | null
   ordinalStart: number
   parentModel?: string | null
   parentRawEvents: readonly unknown[]
+  parentReasoningEffort?: string | null
   serviceTier?: AssistantProviderServiceTier | null
+  subagentEffectiveMetadataByThreadId?: ReadonlyMap<
+    string,
+    CodexSubagentEffectiveMetadata
+  >
+  subagentRawUsageByResponseId?: ReadonlyMap<
+    string,
+    CodexSubagentRawUsageSample
+  >
   subagentTokenUsageByTurn: ReadonlyMap<
     string,
     CodexSubagentTurnTokenUsageSample
   >
 }): AssistantProviderUsageDraft[] {
-  if (input.subagentTokenUsageByTurn.size === 0) {
+  const spawnMetadataByThreadId = readCodexSubagentSpawnMetadataByThread(
+    input.parentRawEvents,
+  )
+  if (spawnMetadataByThreadId.size === 0) {
     return []
   }
 
-  const spawnModelByThreadId = readCodexCollabSpawnModelsByThread(
-    input.parentRawEvents,
+  const rawOperations: CodexSubagentUsageOperation[] = []
+  const rawSourceThreadIds = new Set<string>()
+  const seenResponseIds = new Set<string>()
+  for (const sample of input.subagentRawUsageByResponseId?.values() ?? []) {
+    if (
+      !spawnMetadataByThreadId.has(sample.threadId) ||
+      seenResponseIds.has(sample.responseId)
+    ) {
+      continue
+    }
+    seenResponseIds.add(sample.responseId)
+    rawSourceThreadIds.add(sample.threadId)
+    rawOperations.push({
+      occurredAt: sample.occurredAt,
+      sample,
+      source: 'raw',
+    })
+  }
+
+  const cumulativeOperations: CodexSubagentUsageOperation[] = []
+  for (const sample of input.subagentTokenUsageByTurn.values()) {
+    if (
+      !spawnMetadataByThreadId.has(sample.threadId) ||
+      rawSourceThreadIds.has(sample.threadId)
+    ) {
+      continue
+    }
+    cumulativeOperations.push({
+      occurredAt: sample.occurredAt,
+      sample,
+      source: 'cumulative',
+    })
+  }
+
+  const operations = [...rawOperations, ...cumulativeOperations].sort(
+    (left, right) => left.occurredAt.localeCompare(right.occurredAt),
   )
   const drafts: AssistantProviderUsageDraft[] = []
   let ordinal = input.ordinalStart
 
-  for (const sample of input.subagentTokenUsageByTurn.values()) {
-    if (!spawnModelByThreadId.has(sample.threadId)) {
+  for (const operation of operations) {
+    if (operation.source === 'raw') {
+      const sample = operation.sample as CodexSubagentRawUsageSample
+      const spawnMetadata = spawnMetadataByThreadId.get(sample.threadId)
+      if (!spawnMetadata) {
+        continue
+      }
+      const effectiveMetadata = input.subagentEffectiveMetadataByThreadId?.get(
+        sample.threadId,
+      )
+      const requestedModel = spawnMetadata.model ?? input.parentModel ?? null
+      const servedModel = normalizeNullableString(sample.servedModel)
+        ?? effectiveMetadata?.model
+        ?? requestedModel
+      const modelProvider = effectiveMetadata?.modelProvider ?? input.modelProvider
+      // ThreadResumeResponse.serviceTier is the effective requested tier. The
+      // stock protocol does not attest which tier the provider actually served,
+      // so this is billing metadata rather than provider-outcome evidence.
+      const serviceTier = effectiveMetadata
+        ? effectiveMetadata.serviceTier
+        : input.serviceTier ?? null
+      const reasoningEffort = effectiveMetadata
+        ? effectiveMetadata.reasoningEffort
+        : spawnMetadata.reasoningEffort
+          ?? input.parentReasoningEffort
+          ?? null
+      const rawUsageJson = sanitizeCodexRawResponseUsage(sample.usage)
+      drafts.push({
+        occurredAt: sample.occurredAt,
+        provider: 'codex-cli',
+        providerRequestOrdinal: ordinal++,
+        providerRequestOutcome: 'succeeded',
+        usage: {
+          apiKeyEnv: null,
+          baseUrl: null,
+          cacheWriteTokens: sample.usage.cacheWriteInputTokens,
+          cachedInputTokens: sample.usage.cachedInputTokens,
+          inputTokens: sample.usage.inputTokens,
+          outputTokens: sample.usage.outputTokens,
+          providerMetadataJson: null,
+          providerName: resolveAssistantCodexUsageProviderName(modelProvider),
+          providerRequestId: sample.responseId,
+          rawUsageJson,
+          rawUsageJsonHash: hashAssistantProviderStableJson(rawUsageJson),
+          reasoningTokens: sample.usage.reasoningOutputTokens,
+          requestedModel,
+          servedModel,
+          tokenPricingBasis: resolveCodexAssistantProviderTokenPricingBasis({
+            model: servedModel,
+            modelProvider,
+            serviceTier,
+          }),
+          totalTokens: sample.usage.totalTokens,
+          turnProfileJson: buildCodexSubagentTurnProfileJson({
+            reasoningEffort,
+            usage: sample.usage,
+          }),
+          usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
+          usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
+        },
+      })
       continue
     }
 
+    const sample = operation.sample as CodexSubagentTurnTokenUsageSample
     const pairs = (
       sample.firstEvent === sample.lastEvent
         ? [sample.firstEvent]
@@ -1142,8 +1270,13 @@ export function extractCodexSubagentUsageDrafts(input: {
       continue
     }
 
-    const model = spawnModelByThreadId.get(sample.threadId)
-      ?? input.parentModel
+    const spawnMetadata = spawnMetadataByThreadId.get(sample.threadId)
+    if (!spawnMetadata) {
+      continue
+    }
+    const model = spawnMetadata.model ?? input.parentModel ?? null
+    const reasoningEffort = spawnMetadata.reasoningEffort
+      ?? input.parentReasoningEffort
       ?? null
     const rawUsageJson = sanitizeCodexUsage(delta)
     drafts.push({
@@ -1172,6 +1305,10 @@ export function extractCodexSubagentUsageDrafts(input: {
           serviceTier: input.serviceTier ?? null,
         }),
         totalTokens: delta.totalTokens,
+        turnProfileJson: buildCodexSubagentTurnProfileJson({
+          reasoningEffort,
+          usage: null,
+        }),
         usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
         usageExtractionVersion: CODEX_USAGE_EXTRACTION_VERSION,
       },
@@ -1193,81 +1330,97 @@ export function resolveCodexAssistantProviderTokenPricingBasis(input: {
   })
 }
 
-// Spawn evidence map: every thread id named by a canonical collab tool call
-// or subAgentActivity item is a key. That membership authorizes billing a
-// foreign thread's usage. Only spawnAgent carries an explicit model in the
-// pinned protocol; activity-only evidence inherits the parent model.
-function readCodexCollabSpawnModelsByThread(
-  rawEvents: readonly unknown[],
-): Map<string, string | null> {
-  const modelByThreadId = new Map<string, string | null>()
-  for (const rawEvent of rawEvents) {
-    const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
-    if (!collabToolCall) {
-      continue
-    }
-
-    for (const receiverThreadId of collabToolCall.receiverThreadIds) {
-      modelByThreadId.set(
-        receiverThreadId,
-        modelByThreadId.get(receiverThreadId) ?? collabToolCall.spawnModel,
-      )
-    }
-  }
-
-  return modelByThreadId
-}
-
-// Receiver thread ids named by a single parent-thread collab tool call or
-// subagent activity event, if any. Exported so the live turn loop can
-// prioritize evidenced subagent threads when its bounded usage buffer fills
-// up.
-export function readCodexCollabReceiverThreadIds(
+export function readCodexSubagentSpawnEvidence(
   rawEvent: unknown,
-): readonly string[] {
-  return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
-}
-
-function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
-  receiverThreadIds: string[]
-  spawnModel: string | null
-} | null {
+): readonly CodexSubagentSpawnEvidence[] {
   const notification = readCodexServerNotification(rawEvent)
-  if (
-    notification?.method !== 'item/started' &&
-    notification?.method !== 'item/completed'
-  ) {
-    return null
+  if (notification?.method !== 'item/completed') {
+    return []
   }
 
   const item = readCodexRecord(notification.params.item)
   const itemType = readCodexNonEmptyString(item?.type)
   if (itemType === 'subAgentActivity') {
-    const agentThreadId = readCodexNonEmptyString(item?.agentThreadId)
-    return agentThreadId
-      ? {
-          receiverThreadIds: [agentThreadId],
-          spawnModel: null,
-        }
+    const agentThreadId = item?.kind === 'started'
+      ? readCodexNonEmptyString(item.agentThreadId)
       : null
+    return agentThreadId
+      ? [{ model: null, reasoningEffort: null, threadId: agentThreadId }]
+      : []
   }
-  if (itemType !== 'collabAgentToolCall' || !Array.isArray(item?.receiverThreadIds)) {
-    return null
+  if (
+    itemType !== 'collabAgentToolCall' ||
+    item?.tool !== 'spawnAgent' ||
+    item.status !== 'completed' ||
+    !Array.isArray(item.receiverThreadIds)
+  ) {
+    return []
   }
 
-  const receiverThreadIds = item.receiverThreadIds.flatMap((receiverThreadId) => {
-    const normalized = readCodexNonEmptyString(receiverThreadId)
-    return normalized ? [normalized] : []
+  const model = readCodexNonEmptyString(item.model)
+  const reasoningEffort = readCodexNonEmptyString(item.reasoningEffort)
+  return item.receiverThreadIds.flatMap((receiverThreadId) => {
+    const threadId = readCodexNonEmptyString(receiverThreadId)
+    return threadId ? [{ model, reasoningEffort, threadId }] : []
   })
-  if (receiverThreadIds.length === 0) {
+}
+
+function readCodexSubagentSpawnMetadataByThread(
+  rawEvents: readonly unknown[],
+): Map<string, CodexSubagentSpawnMetadata> {
+  const metadataByThreadId = new Map<string, CodexSubagentSpawnMetadata>()
+  for (const rawEvent of rawEvents) {
+    for (const evidence of readCodexSubagentSpawnEvidence(rawEvent)) {
+      const existing = metadataByThreadId.get(evidence.threadId)
+      metadataByThreadId.set(evidence.threadId, {
+        model: existing?.model ?? evidence.model,
+        reasoningEffort: existing?.reasoningEffort ?? evidence.reasoningEffort,
+      })
+    }
+  }
+  return metadataByThreadId
+}
+
+function sanitizeCodexRawResponseUsage(
+  usage: CodexTokenUsageBreakdown,
+): Record<string, unknown> {
+  return {
+    input_tokens: usage.inputTokens,
+    input_tokens_details: {
+      cached_tokens: usage.cachedInputTokens,
+    },
+    output_tokens: usage.outputTokens,
+    output_tokens_details: {
+      reasoning_tokens: usage.reasoningOutputTokens,
+    },
+    total_tokens: usage.totalTokens,
+  }
+}
+
+function buildCodexSubagentTurnProfileJson(input: {
+  reasoningEffort: string | null
+  usage: CodexTokenUsageBreakdown | null
+}): Record<string, unknown> | null {
+  const reasoningEffort = normalizeNullableString(input.reasoningEffort)
+  if (!reasoningEffort && !input.usage) {
     return null
   }
 
   return {
-    receiverThreadIds,
-    spawnModel: item.tool === 'spawnAgent'
-      ? readCodexNonEmptyString(item.model)
-      : null,
+    modelContextWindow: null,
+    requestCount: input.usage ? 1 : 0,
+    requests: input.usage
+      ? [{
+          cachedInput: input.usage.cachedInputTokens,
+          input: input.usage.inputTokens,
+          output: input.usage.outputTokens,
+        }]
+      : [],
+    requestsTruncated: false,
+    ...(reasoningEffort ? { reasoningEffort } : {}),
+    schema: ASSISTANT_TURN_PROFILE_SCHEMA,
+    tools: [],
+    toolsTruncated: false,
   }
 }
 

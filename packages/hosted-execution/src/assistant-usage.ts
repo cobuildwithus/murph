@@ -59,6 +59,9 @@ export const ASSISTANT_TURN_PROFILE_MAX_REQUESTS = 32;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOLS = 16;
 export const ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH = 64;
 const ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/ -]*$/u;
+const ASSISTANT_TURN_PROFILE_MAX_REASONING_EFFORT_LENGTH = 32;
+const ASSISTANT_TURN_PROFILE_REASONING_EFFORT_PATTERN =
+  /^[A-Za-z0-9][A-Za-z0-9_-]*$/u;
 
 export type AssistantUsageCredentialSource = "member" | "platform" | "unknown";
 export type AssistantProviderRequestOutcome =
@@ -1136,6 +1139,18 @@ function requireValidTurnProfileJson(
       `${label}.tools must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_TOOLS} entries.`,
     );
   }
+  const reasoningEffort = record.reasoningEffort === undefined
+    ? null
+    : normalizeOptionalString(record.reasoningEffort, `${label}.reasoningEffort`);
+  if (
+    reasoningEffort !== null
+    && (
+      reasoningEffort.length > ASSISTANT_TURN_PROFILE_MAX_REASONING_EFFORT_LENGTH
+      || !ASSISTANT_TURN_PROFILE_REASONING_EFFORT_PATTERN.test(reasoningEffort)
+    )
+  ) {
+    throw new TypeError(`${label}.reasoningEffort must be a short sanitized value.`);
+  }
 
   return {
     modelContextWindow: record.modelContextWindow,
@@ -1148,6 +1163,7 @@ function requireValidTurnProfileJson(
       ),
     ),
     requestsTruncated: record.requestsTruncated,
+    ...(reasoningEffort === null ? {} : { reasoningEffort }),
     schema: ASSISTANT_TURN_PROFILE_SCHEMA,
     tools: record.tools.map((entry, index) => {
       const toolLabel = `${label}.tools[${index}]`;

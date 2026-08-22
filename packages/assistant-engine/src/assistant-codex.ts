@@ -58,6 +58,7 @@ import {
 } from './assistant-codex-events.js'
 import {
   buildCodexTurnInterruptParams,
+  buildCodexThreadMetadataResumeParams,
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
@@ -111,6 +112,7 @@ import {
 } from './assistant-codex/app-server-rpc.js'
 import {
   readCodexNonEmptyString,
+  readCodexRawResponseCompleted,
   readCodexRecord,
   readCodexThreadTokenUsage,
   type CodexTokenUsageBreakdown,
@@ -135,10 +137,13 @@ import {
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
 import {
+  type CodexSubagentEffectiveMetadata,
+  type CodexSubagentRawUsageSample,
+  type CodexSubagentSpawnEvidence,
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
-  readCodexCollabReceiverThreadIds,
+  readCodexSubagentSpawnEvidence,
 } from './assistant/providers/helpers.js'
 import {
   materializeCodexImages,
@@ -2935,6 +2940,47 @@ function createCodexSubagentTurnUsageKey(input: {
   return `${input.threadId}\u0000${input.turnId}`
 }
 
+function readCodexSubagentEffectiveMetadataResult(input: {
+  fallback: {
+    model: string | null
+    modelProvider: string | null
+    reasoningEffort: string | null
+    serviceTier: AssistantProviderServiceTier | null
+  }
+  result: unknown
+  threadId: string
+}): CodexSubagentEffectiveMetadata | null {
+  if (extractCodexThreadIdFromResult(input.result) !== input.threadId) {
+    return null
+  }
+
+  const result = readCodexRecord(input.result)
+  if (!result) {
+    return null
+  }
+
+  const serviceTier = Object.hasOwn(result, 'serviceTier')
+    ? result.serviceTier === null || result.serviceTier === 'flex'
+      ? result.serviceTier
+      : input.fallback.serviceTier
+    : input.fallback.serviceTier
+  const reasoningEffort = Object.hasOwn(result, 'reasoningEffort')
+    ? result.reasoningEffort === null
+      ? null
+      : readCodexNonEmptyString(result.reasoningEffort)
+        ?? input.fallback.reasoningEffort
+    : input.fallback.reasoningEffort
+
+  return {
+    model: readCodexNonEmptyString(result.model) ?? input.fallback.model,
+    modelProvider:
+      readCodexNonEmptyString(result.modelProvider) ??
+      input.fallback.modelProvider,
+    reasoningEffort,
+    serviceTier,
+  }
+}
+
 function isCodexTurnCompletedMethod(method: string | null): boolean {
   return method === 'turn/completed'
 }
@@ -3203,11 +3249,15 @@ async function runCodexAppServerTurnOnProcess(
     : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
-  const trackedSubagentUsageThreadIds = new Set<string>()
-  // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
-  // collected live so evidenced subagent threads win buffer slots over
-  // stale/unattributed foreign threads when the cap is reached.
-  const collabReceiverThreadIds = new Set<string>()
+  const subagentRawUsageByResponseId =
+    new Map<string, CodexSubagentRawUsageSample>()
+  const subagentReroutedModelByTurn = new Map<string, string>()
+  const subagentEffectiveMetadataByThreadId =
+    new Map<string, CodexSubagentEffectiveMetadata>()
+  const canonicalSubagentSpawnEvidenceByThreadId =
+    new Map<string, CodexSubagentSpawnEvidence>()
+  const subagentMetadataRequestedThreadIds = new Set<string>()
+  const pendingSubagentMetadataRequests = new Set<Promise<void>>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -3311,7 +3361,11 @@ async function runCodexAppServerTurnOnProcess(
       ordinalStart: nextDynamicToolUsageOrdinal,
       parentModel: normalizeNullableString(input.model) ?? null,
       parentRawEvents: jsonEvents,
+      parentReasoningEffort:
+        normalizeNullableString(input.reasoningEffort) ?? null,
       serviceTier: input.serviceTier ?? null,
+      subagentEffectiveMetadataByThreadId,
+      subagentRawUsageByResponseId,
       subagentTokenUsageByTurn,
     })
 
@@ -4911,7 +4965,32 @@ async function runCodexAppServerTurnOnProcess(
     message: CodexRpcMessage,
     method: string | null,
   ): void => {
+    // Fresh thread listeners must enable the stock raw-event stream so child
+    // completions expose exact usage. The same switch also emits full upstream
+    // response items for the parent; Murph has no accounting use for that
+    // content, so keep it out of traces and buffered provider events.
+    if (method === 'rawResponseItem/completed') {
+      return
+    }
     acceptJsonEvent(message)
+    for (const evidence of readCodexSubagentSpawnEvidence(message)) {
+      const existing = canonicalSubagentSpawnEvidenceByThreadId.get(
+        evidence.threadId,
+      )
+      if (
+        !existing &&
+        canonicalSubagentSpawnEvidenceByThreadId.size >=
+          MAX_CODEX_SUBAGENT_USAGE_THREADS
+      ) {
+        continue
+      }
+      canonicalSubagentSpawnEvidenceByThreadId.set(evidence.threadId, {
+        model: existing?.model ?? evidence.model,
+        reasoningEffort:
+          existing?.reasoningEffort ?? evidence.reasoningEffort,
+        threadId: evidence.threadId,
+      })
+    }
     const providerRequestStartedAtMs = codexProviderRequestStartedAtMs
     const isTurnStartedNotification = isCodexTurnStartedMethod(method)
     const isTurnCompletedNotification = isCodexTurnCompletedMethod(method)
@@ -4945,9 +5024,6 @@ async function runCodexAppServerTurnOnProcess(
           observedAtMs - providerRequestStartedAtMs,
         )
       }
-    }
-    for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
-      collabReceiverThreadIds.add(receiverThreadId)
     }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
@@ -5164,8 +5240,53 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (!canonicalSubagentSpawnEvidenceByThreadId.has(threadId)) {
+      return
+    }
+
+    const rawResponseCompleted = readCodexRawResponseCompleted(message)
+    if (rawResponseCompleted) {
+      if (
+        rawResponseCompleted.threadId !== threadId ||
+        subagentRawUsageByResponseId.has(rawResponseCompleted.responseId)
+      ) {
+        return
+      }
+      subagentRawUsageByResponseId.set(rawResponseCompleted.responseId, {
+        occurredAt: new Date().toISOString(),
+        ...rawResponseCompleted,
+        servedModel: subagentReroutedModelByTurn.get(
+          createCodexSubagentTurnUsageKey({
+            threadId,
+            turnId: rawResponseCompleted.turnId,
+          }),
+        ) ?? null,
+      })
+      requestSubagentEffectiveMetadata(threadId)
+      return
+    }
+
     const eventMethod = readCodexEventMethod(message)
     const messageTurnId = extractCodexTurnIdFromMessage(message)
+    if (eventMethod === 'model/rerouted' && messageTurnId) {
+      const servedModel = readCodexNonEmptyString(
+        readCodexRecord(message.params)?.toModel,
+      )
+      if (!servedModel) {
+        return
+      }
+      const usageKey = createCodexSubagentTurnUsageKey({
+        threadId,
+        turnId: messageTurnId,
+      })
+      subagentReroutedModelByTurn.set(usageKey, servedModel)
+      for (const sample of subagentRawUsageByResponseId.values()) {
+        if (sample.threadId === threadId && sample.turnId === messageTurnId) {
+          sample.servedModel = servedModel
+        }
+      }
+      return
+    }
     if (isCodexTurnStartedMethod(eventMethod)) {
       if (!messageTurnId) {
         return
@@ -5177,26 +5298,6 @@ async function runCodexAppServerTurnOnProcess(
       if (subagentTokenUsageByTurn.has(usageKey)) {
         return
       }
-      if (
-        !trackedSubagentUsageThreadIds.has(threadId)
-        && trackedSubagentUsageThreadIds.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS
-      ) {
-        const evictableThreadId = collabReceiverThreadIds.has(threadId)
-          ? [...trackedSubagentUsageThreadIds].find(
-            (trackedThreadId) => !collabReceiverThreadIds.has(trackedThreadId),
-          )
-          : undefined
-        if (evictableThreadId === undefined) {
-          return
-        }
-        trackedSubagentUsageThreadIds.delete(evictableThreadId)
-        for (const [trackedUsageKey, sample] of subagentTokenUsageByTurn) {
-          if (sample.threadId === evictableThreadId) {
-            subagentTokenUsageByTurn.delete(trackedUsageKey)
-          }
-        }
-      }
-      trackedSubagentUsageThreadIds.add(threadId)
       subagentTokenUsageByTurn.set(usageKey, {
         firstEvent: null,
         lastEvent: null,
@@ -5311,9 +5412,9 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    // Codex owns subagent/thread lifecycle. Murph only keeps foreign thread
-    // traffic away from the active parent turn: token usage is buffered for
-    // billing, server requests are denied, and other child events are dropped.
+    // Codex owns subagent/thread lifecycle. Murph keeps foreign thread traffic
+    // away from the active parent turn and meters only child threads authorized
+    // by canonical spawn evidence emitted on this parent turn.
     // Before a fresh thread/start response produces this turn's thread id, the
     // previous bound thread id is enough to distinguish late child traffic.
     const messageThreadId = extractCodexThreadIdFromMessage(message)
@@ -5418,6 +5519,56 @@ async function runCodexAppServerTurnOnProcess(
     method: string,
     params: Record<string, unknown>,
   ): Promise<unknown> => codexProcess.sendRequest(method, params)
+
+  const requestSubagentEffectiveMetadata = (threadId: string): void => {
+    if (subagentMetadataRequestedThreadIds.has(threadId)) {
+      return
+    }
+    const spawnEvidence = canonicalSubagentSpawnEvidenceByThreadId.get(threadId)
+    if (!spawnEvidence) {
+      return
+    }
+
+    subagentMetadataRequestedThreadIds.add(threadId)
+    const request = withCodexRpcTimeout(
+      sendRequest(
+        'thread/resume',
+        buildCodexThreadMetadataResumeParams(threadId),
+      ),
+      CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+      'thread/resume',
+    ).then((result) => {
+      const metadata = readCodexSubagentEffectiveMetadataResult({
+        fallback: {
+          model:
+            spawnEvidence.model ?? normalizeNullableString(input.model) ?? null,
+          modelProvider:
+            normalizeNullableString(input.modelProvider) ?? null,
+          reasoningEffort:
+            spawnEvidence.reasoningEffort ??
+            normalizeNullableString(input.reasoningEffort) ??
+            null,
+          serviceTier: input.serviceTier ?? null,
+        },
+        result,
+        threadId,
+      })
+      if (metadata) {
+        subagentEffectiveMetadataByThreadId.set(threadId, metadata)
+      }
+    }).catch(() => undefined)
+
+    pendingSubagentMetadataRequests.add(request)
+    void request.finally(() => {
+      pendingSubagentMetadataRequests.delete(request)
+    })
+  }
+
+  const drainPendingSubagentMetadataRequests = async (): Promise<void> => {
+    while (pendingSubagentMetadataRequests.size > 0) {
+      await Promise.all([...pendingSubagentMetadataRequests])
+    }
+  }
 
   const requireLiveTurnIds = (): {
     threadId: string
@@ -5680,6 +5831,7 @@ async function runCodexAppServerTurnOnProcess(
     await drainPendingDynamicToolRequests()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
+    await drainPendingSubagentMetadataRequests()
     emitActionDiagnosticsTrace()
     lifecycleStage = 'turn_completed'
     codexProcess.noteTurnCompleted()
@@ -5738,6 +5890,7 @@ async function runCodexAppServerTurnOnProcess(
     dynamicToolAbortController.abort()
     await drainPendingDynamicToolExecutions()
     await drainPendingProgressDeliveries()
+    await drainPendingSubagentMetadataRequests()
     try {
       await settleNoReplyFinalActions()
     } catch (settlementError) {

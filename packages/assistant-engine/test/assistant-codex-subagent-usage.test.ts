@@ -10,10 +10,13 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 
 import {
+  type CodexSubagentEffectiveMetadata,
+  type CodexSubagentRawUsageSample,
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   hashAssistantProviderStableJson,
 } from '../src/assistant/providers/helpers.ts'
+import { readCodexRawResponseCompleted } from '../src/assistant-codex/app-server-protocol.ts'
 
 const SUBAGENT_PROVIDER_REQUEST_STARTED_AT = '2026-07-23T11:59:00.000Z'
 
@@ -92,6 +95,79 @@ function sampleFromEvents(
   }
 }
 
+function rawUsageSample(input: {
+  occurredAt?: string
+  responseId: string
+  servedModel?: string | null
+  threadId: string
+  turnId: string
+  usage?: Partial<CodexSubagentRawUsageSample['usage']>
+}): CodexSubagentRawUsageSample {
+  return {
+    occurredAt: input.occurredAt ?? SUBAGENT_PROVIDER_REQUEST_STARTED_AT,
+    responseId: input.responseId,
+    ...(input.servedModel === undefined
+      ? {}
+      : { servedModel: input.servedModel }),
+    threadId: input.threadId,
+    turnId: input.turnId,
+    usage: {
+      cacheWriteInputTokens: 0,
+      cachedInputTokens: 0,
+      inputTokens: 80,
+      outputTokens: 20,
+      reasoningOutputTokens: 0,
+      totalTokens: 100,
+      ...input.usage,
+    },
+  }
+}
+
+describe('readCodexRawResponseCompleted', () => {
+  const validUsage = {
+    cacheWriteInputTokens: 3,
+    cachedInputTokens: 20,
+    inputTokens: 100,
+    outputTokens: 30,
+    reasoningOutputTokens: 5,
+    totalTokens: 130,
+  }
+
+  it('accepts the exact stock v0.147 notification shape', () => {
+    expect(readCodexRawResponseCompleted({
+      method: 'rawResponse/completed',
+      params: {
+        responseId: 'resp-exact-raw',
+        threadId: 'thread-exact-raw',
+        turnId: 'turn-exact-raw',
+        usage: validUsage,
+      },
+    })).toEqual({
+      responseId: 'resp-exact-raw',
+      threadId: 'thread-exact-raw',
+      turnId: 'turn-exact-raw',
+      usage: validUsage,
+    })
+  })
+
+  it.each([
+    null,
+    {},
+    { ...validUsage, inputTokens: -1 },
+    { ...validUsage, unexpected: 1 },
+  ])('rejects null or malformed usage %#', (usage) => {
+    expect(readCodexRawResponseCompleted({
+      method: 'rawResponse/completed',
+      params: {
+        responseId: 'resp-invalid-raw',
+        threadId: 'thread-invalid-raw',
+        turnId: 'turn-invalid-raw',
+        usage,
+      },
+    })).toBeNull()
+  })
+})
+
 describe('extractCodexSubagentUsageDrafts', () => {
   it('returns no drafts without subagent samples', () => {
     expect(
@@ -139,6 +215,208 @@ describe('extractCodexSubagentUsageDrafts', () => {
       providerName: 'hosted-openai',
       tokenPricingBasis: 'openai-flex',
     })
+  })
+
+  it('records exact raw child usage with effective metadata and the rerouted served model', () => {
+    const threadId = 'thread-raw-child'
+    const responseId = 'resp_raw_child_1'
+    const effectiveMetadata: CodexSubagentEffectiveMetadata = {
+      model: 'gpt-5.6-sol',
+      modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
+      reasoningEffort: 'high',
+      serviceTier: 'flex',
+    }
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 2,
+      parentModel: 'gpt-5.6-terra',
+      parentRawEvents: [spawnEndEvent({
+        model: 'gpt-5.6-terra-mini',
+        receiverThreadIds: [threadId],
+      })],
+      parentReasoningEffort: 'medium',
+      subagentEffectiveMetadataByThreadId: new Map([
+        [threadId, effectiveMetadata],
+      ]),
+      subagentRawUsageByResponseId: new Map([
+        [responseId, rawUsageSample({
+          responseId,
+          servedModel: 'gpt-5.2',
+          threadId,
+          turnId: 'turn-raw-child',
+          usage: {
+            cacheWriteInputTokens: 9,
+            cachedInputTokens: 40,
+            inputTokens: 120,
+            outputTokens: 30,
+            reasoningOutputTokens: 7,
+            totalTokens: 150,
+          },
+        })],
+      ]),
+      subagentTokenUsageByTurn: new Map(),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]).toMatchObject({
+      provider: 'codex-cli',
+      providerRequestOrdinal: 2,
+      providerRequestOutcome: 'succeeded',
+      usage: {
+        cacheWriteTokens: 9,
+        cachedInputTokens: 40,
+        inputTokens: 120,
+        outputTokens: 30,
+        providerName: 'hosted-openai',
+        providerRequestId: responseId,
+        reasoningTokens: 7,
+        requestedModel: 'gpt-5.6-terra-mini',
+        servedModel: 'gpt-5.2',
+        tokenPricingBasis: 'standard',
+        totalTokens: 150,
+        usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
+      },
+    })
+    expect(drafts[0]?.usage.rawUsageJson).toEqual({
+      input_tokens: 120,
+      input_tokens_details: { cached_tokens: 40 },
+      output_tokens: 30,
+      output_tokens_details: { reasoning_tokens: 7 },
+      total_tokens: 150,
+    })
+    expect(drafts[0]?.usage.turnProfileJson).toMatchObject({
+      reasoningEffort: 'high',
+      requestCount: 1,
+      requests: [{ cachedInput: 40, input: 120, output: 30 }],
+    })
+
+    const draft = drafts[0]!
+    const parsed = parseAssistantUsageRecord({
+      ...draft.usage,
+      attemptCount: 1,
+      credentialSource: 'platform',
+      occurredAt: draft.occurredAt,
+      provider: draft.provider,
+      providerRequestOrdinal: draft.providerRequestOrdinal,
+      providerRequestOutcome: draft.providerRequestOutcome,
+      schema: ASSISTANT_USAGE_SCHEMA,
+      sessionId: 'session-raw-child',
+      turnId: 'turn-parent-raw-child',
+      usageId: createAssistantUsageId({
+        attemptCount: 1,
+        providerRequestOrdinal: draft.providerRequestOrdinal,
+        turnId: 'turn-parent-raw-child',
+      }),
+    })
+    expect(parsed.providerRequestId).toBe(responseId)
+    expect(parsed.turnProfileJson).toMatchObject({
+      reasoningEffort: 'high',
+    })
+  })
+
+  it('deduplicates repeated raw completions by provider response id', () => {
+    const responseId = 'resp_duplicate_child'
+    const sample = rawUsageSample({
+      responseId,
+      threadId: 'thread-duplicate-child',
+      turnId: 'turn-duplicate-child',
+    })
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 1,
+      parentRawEvents: [spawnEndEvent({
+        receiverThreadIds: ['thread-duplicate-child'],
+      })],
+      subagentRawUsageByResponseId: new Map([
+        ['first-delivery', sample],
+        ['duplicate-delivery', { ...sample }],
+      ]),
+      subagentTokenUsageByTurn: new Map(),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]?.usage.providerRequestId).toBe(responseId)
+  })
+
+  it('selects raw usage over cumulative checkpoints for one child lifecycle', () => {
+    const threadId = 'thread-raw-wins'
+    const cumulativeEvents = [tokenUsageEvent({
+      threadId,
+      turnId: 'turn-cumulative-ignored',
+      total: { inputTokens: 900, outputTokens: 100, totalTokens: 1_000 },
+      last: { inputTokens: 900, outputTokens: 100, totalTokens: 1_000 },
+    })]
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 1,
+      parentRawEvents: [spawnEndEvent({ receiverThreadIds: [threadId] })],
+      subagentRawUsageByResponseId: new Map([
+        ['resp-raw-wins', rawUsageSample({
+          responseId: 'resp-raw-wins',
+          threadId,
+          turnId: 'turn-raw-wins',
+          usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+        })],
+      ]),
+      subagentTokenUsageByTurn: new Map([
+        ['cumulative', sampleFromEvents(cumulativeEvents)],
+      ]),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]?.usage).toMatchObject({
+      inputTokens: 80,
+      outputTokens: 20,
+      providerRequestId: 'resp-raw-wins',
+      totalTokens: 100,
+      usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
+    })
+  })
+
+  it('uses cumulative token deltas when a cold-resumed child emits no raw completion', () => {
+    const threadId = 'thread-cold-resume-child'
+    const cumulativeEvents = [tokenUsageEvent({
+      threadId,
+      turnId: 'turn-cold-resume-child',
+      total: { inputTokens: 70, outputTokens: 30, totalTokens: 100 },
+      last: { inputTokens: 70, outputTokens: 30, totalTokens: 100 },
+    })]
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 1,
+      parentRawEvents: [spawnEndEvent({ receiverThreadIds: [threadId] })],
+      subagentRawUsageByResponseId: new Map(),
+      subagentTokenUsageByTurn: new Map([
+        ['cold-resume', sampleFromEvents(cumulativeEvents)],
+      ]),
+    })
+
+    expect(drafts).toHaveLength(1)
+    expect(drafts[0]?.usage).toMatchObject({
+      inputTokens: 70,
+      outputTokens: 30,
+      providerRequestId: null,
+      totalTokens: 100,
+      usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+    })
+  })
+
+  it('rejects raw usage from a foreign child without canonical spawn evidence', () => {
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 1,
+      parentRawEvents: [],
+      subagentRawUsageByResponseId: new Map([
+        ['resp-foreign-child', rawUsageSample({
+          responseId: 'resp-foreign-child',
+          threadId: 'thread-foreign-child',
+          turnId: 'turn-foreign-child',
+        })],
+      ]),
+      subagentTokenUsageByTurn: new Map(),
+    })
+
+    expect(drafts).toEqual([])
   })
 
   it('builds per-turn total deltas with spawn-attributed models', () => {
@@ -472,7 +750,7 @@ describe('extractCodexSubagentUsageDrafts', () => {
     expect(JSON.stringify(drafts)).not.toContain('summarize private context')
   })
 
-  it('authorizes billing via non-spawn collab items and keeps spawn-attributed models', () => {
+  it('rejects non-spawn collab authorization and keeps spawn-attributed models', () => {
     const usageFor = (threadId: string) =>
       sampleFromEvents([
         tokenUsageEvent({
@@ -499,7 +777,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
       modelProvider: 'openai',
       ordinalStart: 1,
       parentRawEvents: [
-        // A reused child only appears via sendInput: billable, model unknown.
+        // A reused child only appears via sendInput: this is not canonical
+        // Murph spawn evidence and must not authorize billing.
         {
           method: 'item/completed',
           params: {
@@ -532,23 +811,8 @@ describe('extractCodexSubagentUsageDrafts', () => {
       ]),
     })
 
-    expect(drafts).toHaveLength(2)
+    expect(drafts).toHaveLength(1)
     expect(drafts[0]).toMatchObject({
-      usage: {
-        requestedModel: null,
-        servedModel: null,
-        totalTokens: 100,
-      },
-    })
-    expect(drafts[0]?.usage.rawUsageJson).toEqual({
-      cacheWriteInputTokens: 0,
-      cachedInputTokens: 0,
-      inputTokens: 80,
-      outputTokens: 20,
-      reasoningOutputTokens: 0,
-      totalTokens: 100,
-    })
-    expect(drafts[1]).toMatchObject({
       usage: {
         requestedModel: 'gpt-5.6-terra-mini',
         servedModel: 'gpt-5.6-terra-mini',

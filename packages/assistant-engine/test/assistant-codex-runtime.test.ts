@@ -854,6 +854,7 @@ describe('assistant codex runtime', () => {
       cwd: '/workspace',
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+      experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       sandbox: 'workspace-write',
@@ -1052,6 +1053,7 @@ describe('assistant codex runtime', () => {
       developerInstructions: 'Stable Murph instructions.',
       dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
       ephemeral: true,
+      experimentalRawEvents: true,
       model: 'gpt-5',
       modelProvider: 'vercel-ai-gateway',
       permissions: 'murph-group-read',
@@ -1212,6 +1214,7 @@ describe('assistant codex runtime', () => {
               approvalPolicy: 'never',
               cwd: expectedWorkingDirectory,
               dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+              experimentalRawEvents: true,
               model,
               modelProvider,
               sandbox: 'workspace-write',
@@ -15056,6 +15059,7 @@ describe('assistant codex runtime', () => {
       expect(asRecord(threadRequests[0]?.params)).toEqual({
         ...expectedFreshThreadContext,
         dynamicTools: MURPH_DYNAMIC_TOOLS_WITHOUT_PROGRESS,
+        experimentalRawEvents: true,
         serviceName: 'murph',
       })
       expect(asRecord(threadRequests[1]?.params)).toEqual(expectedResumeThreadContext)
@@ -18577,6 +18581,337 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
+    it('buffers exact raw child usage before metadata-only resume and never double bills cumulative checkpoints', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-raw-usage-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-raw-usage-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_050 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+            await writeWarmTurnStarted({
+              child,
+              requestCount: 1,
+              threadId: 'thread-subagent-raw-parent',
+              turnId: 'turn-subagent-raw-parent',
+            })
+            expect(asRecord(
+              (await waitForRpcMethod(child, 'thread/start')).params,
+            )).toMatchObject({ experimentalRawEvents: true })
+
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'collab-spawn-raw-child',
+                  type: 'collabAgentToolCall',
+                  tool: 'spawnAgent',
+                  status: 'completed',
+                  senderThreadId: 'thread-subagent-raw-parent',
+                  receiverThreadIds: ['thread-subagent-raw-child'],
+                  model: 'gpt-5.6-terra-mini',
+                  reasoningEffort: 'medium',
+                },
+                threadId: 'thread-subagent-raw-parent',
+                turnId: 'turn-subagent-raw-parent',
+              },
+            }))
+            writeStartedTurn(
+              child,
+              'thread-subagent-raw-child',
+              'turn-subagent-raw-child',
+            )
+            writeTokenUsage({
+              child,
+              last: {
+                cacheWriteInputTokens: 0,
+                cachedInputTokens: 0,
+                inputTokens: 900,
+                outputTokens: 100,
+                reasoningOutputTokens: 0,
+                totalTokens: 1_000,
+              },
+              threadId: 'thread-subagent-raw-child',
+              total: {
+                cacheWriteInputTokens: 0,
+                cachedInputTokens: 0,
+                inputTokens: 900,
+                outputTokens: 100,
+                reasoningOutputTokens: 0,
+                totalTokens: 1_000,
+              },
+              turnId: 'turn-subagent-raw-child',
+            })
+            child.stdout.write(jsonLine({
+              method: 'model/rerouted',
+              params: {
+                fromModel: 'gpt-5.6-sol',
+                reason: 'highRiskCyberActivity',
+                threadId: 'thread-subagent-raw-child',
+                toModel: 'gpt-5.2',
+                turnId: 'turn-subagent-raw-child',
+              },
+            }))
+
+            const rawCompleted = {
+              method: 'rawResponse/completed',
+              params: {
+                responseId: 'resp-subagent-raw-child',
+                threadId: 'thread-subagent-raw-child',
+                turnId: 'turn-subagent-raw-child',
+                usage: {
+                  cacheWriteInputTokens: 8,
+                  cachedInputTokens: 40,
+                  inputTokens: 120,
+                  outputTokens: 30,
+                  reasoningOutputTokens: 7,
+                  totalTokens: 150,
+                },
+              },
+            }
+            child.stdout.write(jsonLine(rawCompleted))
+            child.stdout.write(jsonLine(rawCompleted))
+
+            const metadataResume = await waitForRpcMethod(child, 'thread/resume')
+            expect(asRecord(metadataResume.params)).toEqual({
+              excludeTurns: true,
+              threadId: 'thread-subagent-raw-child',
+            })
+            child.stdout.write(jsonLine({
+              id: metadataResume.id,
+              result: {
+                model: 'gpt-5.6-sol',
+                modelProvider: 'openai',
+                reasoningEffort: 'high',
+                serviceTier: 'flex',
+                thread: { id: 'thread-subagent-raw-child' },
+              },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'rawResponseItem/completed',
+              params: {
+                item: {
+                  type: 'message',
+                  role: 'assistant',
+                  content: [{
+                    type: 'output_text',
+                    text: 'private raw parent response item',
+                  }],
+                },
+                threadId: 'thread-subagent-raw-parent',
+                turnId: 'turn-subagent-raw-parent',
+              },
+            }))
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Exact child usage recorded',
+              threadId: 'thread-subagent-raw-parent',
+              turnId: 'turn-subagent-raw-parent',
+            })
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        prompt: 'spawn a raw-metered child',
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+        serviceTier: 'flex',
+        workingDirectory,
+      })
+
+      expect(result.finalMessage).toBe('Exact child usage recorded')
+      expect(result.additionalUsages).toHaveLength(1)
+      expect(result.additionalUsages[0]).toMatchObject({
+        provider: 'codex-cli',
+        providerRequestOrdinal: 1,
+        usage: {
+          cacheWriteTokens: 8,
+          cachedInputTokens: 40,
+          inputTokens: 120,
+          outputTokens: 30,
+          providerName: 'openai',
+          providerRequestId: 'resp-subagent-raw-child',
+          reasoningTokens: 7,
+          requestedModel: 'gpt-5.6-terra-mini',
+          servedModel: 'gpt-5.2',
+          tokenPricingBasis: 'standard',
+          totalTokens: 150,
+          turnProfileJson: {
+            reasoningEffort: 'high',
+          },
+          usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
+        },
+      })
+      expect(result.additionalUsages[0]?.usage.rawUsageJson).toEqual({
+        input_tokens: 120,
+        input_tokens_details: { cached_tokens: 40 },
+        output_tokens: 30,
+        output_tokens_details: { reasoning_tokens: 7 },
+        total_tokens: 150,
+      })
+      expect(JSON.stringify(result.jsonEvents)).not.toContain(
+        'private raw parent response item',
+      )
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) => message.method === 'thread/resume'),
+      ).toHaveLength(1)
+    })
+
+    it('keeps cold-resumed child usage on the cumulative fallback without enabling raw events', async () => {
+      const workingDirectory = await createTempDir(
+        'assistant-codex-subagent-cold-resume-work-',
+      )
+      const codexHome = await createTempDir(
+        'assistant-codex-subagent-cold-resume-home-',
+      )
+      const spawnedChildren: MockChildProcess[] = []
+      mockProcessGroupSignalsForChildren(spawnedChildren)
+
+      codexMocks.spawn.mockImplementation(() => {
+        const child = new MockChildProcess()
+        child.pid = 31_075 + spawnedChildren.length
+        spawnedChildren.push(child)
+
+        queueMicrotask(() => {
+          void (async () => {
+            const initialize = await waitForRpcMethod(child, 'initialize')
+            child.stdout.write(jsonLine({ id: initialize.id, result: {} }))
+
+            const threadResume = await waitForRpcMethod(child, 'thread/resume')
+            expect(asRecord(threadResume.params)).toEqual({
+              approvalPolicy: 'never',
+              cwd: workingDirectory,
+              excludeTurns: true,
+              model: 'gpt-5.6-sol',
+              modelProvider: 'openai',
+              sandbox: 'workspace-write',
+              threadId: 'thread-subagent-cold-parent',
+            })
+            expect(asRecord(threadResume.params).experimentalRawEvents).toBeUndefined()
+            child.stdout.write(jsonLine({
+              id: threadResume.id,
+              result: {
+                approvalPolicy: 'never',
+                cwd: workingDirectory,
+                model: 'gpt-5.6-sol',
+                modelProvider: 'openai',
+                sandbox: codexSandboxPolicyForMode('workspace-write'),
+                thread: { id: 'thread-subagent-cold-parent' },
+              },
+            }))
+
+            const turnStart = await waitForRpcMethod(child, 'turn/start')
+            child.stdout.write(jsonLine({
+              id: turnStart.id,
+              result: { turn: { id: 'turn-subagent-cold-parent' } },
+            }))
+            child.stdout.write(jsonLine({
+              method: 'item/completed',
+              params: {
+                item: {
+                  id: 'collab-spawn-cold-child',
+                  type: 'collabAgentToolCall',
+                  tool: 'spawnAgent',
+                  status: 'completed',
+                  senderThreadId: 'thread-subagent-cold-parent',
+                  receiverThreadIds: ['thread-subagent-cold-child'],
+                  model: 'gpt-5.6-terra-mini',
+                },
+                threadId: 'thread-subagent-cold-parent',
+                turnId: 'turn-subagent-cold-parent',
+              },
+            }))
+            writeStartedTurn(
+              child,
+              'thread-subagent-cold-child',
+              'turn-subagent-cold-child',
+            )
+            writeTokenUsage({
+              child,
+              last: {
+                cacheWriteInputTokens: 0,
+                cachedInputTokens: 20,
+                inputTokens: 70,
+                outputTokens: 30,
+                reasoningOutputTokens: 4,
+                totalTokens: 100,
+              },
+              threadId: 'thread-subagent-cold-child',
+              total: {
+                cacheWriteInputTokens: 0,
+                cachedInputTokens: 20,
+                inputTokens: 70,
+                outputTokens: 30,
+                reasoningOutputTokens: 4,
+                totalTokens: 100,
+              },
+              turnId: 'turn-subagent-cold-child',
+            })
+            writeCodexV2AssistantEventTurn({
+              child,
+              finalMessage: 'Cold child usage recorded',
+              threadId: 'thread-subagent-cold-parent',
+              turnId: 'turn-subagent-cold-parent',
+            })
+          })()
+        })
+
+        return child
+      })
+
+      const result = await executeCodexAppServerTurn({
+        approvalPolicy: 'never',
+        codexHome,
+        env: { PATH: '/custom/bin' },
+        model: 'gpt-5.6-sol',
+        modelProvider: 'openai',
+        prompt: 'resume and meter a child cumulatively',
+        resumeSessionId: 'thread-subagent-cold-parent',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+
+      expect(result.finalMessage).toBe('Cold child usage recorded')
+      expect(result.additionalUsages).toHaveLength(1)
+      expect(result.additionalUsages[0]?.usage).toMatchObject({
+        cachedInputTokens: 20,
+        inputTokens: 70,
+        outputTokens: 30,
+        providerRequestId: null,
+        reasoningTokens: 4,
+        requestedModel: 'gpt-5.6-terra-mini',
+        servedModel: 'gpt-5.6-terra-mini',
+        totalTokens: 100,
+        usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
+      })
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) => message.method === 'thread/resume'),
+      ).toHaveLength(1)
+    })
+
     it('inherits the parent model for activity-only children and uses collab spawn models', async () => {
       const workingDirectory = await createTempDir('assistant-codex-subagent-usage-work-')
       const codexHome = await createTempDir('assistant-codex-subagent-usage-home-')
