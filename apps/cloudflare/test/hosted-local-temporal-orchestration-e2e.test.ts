@@ -190,17 +190,10 @@ describe("hosted local Temporal orchestration e2e", () => {
     expect(workflowState.lastExecutionErrorCode).toBeNull();
     expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
 
-    await expect.poll(async () => {
-      const mailboxItem = await readHostedMailboxItemForTest({
-        dedupeKey: eventId,
-        environment: activeScenario.runtimeEnv,
-        userId: environmentInterviewUserId,
-      });
-      return mailboxItem.consumedAt;
-    }, {
-      interval: 250,
-      timeout: 120_000,
-    }).toEqual(expect.any(String));
+    await waitForSystemMailboxHandledThrough({
+      expectedSeq: append.wake.seq,
+      userId: environmentInterviewUserId,
+    });
     const finalStatus = await activeScenario.harness.readUserStatus(
       environmentInterviewUserId,
     );
@@ -214,7 +207,6 @@ describe("hosted local Temporal orchestration e2e", () => {
       environment: activeScenario.runtimeEnv,
       userId: environmentInterviewUserId,
     })).resolves.toMatchObject({
-      consumedAt: expect.any(String),
       kind: "environment-interview.completed",
       lane: "system",
     });
