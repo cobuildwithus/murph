@@ -27,6 +27,7 @@ import {
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import { readHostedFamilyBillingRecoveryForOwner } from "./family-plan";
 import { requireHostedInviteForBillingCheckout } from "./invite-service";
+import { hasHostedRecoverableBilling } from "./lifecycle";
 import {
   activateHostedMemberForPositiveSourceTx,
   buildHostedMemberActivationEventId,
@@ -390,6 +391,22 @@ async function ensureHostedStarterUsageEnrollmentWithPolicy(
           code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
           message:
             "This hosted account has Family billing to recover before starting individual access.",
+          httpStatus: 409,
+        });
+      }
+      if (hasHostedRecoverableBilling({
+        billingStatus: member.billingStatus,
+        hasExistingSubscription: Boolean(
+          member.billingRef?.stripeSubscriptionLookupKey,
+        ),
+      })) {
+        if (policy.deferToExistingPageOwner) {
+          return null;
+        }
+        throw hostedOnboardingError({
+          code: "HOSTED_STARTER_USAGE_ENROLLMENT_BLOCKED",
+          message:
+            "This hosted account already has billing to recover before starting individual access.",
           httpStatus: 409,
         });
       }

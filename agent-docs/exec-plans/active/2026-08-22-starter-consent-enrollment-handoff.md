@@ -93,6 +93,31 @@ Updated: 2026-08-22
 - Keep the current Starter island as recovery for already-consented historical
   or interrupted states; the ordinary fresh path no longer depends on it.
 
+## Review anomaly retrospective
+
+- Original requirement: after final consent, continue only when the same
+  existing onboarding owner that renders `/join` says the member is truly
+  Starter-ready. Preserve messaging, direct-billing, and Family recovery as
+  the owners of their current states.
+- First candidate shape: consent called the canonical Starter enrollment
+  boundary, but that boundary treated consent completion as sufficient. The
+  first review remediation added explicit deferral for messaging and Family
+  recovery plus the existing destination handoff.
+- Repeated mechanism: direct-billing recovery was still inferred locally from
+  paid-evidence fields. A retained Subscription can be recoverable even when
+  that evidence also makes access look active, so continuation and `/join`
+  could select different owners.
+- Complexity attribution: the first candidate changed 57 source lines; its
+  remediation added 154 lines of source churn. The growth was warranted for
+  existing owner revalidation and handoff reuse, but duplicating billing-owner
+  inference was not.
+- Decision: shrink the remediation around the existing
+  `hasHostedRecoverableBilling` policy. Both `/join` rendering and post-consent
+  continuation use that same predicate and the retained-Subscription presence
+  signal; no status-specific patch, new state, service, queue, webhook, or
+  lifecycle owner is added. Paid evidence is considered only after the
+  recovery owner declines the member.
+
 ## Product UX
 
 - Outcome: accepting the final required consent either finishes Starter or
@@ -119,12 +144,13 @@ Updated: 2026-08-22
 - Other consent callers: requests without the explicit invite continuation do
   not enter enrollment and retain the existing consent and health-runtime
   ordering.
-- Evidence: 86 focused Vitest cases passed across the consent route, real join
+- Evidence: 96 focused Vitest cases passed across the consent route, real join
   island, join page/view, and canonical Starter enrollment service; Web
-  typechecking and rendered browser proof remain to be refreshed on the final
-  candidate head.
-- Verdict: implementation proof passes; final browser and exact-head review
-  evidence remain pending.
+  typechecking and lint pass on the simplified candidate. The recovery proof
+  covers every supported direct-billing recovery status with retained
+  Subscription identity and confirms the join owner routes to Subscription.
+- Verdict: local implementation proof passes; exact-head CI and ReviewGPT round
+  3 remain pending.
 
 ## Verification
 

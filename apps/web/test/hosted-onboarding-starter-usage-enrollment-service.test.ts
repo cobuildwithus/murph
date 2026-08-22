@@ -554,23 +554,37 @@ describe("Starter usage enrollment owner", () => {
     },
   );
 
-  it("defers committed consent to direct billing recovery", async () => {
-    memberState = buildMemberState({
-      billingStatus: HostedBillingStatus.paused,
-    });
-    const prisma = buildPrisma(() => memberState);
+  it.each([
+    HostedBillingStatus.incomplete,
+    HostedBillingStatus.paused,
+    HostedBillingStatus.past_due,
+    HostedBillingStatus.canceled,
+    HostedBillingStatus.unpaid,
+  ])(
+    "defers committed consent to retained %s billing recovery",
+    async (billingStatus) => {
+      memberState = buildMemberState({
+        billingRef: {
+          currentBillingPhase: null,
+          currentCheckoutOffer: null,
+          stripeSubscriptionLookupKey: "subscription_lookup_recovery",
+        },
+        billingStatus,
+      });
+      const prisma = buildPrisma(() => memberState);
 
-    await expect(continueHostedJoinInviteAfterLaunchConsent({
-      inviteCode: "invite_123",
-      member: { id: memberState.id, suspendedAt: null },
-      now: NOW,
-      prisma: prisma as never,
-      source: "web_onboarding",
-    })).resolves.toEqual({ disposition: "deferred" });
+      await expect(continueHostedJoinInviteAfterLaunchConsent({
+        inviteCode: "invite_123",
+        member: { id: memberState.id, suspendedAt: null },
+        now: NOW,
+        prisma: prisma as never,
+        source: "web_onboarding",
+      })).resolves.toEqual({ disposition: "deferred" });
 
-    expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
-    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
-  });
+      expect(mocks.ensureHostedStarterUsageGrantTx).not.toHaveBeenCalled();
+      expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps unexpected post-consent enrollment failures retryable", async () => {
     mocks.assertHostedMemberBillingStartMessagingReady.mockRejectedValueOnce(

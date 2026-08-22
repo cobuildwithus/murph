@@ -3446,13 +3446,16 @@ the authoritative returned status has both launch scopes current. The existing
 Starter enrollment boundary then revalidates invite/member matching,
 suspension, messaging readiness, direct billing, and Family recovery under its
 member/beneficiary lock before any append-only grant. Messaging or billing
-recovery defers successfully to the existing server-rendered join owner. An
-actual Starter enrollment returns its canonical destination through the same
-request so the browser can reuse the existing full-document Home or armed
-group-start handoff. The hint grants no authority by itself. The existing
-Starter island remains a recovery path for already-consented historical or
-interrupted states; Privy authentication webhooks are not activation authority
-and do not replace the consent-owned continuation.
+recovery defers successfully to the existing server-rendered join owner. Join
+rendering and consent continuation share the canonical recoverable-billing
+predicate; retained Subscription identity is checked before paid evidence, so
+recovery cannot be mistaken for active access. An actual Starter enrollment
+returns its canonical destination through the same request so the browser can
+reuse the existing full-document Home or armed group-start handoff. The hint
+grants no authority by itself. The existing Starter island remains a recovery
+path for already-consented historical or interrupted states; Privy
+authentication webhooks are not activation authority and do not replace the
+consent-owned continuation.
 
 Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
