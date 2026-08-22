@@ -80,8 +80,14 @@ behind retained model-free maintenance work.
   integration proves a later delegated ask upgrades system-mailbox processing
   through Codex preparation into exactly one assistant phase while the older
   device wake remains durable.
-- No coverage patch artifact was returned. Both corrections remain inside the
-  existing prompt planner and runtime-owner boundaries.
+- Accepted recovered-sending expiry finding: the existing assistant-notification
+  preparation boundary now revalidates the handoff's inclusive deadline before
+  any model or provider work. Expired in-flight recovery returns the existing
+  terminal no-send outcome, removes only the mailbox source item, and leaves any
+  already-durable outbox intent with its canonical idempotent delivery owner.
+- No coverage patch artifact was returned. All corrections remain inside the
+  existing prompt planner and runtime-owner boundaries; the expiry correction
+  adds no persisted field, queue, scheduler, or lifecycle state.
 
 ## Deployment
 
