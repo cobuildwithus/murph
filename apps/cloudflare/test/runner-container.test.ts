@@ -1671,24 +1671,60 @@ describe("RunnerContainer", () => {
     const fixedNowMs = Date.parse("2026-08-20T16:32:00.000Z");
     let nowMs = fixedNowMs;
     const now = vi.spyOn(Date, "now").mockImplementation(() => nowMs);
+    const healthStarted = createDeferred<void>();
     let healthChecks = 0;
+    let startCalls = 0;
     let status: "running" | "stopped" = "stopped";
     let lastChange = fixedNowMs;
+    let destroyedStart: unknown = null;
+    let issuedStart: unknown = null;
+    let container: RunnerContainer;
     const startAndWaitForPorts = vi.fn(async () => {
+      startCalls += 1;
       status = "running";
+      if (startCalls === 1) {
+        issuedStart = Reflect.get(container, "currentContainerStart");
+        nowMs = fixedNowMs + 100;
+      } else {
+        nowMs += 100;
+      }
       lastChange = Date.now();
-      nowMs = fixedNowMs + 8_000;
-      timeoutControllers[0]?.abort(new DOMException("Timed out", "TimeoutError"));
-      throw timeoutControllers[0]?.signal.reason;
+      container.onStart();
+      if (startCalls === 1) {
+        nowMs = fixedNowMs + 7_900;
+      }
     });
     const containerFetch = vi.fn(async (
       url: string,
-      _init?: { signal?: AbortSignal },
+      init?: { signal?: AbortSignal },
     ) => {
       if (!url.endsWith("/health")) {
         throw new Error(`Unexpected runner request URL: ${url}`);
       }
       healthChecks += 1;
+      if (healthChecks === 1) {
+        const signal = init?.signal;
+        if (!(signal instanceof AbortSignal)) {
+          throw new Error("Expected cold health to receive an abort signal.");
+        }
+        healthStarted.resolve(undefined);
+        await new Promise<never>((_resolve, reject) => {
+          const rejectWithAbort = () => reject(signal.reason);
+          if (signal.aborted) {
+            rejectWithAbort();
+            return;
+          }
+          signal.addEventListener("abort", rejectWithAbort, { once: true });
+        });
+      }
+      if (healthChecks === 3) {
+        return new Response(JSON.stringify({ error: "ready start became unhealthy" }), {
+          headers: {
+            "content-type": "application/json; charset=utf-8",
+          },
+          status: 503,
+        });
+      }
       return new Response(JSON.stringify(createRunnerHealthResult()), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -1697,11 +1733,12 @@ describe("RunnerContainer", () => {
       });
     });
     const destroy = vi.fn(async () => {
+      destroyedStart = Reflect.get(container, "currentContainerStart");
       status = "stopped";
       lastChange = Date.now();
     });
     const getState = vi.fn(async () => ({ lastChange, status }));
-    const { container } = createContainerDouble({
+    ({ container } = createContainerDouble({
       containerFetch,
       destroy,
       env: {
@@ -1710,17 +1747,20 @@ describe("RunnerContainer", () => {
       getState,
       initialStatus: "stopped",
       startAndWaitForPorts,
-    });
+    }));
 
     try {
       const first = container.ensureReadyForProcessing({
         timeoutMs: 8_000,
         userId: "member_123",
       });
+      await healthStarted.promise;
+      nowMs = fixedNowMs + 8_000;
+      timeoutControllers[0]?.abort(new DOMException("Timed out", "TimeoutError"));
       await expect(first).rejects.toMatchObject({ name: "TimeoutError" });
       expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(issuedStart);
 
-      container.onStart();
       nowMs = fixedNowMs + 9_000;
       await expect(container.ensureReadyForProcessing({
         timeoutMs: 8_000,
@@ -1731,8 +1771,9 @@ describe("RunnerContainer", () => {
       });
 
       expect(startAndWaitForPorts).toHaveBeenCalledOnce();
-      expect(containerFetch).toHaveBeenCalledOnce();
+      expect(containerFetch).toHaveBeenCalledTimes(2);
       expect(destroy).not.toHaveBeenCalled();
+      expect(Reflect.get(container, "currentContainerStart")).toBe(issuedStart);
       const pendingLogs = mocks.emitHostedExecutionStructuredLog.mock.calls
         .map(([input]) => input)
         .filter((input) =>
@@ -1747,6 +1788,24 @@ describe("RunnerContainer", () => {
           message: "Hosted execution container failed to start or listen.",
         }),
       );
+
+      nowMs = fixedNowMs + 10_000;
+      await expect(container.ensureReadyForProcessing({
+        timeoutMs: 8_000,
+        userId: "member_456",
+      })).resolves.toEqual({
+        action: "started",
+        kind: "ready",
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(destroyedStart).toBe(issuedStart);
+      expect(destroyedStart).toMatchObject({
+        pendingUntilMs: null,
+        readyObservedBy: "cold-start-ready",
+        startedAtMs: fixedNowMs + 100,
+      });
+      expect(startAndWaitForPorts).toHaveBeenCalledTimes(2);
+      expect(containerFetch).toHaveBeenCalledTimes(4);
     } finally {
       now.mockRestore();
       timeout.mockRestore();
@@ -2217,6 +2276,7 @@ describe("RunnerContainer", () => {
     let healthChecks = 0;
     let lastChange = fixedNowMs;
     let status: "running" | "stopped" = "stopped";
+    let container: RunnerContainer;
     const getState = vi.fn(async () => ({ lastChange, status }));
     const containerFetch = vi.fn(async (url: string) => {
       if (!url.endsWith("/health")) {
@@ -2225,13 +2285,16 @@ describe("RunnerContainer", () => {
       healthChecks += 1;
       return new Response(JSON.stringify(
         healthChecks === 1
-          ? { error: "old start failed health" }
+          ? {
+            ...createRunnerHealthResult(),
+            hostedRuntimeArchitectureVersion: "stale-architecture",
+          }
           : createRunnerHealthResult()
       ), {
         headers: {
           "content-type": "application/json; charset=utf-8",
         },
-        status: healthChecks === 1 ? 503 : 200,
+        status: 200,
       });
     });
     const destroy = vi.fn(async () => {
@@ -2239,9 +2302,11 @@ describe("RunnerContainer", () => {
     });
     const startAndWaitForPorts = vi.fn(async () => {
       status = "running";
+      nowMs += 100;
       lastChange = Date.now();
+      container.onStart();
     });
-    const { container } = createContainerDouble({
+    ({ container } = createContainerDouble({
       containerFetch,
       destroy,
       env: {
@@ -2251,7 +2316,7 @@ describe("RunnerContainer", () => {
       initialStatus: "stopped",
       platformRunning: true,
       startAndWaitForPorts,
-    });
+    }));
 
     try {
       await expect(container.ensureReadyForProcessing({
@@ -5262,7 +5327,7 @@ describe("RunnerContainer", () => {
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
-  it("destroys a cold shell when post-start health fails", async () => {
+  it("preserves a recent cold shell when post-start health is not ready", async () => {
     const containerFetch = vi.fn(async (url: string) => {
       if (url.endsWith("/health")) {
         return new Response(JSON.stringify({ error: "not ready" }), {
@@ -5293,7 +5358,7 @@ describe("RunnerContainer", () => {
       userId: "member_123",
     })).rejects.toThrow("Hosted runner container health check returned HTTP 503.");
 
-    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(destroy).not.toHaveBeenCalled();
     expect(containerFetch.mock.calls.some(([url]) =>
       String(url).endsWith("/internal/workspace-invocation")
     )).toBe(false);
@@ -10168,15 +10233,13 @@ function createContainerDouble(input: CreateContainerDoubleInput = {}) {
   }));
   const startAndWaitForPorts = input.startAndWaitForPorts ?? vi.fn(async () => {
     currentStatus = "running";
-    const currentStart = Reflect.get(container, "currentContainerStart");
-    const startedAtMs = isRecord(currentStart) ? currentStart.startedAtMs : null;
-    currentLastChange = typeof startedAtMs === "number" ? startedAtMs : Date.now();
+    currentLastChange = Date.now();
+    container.onStart();
   });
   const start = input.start ?? vi.fn(async () => {
     currentStatus = "running";
-    const currentStart = Reflect.get(container, "currentContainerStart");
-    const startedAtMs = isRecord(currentStart) ? currentStart.startedAtMs : null;
-    currentLastChange = typeof startedAtMs === "number" ? startedAtMs : Date.now();
+    currentLastChange = Date.now();
+    container.onStart();
   });
 
   Object.assign(container, {

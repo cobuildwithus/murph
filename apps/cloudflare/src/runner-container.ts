@@ -327,7 +327,13 @@ type RunnerContainerReadinessObservation =
   | "cold-start-ready"
   | "deploy-smoke-ready";
 
+type RunnerContainerCleanupOwnership =
+  | "ambiguous"
+  | "current"
+  | "superseded";
+
 interface RunnerContainerCurrentStart {
+  pendingOnStartObservation: boolean;
   pendingUntilMs: number | null;
   readyObservedBy: RunnerContainerReadinessObservation | null;
   startedAtMs: number;
@@ -1709,7 +1715,7 @@ export class RunnerContainer extends Container {
   }
 
   override onStart(): void {
-    this.recordContainerStartIssued(
+    this.recordContainerStartObserved(
       Date.now(),
       readRunnerReadyTimeoutMs(this.environment),
     );
@@ -2402,7 +2408,6 @@ export class RunnerContainer extends Container {
           waitInterval: RUNNER_WAIT_INTERVAL_MS,
         },
       });
-      this.clearContainerPendingWindow(currentStart);
       await assertRunnerHealthy(
         this,
         readinessTimeoutMs,
@@ -2631,11 +2636,12 @@ export class RunnerContainer extends Container {
         Math.max(1, statusDeadlineAtMs - Date.now()),
       );
       statusBeforeDestroy = readContainerStatus(stateBeforeDestroy);
-      if (!this.cleanupOwnsContainerStart(
+      const ownershipAfterStatus = this.readContainerCleanupOwnership(
         input.expectedStart,
         stateBeforeDestroy,
-      )) {
-        return true;
+      );
+      if (ownershipAfterStatus !== "current") {
+        return ownershipAfterStatus === "superseded";
       }
       if (
         isRunnerContainerStopped(statusBeforeDestroy)
@@ -2645,7 +2651,7 @@ export class RunnerContainer extends Container {
         return true;
       }
     } catch (error) {
-      if (!this.cleanupOwnsContainerStart(input.expectedStart)) {
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
         return true;
       }
       emitRunnerContainerLifecycleFailure({
@@ -2669,8 +2675,12 @@ export class RunnerContainer extends Container {
     ) {
       return true;
     }
-    if (!this.cleanupOwnsContainerStart(input.expectedStart, stateBeforeDestroy)) {
-      return true;
+    const ownershipBeforeRequest = this.readContainerCleanupOwnership(
+      input.expectedStart,
+      stateBeforeDestroy,
+    );
+    if (ownershipBeforeRequest !== "current") {
+      return ownershipBeforeRequest === "superseded";
     }
 
     const destroyStartedAt = Date.now();
@@ -2700,11 +2710,12 @@ export class RunnerContainer extends Container {
     ) {
       return true;
     }
-    if (!this.cleanupOwnsContainerStart(
+    const ownershipBeforeDestroy = this.readContainerCleanupOwnership(
       input.expectedStart,
       stateBeforeDestroy,
-    )) {
-      return true;
+    );
+    if (ownershipBeforeDestroy !== "current") {
+      return ownershipBeforeDestroy === "superseded";
     }
     this.pointerlessWakeBlockingLifecycleCount += 1;
     try {
@@ -2731,7 +2742,7 @@ export class RunnerContainer extends Container {
       ]);
 
       if (firstDestroyOutcome.kind === "destroy-rejected") {
-        if (!this.cleanupOwnsContainerStart(input.expectedStart)) {
+        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
           return true;
         }
         const error = firstDestroyOutcome.error;
@@ -2757,7 +2768,7 @@ export class RunnerContainer extends Container {
         ? await destroySettle
         : firstDestroyOutcome;
       if (settledOutcome.kind === "settle-rejected") {
-        if (!this.cleanupOwnsContainerStart(input.expectedStart)) {
+        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
           return true;
         }
         if (failClosed) {
@@ -2830,7 +2841,7 @@ export class RunnerContainer extends Container {
     });
 
     while (true) {
-      if (!this.cleanupOwnsContainerStart(input.expectedStart)) {
+      if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
         return supersededResult();
       }
       if (this.stopGeneration > input.stopGenerationBeforeDestroy) {
@@ -2881,18 +2892,15 @@ export class RunnerContainer extends Container {
         );
         statusAfterDestroy = readContainerStatus(stateAfterDestroy);
         appendObservedRunnerContainerStatus(observedStatuses, statusAfterDestroy);
-        if (!this.cleanupOwnsContainerStart(
+        const ownershipAfterDestroy = this.readContainerCleanupOwnership(
           input.expectedStart,
           stateAfterDestroy,
-        )) {
-          return {
-            ok: true,
-            observedStatuses,
-            settleLatencyMs: Date.now() - input.destroyStartedAt,
-            settleReason: "superseded",
-            statusAfterDestroy,
-            stopObservedAfterDestroy: false,
-          };
+        );
+        if (ownershipAfterDestroy === "superseded") {
+          return supersededResult();
+        }
+        if (ownershipAfterDestroy === "ambiguous") {
+          return { ok: false };
         }
         if (
           isRunnerContainerStopped(statusAfterDestroy)
@@ -2909,7 +2917,7 @@ export class RunnerContainer extends Container {
           };
         }
       } catch (error) {
-        if (!this.cleanupOwnsContainerStart(input.expectedStart)) {
+        if (this.readContainerCleanupOwnership(input.expectedStart) === "superseded") {
           return supersededResult();
         }
         lastError = error;
@@ -2934,7 +2942,7 @@ export class RunnerContainer extends Container {
     failClosed?: boolean;
     reason?: RunnerContainerDestroyReason;
   }): Promise<boolean> {
-    if (!this.cleanupOwnsContainerStart(input?.expectedStart)) {
+    if (this.readContainerCleanupOwnership(input?.expectedStart) === "superseded") {
       return true;
     }
     this.clearRecentReadinessProof();
@@ -2956,13 +2964,13 @@ export class RunnerContainer extends Container {
         reason,
       });
     } catch (error) {
-      if (!this.cleanupOwnsContainerStart(input?.expectedStart)) {
+      if (this.readContainerCleanupOwnership(input?.expectedStart) === "superseded") {
         return true;
       }
       this.warmShellInvalidatedByUnsettledDestroy = true;
       throw error;
     }
-    if (!this.cleanupOwnsContainerStart(input?.expectedStart)) {
+    if (this.readContainerCleanupOwnership(input?.expectedStart) === "superseded") {
       return true;
     }
     if (destroyed) {
@@ -3092,24 +3100,27 @@ export class RunnerContainer extends Container {
     state: unknown,
     maxAgeMs: number,
   ): RunnerContainerCurrentStart | null {
+    const existing = this.currentContainerStart;
+    if (existing) {
+      return existing;
+    }
     const recentStart = readRecentContainerStart(state, Date.now(), maxAgeMs);
     const startedAtMs = readContainerLastChangeMs(state);
     if (!recentStart || startedAtMs === null) {
-      return this.currentContainerStart;
+      return null;
     }
-    const existing = this.currentContainerStart;
-    if (existing && startedAtMs <= existing.startedAtMs) {
-      return existing;
-    }
-    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs);
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
   }
 
-  private cleanupOwnsContainerStart(
+  private readContainerCleanupOwnership(
     expectedStart: RunnerContainerCurrentStart | null | undefined,
     state?: unknown,
-  ): boolean {
+  ): RunnerContainerCleanupOwnership {
     if (expectedStart === undefined) {
-      return true;
+      return "current";
+    }
+    if (this.currentContainerStart !== expectedStart) {
+      return "superseded";
     }
     if (
       expectedStart !== null
@@ -3117,24 +3128,14 @@ export class RunnerContainer extends Container {
       && isRunnerContainerRunning(readContainerStatus(state))
     ) {
       const startedAtMs = readContainerLastChangeMs(state);
-      const currentStart = this.currentContainerStart;
-      const readyTimeoutMs = readRunnerReadyTimeoutMs(this.environment);
-      const mayDescribeSamePendingStart = expectedStart.readyObservedBy === null
-        && startedAtMs !== null
-        && startedAtMs <= expectedStart.startedAtMs + readyTimeoutMs;
       if (
         startedAtMs !== null
         && startedAtMs > expectedStart.startedAtMs
-        && !mayDescribeSamePendingStart
-        && (currentStart === null || startedAtMs > currentStart.startedAtMs)
       ) {
-        this.replaceCurrentContainerStart(
-          startedAtMs,
-          readyTimeoutMs,
-        );
+        return "ambiguous";
       }
     }
-    return this.currentContainerStart === expectedStart;
+    return "current";
   }
 
   private recordContainerStartIssued(
@@ -3142,23 +3143,38 @@ export class RunnerContainer extends Container {
     maxAgeMs: number,
   ): RunnerContainerCurrentStart {
     const existing = this.currentContainerStart;
-    if (
-      existing?.readyObservedBy === null
-      && !this.warmShellInvalidatedByUnsettledDestroy
-    ) {
+    if (existing?.readyObservedBy === null) {
+      return existing;
+    }
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, true);
+  }
+
+  private recordContainerStartObserved(
+    startedAtMs: number,
+    maxAgeMs: number,
+  ): RunnerContainerCurrentStart {
+    const existing = this.currentContainerStart;
+    if (existing?.pendingOnStartObservation) {
+      existing.pendingOnStartObservation = false;
+      existing.startedAtMs = startedAtMs;
+      if (existing.pendingUntilMs !== null) {
+        existing.pendingUntilMs = startedAtMs + maxAgeMs;
+      }
       this.recordContainerActivityObserved("onStart");
       this.lastActivityExpiryAtMs = null;
       this.lastDestroyRequest = null;
       return existing;
     }
-    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs);
+    return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
   }
 
   private replaceCurrentContainerStart(
     startedAtMs: number,
     maxAgeMs: number,
+    pendingOnStartObservation: boolean,
   ): RunnerContainerCurrentStart {
     const currentStart: RunnerContainerCurrentStart = {
+      pendingOnStartObservation,
       pendingUntilMs: startedAtMs + maxAgeMs,
       readyObservedBy: null,
       startedAtMs,
@@ -3181,6 +3197,7 @@ export class RunnerContainer extends Container {
       return null;
     }
     const currentStart: RunnerContainerCurrentStart = expectedStart ?? {
+      pendingOnStartObservation: false,
       pendingUntilMs: null,
       readyObservedBy: null,
       startedAtMs: readContainerLastChangeMs(state) ?? Date.now(),

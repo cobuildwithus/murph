@@ -60,8 +60,10 @@ not application startup. A 90-second readiness default is unsupported.
    same recent start that has never passed readiness. Rejoin it on the next
    check. Recycle it after the 20-second owner window or on explicit fatal or
    previously-ready failure.
-5. Revalidate platform `lastChange` while old cleanup settles so a newer
-   running start supersedes that cleanup instead of inheriting invalidation.
+5. Let the first real `onStart` hook adopt the provisional start record and
+   let later hooks publish replacements. Treat a newer platform `lastChange`
+   without a matching hook as ambiguous rather than manufacturing a second
+   identity or authorizing destructive cleanup.
 
 ## Review retrospective
 
@@ -100,23 +102,29 @@ That premise is now invalidated. The corrective decision is:
   owned by the old record.
 - Focused regressions cover stale status-read rejection, stale destroy
   rejection, and unsettled cleanup completing before the replacement `onStart`.
+- Round 6 found that the pending window ended after port readiness but before
+  health readiness, and that `lastChange` is a state timestamp rather than a
+  process identity. The correction keeps the same record pending through
+  health, adopts the first lifecycle hook into that record, and returns
+  unsettled when platform state is newer but ownership is ambiguous.
+- The eight-to-nine-second regression now times out during health after the
+  port is ready, proves the first `onStart` retains object identity, retries
+  without destroy, and then proves a later warm-health failure still recycles
+  that same anchored record.
 - A stale never-ready start older than 20 seconds still enters bounded cleanup.
 
 ## State
 
-Active. ReviewGPT round 5 returned one material stale-cleanup ownership finding,
-and its smallest exact-record correction is implemented locally. The focused
-Cloudflare gate passes 423 tests across five files, and the Cloudflare package
-typecheck passes. The focused web orchestration test passes all 31 tests after
-correcting its stale 15-second expectation to the derived 25-second Temporal
-activity budget. The hosted-execution suite passed 544 tests across 49 files,
-and its package typecheck passed before this Cloudflare-only correction.
-Diff-aware verification also passed the hosted guards and every affected-package
-typecheck; its workspace-boundary step reported two unrelated existing Junction
-import violations, and its test phase was stopped while waiting for a shared
-host slot held by another verifier. A substantive ReviewGPT round 6 and
-exact-head CI remain. The PR remains draft and no production action is
-authorized.
+Active. ReviewGPT round 6 returned one material startup-ownership finding, and
+its smallest single-record correction is implemented locally. The focused
+runner-container suite passes all 208 tests, including the production-faithful
+health-timeout and later warm-recycle proof, and the Cloudflare package
+typecheck passes. The previously recorded five-file Cloudflare gate, focused
+web orchestration tests, hosted-execution package suite/typecheck, and
+diff-aware verification remain the last broad evidence until current `main` is
+merged. Current-base reconciliation, the affected focused gates, exact-head CI,
+and substantive ReviewGPT round 7 remain. The PR remains draft and no
+production action is authorized.
 
 ## Working Set
 
