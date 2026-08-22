@@ -376,6 +376,7 @@ export async function runTemporalCompatibility({
       body: JSON.stringify({
         inputs: buildDispatchInputs({ publicSha, requestId }),
         ref: privateRef,
+        return_run_details: true,
       }),
       headers: { ...githubHeaders(privateToken), "content-type": "application/json" },
       method: "POST",

@@ -418,6 +418,7 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
       assert.deepEqual(JSON.parse(init.body), {
         inputs: buildDispatchInputs({ publicSha: PUBLIC_SHA, requestId: REQUEST_ID }),
         ref: PRIVATE_REF,
+        return_run_details: true,
       });
       return jsonResponse({ workflow_run_id: RUN_ID });
     }
