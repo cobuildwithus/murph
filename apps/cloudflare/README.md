@@ -46,9 +46,15 @@ Internal control routes:
   readiness or create runtime authority.
 - `POST /internal/users/:userId/browser-vault/session` creates an encrypted browser-vault read session for the latest web-owned replica ref
 - `GET /internal/users/:userId/status`
+- `GET /internal/temporal-worker/binding-admission` authenticates the existing
+  callback signature without a member binding, consumes its replay nonce, and
+  returns only the production `bindings-v1` owner/key identity needed before a
+  versioned Temporal worker may register pollers. The response is `no-store`.
 - `POST /internal/deploy/container-smoke` is a signed deploy-verification callback, not a product control API
 
-The supported worker HTTP surface stops at those narrow control routes, the deploy smoke callback, and the public banner and health checks.
+The supported worker HTTP surface stops at those narrow control routes, the
+binding-admission and deploy-smoke callbacks, and the public banner and health
+checks.
 Hosted assistant delivery recovery comes from the encrypted local runtime outbox state inside the workspace checkpoint plus web-owned hosted-runtime logs/status.
 The runner container sends runtime internal Worker requests to normal virtual hosts such as `results.worker` and `web-control.worker`. Cloudflare Container outbound interception routes those requests back into Worker-owned handlers, using the runtime write-fence headers as authority.
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
