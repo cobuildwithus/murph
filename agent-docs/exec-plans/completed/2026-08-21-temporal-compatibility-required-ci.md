@@ -1,6 +1,6 @@
 # Require Temporal compatibility before merge
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-22
 
@@ -104,16 +104,24 @@ Updated: 2026-08-22
 - ReviewGPT returned a concrete two-repository contract but no downloadable
   patch. The public controller, stable status workflow, focused contract tests,
   and durable owner docs were reconstructed from that retained response.
-- The paired private compatibility-only workflow and immutable supported-reader
-  tag remain a rollout prerequisite owned by private Murph Cloud; this public
-  branch neither edits nor weakens that owner boundary.
+- The paired private compatibility-only workflow now checks the exact public
+  producer fixtures against every immutable supported reader. The public route
+  and compatibility fixture builder execute one shared pure wire projection,
+  so the gate cannot drift from production through source-text inspection or
+  duplicated sample shapes.
+- The private fixture handoff publishes its exact cache key from setup to every
+  reader job, preserving ordinary failed-job reruns across run attempts.
 - Focused controller tests, Node syntax, workflow YAML/action validation,
   provider-request boundaries, Temporal architecture guards, and docs drift
   pass locally. `pnpm test:diff` reaches repo-tools and then fails in pre-existing
   Frog autofix fixtures because their synthetic non-noreply Git identity is
   rejected by the installed privacy hook; the narrow failing test reproduces
   without touching this task's files.
+- The executable producer-fixture test, hosted-execution package tests and
+  build/typecheck, focused hosted Web route test/typecheck, and private
+  compatibility reader tests/typecheck/build pass after the final remediation.
 
 ## Completion
 
 - Pending.
+Completed: 2026-08-22

@@ -6,6 +6,11 @@ import {
   type HostedWorkspaceInvocationProcessingMode,
 } from "./runtime-control.ts";
 
+export {
+  projectHostedRuntimeReconciliationFactsWireResponse,
+  type HostedRuntimeReconciliationFactsWireResponse,
+} from "./reconciliation-facts-wire.ts";
+
 export const HOSTED_USER_RUNTIME_WORKFLOW_TYPE =
   "hostedUserRuntimeWorkflow" as const;
 
