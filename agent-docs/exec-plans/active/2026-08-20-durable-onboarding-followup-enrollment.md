@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-20
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Goal
 
@@ -118,5 +118,20 @@ follow-up.
   The failing surface matched `main` exactly. Adding that single mock entry
   fixes the focused test, and Web typecheck remains green; no production path or
   onboarding behavior changed.
-- Remaining work is the corrected exact-head CI run, final ReviewGPT round,
-  parent review, and plan closure.
+- Final ReviewGPT round 2 found that established Telegram activation retained
+  the privacy-blinded conversation locator but dropped the distinct raw
+  provider destination while projecting the automation route. A focused
+  failing test reproduced the exact `deliveryTarget: null` projection. The
+  correction preserves `delivery.target` for every non-participant delivery,
+  matching the existing route contract without adding an owner or abstraction.
+  Focused activation and due-cron proofs now verify that the persisted
+  automation keeps the raw Telegram destination alongside the blinded locator
+  and forwards the raw destination into notification delivery. Complete
+  verification passes 2,470 assistant-runtime tests, 4,041 assistant-engine
+  tests, 128 assistant-cli tests, 40 assistantd tests, 1,186 CLI tests, 108
+  setup-cli tests, 10,937 Web tests and production build, 2,639 Cloudflare Node
+  tests, 15 Cloudflare Workers tests, all affected typechecks, workspace and
+  dependency boundaries, and provider/privacy guards through canonical
+  `pnpm test:diff`.
+- Remaining work is corrected-head CI and ReviewGPT, parent review, merge, and
+  plan closure.

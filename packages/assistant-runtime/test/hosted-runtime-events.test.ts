@@ -2746,6 +2746,19 @@ describe("executeHostedMailboxEvent", () => {
 
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledOnce();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith({
+      route: {
+        channel: "telegram",
+        deliverySource: null,
+        deliveryTarget: "telegram_thread_123",
+        identityId: null,
+        participantId: null,
+        threadId: "hid_telegram_thread_123",
+        threadIsDirect: true,
+      },
+      stableKey: "member_123",
+      vault: "/tmp/assistant-runtime-events",
+    });
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
       nextWakeAt: seededNextWakeAt,
