@@ -1015,9 +1015,13 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
 export {
   buildKernelCliEnvironment as buildKernelCliEnvironmentForTest,
   buildKernelTunnelArguments as buildKernelTunnelArgumentsForTest,
+  closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
+  stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
 };
 
 function assertTrustedAuthorizationUrl(
@@ -1098,6 +1102,9 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
   message = message.replace(/(?:https?|wss?):\/\/[^\s)"']+/gu, (rawUrl) => {
     try {
       const url = new URL(rawUrl);
+      if (url.protocol === "ws:" || url.protocol === "wss:") {
+        return "[redacted-url]";
+      }
       return `${url.origin}${url.pathname}`;
     } catch {
       return "[url]";
