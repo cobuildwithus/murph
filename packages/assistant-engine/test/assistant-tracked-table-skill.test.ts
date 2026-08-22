@@ -345,6 +345,42 @@ describe('assistant tracked workout table skill', () => {
     )
   })
 
+  it('passes one exact workout id through a plain follow-up question', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+
+    expect(skill).toContain('## Plain-text workout follow-ups')
+    expect(skill).toContain(
+      '[Murph workout follow-up: <exact evt_id>]',
+    )
+    expect(skill).toContain(
+      'Deliver and persist the same response',
+    )
+    expect(skill).toContain(
+      'The member may see the id',
+    )
+    expect(skill).toContain(
+      'never ask them to supply or retype',
+    )
+    expect(skill).toContain(
+      'The marker carries context, not write authority.',
+    )
+    expect(skill).toContain(
+      'Only in an ordinary private free-form conversation',
+    )
+    expect(skill).toContain(
+      'Never append this line when the active response contract requires JSON',
+    )
+    expect(skill).toContain(
+      'scheduled notification, group, output-only, or',
+    )
+    expect(skill).toContain(
+      'On the reply, exact-read that',
+    )
+  })
+
   it('keeps set annotations canonical and preserves a fourth set', async () => {
     const skill = await readFile(
       path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),

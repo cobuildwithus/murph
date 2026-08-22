@@ -444,6 +444,7 @@ async function createMember(
     billingStatus,
     environment: requireScenario().runtimeEnv,
     memberId,
+    previouslyActivated: billingStatus === "canceled",
     privyUserId,
     verifiedEmail,
   });
@@ -476,6 +477,7 @@ async function bindDirectFixture(
     billingStatus,
     environment: requireScenario().runtimeEnv,
     memberId,
+    previouslyActivated: true,
   });
 }
 

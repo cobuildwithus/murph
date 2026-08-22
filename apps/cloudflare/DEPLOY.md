@@ -645,6 +645,18 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+The private-to-group context-handoff exact-replay transport is a paired
+Web/runner change. Deploy the Web replay validator first; old runners remain
+safe but do not recover a lost successful handoff response. Then deploy the
+Worker and runner bundle with `container_rollout=immediate`, require managed
+container smoke to report the new bundle fingerprint, and exercise one
+handoff whose first response body is lost so the byte-identical retry returns
+the already accepted mailbox item. New runners against the preceding Web
+version fail closed on that retry but do not provide the intended truthful
+recovery, so this is not a supported steady state. Roll back the runner bundle
+before Web; if Web must roll back first, treat handoff replay as degraded until
+the runner rollback converges. No mailbox schema or record migration is needed.
+
 ## Phone-Call Result Deployment
 
 A completed phone call delivers its result as a proactive
@@ -1163,6 +1175,14 @@ runner. Its entries are compatibility material only; the required
 key.
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The versioned Temporal worker must not register pollers until both signed,
+uncached owner checks succeed: Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and this
+Worker at `/internal/temporal-worker/binding-admission`. Deploy Web and
+Cloudflare first, configure the two exact production URLs on both inactive
+Render colors, then allow the private exact-SHA blue/green controller to ramp.
+Rollback the Temporal candidate before either owner route; keep both owner
+routes through the whole retained-color rollback window.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
 hosted Web; the Worker and runner carry only the normalized semantic

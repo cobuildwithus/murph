@@ -241,6 +241,7 @@ export function expectAdvertisedMurphDynamicTools(
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
     pendingVaultFilesAvailable?: boolean;
+    physicalNoteRecoveryAvailable?: boolean;
     physicalNotesAvailable?: boolean;
     phoneCallsAvailable?: boolean;
     progressUpdatesAvailable?: boolean;
@@ -296,6 +297,13 @@ export function expectAdvertisedMurphDynamicTools(
       if (
         options.imessageContactAvailable !== true
         && name === "murph.imessage_contact"
+      ) {
+        return false;
+      }
+
+      if (
+        options.physicalNoteRecoveryAvailable !== true
+        && name === "murph.resolve_physical_note"
       ) {
         return false;
       }

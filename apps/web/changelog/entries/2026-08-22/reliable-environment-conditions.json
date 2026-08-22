@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-08-22",
+  "order": 200,
+  "item": {
+    "id": "reliable-environment-conditions",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Live Environment conditions work again",
+    "summary": "Your Environment report can again show current weather and outdoor air quality for your saved city.",
+    "details": "Murph reuses recent public conditions to keep the report responsive. Your city remains the only location sent, and outdoor air stays separate from indoor air.",
+    "relevanceTags": ["environment", "reports", "reliability", "web"],
+    "sourcePullRequests": [2157],
+    "tryIt": {
+      "href": "/environment",
+      "label": "Open your Environment report"
+    }
+  }
+}

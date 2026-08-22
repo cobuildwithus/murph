@@ -1,10 +1,84 @@
-import { describe, expect, it, vi } from "vitest";
+import { EventEmitter } from "node:events";
+import { fileURLToPath } from "node:url";
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const kernelLifecycleMocks = vi.hoisted(() => {
+  const connectOverCDP = vi.fn();
+  const createAutomationBrowser = vi.fn();
+  const deleteBrowserByIdOrName = vi.fn();
+  const ensureProfile = vi.fn();
+  const launch = vi.fn();
+  const spawn = vi.fn();
+
+  class KernelComputerClient {
+    createAutomationBrowser = createAutomationBrowser;
+    deleteBrowserByIdOrName = deleteBrowserByIdOrName;
+    ensureProfile = ensureProfile;
+  }
+
+  return {
+    connectOverCDP,
+    createAutomationBrowser,
+    deleteBrowserByIdOrName,
+    ensureProfile,
+    KernelComputerClient,
+    launch,
+    spawn,
+  };
+});
+
+vi.mock("node:child_process", () => ({
+  spawn: kernelLifecycleMocks.spawn,
+}));
+
+vi.mock("@playwright/test", () => ({
+  chromium: {
+    connectOverCDP: kernelLifecycleMocks.connectOverCDP,
+    launch: kernelLifecycleMocks.launch,
+  },
+}));
+
+vi.mock("../src/lib/computer-use/kernel-client.ts", () => ({
+  KernelComputerClient: kernelLifecycleMocks.KernelComputerClient,
+}));
 
 import {
+  buildKernelCliEnvironmentForTest,
+  buildKernelTunnelArgumentsForTest,
+  closeHostedLocalJunctionBrowserSessionForTest,
   completeExternalJunctionAuthorizationForTest,
   completeHostedLocalJunctionAuthorizationForTest,
+  openHostedLocalJunctionBrowserSessionForTest,
   readHostedLocalJunctionBrowserConfigForTest,
+  sanitizeHostedLocalJunctionBrowserFailureForTest,
+  stopHostedLocalJunctionKernelTunnelForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
+
+interface FakeKernelTunnelChild extends EventEmitter {
+  exitCode: number | null;
+  kill: ReturnType<typeof vi.fn>;
+  pid: number;
+  signalCode: NodeJS.Signals | null;
+}
+
+function createKernelTunnelChild(input: {
+  exitOnTerminate?: boolean;
+  pid?: number;
+} = {}): FakeKernelTunnelChild {
+  const child = new EventEmitter() as FakeKernelTunnelChild;
+  child.exitCode = null;
+  child.pid = input.pid ?? 43_123;
+  child.signalCode = null;
+  child.kill = vi.fn((signal: NodeJS.Signals) => {
+    if (input.exitOnTerminate !== false) {
+      child.signalCode = signal;
+      child.emit("exit", null, signal);
+    }
+    return true;
+  });
+  return child;
+}
 
 function createConfig(environment: Record<string, string | undefined> = {}) {
   return readHostedLocalJunctionBrowserConfigForTest({
@@ -150,6 +224,302 @@ function authorizationFrame(input: {
 }
 
 describe("hosted-local Junction wearable browser authorization", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses the local browser transport unless the caller selects Kernel", () => {
+    const config = createConfig();
+
+    expect(config.browserTransport).toBe("local");
+    expect(config.kernelApiKey).toBeNull();
+  });
+
+  it("accepts only a headless WHOOP Kernel browser on explicit localhost", () => {
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+
+    expect(config.browserTransport).toBe("kernel");
+    expect(config.browserChannel).toBeUndefined();
+    expect(config.kernelApiKey).toBe("kernel-test-key");
+    expect(config.kernelCliPath).toBe("/opt/kernel-tools/kernel");
+    expect(config.manualAuthorizationAllowed).toBe(false);
+  });
+
+  it("rejects Kernel without its exact authority and loopback CLI contract", () => {
+    expect(() => createConfig({
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+    })).toThrow("requires KERNEL_API_KEY");
+
+    expect(() => createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+    })).toThrow(
+      "Kernel browser transport requires an explicit http://localhost:<port>",
+    );
+  });
+
+  it("builds an exact reverse tunnel with a narrowly inherited environment", () => {
+    expect(buildKernelTunnelArgumentsForTest("kernel-session-1", 43123)).toEqual([
+      "browsers",
+      "ssh",
+      "kernel-session-1",
+      "-R",
+      "43123:localhost:43123",
+    ]);
+    expect(buildKernelCliEnvironmentForTest("kernel-test-key", {
+      HOME: "/workspace/operator",
+      JUNCTION_API_KEY: "must-not-pass",
+      LANG: "en_US.UTF-8",
+      MURPH_E2E_PROVIDER_PASSWORD: "must-not-pass",
+      NODE_ENV: "production",
+      PATH: "/usr/bin",
+    })).toEqual({
+      HOME: "/workspace/operator",
+      KERNEL_API_KEY: "kernel-test-key",
+      LANG: "en_US.UTF-8",
+      NODE_ENV: "production",
+      PATH: "/usr/bin",
+    });
+  });
+
+  it("creates and tears down the exact owned Kernel browser and tunnel", async () => {
+    const child = createKernelTunnelChild();
+    const clearCookies = vi.fn(async () => undefined);
+    const browser = {
+      close: vi.fn(async () => undefined),
+      contexts: vi.fn(() => [{ clearCookies }]),
+    };
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+    const parentExitListenersBefore = process.listenerCount("exit");
+
+    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
+    kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
+      cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
+      sessionId: "kernel-session-1",
+    });
+    kernelLifecycleMocks.spawn.mockReturnValueOnce(child);
+    kernelLifecycleMocks.connectOverCDP.mockResolvedValueOnce(browser);
+    kernelLifecycleMocks.deleteBrowserByIdOrName.mockResolvedValueOnce(undefined);
+
+    const session = await openHostedLocalJunctionBrowserSessionForTest(config);
+    expect(process.listenerCount("exit")).toBe(parentExitListenersBefore + 1);
+    expect(kernelLifecycleMocks.spawn).toHaveBeenCalledWith(
+      "/opt/kernel-tools/kernel",
+      [
+        "browsers",
+        "ssh",
+        "kernel-session-1",
+        "-R",
+        "43123:localhost:43123",
+      ],
+      expect.objectContaining({
+        detached: true,
+        stdio: ["pipe", "ignore", "ignore"],
+      }),
+    );
+
+    await closeHostedLocalJunctionBrowserSessionForTest(session, config);
+
+    expect(kernelLifecycleMocks.ensureProfile).toHaveBeenCalledWith(
+      "murph-junction-whoop-canary",
+    );
+    expect(kernelLifecycleMocks.createAutomationBrowser).toHaveBeenCalledWith({
+      headless: true,
+      profileName: "murph-junction-whoop-canary",
+      saveChanges: true,
+      timeoutSeconds: 90,
+    });
+    expect(kernelLifecycleMocks.connectOverCDP).toHaveBeenCalledWith(
+      "wss://cdp.example.test/session/capability-secret",
+      { timeout: 30_000 },
+    );
+    expect(clearCookies).toHaveBeenCalledWith({ domain: "localhost" });
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(kernelLifecycleMocks.deleteBrowserByIdOrName).toHaveBeenCalledWith(
+      "kernel-session-1",
+    );
+    expect(process.listenerCount("exit")).toBe(parentExitListenersBefore);
+  });
+
+  it("keeps the real tunnel child alive until owned cleanup", async () => {
+    const { spawn: actualSpawn } = await vi.importActual<
+      typeof import("node:child_process")
+    >("node:child_process");
+    const browser = {
+      close: vi.fn(async () => undefined),
+      contexts: vi.fn(() => [{ clearCookies: vi.fn(async () => undefined) }]),
+    };
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: fileURLToPath(
+        new URL("fixtures/kernel-tunnel-stdin.sh", import.meta.url),
+      ),
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+    const parentExitListenersBefore = process.listenerCount("exit");
+    let session: Awaited<
+      ReturnType<typeof openHostedLocalJunctionBrowserSessionForTest>
+    > | null = null;
+
+    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
+    kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
+      cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
+      sessionId: "kernel-session-real-child",
+    });
+    kernelLifecycleMocks.spawn.mockImplementationOnce(actualSpawn);
+    kernelLifecycleMocks.connectOverCDP.mockResolvedValueOnce(browser);
+    kernelLifecycleMocks.deleteBrowserByIdOrName.mockResolvedValueOnce(undefined);
+
+    try {
+      session = await openHostedLocalJunctionBrowserSessionForTest(config);
+      const tunnel = session.kernelTunnel;
+      expect(tunnel).not.toBeNull();
+      if (!tunnel) throw new Error("Expected the Kernel tunnel fixture to start.");
+
+      const exitedBeforeCleanup = await Promise.race([
+        new Promise<boolean>((resolve) => {
+          tunnel.child.once("exit", () => resolve(true));
+        }),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => resolve(false), 200);
+        }),
+      ]);
+      expect(exitedBeforeCleanup).toBe(false);
+      expect(tunnel.child.exitCode).toBeNull();
+      expect(tunnel.child.signalCode).toBeNull();
+
+      await closeHostedLocalJunctionBrowserSessionForTest(session, config);
+      session = null;
+
+      expect(tunnel.child.signalCode).toBe("SIGTERM");
+      expect(process.listenerCount("exit")).toBe(parentExitListenersBefore);
+    } finally {
+      if (session) {
+        await closeHostedLocalJunctionBrowserSessionForTest(session, config)
+          .catch(() => undefined);
+      }
+    }
+  });
+
+  it("deletes the created Kernel browser when CDP exposes no context", async () => {
+    const child = createKernelTunnelChild();
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+    const parentExitListenersBefore = process.listenerCount("exit");
+
+    kernelLifecycleMocks.ensureProfile.mockResolvedValueOnce(undefined);
+    kernelLifecycleMocks.createAutomationBrowser.mockResolvedValueOnce({
+      cdpWsUrl: "wss://cdp.example.test/session/capability-secret",
+      sessionId: "kernel-session-2",
+    });
+    kernelLifecycleMocks.spawn.mockReturnValueOnce(child);
+    kernelLifecycleMocks.connectOverCDP.mockResolvedValueOnce({
+      contexts: vi.fn(() => []),
+    });
+    kernelLifecycleMocks.deleteBrowserByIdOrName.mockResolvedValueOnce(undefined);
+
+    await expect(
+      openHostedLocalJunctionBrowserSessionForTest(config),
+    ).rejects.toThrow("Kernel browser did not expose its persistent context.");
+
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(kernelLifecycleMocks.deleteBrowserByIdOrName).toHaveBeenCalledWith(
+      "kernel-session-2",
+    );
+    expect(process.listenerCount("exit")).toBe(parentExitListenersBefore);
+  });
+
+  it("force-stops only the owned Kernel tunnel process group", async () => {
+    vi.useFakeTimers();
+    const child = createKernelTunnelChild({
+      exitOnTerminate: false,
+      pid: 43_124,
+    });
+    const processKill = vi.spyOn(process, "kill").mockImplementation(
+      ((processId: number, signal?: NodeJS.Signals | number) => {
+        expect(processId).toBe(-43_124);
+        expect(signal).toBe("SIGKILL");
+        child.signalCode = "SIGKILL";
+        child.emit("exit", null, "SIGKILL");
+        return true;
+      }) as typeof process.kill,
+    );
+    const removeParentExitHandler = vi.fn();
+
+    try {
+      const stopped = stopHostedLocalJunctionKernelTunnelForTest({
+        child,
+        processId: child.pid,
+        removeParentExitHandler,
+        spawnFailed: false,
+      } as never);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await stopped;
+
+      expect(removeParentExitHandler).toHaveBeenCalledOnce();
+      expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(processKill).toHaveBeenCalledWith(-43_124, "SIGKILL");
+    } finally {
+      processKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("redacts Kernel authority and the complete CDP capability URL", () => {
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+
+    const sanitized = sanitizeHostedLocalJunctionBrowserFailureForTest(
+      new Error(
+        "kernel-test-key failed at wss://cdp.example.test/session/capability-secret?token=query-secret",
+      ),
+      config,
+    );
+
+    expect(sanitized).not.toContain("kernel-test-key");
+    expect(sanitized).not.toContain("capability-secret");
+    expect(sanitized).not.toContain("query-secret");
+    expect(sanitized).not.toContain("wss://");
+    expect(sanitized).toContain("[redacted-url]");
+  });
+
   it("fails a continuous external challenge after the bounded grace period", async () => {
     let now = 0;
     const page = {
