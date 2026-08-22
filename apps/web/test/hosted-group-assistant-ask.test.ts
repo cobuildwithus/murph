@@ -737,9 +737,54 @@ describe("Hosted private-to-group context handoff admission", () => {
     expect(mocks.resolveHostedAssistantNotificationDestination)
       .not.toHaveBeenCalled();
     expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto)
-      .not.toHaveBeenCalled();
+      .toHaveBeenCalledOnce();
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
       .not.toHaveBeenCalled();
+  });
+
+  it("prepares the private origin before cache-only fresh and replay authority checks", async () => {
+    const context = "The original bounded fact.";
+    const wake = contextHandoffWake({ context });
+    const { prisma } = createPrisma();
+    const originProviderCallFences: boolean[] = [];
+    mocks.readHostedMailboxConversationWakeByAssistantInputId
+      .mockImplementation(async () => {
+        originProviderCallFences.push(
+          areHostedDomainRootProviderCallsDisabled(),
+        );
+        return directOriginWake();
+      });
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ result: { status: "accepted" } });
+    expect(originProviderCallFences).toEqual([
+      false,
+      true,
+      true,
+      false,
+      true,
+      true,
+    ]);
+
+    originProviderCallFences.length = 0;
+    mocks.readHostedMailboxItemById.mockResolvedValue(
+      mailboxItemForContextHandoff(wake),
+    );
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue(wake);
+
+    await expect(requestHostedGroupContextHandoff({
+      context,
+      memberId: ORIGIN_MEMBER_ID,
+      now: new Date(NOW.getTime() + 60_000),
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toMatchObject({ result: { status: "accepted" } });
+    expect(originProviderCallFences).toEqual([false, true]);
   });
 
   it("replays an identical wake that wins the concurrent admission race", async () => {

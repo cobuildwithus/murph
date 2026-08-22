@@ -383,6 +383,19 @@ export async function requestHostedGroupContextHandoff(input: {
   originAssistantInputId: string;
   prisma?: PrismaClient;
 }): Promise<HostedGroupAssistantAskAdmission> {
+  return runWithHostedDomainRootUnwrapCache(() =>
+    requestHostedGroupContextHandoffWithCryptoCache(input)
+  );
+}
+
+async function requestHostedGroupContextHandoffWithCryptoCache(input: {
+  context: string;
+  groupLabel?: string | null;
+  memberId: string;
+  now?: Date;
+  originAssistantInputId: string;
+  prisma?: PrismaClient;
+}): Promise<HostedGroupAssistantAskAdmission> {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const context = normalizeHostedAssistantAskText({
@@ -411,57 +424,24 @@ export async function requestHostedGroupContextHandoff(input: {
     });
   }
 
-  const preparedSelection: {
-    result: HostedGroupAssistantAskAdmission;
-  } | {
-    membershipId: string;
-    targetRuntimeMemberId: string;
-  } = await prisma.$transaction(async (tx) => {
-    if (!await isEligiblePersonalAssistantAskCallerTx({
-      memberId: input.memberId,
-      now,
-      originAssistantInputId: input.originAssistantInputId,
-      tx,
-    })) {
-      return { result: unavailableAdmission("origin_unavailable") } as const;
-    }
-    const memberships = await readHostedAssistantAskMemberships({
-      memberId: input.memberId,
-      prisma: tx,
-    });
-    const resolution = resolveHostedAssistantAskMembership({
-      memberships,
-      requestedLabel,
-    });
-    if (resolution.result) {
-      return {
-        result: { mailboxWake: null, result: resolution.result },
-      } as const;
-    }
-    const selected = resolution.membership;
-    if (!selected?.group.runtimeMemberId) {
-      return {
-        result: unavailableAdmission("membership_unavailable"),
-      } as const;
-    }
-    const authority = await readHostedAssistantAskMembershipAuthorityTx({
-      expectedOriginMemberId: input.memberId,
-      expectedTargetRuntimeMemberId: selected.group.runtimeMemberId,
-      membershipId: selected.id,
-      now,
-      originAssistantInputId: input.originAssistantInputId,
-      tx,
-    });
-    if (!authority) {
-      return {
-        result: unavailableAdmission("membership_unavailable"),
-      } as const;
-    }
-    return {
-      membershipId: authority.membership.id,
-      targetRuntimeMemberId: authority.targetRuntimeMemberId,
-    } as const;
+  await readHostedMailboxConversationWakeByAssistantInputId({
+    assistantInputId: input.originAssistantInputId,
+    availableAt: now,
+    memberId: input.memberId,
+    prisma,
   });
+
+  const preparedSelection = await prisma.$transaction((tx) =>
+    runWithHostedDomainRootProviderCallsDisabled(() =>
+      selectHostedGroupContextHandoffMembershipTx({
+        memberId: input.memberId,
+        now,
+        originAssistantInputId: input.originAssistantInputId,
+        requestedLabel,
+        tx,
+      })
+    )
+  );
   if ("result" in preparedSelection) {
     return preparedSelection.result;
   }
@@ -601,15 +581,70 @@ export async function requestHostedGroupContextHandoff(input: {
       })
     ),
     prepareExisting: async () => {
-      await readHostedMailboxWakeByItemId({
-        availableAt: now,
-        mailboxItemId: eventId,
+      await prepareHostedGroupContextHandoffCrypto({
+        eventId,
+        memberId: input.memberId,
+        now,
+        originAssistantInputId: input.originAssistantInputId,
         prisma,
       });
     },
     prisma,
     userId: preparedSelection.targetRuntimeMemberId,
   });
+}
+
+type HostedGroupContextHandoffMembershipSelection =
+  | { result: HostedGroupAssistantAskAdmission }
+  | { membershipId: string; targetRuntimeMemberId: string };
+
+async function selectHostedGroupContextHandoffMembershipTx(input: {
+  memberId: string;
+  now: Date;
+  originAssistantInputId: string;
+  requestedLabel: string | null;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupContextHandoffMembershipSelection> {
+  if (!await isEligiblePersonalAssistantAskCallerTx({
+    memberId: input.memberId,
+    now: input.now,
+    originAssistantInputId: input.originAssistantInputId,
+    tx: input.tx,
+  })) {
+    return { result: unavailableAdmission("origin_unavailable") };
+  }
+  const memberships = await readHostedAssistantAskMemberships({
+    memberId: input.memberId,
+    prisma: input.tx,
+  });
+  const resolution = resolveHostedAssistantAskMembership({
+    memberships,
+    requestedLabel: input.requestedLabel,
+  });
+  if (resolution.result) {
+    return {
+      result: { mailboxWake: null, result: resolution.result },
+    };
+  }
+  const selected = resolution.membership;
+  if (!selected?.group.runtimeMemberId) {
+    return { result: unavailableAdmission("membership_unavailable") };
+  }
+  const authority = await readHostedAssistantAskMembershipAuthorityTx({
+    expectedOriginMemberId: input.memberId,
+    expectedTargetRuntimeMemberId: selected.group.runtimeMemberId,
+    membershipId: selected.id,
+    now: input.now,
+    originAssistantInputId: input.originAssistantInputId,
+    tx: input.tx,
+  });
+  if (!authority) {
+    return { result: unavailableAdmission("membership_unavailable") };
+  }
+  return {
+    membershipId: authority.membership.id,
+    targetRuntimeMemberId: authority.targetRuntimeMemberId,
+  };
 }
 
 export async function requestHostedGroupMemberAssistantAsk(input: {
@@ -1742,36 +1777,74 @@ async function replayHostedGroupContextHandoff(input: {
   prisma: PrismaClient;
   requestedLabel: string | null;
 }): Promise<HostedGroupAssistantAskAdmission> {
-  return runWithHostedDomainRootUnwrapCache(async () => {
-    await readHostedMailboxWakeByItemId({
-      availableAt: input.now,
-      mailboxItemId: input.eventId,
-      prisma: input.prisma,
-    });
-    return input.prisma.$transaction(async (tx) => {
-      await acquireHostedAssistantAskLockTx(tx, input.eventId);
-      const existing = await readHostedMailboxItemById({
-        mailboxItemId: input.eventId,
-        prisma: tx,
-      });
-      if (!existing) {
-        return unavailableAdmission("request_conflict");
-      }
-      return replayHostedGroupContextHandoffTx({
-        context: input.context,
+  const existing = await readHostedMailboxItemById({
+    mailboxItemId: input.eventId,
+    prisma: input.prisma,
+  });
+  if (!existing) {
+    return unavailableAdmission("request_conflict");
+  }
+
+  return runWithPreparedHostedMailboxItemAppendCrypto({
+    append: () => input.prisma.$transaction((tx) =>
+      runWithHostedDomainRootProviderCallsDisabled(async () => {
+        await acquireHostedAssistantAskLockTx(tx, input.eventId);
+        const locked = await readHostedMailboxItemById({
+          mailboxItemId: input.eventId,
+          prisma: tx,
+        });
+        if (!locked) {
+          return unavailableAdmission("request_conflict");
+        }
+        return replayHostedGroupContextHandoffTx({
+          context: input.context,
+          eventId: input.eventId,
+          existingDedupeKey: locked.dedupeKey,
+          existingExpiresAt: locked.expiresAt ?? null,
+          existingKind: locked.kind,
+          existingUserId: locked.userId,
+          memberId: input.memberId,
+          now: input.now,
+          originAssistantInputId: input.originAssistantInputId,
+          requestedLabel: input.requestedLabel,
+          tx,
+        });
+      })
+    ),
+    prepareExisting: async () => {
+      await prepareHostedGroupContextHandoffCrypto({
         eventId: input.eventId,
-        existingDedupeKey: existing.dedupeKey,
-        existingExpiresAt: existing.expiresAt ?? null,
-        existingKind: existing.kind,
-        existingUserId: existing.userId,
         memberId: input.memberId,
         now: input.now,
         originAssistantInputId: input.originAssistantInputId,
-        requestedLabel: input.requestedLabel,
-        tx,
+        prisma: input.prisma,
       });
-    });
+    },
+    prisma: input.prisma,
+    userId: existing.userId,
   });
+}
+
+async function prepareHostedGroupContextHandoffCrypto(input: {
+  eventId: string;
+  memberId: string;
+  now: Date;
+  originAssistantInputId: string;
+  prisma: PrismaClient;
+}): Promise<void> {
+  await Promise.all([
+    readHostedMailboxWakeByItemId({
+      availableAt: input.now,
+      mailboxItemId: input.eventId,
+      prisma: input.prisma,
+    }),
+    readHostedMailboxConversationWakeByAssistantInputId({
+      assistantInputId: input.originAssistantInputId,
+      availableAt: input.now,
+      memberId: input.memberId,
+      prisma: input.prisma,
+    }),
+  ]);
 }
 
 async function replayHostedGroupContextHandoffTx(input: {

@@ -68,6 +68,13 @@ the same hidden request once after a retryable Cloudflare-to-Web failure, so a
 lost successful response re-signals the same mailbox item instead of reporting
 a false failure or selecting another target.
 
+Web prepares both the private-origin conversation root and the target mailbox
+root in one bounded request cache before entering membership-selection,
+append, or replay transactions. Those transactions revalidate the live origin,
+membership, and route from the existing database owners while provider-backed
+root unwraps are disabled; a root change retries the existing preparation owner
+rather than performing provider work under locks.
+
 The target turn uses the conversation prompt with an isolated output-only
 provider thread. It has no tools, private-vault access, filesystem capability,
 follow-up effect, recursion, or second delivery protocol. Fresh foreground
