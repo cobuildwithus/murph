@@ -378,9 +378,12 @@ The per-user workflow reads source-less reconciliation facts from web:
 Facts do not contain run/idle decisions, raw mailbox kinds, producer
 source/reason, raw mailbox payloads, workspace redacted status, signed usage
 decisions, or direct wake flags. The frontier classification exposes only
-whether the first retained system item is bounded model-free work or remains
-default-owned. Temporal interprets the facts mechanically: fresh mailbox signals may
-ensure processing directly; carried pointers and timers re-read facts;
+whether the first retained system item is bounded model-free work, remains
+default-owned, or is not admitted by the current facts. Inactive access uses
+the explicit not-admitted value without reading mailbox rows; Temporal may
+retire its pointer projection while Web retains durable mailbox truth for a
+future reactivation. Temporal interprets the facts mechanically: fresh mailbox
+signals may ensure processing directly; carried pointers and timers re-read facts;
 conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
 wake selects `inbox_media_retention` processing when foreground/default work is

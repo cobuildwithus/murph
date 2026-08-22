@@ -1309,8 +1309,12 @@ Cloudflare state and cannot attach to default foreground processing.
 The optional workspace `systemMailboxFrontier` fact is a separate rollout seam.
 An omitted field means an older Web producer, `model_free` means the first live
 system item beyond the runtime's handled-through frontier is eligible for the
-bounded system-mailbox executor, `default_owned` leaves that item with ordinary
-default processing, and `null` proves no live retained frontier. Deploy the
+bounded system-mailbox executor, and `default_owned` leaves that item with
+ordinary default processing. `null` means no system work is admitted by the
+current reconciliation facts. For active access, Web derives that result from
+the durable retained frontier. For inactive access, Web emits `null` without a
+mailbox read so Temporal can retire its pointer projection while the durable
+mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
