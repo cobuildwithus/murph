@@ -8,7 +8,10 @@ import {
   readStripeSurfaceForTest,
   redactHostedBillingBrowserErrorForTest,
 } from "./support/hosted-billing-browser-driver";
-import { seedHostedBillingMemberForTest } from "./support/hosted-billing-live-testkit";
+import {
+  provisionHostedBillingActivationProofForTest,
+  seedHostedBillingMemberForTest,
+} from "./support/hosted-billing-live-testkit";
 import {
   buildHostedStripeRunCorrelationToken,
   buildStripeFixtureChildEnvironmentForTest,
@@ -273,7 +276,37 @@ describe("hosted billing live browser support", () => {
     await expect(seedHostedBillingMemberForTest({
       billingStatus: "not_started",
       memberId: " ",
+      previouslyActivated: false,
     })).rejects.toThrow(/requires a member id/u);
+  });
+
+  it("leaves a never-activated Starter seed without activation-proof roots", async () => {
+    const provision = vi.fn();
+    await provisionHostedBillingActivationProofForTest({
+      memberId: "member_starter_seed",
+      previouslyActivated: false,
+      provision,
+      tx: { kind: "fixture-transaction" },
+    });
+
+    expect(provision).not.toHaveBeenCalled();
+  });
+
+  it("adds activation-proof roots when the seed has prior activation", async () => {
+    const provision = vi.fn();
+    const tx = { kind: "fixture-transaction" };
+    await provisionHostedBillingActivationProofForTest({
+      memberId: "member_paid_seed",
+      previouslyActivated: true,
+      provision,
+      tx,
+    });
+
+    expect(provision).toHaveBeenCalledWith({
+      reason: "hosted-billing-live.test-seed",
+      tx,
+      userId: "member_paid_seed",
+    });
   });
 });
 

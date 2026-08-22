@@ -1197,6 +1197,11 @@ Callback auth contract:
   payload binding succeed, `apps/web` consumes the SHA-256 nonce with one
   primary-Postgres insert; the `nonce_hash` primary-key conflict rejects a
   replay, and callback admission never sweeps expired rows
+- `GET /api/internal/hosted-orchestration/temporal-worker/binding-admission`
+  is the memberless exception for production Temporal worker startup. It binds
+  the signature to a null member, rejects a presented member header, consumes
+  the nonce under a reserved system owner in the same replay table, and returns
+  only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
 - the existing hourly hosted-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
   account deletion still independently deletes the member's nonce rows
