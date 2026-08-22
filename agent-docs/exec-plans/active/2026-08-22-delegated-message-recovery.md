@@ -70,6 +70,19 @@ behind retained model-free maintenance work.
 - Exact pushed-head CI, preliminary completion specialists, sensitive final
   ReviewGPT, and a clean current-base merge-tree.
 
+## Review finding resolution
+
+- Accepted prompt-authority finding: the developer contract now owns the full
+  positive handoff task and limits the untrusted boundary to the tagged private
+  payload and committed group history. Production-shaped injection text covers
+  the assembled prompt without broadening capabilities.
+- Accepted foreground-owner coverage finding: a dedicated workspace-runtime
+  integration proves a later delegated ask upgrades system-mailbox processing
+  through Codex preparation into exactly one assistant phase while the older
+  device wake remains durable.
+- No coverage patch artifact was returned. Both corrections remain inside the
+  existing prompt planner and runtime-owner boundaries.
+
 ## Deployment
 
 Prefer a rolling-compatible public runtime change that derives the existing
