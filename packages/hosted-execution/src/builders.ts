@@ -18,6 +18,7 @@ import type {
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDailyMetricReportedWake,
+  HostedExecutionEnvironmentInterviewCompletedWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
@@ -969,6 +970,41 @@ export function buildHostedExecutionEnvironmentVoiceCapturedWake(input: {
       sha256: input.sha256,
     },
     kind: "environment-voice.captured",
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionEnvironmentInterviewCompletedWake(input: {
+  completedAt: string;
+  completionId: string;
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  topics: HostedExecutionEnvironmentInterviewCompletedWake["environmentInterview"]["topics"];
+}): HostedExecutionEnvironmentInterviewCompletedWake {
+  if (input.occurredAt !== input.completedAt) {
+    throw new TypeError(
+      "Hosted environment interview wake occurredAt must match completedAt.",
+    );
+  }
+
+  return {
+    environmentInterview: {
+      completedAt: input.completedAt,
+      completionId: input.completionId,
+      topics: input.topics.map((topic) => ({
+        answers: topic.answers.map((answer) => ({
+          aspectId: answer.aspectId,
+          indicatorId: answer.indicatorId,
+          ...(answer.note === undefined ? {} : { note: answer.note }),
+          value: answer.value,
+        })),
+        topicId: topic.topicId,
+      })),
+    },
+    eventId: input.eventId,
+    kind: "environment-interview.completed",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

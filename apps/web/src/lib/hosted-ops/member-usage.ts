@@ -18,12 +18,19 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "../hosted-onboarding/linq-observability-identifiers";
 import {
+  createHostedEmailLookupKeyReadCandidates,
+  normalizeHostedEmailAddress,
+} from "../hosted-onboarding/contact-privacy";
+import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
 } from "../hosted-onboarding/shared";
 import {
   HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
 } from "../hosted-onboarding/starter-usage";
 import { getPrisma } from "../prisma";
+import {
+  isHostedOpsUsageResetAllOperationId,
+} from "./member-usage-contract";
 
 const HOSTED_CONVERSATION_MESSAGE_KIND = "conversation.message";
 const HOSTED_MESSAGE_RETENTION_DAYS = 30;
@@ -31,6 +38,11 @@ const HOSTED_USAGE_REPORTING_WINDOW_DAYS = 7;
 const HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY =
   "hosted-ops-usage-reset:starter:v1";
 export const HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE = 25;
+export const HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT = 100;
+export const HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE = 10;
+const HOSTED_OPS_MEMBER_USAGE_RESET_ALL_STALE_RETRIES = 1;
+const HOSTED_OPS_MEMBER_ID_PATTERN = /^hbm_[A-Za-z0-9_-]+$/u;
+const HOSTED_OPS_PHONE_LAST_FOUR_PATTERN = /^\d{4}$/u;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface HostedOpsMemberUsageRow {
@@ -78,6 +90,14 @@ export interface HostedOpsMemberUsageDashboard {
     previousCursor: string | null;
   };
   rows: HostedOpsMemberUsageRow[];
+  search: {
+    cap: number;
+    capped: boolean;
+    error: string | null;
+    kind: HostedOpsMemberUsageSearchKind;
+    query: string | null;
+    resultCount: number;
+  };
   summary: {
     activeEntitiesLast7Days: number;
     groupContainers: number;
@@ -86,11 +106,56 @@ export interface HostedOpsMemberUsageDashboard {
   };
 }
 
+export type HostedOpsMemberUsageSearchKind =
+  | "email"
+  | "member_id"
+  | "phone_last_four"
+  | null;
+
 export interface HostedOpsMemberUsageReadInput {
   after?: string | null;
   before?: string | null;
   now?: Date;
   prisma?: PrismaClient;
+  search?: string | null;
+}
+
+export interface HostedOpsMemberUsageResetAllBatchInput {
+  afterMemberId?: string | null;
+  prisma?: PrismaClient;
+}
+
+export interface HostedOpsMemberUsageResetAllBatch {
+  hasMore: boolean;
+  memberIds: string[];
+}
+
+export interface HostedOpsMemberUsageResetAllWakeBatchInput {
+  afterMemberId?: string | null;
+  operationId: string;
+  prisma?: PrismaClient;
+}
+
+export interface HostedOpsMemberUsageResetAllWakeBatch {
+  hasMore: boolean;
+  receipts: Array<{
+    memberId: string;
+    timestamp: string;
+  }>;
+}
+
+export interface HostedOpsMemberUsageResetAllMemberInput {
+  memberId: string;
+  now?: Date;
+  operationId: string;
+}
+
+export interface HostedOpsMemberUsageResetAllMemberResult {
+  memberId: string;
+  outcome: "reset" | "skipped" | "unchanged";
+  resetMode: HostedOpsMemberUsageResetMode | null;
+  runtimeRecheckRequired: boolean;
+  timestamp: string;
 }
 
 interface HostedOpsMemberUsageSummaryRow {
@@ -149,14 +214,145 @@ export class HostedOpsMemberUsageResetNoticeInFlightError extends Error {
   }
 }
 
+interface HostedOpsMemberUsageSearchPlan {
+  emailLookupKeys: string[];
+  error: string | null;
+  kind: HostedOpsMemberUsageSearchKind;
+  query: string | null;
+}
+
+type HostedOpsMemberUsageReceiptClient =
+  | PrismaClient
+  | Prisma.TransactionClient;
+
+interface HostedOpsMemberUsageResetAllReceiptResult
+  extends HostedOpsMemberUsageResetAllMemberResult {
+  noticeClaimReleased: boolean;
+  periodStart: Date | null;
+  previousSpentUsdMicros: bigint | null;
+  updatedAt: Date | null;
+  usageCreditGrantedUsdMicros: bigint;
+}
+
+interface HostedOpsMemberUsageResetTransactionInput {
+  expected: {
+    periodUpdatedAt: Date;
+    periodStart: Date;
+    usageCreditLedgerVersion: bigint;
+  } | null;
+  memberId: string;
+  now: Date;
+  operationId: string | null;
+}
+
+function normalizeHostedOpsMemberUsageSearch(
+  value: string | null | undefined,
+): HostedOpsMemberUsageSearchPlan {
+  const query = typeof value === "string" ? value.trim() : "";
+  if (query.length === 0) {
+    return {
+      emailLookupKeys: [],
+      error: null,
+      kind: null,
+      query: null,
+    };
+  }
+  if (query.length > 256) {
+    return {
+      emailLookupKeys: [],
+      error: "Search is too long. Enter one member ID, verified email, or four phone digits.",
+      kind: null,
+      query,
+    };
+  }
+  if (HOSTED_OPS_PHONE_LAST_FOUR_PATTERN.test(query)) {
+    return {
+      emailLookupKeys: [],
+      error: null,
+      kind: "phone_last_four",
+      query,
+    };
+  }
+  const normalizedEmail = normalizeHostedEmailAddress(query);
+  if (normalizedEmail) {
+    return {
+      emailLookupKeys:
+        createHostedEmailLookupKeyReadCandidates(normalizedEmail),
+      error: null,
+      kind: "email",
+      query,
+    };
+  }
+  if (HOSTED_OPS_MEMBER_ID_PATTERN.test(query)) {
+    return {
+      emailLookupKeys: [],
+      error: null,
+      kind: "member_id",
+      query,
+    };
+  }
+  return {
+    emailLookupKeys: [],
+    error:
+      "Enter a complete hosted member/container ID, an exact verified email, or exactly four phone digits.",
+    kind: null,
+    query,
+  };
+}
+
+async function readHostedOpsMemberUsageSearchMemberIds(input: {
+  plan: HostedOpsMemberUsageSearchPlan;
+  prisma: PrismaClient;
+}): Promise<string[]> {
+  const plan = input.plan;
+  if (plan.query === null || plan.kind === null) {
+    return [];
+  }
+  let memberIds: string[];
+  if (plan.kind === "member_id") {
+    const matches = await input.prisma.hostedMember.findMany({
+      orderBy: { id: "asc" },
+      select: { id: true },
+      take: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1,
+      where: { id: plan.query },
+    });
+    memberIds = matches.map((match) => match.id);
+  } else if (plan.kind === "email") {
+    const matches = await input.prisma.hostedMemberEmailAuthorization.findMany({
+      orderBy: { memberId: "asc" },
+      select: { memberId: true },
+      take: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1,
+      where: {
+        verifiedEmailLookupKey: { in: plan.emailLookupKeys },
+        verifiedEmailVerifiedAt: { not: null },
+      },
+    });
+    memberIds = matches.map((match) => match.memberId);
+  } else {
+    const matches = await input.prisma.hostedMemberIdentity.findMany({
+      orderBy: { memberId: "asc" },
+      select: { memberId: true },
+      take: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT + 1,
+      where: { maskedPhoneNumberHint: { endsWith: plan.query } },
+    });
+    memberIds = matches.map((match) => match.memberId);
+  }
+  return [...new Set(memberIds)];
+}
+
 export async function readHostedOpsMemberUsage(
   input: HostedOpsMemberUsageReadInput = {},
 ): Promise<HostedOpsMemberUsageDashboard> {
   const now = input.now ?? new Date();
   const prisma = input.prisma ?? getPrisma();
   assertValidDate(now, "Hosted ops usage reporting timestamp is invalid.");
-  const after = normalizeHostedOpsMemberUsageCursor(input.after);
-  const before = normalizeHostedOpsMemberUsageCursor(input.before);
+  const searchPlan = normalizeHostedOpsMemberUsageSearch(input.search);
+  const after = searchPlan.query === null
+    ? normalizeHostedOpsMemberUsageCursor(input.after)
+    : null;
+  const before = searchPlan.query === null
+    ? normalizeHostedOpsMemberUsageCursor(input.before)
+    : null;
   if (after && before) {
     throw new TypeError(
       "Hosted ops usage pagination cannot specify both after and before cursors.",
@@ -172,43 +368,61 @@ export async function readHostedOpsMemberUsage(
   const cursor = before ?? after;
   let pageDescending = requestedDescending;
   let recoveredBoundaryPage = false;
+  let hasMoreInReadDirection = false;
+  let pageMemberIds: string[];
+  let searchCapped = false;
 
-  let memberKeyCandidates = await prisma.hostedMember.findMany({
-    ...(cursor
-      ? {
-          where: {
-            id: requestedDescending ? { lt: cursor } : { gt: cursor },
-          },
-        }
-      : {}),
-    orderBy: { id: requestedDescending ? "desc" : "asc" },
-    select: { id: true },
-    take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
-  });
-  // A strict cursor can become empty at a real endpoint or after deletions.
-  // Re-anchor with one opposite-direction inclusive cap-plus-one scan so the
-  // boundary member is not skipped when the operator navigates back.
-  if (cursor && memberKeyCandidates.length === 0) {
-    recoveredBoundaryPage = true;
-    pageDescending = !requestedDescending;
-    memberKeyCandidates = await prisma.hostedMember.findMany({
-      orderBy: { id: pageDescending ? "desc" : "asc" },
+  if (searchPlan.query !== null) {
+    const searchMemberIds = searchPlan.error
+      ? []
+      : await readHostedOpsMemberUsageSearchMemberIds({
+          plan: searchPlan,
+          prisma,
+        });
+    searchCapped = searchMemberIds.length
+      > HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT;
+    pageMemberIds = searchMemberIds.slice(
+      0,
+      HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
+    );
+  } else {
+    let memberKeyCandidates = await prisma.hostedMember.findMany({
+      ...(cursor
+        ? {
+            where: {
+              id: requestedDescending ? { lt: cursor } : { gt: cursor },
+            },
+          }
+        : {}),
+      orderBy: { id: requestedDescending ? "desc" : "asc" },
       select: { id: true },
       take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
-      where: {
-        id: pageDescending ? { lte: cursor } : { gte: cursor },
-      },
     });
+    // A strict cursor can become empty at a real endpoint or after deletions.
+    // Re-anchor with one opposite-direction inclusive cap-plus-one scan so the
+    // boundary member is not skipped when the operator navigates back.
+    if (cursor && memberKeyCandidates.length === 0) {
+      recoveredBoundaryPage = true;
+      pageDescending = !requestedDescending;
+      memberKeyCandidates = await prisma.hostedMember.findMany({
+        orderBy: { id: pageDescending ? "desc" : "asc" },
+        select: { id: true },
+        take: HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE + 1,
+        where: {
+          id: pageDescending ? { lte: cursor } : { gte: cursor },
+        },
+      });
+    }
+    hasMoreInReadDirection =
+      memberKeyCandidates.length > HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE;
+    const selectedMemberKeys = memberKeyCandidates.slice(
+      0,
+      HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
+    );
+    pageMemberIds = (
+      pageDescending ? selectedMemberKeys.reverse() : selectedMemberKeys
+    ).map((member) => member.id);
   }
-  const hasMoreInReadDirection =
-    memberKeyCandidates.length > HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE;
-  const selectedMemberKeys = memberKeyCandidates.slice(
-    0,
-    HOSTED_OPS_MEMBER_USAGE_PAGE_SIZE,
-  );
-  const pageMemberIds = (
-    pageDescending ? selectedMemberKeys.reverse() : selectedMemberKeys
-  ).map((member) => member.id);
   const members = pageMemberIds.length > 0
     ? await prisma.hostedMember.findMany({
         orderBy: { id: "asc" },
@@ -480,7 +694,10 @@ export async function readHostedOpsMemberUsage(
   const lastMemberId = pageMemberIds.at(-1) ?? null;
   let nextCursor: string | null;
   let previousCursor: string | null;
-  if (recoveredBoundaryPage) {
+  if (searchPlan.query !== null) {
+    nextCursor = null;
+    previousCursor = null;
+  } else if (recoveredBoundaryPage) {
     nextCursor = pageDescending
       ? null
       : hasMoreInReadDirection
@@ -506,8 +723,239 @@ export async function readHostedOpsMemberUsage(
       previousCursor,
     },
     rows,
+    search: {
+      cap: HOSTED_OPS_MEMBER_USAGE_SEARCH_LIMIT,
+      capped: searchCapped,
+      error: searchPlan.error,
+      kind: searchPlan.kind,
+      query: searchPlan.query,
+      resultCount: rows.length,
+    },
     summary,
   };
+}
+
+export async function readHostedOpsMemberUsageResetAllBatch(
+  input: HostedOpsMemberUsageResetAllBatchInput = {},
+): Promise<HostedOpsMemberUsageResetAllBatch> {
+  const prisma = input.prisma ?? getPrisma();
+  const afterMemberId = normalizeHostedOpsMemberUsageCursor(
+    input.afterMemberId,
+  );
+  if (afterMemberId && !HOSTED_OPS_MEMBER_ID_PATTERN.test(afterMemberId)) {
+    throw new TypeError("Hosted ops reset-everyone cursor is invalid.");
+  }
+  const candidates = await prisma.hostedMember.findMany({
+    ...(afterMemberId
+      ? { where: { id: { gt: afterMemberId } } }
+      : {}),
+    orderBy: { id: "asc" },
+    select: { id: true },
+    take: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1,
+  });
+  return {
+    hasMore:
+      candidates.length > HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE,
+    memberIds: candidates
+      .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
+      .map((candidate) => candidate.id),
+  };
+}
+
+export async function readHostedOpsMemberUsageResetAllWakeBatch(
+  input: HostedOpsMemberUsageResetAllWakeBatchInput,
+): Promise<HostedOpsMemberUsageResetAllWakeBatch> {
+  const prisma = input.prisma ?? getPrisma();
+  const afterMemberId = normalizeHostedOpsMemberUsageCursor(
+    input.afterMemberId,
+  );
+  if (afterMemberId && !HOSTED_OPS_MEMBER_ID_PATTERN.test(afterMemberId)) {
+    throw new TypeError("Hosted ops reset-everyone wake cursor is invalid.");
+  }
+  if (!isHostedOpsUsageResetAllOperationId(input.operationId)) {
+    throw new TypeError("Hosted ops reset-everyone operation ID is invalid.");
+  }
+  const candidates = await prisma.hostedOpsUsageResetReceipt.findMany({
+    orderBy: { memberId: "asc" },
+    select: {
+      memberId: true,
+      resetAt: true,
+    },
+    take: HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE + 1,
+    where: {
+      ...(afterMemberId
+        ? { memberId: { gt: afterMemberId } }
+        : {}),
+      operationId: input.operationId,
+      runtimeRecheckRequired: true,
+    },
+  });
+  return {
+    hasMore:
+      candidates.length > HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE,
+    receipts: candidates
+      .slice(0, HOSTED_OPS_MEMBER_USAGE_RESET_ALL_BATCH_SIZE)
+      .map((candidate) => ({
+        memberId: candidate.memberId,
+        timestamp: candidate.resetAt.toISOString(),
+      })),
+  };
+}
+
+export async function resetHostedOpsMemberUsageForResetAll(
+  input: HostedOpsMemberUsageResetAllMemberInput,
+  prisma: PrismaClient = getPrisma(),
+): Promise<HostedOpsMemberUsageResetAllMemberResult> {
+  const now = input.now ?? new Date();
+  assertValidDate(now, "Hosted ops reset-everyone timestamp is invalid.");
+  if (!HOSTED_OPS_MEMBER_ID_PATTERN.test(input.memberId)) {
+    throw new TypeError("Hosted ops reset-everyone member ID is invalid.");
+  }
+  if (!isHostedOpsUsageResetAllOperationId(input.operationId)) {
+    throw new TypeError("Hosted ops reset-everyone operation ID is invalid.");
+  }
+
+  for (
+    let attempt = 0;
+    attempt <= HOSTED_OPS_MEMBER_USAGE_RESET_ALL_STALE_RETRIES;
+    attempt += 1
+  ) {
+    try {
+      const result = await resetHostedOpsMemberUsageTransaction({
+        expected: null,
+        memberId: input.memberId,
+        operationId: input.operationId,
+        now,
+      }, prisma);
+      return toHostedOpsMemberUsageResetAllResult(result);
+    } catch (error) {
+      if (error instanceof HostedOpsMemberUsageResetNotFoundError) {
+        return {
+          memberId: input.memberId,
+          outcome: "skipped",
+          resetMode: null,
+          runtimeRecheckRequired: false,
+          timestamp: now.toISOString(),
+        };
+      }
+      if (
+        (
+          error instanceof HostedOpsMemberUsageResetStaleError
+          || isHostedOpsMemberUsageResetAllTransactionConflict(error)
+        )
+        && attempt < HOSTED_OPS_MEMBER_USAGE_RESET_ALL_STALE_RETRIES
+      ) {
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw new HostedOpsMemberUsageResetStaleError();
+}
+
+async function readHostedOpsMemberUsageResetAllReceipt(input: {
+  memberId: string;
+  operationId: string;
+  prisma: HostedOpsMemberUsageReceiptClient;
+}): Promise<HostedOpsMemberUsageResetAllReceiptResult | null> {
+  const receipt = await input.prisma.hostedOpsUsageResetReceipt.findUnique({
+    where: {
+      operationId_memberId: {
+        memberId: input.memberId,
+        operationId: input.operationId,
+      },
+    },
+  });
+  if (!receipt) {
+    return null;
+  }
+  if (
+    receipt.memberId !== input.memberId
+    || receipt.operationId !== input.operationId
+    || !isHostedOpsMemberUsageResetOutcome(receipt.outcome)
+    || !isHostedOpsMemberUsageResetMode(receipt.resetMode)
+    || receipt.usageCreditGrantedUsdMicros < 0n
+  ) {
+    throw new TypeError(
+      "Hosted ops reset-everyone receipt invariant failed.",
+    );
+  }
+  return {
+    memberId: receipt.memberId,
+    noticeClaimReleased: receipt.noticeClaimReleased,
+    outcome: receipt.outcome,
+    periodStart: receipt.periodStart,
+    previousSpentUsdMicros: receipt.previousSpentUsdMicros,
+    resetMode: receipt.resetMode,
+    runtimeRecheckRequired: receipt.runtimeRecheckRequired,
+    timestamp: receipt.resetAt.toISOString(),
+    updatedAt: receipt.updatedAt,
+    usageCreditGrantedUsdMicros: receipt.usageCreditGrantedUsdMicros,
+  };
+}
+
+function createHostedOpsMemberUsageResetAllNoopResult(input: {
+  memberId: string;
+  now: Date;
+  outcome: "skipped" | "unchanged";
+  resetMode: HostedOpsMemberUsageResetMode | null;
+  runtimeRecheckRequired: boolean;
+}): HostedOpsMemberUsageResetAllReceiptResult {
+  return {
+    memberId: input.memberId,
+    noticeClaimReleased: false,
+    outcome: input.outcome,
+    periodStart: null,
+    previousSpentUsdMicros: null,
+    resetMode: input.resetMode,
+    runtimeRecheckRequired: input.runtimeRecheckRequired,
+    timestamp: input.now.toISOString(),
+    updatedAt: null,
+    usageCreditGrantedUsdMicros: 0n,
+  };
+}
+
+function toHostedOpsMemberUsageResetAllResult(
+  result: HostedOpsMemberUsageResetAllReceiptResult,
+): HostedOpsMemberUsageResetAllMemberResult {
+  return {
+    memberId: result.memberId,
+    outcome: result.outcome,
+    resetMode: result.resetMode,
+    runtimeRecheckRequired: result.runtimeRecheckRequired,
+    timestamp: result.timestamp,
+  };
+}
+
+async function hasHostedOpsStarterResetRuntimeRecovery(input: {
+  memberId: string;
+  prisma: HostedOpsMemberUsageReceiptClient;
+}): Promise<boolean> {
+  const activeResetGrants = await input.prisma.hostedUsageCreditEntry.findMany({
+    select: { beneficiaryMemberId: true },
+    take: 1,
+    where: {
+      beneficiaryMemberId: input.memberId,
+      grant: { remainingUsdMicros: { gt: 0n } },
+      kind: "starter_grant",
+      sourceReferenceLookupKey:
+        HOSTED_OPS_STARTER_RESET_SOURCE_REFERENCE_LOOKUP_KEY,
+    },
+  });
+  if (activeResetGrants.length === 0) {
+    return false;
+  }
+  const stalledMailboxItems = await input.prisma.hostedMailboxItem.findMany({
+    select: { userId: true },
+    take: 1,
+    where: {
+      aiUsageDeniedAt: { not: null },
+      consumedAt: null,
+      userId: input.memberId,
+    },
+  });
+  return stalledMailboxItems.length > 0;
 }
 
 export async function resetHostedOpsMemberUsage(
@@ -528,6 +976,24 @@ export async function resetHostedOpsMemberUsage(
     throw new TypeError("Hosted ops usage reset ledger version is invalid.");
   }
 
+  return toHostedOpsMemberUsageResetResult(
+    await resetHostedOpsMemberUsageTransaction({
+      expected: {
+        periodStart: input.periodStart,
+        periodUpdatedAt: input.expectedPeriodUpdatedAt,
+        usageCreditLedgerVersion: input.expectedUsageCreditLedgerVersion,
+      },
+      memberId: input.memberId,
+      now,
+      operationId: null,
+    }, prisma),
+  );
+}
+
+async function resetHostedOpsMemberUsageTransaction(
+  input: HostedOpsMemberUsageResetTransactionInput,
+  prisma: PrismaClient,
+): Promise<HostedOpsMemberUsageResetAllReceiptResult> {
   return prisma.$transaction(async (tx) => {
     const memberRows = await tx.$queryRaw<Array<{
       hasActiveUsageCreditGrant: boolean;
@@ -551,34 +1017,97 @@ export async function resetHostedOpsMemberUsage(
     if (!member) {
       throw new HostedOpsMemberUsageResetNotFoundError();
     }
+    if (input.operationId) {
+      const replay = await readHostedOpsMemberUsageResetAllReceipt({
+        memberId: input.memberId,
+        operationId: input.operationId,
+        prisma: tx,
+      });
+      if (replay) {
+        return replay;
+      }
+    }
     const usageCreditLedgerVersion = normalizeNonNegativeBigInt(
       member.usageCreditLedgerVersion,
     );
     const usageCreditBalanceUsdMicros = normalizeNonNegativeBigInt(
       member.usageCreditBalanceUsdMicros,
     );
+
+    const canonicalGate = await readHostedAiUsageGate({
+      memberId: input.memberId,
+      now: input.now,
+      prisma: tx,
+    });
     if (
-      usageCreditLedgerVersion !== input.expectedUsageCreditLedgerVersion
+      canonicalGate.usageCreditBalanceUsdMicros
+        !== usageCreditBalanceUsdMicros
+      || canonicalGate.usageCreditLedgerVersion
+        !== usageCreditLedgerVersion
+    ) {
+      throw new HostedOpsMemberUsageResetStaleError();
+    }
+    if (
+      input.expected
+      && (
+        (!canonicalGate.allowed
+          && canonicalGate.reason !== "ai_usage_limit_exceeded")
+        || canonicalGate.periodStart.getTime()
+          !== input.expected.periodStart.getTime()
+        || usageCreditLedgerVersion
+          !== input.expected.usageCreditLedgerVersion
+      )
     ) {
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
-    const canonicalGate = await readHostedAiUsageGate({
-      memberId: input.memberId,
-      now,
-      prisma: tx,
-    });
     if (
-      (!canonicalGate.allowed
-        && canonicalGate.reason !== "ai_usage_limit_exceeded")
-      || canonicalGate.periodStart.getTime() !== input.periodStart.getTime()
-      || canonicalGate.usageCreditBalanceUsdMicros
-        !== usageCreditBalanceUsdMicros
-      || canonicalGate.usageCreditLedgerVersion
-        !== input.expectedUsageCreditLedgerVersion
+      input.operationId
+      && canonicalGate.allowanceSource === "direct_starter"
+      && canonicalGate.allowed
     ) {
-      throw new HostedOpsMemberUsageResetStaleError();
+      const runtimeRecheckRequired =
+        await hasHostedOpsStarterResetRuntimeRecovery({
+          memberId: input.memberId,
+          prisma: tx,
+        });
+      const result = createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: runtimeRecheckRequired ? "unchanged" : "skipped",
+        resetMode: runtimeRecheckRequired
+          ? "starter_allowance"
+          : null,
+        runtimeRecheckRequired,
+      });
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+      return result;
     }
+
+    const resettableDecision = canonicalGate.allowed
+      || canonicalGate.reason === "ai_usage_limit_exceeded";
+    if (input.operationId && !resettableDecision) {
+      const result = createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+      });
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+      return result;
+    }
+
+    const periodStart = input.expected?.periodStart
+      ?? canonicalGate.periodStart;
     const resetMode: HostedOpsMemberUsageResetMode =
       canonicalGate.allowanceSource === "direct_starter"
         ? "starter_allowance"
@@ -615,22 +1144,39 @@ export async function resetHostedOpsMemberUsage(
         "updated_at" AS "updatedAt"
       FROM "hosted_ai_usage_period"
       WHERE "member_id" = ${input.memberId}
-        AND "period_start" = ${input.periodStart}
+        AND "period_start" = ${periodStart}
       FOR UPDATE
     `;
     const period = periodRows[0];
     if (!period) {
-      throw new HostedOpsMemberUsageResetNotFoundError();
+      if (!input.operationId) {
+        throw new HostedOpsMemberUsageResetNotFoundError();
+      }
+      const result = createHostedOpsMemberUsageResetAllNoopResult({
+        memberId: input.memberId,
+        now: input.now,
+        outcome: "skipped",
+        resetMode: null,
+        runtimeRecheckRequired: false,
+      });
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+      return result;
     }
     if (
-      period.updatedAt.getTime() !== input.expectedPeriodUpdatedAt.getTime()
+      input.expected
+      && period.updatedAt.getTime()
+        !== input.expected.periodUpdatedAt.getTime()
     ) {
       throw new HostedOpsMemberUsageResetStaleError();
     }
 
     const noticeLookupKey = buildHostedUsageNoticeLookupKey({
       memberId: input.memberId,
-      periodStart: input.periodStart,
+      periodStart,
       planResetAt: canonicalGate.planResetAt,
       usageCreditLedgerVersion,
     });
@@ -662,7 +1208,10 @@ export async function resetHostedOpsMemberUsage(
         `
       : [];
     const delivery = deliveryRows[0] ?? null;
-    if (delivery && isHostedUsageNoticeDispatchInFlight({ delivery, now })) {
+    if (
+      delivery
+      && isHostedUsageNoticeDispatchInFlight({ delivery, now: input.now })
+    ) {
       throw new HostedOpsMemberUsageResetNoticeInFlightError(
         new Date(
           delivery.attemptedAt.getTime()
@@ -687,17 +1236,22 @@ export async function resetHostedOpsMemberUsage(
     let usageCreditGrantedUsdMicros = 0n;
     if (resetMode === "starter_allowance") {
       const grant = await appendHostedUsageCreditGrantTx({
-        effectiveAt: now,
+        effectiveAt: input.now,
         grantUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
         lockedBeneficiary: {
           balanceUsdMicros: usageCreditBalanceUsdMicros,
           beneficiaryMemberId: input.memberId,
           ledgerVersion: usageCreditLedgerVersion,
         },
-        semanticSourceKey: buildHostedOpsStarterResetSemanticSourceKey({
-          memberId: input.memberId,
-          usageCreditLedgerVersion,
-        }),
+        semanticSourceKey: input.operationId
+          ? buildHostedOpsStarterResetAllSemanticSourceKey({
+              memberId: input.memberId,
+              operationId: input.operationId,
+            })
+          : buildHostedOpsStarterResetSemanticSourceKey({
+              memberId: input.memberId,
+              usageCreditLedgerVersion,
+            }),
         source: {
           kind: "starter",
           sourceReferenceLookupKey:
@@ -717,11 +1271,11 @@ export async function resetHostedOpsMemberUsage(
         data: {
           blockedAt: null,
           spentUsdMicros: 0n,
-          updatedAt: now,
+          updatedAt: input.now,
         },
         where: {
           memberId: input.memberId,
-          periodStart: input.periodStart,
+          periodStart,
           ...(resetMode === "included_usage"
             ? { updatedAt: period.updatedAt }
             : {}),
@@ -732,23 +1286,154 @@ export async function resetHostedOpsMemberUsage(
       }
     }
 
-    return {
+    const result = {
       memberId: input.memberId,
       noticeClaimReleased: delivery !== null,
       outcome,
-      periodStart: input.periodStart.toISOString(),
-      previousSpentUsdMicros: period.spentUsdMicros.toString(),
-      resetAt: now.toISOString(),
+      periodStart,
+      previousSpentUsdMicros: period.spentUsdMicros,
       resetMode,
-      updatedAt: outcome === "reset"
-        ? now.toISOString()
-        : period.updatedAt.toISOString(),
-      usageCreditGrantedUsdMicros: usageCreditGrantedUsdMicros.toString(),
-    };
+      runtimeRecheckRequired: true,
+      timestamp: input.now.toISOString(),
+      updatedAt: outcome === "reset" ? input.now : period.updatedAt,
+      usageCreditGrantedUsdMicros,
+    } satisfies HostedOpsMemberUsageResetAllReceiptResult;
+    if (input.operationId) {
+      await createHostedOpsMemberUsageResetAllReceipt({
+        operationId: input.operationId,
+        result,
+        tx,
+      });
+    }
+    return result;
   }, {
     ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
     isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
   });
+}
+
+function toHostedOpsMemberUsageResetResult(
+  result: HostedOpsMemberUsageResetAllReceiptResult,
+): HostedOpsMemberUsageResetResult {
+  if (
+    result.outcome === "skipped"
+    || result.periodStart === null
+    || result.previousSpentUsdMicros === null
+    || result.resetMode === null
+    || result.updatedAt === null
+  ) {
+    throw new TypeError("Hosted ops row reset returned an invalid result.");
+  }
+  return {
+    memberId: result.memberId,
+    noticeClaimReleased: result.noticeClaimReleased,
+    outcome: result.outcome,
+    periodStart: result.periodStart.toISOString(),
+    previousSpentUsdMicros: result.previousSpentUsdMicros.toString(),
+    resetAt: result.timestamp,
+    resetMode: result.resetMode,
+    updatedAt: result.updatedAt.toISOString(),
+    usageCreditGrantedUsdMicros:
+      result.usageCreditGrantedUsdMicros.toString(),
+  };
+}
+
+async function createHostedOpsMemberUsageResetAllReceipt(input: {
+  operationId: string;
+  result: HostedOpsMemberUsageResetAllReceiptResult;
+  tx: Prisma.TransactionClient;
+}): Promise<void> {
+  await input.tx.hostedOpsUsageResetReceipt.create({
+    data: {
+      memberId: input.result.memberId,
+      noticeClaimReleased: input.result.noticeClaimReleased,
+      operationId: input.operationId,
+      outcome: input.result.outcome,
+      periodStart: input.result.periodStart,
+      previousSpentUsdMicros: input.result.previousSpentUsdMicros,
+      resetAt: new Date(input.result.timestamp),
+      resetMode: input.result.resetMode,
+      runtimeRecheckRequired: input.result.runtimeRecheckRequired,
+      updatedAt: input.result.updatedAt,
+      usageCreditGrantedUsdMicros:
+        input.result.usageCreditGrantedUsdMicros,
+    },
+  });
+}
+
+function isHostedOpsMemberUsageResetOutcome(
+  value: string,
+): value is HostedOpsMemberUsageResetAllMemberResult["outcome"] {
+  return value === "reset" || value === "skipped" || value === "unchanged";
+}
+
+function isHostedOpsMemberUsageResetMode(
+  value: string | null,
+): value is HostedOpsMemberUsageResetMode | null {
+  return value === null
+    || value === "included_usage"
+    || value === "starter_allowance";
+}
+
+function isHostedOpsMemberUsageResetAllTransactionConflict(
+  error: unknown,
+): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+  const code = typeof error.code === "string" ? error.code : null;
+  if (code === "P2034") {
+    return true;
+  }
+  if (code !== "P2010" || !("meta" in error)) {
+    return false;
+  }
+  return readHostedOpsMemberUsagePostgresErrorCode(error.meta) === "40001";
+}
+
+function readHostedOpsMemberUsagePostgresErrorCode(
+  meta: unknown,
+): string | null {
+  if (!meta || typeof meta !== "object") {
+    return null;
+  }
+  if ("code" in meta && typeof meta.code === "string") {
+    return meta.code;
+  }
+  if (!("driverAdapterError" in meta)) {
+    return null;
+  }
+  const driverAdapterError = meta.driverAdapterError;
+  if (
+    !driverAdapterError
+    || typeof driverAdapterError !== "object"
+    || !("cause" in driverAdapterError)
+  ) {
+    return null;
+  }
+  const cause = driverAdapterError.cause;
+  if (!cause || typeof cause !== "object") {
+    return null;
+  }
+  if ("originalCode" in cause && typeof cause.originalCode === "string") {
+    return cause.originalCode;
+  }
+  return "code" in cause && typeof cause.code === "string"
+    ? cause.code
+    : null;
+}
+
+function buildHostedOpsStarterResetAllSemanticSourceKey(input: {
+  memberId: string;
+  operationId: string;
+}): string {
+  return [
+    "hosted-ops-usage-reset-all",
+    input.operationId,
+    input.memberId,
+    "starter",
+    "v1",
+  ].join(":");
 }
 
 function buildHostedOpsStarterResetSemanticSourceKey(input: {

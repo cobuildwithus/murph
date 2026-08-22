@@ -68,6 +68,7 @@ export interface HostedRetentionCleanupResult {
   expiredMailboxContentRetired: number;
   expiredMailboxTombstonesDeleted: number;
   expiredSensitiveActionChallengesDeleted: number;
+  expiredSignupNotificationContextsRetired: number;
   inboxMediaRetentionRuntimeSignalFailures: number;
   inboxMediaRetentionRuntimeSignalsSent: number;
   oldRuntimeLogsDeleted: number;
@@ -102,6 +103,8 @@ export async function runHostedRetentionCleanup(input: {
     await deleteExpiredClinicalRecordConnectIntents({ now, prisma });
   const expiredEmailPublicBootstrapAttemptsDeleted =
     await deleteExpiredEmailPublicBootstrapAttempts({ now, prisma });
+  const expiredSignupNotificationContextsRetired =
+    await retireExpiredSignupNotificationContexts({ now, prisma });
   const expiredMailboxItems = await retireExpiredMailboxContent({
     now,
     prisma,
@@ -162,11 +165,42 @@ export async function runHostedRetentionCleanup(input: {
     expiredMailboxContentRetired: expiredMailboxItems.retired,
     expiredMailboxTombstonesDeleted: expiredMailboxItems.tombstonesDeleted,
     expiredSensitiveActionChallengesDeleted,
+    expiredSignupNotificationContextsRetired,
     inboxMediaRetentionRuntimeSignalFailures: mediaRetentionSignals.failures,
     inboxMediaRetentionRuntimeSignalsSent: mediaRetentionSignals.sent,
     oldRuntimeLogsDeleted: 0,
     staleWebSessionsDeleted,
   };
+}
+
+// Signup context is optional notification projection data, not member history.
+// The partial expiry index keeps this bounded sweep off unrelated member rows.
+async function retireExpiredSignupNotificationContexts(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return await runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH due AS MATERIALIZED (
+      SELECT member."id"
+      FROM "hosted_member" AS member
+      WHERE member."signup_notification_context_encrypted" IS NOT NULL
+        AND (
+          member."signup_notification_context_expires_at" IS NULL
+          OR member."signup_notification_context_expires_at" <= ${input.now}
+        )
+      ORDER BY
+        member."signup_notification_context_expires_at" ASC NULLS FIRST,
+        member."id" ASC
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF member SKIP LOCKED
+    )
+    UPDATE "hosted_member" AS member
+    SET
+      "signup_notification_context_encrypted" = NULL,
+      "signup_notification_context_expires_at" = NULL
+    FROM due
+    WHERE member."id" = due."id"
+  `);
 }
 
 async function deleteExpiredGroupCurrentSenderClarifications(input: {

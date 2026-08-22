@@ -312,18 +312,30 @@ function signStravaDeauthorization(input: {
 }
 
 async function prepareRegistration(input: {
+  eventType?: "provider.connection.created" | "provider.connection.updated";
   fixture: Fixture;
   receivedAt?: Date;
   registry: DeviceSyncRegistry;
+  sourceProviderSlug?: string;
 }): Promise<PreparedDeviceSyncWebhookV1> {
+  const eventType = input.eventType ?? "provider.connection.updated";
   const receivedAt = input.receivedAt ?? input.fixture.receivedAt;
+  const sourceProviderSlug = input.sourceProviderSlug ?? "apple_health_kit";
   const signed = signJunctionWebhook({
     body: {
-      data: {
-        provider: "apple_health_kit",
-        updated_at: receivedAt.toISOString(),
-      },
-      event_type: "provider.connection.updated",
+      data: eventType === "provider.connection.created"
+        ? {
+            provider: {
+              name: sourceProviderSlug,
+              slug: sourceProviderSlug,
+            },
+            user_id: input.fixture.externalAccountId,
+          }
+        : {
+            provider: sourceProviderSlug,
+            updated_at: receivedAt.toISOString(),
+          },
+      event_type: eventType,
       user_id: input.fixture.externalAccountId,
     },
     messageId: `msg_prepared_authority_${randomUUID().replaceAll("-", "")}`,
@@ -1387,6 +1399,168 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("recovers a lost Junction callback from provider.connection.created after the production start path", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+      const sourceProviderSlug = "garmin";
+      let fixture: Fixture | null = null;
+
+      try {
+        fixture = await createFixture({
+          setupPhase: "pending_link",
+          sourceLastErrorCode: null,
+          sourceProviderSlug,
+        });
+        const activeFixture = fixture;
+        await activeFixture.prisma.deviceConnectionSource.delete({
+          where: { id: activeFixture.sourceId },
+        });
+        await activeFixture.prisma.deviceConnection.delete({
+          where: { id: activeFixture.connectionId },
+        });
+
+        const startAt = new Date("2026-03-26T12:01:00.000Z");
+        const receivedAt = new Date("2026-03-26T12:02:00.000Z");
+        const providerFetch = vi.fn(async (input: string | URL | Request) => {
+          const url = typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+            return new Response(JSON.stringify({ id: activeFixture.externalAccountId }), {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            });
+          }
+          if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+            return new Response(JSON.stringify({
+              link_web_url: "https://link.junction.com/session/prepared-authority",
+            }), {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            });
+          }
+          if (
+            url
+            === `https://api.sandbox.us.junction.com/v2/user/providers/${activeFixture.externalAccountId}`
+          ) {
+            return new Response(JSON.stringify({
+              data: [{ slug: sourceProviderSlug, status: "connected" }],
+            }), {
+              headers: { "content-type": "application/json" },
+              status: 200,
+            });
+          }
+          throw new Error(`Unexpected Junction request: ${url}`);
+        });
+        const registry = createJunctionRegistry(providerFetch);
+
+        vi.setSystemTime(startAt);
+        const started = await createIngressService({
+          headers: new Headers(),
+          registry,
+          store: activeFixture.store,
+        }).startConnection(activeFixture.memberId, "junction", null, {
+          sourceProviderSlug,
+        });
+        const connection = await activeFixture.prisma.deviceConnection.findFirstOrThrow({
+          select: { id: true },
+          where: {
+            provider: "junction",
+            userId: activeFixture.memberId,
+          },
+        });
+        const source = await activeFixture.prisma.deviceConnectionSource.findFirstOrThrow({
+          select: { id: true },
+          where: {
+            connectionId: connection.id,
+            sourceProviderSlug,
+          },
+        });
+        activeFixture.connectionId = connection.id;
+        activeFixture.sourceId = source.id;
+        activeFixture.receivedAt = receivedAt;
+        await expect(activeFixture.prisma.deviceOauthSession.findUniqueOrThrow({
+          select: { consumedAt: true },
+          where: { state: started.state },
+        })).resolves.toEqual({ consumedAt: null });
+
+        vi.setSystemTime(receivedAt);
+        const prepared = await prepareRegistration({
+          eventType: "provider.connection.created",
+          fixture: activeFixture,
+          receivedAt,
+          registry,
+          sourceProviderSlug,
+        });
+        expect(prepared).toMatchObject({
+          eventType: "provider.connection.created",
+          sourceProviderSlug,
+        });
+        const consumeService = createIngressService({
+          headers: new Headers(),
+          registry,
+          store: activeFixture.store,
+        });
+
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: false,
+        });
+        await expect(consumeService.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+          accepted: true,
+          duplicate: true,
+        });
+
+        expect(providerFetch).toHaveBeenCalledTimes(3);
+        await expect(activeFixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: {
+            setupExpiresAt: true,
+            setupPhase: true,
+          },
+          where: { id: activeFixture.connectionId },
+        })).resolves.toEqual({
+          setupExpiresAt: null,
+          setupPhase: "source_confirmed",
+        });
+        await expect(activeFixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          select: {
+            lastDataAt: true,
+            status: true,
+          },
+          where: { id: activeFixture.sourceId },
+        })).resolves.toEqual({
+          lastDataAt: null,
+          status: "connected",
+        });
+        await expect(activeFixture.prisma.deviceOauthSession.findUniqueOrThrow({
+          select: { consumedAt: true },
+          where: { state: started.state },
+        })).resolves.toEqual({ consumedAt: null });
+        await expect(readSourceEstablishmentJobs(activeFixture)).resolves.toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              kind: "backfill",
+              payload: expect.objectContaining({ sourceProviderSlug }),
+            }),
+            expect.objectContaining({
+              kind: "reconcile",
+              payload: expect.objectContaining({ sourceProviderSlug }),
+            }),
+          ]),
+        );
+        await expect(activeFixture.prisma.hostedMailboxItem.count({
+          where: { userId: activeFixture.memberId },
+        })).resolves.toBe(1);
+      } finally {
+        vi.useRealTimers();
+        if (fixture) {
+          await cleanupFixture(fixture);
+        }
+      }
+    });
+
     it("confirms pending setup and recovers a missed runtime handoff from durable mailbox state", async () => {
       const sourceProviderSlug = "garmin";
       const fixture = await createFixture({
@@ -1579,7 +1753,7 @@ describe.skipIf(!runPostgresProof)(
         sourceProviderSlug,
       });
       const providerFetch = vi.fn(async () => new Response(JSON.stringify({
-        data: [{ slug: sourceProviderSlug, status: "unknown" }],
+        data: [{ slug: sourceProviderSlug, status: "active" }],
       }), {
         headers: { "content-type": "application/json" },
         status: 200,

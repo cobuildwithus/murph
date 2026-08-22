@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   readHostedPrivyUserById: vi.fn(),
   readHostedMemberMessagingSetupState: vi.fn(),
   syncHostedMemberVerifiedEmailAuthorization: vi.fn(),
+  writeHostedMemberSignupNotificationContextIfPendingTx: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", async (importOriginal) => {
@@ -81,6 +82,8 @@ vi.mock("@/src/lib/hosted-onboarding/hosted-member-store", async (importOriginal
     readHostedMemberMessagingSetupState: mocks.readHostedMemberMessagingSetupState,
     syncHostedMemberVerifiedEmailAuthorization:
       mocks.syncHostedMemberVerifiedEmailAuthorization,
+    writeHostedMemberSignupNotificationContextIfPendingTx:
+      mocks.writeHostedMemberSignupNotificationContextIfPendingTx,
   };
 });
 
@@ -147,6 +150,8 @@ describe("hosted signup timezone handoff", () => {
       }],
     });
     mocks.syncHostedMemberVerifiedEmailAuthorization.mockResolvedValue({});
+    mocks.writeHostedMemberSignupNotificationContextIfPendingTx
+      .mockResolvedValue(true);
   });
 
   it("persists the signup timezone before activation can claim the member row", async () => {
@@ -154,6 +159,13 @@ describe("hosted signup timezone handoff", () => {
     let memberResolutionTransactionOpen = false;
     let activationClaimed = false;
     let pendingActivationTimeZone: string | null = null;
+    mocks.writeHostedMemberSignupNotificationContextIfPendingTx
+      .mockImplementationOnce(async () => {
+        expect(memberResolutionTransactionOpen).toBe(true);
+        expect(activationClaimed).toBe(false);
+        sequence.push("signup-context:persist");
+        return true;
+      });
 
     const prisma = {
       $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
@@ -193,6 +205,16 @@ describe("hosted signup timezone handoff", () => {
         identity: IDENTITY,
         now: NOW,
         prisma,
+        signupNotificationContext: {
+          schema: "murph.hosted-signup-notification-context.v1",
+          occurredAt: NOW.toISOString(),
+          surface: "website",
+          timeZone: "Europe/Warsaw",
+          location: {
+            city: "Warsaw",
+            country: "PL",
+          },
+        },
         timeZone: "Europe/Warsaw",
       }),
     ).resolves.toMatchObject({
@@ -204,8 +226,56 @@ describe("hosted signup timezone handoff", () => {
     expect(sequence).toEqual([
       "member-resolution:start",
       "timezone:persist",
+      "signup-context:persist",
       "activation:claim",
     ]);
+    expect(mocks.writeHostedMemberSignupNotificationContextIfPendingTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        context: expect.objectContaining({
+          occurredAt: NOW.toISOString(),
+          surface: "website",
+        }),
+        memberId: MEMBER.id,
+        prisma,
+      }));
+  });
+
+  it("leaves inactive signup notification context empty when request capture is omitted", async () => {
+    let signupNotificationContextEncrypted: string | null = null;
+    const prisma = {
+      $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback(prisma)),
+      hostedMember: {
+        findUnique: vi.fn(async () => ({
+          accountGroupMemberships: [],
+          billingStatus: MEMBER.billingStatus,
+          suspendedAt: null,
+          threadContainer: null,
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+    } as unknown as PrismaClient;
+    mocks.writeHostedMemberSignupNotificationContextIfPendingTx
+      .mockImplementationOnce(async () => {
+        signupNotificationContextEncrypted = "encrypted-context";
+        return true;
+      });
+
+    await expect(
+      completeHostedPrivyVerification({
+        identity: IDENTITY,
+        now: NOW,
+        prisma,
+        timeZone: "Europe/Warsaw",
+      }),
+    ).resolves.toMatchObject({
+      memberId: MEMBER.id,
+      stage: "checkout",
+    });
+
+    expect(mocks.writeHostedMemberSignupNotificationContextIfPendingTx)
+      .not.toHaveBeenCalled();
+    expect(signupNotificationContextEncrypted).toBeNull();
   });
 
   it("prepares a private reply alias from the authoritative live email", async () => {

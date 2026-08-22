@@ -45,6 +45,7 @@ const habitatRecordSchema = z.object({
   domain: z.string().min(1),
   status: z.string().min(1),
   indicators: z.record(z.string(), z.unknown()),
+  indicatorNotes: z.record(z.string(), z.string()).nullable(),
   indicatorRecordedAt: z.record(z.string(), z.string()).nullable(),
   note: z.string().nullable(),
   body: z.string(),
@@ -212,6 +213,47 @@ function parseIndicatorAssignments(
   return indicators
 }
 
+function parseIndicatorNoteAssignments(
+  aspectId: string,
+  assignments: string[] | undefined,
+): Record<string, string | null> | undefined {
+  if (!assignments || assignments.length === 0) {
+    return undefined
+  }
+
+  const notes: Record<string, string | null> = {}
+  for (const assignment of assignments) {
+    const separator = assignment.indexOf('=')
+    if (separator <= 0) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Indicator note "${assignment}" must use the form indicator_id=text.`,
+      )
+    }
+    const indicatorId = assignment.slice(0, separator).trim()
+    if (!getHabitatIndicatorDefinition(aspectId, indicatorId)) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Indicator "${indicatorId}" is not part of habitat aspect "${aspectId}".`,
+      )
+    }
+    const rawNote = assignment.slice(separator + 1).trim()
+    if (rawNote === 'null') {
+      notes[indicatorId] = null
+      continue
+    }
+    if (rawNote.length === 0 || rawNote.length > 400) {
+      throw new VaultCliError(
+        'contract_invalid',
+        `Indicator note "${indicatorId}" must contain 1-400 characters.`,
+      )
+    }
+    notes[indicatorId] = rawNote
+  }
+
+  return notes
+}
+
 function habitatRecordPayload(record: Awaited<ReturnType<typeof readHabitatAspect>>) {
   return {
     habitatId: record.habitatId,
@@ -220,6 +262,7 @@ function habitatRecordPayload(record: Awaited<ReturnType<typeof readHabitatAspec
     domain: record.domain,
     status: record.status,
     indicators: record.indicators,
+    indicatorNotes: record.indicatorNotes ?? null,
     indicatorRecordedAt: record.indicatorRecordedAt ?? null,
     note: record.note ?? null,
     body: record.body,
@@ -246,6 +289,12 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         .describe(
           'Indicator assignment like night_temp_c=19 or co2_meter=declined. Repeat --indicator for multiple values.',
         ),
+      indicatorNote: z
+        .array(z.string().min(3))
+        .optional()
+        .describe(
+          'Concise context like sauna_type=Dry home sauna, up to 100°C, Harvia heater. Repeat --indicator-note for multiple values; use null to clear.',
+        ),
       recordedAt: z
         .string()
         .regex(/^\d{4}-\d{2}-\d{2}$/u)
@@ -260,6 +309,10 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         vaultRoot: options.vault,
         aspect: args.aspect,
         indicators: parseIndicatorAssignments(args.aspect, options.indicator),
+        indicatorNotes: parseIndicatorNoteAssignments(
+          args.aspect,
+          options.indicatorNote,
+        ),
         recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
         note: options.note,
         body: options.body,

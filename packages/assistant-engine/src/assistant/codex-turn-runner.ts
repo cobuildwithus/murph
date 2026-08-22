@@ -16,7 +16,6 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -727,9 +726,7 @@ async function executeAssistantCodexAttempt(input: {
         permissions:
           groupRoomModelMaintenanceTurn
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : memberMemoryMaintenanceTurn
-              ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
-              : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
                 ? hostedLocalTestProviderTurn

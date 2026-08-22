@@ -132,6 +132,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
+      ['UPDATE "hosted_member"', 3],
     ]);
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
       const sql = strings.join("?");
@@ -187,6 +188,7 @@ describe("hosted retention cleanup", () => {
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
       expiredSensitiveActionChallengesDeleted: 2,
+      expiredSignupNotificationContextsRetired: 3,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 0,
@@ -199,6 +201,28 @@ describe("hosted retention cleanup", () => {
       accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch
         .mock.invocationCallOrder[0],
     ).toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
+
+    const signupContextRetentionCall = findRetentionCall(
+      executeRaw,
+      'UPDATE "hosted_member" AS member',
+    );
+    const signupContextRetentionSql = sqlOf(signupContextRetentionCall);
+    expect(signupContextRetentionSql).toContain(
+      '"signup_notification_context_expires_at" ASC NULLS FIRST',
+    );
+    expect(signupContextRetentionSql).toContain(
+      '"signup_notification_context_expires_at" IS NULL',
+    );
+    expect(signupContextRetentionSql).toContain(
+      "FOR UPDATE OF member SKIP LOCKED",
+    );
+    expect(signupContextRetentionSql).toContain(
+      '"signup_notification_context_encrypted" = NULL',
+    );
+    expect(signupContextRetentionCall.slice(1)).toEqual([
+      now,
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
 
     const mailboxDeleteSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
     expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_item"');
@@ -229,7 +253,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(15);
+    expect(executeRaw).toHaveBeenCalledTimes(16);
 
     const deviceOauthCall = findRetentionCall(
       executeRaw,
@@ -693,6 +717,7 @@ describe("hosted retention cleanup", () => {
         expiredMailboxContentRetired: 1,
         expiredMailboxTombstonesDeleted: 0,
         expiredSensitiveActionChallengesDeleted: 1,
+        expiredSignupNotificationContextsRetired: 1,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 0,
