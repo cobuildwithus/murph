@@ -9,6 +9,9 @@ import {
   preferencesDocumentRelativePath,
   resolveAssistantVoiceOptionElevenLabsVoiceId,
 } from '@murphai/contracts'
+import {
+  createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
+} from '@murphai/hosted-execution/assistant-identifiers'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   normalizeAssistantProviderConfig,
@@ -138,7 +141,18 @@ import {
 import {
   buildAssistantSkillFileRef,
 } from '../src/assistant-skill-assets.js'
-import { appendAssistantTranscriptEntries } from '../src/assistant/store.js'
+import {
+  appendAssistantTranscriptEntries,
+  listAssistantTranscriptEntries,
+  saveAssistantSession,
+} from '../src/assistant/store.js'
+import {
+  createAssistantOutboxIntent,
+  saveAssistantOutboxIntent,
+} from '../src/assistant/outbox.js'
+import {
+  reconcileAssistantPrivateCompletionContinuityForSession,
+} from '../src/assistant/private-completion-continuity.js'
 import {
   buildAssistantGeneratedImageDeliveryTranscriptMarkerText,
 } from '../src/assistant/response-media.js'
@@ -160,7 +174,10 @@ import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
 } from '../src/assistant/shared.js'
 import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
-import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import {
+  assistantChannelDeliverySchema,
+  type AssistantSession,
+} from '@murphai/operator-config/assistant-cli-contracts'
 import type { CodexThreadIdentity } from '../src/assistant/codex-thread-route.js'
 
 afterEach(() => {
@@ -5729,6 +5746,172 @@ describe('assistant Codex turn planning', () => {
           { content: cadenceQuestion, role: 'assistant' },
         ],
       })
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('preserves an imported private completion when older member text has retired', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-private-completion-history-',
+    ))
+    const sessionId = 'session-private-completion-history'
+    const threadId = 'h1_111111111111111111111111'
+    const actorId = 'h1_222222222222222222222222'
+    const identityId = 'h1_333333333333333333333333'
+    const exactCompletion = 'Use the lower-impact option for the next step.'
+    const ordinaryAssistantText = 'I saved the older conversation choice.'
+    const route = createRoute()
+    const session = await saveAssistantSession(vault, {
+      ...createSession({
+        resumeState: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          routeFingerprint: 'b'.repeat(64),
+          threadId: 'thread-before-private-completion',
+        },
+        turnCount: 1,
+      }),
+      binding: {
+        actorId,
+        channel: 'linq',
+        conversationKey: null,
+        delivery: {
+          kind: 'thread',
+          target: threadId,
+        },
+        identityId,
+        threadId,
+        threadIsDirect: true,
+      },
+      conversationId: sessionId,
+      sessionId,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          contentReceivedAt: '2026-07-01T10:00:00.000Z',
+          createdAt: '2026-07-01T10:00:00.000Z',
+          kind: 'user',
+          text: 'Use the older option.',
+        },
+        {
+          createdAt: '2026-07-01T10:01:00.000Z',
+          kind: 'assistant',
+          text: ordinaryAssistantText,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-08-21T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const completionId = 'aask_done_private_completion_history'
+      const deliveryKey =
+        createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
+          completionId,
+        )
+      const pending = await createAssistantOutboxIntent({
+        actorId,
+        answeredMailboxItemIds: [completionId],
+        bindingDelivery: {
+          kind: 'thread',
+          target: threadId,
+        },
+        channel: 'linq',
+        deliveryIdempotencyKey: deliveryKey,
+        deliveryTransportIdempotent: true,
+        identityId,
+        message: exactCompletion,
+        privateCompletionContinuitySessionId: session.sessionId,
+        reviewedAssistantAskCompletionExpiresAt:
+          '2099-08-21T10:00:00.000Z',
+        sessionId: session.sessionId,
+        threadId,
+        threadIsDirect: true,
+        turnId: 'turn-private-completion-history',
+        vault,
+      })
+      const sentAt = '2026-08-21T10:01:00.000Z'
+      await saveAssistantOutboxIntent(vault, {
+        ...pending,
+        delivery: assistantChannelDeliverySchema.parse({
+          channel: 'linq',
+          idempotencyKey: pending.deliveryIdempotencyKey,
+          kind: 'message',
+          messageLength: exactCompletion.length,
+          providerMessageId: 'provider-private-completion-history',
+          providerThreadId: threadId,
+          sentAt,
+          target: threadId,
+          targetKind: 'thread',
+        }),
+        deliveryConfirmationPending: false,
+        sentAt,
+        status: 'sent',
+      })
+
+      const reconciledSession =
+        await reconcileAssistantPrivateCompletionContinuityForSession({
+          allowUnbound: false,
+          sessionId: session.sessionId,
+          vault,
+        })
+      expect(reconciledSession.resumeState).toBeNull()
+      await expect(listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )).resolves.toEqual([
+        expect.objectContaining({ text: '' }),
+        expect.objectContaining({ text: ordinaryAssistantText }),
+        expect.objectContaining({
+          sourceOutboxIntentId: pending.intentId,
+          text: exactCompletion,
+        }),
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Why?',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'UTC',
+        },
+        route,
+        session: reconciledSession,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
+          content: exactCompletion,
+          role: 'assistant',
+        },
+      ])
     } finally {
       await rm(vault, { force: true, recursive: true })
     }
