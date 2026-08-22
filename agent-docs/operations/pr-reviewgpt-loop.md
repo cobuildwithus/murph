@@ -94,7 +94,7 @@ lane. The detached watcher owns the wait and resumes Codex only after the
 response is complete; the active agent does not remain in a progress-check
 loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
 every five minutes. Unless an explicit caller- or user-supplied per-run bound
-already applies, use `--poll-timeout 240m`; preserve any explicit bound. That
+already applies, use `--poll-timeout 260m`; preserve any explicit bound. That
 wake timeout is independent of the normal ReviewGPT response-capture timeout,
 which defaults to 250 minutes.
 
