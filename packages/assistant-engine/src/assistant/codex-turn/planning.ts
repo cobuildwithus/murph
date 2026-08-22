@@ -1185,7 +1185,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
 type TranscriptHistoryCandidate = {
   contentIncomplete: boolean
   message: AssistantProviderConversationMessage
-  sourceOutboxIntentId: string | null
+  standaloneAssistantContext: boolean
   userPromptKey: string | null
 }
 
@@ -1214,7 +1214,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
           content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
           role: 'assistant',
         },
-        sourceOutboxIntentId: null,
+        standaloneAssistantContext: false,
         userPromptKey: null,
       }]
     }
@@ -1230,7 +1230,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
               ),
               role: 'assistant',
             },
-            sourceOutboxIntentId: null,
+            standaloneAssistantContext: false,
             userPromptKey: null,
           }]
         : []
@@ -1259,7 +1259,14 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
             content,
             role: entry.kind,
           },
-          sourceOutboxIntentId: entry.sourceOutboxIntentId ?? null,
+          standaloneAssistantContext:
+            entry.kind === 'assistant'
+            && (
+              entry.standaloneAssistantContext === true
+              // Private completions written before the generic semantic field
+              // already carry durable import provenance.
+              || entry.sourceOutboxIntentId !== undefined
+            ),
           userPromptKey: entry.kind === 'user' && rawContent
             ? normalizeAssistantConversationHistoryText(rawContent)
             : null,
@@ -1398,7 +1405,7 @@ function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
   if (firstUserIndex < 0) {
     removed = []
     for (const candidate of messages.splice(0, messages.length)) {
-      if (candidate.sourceOutboxIntentId === null) {
+      if (!candidate.standaloneAssistantContext) {
         removed.push(candidate)
       } else {
         messages.push(candidate)

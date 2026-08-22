@@ -65,6 +65,7 @@ vi.mock('../src/assistant/cli-surface-bootstrap.js', () => ({
 }))
 
 vi.mock('../src/assistant/codex-runtime.js', () => ({
+  resolveCodexAssistantLabel: () => 'Codex',
   resolveCodexAssistantTargetCapabilities:
     planningMocks.resolveCodexAssistantTargetCapabilities,
 }))
@@ -165,10 +166,12 @@ import {
   applyAssistantSessionCodexResumeStateAction,
   ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
   ASSISTANT_NO_REPLY_TRANSCRIPT_MARKER_PREFIX,
+  persistAssistantTurnAndSession,
 } from '../src/assistant/turn-finalizer.js'
 import type {
   AssistantMessageInput,
   AssistantTurnSharedPlan,
+  ExecutedAssistantProviderTurnResult,
 } from '../src/assistant/service-contracts.js'
 import {
   ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
@@ -5876,9 +5879,29 @@ describe('assistant Codex turn planning', () => {
         expect.objectContaining({ text: ordinaryAssistantText }),
         expect.objectContaining({
           sourceOutboxIntentId: pending.intentId,
+          standaloneAssistantContext: true,
           text: exactCompletion,
         }),
       ])
+      const importedTranscript = await listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )
+      const retiredMember = importedTranscript[0]
+      const ordinaryAssistant = importedTranscript[1]
+      const importedCompletion = importedTranscript[2]
+      if (!retiredMember || !ordinaryAssistant || !importedCompletion) {
+        throw new Error('Expected the complete private-completion transcript fixture.')
+      }
+      const {
+        standaloneAssistantContext: _newStandaloneContext,
+        ...legacyImportedCompletion
+      } = importedCompletion
+      await replaceTranscriptEntries(
+        resolveAssistantStatePaths(vault),
+        session.sessionId,
+        [retiredMember, ordinaryAssistant, legacyImportedCompletion],
+      )
 
       const plan = await resolveAssistantRouteTurnPlan({
         executionContext: null,
@@ -5909,6 +5932,156 @@ describe('assistant Codex turn planning', () => {
         },
         {
           content: exactCompletion,
+          role: 'assistant',
+        },
+      ])
+    } finally {
+      await rm(vault, { force: true, recursive: true })
+    }
+  })
+
+  it('retains a scheduled reminder but drops its retired ordinary predecessor', async () => {
+    planningMocks.readAssistantCliSurfaceBootstrapContext.mockResolvedValue(
+      'bootstrap contract',
+    )
+    planningMocks.readAssistantContextSnapshotPrompt.mockResolvedValue(null)
+    planningMocks.resolveCodexAssistantTargetCapabilities.mockReturnValue({
+      supportsNativeResume: true,
+    })
+    const vault = await mkdtemp(path.join(
+      os.tmpdir(),
+      'assistant-route-plan-standalone-reminder-history-',
+    ))
+    const sessionId = 'session-standalone-reminder-history'
+    const ordinaryAssistantText = 'I saved the older member choice.'
+    const reminderText = 'Time for the scheduled mobility reset.'
+    const session = await saveAssistantSession(vault, {
+      ...createSession({
+        resumeState: {
+          assistantContractFingerprint: 'a'.repeat(64),
+          routeFingerprint: 'route-before-reminder',
+          threadId: 'thread-before-reminder',
+        },
+        turnCount: 2,
+      }),
+      conversationId: sessionId,
+      sessionId,
+    })
+
+    try {
+      await appendAssistantTranscriptEntries(vault, session.sessionId, [
+        {
+          contentReceivedAt: '2026-07-01T10:00:00.000Z',
+          createdAt: '2026-07-01T10:00:00.000Z',
+          kind: 'user',
+          text: 'Keep the earlier plan.',
+        },
+        {
+          createdAt: '2026-07-01T10:01:00.000Z',
+          kind: 'assistant',
+          text: ordinaryAssistantText,
+        },
+      ])
+      await expect(pruneAssistantTranscriptRetention(
+        resolveAssistantStatePaths(vault),
+        { now: new Date('2026-08-21T10:00:00.000Z') },
+      )).resolves.toMatchObject({
+        entriesRedacted: 1,
+      })
+
+      const automationRoute = createRoute({
+        routeFingerprint: 'route-custom-reminder-model',
+      })
+      const automationInput: AssistantMessageInput = {
+        ...createMessageInput(),
+        assistantTargetOverride: {
+          model: 'custom-reminder-model',
+          reasoningEffort: 'low',
+        },
+        prompt: 'Send the scheduled reminder.',
+        turnTrigger: 'automation-cron',
+        vault,
+      }
+      const providerResult: ExecutedAssistantProviderTurnResult = {
+        acceptedNoReplyDeliveryContextOrdinals: [],
+        additionalUsages: [],
+        assistantContractFingerprint: 'b'.repeat(64),
+        attemptCount: 1,
+        codexContinuation: {
+          kind: 'provider-state-optimization',
+        },
+        codexRolloutRelativePath: null,
+        codexThreadId: 'thread-custom-reminder-model',
+        provider: 'codex-cli',
+        providerOptions: automationRoute.providerOptions,
+        rawEvents: [],
+        response: reminderText,
+        responseCard: null,
+        responseDeliveryContextOrdinal: 0,
+        responseMedia: [],
+        route: automationRoute,
+        session,
+        stderr: '',
+        stdout: '',
+        transcriptResponse: reminderText,
+        usage: null,
+        workingDirectory: '/work',
+      }
+      const saved = await persistAssistantTurnAndSession({
+        assistantTranscriptStandaloneContext: true,
+        assistantTranscriptText: reminderText,
+        input: automationInput,
+        persistUserPromptToTranscript: false,
+        plan: createPrivateSharedPlan(),
+        providerResult,
+        providerResumeStateAction: 'persist-from-provider-turn',
+        session,
+        turnCreatedAt: '2026-08-21T10:01:00.000Z',
+        turnId: 'turn-custom-reminder-model',
+      })
+
+      expect(saved.resumeState).toBeNull()
+      await expect(listAssistantTranscriptEntries(
+        vault,
+        session.sessionId,
+      )).resolves.toEqual([
+        expect.objectContaining({ text: '' }),
+        expect.objectContaining({ text: ordinaryAssistantText }),
+        expect.objectContaining({
+          standaloneAssistantContext: true,
+          text: reminderText,
+        }),
+      ])
+
+      const plan = await resolveAssistantRouteTurnPlan({
+        executionContext: null,
+        input: {
+          ...createMessageInput(),
+          prompt: 'Done.',
+          vault,
+        },
+        profile: {
+          promptProfile: 'conversation',
+          threadScope: 'session-thread',
+          toolProfile: 'provider-turn',
+        },
+        promptTimeContext: {
+          currentLocalDate: '2026-08-21',
+          currentTimeZone: 'UTC',
+        },
+        route: createRoute(),
+        session: saved,
+        sharedPlan: createPrivateSharedPlan(),
+      })
+
+      expect(plan.resume).toBeNull()
+      expect(plan.conversationHistoryMessages).toEqual([
+        {
+          content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
+          role: 'assistant',
+        },
+        {
+          content: reminderText,
           role: 'assistant',
         },
       ])
