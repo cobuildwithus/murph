@@ -112,5 +112,44 @@ and bounded safety recovery.
   `appendHostedMailboxEnvelopeWithIdentityTx` export now loaded by the shared
   hosted-Web testkit. The branch adds that missing test-only mock; the failure
   is outside the nutrition runtime path and changes no production behavior.
-- Exact-head ReviewGPT round after the substantive remediation and required
-  GitHub checks.
+- Final ReviewGPT round 7 returned two accepted findings. First, same-Goal
+  co-location alone cannot distinguish dietary intake from the globally
+  ambiguous wearable calorie-burn metric. The original historical record does
+  preserve one complete stable `daily-*` target-id set, so compatibility can be
+  narrowed to that exact immutable identity without a registry, migration, or
+  Goal repair. Second, scheduled closeout currently runs the full clinical
+  safety fanout before the cheaper Goal eligibility read even though the
+  resident card contract and scripted saturation proof already short-circuit on
+  Goal eligibility first.
+
+## Round 7 Cap Retrospective
+
+- The original requirement remains one read-only compatibility path for the
+  demonstrated historical nutrition Goal, with no state repair and no adoption
+  of activity expenditure as intake guidance.
+- Review-driven growth remains concentrated in prompt contracts and proof; it
+  has not added a runtime owner, queue, state machine, registry, migration, or
+  compatibility writer. The two round-7 failures come from one overly broad
+  structural discriminator and one ordering regression.
+- Continue with the smallest correction: replace co-location authority with the
+  historical stable target-id set, restore Goal/all-status eligibility before
+  the unchanged safety gate on scheduled closeout, and use production-shape
+  Goal fixtures plus command-count tests. Delete the unsupported co-location
+  assumption and avoid any new provenance service or stored marker.
+- After the fix, pause the ReviewGPT loop at the seven-round cap. Complete the
+  parent review, focused verification, and CI, then obtain an explicit decision
+  before any eighth substantive ReviewGPT round.
+- Round-7 remediation proof parses every synthetic target through the production
+  Goal target schema. The exact historical `daily-*` set succeeds; canonical
+  dietary authority beside activity calories still succeeds; alias-only,
+  cross-Goal, and same-Goal calorie-burn records fail closed with zero Goal
+  mutation. Scheduled saturation executes only the bounded active-Goal list,
+  and an incomplete bundle with an existing managed proposal performs only the
+  necessary active/all-status Goal reads with zero safety commands. Eligible
+  card and first-proposal candidates still run the complete safety gate before
+  totals, attachment, or mutation.
+- Five focused prompt/contract files passed 119 tests with 75 credential-gated
+  real-provider cases skipped. The complete scripted App Server matrix passed
+  its focused test, with 91 unrelated cases skipped. Assistant-engine typecheck
+  and `git diff --check` passed. Parent review found the two accepted mechanisms
+  resolved without a new runtime owner, stored marker, registry, or migration.

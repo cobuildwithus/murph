@@ -8,6 +8,7 @@ import {
   eventRecordSchema,
   experimentFrontmatterSchema,
   experimentProgressSnapshotSchema,
+  goalMetricTargetSchema,
   regimenFrontmatterSchema,
   workoutSessionSchema,
 } from '@murphai/contracts'
@@ -7846,6 +7847,17 @@ describeRealCodex('real Codex daily nutrition-card authority e2e', () => {
       expect(activityOnly.progressUpdates).toEqual([])
       expect(readNutritionGoalMutationCommands(activityOnly.commands)).toEqual([])
 
+      const activitySameGoal = await runRealNutritionCardAuthorityScenario({
+        config,
+        conditionRecovery: 'none',
+        goalScenario: 'activity-same-goal',
+      })
+      expect(activitySameGoal.card).toBeNull()
+      expect(activitySameGoal.progressUpdates).toEqual([])
+      expect(
+        readNutritionGoalMutationCommands(activitySameGoal.commands),
+      ).toEqual([])
+
       const recovered = await runRealNutritionCardAuthorityScenario({
         config,
         conditionRecovery: 'complete',
@@ -7899,6 +7911,7 @@ type NutritionConditionRecovery =
 
 type NutritionGoalScenario =
   | 'activity-only'
+  | 'activity-same-goal'
   | 'canonical-with-activity'
   | 'legacy'
 
@@ -8017,31 +8030,29 @@ async function materializeNutritionCardVaultCli(input: {
   goalScenario: NutritionGoalScenario
 }): Promise<void> {
   const pointTarget = (
-    id: string,
-    metric: string,
+    targetId: string,
+    metricKey: string,
     unit: string,
     value: number,
-  ) => ({
-    evaluation: {
-      comparator: 'between',
-      highValue: value,
-      kind: 'selected-value',
-      value,
-    },
-    id,
+  ) => goalMetricTargetSchema.parse({
+    comparator: 'between',
+    evaluation: { kind: 'selected-value' },
+    highValue: value,
     kind: 'metric',
-    metric,
+    metricKey,
+    targetId,
     unit,
+    value,
   })
   const legacyGoal = {
     entity: {
       data: {
         metricTargets: [
-          pointTarget('target_calories', 'calories', 'kcal', 1_800),
-          pointTarget('target_protein', 'protein-grams', 'g', 140),
-          pointTarget('target_carbs', 'carbs-grams', 'g', 190),
-          pointTarget('target_fat', 'fat-grams', 'g', 55),
-          pointTarget('target_fiber', 'fiber-grams', 'g', 25),
+          pointTarget('daily-calories', 'calories', 'kcal', 1_800),
+          pointTarget('daily-protein', 'protein-grams', 'g', 140),
+          pointTarget('daily-carbohydrates', 'carbs-grams', 'g', 190),
+          pointTarget('daily-fat', 'fat-grams', 'g', 55),
+          pointTarget('daily-fiber', 'fiber-grams', 'g', 25),
         ],
         status: 'active',
         windowStartAt: '2026-07-01',
@@ -8059,9 +8070,9 @@ async function materializeNutritionCardVaultCli(input: {
       data: {
         ...legacyGoal.entity.data,
         metricTargets: legacyGoal.entity.data.metricTargets.map((target) =>
-          target.metric === 'calories'
+          target.metricKey === 'calories'
             ? pointTarget(
-                'target_dietary_calories',
+                'target-dietary-calories',
                 'dietary-calories',
                 'kcal',
                 1_800,
@@ -8078,7 +8089,7 @@ async function materializeNutritionCardVaultCli(input: {
       data: {
         metricTargets: [
           pointTarget(
-            'target_total_calories_burned',
+            'target-total-calories-burned',
             'calories',
             'kcal',
             2_200,
@@ -8093,6 +8104,29 @@ async function materializeNutritionCardVaultCli(input: {
     },
     vault: 'synthetic-vault',
   }
+  const activitySameGoal = {
+    entity: {
+      data: {
+        metricTargets: [
+          pointTarget(
+            'target-total-calories-burned',
+            'calories',
+            'kcal',
+            2_200,
+          ),
+          ...canonicalNutritionGoal.entity.data.metricTargets.filter(
+            (target) => target.metricKey !== 'dietary-calories',
+          ),
+        ],
+        status: 'active',
+        windowStartAt: '2026-07-01',
+      },
+      id: 'goal_activity_same_goal',
+      kind: 'goal',
+      title: 'Combined training and nutrition targets',
+    },
+    vault: 'synthetic-vault',
+  }
   const macroOnlyGoal = {
     ...canonicalNutritionGoal,
     entity: {
@@ -8100,7 +8134,7 @@ async function materializeNutritionCardVaultCli(input: {
       data: {
         ...canonicalNutritionGoal.entity.data,
         metricTargets: canonicalNutritionGoal.entity.data.metricTargets.filter(
-          (target) => target.metric !== 'dietary-calories',
+          (target) => target.metricKey !== 'dietary-calories',
         ),
       },
       id: 'goal_macro_bundle',
@@ -8109,6 +8143,8 @@ async function materializeNutritionCardVaultCli(input: {
   }
   const activeGoals = input.goalScenario === 'legacy'
     ? [legacyGoal]
+    : input.goalScenario === 'activity-same-goal'
+      ? [activitySameGoal]
     : input.goalScenario === 'canonical-with-activity'
       ? [canonicalNutritionGoal, activityCaloriesGoal]
       : [macroOnlyGoal, activityCaloriesGoal]
@@ -8213,6 +8249,7 @@ async function materializeNutritionCardVaultCli(input: {
     `  "goal show goal_legacy_bundle --format json") ${emit(legacyGoal)} ;;`,
     `  "goal show goal_canonical_nutrition --format json") ${emit(canonicalNutritionGoal)} ;;`,
     `  "goal show goal_activity_calories --format json") ${emit(activityCaloriesGoal)} ;;`,
+    `  "goal show goal_activity_same_goal --format json") ${emit(activitySameGoal)} ;;`,
     `  "goal show goal_macro_bundle --format json") ${emit(macroOnlyGoal)} ;;`,
     `  "memory show --format json") ${emit({
       document: {

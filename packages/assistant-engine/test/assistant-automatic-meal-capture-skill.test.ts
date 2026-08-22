@@ -150,10 +150,10 @@ describe('assistant automatic meal capture skill', () => {
       'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactSkill).toContain(
-      'as the complete safety gate before target resolution or a card, even when five accepted goals already exist.',
+      'as the complete safety gate before deriving or presenting numeric values, any Goal write, totals, or a card.',
     )
     expect(compactSkill).toContain(
-      'For this scheduled run, when that gate suppresses numeric output or any required safety read is incomplete, unavailable, or unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+      'When that gate suppresses numeric output or any required safety read is incomplete, unavailable, or unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
     )
     expect(compactSkill).not.toContain('`vault-cli memory show --format json`')
     expect(compactSkill).not.toContain(
@@ -179,16 +179,16 @@ describe('assistant automatic meal capture skill', () => {
       'New authoring uses `dietary-calories`. Resolve that canonical owner first; when it exists, use it and ignore every globally ambiguous `calories` target.',
     )
     expect(compactSkill).toContain(
-      'Only without a canonical owner may an applicable exact-point `calories` target in `kcal` fill the card\'s calorie slot, and only when the same containing Goal also owns exactly one applicable compatible point for each of the four card metrics below.',
+      'Only without a canonical owner may an applicable exact-point `calories` target in `kcal` fill the card\'s calorie slot when its `targetId` is `daily-calories`.',
     )
     expect(compactSkill).toContain(
-      'ignore alias-only or cross-Goal `calories` targets and never combine one with a managed proposal.',
+      '`daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` / `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` / `fiber-grams` / `g`.',
     )
     expect(compactSkill).toContain(
       'never rename or mutate a Goal just to repair this key.',
     )
     expect(compactSkill).toContain(
-      'The other card-qualifying targets use the exact canonical metric/unit pairs: `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.',
+      'Any other `calories` target is not dietary authority even when the four nutrition metrics share its Goal',
     )
     expect(compactSkill).toContain(
       'A target in another unit remains authoritative, but never compare, convert, or copy its raw value into this fixed-unit card',
@@ -227,7 +227,7 @@ describe('assistant automatic meal capture skill', () => {
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
     )
     expect(compactSkill).toContain(
-      'the first eligible managed closeout has one proposal-only exception',
+      'does the first eligible managed closeout have one proposal-only exception',
     )
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
@@ -320,7 +320,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSafety).toContain('below 1,200 kcal/day')
     expect(compactSafety).toContain('active resolved target at card time')
     expect(compactSafety).toContain(
-      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the same-Goal legacy `calories` member of one complete nutrition bundle, in `kcal`.',
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the historical `daily-calories` / `calories` member of the complete stable `daily-*` nutrition target set, in `kcal`.',
     )
     expect(compactSafety).toContain(
       'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
@@ -368,16 +368,13 @@ describe('assistant automatic meal capture skill', () => {
     ).toBeLessThan(
       compactSkill.indexOf('daily-nutrition-card-safety.md'),
     )
-    expect(compactSkill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
-      compactSkill.indexOf(
-        'vault-cli goal list --status active --limit 200 --format json',
-      ),
-    )
     expect(
       compactSkill.indexOf(
         'vault-cli goal list --status active --limit 200 --format json',
       ),
-    ).toBeLessThan(attachCardIndex)
+    ).toBeLessThan(compactSkill.indexOf('daily-nutrition-card-safety.md'))
+    expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
+      .toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')

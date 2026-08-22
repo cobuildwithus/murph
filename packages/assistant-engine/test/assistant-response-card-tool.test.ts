@@ -900,10 +900,13 @@ describe('murph.attach_response_card', () => {
       'When exactly one compatible canonical calorie owner exists, use it and ignore every globally ambiguous calories target.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Only without a canonical owner may calories in kcal substitute, and only inside one same containing Goal that also owns exactly one compatible applicable point for each of the four gram metrics.',
+      'Only without a canonical owner may targetId daily-calories with metric calories and unit kcal substitute',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Ignore alias-only and cross-Goal calories targets; never combine one with another Goal or managed proposal',
+      'daily-protein / protein-grams / g, daily-carbohydrates / carbs-grams / g, daily-fat / fat-grams / g, and daily-fiber / fiber-grams / g',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Any other calories target is not dietary authority even when co-located with all four nutrition metrics.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Never mutate a Goal to repair its key.',

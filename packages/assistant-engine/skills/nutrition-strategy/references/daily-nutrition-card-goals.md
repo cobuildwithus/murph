@@ -15,15 +15,20 @@ card, and never activates the proposal. Once the managed Goal exists in any
 status, later scheduled closeouts may use an accepted active bundle but never
 create, change, or automatically repeat a numeric proposal.
 
-Before using this workflow, read and apply `daily-nutrition-card-safety.md`,
-including its complete canonical memory document, bounded active-condition and
-active-regimen discovery, lifetime procedure-event and encounter-diagnosis
-discovery, 45-day body-measurement read, separate 300-day `pregnancy-test`
-measurement read, and 300-day canonical test-event list plus required detail
-reads. The context snapshot is not completeness proof for any of these owners.
-If any required canonical read is saturated or unavailable,
-or the gate suppresses numeric goals, stop here with no Goal or measurement
-mutation and keep the owning non-numeric or clinical path.
+Run the cheap read-only target-authority discovery below before the complete
+clinical-history fanout. If that discovery proves that no card or responsible
+proposal can be produced, stop on the owning non-numeric path without unrelated
+safety reads. When a complete accepted bundle or a responsible proposal
+candidate remains, read and apply `daily-nutrition-card-safety.md` before
+deriving, surfacing, writing, or activating numeric goals, reading card totals,
+or attaching a card. That gate includes its complete canonical memory document,
+bounded active-condition and active-regimen discovery, lifetime procedure-event
+and encounter-diagnosis discovery, 45-day body-measurement read, separate
+300-day `pregnancy-test` measurement read, and 300-day canonical test-event list
+plus required detail reads. The context snapshot is not completeness proof for
+any of these owners. If any required canonical read is saturated or unavailable,
+or the gate suppresses numeric goals, stop with no Goal or measurement mutation
+and keep the owning non-numeric or clinical path.
 
 A numeric card request explicitly asks for Murph's goal-aware daily-card
 experience. It authorizes only the one paused canonical proposal below so the
@@ -77,17 +82,19 @@ card gate fails, return the owning food-journal skill's short truthful fallback.
   date, comparator, and unit rules here. When exactly one compatible canonical
   owner remains, use it and ignore every `calories` target; that globally
   ambiguous key neither overrides nor conflicts with canonical dietary
-  authority. Only when no canonical owner exists may one applicable active
-  exact-point `calories` target in `kcal` fill the card's calorie slot, and only
-  when its same containing Goal also owns exactly one applicable compatible
-  exact-point target for each of `protein-grams`, `carbs-grams`, `fat-grams`,
-  and `fiber-grams` in `g`. Require exactly one such complete same-Goal legacy
-  nutrition bundle. Ignore `calories` targets outside a complete same-Goal
-  nutrition bundle; never combine one with macro or fiber targets from another
-  Goal or a managed proposal. Multiple qualifying legacy bundles or ambiguity
-  or incompatibility inside the qualifying Goal means no card and no managed
-  Goal mutation. Do not use titles, slugs, domains, descriptions, or guessed
-  intent as authority. Apply the 1,200-kcal boundary and residual-energy
+  authority. Only when no canonical owner exists may the historical target
+  `daily-calories` with metric `calories` and unit `kcal` fill the card's calorie
+  slot. Its same containing Goal must also own exactly one applicable compatible
+  exact-point target for each historical id, metric, and unit pair:
+  `daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` /
+  `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` /
+  `fiber-grams` / `g`. Require exactly one complete historical set. Any other
+  `calories` target is not dietary authority, even when co-located with all four
+  macro and fiber metrics. Never combine the historical calorie target with
+  targets from another Goal or a managed proposal. Multiple qualifying sets or
+  ambiguity or incompatibility inside the qualifying Goal means no card and no
+  managed Goal mutation. Do not use titles, slugs, domains, descriptions, or
+  guessed intent as authority. Apply the 1,200-kcal boundary and residual-energy
   calculations to the one resolved calorie value exactly as if it came from
   `dietary-calories`. Never rename or mutate the Goal, extend this exception to
   another workflow, or author new `calories` targets.

@@ -11,6 +11,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import {
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
 } from '@murphai/hosted-execution/env'
+import { goalMetricTargetSchema } from '@murphai/contracts'
 import {
   listHostedBundleInlineFiles,
   snapshotHostedExecutionContext,
@@ -7062,28 +7063,26 @@ if (!tool) {
       'meal totals --from 2026-07-30 --to 2026-07-30 --format json'
 
     const pointTarget = (
-      id: string,
-      metric: string,
+      targetId: string,
+      metricKey: string,
       unit: string,
       value: number,
-    ) => ({
-      evaluation: {
-        comparator: 'between',
-        highValue: value,
-        kind: 'selected-value',
-        value,
-      },
-      id,
+    ) => goalMetricTargetSchema.parse({
+      comparator: 'between',
+      evaluation: { kind: 'selected-value' },
+      highValue: value,
       kind: 'metric',
-      metric,
+      metricKey,
+      targetId,
       unit,
+      value,
     })
     const completeTargets = [
-      pointTarget('target_calories', 'dietary-calories', 'kcal', 1_800),
-      pointTarget('target_protein', 'protein-grams', 'g', 140),
-      pointTarget('target_carbs', 'carbs-grams', 'g', 190),
-      pointTarget('target_fat', 'fat-grams', 'g', 55),
-      pointTarget('target_fiber', 'fiber-grams', 'g', 25),
+      pointTarget('target-calories', 'dietary-calories', 'kcal', 1_800),
+      pointTarget('target-protein', 'protein-grams', 'g', 140),
+      pointTarget('target-carbs', 'carbs-grams', 'g', 190),
+      pointTarget('target-fat', 'fat-grams', 'g', 55),
+      pointTarget('target-fiber', 'fiber-grams', 'g', 25),
     ]
     const visibleGoal = {
       entity: {
@@ -7103,7 +7102,7 @@ if (!tool) {
         data: {
           metricTargets: [
             pointTarget(
-              'target_hidden_calories',
+              'target-hidden-calories',
               'dietary-calories',
               'kcal',
               1_100,
@@ -8285,10 +8284,15 @@ text(result.output);
       'goal show goal_legacy_nutrition --format json'
     const activityCaloriesGoalShowCommand =
       'goal show goal_activity_calories --format json'
-    const legacyNutritionTargets = completeTargets.map((target) =>
-      target.metric === 'dietary-calories'
-        ? pointTarget('target_legacy_calories', 'calories', 'kcal', 1_800)
-        : target)
+    const activitySameGoalShowCommand =
+      'goal show goal_activity_same_goal --format json'
+    const legacyNutritionTargets = [
+      pointTarget('daily-calories', 'calories', 'kcal', 1_800),
+      pointTarget('daily-protein', 'protein-grams', 'g', 140),
+      pointTarget('daily-carbohydrates', 'carbs-grams', 'g', 190),
+      pointTarget('daily-fat', 'fat-grams', 'g', 55),
+      pointTarget('daily-fiber', 'fiber-grams', 'g', 25),
+    ]
     const legacyNutritionGoal = {
       entity: {
         data: {
@@ -8303,7 +8307,7 @@ text(result.output);
       vault: 'synthetic-vault',
     }
     const macroOnlyTargets = completeTargets.filter(
-      ({ metric }) => metric !== 'dietary-calories',
+      ({ metricKey }) => metricKey !== 'dietary-calories',
     )
     const macroOnlyActiveGoal = {
       ...pausedGoal,
@@ -8320,7 +8324,7 @@ text(result.output);
       entity: {
         data: {
           metricTargets: [
-            pointTarget('target_total_calories_burned', 'calories', 'kcal', 2_200),
+            pointTarget('target-total-calories-burned', 'calories', 'kcal', 2_200),
           ],
           status: 'active',
           windowStartAt: '2026-07-01',
@@ -8328,6 +8332,27 @@ text(result.output);
         id: 'goal_activity_calories',
         kind: 'goal',
         title: 'Daily energy expenditure',
+      },
+      vault: 'synthetic-vault',
+    }
+    const activitySameGoal = {
+      entity: {
+        data: {
+          metricTargets: [
+            pointTarget(
+              'target-total-calories-burned',
+              'calories',
+              'kcal',
+              2_200,
+            ),
+            ...macroOnlyTargets,
+          ],
+          status: 'active',
+          windowStartAt: '2026-07-01',
+        },
+        id: 'goal_activity_same_goal',
+        kind: 'goal',
+        title: 'Combined training and nutrition targets',
       },
       vault: 'synthetic-vault',
     }
@@ -8378,10 +8403,23 @@ text(result.output);
       nextCursor: null,
       vault: 'synthetic-vault',
     }
+    const activitySameGoalActiveList = {
+      count: 1,
+      filters: { limit: 200, status: 'active' },
+      items: [{
+        data: { metricTargetsCount: 5, status: 'active' },
+        id: 'goal_activity_same_goal',
+        kind: 'goal',
+        title: 'Combined training and nutrition targets',
+      }],
+      nextCursor: null,
+      vault: 'synthetic-vault',
+    }
 
     await runCase({
       commandOutputs: [
         [activeListCommand, noActiveGoalsList],
+        [allStatusGoalListCommand, noManagedGoalsList],
         [memoryCommand, adultMemory],
         ...emptySafetyOutputs,
         [procedureListCommand, noProcedures],
@@ -8389,12 +8427,12 @@ text(result.output);
         [measurementCommand, normalBmiMeasurements],
         [pregnancyMeasurementCommand, noPregnancyMeasurements],
         [testEventListCommand, noTestEvents],
-        [allStatusGoalListCommand, noManagedGoalsList],
         [proposalImportCommand, pausedGoal],
         [pausedGoalShowCommand, pausedGoal],
       ],
       expectedCommands: [
         activeListCommand,
+        allStatusGoalListCommand,
         memoryCommand,
         ...emptySafetyCommands,
         procedureListCommand,
@@ -8402,7 +8440,6 @@ text(result.output);
         measurementCommand,
         pregnancyMeasurementCommand,
         testEventListCommand,
-        allStatusGoalListCommand,
         proposalImportCommand,
         pausedGoalShowCommand,
       ],
@@ -8416,25 +8453,11 @@ text(result.output);
     await runCase({
       commandOutputs: [
         [activeListCommand, noActiveGoalsList],
-        [memoryCommand, adultMemory],
-        ...emptySafetyOutputs,
-        [procedureListCommand, noProcedures],
-        [encounterListCommand, noEncounters],
-        [measurementCommand, normalBmiMeasurements],
-        [pregnancyMeasurementCommand, noPregnancyMeasurements],
-        [testEventListCommand, noTestEvents],
         [allStatusGoalListCommand, pausedManagedGoalList],
         [pausedGoalShowCommand, pausedGoal],
       ],
       expectedCommands: [
         activeListCommand,
-        memoryCommand,
-        ...emptySafetyCommands,
-        procedureListCommand,
-        encounterListCommand,
-        measurementCommand,
-        pregnancyMeasurementCommand,
-        testEventListCommand,
         allStatusGoalListCommand,
         pausedGoalShowCommand,
       ],
@@ -9427,6 +9450,26 @@ text(result.output);
       scheduled: false,
       skillReadCommands: interactiveSkillReads,
       skillSlugs: ['food-journal', 'nutrition-strategy'],
+    })
+
+    await runCase({
+      commandOutputs: [
+        [activeListCommand, activitySameGoalActiveList],
+        [activitySameGoalShowCommand, activitySameGoal],
+        [allStatusGoalListCommand, pausedManagedGoalList],
+        [pausedGoalShowCommand, pausedGoal],
+      ],
+      expectedCommands: [
+        activeListCommand,
+        activitySameGoalShowCommand,
+        allStatusGoalListCommand,
+        pausedGoalShowCommand,
+      ],
+      finalMessage: 'Meal closeout saved without a card. The calorie-burn target was not used as dietary guidance, and the existing proposal is unchanged.',
+      prompt: 'Run the scheduled closeout for a combined Goal whose calories target is total energy expenditure. Do not use it as dietary intake, repeat the existing proposal, run unrelated safety reads, or mutate any Goal.',
+      scheduled: true,
+      skillReadCommands: scheduledProposalSkillReads,
+      skillSlugs: ['automatic-meal-capture', 'nutrition-strategy'],
     })
 
     await runCase({
