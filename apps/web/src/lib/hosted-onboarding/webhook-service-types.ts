@@ -18,7 +18,6 @@ export type HostedWebhookPlan<TResult, TSideEffect = never> = {
   linqReadReceiptRouteAuthority?: HostedLinqThreadRouteEgressAuthority;
   postCommitGroupJoinConfirmationMemberIds?: readonly string[];
   postCommitPhoneCallResultRecoveryMemberIds?: readonly string[];
-  postCommitRuntimeRecheckMemberIds?: readonly string[];
   postCommitSignupNotificationMemberIds?: readonly string[];
   postCommitUsageReferralIds?: readonly string[];
   response: TResult;

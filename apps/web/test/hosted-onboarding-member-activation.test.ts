@@ -604,6 +604,56 @@ describe("hosted onboarding member activation", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("commits an exact maintenance handoff for established Family members", async () => {
+    const member = makeMemberSnapshot({
+      core: {
+        billingStatus: HostedBillingStatus.canceled,
+      },
+    });
+    setActivationMemberSnapshot(member);
+    mocks.readHostedMailboxUserIdsByKind.mockResolvedValueOnce(
+      new Set([member.core.id]),
+    );
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValueOnce({
+      item: {
+        dedupeKey: "runtime-control:access-restored:family",
+        id: "mailbox_access_restored",
+        userId: member.core.id,
+      },
+    });
+    const tx = makeTransactionHarness({
+      accountGroupMemberships: [{
+        group: { billingStatus: HostedBillingStatus.active, suspendedAt: null },
+        status: "active",
+      }],
+      billingStatus: HostedBillingStatus.canceled,
+      suspendedAt: null,
+      threadContainer: null,
+    }) as never;
+
+    await expect(activateHostedMemberForFamilySponsorshipTx({
+      accessRestorationSourceEventId: "family-invite:invite_123",
+      memberId: member.core.id,
+      occurredAt: new Date("2026-06-18T12:00:00.000Z"),
+      prisma: tx,
+      sourceEventId: "family-invite:invite_123",
+    })).resolves.toEqual({
+      activated: false,
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
+      memberId: member.core.id,
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledWith({
+      envelope: expect.objectContaining({
+        kind: "runtime.maintenance-requested",
+        userId: member.core.id,
+      }),
+      tx,
+    });
+    expect(mocks.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
+  });
+
   it("activates verified-email-only family members without assigning a Linq home line", async () => {
     const member = makeMemberSnapshot({
       core: {

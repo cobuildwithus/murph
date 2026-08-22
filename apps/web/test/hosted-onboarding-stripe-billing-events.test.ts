@@ -7,6 +7,7 @@ import type { HostedMemberBillingSnapshot } from "@/src/lib/hosted-onboarding/ho
 const mocks = vi.hoisted(() => ({
   acceptHostedMemberStripeCheckoutCompletionTx: vi.fn(),
   activateHostedMemberForPositiveSourceTx: vi.fn(),
+  appendHostedAccessRestorationRuntimeHandoffTx: vi.fn(),
   applyHostedFamilyStripeCheckoutCompletedTx: vi.fn(),
   applyHostedFamilyStripeCheckoutExpiredTx: vi.fn(),
   applyHostedFamilyStripeSubscriptionUpdatedTx: vi.fn(),
@@ -37,6 +38,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-onboarding/member-activation", () => ({
   activateHostedMemberForPositiveSourceTx: mocks.activateHostedMemberForPositiveSourceTx,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access-runtime-handoff", () => ({
+  appendHostedAccessRestorationRuntimeHandoffTx:
+    mocks.appendHostedAccessRestorationRuntimeHandoffTx,
 }));
 
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async () => {
@@ -224,6 +230,13 @@ describe("hosted onboarding stripe billing events", () => {
       member,
     });
     mocks.writeHostedMemberStripeBillingTx.mockResolvedValue(member);
+    mocks.appendHostedAccessRestorationRuntimeHandoffTx.mockImplementation(
+      async ({ memberId }: { memberId: string }) => ({
+        hostedExecutionEventId: "runtime-control:access-restored:test",
+        hostedExecutionMailboxItemId: "mailbox_access_restored",
+        memberId,
+      }),
+    );
     mocks.suspendHostedMemberForBillingReversalTx.mockResolvedValue(undefined);
     mocks.upsertPreparedHostedMemberStripeCheckoutEmailIfFreshUnderLockTx
       .mockResolvedValue(undefined);
@@ -971,11 +984,11 @@ describe("hosted onboarding stripe billing events", () => {
         HostedBillingStatus.active,
       ),
     ).resolves.toEqual({
-      activatedMemberId: null,
-      hostedExecutionEventId: null,
-      hostedExecutionMailboxItemId: null,
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:test",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
       newlyActivatedMemberIds: [],
-      runtimeRecheckMemberIds: ["member_123"],
+      runtimeRecheckMemberIds: [],
       welcomeEmailMemberId: null,
     });
 
@@ -997,7 +1010,7 @@ describe("hosted onboarding stripe billing events", () => {
     HostedBillingStatus.canceled,
     HostedBillingStatus.paused,
     HostedBillingStatus.unpaid,
-  ])("reports a runtime recheck when invoice.paid restores %s direct access", async (
+  ])("commits a mailbox handoff when invoice.paid restores %s direct access", async (
     startingBillingStatus,
   ) => {
     const recoveringMember = makeMemberSnapshot({
@@ -1027,11 +1040,20 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
       HostedBillingStatus.active,
     )).resolves.toMatchObject({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:test",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
       newlyActivatedMemberIds: [],
-      runtimeRecheckMemberIds: ["member_123"],
+      runtimeRecheckMemberIds: [],
     });
 
     expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
+    expect(mocks.appendHostedAccessRestorationRuntimeHandoffTx).toHaveBeenCalledWith({
+      memberId: "member_123",
+      sourceEventId: `evt_paid_recovery_${startingBillingStatus}`,
+      sourceType: "stripe.invoice.paid",
+      tx: {},
+    });
   });
 
   it("returns the exact direct activation target when invoice replay finds a durable wake", async () => {
@@ -1163,9 +1185,10 @@ describe("hosted onboarding stripe billing events", () => {
 
   it("routes Family subscription updates to group billing without member billing writes", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      accessRestoredMemberIds: ["member_owner"],
       activations: [],
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner"],
+      runtimeRecheckMemberIds: [],
     });
     const tx = {};
     const preparedFamilyCryptoDomainRoots = new Map([
@@ -1250,9 +1273,10 @@ describe("hosted onboarding stripe billing events", () => {
 
   it("reconciles a direct-to-Family usage handoff from invoice.paid", async () => {
     mocks.applyHostedFamilyStripeSubscriptionUpdatedTx.mockResolvedValueOnce({
+      accessRestoredMemberIds: ["member_owner"],
       activations: [],
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner"],
+      runtimeRecheckMemberIds: [],
     });
     const tx = {};
     const preparedFamilyCryptoDomainRoots = new Map([
@@ -2887,7 +2911,11 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
       "cus_123",
       preparedProviderState,
-    )).resolves.toBe("runtime_recheck_required");
+    )).resolves.toEqual({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:test",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
+    });
 
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
       billingStatus: HostedBillingStatus.active,

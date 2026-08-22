@@ -156,7 +156,6 @@ const mocks = vi.hoisted(() => {
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
     })),
-    signalHostedAccessGrantRuntimeRecheckBestEffort: vi.fn(),
     startHostedOnboardingTiming: vi.fn((step: string, baseDetails: Record<string, unknown> = {}) => ({
       baseDetails,
       startedAtMs: 0,
@@ -294,11 +293,6 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-provider-linq", async (importOrigin
 vi.mock("@/src/lib/hosted-groups/group-join-confirmation", () => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort:
     mocks.materializePendingHostedGroupJoinConfirmationsBestEffort,
-}));
-
-vi.mock("@/src/lib/hosted-onboarding/member-access-runtime-recheck", () => ({
-  signalHostedAccessGrantRuntimeRecheckBestEffort:
-    mocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/signup-notification-email", () => ({
@@ -1109,9 +1103,6 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort
       .mockResolvedValue(undefined);
-    mocks.signalHostedAccessGrantRuntimeRecheckBestEffort.mockResolvedValue(
-      undefined,
-    );
     mocks.releaseHostedLinqOnboardingLinkNoticeClaim.mockResolvedValue(undefined);
     mocks.releaseHostedLinqQuotaReplyNoticeClaim.mockResolvedValue(undefined);
     mocks.drainHostedExecutionOutboxBestEffort.mockResolvedValue(undefined);
@@ -6649,8 +6640,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
       await input.onAcceptedMemberActivated({
         activated: false,
-        hostedExecutionEventId: null,
-        hostedExecutionMailboxItemId: null,
+        hostedExecutionEventId: "runtime-control:access-restored:linq",
+        hostedExecutionMailboxItemId: "mailbox_access_restored",
         memberId: "member_123",
       });
       return {
@@ -6751,14 +6742,11 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
     });
     expect(mocks.scheduleHostedSignupNotificationEmails).not.toHaveBeenCalled();
-    expect(
-      mocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
-    ).toHaveBeenCalledWith({
-      memberId: "member_123",
-      prisma,
-      timeoutMs: expect.any(Number),
+    expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledWith({
+      abortSignal: expect.any(AbortSignal),
+      expectedUserId: "member_123",
+      mailboxItemId: "mailbox_access_restored",
     });
-    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_home",
       idempotencyKey: "linq-message:evt_family_sparse_saved_home",

@@ -29,6 +29,9 @@ import {
   isHostedAccessBlockedBillingStatus,
   isHostedMemberSuspended,
 } from "./entitlement";
+import {
+  appendHostedAccessRestorationRuntimeHandoffTx,
+} from "./member-access-runtime-handoff";
 import { readActiveHostedMemberAccess } from "./member-access";
 import {
   clearHostedMemberPendingActivationTimeZone,
@@ -151,6 +154,7 @@ export async function activateHostedMemberForPositiveSourceTx(input: {
 }
 
 export async function activateHostedMemberForFamilySponsorshipTx(input: {
+  accessRestorationSourceEventId?: string;
   memberId: string;
   occurredAt: Date;
   preparedCryptoDomainRoots?: PreparedHostedCryptoDomainRootCandidates;
@@ -160,6 +164,12 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
   return runWithHostedDomainRootUnwrapCache(() =>
     activateHostedMemberForPositiveSourceTxInner({
       allowLegacyCryptoPreparation: !input.preparedCryptoDomainRoots,
+      ...(input.accessRestorationSourceEventId
+        ? {
+            accessRestorationSourceEventId:
+              input.accessRestorationSourceEventId,
+          }
+        : {}),
       dispatchContext: {
         eventCreatedAt: input.occurredAt,
         occurredAt: input.occurredAt.toISOString(),
@@ -181,6 +191,7 @@ export async function activateHostedMemberForFamilySponsorshipTx(input: {
 }
 
 async function activateHostedMemberForPositiveSourceTxInner(input: {
+  accessRestorationSourceEventId?: string;
   allowLegacyCryptoPreparation: boolean;
   allowSignupWelcomeWithoutAssignableLinqLine?: boolean;
   dispatchContext: HostedStripeDispatchContext;
@@ -253,6 +264,18 @@ async function activateHostedMemberForPositiveSourceTxInner(input: {
         member: currentMember,
         prisma: input.prisma,
       });
+
+      if (input.accessRestorationSourceEventId) {
+        return {
+          activated: false,
+          ...await appendHostedAccessRestorationRuntimeHandoffTx({
+            memberId: currentMember.core.id,
+            sourceEventId: input.accessRestorationSourceEventId,
+            sourceType: input.dispatchContext.sourceType,
+            tx: input.prisma,
+          }),
+        };
+      }
 
       return {
         activated: false,

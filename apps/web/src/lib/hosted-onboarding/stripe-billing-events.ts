@@ -46,6 +46,9 @@ import {
   activateHostedMemberForPositiveSourceTx,
 } from "./member-activation";
 import {
+  appendHostedAccessRestorationRuntimeHandoffTx,
+} from "./member-access-runtime-handoff";
+import {
   acceptHostedMemberStripeCheckoutCompletionTx,
   assertNoHostedMemberStripeEffectTx,
   clearHostedMemberLegacyTrialBillingUnderLockTx,
@@ -1476,13 +1479,25 @@ export async function applyStripeInvoicePaid(
   });
 
   if (isHostedAccessBlockedBillingStatus(startingBillingStatus)) {
+    const accessRestorationHandoff = restoredDirectAccess
+      ? await appendHostedAccessRestorationRuntimeHandoffTx({
+          memberId: updatedMember.core.id,
+          sourceEventId: dispatchContext.sourceEventId,
+          sourceType: dispatchContext.sourceType,
+          tx: prisma,
+        })
+      : null;
     return {
       ...buildEmptyHostedStripeActivationOutcome(),
+      activatedMemberId: accessRestorationHandoff?.memberId ?? null,
+      hostedExecutionEventId:
+        accessRestorationHandoff?.hostedExecutionEventId ?? null,
+      hostedExecutionMailboxItemId:
+        accessRestorationHandoff?.hostedExecutionMailboxItemId ?? null,
       runtimeRecheckMemberIds: runtimeRecheckMemberId
+        && !accessRestorationHandoff
         ? [runtimeRecheckMemberId]
-        : restoredDirectAccess
-          ? [updatedMember.core.id]
-          : [],
+        : [],
     };
   }
 
@@ -1496,19 +1511,32 @@ export async function applyStripeInvoicePaid(
     skipIfBillingAlreadyActive: hadActiveBilling,
     skipIfPreviouslyActivated: true,
   });
+  const accessRestorationHandoff = restoredDirectAccess
+    && !activation.hostedExecutionEventId
+    ? await appendHostedAccessRestorationRuntimeHandoffTx({
+        memberId: updatedMember.core.id,
+        sourceEventId: dispatchContext.sourceEventId,
+        sourceType: dispatchContext.sourceType,
+        tx: prisma,
+      })
+    : null;
 
   return {
     activatedMemberId: activation.hostedExecutionEventId
+      || accessRestorationHandoff
       ? updatedMember.core.id
       : null,
-    hostedExecutionEventId: activation.hostedExecutionEventId,
-    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId ?? null,
+    hostedExecutionEventId: activation.hostedExecutionEventId
+      ?? accessRestorationHandoff?.hostedExecutionEventId
+      ?? null,
+    hostedExecutionMailboxItemId: activation.hostedExecutionMailboxItemId
+      ?? accessRestorationHandoff?.hostedExecutionMailboxItemId
+      ?? null,
     newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
     runtimeRecheckMemberIds: runtimeRecheckMemberId
+      && !accessRestorationHandoff
       ? [runtimeRecheckMemberId]
-      : restoredDirectAccess && !activation.hostedExecutionEventId
-        ? [updatedMember.core.id]
-        : [],
+      : [],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? updatedMember.core.id
       : null,
@@ -1623,7 +1651,12 @@ async function applyHostedFamilyStripeSubscriptionUpdatedWithUsageTx(input: {
 }): Promise<HostedFamilyStripeSubscriptionResult> {
   const familySubscription = await applyHostedFamilyStripeSubscriptionUpdatedTx(input);
   const now = input.dispatchContext.eventCreatedAt ?? new Date();
-  for (const memberId of familySubscription.runtimeRecheckMemberIds ?? []) {
+  const usageGateMemberIds = new Set([
+    ...(familySubscription.accessRestoredMemberIds ?? []),
+    ...(familySubscription.billingModeChangedMemberIds ?? []),
+    ...(familySubscription.runtimeRecheckMemberIds ?? []),
+  ]);
+  for (const memberId of usageGateMemberIds) {
     await reconcileHostedAiUsageGateForBillingModeChangeTx({
       memberId,
       now,
@@ -2491,7 +2524,7 @@ export async function applyStripeDisputeUpdated(
   customerId?: string | null,
   preparedProviderState?: PreparedHostedStripeReversalProviderState | null,
 ): Promise<
-  "applied" | "runtime_recheck_required" | "subscription_identity_pending"
+  HostedStripeActivatedMemberOutcome | "applied" | "subscription_identity_pending"
 > {
   const outcome = classifyHostedStripeDisputeOutcome(dispute, dispatchContext.sourceType);
   if (outcome === "ignore") {
@@ -2561,11 +2594,25 @@ export async function applyStripeDisputeUpdated(
       suspendedAtOverride: null,
       tx: prisma,
     });
-    return updatedMember
+    if (
+      updatedMember
       && !hasHostedMemberOwnActiveAccess(member.core)
       && hasHostedMemberOwnActiveAccess(updatedMember.core)
-      ? "runtime_recheck_required"
-      : "applied";
+    ) {
+      const handoff = await appendHostedAccessRestorationRuntimeHandoffTx({
+        memberId: updatedMember.core.id,
+        sourceEventId: dispatchContext.sourceEventId,
+        sourceType: dispatchContext.sourceType,
+        tx: prisma,
+      });
+      return {
+        activatedMemberId: handoff.memberId,
+        hostedExecutionEventId: handoff.hostedExecutionEventId,
+        hostedExecutionMailboxItemId:
+          handoff.hostedExecutionMailboxItemId,
+      };
+    }
+    return "applied";
   }
 
   const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
@@ -2664,13 +2711,6 @@ export function isHostedStripeRefundEventType(type: string): boolean {
 }
 
 type HostedStripeDisputeOutcome = "ignore" | "restore" | "suspend";
-
-export function isHostedStripeDisputeAccessRestoration(
-  dispute: Stripe.Dispute,
-  sourceType: string,
-): boolean {
-  return classifyHostedStripeDisputeOutcome(dispute, sourceType) === "restore";
-}
 
 function classifyHostedStripeDisputeOutcome(
   dispute: Stripe.Dispute,

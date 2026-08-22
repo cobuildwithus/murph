@@ -48,9 +48,6 @@ const nextServerMocks = vi.hoisted(() => ({
 const activationWakeMocks = vi.hoisted(() => ({
   signalHostedMemberActivationRuntimeWakeBestEffortResult: vi.fn(),
 }));
-const accessGrantRecheckMocks = vi.hoisted(() => ({
-  signalHostedAccessGrantRuntimeRecheckBestEffort: vi.fn(),
-}));
 const groupJoinConfirmationMocks = vi.hoisted(() => ({
   materializePendingHostedGroupJoinConfirmationsBestEffort: vi.fn(),
 }));
@@ -73,10 +70,6 @@ vi.mock("@/src/lib/hosted-onboarding/member-activation-runtime-wake", () => ({
   HOSTED_MEMBER_ACTIVATION_RUNTIME_WAKE_TIMEOUT_MS: 5_000,
   signalHostedMemberActivationRuntimeWakeBestEffortResult:
     activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
-}));
-vi.mock("@/src/lib/hosted-onboarding/member-access-runtime-recheck", () => ({
-  signalHostedAccessGrantRuntimeRecheckBestEffort:
-    accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
 }));
 vi.mock("@/src/lib/hosted-crypto/domain-root-store", () => ({
   HostedDomainRootPreparationMismatchError: class extends Error {
@@ -333,8 +326,6 @@ describe("hosted Family plan", () => {
       signalAccepted: true,
       workflowIdPresent: true,
     });
-    accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort
-      .mockResolvedValue(undefined);
     mailboxMocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({
       item: { id: "mailbox_item_owner_notification" },
     });
@@ -4166,15 +4157,24 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("rechecks an established member runtime after browser Family access is granted", async () => {
+  it("keeps established-member Family access recoverable when its first signal fails", async () => {
     const tx = createTxMock();
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(createPendingInvite());
     activationMocks.activateHostedMemberForFamilySponsorshipTx.mockResolvedValueOnce({
       activated: false,
-      hostedExecutionEventId: null,
-      hostedExecutionMailboxItemId: null,
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      hostedExecutionMailboxItemId: "mailbox_access_restored",
       memberId: "member_mom",
     });
+    activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult
+      .mockResolvedValueOnce({
+        accepted: false,
+        configured: true,
+        errorCode: "TEMPORAL_SIGNAL_FAILED",
+        mailboxItemIdPresent: true,
+        signalAccepted: false,
+        workflowIdPresent: true,
+      });
     const prisma = tx as FamilyPlanTxMock & {
       $transaction: ReturnType<typeof vi.fn>;
     };
@@ -4188,20 +4188,18 @@ describe("hosted Family plan", () => {
 
     expect(
       activationWakeMocks.signalHostedMemberActivationRuntimeWakeBestEffortResult,
-    ).not.toHaveBeenCalled();
-    expect(
-      accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort,
     ).toHaveBeenCalledWith({
+      hostedExecutionEventId: "runtime-control:access-restored:family",
+      mailboxItemId: "mailbox_access_restored",
       memberId: "member_mom",
       prisma,
+      source: "family-invite-web-accept",
       timeoutMs: 5_000,
     });
-    expect(
-      accessGrantRecheckMocks.signalHostedAccessGrantRuntimeRecheckBestEffort.mock
-        .invocationCallOrder[0],
-    ).toBeLessThan(
-      groupJoinConfirmationMocks.materializePendingHostedGroupJoinConfirmationsBestEffort
-        .mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        accessRestorationSourceEventId: "family-invite:hbagi_invite",
+      }),
     );
   });
 
@@ -5837,7 +5835,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("rechecks every sponsored runtime when Family billing restores access", async () => {
+  it("commits handoffs for every sponsored runtime when Family billing restores access", async () => {
     const tx = createTxMock({
       group: {
         billingStatus: HostedBillingStatus.unpaid,
@@ -5854,9 +5852,17 @@ describe("hosted Family plan", () => {
       subscription: makeFamilyStripeSubscription(),
       tx,
     })).resolves.toMatchObject({
+      accessRestoredMemberIds: ["member_owner", "member_mom"],
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner", "member_mom"],
+      runtimeRecheckMemberIds: [],
     });
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledTimes(2);
+    expect(
+      activationMocks.activateHostedMemberForFamilySponsorshipTx.mock.calls
+        .every(([input]) => input.accessRestorationSourceEventId
+          === "family-subscription:sub_family:2026-08-22T12:30:00.000Z"),
+    ).toBe(true);
   });
 
   it("prepares at most six Family members sequentially before reconciliation", async () => {
@@ -6159,7 +6165,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("replays the exact active Family owner wake after the direct binding is cleared", async () => {
+  it("replays the exact active Family owner handoff after the direct binding is cleared", async () => {
     const tx = createTxMock();
     const eventCreatedAt = new Date("2026-07-15T12:30:00.000Z");
     const billingRef = createBillingRefMock({
@@ -6174,12 +6180,19 @@ describe("hosted Family plan", () => {
       subscription: makeFamilyStripeSubscription(),
       tx,
     })).resolves.toMatchObject({
+      activations: [{ memberId: "member_owner" }],
       groupId: "hbag_family",
-      runtimeRecheckMemberIds: ["member_owner"],
+      runtimeRecheckMemberIds: [],
     });
 
     expect(tx.hostedMember.update).not.toHaveBeenCalled();
     expect(tx.hostedMemberBillingRef.updateMany).not.toHaveBeenCalled();
+    expect(activationMocks.activateHostedMemberForFamilySponsorshipTx)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        accessRestorationSourceEventId:
+          "family-subscription:sub_family:2026-07-15T12:30:00.000Z",
+        memberId: "member_owner",
+      }));
   });
 
   it("replays the current active Family owner wake after a newer event", async () => {

@@ -180,9 +180,6 @@ import {
   readHostedRuntimeAiAccessDecision,
 } from "./member-access";
 import {
-  signalHostedAccessGrantRuntimeRecheckBestEffort,
-} from "./member-access-runtime-recheck";
-import {
   prepareHostedFamilyOwnerNotification,
   resolveHostedFamilyPhoneInvitePreparation,
   type HostedFamilyPhoneInvitePreparation,
@@ -1031,13 +1028,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           wakeHandoff,
         });
       } finally {
-        await recheckHostedRuntimeAccessGrantsAfterCommitBestEffort({
-          deadlineMs: confirmationDeadlineMs,
-          memberIds: plan.postCommitRuntimeRecheckMemberIds ?? [],
-          prisma,
-          scheduleAfterResponse: input.scheduleAfterResponse,
-          signal: input.scheduleAfterResponse ? undefined : input.signal,
-        });
         await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
           deadlineMs: confirmationDeadlineMs,
           memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],
@@ -1746,37 +1736,6 @@ async function reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort(input:
   await run(input.deadlineMs ?? createHostedPostCommitDeadline(undefined));
 }
 
-async function recheckHostedRuntimeAccessGrantsAfterCommitBestEffort(input: {
-  deadlineMs?: number;
-  memberIds: readonly string[];
-  prisma: PrismaClient;
-  scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
-  signal?: AbortSignal;
-}): Promise<void> {
-  const memberIds = [...new Set(input.memberIds)];
-  if (memberIds.length === 0) {
-    return;
-  }
-
-  const run = async (deadlineMs: number) => {
-    for (const memberId of memberIds) {
-      await signalHostedAccessGrantRuntimeRecheckBestEffort({
-        memberId,
-        prisma: input.prisma,
-        ...(input.signal ? { signal: input.signal } : {}),
-        timeoutMs: readHostedPostCommitRemainingMs(deadlineMs),
-      });
-    }
-  };
-
-  if (input.scheduleAfterResponse) {
-    input.scheduleAfterResponse(() => run(createHostedPostCommitDeadline(undefined)));
-    return;
-  }
-
-  await run(input.deadlineMs ?? createHostedPostCommitDeadline(undefined));
-}
-
 function buildHostedLinqCurrentInboundReplyProof(
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0],
 ): HostedLinqCurrentInboundReplyProof {
@@ -2056,13 +2015,6 @@ export async function handleHostedOnboardingTelegramWebhook(input: {
       wakeHandoff: plan.wakeHandoffs?.[0],
     });
   } finally {
-    await recheckHostedRuntimeAccessGrantsAfterCommitBestEffort({
-      deadlineMs: confirmationDeadlineMs,
-      memberIds: plan.postCommitRuntimeRecheckMemberIds ?? [],
-      prisma,
-      scheduleAfterResponse: input.scheduleAfterResponse,
-      signal: input.scheduleAfterResponse ? undefined : input.signal,
-    });
     await reconcileHostedGroupJoinConfirmationsAfterCommitBestEffort({
       deadlineMs: confirmationDeadlineMs,
       memberIds: plan.postCommitGroupJoinConfirmationMemberIds ?? [],

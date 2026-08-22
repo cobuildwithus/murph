@@ -113,12 +113,13 @@ live system frontier; and an omitted frontier retains the pointer during
 additive deployment skew. Explicit-null retirement never marks the mailbox item
 handled or deletes Web-owned durable mailbox state. Inactive facts can therefore
 retire retry ownership without reading or consuming retained work, which Web
-re-reads after reactivation. Every owner that restores runtime access must send
-a post-commit mailbox wake or payload-free `runtime_recheck_requested`. Direct
-`invoice.paid` recovery and won or reinstated disputes recheck the restored
-member when activation did not append a mailbox item; the durable Stripe receipt
-keeps a failed post-commit recheck retryable. Family billing restoration applies
-the same handoff to the bounded active roster, including exact event retries.
+re-reads after reactivation. Every owner that restores runtime access appends a
+deterministic `runtime.maintenance-requested` item in the same transaction as
+the access change. Direct billing recovery, won or reinstated disputes, Family
+billing restoration for its bounded active roster, and established-member
+Family invite acceptance all signal that exact pointer after commit. The signal
+is a latency hint: the existing bounded mailbox-handoff sweep owns recovery, and
+Stripe receipts retain their exact pointers for replay.
 Workspace-version movement may bypass same-version no-progress backoff, but
 cannot prove that the pointed system item was handled.
 

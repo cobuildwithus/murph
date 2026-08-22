@@ -184,12 +184,6 @@ vi.mock("@/src/lib/hosted-onboarding/stripe-billing-events", () => ({
   applyStripeSubscriptionUpdated: mocks.applyStripeSubscriptionUpdated,
   isHostedStripeRefundEventType: (type: string) =>
     type === "refund.created" || type === "refund.updated",
-  isHostedStripeDisputeAccessRestoration: (
-    dispute: Stripe.Dispute,
-    sourceType: string,
-  ) => sourceType === "stripe.charge.dispute.funds_reinstated"
-    || dispute.status === "won"
-    || dispute.status === "warning_closed",
   cleanupHostedFamilySponsoredDirectSubscription:
     mocks.cleanupHostedFamilySponsoredDirectSubscription,
   cleanupHostedStandardCheckoutAndRetireAttempt:
@@ -1289,14 +1283,13 @@ describe("hosted Stripe event reconciliation", () => {
     errorSpy.mockRestore();
   });
 
-  it("retries a reinstated-dispute runtime recheck before completing its receipt", async () => {
+  it("stores the exact mailbox handoff when a dispute restores access", async () => {
     const prisma = createStripeEventPrismaHarness({
       billingStatus: HostedBillingStatus.active,
       currentBillingPhase: "paid",
       suspendedAt: null,
     });
     const event = makeDisputeFundsReinstatedEvent();
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const preparedProviderState = {
       memberId: "member_123",
       refundCoversCurrentEntitlement: false,
@@ -1310,19 +1303,10 @@ describe("hosted Stripe event reconciliation", () => {
     mocks.prepareHostedStripeReversalProviderState.mockResolvedValue(
       preparedProviderState,
     );
-    mocks.applyStripeDisputeUpdated
-      .mockResolvedValueOnce("runtime_recheck_required")
-      .mockResolvedValueOnce("applied");
-    let signalAttempt = 0;
-    mocks.signalHostedRuntimeRecheckRuntime.mockImplementation(async () => {
-      signalAttempt += 1;
-      if (signalAttempt === 1) {
-        throw new Error("runtime unavailable");
-      }
-      return {
-        signalAccepted: true,
-        workflowId: "hosted-user-runtime:member_123",
-      };
+    mocks.applyStripeDisputeUpdated.mockResolvedValueOnce({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:dispute",
+      hostedExecutionMailboxItemId: "mailbox_access_restored_dispute",
     });
 
     await recordHostedStripeEvent({ event, prisma: prisma.client });
@@ -1330,27 +1314,24 @@ describe("hosted Stripe event reconciliation", () => {
     await expect(reconcileHostedStripeEventById({
       eventId: event.id,
       prisma: prisma.client,
-    })).resolves.toMatchObject({ status: "failed" });
-    expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      lastErrorCode: "HOSTED_STRIPE_RUNTIME_RECHECK_PENDING",
-      processedAt: null,
-      status: HostedStripeEventStatus.failed,
-    }));
+    })).resolves.toMatchObject({
+      activatedMemberId: "member_123",
+      hostedExecutionEventId: "runtime-control:access-restored:dispute",
+      hostedExecutionMailboxItemId: "mailbox_access_restored_dispute",
+      status: "completed",
+    });
 
-    prisma.rows[0]!.nextAttemptAt = new Date(0);
-    await expect(reconcileHostedStripeEventById({
-      eventId: event.id,
-      prisma: prisma.client,
-    })).resolves.toMatchObject({ status: "completed" });
-
-    expect(mocks.applyStripeDisputeUpdated).toHaveBeenCalledTimes(2);
-    expect(mocks.signalHostedRuntimeRecheckRuntime).toHaveBeenCalledTimes(2);
+    expect(mocks.applyStripeDisputeUpdated).toHaveBeenCalledTimes(1);
+    expect(mocks.signalHostedRuntimeRecheckRuntime).not.toHaveBeenCalled();
     expect(prisma.rows[0]).toEqual(expect.objectContaining({
-      attemptCount: 2,
+      activationResultJson: {
+        activationMailboxItemIds: ["mailbox_access_restored_dispute"],
+        schema: "hosted.stripe.activation-result.v1",
+      },
+      attemptCount: 1,
       processedAt: expect.any(Date),
       status: HostedStripeEventStatus.completed,
     }));
-    errorSpy.mockRestore();
   });
 
   it("reissues a paid direct-billing wake after an expired processing lease", async () => {

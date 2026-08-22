@@ -1,7 +1,7 @@
 # Hosted Runtime Frontier Convergence
 
 Status: active
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Goal
 
@@ -14,7 +14,9 @@ truth:
 2. a device-sync pass that starts must leave durable completion or exact
    interruption/retry evidence before ownership is released; and
 3. a foreground-progress checkpoint with still-due device work must receive a
-   bounded orchestration re-dispatch.
+   bounded orchestration re-dispatch; and
+4. a runtime whose inactive system frontier was retired must retain a durable,
+   exact recovery path when billing or Family access becomes active again.
 
 ## Constraints
 
@@ -47,6 +49,9 @@ truth:
 7. Retire stale Temporal system-pointer projections when inactive access admits
    no mailbox work, while preserving the independent inbox-media retention wake
    and durable Web-owned mailbox rows for later reactivation.
+8. Commit one deterministic maintenance mailbox item with every proven
+   inactive-to-active access restoration and delete the pointerless Family and
+   restoration-specific billing retry paths it replaces.
 
 ## Verification
 
@@ -58,7 +63,15 @@ truth:
   field from an explicit no-work frontier. Residual production proof showed
   inactive workflows receiving the omitted form and repeatedly retrying their
   retained pointer projection even though Web admitted no mailbox work.
-- Pending focused public regression proof, exact-head CI and ReviewGPT gates.
+- Access-restoration remediation now uses the existing Web-owned mailbox as its
+  sole durable handoff. The access transaction appends an exact deterministic
+  `runtime.maintenance-requested` item, the normal pointer signal remains a
+  best-effort fast path, and the existing bounded mailbox-handoff sweep owns a
+  failed first signal. No queue, schema field, scheduler, polling owner, or
+  compatibility path was added; obsolete pointerless Family and dispute retry
+  plumbing was deleted.
+- Focused public regression proof and Web typecheck pass. Exact-head CI and the
+  next ReviewGPT gate remain pending.
 - Pending Web deployment and aggregate production convergence proof with the
   Temporal workers and device-sync schedule left active.
 
@@ -105,3 +118,21 @@ complete device retry change would not reduce the exact-delivery lifecycle or
 its deploy contract. The current direction adds no queue, scheduler, state
 field, lifecycle enum, migration, compatibility path, or reconciliation loop;
 it tightens existing mailbox, outbox, and checkpoint boundaries.
+
+## Access-Restoration Review Retrospective
+
+The next accepted review finding exposed the same requirement-level boundary:
+explicit-null frontier retirement is safe only when every access restoration
+commits restart-safe work before returning success. A one-shot payload-free
+signal could be lost after Family invite acceptance or billing restoration,
+leaving retained mailbox work with no durable retry owner.
+
+The authority decision stays intentionally small. Web's existing mailbox is
+the sole durable owner, so each proven inactive-to-active transition appends a
+deterministic `runtime.maintenance-requested` item inside the access transaction.
+Temporal receives only its exact pointer, and the existing bounded mailbox
+handoff sweep recovers a missed signal. Stripe stores that pointer in its
+existing receipt result. This replaces and deletes the pointerless Family
+post-commit helper plus restoration-specific dispute reconstruction. It adds no
+state field, queue, scheduler, roster receipt, polling loop, compatibility shim,
+or new lifecycle owner.

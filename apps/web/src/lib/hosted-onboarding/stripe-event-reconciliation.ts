@@ -35,7 +35,6 @@ import {
   prepareHostedStripeCheckoutCompletion,
   prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState,
-  isHostedStripeDisputeAccessRestoration,
   isHostedStripeRefundEventType,
   type PreparedHostedStripeCheckoutCompletion,
   type PreparedHostedStripeReversalProviderState,
@@ -543,17 +542,14 @@ async function processHostedStripeEventRecord(
             "Stripe subscription identity is pending.",
           );
         }
-        if (disputeResult === "runtime_recheck_required") {
-          const memberId =
-            processingContext.preparedReversalProviderState?.memberId;
-          if (!memberId) {
-            throw new Error(
-              "Stripe dispute restoration requires an exact member owner.",
-            );
-          }
+        if (typeof disputeResult === "object") {
           return {
             ...buildEmptyHostedStripeEventProcessingResult(),
-            runtimeRecheckMemberIds: [memberId],
+            activatedMemberId: disputeResult.activatedMemberId,
+            hostedExecutionEventId:
+              disputeResult.hostedExecutionEventId,
+            hostedExecutionMailboxItemId:
+              disputeResult.hostedExecutionMailboxItemId ?? null,
           };
         }
         return buildEmptyHostedStripeEventProcessingResult();
@@ -1181,14 +1177,7 @@ function isHostedDirectPaidRuntimeRecheckEvent(event: Stripe.Event): boolean {
   return event.type === "invoice.paid"
     || event.type === "customer.subscription.created"
     || event.type === "customer.subscription.updated"
-    || event.type === "customer.subscription.resumed"
-    || (
-      event.type.startsWith("charge.dispute.")
-      && isHostedStripeDisputeAccessRestoration(
-        event.data.object as Stripe.Dispute,
-        event.type,
-      )
-    );
+    || event.type === "customer.subscription.resumed";
 }
 
 async function hasHostedMemberActiveDirectPaidAccess(input: {

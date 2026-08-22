@@ -1317,16 +1317,15 @@ mailbox read so Temporal can retire its pointer projection while the durable
 mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
 Because explicit-null retirement removes Temporal's last local reason to wake,
-every Web owner that restores active access must hand off a post-commit mailbox
-wake or payload-free `runtime_recheck_requested`. Direct `invoice.paid` recovery
-and won or reinstated disputes recheck the restored member when activation did
-not append a mailbox item; a failed post-commit signal leaves the Stripe receipt
-retryable and exact retry reconstructs the wake only while direct paid access is
-active. Family subscription recovery rechecks its bounded active roster and
-preserves that roster on exact/stale Stripe-event retries; Family invite
-acceptance rechecks an established member when activation did not append a
-mailbox item. Ordinary successful active-to-active billing events do not wake
-the member or roster.
+every Web owner that restores active access must append a deterministic
+`runtime.maintenance-requested` mailbox item in the same transaction as the
+access change. The normal exact-pointer signal is only a latency hint: the
+existing bounded mailbox-handoff sweep recovers a failed first signal from the
+durable item. Direct `invoice.paid` recovery, won or reinstated disputes,
+Family subscription recovery for its bounded active roster, and established
+member Family invite acceptance all use this one handoff. Stripe receipts retain
+the exact mailbox pointers for replay. Ordinary successful active-to-active
+billing events append no restoration item and do not wake the member or roster.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
@@ -2159,9 +2158,11 @@ insufficient.
 ### Hosted Runtime Maintenance Wake
 
 `runtime.maintenance-requested` is the durable no-payload wake for one-time
-hosted runtime maintenance such as a vault format rollout and for a committed
-group projection grant that needs its first private-runtime pass. Web appends
-the runtime-control mailbox row and signals the normal hosted runtime workflow;
+hosted runtime maintenance such as a vault format rollout, for a committed
+group projection grant that needs its first private-runtime pass, and for an
+access-restoration transaction whose runtime may have retired its inactive
+frontier. Web appends the runtime-control mailbox row and signals the normal
+hosted runtime workflow;
 the assistant runtime treats the row as a no-op control receipt, then runs the
 same restore, local runtime maintenance, idle checkpoint, and workspace-version
 CAS path as any other hosted invocation. The maintenance wake must not carry
