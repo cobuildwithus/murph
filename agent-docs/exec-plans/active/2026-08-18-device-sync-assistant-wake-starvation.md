@@ -45,8 +45,11 @@ frontiers advance after deployment.
 - Preserve fresh conversation, accepted completion, and real due assistant work
   ahead of device maintenance.
 - Execute only the existing canonical `device-sync.wake` mailbox owner; do not
-  add a scheduler, queue, persisted field, polling loop, broad resync, or a
-  larger timeout that hides non-resumable work.
+  add a scheduler, queue, persisted field, polling loop, broad resync, or use a
+  larger timeout to hide non-resumable work. The 2026-08-21 device-pass budget
+  follow-up supersedes only the blanket timeout restriction after durable
+  continuation shipped: resumable sync work gets 90 seconds, while atomic
+  dense-raw cleanup retains its prior 45-second admission cap.
 - Preserve assistant wake state while platform policy blocks assistant work;
   the platform boundary remains the sole authority for that policy.
 - Split provider work only through existing resource-job continuation and
