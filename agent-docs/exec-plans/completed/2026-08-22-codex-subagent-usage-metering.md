@@ -1,6 +1,6 @@
 # Codex Subagent Usage Metering
 
-Status: active
+Status: completed
 Updated: 2026-08-22
 
 ## Goal
@@ -119,5 +119,9 @@ metadata timeout cleanup, requested stop, and unexpected idle process loss.
 - Full real Codex scripted-runtime tests pass (99 tests).
 - Focused public CLI Codex lifecycle tests pass (9 tests).
 - Assistant-engine typecheck passes.
-- The latest pushed head passed all 20 required CI checks; exact-head
-  ReviewGPT and CI remain pending for the final cleanup candidate.
+- The behavior-bearing head passed all required exact-head CI checks.
+- ReviewGPT substantive round 3 returned `ROUND_OUTCOME: PASS` from a fresh
+  full sensitive snapshot and confirmed the retrospective resolves every prior
+  accepted finding without a second writer or lifecycle owner.
+- The behavior-bearing head merges cleanly with the latest `origin/main`.
+Completed: 2026-08-22
