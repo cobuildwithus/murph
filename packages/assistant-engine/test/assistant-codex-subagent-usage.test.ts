@@ -13,6 +13,7 @@ import {
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   hashAssistantProviderStableJson,
+  readCodexCollabReceiverEvidence,
 } from '../src/assistant/providers/helpers.ts'
 
 const SUBAGENT_PROVIDER_REQUEST_STARTED_AT = '2026-07-23T11:59:00.000Z'
@@ -41,6 +42,30 @@ function tokenUsageEvent(input: {
         modelContextWindow: null,
         total: completeBreakdown(input.total),
       },
+    },
+  }
+}
+
+function rawResponseCompletedEvent(input: {
+  responseId: string
+  threadId: string
+  turnId: string
+  usage: Record<string, number> | null
+}): Record<string, unknown> {
+  return {
+    method: 'rawResponse/completed',
+    params: {
+      responseId: input.responseId,
+      threadId: input.threadId,
+      turnId: input.turnId,
+      usage: input.usage === null
+        ? null
+        : {
+            cacheWriteInputTokens: 0,
+            cachedInputTokens: 0,
+            reasoningOutputTokens: 0,
+            ...input.usage,
+          },
     },
   }
 }
@@ -93,6 +118,31 @@ function sampleFromEvents(
 }
 
 describe('extractCodexSubagentUsageDrafts', () => {
+  it('classifies V2 activity as detached and V1 collaboration as root-bound', () => {
+    expect(readCodexCollabReceiverEvidence({
+      method: 'item/completed',
+      params: {
+        item: {
+          agentThreadId: 'thread-child-v2',
+          kind: 'started',
+          type: 'subAgentActivity',
+        },
+      },
+    })).toEqual([{
+      detached: true,
+      requestedModel: null,
+      threadId: 'thread-child-v2',
+    }])
+    expect(readCodexCollabReceiverEvidence(spawnEndEvent({
+      model: 'gpt-5.6-terra-mini',
+      receiverThreadIds: ['thread-child-v1'],
+    }))).toEqual([{
+      detached: false,
+      requestedModel: 'gpt-5.6-terra-mini',
+      threadId: 'thread-child-v1',
+    }])
+  })
+
   it('returns no drafts without subagent samples', () => {
     expect(
       extractCodexSubagentUsageDrafts({
@@ -139,6 +189,133 @@ describe('extractCodexSubagentUsageDrafts', () => {
       providerName: 'hosted-openai',
       tokenPricingBasis: 'openai-flex',
     })
+  })
+
+  it('uses exact raw response usage once per response and attributes effective child metadata', () => {
+    const threadId = 'thread-raw-child'
+    const turnId = 'turn-raw-child'
+    const cumulative = tokenUsageEvent({
+      threadId,
+      turnId,
+      total: { inputTokens: 900, outputTokens: 99, totalTokens: 999 },
+      last: { inputTokens: 900, outputTokens: 99, totalTokens: 999 },
+    })
+    const firstRaw = rawResponseCompletedEvent({
+      responseId: 'response-raw-1',
+      threadId,
+      turnId,
+      usage: {
+        cachedInputTokens: 40,
+        inputTokens: 80,
+        outputTokens: 20,
+        reasoningOutputTokens: 5,
+        totalTokens: 100,
+      },
+    })
+    const secondRaw = rawResponseCompletedEvent({
+      responseId: 'response-raw-2',
+      threadId,
+      turnId,
+      usage: {
+        inputTokens: 160,
+        outputTokens: 40,
+        reasoningOutputTokens: 10,
+        totalTokens: 200,
+      },
+    })
+    const sample = sampleFromEvents([cumulative])
+    sample.executionMetadata = {
+      model: 'gpt-5.6-sol',
+      modelProvider: 'openai',
+      reasoningEffort: 'high',
+      serviceTier: 'flex',
+    }
+    sample.rawResponseEvents = [
+      firstRaw,
+      firstRaw,
+      {
+        method: 'rawResponse/completed',
+        params: {
+          responseId: 'response-malformed',
+          threadId,
+          turnId,
+          usage: { input_tokens: 50, output_tokens: 10 },
+        },
+      },
+      secondRaw,
+    ]
+
+    const drafts = extractCodexSubagentUsageDrafts({
+      modelProvider: 'local-test-provider',
+      ordinalStart: 4,
+      parentModel: 'gpt-5.6-sol',
+      parentRawEvents: [spawnEndEvent({
+        model: 'gpt-5.6-terra',
+        receiverThreadIds: [threadId],
+      })],
+      serviceTier: null,
+      subagentTokenUsageByTurn: new Map([[threadId, sample]]),
+    })
+
+    expect(drafts).toHaveLength(2)
+    expect(drafts).toMatchObject([
+      {
+        providerRequestOrdinal: 4,
+        usage: {
+          cachedInputTokens: 40,
+          inputTokens: 80,
+          outputTokens: 20,
+          providerMetadataJson: {
+            reasoningEffort: 'high',
+            requestedServiceTier: 'flex',
+          },
+          providerName: 'openai',
+          providerRequestId: 'response-raw-1',
+          reasoningTokens: 5,
+          requestedModel: 'gpt-5.6-terra',
+          servedModel: 'gpt-5.6-sol',
+          tokenPricingBasis: 'openai-flex',
+          totalTokens: 100,
+          usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
+        },
+      },
+      {
+        providerRequestOrdinal: 5,
+        usage: {
+          inputTokens: 160,
+          outputTokens: 40,
+          providerRequestId: 'response-raw-2',
+          reasoningTokens: 10,
+          totalTokens: 200,
+        },
+      },
+    ])
+    expect(drafts.map((draft) => draft.usage.totalTokens)).toEqual([100, 200])
+  })
+
+  it('does not fall back to cumulative estimates after an exact raw lifecycle signal', () => {
+    const threadId = 'thread-raw-null-child'
+    const turnId = 'turn-raw-null-child'
+    const cumulative = tokenUsageEvent({
+      threadId,
+      turnId,
+      total: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+      last: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+    })
+    const sample = sampleFromEvents([cumulative])
+    sample.rawResponseEvents = [rawResponseCompletedEvent({
+      responseId: 'response-without-usage',
+      threadId,
+      turnId,
+      usage: null,
+    })]
+
+    expect(extractCodexSubagentUsageDrafts({
+      modelProvider: 'openai',
+      ordinalStart: 1,
+      parentRawEvents: [spawnEndEvent({ receiverThreadIds: [threadId] })],
+      subagentTokenUsageByTurn: new Map([[threadId, sample]]),
+    })).toEqual([])
   })
 
   it('builds per-turn total deltas with spawn-attributed models', () => {
