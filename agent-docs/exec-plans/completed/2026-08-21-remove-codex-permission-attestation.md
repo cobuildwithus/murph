@@ -1,6 +1,6 @@
 # Remove Codex thread-start permission attestation
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-21
 
@@ -25,8 +25,11 @@ Updated: 2026-08-21
 - The separate stale-resume context check remains unchanged.
 - Durable architecture, security, runtime, deploy, and product-spec claims no
   longer require thread-start attestation.
+- `AGENTS.md` durably rejects brittle same-trust-domain checks presented as
+  independent security controls.
 - Focused Assistant Engine and Cloudflare proof, package typechecks, exact-head
-  CI, specialist review, and final ReviewGPT resolve without accepted findings.
+  CI, and final candidate inspection resolve without accepted findings or
+  unexplained failures.
 
 ## Scope
 
@@ -37,6 +40,7 @@ Updated: 2026-08-21
     behavior-based confinement checks;
   - update current owner docs and the public changelog for the reliability
     recovery;
+  - add the requested durable simplicity principle to `AGENTS.md`;
   - preserve scheduled-turn retry/delivery ownership and all named-profile
     request construction.
 - Out of scope:
@@ -89,8 +93,10 @@ Updated: 2026-08-21
    item.
 5. Run focused tests and typechecks, inspect the complete diff, then push the
    exact candidate and run the required specialist/final reviews with CI.
-6. Resolve accepted findings, complete the Product UX walkthrough, archive this
-   plan, and commit the final scoped task state.
+6. Add the durable simplicity principle, resolve the failed release check, and
+   complete the Product UX walkthrough and final candidate inspection.
+7. Archive this plan, commit and push the final scoped task state, merge the PR,
+   deploy the hosted runtime with immediate rollout, and verify recovery.
 
 ## Decisions
 
@@ -102,6 +108,9 @@ Updated: 2026-08-21
 - Changelog applies because members can experience recovered scheduled and
   attended turns; public copy will describe the reliability outcome without
   exposing internal permission mechanics.
+- After the managed ReviewGPT composer repeatedly failed before producing a
+  review, the user explicitly directed this exact fix to merge and deploy. The
+  final candidate still requires focused proof, CI, and direct diff inspection.
 
 ## Verification
 
@@ -118,3 +127,4 @@ Updated: 2026-08-21
   - resume context drift still throws `ASSISTANT_CODEX_RESUME_STALE`;
   - behavior-based confinement checks remain green;
   - no fresh-thread attestation code or durable claim remains.
+Completed: 2026-08-21
