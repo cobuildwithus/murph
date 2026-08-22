@@ -3451,6 +3451,22 @@ text(result.output);
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
       const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
       const laterPrompt = `USE_LATE_CHILD_${scopeLabel}`
+      const originAssistantInputId = conversationScope === 'direct'
+        ? `ain_${'9'.repeat(32)}`
+        : `ain_${'a'.repeat(32)}`
+      const usageOperationId = `turn-meter-delayed-${conversationScope}`
+      const recordDetachedUsage = vi.fn()
+      const hostedToolContext: AssistantHostedToolContext = {
+        computerToolsAvailable: false,
+        currentAssistantInputId: () => originAssistantInputId,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        recordDetachedUsage,
+        sendVaultFile: async () => {
+          throw new Error('Vault-file sending is unavailable for this turn.')
+        },
+        vaultFileSendAvailable: false,
+      }
       scenario.stub.queue(
         {
           functionCall: {
@@ -3472,6 +3488,7 @@ text(result.output);
             `late_child_${conversationScope}`,
           ],
           text: childResult,
+          usageInputTokens: 53,
         },
         {
           requestExcludes: ['Message Type: FINAL_ANSWER'],
@@ -3484,11 +3501,14 @@ text(result.output);
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
         groupConversation: conversationScope === 'group',
+        hostedToolContext,
         prompt: firstPrompt,
+        usageOperationId,
       })
 
       expect(first.finalMessage).toBe(`ROOT_REPLIED_WITHOUT_WAIT_${scopeLabel}`)
       expect(first.sessionId).toEqual(expect.any(String))
+      expect(first.additionalUsages).toEqual([])
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).not.toContain(childResult)
@@ -3503,7 +3523,40 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
-      await delay(100)
+      const usageDeadline = Date.now() + 5_000
+      while (
+        recordDetachedUsage.mock.calls.length === 0
+        && Date.now() < usageDeadline
+      ) {
+        await delay(20)
+      }
+      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
+      const recordedUsage = recordDetachedUsage.mock.calls[0]?.[0]
+      expect(recordedUsage).toMatchObject({
+        operationId: usageOperationId,
+        originAssistantInputId,
+        usageDraft: {
+          provider: 'codex-cli',
+          providerRequestOrdinal: 1,
+          usage: expect.objectContaining({
+            inputTokens: 53,
+            outputTokens: 7,
+            providerMetadataJson: {
+              reasoningEffort: 'low',
+              requestedServiceTier: null,
+            },
+            providerName: SCRIPTED_MODEL_PROVIDER,
+            providerRequestId: expect.stringMatching(/^resp_scripted_/u),
+            reasoningTokens: 0,
+            requestedModel: SCRIPTED_MODEL,
+            servedModel: SCRIPTED_MODEL,
+            totalTokens: 60,
+            usageExtractionSourcePath:
+              'subagent.rawResponse.completed.usage',
+          }),
+        },
+      })
+      expect(recordedUsage?.effectiveEnv).toEqual(expect.any(Object))
 
       scenario.stub.queue({
         requestIncludes: [
@@ -3515,12 +3568,16 @@ text(result.output);
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         groupConversation: conversationScope === 'group',
+        hostedToolContext,
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
+        usageOperationId: `turn-later-${conversationScope}`,
       })
 
       expect(later.finalMessage).toBe(`INCORPORATED_${childResult}`)
       expect(later.threadId).toBe(first.threadId)
+      expect(later.additionalUsages).toEqual([])
+      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )

@@ -1042,6 +1042,7 @@ export interface CodexSubagentExecutionMetadata {
 // proof of a subagent — a stale flush from a previous thread must never mint a
 // usage row.
 export function extractCodexSubagentUsageDrafts(input: {
+  authorizedRequestedModelByThreadId?: ReadonlyMap<string, string | null>
   modelProvider: string | null
   ordinalStart: number
   parentModel?: string | null
@@ -1051,16 +1052,17 @@ export function extractCodexSubagentUsageDrafts(input: {
     string,
     CodexSubagentTurnTokenUsageSample
   >
+  seenRawResponseIds?: Set<string>
 }): AssistantProviderUsageDraft[] {
   if (input.subagentTokenUsageByTurn.size === 0) {
     return []
   }
 
-  const spawnModelByThreadId = readCodexCollabSpawnModelsByThread(
-    input.parentRawEvents,
-  )
+  const spawnModelByThreadId = input.authorizedRequestedModelByThreadId
+    ? new Map(input.authorizedRequestedModelByThreadId)
+    : readCodexCollabSpawnModelsByThread(input.parentRawEvents)
   const drafts: AssistantProviderUsageDraft[] = []
-  const seenRawResponseIds = new Set<string>()
+  const seenRawResponseIds = input.seenRawResponseIds ?? new Set<string>()
   let ordinal = input.ordinalStart
 
   for (const sample of input.subagentTokenUsageByTurn.values()) {
@@ -1251,17 +1253,27 @@ function readCodexCollabSpawnModelsByThread(
   return modelByThreadId
 }
 
-// Receiver thread ids named by a single parent-thread collab tool call or
-// subagent activity event, if any. Exported so the live turn loop can
-// prioritize evidenced subagent threads when its bounded usage buffer fills
-// up.
-export function readCodexCollabReceiverThreadIds(
+export interface CodexSubagentReceiverEvidence {
+  detached: boolean
+  requestedModel: string | null
+  threadId: string
+}
+
+export function readCodexCollabReceiverEvidence(
   rawEvent: unknown,
-): readonly string[] {
-  return readCodexCollabToolCallFromEvent(rawEvent)?.receiverThreadIds ?? []
+): readonly CodexSubagentReceiverEvidence[] {
+  const collabToolCall = readCodexCollabToolCallFromEvent(rawEvent)
+  return collabToolCall
+    ? collabToolCall.receiverThreadIds.map((threadId) => ({
+        detached: collabToolCall.detached,
+        requestedModel: collabToolCall.spawnModel,
+        threadId,
+      }))
+    : []
 }
 
 function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
+  detached: boolean
   receiverThreadIds: string[]
   spawnModel: string | null
 } | null {
@@ -1279,6 +1291,7 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
     const agentThreadId = readCodexNonEmptyString(item?.agentThreadId)
     return agentThreadId
       ? {
+          detached: true,
           receiverThreadIds: [agentThreadId],
           spawnModel: null,
         }
@@ -1297,6 +1310,7 @@ function readCodexCollabToolCallFromEvent(rawEvent: unknown): {
   }
 
   return {
+    detached: false,
     receiverThreadIds,
     spawnModel: item.tool === 'spawnAgent'
       ? readCodexNonEmptyString(item.model)

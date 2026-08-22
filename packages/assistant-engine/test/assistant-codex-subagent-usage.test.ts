@@ -13,6 +13,7 @@ import {
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   hashAssistantProviderStableJson,
+  readCodexCollabReceiverEvidence,
 } from '../src/assistant/providers/helpers.ts'
 
 const SUBAGENT_PROVIDER_REQUEST_STARTED_AT = '2026-07-23T11:59:00.000Z'
@@ -117,6 +118,31 @@ function sampleFromEvents(
 }
 
 describe('extractCodexSubagentUsageDrafts', () => {
+  it('classifies V2 activity as detached and V1 collaboration as root-bound', () => {
+    expect(readCodexCollabReceiverEvidence({
+      method: 'item/completed',
+      params: {
+        item: {
+          agentThreadId: 'thread-child-v2',
+          kind: 'started',
+          type: 'subAgentActivity',
+        },
+      },
+    })).toEqual([{
+      detached: true,
+      requestedModel: null,
+      threadId: 'thread-child-v2',
+    }])
+    expect(readCodexCollabReceiverEvidence(spawnEndEvent({
+      model: 'gpt-5.6-terra-mini',
+      receiverThreadIds: ['thread-child-v1'],
+    }))).toEqual([{
+      detached: false,
+      requestedModel: 'gpt-5.6-terra-mini',
+      threadId: 'thread-child-v1',
+    }])
+  })
+
   it('returns no drafts without subagent samples', () => {
     expect(
       extractCodexSubagentUsageDrafts({
