@@ -345,6 +345,16 @@ snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
+Assistant-engine also accepts six parser-only group family names:
+`murph.group_consult`, `murph.group_data`, `murph.group_membership`,
+`murph.group_usage`, `murph.group_chat`, and `murph.group_email`. Each is a
+strict action subset derived from the canonical `murph.group` argument parser
+and normalizes into the same existing group request/executor path. These names
+remain absent from the dynamic-tool catalog, so this consumer-first deployment
+does not change provider input or the assistant contract fingerprint. A later
+catalog cutover may advertise them only after parser compatibility is deployed
+everywhere; until then `murph.group` remains the sole advertised full surface.
+
 `murph.group action="read_chat_name"` is the on-demand provider-title primitive.
 Web resolves the signed callback member's single encrypted thread-container
 route only after the model invokes it, then performs one bounded Linq chat read
