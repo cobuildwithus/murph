@@ -9,8 +9,8 @@ Complete the required exact-head review and CI gates for the Garmin Junction can
 
 ## Tasks
 
-- [ ] Open the pull request from the pushed implementation candidate.
-- [ ] Resolve the preliminary specialist ReviewGPT pass.
+- [x] Open the pull request from the pushed implementation candidate.
+- [x] Resolve the preliminary specialist ReviewGPT pass.
 - [ ] Resolve the final cross-cutting ReviewGPT gate.
 - [ ] Confirm required GitHub checks and current-base merge-tree proof.
 - [ ] Perform the parent final diff and privacy review.
