@@ -35,6 +35,7 @@ import {
   prepareHostedStripeCheckoutCompletion,
   prepareHostedStripeDirectMemberActivationCrypto,
   prepareHostedStripeReversalProviderState,
+  isHostedStripeDisputeAccessRestoration,
   isHostedStripeRefundEventType,
   type PreparedHostedStripeCheckoutCompletion,
   type PreparedHostedStripeReversalProviderState,
@@ -69,6 +70,7 @@ import {
   parseHostedBillingCheckoutOffer,
   parseHostedBillingPlanCode,
 } from "./billing-plans";
+import { hasHostedMemberOwnActiveAccess } from "./entitlement";
 import {
   sanitizeHostedOnboardingPersistedErrorCode,
   sanitizeHostedOnboardingPersistedErrorMessage,
@@ -528,18 +530,34 @@ async function processHostedStripeEventRecord(
     case "charge.dispute.closed":
     case "charge.dispute.funds_reinstated":
     case "charge.dispute.funds_withdrawn":
-      if (await applyStripeDisputeUpdated(
-        payload as Stripe.Dispute,
-        dispatchContext,
-        prisma,
-        processingContext.customerId,
-        processingContext.preparedReversalProviderState,
-      ) === "subscription_identity_pending") {
-        throw new HostedStripeSubscriptionIdentityPendingError(
-          "Stripe subscription identity is pending.",
+      {
+        const disputeResult = await applyStripeDisputeUpdated(
+          payload as Stripe.Dispute,
+          dispatchContext,
+          prisma,
+          processingContext.customerId,
+          processingContext.preparedReversalProviderState,
         );
+        if (disputeResult === "subscription_identity_pending") {
+          throw new HostedStripeSubscriptionIdentityPendingError(
+            "Stripe subscription identity is pending.",
+          );
+        }
+        if (disputeResult === "runtime_recheck_required") {
+          const memberId =
+            processingContext.preparedReversalProviderState?.memberId;
+          if (!memberId) {
+            throw new Error(
+              "Stripe dispute restoration requires an exact member owner.",
+            );
+          }
+          return {
+            ...buildEmptyHostedStripeEventProcessingResult(),
+            runtimeRecheckMemberIds: [memberId],
+          };
+        }
+        return buildEmptyHostedStripeEventProcessingResult();
       }
-      return buildEmptyHostedStripeEventProcessingResult();
     default:
       return buildEmptyHostedStripeEventProcessingResult();
   }
@@ -966,8 +984,8 @@ async function processClaimedHostedStripeEvent(
       claimed.retryDirectPaidRuntimeRecheck
       && !usageCreditReconciliation.handled
       && processingMemberId
-      && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent.type)
-      && await hasHostedMemberAcceptedDirectPaidPhase({
+      && isHostedDirectPaidRuntimeRecheckEvent(stripeEvent)
+      && await hasHostedMemberActiveDirectPaidAccess({
         memberId: processingMemberId,
         prisma,
       })
@@ -1159,14 +1177,21 @@ async function processClaimedHostedStripeEvent(
   }
 }
 
-function isHostedDirectPaidRuntimeRecheckEvent(type: Stripe.Event.Type): boolean {
-  return type === "invoice.paid"
-    || type === "customer.subscription.created"
-    || type === "customer.subscription.updated"
-    || type === "customer.subscription.resumed";
+function isHostedDirectPaidRuntimeRecheckEvent(event: Stripe.Event): boolean {
+  return event.type === "invoice.paid"
+    || event.type === "customer.subscription.created"
+    || event.type === "customer.subscription.updated"
+    || event.type === "customer.subscription.resumed"
+    || (
+      event.type.startsWith("charge.dispute.")
+      && isHostedStripeDisputeAccessRestoration(
+        event.data.object as Stripe.Dispute,
+        event.type,
+      )
+    );
 }
 
-async function hasHostedMemberAcceptedDirectPaidPhase(input: {
+async function hasHostedMemberActiveDirectPaidAccess(input: {
   memberId: string;
   prisma: PrismaClient;
 }): Promise<boolean> {
@@ -1175,14 +1200,20 @@ async function hasHostedMemberAcceptedDirectPaidPhase(input: {
       id: input.memberId,
     },
     select: {
+      billingStatus: true,
       billingRef: {
         select: {
           currentBillingPhase: true,
         },
       },
+      suspendedAt: true,
     },
   });
-  return member?.billingRef?.currentBillingPhase === "paid";
+  return Boolean(
+    member
+    && member.billingRef?.currentBillingPhase === "paid"
+    && hasHostedMemberOwnActiveAccess(member),
+  );
 }
 
 function isHostedStripeEventOperationallyRetryableError(

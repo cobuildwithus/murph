@@ -32,7 +32,10 @@ import {
   parseHostedBillingPlanCode,
   requireHostedPulseTrialPolicy,
 } from "./billing-plans";
-import { isHostedAccessBlockedBillingStatus } from "./entitlement";
+import {
+  hasHostedMemberOwnActiveAccess,
+  isHostedAccessBlockedBillingStatus,
+} from "./entitlement";
 import {
   HostedOnboardingError,
   hostedOnboardingError,
@@ -1450,6 +1453,11 @@ export async function applyStripeInvoicePaid(
     tx: prisma,
     updatedMember,
   });
+  const restoredDirectAccess = Boolean(
+    updatedMember
+    && !hasHostedMemberOwnActiveAccess(member.core)
+    && hasHostedMemberOwnActiveAccess(updatedMember.core),
+  );
 
   if (!updatedMember) {
     return {
@@ -1472,7 +1480,9 @@ export async function applyStripeInvoicePaid(
       ...buildEmptyHostedStripeActivationOutcome(),
       runtimeRecheckMemberIds: runtimeRecheckMemberId
         ? [runtimeRecheckMemberId]
-        : [],
+        : restoredDirectAccess
+          ? [updatedMember.core.id]
+          : [],
     };
   }
 
@@ -1496,7 +1506,9 @@ export async function applyStripeInvoicePaid(
     newlyActivatedMemberIds: activation.activated ? [updatedMember.core.id] : [],
     runtimeRecheckMemberIds: runtimeRecheckMemberId
       ? [runtimeRecheckMemberId]
-      : [],
+      : restoredDirectAccess && !activation.hostedExecutionEventId
+        ? [updatedMember.core.id]
+        : [],
     welcomeEmailMemberId: isHostedStripeActivationWelcomeCandidate(activation)
       ? updatedMember.core.id
       : null,
@@ -2478,7 +2490,9 @@ export async function applyStripeDisputeUpdated(
   prisma: Prisma.TransactionClient,
   customerId?: string | null,
   preparedProviderState?: PreparedHostedStripeReversalProviderState | null,
-): Promise<"applied" | "subscription_identity_pending"> {
+): Promise<
+  "applied" | "runtime_recheck_required" | "subscription_identity_pending"
+> {
   const outcome = classifyHostedStripeDisputeOutcome(dispute, dispatchContext.sourceType);
   if (outcome === "ignore") {
     return "applied";
@@ -2531,7 +2545,7 @@ export async function applyStripeDisputeUpdated(
         member,
       });
 
-    await writeHostedMemberStripeBillingTx({
+    const updatedMember = await writeHostedMemberStripeBillingTx({
       billingStatus: HostedBillingStatus.active,
       canonicalBillingStatus: resolvedCanonicalBillingStatus,
       ...buildHostedStripeSubscriptionBillingPeriodSnapshot(subscription),
@@ -2547,7 +2561,11 @@ export async function applyStripeDisputeUpdated(
       suspendedAtOverride: null,
       tx: prisma,
     });
-    return "applied";
+    return updatedMember
+      && !hasHostedMemberOwnActiveAccess(member.core)
+      && hasHostedMemberOwnActiveAccess(updatedMember.core)
+      ? "runtime_recheck_required"
+      : "applied";
   }
 
   const { canonicalBillingStatus, member: preparedMember } = await prepareHostedMemberStripeBillingWrite({
@@ -2646,6 +2664,13 @@ export function isHostedStripeRefundEventType(type: string): boolean {
 }
 
 type HostedStripeDisputeOutcome = "ignore" | "restore" | "suspend";
+
+export function isHostedStripeDisputeAccessRestoration(
+  dispute: Stripe.Dispute,
+  sourceType: string,
+): boolean {
+  return classifyHostedStripeDisputeOutcome(dispute, sourceType) === "restore";
+}
 
 function classifyHostedStripeDisputeOutcome(
   dispute: Stripe.Dispute,

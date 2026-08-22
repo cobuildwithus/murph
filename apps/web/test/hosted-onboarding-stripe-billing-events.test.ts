@@ -936,7 +936,7 @@ describe("hosted onboarding stripe billing events", () => {
     });
   });
 
-  it("does not report activation for payment recovery after prior activation", async () => {
+  it("reports a runtime recheck for payment recovery after prior activation", async () => {
     const recoveringMember = makeMemberSnapshot({
       billingStatus: HostedBillingStatus.past_due,
     });
@@ -975,7 +975,7 @@ describe("hosted onboarding stripe billing events", () => {
       hostedExecutionEventId: null,
       hostedExecutionMailboxItemId: null,
       newlyActivatedMemberIds: [],
-      runtimeRecheckMemberIds: [],
+      runtimeRecheckMemberIds: ["member_123"],
       welcomeEmailMemberId: null,
     });
 
@@ -991,6 +991,47 @@ describe("hosted onboarding stripe billing events", () => {
       skipIfBillingAlreadyActive: false,
       skipIfPreviouslyActivated: true,
     });
+  });
+
+  it.each([
+    HostedBillingStatus.canceled,
+    HostedBillingStatus.paused,
+    HostedBillingStatus.unpaid,
+  ])("reports a runtime recheck when invoice.paid restores %s direct access", async (
+    startingBillingStatus,
+  ) => {
+    const recoveringMember = makeMemberSnapshot({
+      billingStatus: startingBillingStatus,
+    });
+    const updatedMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+    });
+    mocks.findMemberForStripeInvoice.mockResolvedValueOnce(recoveringMember);
+    mocks.prepareHostedMemberStripeBillingWrite.mockResolvedValueOnce({
+      canonicalBillingStatus: HostedBillingStatus.active,
+      member: recoveringMember,
+    });
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(updatedMember);
+
+    await expect(applyStripeInvoicePaid(
+      makeStripeInvoice({
+        id: `in_paid_recovery_${startingBillingStatus}`,
+        subscription: "sub_123",
+      }),
+      {
+        eventCreatedAt: new Date("2026-04-26T05:13:09.000Z"),
+        occurredAt: "2026-04-26T05:13:09.000Z",
+        sourceEventId: `evt_paid_recovery_${startingBillingStatus}`,
+        sourceType: "stripe.invoice.paid",
+      },
+      {} as never,
+      HostedBillingStatus.active,
+    )).resolves.toMatchObject({
+      newlyActivatedMemberIds: [],
+      runtimeRecheckMemberIds: ["member_123"],
+    });
+
+    expect(mocks.activateHostedMemberForPositiveSourceTx).not.toHaveBeenCalled();
   });
 
   it("returns the exact direct activation target when invoice replay finds a durable wake", async () => {
@@ -2784,7 +2825,7 @@ describe("hosted onboarding stripe billing events", () => {
   });
 
   it("ignores non-adverse dispute updates", async () => {
-    await applyStripeDisputeUpdated(
+    await expect(applyStripeDisputeUpdated(
       makeStripeDispute({ status: "under_review" }),
       {
         eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
@@ -2793,14 +2834,14 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
-    );
+    )).resolves.toBe("applied");
 
     expect(mocks.findMemberForStripeReversal).not.toHaveBeenCalled();
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
 
   it("suspends members for adverse dispute outcomes", async () => {
-    await applyStripeDisputeUpdated(
+    await expect(applyStripeDisputeUpdated(
       makeStripeDispute({ status: "under_review" }),
       {
         eventCreatedAt: new Date("2026-04-25T00:00:00.000Z"),
@@ -2809,7 +2850,7 @@ describe("hosted onboarding stripe billing events", () => {
       },
       {} as never,
       "cus_123",
-    );
+    )).resolves.toBe("applied");
 
     expect(mocks.suspendHostedMemberForBillingReversalTx).toHaveBeenCalledWith(expect.objectContaining({
       canonicalBillingStatus: HostedBillingStatus.active,
@@ -2824,15 +2865,19 @@ describe("hosted onboarding stripe billing events", () => {
     const member = makeMemberSnapshot({
       billingStatus: HostedBillingStatus.unpaid,
     });
+    const restoredMember = makeMemberSnapshot({
+      billingStatus: HostedBillingStatus.active,
+    });
     mocks.findMemberForStripeReversal.mockResolvedValueOnce(member);
     mocks.readHostedMemberBillingSnapshot.mockResolvedValueOnce(member);
+    mocks.writeHostedMemberStripeBillingTx.mockResolvedValueOnce(restoredMember);
     const dispute = makeStripeDispute({ status: "won" });
     const preparedProviderState = await prepareStripeReversalProviderState(
       "charge.dispute.funds_reinstated",
       dispute,
     );
 
-    await applyStripeDisputeUpdated(
+    await expect(applyStripeDisputeUpdated(
       dispute,
       {
         eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
@@ -2842,7 +2887,7 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
       "cus_123",
       preparedProviderState,
-    );
+    )).resolves.toBe("runtime_recheck_required");
 
     expect(mocks.writeHostedMemberStripeBillingTx).toHaveBeenCalledWith(expect.objectContaining({
       billingStatus: HostedBillingStatus.active,
@@ -2903,7 +2948,7 @@ describe("hosted onboarding stripe billing events", () => {
       dispute,
     );
 
-    await applyStripeDisputeUpdated(
+    await expect(applyStripeDisputeUpdated(
       dispute,
       {
         eventCreatedAt: new Date("2026-04-26T00:00:00.000Z"),
@@ -2913,7 +2958,7 @@ describe("hosted onboarding stripe billing events", () => {
       {} as never,
       "cus_123",
       preparedProviderState,
-    );
+    )).resolves.toBe("applied");
 
     expect(mocks.writeHostedMemberStripeBillingTx).not.toHaveBeenCalled();
   });
