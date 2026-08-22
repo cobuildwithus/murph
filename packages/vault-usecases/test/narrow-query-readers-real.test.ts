@@ -10,6 +10,7 @@ import { test } from "vitest";
 
 import { showExperimentRecord } from "../src/usecases/experiment-journal-vault.ts";
 import { showWorkoutRecord } from "../src/usecases/workout-read.ts";
+import { createIntegratedVaultServices } from "../src/vault-services.ts";
 
 test("exact event reads ignore unrelated canonical roots and do not create query.sqlite", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-narrow-event-read-"));
@@ -96,6 +97,38 @@ test("experiment id and slug reads stay inside the experiment family and leave q
     assert.equal(bySlug.entity.id, saved.experiment.id);
     assert.deepEqual(await readFile(queryDatabasePath), beforeBytes);
     assert.equal((await stat(queryDatabasePath)).mtimeMs, beforeStat.mtimeMs);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("generic show resolves the initialized vault id without creating query.sqlite", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-narrow-core-read-"));
+
+  try {
+    const initialized = await initializeVault({
+      vaultRoot,
+      createdAt: "2026-08-20T12:00:00.000Z",
+      timezone: "UTC",
+    });
+    const queryDatabasePath = path.join(vaultRoot, QUERY_DB_RELATIVE_PATH);
+    await assert.rejects(
+      () => stat(queryDatabasePath),
+      (error): boolean => (error as NodeJS.ErrnoException).code === "ENOENT",
+    );
+
+    const shown = await createIntegratedVaultServices().query.show({
+      vault: vaultRoot,
+      id: initialized.metadata.vaultId,
+      requestId: null,
+    });
+
+    assert.equal(shown.entity.id, initialized.metadata.vaultId);
+    assert.equal(shown.entity.kind, "core_document");
+    await assert.rejects(
+      () => stat(queryDatabasePath),
+      (error): boolean => (error as NodeJS.ErrnoException).code === "ENOENT",
+    );
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

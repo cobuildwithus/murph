@@ -122,8 +122,9 @@ Updated: 2026-08-22
   already-landed narrow readers are not reimplemented.
 - 2026-08-21: Classify the task as a standard, multi-package internal
   architecture/performance change with the coverage preliminary lens and the
-  final cross-cutting ReviewGPT gate. Product UX, prompt, and frontend lenses
-  are not currently applicable.
+  final cross-cutting ReviewGPT gate. Product UX and frontend are not
+  applicable. Prompt review applies because this plan and package ownership
+  guidance are part of the change.
 - 2026-08-22: ReviewGPT returned the narrow-reader implementation from the
   original audit thread. Its first artifact expired before download; the same
   thread regenerated the scoped patch from the already-attached current-main
@@ -140,25 +141,34 @@ Updated: 2026-08-22
   that the filtered SQL date predicate does not preserve the existing
   canonical-day selection contract. The command remains on the full read model
   until the aggregate freshness phase can preserve that behavior explicitly.
+- 2026-08-22: Accept all preliminary specialist findings and both final-round
+  findings. Correct the prompt-lens disposition, restore canonical-day
+  precedence in the shared filtered projection predicate, register canonical
+  `vault_` IDs with the core lookup family, and collapse generic-show routing
+  onto the shared lookup registries plus the existing query-family catalog.
+  Projection/read-model parity, every generic-show route, typed misses, an
+  initialized-vault exact read, and a delayed Europe/Berlin meal closeout now
+  protect the corrected behavior.
 
 ## Verification
 
 - Completed local proof:
   - Query suite: 66 files and 696 tests passed.
-  - Vault-usecases focused proof: 8 files and 50 tests passed.
-  - Vault-usecases suite: 43 files and 366 tests passed.
-  - CLI suite: 125 files and 1,185 tests passed; one unrelated assistant-session
-    redaction test timed out at 60 seconds under concurrent typecheck load and
-    passed alone in 19 seconds. The changed canonical-write-lock harness passed
-    its focused 6-test rerun.
-  - `pnpm typecheck` passed, including query, vault-usecases, and CLI.
+  - Corrected-head contracts suite: 40 files and 326 tests passed.
+  - Original vault-usecases focused proof: 8 files and 50 tests passed.
+  - Corrected-head vault-usecases suite: 44 files and 369 tests passed. The
+    corrected routing and exact core-reader focused run passed 2 files and 5
+    tests.
+  - Corrected-head CLI suite: 126 files passed with 1,187 tests passed and 1
+    skipped. The delayed-closeout focused proof passed 1 file and 11 tests.
+  - Corrected-head `pnpm typecheck` passed, including query, vault-usecases,
+    and CLI.
   - `pnpm test:scenario-integrity` passed for 207 scenarios, 12 sample inputs,
     and 29 golden-output directories.
   - `git diff --check`, artifact reverse-check, and privacy scans passed.
 - Remaining exact-head proof:
-  - Required GitHub Actions, preliminary specialist ReviewGPT coverage pass,
-    final ReviewGPT `ROUND_OUTCOME: PASS`, and current-base
-    `git merge-tree --write-tree` proof.
+  - Corrected-head GitHub Actions, final ReviewGPT `ROUND_OUTCOME: PASS`, and
+    current-base `git merge-tree --write-tree` proof.
 - Expected outcomes:
   - Representative exact and family reads do not create or modify the query
     projection and are insensitive to unrelated malformed records.

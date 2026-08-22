@@ -138,50 +138,12 @@ const COMPACT_WEARABLE_TREND_POINT_LIMIT = 14
 const COMPACT_WEARABLE_STRING_LENGTH = 160
 
 function genericShowFamily(id: string): QueryEntityFamily | null {
-  switch (inferEntityKind(id)) {
-    case "allergy":
-      return "allergy"
-    case "assessment":
-      return "assessment"
-    case "audit":
-      return "audit"
-    case "condition":
-      return "condition"
-    case "core":
-      return "core"
-    case "document":
-    case "event":
-    case "meal":
-      return "event"
-    case "experiment":
-      return "experiment"
-    case "family":
-      return "family"
-    case "food":
-      return "food"
-    case "genetics":
-      return "genetics"
-    case "goal":
-      return "goal"
-    case "habitat":
-      return "habitat"
-    case "journal":
-      return "journal"
-    case "protocol":
-      return "protocol"
-    case "provider":
-      return "provider"
-    case "recipe":
-      return "recipe"
-    case "regimen":
-      return "regimen"
-    case "sample":
-      return "sample"
-    case "workout_format":
-      return "workout_format"
-    default:
-      return null
+  const entityKind = inferEntityKind(id)
+  if (entityKind === "document" || entityKind === "meal") {
+    return "event"
   }
+
+  return ALL_QUERY_ENTITY_FAMILIES.find((family) => family === entityKind) ?? null
 }
 
 type CompactWearableValue = JsonValue | typeof OMIT_COMPACT_WEARABLE_VALUE
