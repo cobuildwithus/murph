@@ -6342,6 +6342,16 @@ describe("runHostedAssistantAutomationLane", () => {
 describe("runHostedDeviceSyncWakeLane", () => {
   it("runs only the hosted device-sync lane", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const queueJobKinds = [
+      "backfill",
+      "deauthorization",
+      "deauthorize",
+      "delete",
+      "push_source_recovery",
+      "reconcile",
+      "resource",
+      "authorization",
+    ] as const;
     const drainWorker = vi.fn()
       .mockResolvedValueOnce(1)
       .mockResolvedValue(0);
@@ -6351,7 +6361,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         (_, index) => ({
           attempts: index % 4,
           createdAt: "2026-04-07T23:58:00.000Z",
-          kind: `kind.${String(index % 20).padStart(2, "0")}`,
+          kind: queueJobKinds[index % queueJobKinds.length],
           status: index === 0 ? "running" : "queued",
         }),
       ))
@@ -6471,12 +6481,15 @@ describe("runHostedDeviceSyncWakeLane", () => {
           pendingJobCountBefore: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
           pendingJobCountBeforeTruncated: true,
           pendingJobKindCountsAfter: ["resource=1"],
-          pendingJobKindCountsAfterTruncated: false,
-          pendingJobKindCountsBefore: Array.from(
-            { length: 16 },
-            (_, index) => `kind.${String(index).padStart(2, "0")}=5`,
-          ),
-          pendingJobKindCountsBeforeTruncated: true,
+          pendingJobKindCountsBefore: [
+            "backfill=13",
+            "deauth=26",
+            "delete=13",
+            "other=12",
+            "push_source_recovery=12",
+            "reconcile=12",
+            "resource=12",
+          ],
           pendingJobMaxAttemptsAfter: 3,
           pendingJobMaxAttemptsBefore: 3,
           pendingJobOldestAgeMsAfter: expect.any(Number),
@@ -6515,13 +6528,13 @@ describe("runHostedDeviceSyncWakeLane", () => {
         .mockReturnValueOnce([{
           attempts: 0,
           createdAt: "2026-04-07T23:59:00.000Z",
-          kind: "resource",
+          kind: "deauthorization",
           status: "queued",
         }])
         .mockReturnValueOnce([{
           attempts: 1,
           createdAt: "2026-04-07T23:59:00.000Z",
-          kind: "resource",
+          kind: "deauthorization",
           status: "queued",
         }]);
       mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
@@ -6577,15 +6590,20 @@ describe("runHostedDeviceSyncWakeLane", () => {
       const finishedEntry = logRequests
         .flatMap((request) => request.entries)
         .find((entry) => entry.eventCode === "device-sync.pass_finished");
+      expect(logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode.startsWith("device-sync.pass_"))
+        .map((entry) => entry.eventCode)).toEqual([
+          "device-sync.pass_started",
+          "device-sync.pass_finished",
+        ]);
       expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
         outcome: "yielded",
         passStage: "worker_drain",
         pendingJobCountAfter: 1,
         pendingJobCountBefore: 1,
-        pendingJobKindCountsAfter: ["resource=1"],
-        pendingJobKindCountsAfterTruncated: false,
-        pendingJobKindCountsBefore: ["resource=1"],
-        pendingJobKindCountsBeforeTruncated: false,
+        pendingJobKindCountsAfter: ["deauth=1"],
+        pendingJobKindCountsBefore: ["deauth=1"],
         pendingJobMaxAttemptsAfter: 1,
         pendingJobMaxAttemptsBefore: 0,
         processedJobs: 1,

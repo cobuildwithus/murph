@@ -66,7 +66,6 @@ import type {
 } from "./platform.ts";
 import {
   buildHostedRuntimeLogContextFields,
-  compactHostedRuntimeLogCodes,
   toHostedRuntimeLogCode,
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
@@ -135,7 +134,6 @@ type HostedDeviceSyncQueueSnapshot = {
   jobCount: number;
   jobCountTruncated: boolean;
   jobKindCounts: string[];
-  jobKindCountsTruncated: boolean;
   maxJobAttempts: number | null;
   oldestJobAgeMs: number | null;
   queuedJobCount: number;
@@ -998,7 +996,7 @@ function buildHostedDeviceSyncQueueSnapshot(
   let runningJobCount = 0;
 
   for (const job of sampledJobs) {
-    const jobKind = toHostedRuntimeLogCode(job.kind);
+    const jobKind = toHostedDeviceSyncQueueJobKindLogCode(job.kind);
     jobKindCounts.set(jobKind, (jobKindCounts.get(jobKind) ?? 0) + 1);
     maxJobAttempts = Math.max(maxJobAttempts ?? 0, job.attempts);
     const createdAtMs = Date.parse(job.createdAt);
@@ -1012,15 +1010,12 @@ function buildHostedDeviceSyncQueueSnapshot(
     }
   }
 
-  const loggedJobKinds = compactHostedRuntimeLogCodes([...jobKindCounts.keys()]);
-
   return {
     jobCount: sampledJobs.length,
     jobCountTruncated: pendingJobs.length > sampledJobs.length,
-    jobKindCounts: loggedJobKinds.map(
-      (jobKind) => `${jobKind}=${jobKindCounts.get(jobKind) ?? 0}`,
-    ),
-    jobKindCountsTruncated: loggedJobKinds.length < jobKindCounts.size,
+    jobKindCounts: [...jobKindCounts.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([jobKind, count]) => `${jobKind}=${count}`),
     maxJobAttempts,
     oldestJobAgeMs: oldestCreatedAtMs === null
       ? null
@@ -1028,6 +1023,22 @@ function buildHostedDeviceSyncQueueSnapshot(
     queuedJobCount,
     runningJobCount,
   };
+}
+
+function toHostedDeviceSyncQueueJobKindLogCode(jobKind: string): string {
+  switch (jobKind) {
+    case "backfill":
+    case "delete":
+    case "push_source_recovery":
+    case "reconcile":
+    case "resource":
+      return jobKind;
+    case "deauthorization":
+    case "deauthorize":
+      return "deauth";
+    default:
+      return "other";
+  }
 }
 
 async function runHostedDeviceSyncDenseRawRetention(input: {
@@ -1453,11 +1464,7 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
               pendingJobCountBeforeTruncated:
                 queueSnapshotBefore?.jobCountTruncated ?? null,
               pendingJobKindCountsAfter: queueSnapshotAfter?.jobKindCounts ?? [],
-              pendingJobKindCountsAfterTruncated:
-                queueSnapshotAfter?.jobKindCountsTruncated ?? null,
               pendingJobKindCountsBefore: queueSnapshotBefore?.jobKindCounts ?? [],
-              pendingJobKindCountsBeforeTruncated:
-                queueSnapshotBefore?.jobKindCountsTruncated ?? null,
               pendingJobMaxAttemptsAfter: queueSnapshotAfter?.maxJobAttempts ?? null,
               pendingJobMaxAttemptsBefore: queueSnapshotBefore?.maxJobAttempts ?? null,
               pendingJobOldestAgeMsAfter: queueSnapshotAfter?.oldestJobAgeMs ?? null,

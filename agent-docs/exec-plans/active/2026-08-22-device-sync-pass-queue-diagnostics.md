@@ -15,8 +15,8 @@ Updated: 2026-08-22
 - Each finished pass records one secret-safe, bounded before/after snapshot of
   the selected account's local job queue when that queue is available.
 - The snapshot reports capped counts, truncation, queued/running counts,
-  sanitized job-kind counts, oldest sampled job age, maximum sampled attempt
-  count, and whether the pass reached its existing 100-job limit.
+  closed-vocabulary job-kind counts, oldest sampled job age, maximum sampled
+  attempt count, and whether the pass reached its existing 100-job limit.
 - Timeout/yield and later-stage failure logs retain the last completed queue
   snapshot.
 - Existing wake ownership, foreground preemption, follow-up scheduling,
@@ -43,7 +43,8 @@ Updated: 2026-08-22
 - Technical constraints:
   - inspect at most `HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1` pending rows per
     snapshot and label truncation explicitly;
-  - log only counts, ages, attempt counts, and sanitized code-owned job kinds;
+  - log only counts, ages, attempt counts, and closed code-owned job-kind
+    labels;
   - keep info logging best-effort and off the foreground reply path.
 - Product/process constraints:
   - production rows and member identifiers stay out of repository artifacts;
@@ -60,7 +61,7 @@ Updated: 2026-08-22
    do not add an aggregate scan or remote callback.
 3. Risk: diagnostics expose provider payload or member identity.
    Mitigation: never log job ids, account ids, payloads, resources, timestamps,
-   or provider prose; sanitize job-kind codes through the existing helper.
+   or provider prose; map job kinds to a closed seven-label diagnostic vocabulary.
 4. Risk: rollout leaves warm runners on the old logging contract.
    Mitigation: deploy the runner bundle with immediate container convergence
    and verify the exact bundle plus new production log fields.
@@ -88,9 +89,10 @@ Updated: 2026-08-22
 - Run queue reads only when the wake lane has an active runtime-log port, so
   callers that do not emit pass telemetry pay no diagnostic read cost.
 - Keep kind-count summaries inside the existing runtime-log parser contract:
-  emit deterministic scalar `kind=count` strings through the shared 16-code
-  compactor and label distinct-kind truncation explicitly. This avoids a new
-  object-array allowlist and a coordinated Web-first deployment.
+  map current and supported legacy kinds to seven fixed parser-safe labels,
+  collapse unknowns to `other`, and emit deterministic scalar `kind=count`
+  strings. The closed vocabulary stays below the parser cap without a shared
+  compactor, object-array allowlist, or coordinated Web-first deployment.
 
 ## Verification
 
