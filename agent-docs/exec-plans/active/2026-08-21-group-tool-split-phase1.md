@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-21
-Updated: 2026-08-21
+Updated: 2026-08-22
 
 ## Goal
 
@@ -42,8 +42,8 @@ Updated: 2026-08-21
 2. [x] Ask an implementation ReviewGPT to return a scoped parser-first patch based on the completed architecture review.
 3. [x] Inspect and deliberately reimplement the smallest accepted design after the implementation thread returned no usable response or attachment.
 4. [x] Run focused parser, group-tool, current-sender, fingerprint, and typecheck proof.
-5. Commit and push the candidate, open the required PR, and launch preliminary specialist and final ReviewGPT gates concurrently with CI.
-6. Resolve accepted findings, reach green exact-head gates, merge, and retire the worktree.
+5. [ ] Commit and push the candidate, open the required PR, and launch preliminary specialist and final ReviewGPT gates concurrently with CI.
+6. [ ] Resolve accepted findings, reach green exact-head gates, merge, and retire the worktree.
 
 ## Decisions
 
@@ -55,4 +55,5 @@ Updated: 2026-08-21
 
 - Commands to run: focused assistant-engine Vitest suites selected from the changed paths, `pnpm --dir packages/assistant-engine typecheck`, exact provider-input/fingerprint measurements, required ReviewGPT gates, and required GitHub Actions.
 - Expected outcomes: all current valid group calls remain canonically equivalent, every family rejects cross-family and authority-bearing fields, the catalog/fingerprint remain unchanged, and the exact pushed PR head is green.
-- Local result: 118 tests passed across the full group-tool, current-sender, and parser-compatibility suites; the assistant-engine typecheck passed; and the unchanged `murph.group` descriptor SHA-256 remains `7ca2e594d2fab08fab1988e18018b70043173be6da2d7ca69d9b981bad77e736`.
+- Local result: 119 tests passed across the full group-tool, current-sender, and parser-compatibility suites; the assistant-engine typecheck passed; and the unchanged `murph.group` descriptor SHA-256 remains `7ca2e594d2fab08fab1988e18018b70043173be6da2d7ca69d9b981bad77e736`.
+- Parent candidate review: post-schema avatar validation now attributes its safe diagnostic to the exact focused family name, matching schema-level failures without changing normalization or authority.
