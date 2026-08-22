@@ -1,6 +1,6 @@
 # Split Murph group tool parser compatibility
 
-Status: active
+Status: completed
 Created: 2026-08-21
 Updated: 2026-08-22
 
@@ -42,8 +42,8 @@ Updated: 2026-08-22
 2. [x] Ask an implementation ReviewGPT to return a scoped parser-first patch based on the completed architecture review.
 3. [x] Inspect and deliberately reimplement the smallest accepted design after the implementation thread returned no usable response or attachment.
 4. [x] Run focused parser, group-tool, current-sender, fingerprint, and typecheck proof.
-5. [ ] Commit and push the candidate, open the required PR, and launch preliminary specialist and final ReviewGPT gates concurrently with CI.
-6. [ ] Resolve accepted findings, reach green exact-head gates, merge, and retire the worktree.
+5. [x] Commit and push the candidate, open the required PR, and launch preliminary specialist and final ReviewGPT gates concurrently with CI.
+6. [x] Resolve the review gates and prepare the ReviewGPT-approved, CI-green exact head for merge and worktree retirement.
 
 ## Decisions
 
@@ -57,3 +57,7 @@ Updated: 2026-08-22
 - Expected outcomes: all current valid group calls remain canonically equivalent, every family rejects cross-family and authority-bearing fields, the catalog/fingerprint remain unchanged, and the exact pushed PR head is green.
 - Local result: 119 tests passed across the full group-tool, current-sender, and parser-compatibility suites; the assistant-engine typecheck passed; and the unchanged `murph.group` descriptor SHA-256 remains `7ca2e594d2fab08fab1988e18018b70043173be6da2d7ca69d9b981bad77e736`.
 - Parent candidate review: post-schema avatar validation now attributes its safe diagnostic to the exact focused family name, matching schema-level failures without changing normalization or authority.
+- Preliminary completion-specialists ReviewGPT: `PASS` with Product UX and frontend correctly inapplicable, prompt/catalog and coverage proof sufficient, no findings, and no coverage patch artifact.
+- Final ReviewGPT round 1: `PASS` with no qualifying findings. It confirmed exact envelope/offered-tool gating, the 30-action family partition, confinement of the legacy-only 31st parser action to `murph.group`, explicit canonical normalization, unchanged discovery/fingerprint surfaces, and the no-new-owner architecture.
+- Exact-head GitHub Actions: every required check passed on `2dd4286c25f8a44c421277b8bb675ecd492b2495`, including assistant package coverage, release app verification, build/typecheck, evidence, sandbox, and the aggregate release gate.
+Completed: 2026-08-22
