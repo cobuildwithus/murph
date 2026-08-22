@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   restoreHostedExecutionContext,
@@ -6350,7 +6351,7 @@ describe("runHostedDeviceSyncWakeLane", () => {
         (_, index) => ({
           attempts: index % 4,
           createdAt: "2026-04-07T23:58:00.000Z",
-          kind: index % 2 === 0 ? "resource" : "reconcile",
+          kind: `kind.${String(index % 20).padStart(2, "0")}`,
           status: index === 0 ? "running" : "queued",
         }),
       ))
@@ -6407,8 +6408,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
       runtimeLogPlatform: {
         logPort: {
           async write(request) {
-            logRequests.push(request);
-            return { loggedCount: request.entries.length };
+            const parsed = parseHostedRuntimeLogRequest(request);
+            logRequests.push(parsed);
+            return { loggedCount: parsed.entries.length };
           },
         },
       },
@@ -6468,11 +6470,13 @@ describe("runHostedDeviceSyncWakeLane", () => {
           pendingJobCountAfterTruncated: false,
           pendingJobCountBefore: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
           pendingJobCountBeforeTruncated: true,
-          pendingJobKindCountsAfter: [{ count: 1, jobKind: "resource" }],
-          pendingJobKindCountsBefore: [
-            { count: 50, jobKind: "reconcile" },
-            { count: 50, jobKind: "resource" },
-          ],
+          pendingJobKindCountsAfter: ["resource=1"],
+          pendingJobKindCountsAfterTruncated: false,
+          pendingJobKindCountsBefore: Array.from(
+            { length: 16 },
+            (_, index) => `kind.${String(index).padStart(2, "0")}=5`,
+          ),
+          pendingJobKindCountsBeforeTruncated: true,
           pendingJobMaxAttemptsAfter: 3,
           pendingJobMaxAttemptsBefore: 3,
           pendingJobOldestAgeMsAfter: expect.any(Number),
@@ -6541,8 +6545,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
         runtimeLogPlatform: {
           logPort: {
             async write(request) {
-              logRequests.push(request);
-              return { loggedCount: request.entries.length };
+              const parsed = parseHostedRuntimeLogRequest(request);
+              logRequests.push(parsed);
+              return { loggedCount: parsed.entries.length };
             },
           },
         },
@@ -6577,8 +6582,10 @@ describe("runHostedDeviceSyncWakeLane", () => {
         passStage: "worker_drain",
         pendingJobCountAfter: 1,
         pendingJobCountBefore: 1,
-        pendingJobKindCountsAfter: [{ count: 1, jobKind: "resource" }],
-        pendingJobKindCountsBefore: [{ count: 1, jobKind: "resource" }],
+        pendingJobKindCountsAfter: ["resource=1"],
+        pendingJobKindCountsAfterTruncated: false,
+        pendingJobKindCountsBefore: ["resource=1"],
+        pendingJobKindCountsBeforeTruncated: false,
         pendingJobMaxAttemptsAfter: 1,
         pendingJobMaxAttemptsBefore: 0,
         processedJobs: 1,

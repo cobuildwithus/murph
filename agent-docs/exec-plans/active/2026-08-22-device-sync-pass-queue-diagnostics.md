@@ -87,6 +87,10 @@ Updated: 2026-08-22
   finite backlog from repeatedly stuck work.
 - Run queue reads only when the wake lane has an active runtime-log port, so
   callers that do not emit pass telemetry pay no diagnostic read cost.
+- Keep kind-count summaries inside the existing runtime-log parser contract:
+  emit deterministic scalar `kind=count` strings through the shared 16-code
+  compactor and label distinct-kind truncation explicitly. This avoids a new
+  object-array allowlist and a coordinated Web-first deployment.
 
 ## Verification
 

@@ -66,6 +66,7 @@ import type {
 } from "./platform.ts";
 import {
   buildHostedRuntimeLogContextFields,
+  compactHostedRuntimeLogCodes,
   toHostedRuntimeLogCode,
   type HostedRuntimeLogContext,
   writeHostedRuntimeLogBestEffort,
@@ -130,15 +131,11 @@ type HostedDeviceSyncYieldReason =
   | HostedBackgroundMaintenanceCancellationReason
   | "unknown";
 
-type HostedDeviceSyncQueueKindCount = {
-  count: number;
-  jobKind: string;
-};
-
 type HostedDeviceSyncQueueSnapshot = {
   jobCount: number;
   jobCountTruncated: boolean;
-  jobKindCounts: HostedDeviceSyncQueueKindCount[];
+  jobKindCounts: string[];
+  jobKindCountsTruncated: boolean;
   maxJobAttempts: number | null;
   oldestJobAgeMs: number | null;
   queuedJobCount: number;
@@ -1015,12 +1012,15 @@ function buildHostedDeviceSyncQueueSnapshot(
     }
   }
 
+  const loggedJobKinds = compactHostedRuntimeLogCodes([...jobKindCounts.keys()]);
+
   return {
     jobCount: sampledJobs.length,
     jobCountTruncated: pendingJobs.length > sampledJobs.length,
-    jobKindCounts: [...jobKindCounts.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([jobKind, count]) => ({ count, jobKind })),
+    jobKindCounts: loggedJobKinds.map(
+      (jobKind) => `${jobKind}=${jobKindCounts.get(jobKind) ?? 0}`,
+    ),
+    jobKindCountsTruncated: loggedJobKinds.length < jobKindCounts.size,
     maxJobAttempts,
     oldestJobAgeMs: oldestCreatedAtMs === null
       ? null
@@ -1453,7 +1453,11 @@ function writeHostedDeviceSyncPassLifecycleLog(input: {
               pendingJobCountBeforeTruncated:
                 queueSnapshotBefore?.jobCountTruncated ?? null,
               pendingJobKindCountsAfter: queueSnapshotAfter?.jobKindCounts ?? [],
+              pendingJobKindCountsAfterTruncated:
+                queueSnapshotAfter?.jobKindCountsTruncated ?? null,
               pendingJobKindCountsBefore: queueSnapshotBefore?.jobKindCounts ?? [],
+              pendingJobKindCountsBeforeTruncated:
+                queueSnapshotBefore?.jobKindCountsTruncated ?? null,
               pendingJobMaxAttemptsAfter: queueSnapshotAfter?.maxJobAttempts ?? null,
               pendingJobMaxAttemptsBefore: queueSnapshotBefore?.maxJobAttempts ?? null,
               pendingJobOldestAgeMsAfter: queueSnapshotAfter?.oldestJobAgeMs ?? null,
