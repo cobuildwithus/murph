@@ -36,7 +36,7 @@ export function inspectRetryableNativeIosPullRequest(
   }
   if (value.head?.repo?.full_name !== REPOSITORY || value.user?.type !== "User") {
     throw new Error(
-      "Native iOS hosted E2E retries require an open same-repository human-authored PR.",
+      "Native hosted E2E retries require an open same-repository human-authored PR.",
     );
   }
   const headRef = value.head?.ref;
@@ -135,7 +135,7 @@ function requestGitHubApi({ endpoint, method, paginate = false }) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.error?.code === "ENOENT") {
-    throw new Error("GitHub CLI (gh) is required for the native iOS retry helper.");
+    throw new Error("GitHub CLI (gh) is required for the native hosted E2E retry helper.");
   }
   if (result.error) throw new Error("Unable to execute GitHub CLI.");
   if (result.status !== 0) {
@@ -145,7 +145,7 @@ function requestGitHubApi({ endpoint, method, paginate = false }) {
   try {
     return JSON.parse(result.stdout);
   } catch {
-    throw new Error("GitHub returned invalid JSON to the native iOS retry helper.");
+    throw new Error("GitHub returned invalid JSON to the native hosted E2E retry helper.");
   }
 }
 
@@ -155,7 +155,7 @@ async function main(argv) {
   console.log([
     `Restarted exact-head Repo Hygiene run ${result.repoHygieneRunId}`,
     `for PR #${result.prNumber} at ${result.headSha}; its successful completion`,
-    "will create a fresh native iOS waiter.",
+    "will create fresh applicable native iOS and Android waiters.",
   ].join(" "));
 }
 

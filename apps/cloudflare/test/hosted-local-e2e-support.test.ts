@@ -589,7 +589,8 @@ describe("expectAdvertisedMurphDynamicTools", () => {
   it("expects gated tools only when the scenario enables them", () => {
     const allToolNames = listMurphDynamicToolNames();
     const baseToolNames = allToolNames.filter((name) =>
-      !name.startsWith("murph.computer_")
+      name !== "murph.analyze_video"
+      && !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
       && name !== "murph.group_room_model"
       && name !== "murph.imessage_contact"
@@ -607,6 +608,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
       name !== "murph.send_progress_update"
     );
+    expect(allToolNames).toContain("murph.analyze_video");
     expect(allToolNames).toContain("murph.react_to_message");
     expect(allToolNames).toContain("murph.select_reply_target");
     expect(allToolNames).toContain("murph.computer_open");
@@ -638,6 +640,12 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       buildResponsesRequest(baseToolNames, "code-mode-namespaced"),
     ]);
     expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest([...baseToolNames, "murph.analyze_video"])],
+      {
+        analyzeVideoAvailable: true,
+      },
+    );
+    expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest([...baseToolNames, "murph.pending_vault_files"])],
       {
         pendingVaultFilesAvailable: true,
@@ -659,6 +667,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(allToolNames)],
       {
+        analyzeVideoAvailable: true,
         connectedAppsAvailable: true,
         computerToolsAvailable: true,
         exerciseRoutineResponseCardAvailable: true,

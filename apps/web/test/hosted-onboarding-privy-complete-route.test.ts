@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -64,6 +64,9 @@ describe("hosted onboarding Privy completion route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("HOSTED_SIGNUP_NOTIFICATION_EMAILS", "founder@example.com");
+    vi.stubEnv("HOSTED_SIGNUP_WELCOME_EMAIL_FROM", "Murph <welcome@example.com>");
+    vi.stubEnv("RESEND_API_KEY", "re_test");
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.assertHostedOnboardingMutationOrigin.mockReturnValue(undefined);
@@ -97,6 +100,10 @@ describe("hosted onboarding Privy completion route", () => {
         id: "did:privy:user_123",
       },
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("rejects a different live Privy identity before replacing an existing app session", async () => {
@@ -221,6 +228,10 @@ describe("hosted onboarding Privy completion route", () => {
         }),
         headers: {
           origin: "https://join.example.test",
+          "x-vercel-ip-city": "Atlanta",
+          "x-vercel-ip-country": "US",
+          "x-vercel-ip-country-region": "GA",
+          "x-vercel-ip-timezone": "America/New_York",
         },
         method: "POST",
       }),
@@ -251,7 +262,24 @@ describe("hosted onboarding Privy completion route", () => {
         wallet: null,
       },
       inviteCode: "invite_123",
+      now: expect.any(Date),
+      signupNotificationContext: {
+        schema: "murph.hosted-signup-notification-context.v1",
+        occurredAt: expect.any(String),
+        surface: "website",
+        timeZone: "America/New_York",
+        location: {
+          city: "Atlanta",
+          country: "US",
+          countryRegion: "GA",
+        },
+      },
+      timeZone: "America/New_York",
     });
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput?.signupNotificationContext?.occurredAt).toBe(
+      completionInput?.now?.toISOString(),
+    );
     expect(mocks.issueHostedAppSession).toHaveBeenCalledWith({
       memberId: "member_123",
       privyUserId: "did:privy:user_123",
@@ -260,6 +288,53 @@ describe("hosted onboarding Privy completion route", () => {
       authenticatedMember: createHostedMember(),
       inviteCode: "invite_123",
     });
+  });
+
+  it("does not collect signup notification context when notification email is disabled", async () => {
+    vi.stubEnv("HOSTED_SIGNUP_NOTIFICATION_EMAILS", "");
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+          "x-vercel-ip-city": "Atlanta",
+          "x-vercel-ip-country": "US",
+          "x-vercel-ip-country-region": "GA",
+          "x-vercel-ip-timezone": "America/New_York",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledOnce();
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput).toMatchObject({
+      authMethod: "phone",
+      timeZone: "America/New_York",
+    });
+    expect(completionInput).not.toHaveProperty("signupNotificationContext");
+  });
+
+  it("does not collect signup notification context when Resend is only partially configured", async () => {
+    vi.stubEnv("RESEND_API_KEY", "");
+
+    const response = await privyCompleteRoute.POST(
+      new Request("https://join.example.test/api/hosted-onboarding/privy/complete", {
+        headers: {
+          origin: "https://join.example.test",
+          "x-vercel-ip-city": "Atlanta",
+          "x-vercel-ip-country": "US",
+          "x-vercel-ip-timezone": "America/New_York",
+        },
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.completeHostedPrivyVerification).toHaveBeenCalledOnce();
+    const completionInput = mocks.completeHostedPrivyVerification.mock.calls[0]?.[0];
+    expect(completionInput).not.toHaveProperty("signupNotificationContext");
   });
 
   it("returns the active stage when the member is already active", async () => {

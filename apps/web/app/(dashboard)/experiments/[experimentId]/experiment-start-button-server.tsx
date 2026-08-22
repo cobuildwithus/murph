@@ -44,12 +44,13 @@ export async function HostedExperimentStartButton({
   protocolDays,
   protocolTitle,
 }: HostedExperimentStartButtonProps) {
-  const { initialContactChannels, murphPhoneNumber } =
+  const { initialContactChannels, murphEmailAddress, murphPhoneNumber } =
     await getHostedMurphContactContext();
 
   const startAction = (
     <StartExperimentButton
       initialContactChannels={initialContactChannels}
+      murphEmailAddress={murphEmailAddress}
       murphPhoneNumber={murphPhoneNumber}
       protocolDays={protocolDays}
       protocolTitle={protocolTitle}

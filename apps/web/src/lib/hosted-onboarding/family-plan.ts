@@ -4946,6 +4946,7 @@ export async function acceptHostedFamilyInvite(input: {
 
   if (activation?.activated) {
     scheduleHostedSignupNotificationEmails({
+      activationSurface: "website",
       memberIds: [activation.memberId],
       prisma,
     });

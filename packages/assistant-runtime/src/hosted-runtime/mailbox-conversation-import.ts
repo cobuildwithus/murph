@@ -14,6 +14,10 @@ import {
   readHostedLinqConversationMessageAccountLookupKey,
 } from "@murphai/hosted-execution";
 import {
+  HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV,
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
+} from "@murphai/hosted-execution/assistant-capabilities";
+import {
   parseHostedEmailThreadTarget,
   redactHostedGroupEmailPromptText,
 } from "@murphai/runtime-state";
@@ -182,6 +186,7 @@ export interface HostedConversationMailboxAssistantInputProjectionUpdate {
 
 export interface HostedConversationMailboxAssistantInputStageResult {
   attachmentDescriptorCount?: number;
+  hasAnalyzeVideoAttachmentCandidate?: boolean;
   inputId: string;
   recordAttachmentEvidence?(
     attachmentEvidence: AssistantInputAttachmentEvidence,
@@ -392,6 +397,23 @@ export async function importHostedConversationMailboxItem(input: {
     pendingReplyEligible && input.item.durablyConsumed !== true
       ? stagedInput.inputId
       : null;
+  const deferActiveTurnNotificationUntilProjection =
+    foregroundAssistantInputId !== null
+    && stagedInput.hasAnalyzeVideoAttachmentCandidate === true
+    && isHostedConversationAnalyzeVideoRuntimeEligible({
+      runtime: input.runtime,
+      wake: decoded.wake,
+    });
+  const notifyActiveTurnInputAvailable = async (): Promise<void> => {
+    if (!foregroundAssistantInputId) {
+      return;
+    }
+    await notifyAssistantActiveTurnInputAvailableForInputIds({
+      inputIds: [foregroundAssistantInputId],
+      ...(input.signal ? { signal: input.signal } : {}),
+      vault: input.vaultRoot,
+    });
+  };
   if (input.item.durablyConsumed !== true) {
     const latencyMilestones = withHostedConversationImportLatencyMilestones({
       autoReplyPreparedAtEpochMs,
@@ -424,12 +446,11 @@ export async function importHostedConversationMailboxItem(input: {
       runtimeAttemptId: input.runtimeAttemptId ?? null,
       wake: decoded.wake,
     });
-    if (foregroundAssistantInputId) {
-      await notifyAssistantActiveTurnInputAvailableForInputIds({
-        inputIds: [foregroundAssistantInputId],
-        ...(input.signal ? { signal: input.signal } : {}),
-        vault: input.vaultRoot,
-      });
+    if (
+      foregroundAssistantInputId
+      && !deferActiveTurnNotificationUntilProjection
+    ) {
+      await notifyActiveTurnInputAvailable();
     }
   }
 
@@ -439,6 +460,9 @@ export async function importHostedConversationMailboxItem(input: {
     attachmentDescriptorCount: stagedInput.attachmentDescriptorCount,
     wake: decoded.wake,
   })) {
+    if (deferActiveTurnNotificationUntilProjection) {
+      await notifyActiveTurnInputAvailable();
+    }
     return {
       ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
       captureId: null,
@@ -464,6 +488,9 @@ export async function importHostedConversationMailboxItem(input: {
       retryable: true,
       status: "blocked",
     };
+  }
+  if (deferActiveTurnNotificationUntilProjection) {
+    await notifyActiveTurnInputAvailable();
   }
   return {
     ...(foregroundAssistantInputId ? { assistantInputId: foregroundAssistantInputId } : {}),
@@ -981,6 +1008,10 @@ async function stageHostedConversationAssistantInputEvent(input: {
 
   return {
     attachmentDescriptorCount: event.content.attachmentDescriptors.length,
+    hasAnalyzeVideoAttachmentCandidate:
+      event.content.attachmentDescriptors.some(
+        isHostedConversationAnalyzeVideoAttachmentDescriptor,
+      ),
     inputId: event.inputId,
     async recordAttachmentEvidence(attachmentEvidence) {
       if (attachmentEvidence.status === "failed") {
@@ -1816,6 +1847,58 @@ function createHostedConversationAssistantInputAttachmentDescriptors(
   }
 
   return [];
+}
+
+const analyzeVideoSupportedMimeTypes = new Set<string>(
+  HOSTED_GEMINI_VIDEO_ANALYSIS_SUPPORTED_MIME_TYPES,
+);
+
+function isHostedConversationAnalyzeVideoRuntimeEligible(input: {
+  runtime: HostedConversationMailboxRuntime;
+  wake: HostedExecutionConversationMessageWake;
+}): boolean {
+  return hasHostedGeminiVideoAnalysisRuntimeKey(input.runtime)
+    && isHostedConversationPrivateDirectWake(input.wake);
+}
+
+function hasHostedGeminiVideoAnalysisRuntimeKey(
+  runtime: HostedConversationMailboxRuntime,
+): boolean {
+  return typeof runtime.forwardedEnv[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV] === "string"
+    && runtime.forwardedEnv[HOSTED_GEMINI_VIDEO_ANALYSIS_API_KEY_ENV].trim().length > 0;
+}
+
+function isHostedConversationPrivateDirectWake(
+  wake: HostedExecutionConversationMessageWake,
+): boolean {
+  if (isHostedLinqConversationMessageWake(wake)) {
+    return wake.message.linqMessage.threadIsDirect !== false;
+  }
+  if (isHostedTelegramConversationMessageWake(wake)) {
+    return wake.message.telegramMessage.threadIsDirect !== false;
+  }
+  if (isHostedEmailConversationMessageWake(wake)) {
+    return resolveHostedEmailConversationDirectness({
+      message: wake.message,
+      threadTarget: parseHostedEmailThreadTarget(wake.message.threadTarget),
+    }) === true;
+  }
+  return false;
+}
+
+function isHostedConversationAnalyzeVideoAttachmentDescriptor(
+  descriptor: AssistantInputAttachmentDescriptor,
+): boolean {
+  const contentType = descriptor.contentType?.trim().toLowerCase() ?? "";
+  if (contentType === "video/mov") {
+    return true;
+  }
+  if (analyzeVideoSupportedMimeTypes.has(contentType)) {
+    return true;
+  }
+
+  const extension = path.extname(descriptor.fileName ?? "").toLowerCase();
+  return extension === ".mp4" || extension === ".mov" || extension === ".webm";
 }
 
 async function recordHostedConversationProjectionBestEffort(

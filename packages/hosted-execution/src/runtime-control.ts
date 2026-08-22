@@ -164,6 +164,7 @@ export const HOSTED_MAILBOX_KINDS = [
   "assistant.ask.completed",
   "clinical-records.sync-requested",
   "device-sync.wake",
+  "environment-interview.completed",
   "environment-voice.captured",
   "health.daily-metric.reported",
   "meal-photo.captured",
@@ -1355,10 +1356,15 @@ export interface HostedRuntimeGroupToolSelfOptOutContext {
 }
 
 export const HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX = 32;
+export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX =
+  "assistant.notification.requested:group-context-handoff:";
+export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS = 4_000;
+export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS = 10 * 60 * 1_000;
 export const HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS = 512;
 // JSON can escape one code point to six bytes. One KiB covers the fixed
 // request envelope, projection scopes, quotes, and commas.
 export const HOSTED_RUNTIME_GROUP_TOOL_REQUEST_MAX_BYTES = 1_024
+  + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS * 6
   + HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
     * HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS
     * 6;
@@ -1476,6 +1482,12 @@ export type HostedRuntimeGroupToolRequest =
       originAssistantInputId: string;
       originSessionId: string;
       question: string;
+    }
+  | {
+      action: "handoff";
+      context: string;
+      groupLabel?: string | null;
+      originAssistantInputId: string;
     }
   | {
       action: "ask_current_sender";
@@ -1632,6 +1644,10 @@ export type HostedRuntimeGroupDailyMetricReportResult =
 export type HostedRuntimeGroupToolResponse =
   | {
       action: "ask";
+      result: HostedRuntimeGroupAskResult;
+    }
+  | {
+      action: "handoff";
       result: HostedRuntimeGroupAskResult;
     }
   | {
@@ -3517,6 +3533,7 @@ export interface HostedWorkspaceInvocationBudget {
 
 export const HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES = [
   "default",
+  "environment_interview",
   "inbox_media_retention",
   "system_mailbox",
 ] as const;

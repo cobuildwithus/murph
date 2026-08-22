@@ -42,6 +42,7 @@ import type {
 import {
   findNextHostedSystemMailboxQueueItem,
   mergeHostedSystemMailboxRollbackItems,
+  projectHostedSystemMailboxModelFreeNotificationFrontier,
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeAt,
@@ -308,8 +309,21 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   const prepared = await updateHostedSystemMailboxState(
     input.vaultRoot,
     (state) => {
+      const notificationProjectedState =
+        input.allowedRouteActions?.includes(
+          "dispatch-assistant-notification",
+        ) === true
+        && (
+          input.allowedRouteActions?.includes("apply-runtime-control-request") === true
+          || input.allowedRouteActions?.includes("run-device-sync-wake") === true
+        )
+        && input.allowedWakeKinds?.includes(
+          "assistant.notification.requested",
+        ) === true
+          ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
+          : state;
       const selectionState = {
-        pending: state.pending.filter((item) =>
+        pending: notificationProjectedState.pending.filter((item) =>
           (
             input.allowedRouteActions != null
             || item.routeAction !== "run-assistant-ask"
@@ -843,6 +857,23 @@ export async function deferHostedSystemMailboxItemAfterVaultShareProjectionFailu
   );
 }
 
+export async function retainHostedSystemMailboxItemUntilDeliveryWake(input: {
+  item: HostedSystemMailboxPendingItem;
+  nextWakeAt: string;
+  vaultRoot: string;
+}): Promise<HostedSystemMailboxPendingItem> {
+  const retainedItem: HostedSystemMailboxPendingItem = {
+    ...input.item,
+    nextAttemptAt: input.nextWakeAt,
+    status: "recording",
+  };
+  await updateHostedSystemMailboxPendingItem({
+    item: retainedItem,
+    vaultRoot: input.vaultRoot,
+  });
+  return retainedItem;
+}
+
 function isHostedDeviceSyncDirtyPostCheckpointRecord(
   record: HostedSystemMailboxPostCheckpointRecord,
 ): boolean {
@@ -989,6 +1020,7 @@ function readHostedSystemMailboxRouteAction(
     || item.route.action === "continue-assistant-ask"
     || item.route.action === "run-clinical-records-sync"
     || item.route.action === "run-device-sync-wake"
+    || item.route.action === "run-environment-interview"
     || item.route.action === "run-environment-voice"
     || item.route.action === "import-reported-daily-metric"
     || item.route.action === "apply-runtime-control-request"

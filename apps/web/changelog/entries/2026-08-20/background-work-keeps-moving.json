@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-20",
+  "order": 210,
+  "item": {
+    "id": "background-work-keeps-moving",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Background work keeps moving",
+    "summary": "Group-join confirmations and connected-health follow-ups now recover when hosted background work is paused or interrupted.",
+    "details": "Current conversations and approved actions still run first. Other paused automatic messages stay paused, and interrupted connected-health work keeps one bounded retry instead of starting a second recovery loop.",
+    "relevanceTags": ["device-sync", "groups", "reliability"],
+    "sourcePullRequests": [2106]
+  }
+}

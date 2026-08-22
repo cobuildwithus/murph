@@ -1,6 +1,6 @@
 # Product UX
 
-Last verified: 2026-08-17
+Last verified: 2026-08-21
 
 ## Purpose
 
@@ -95,6 +95,19 @@ into repository files, tests, prompts, PR text, or review packets.
 
 Keep the plan short. Write decisions, not a large matrix.
 Keep it inside the existing work plan. Do not create a separate form or report.
+
+### Requirement Boundary
+
+The plan defines the minimum current promise, not a wishlist. Product principles
+constrain behavior already in scope; they are not a backlog. Do not add generic
+object controls, future-use data, cascades, or lifecycle behavior unless a
+current supported journey or owner contract requires them.
+
+Every added field or state needs a current writer, current consumer, and
+present-day outcome or hard invariant. Every added control or ownership path
+needs a current supported journey. Plan an exceptional state only when the
+change touches it, the current product supports it, or concrete evidence shows
+a material current risk.
 
 ### Outcome
 
@@ -276,9 +289,10 @@ review-only. It reports findings and does not edit files or create a patch.
 
 Start by stating the irreducible user purpose in one sentence. Name the
 smallest complete experience that fulfills it. The plan is a claim, not proof.
-Challenge missing affected people. Check what each person sees, reads,
-understands, does, publishes, reveals, and receives from the ordinary entry to
-the last boundary that defines the promise.
+Review the ordinary current journey from entry to the last boundary that defines
+the promise. Do not turn an imaginable person, state, operation, or future use
+into a requirement. Missing behavior qualifies only when the current plan or a
+hard invariant requires it and the change creates a material current gap.
 
 `Asynchronous` is not a complete experience or timing contract. An accepted or
 internally completed request still fails when the person gets no truthful
@@ -296,6 +310,10 @@ pre-existing problem only when the changed outcome cannot ship correctly
 without resolving it. Ground every finding in the changed production path,
 rendered evidence, or a production-faithful direct scenario. A valid review can
 have zero findings.
+
+The parent owns finding disposition. It may reject a finding as wrong, already
+handled, speculative, unproven, or not worth the complexity it would add. Only
+accepted findings require remediation.
 
 Use these finding levels:
 

@@ -139,6 +139,10 @@ import {
 import {
   resolveAssistantUserActionAcceptedInputIds,
 } from '../assistant-codex/dynamic-tools/phone-calls.js'
+import {
+  snapshotAnalyzeVideoAttachmentAuthorities,
+  type AnalyzeVideoAttachmentAuthority,
+} from '../assistant-codex/analyze-video-tool.js'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
 import {
   requestAssistantVaultFileSend,
@@ -613,6 +617,36 @@ export async function sendAssistantMessageLocal(
         }
 
         const runtimeState = createAssistantRuntimeStateService(input.vault)
+        const analyzeVideoAttachmentAuthorities = new Map<
+          string,
+          AnalyzeVideoAttachmentAuthority
+        >()
+        const snapshottedAnalyzeVideoInputIds = new Set<string>()
+        const snapshotAnalyzeVideoAuthorities = async (
+          acceptedInputIds: readonly string[],
+        ): Promise<void> => {
+          const newInputIds = acceptedInputIds.filter((acceptedInputId) => {
+            if (snapshottedAnalyzeVideoInputIds.has(acceptedInputId)) {
+              return false
+            }
+            snapshottedAnalyzeVideoInputIds.add(acceptedInputId)
+            return true
+          })
+          if (newInputIds.length === 0) return
+          const authorities = await snapshotAnalyzeVideoAttachmentAuthorities({
+            acceptedInputIds: newInputIds,
+            vaultRoot: input.vault,
+          })
+          for (const authority of authorities) {
+            const key = JSON.stringify([
+              authority.messageRef,
+              authority.ordinal,
+            ])
+            if (!analyzeVideoAttachmentAuthorities.has(key)) {
+              analyzeVideoAttachmentAuthorities.set(key, authority)
+            }
+          }
+        }
         const preProviderSteerAcceptedInputJournals = new Map<
           string,
           AssistantAcceptedTurnInputJournal
@@ -623,6 +657,9 @@ export async function sendAssistantMessageLocal(
               inputs: acceptedInputs,
               vault: input.vault,
             })
+            await snapshotAnalyzeVideoAuthorities(
+              acceptedInputs.map((acceptedInput) => acceptedInput.id),
+            )
           },
           admissionHook: input.activeTurnInput,
           beforeProviderSteer: input.beforeProviderAcceptedInputs
@@ -637,6 +674,9 @@ export async function sendAssistantMessageLocal(
                   journal: acceptedInputJournal,
                   vault: input.vault,
                 })
+                await snapshotAnalyzeVideoAuthorities(
+                  acceptedInputJournal.inputIds,
+                )
                 const releaseProviderAcceptedInputs =
                   await input.beforeProviderAcceptedInputs?.({
                     ...event,
@@ -680,6 +720,9 @@ export async function sendAssistantMessageLocal(
           journal: initialAcceptedInputJournal,
           vault: input.vault,
         })
+        await snapshotAnalyzeVideoAuthorities(
+          initialAcceptedInputJournal.inputIds,
+        )
         const threadScope = resolveAssistantCodexThreadScope({})
         const turnTimingStartedAt = lockAcquiredAt
         let currentInput = input
@@ -845,6 +888,9 @@ export async function sendAssistantMessageLocal(
                 messageInput: currentInput,
                 session: currentSession,
               }),
+              getAnalyzeVideoAttachmentAuthorities: () => [
+                ...analyzeVideoAttachmentAuthorities.values(),
+              ],
               getConversationScope: () =>
                 resolveAssistantConversationScope(
                   sharedPlan.conversationPolicy.audience,

@@ -2500,7 +2500,7 @@ test("SettingsPage omits an empty email-only invitation but preserves activity h
   mocks.resolveMurphContactOptions.mockImplementation((input) =>
     input?.contactChannels?.email === true
       ? [{
-          href: "mailto:murph@mail.withmurph.ai?body=test",
+          href: "mailto:mail@mail.withmurph.ai?body=test",
           kind: "email",
           label: "Email",
         }]

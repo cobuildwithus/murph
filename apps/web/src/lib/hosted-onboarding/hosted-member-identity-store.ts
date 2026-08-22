@@ -78,7 +78,7 @@ export interface HostedMemberIdentityCoreLookup {
   core: Prisma.HostedMemberIdentityGetPayload<{
     select: typeof hostedMemberIdentityCoreLookupSelect;
   }>["member"];
-  matchedBy: "phoneNumber";
+  matchedBy: "phoneNumber" | "privyUserId";
 }
 
 type HostedMemberIdentityCoreLookupRecord =
@@ -153,14 +153,36 @@ export interface HostedMemberSignupPhoneStateWriteInput {
   signupPhoneNumber?: string | null;
 }
 
-export async function lookupHostedMemberIdentityByPrivyUserId(input: {
+type HostedMemberIdentityByPrivyUserIdInput = {
   prisma: HostedOnboardingReadClient;
   privyUserId: string;
-}): Promise<HostedMemberIdentityLookup | null> {
+};
+
+export async function lookupHostedMemberIdentityByPrivyUserId(
+  input: HostedMemberIdentityByPrivyUserIdInput & { projection: "core" },
+): Promise<HostedMemberIdentityCoreLookup | null>;
+export async function lookupHostedMemberIdentityByPrivyUserId(
+  input: HostedMemberIdentityByPrivyUserIdInput,
+): Promise<HostedMemberIdentityLookup | null>;
+export async function lookupHostedMemberIdentityByPrivyUserId(
+  input: HostedMemberIdentityByPrivyUserIdInput & { projection?: "core" },
+): Promise<HostedMemberIdentityCoreLookup | HostedMemberIdentityLookup | null> {
   const privyUserLookupKeys = createHostedPrivyUserLookupKeyReadCandidates(input.privyUserId);
 
   if (privyUserLookupKeys.length === 0) {
     return null;
+  }
+
+  if (input.projection === "core") {
+    const records = await input.prisma.hostedMemberIdentity.findMany({
+      where: {
+        privyUserLookupKey: {
+          in: privyUserLookupKeys,
+        },
+      },
+      select: hostedMemberIdentityCoreLookupSelect,
+    });
+    return resolveHostedMemberIdentityCoreLookup(records, "privyUserId");
   }
 
   const identityRecords = await input.prisma.hostedMemberIdentity.findMany({
@@ -558,7 +580,7 @@ async function resolveHostedMemberIdentityLookup(
 
 function resolveHostedMemberIdentityCoreLookup(
   records: readonly HostedMemberIdentityCoreLookupRecord[],
-  matchedBy: "phoneNumber",
+  matchedBy: HostedMemberIdentityCoreLookup["matchedBy"],
 ): HostedMemberIdentityCoreLookup | null {
   const coreByMemberId = new Map<string, HostedMemberIdentityCoreLookup["core"]>();
   for (const record of records) {

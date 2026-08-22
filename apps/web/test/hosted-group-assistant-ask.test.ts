@@ -2,22 +2,31 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedMailboxEnvelopeWithIdentityTx: vi.fn(),
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx: vi.fn(),
+  assertHostedThreadRouteEgressAuthority: vi.fn(),
+  bindHostedAssistantNotificationDestination: vi.fn(),
   readHostedMailboxConversationWakeByAssistantInputId: vi.fn(),
   readHostedMailboxItemById: vi.fn(),
   readHostedMailboxWakeByDedupeKey: vi.fn(),
   readHostedMailboxWakeByItemId: vi.fn(),
   requireHostedRuntimeActiveAccess: vi.fn(),
   requireHostedRuntimeActiveAccessForUpdateTx: vi.fn(),
+  resolveHostedAssistantNotificationDestination: vi.fn(),
+  runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({
   appendHostedMailboxEnvelopeWithIdentityTx:
     mocks.appendHostedMailboxEnvelopeWithIdentityTx,
+  appendHostedMailboxEnvelopeWithPreparedCryptoTx:
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx,
   readHostedMailboxConversationWakeByAssistantInputId:
     mocks.readHostedMailboxConversationWakeByAssistantInputId,
   readHostedMailboxItemById: mocks.readHostedMailboxItemById,
   readHostedMailboxWakeByDedupeKey: mocks.readHostedMailboxWakeByDedupeKey,
   readHostedMailboxWakeByItemId: mocks.readHostedMailboxWakeByItemId,
+  runWithPreparedHostedMailboxItemAppendCrypto:
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto,
 }));
 
 vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
@@ -26,11 +35,27 @@ vi.mock("@/src/lib/hosted-mailbox/runtime-access", () => ({
     mocks.requireHostedRuntimeActiveAccessForUpdateTx,
 }));
 
+vi.mock("@/src/lib/hosted-routing/assistant-notification-destination", () => ({
+  bindHostedAssistantNotificationDestination:
+    mocks.bindHostedAssistantNotificationDestination,
+  resolveHostedAssistantNotificationDestination:
+    mocks.resolveHostedAssistantNotificationDestination,
+}));
+
+vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
+  assertHostedLinqRouteEgressAuthority: vi.fn(),
+  assertHostedThreadRouteEgressAuthority:
+    mocks.assertHostedThreadRouteEgressAuthority,
+}));
+
 import {
+  buildHostedGroupContextHandoffInstructions,
   createHostedAssistantAskCompletionId,
   createHostedAssistantAskRequestId,
+  createHostedGroupContextHandoffEventId,
   handleHostedRuntimeAssistantAskControl,
   requestHostedGroupAssistantAsk,
+  requestHostedGroupContextHandoff,
 } from "@/src/lib/hosted-groups/group-assistant-ask";
 import {
   buildHostedExecutionAssistantAskCompletedWake,
@@ -39,6 +64,9 @@ import {
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS,
 } from "@murphai/hosted-execution/contracts";
+import {
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+} from "@murphai/hosted-execution/runtime-control";
 
 const NOW = new Date("2026-07-15T12:00:00.000Z");
 const ORIGIN_MEMBER_ID = "member-personal";
@@ -156,6 +184,34 @@ function mailboxItemForWake(wake: ReturnType<typeof requestWake>) {
   };
 }
 
+function groupDestination() {
+  const externalThreadRouteAuthority = {
+    accountLookupKey: "linq-account-key",
+    channel: "linq" as const,
+    containerMemberId: TARGET_RUNTIME_MEMBER_ID,
+    threadId: "linq-group-chat",
+  };
+  const route = {
+    actorId: null,
+    channel: "linq" as const,
+    delivery: {
+      kind: "thread" as const,
+      target: "linq-group-chat",
+    },
+    identityId: "group-identity",
+    threadId: "group-thread",
+    threadIsDirect: false,
+  };
+  return {
+    bound: { externalThreadRouteAuthority, route },
+    destination: {
+      conversationShape: "thread-container" as const,
+      externalThreadRouteAuthority,
+      route,
+    },
+  };
+}
+
 describe("Hosted group Assistant Ask admission", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -174,6 +230,34 @@ describe("Hosted group Assistant Ask admission", () => {
           id: input.envelope.eventId,
           userId: input.envelope.userId,
         },
+      }),
+    );
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
+      async (input: { envelope: { eventId: string; userId: string } }) => ({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          id: input.envelope.eventId,
+          userId: input.envelope.userId,
+        },
+      }),
+    );
+    const destination = groupDestination();
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(
+      destination.destination,
+    );
+    mocks.bindHostedAssistantNotificationDestination.mockReturnValue(
+      destination.bound,
+    );
+    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
+      async (input: {
+        append: (prepared: object) => Promise<unknown>;
+      }) => input.append({
+        domain: "mailbox-payload",
+        rootKeyId: "root-key",
+        userId: TARGET_RUNTIME_MEMBER_ID,
       }),
     );
   });
@@ -412,6 +496,208 @@ describe("Hosted group Assistant Ask admission", () => {
       result: { status: "unavailable", unavailableReason: "origin_unavailable" },
     });
     expect(tx.hostedGroupMember.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("Hosted private-to-group context handoff admission", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readHostedMailboxItemById.mockResolvedValue(null);
+    mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValue(
+      directOriginWake(),
+    );
+    mocks.requireHostedRuntimeActiveAccess.mockResolvedValue(undefined);
+    mocks.requireHostedRuntimeActiveAccessForUpdateTx.mockResolvedValue(undefined);
+    const destination = groupDestination();
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(
+      destination.destination,
+    );
+    mocks.bindHostedAssistantNotificationDestination.mockReturnValue(
+      destination.bound,
+    );
+    mocks.assertHostedThreadRouteEgressAuthority.mockResolvedValue({});
+    mocks.runWithPreparedHostedMailboxItemAppendCrypto.mockImplementation(
+      async (input: {
+        append: (prepared: object) => Promise<unknown>;
+      }) => input.append({
+        domain: "mailbox-payload",
+        rootKeyId: "root-key",
+        userId: TARGET_RUNTIME_MEMBER_ID,
+      }),
+    );
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockImplementation(
+      async (input: { envelope: { eventId: string; userId: string } }) => ({
+        dedupeConflict: false,
+        duplicate: false,
+        inserted: true,
+        item: {
+          id: input.envelope.eventId,
+          userId: input.envelope.userId,
+        },
+      }),
+    );
+  });
+
+  it("queues one expiring target-authored notification for the only group", async () => {
+    const { prisma } = createPrisma();
+    const context = "Sunny logged a 405 lb deadlift personal record today.";
+    const eventId = createHostedGroupContextHandoffEventId({
+      memberId: ORIGIN_MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+
+    await expect(requestHostedGroupContextHandoff({
+      context: `  ${context}  `,
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: {
+        expectedUserId: TARGET_RUNTIME_MEMBER_ID,
+        mailboxItemId: eventId,
+      },
+      result: { status: "accepted", targetLabel: "100 Club" },
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .toHaveBeenCalledWith({
+        envelope: expect.objectContaining({
+          eventId,
+          kind: "assistant.notification.requested",
+          notification: {
+            deliveryDedupeToken: eventId,
+            deliveryDispatchMode: "queue-only",
+            deliveryIdempotencyKey: eventId,
+            externalThreadRouteAuthority: expect.objectContaining({
+              containerMemberId: TARGET_RUNTIME_MEMBER_ID,
+              threadId: "linq-group-chat",
+            }),
+            groupContextHandoff: {
+              membershipId: "membership-one",
+              originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+            },
+            instructions: buildHostedGroupContextHandoffInstructions({ context }),
+            notificationPromptProfile: "context-handoff",
+            responsePolicy: { kind: "require_send" },
+            route: expect.objectContaining({
+              threadIsDirect: false,
+            }),
+          },
+          userId: TARGET_RUNTIME_MEMBER_ID,
+        }),
+        expiresAt: new Date(
+          NOW.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+        ).toISOString(),
+        itemId: eventId,
+        prepared: expect.any(Object),
+        tx: expect.any(Object),
+      });
+    expect(mocks.assertHostedThreadRouteEgressAuthority).toHaveBeenCalledWith({
+      authority: expect.objectContaining({
+        containerMemberId: TARGET_RUNTIME_MEMBER_ID,
+        threadId: "linq-group-chat",
+      }),
+      prisma: expect.any(Object),
+    });
+  });
+
+  it("fails before mailbox crypto when the group route is unavailable", async () => {
+    mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(null);
+    const { prisma } = createPrisma();
+
+    await expect(requestHostedGroupContextHandoff({
+      context: "A bounded fact.",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "group_route_unavailable",
+      },
+    });
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto)
+      .not.toHaveBeenCalled();
+  });
+
+  it("pins changed context and target to the first deterministic request", async () => {
+    const { prisma } = createPrisma();
+    const eventId = createHostedGroupContextHandoffEventId({
+      memberId: ORIGIN_MEMBER_ID,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+    });
+    mocks.readHostedMailboxItemById.mockResolvedValue({
+      dedupeKey: eventId,
+      expiresAt: new Date(
+        NOW.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+      ).toISOString(),
+      id: eventId,
+      kind: "assistant.notification.requested",
+      userId: TARGET_RUNTIME_MEMBER_ID,
+    });
+    mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mockResolvedValue({
+      dedupeConflict: true,
+      duplicate: true,
+      inserted: false,
+      item: { id: eventId, userId: TARGET_RUNTIME_MEMBER_ID },
+    });
+
+    await expect(requestHostedGroupContextHandoff({
+      context: "Changed context must not redirect the same accepted input.",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "request_conflict" },
+    });
+
+    mocks.readHostedMailboxItemById.mockResolvedValue({
+      dedupeKey: eventId,
+      expiresAt: new Date(
+        NOW.getTime() + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+      ).toISOString(),
+      id: eventId,
+      kind: "assistant.notification.requested",
+      userId: "member-other-group-runtime",
+    });
+    await expect(requestHostedGroupContextHandoff({
+      context: "Changed target must not redirect the same accepted input.",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: { status: "unavailable", unavailableReason: "request_conflict" },
+    });
+  });
+
+  it("fails closed when the selected membership generation changes before append", async () => {
+    const { prisma, tx } = createPrisma();
+    tx.hostedGroupMember.findUnique
+      .mockResolvedValueOnce(membership())
+      .mockResolvedValueOnce(null);
+
+    await expect(requestHostedGroupContextHandoff({
+      context: "A bounded fact.",
+      memberId: ORIGIN_MEMBER_ID,
+      now: NOW,
+      originAssistantInputId: ORIGIN_ASSISTANT_INPUT_ID,
+      prisma: prisma as never,
+    })).resolves.toEqual({
+      mailboxWake: null,
+      result: {
+        status: "unavailable",
+        unavailableReason: "membership_unavailable",
+      },
+    });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx)
+      .not.toHaveBeenCalled();
   });
 });
 

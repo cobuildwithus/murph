@@ -44,5 +44,8 @@ jobs:
       - name: Test native iOS hosted E2E control contract
         run: node --test scripts/native-ios-hosted-e2e.test.mjs
 
+      - name: Test native Android hosted E2E control contract
+        run: node --test scripts/native-android-hosted-e2e.test.mjs
+
       - name: Check tracked private/build artifacts
         run: pnpm no-js

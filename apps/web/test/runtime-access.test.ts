@@ -5,6 +5,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  hasHostedRuntimeActiveAccessForUpdateTx,
   requireHostedRuntimeActiveAccessForUpdateTx,
   requireHostedRuntimeMembersActiveAccessForUpdateTx,
 } from "@/src/lib/hosted-mailbox/runtime-access";
@@ -231,6 +232,44 @@ describe("requireHostedRuntimeActiveAccessForUpdateTx", () => {
     });
 
     expect(tx.hostedMember.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("returns false only for canonical inactive access", async () => {
+    const { tx } = buildRuntimeAccessTx(
+      ["member_owner", "member_owner"],
+      { ownerBillingStatus: HostedBillingStatus.paused },
+    );
+
+    await expect(hasHostedRuntimeActiveAccessForUpdateTx(
+      "member_group_runtime",
+      { prisma: tx },
+    )).resolves.toBe(false);
+  });
+
+  it("preserves retryable authority drift for the transaction owner", async () => {
+    const { tx } = buildRuntimeAccessTx([
+      "member_owner",
+      "member_other_owner",
+    ]);
+
+    await expect(hasHostedRuntimeActiveAccessForUpdateTx(
+      "member_group_runtime",
+      { prisma: tx },
+    )).rejects.toMatchObject({
+      code: "HOSTED_RUNTIME_ACCESS_AUTHORITY_CHANGED",
+      retryable: true,
+    });
+  });
+
+  it("preserves unexpected database failures for the transaction owner", async () => {
+    const { tx } = buildRuntimeAccessTx([]);
+    const databaseError = new Error("database transaction aborted");
+    tx.$queryRaw.mockRejectedValueOnce(databaseError);
+
+    await expect(hasHostedRuntimeActiveAccessForUpdateTx(
+      "member_group_runtime",
+      { prisma: tx },
+    )).rejects.toBe(databaseError);
   });
 
   it("completes reciprocal cross-owned runtime checks in owner-cluster order", async () => {

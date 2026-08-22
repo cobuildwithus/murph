@@ -28,7 +28,15 @@ export {
   NATIVE_IOS_HOSTED_E2E_VERCEL_TARGET,
 };
 
-export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postconditions, retire }) {
+export async function runPrLifecycle({
+  cleanup,
+  deploy,
+  dispatch,
+  laneLabel = "Native iOS E2E",
+  now,
+  postconditions,
+  retire,
+}) {
   let primaryError = null;
   let primaryStage = "retire_before_run";
   let finalizationError = null;
@@ -58,8 +66,8 @@ export async function runPrLifecycle({ cleanup, deploy, dispatch, now, postcondi
   }
   if (finalizationError) {
     const message = primaryError
-      ? `Native iOS E2E failed at ${primaryStage}; fail-closed finalization failed at ${finalizationStage}.`
-      : `Native iOS E2E finalization failed at ${finalizationStage}.`;
+      ? `${laneLabel} failed at ${primaryStage}; fail-closed finalization failed at ${finalizationStage}.`
+      : `${laneLabel} finalization failed at ${finalizationStage}.`;
     if (primaryError) throw new AggregateError([primaryError, finalizationError], message);
     throw new Error(message, { cause: finalizationError });
   }

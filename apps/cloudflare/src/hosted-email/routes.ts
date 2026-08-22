@@ -9,10 +9,11 @@ import {
 } from "@murphai/hosted-execution";
 import {
   createHostedEmailGroupReplyAliasRoute,
-  createHostedEmailUserReplyAliasRoute,
+  createHostedEmailReplyAliasRoute,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
+  parseHostedEmailReplyAliasRegistrationCallbackResponse,
   parseHostedEmailRouteResolutionCallbackResponse,
 } from "@murphai/hosted-execution/hosted-email";
 import {
@@ -103,20 +104,15 @@ export async function createHostedEmailUserAddress(input: {
     throw new Error("Hosted email route registration callback is not configured.");
   }
 
-  const replyAlias = await createHostedEmailUserReplyAliasRoute({
-    domain: input.config.domain,
-    localPart: input.config.localPart,
-    signingSecret: input.config.signingSecret,
-    userId: input.userId,
-  });
   let response: Response;
   try {
     response = await fetchHostedExecutionWebControlPlaneResponse({
       ...(input.webControlAllowHttpHosts ? { allowHttpHosts: input.webControlAllowHttpHosts } : {}),
       baseUrl: input.webControlBaseUrl,
-      body: JSON.stringify({
-        aliasKey: replyAlias.aliasKey,
-      }),
+      // Web owns the current generation. A new Worker against an old Web fails
+      // closed because the old endpoint rejects null; an old Worker against a
+      // rotated Web receives 409 rather than restoring the deterministic alias.
+      body: JSON.stringify({ aliasKey: null }),
       boundUserId: input.userId,
       callbackSigning: input.webCallbackSigning,
       fetchImpl: input.fetchImpl,
@@ -176,7 +172,20 @@ export async function createHostedEmailUserAddress(input: {
     throw error;
   }
 
-  return replyAlias.address;
+  const payload = parseHostedEmailReplyAliasRegistrationCallbackResponse(
+    await response.json(),
+  );
+  const expectedRoute = await createHostedEmailReplyAliasRoute({
+    aliasKey: payload.aliasKey,
+    domain: input.config.domain,
+    localPart: input.config.localPart,
+    signingSecret: input.config.signingSecret,
+  });
+  if (payload.address !== expectedRoute.address) {
+    throw new Error("Hosted email route registration returned an inconsistent alias address.");
+  }
+
+  return payload.address;
 }
 
 export async function resolveHostedEmailInboundRoute(

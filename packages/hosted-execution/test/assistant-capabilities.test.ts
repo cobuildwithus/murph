@@ -48,6 +48,7 @@ describe("hosted assistant capability env lists", () => {
 
   it("exports named provider env projections for runtime boundaries", () => {
     expect(HOSTED_ASSISTANT_WORKER_SECRET_ENV_NAMES).toEqual([
+      "GEMINI_API_KEY",
       "ELEVENLABS_API_KEY",
       "XAI_API_KEY",
       "EXA_API_KEY",
@@ -86,6 +87,7 @@ describe("hosted assistant capability env lists", () => {
     ]);
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("ELEVENLABS_API_KEY");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("XAI_API_KEY");
+    expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("GEMINI_API_KEY");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_MODEL_ID");
     expect(HOSTED_ASSISTANT_CODEX_SHELL_ENV_NAMES).not.toContain("MURPH_ELEVENLABS_VOICE_ID");
 

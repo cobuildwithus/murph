@@ -173,6 +173,40 @@ describe('assistant tracked workout table skill', () => {
       'Starting a new workout is independent of every older unfinished workout',
     )
     expect(skill).toContain(
+      "one repeated `--exercise 'name=...;sets=...;reps=...'` value per ordered ad-hoc exercise",
+    )
+    expect(skill).not.toContain('vault-cli workout replace')
+    expect(skill).not.toContain('--confirm-delete')
+    expect(skill).toContain('The start command must')
+    expect(skill).toContain(
+      'contain the complete ordered initial exercise list',
+    )
+    expect(skill).toContain(
+      'Verify the successful start result identifies the new canonical `eventId`',
+    )
+    expect(skill).toContain(
+      '`vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`',
+    )
+    expect(skill).toContain('Never delete first.')
+    expect(skill).toContain(
+      'If the guarded delete conflicts or fails, keep both workouts.',
+    )
+    expect(skill).toContain(
+      'Never roll back or delete the successfully created replacement.',
+    )
+    expect(skill).toContain('Other unfinished workouts are valid')
+    expect(skill).toContain('Pass `reps=<n>` only')
+    expect(skill).toContain(
+      'for one exact member-stated integer count',
+    )
+    expect(skill).toContain(
+      'format or an exact-reference reminder retains its specialized start',
+    )
+    expect(skill).toContain(
+      'An ordinary request to start a workout does not itself',
+    )
+    expect(skill).toContain('authorize deletion.')
+    expect(skill).toContain(
       'Presentation order never proves exercise identity.',
     )
     expect(skill).toContain('Saved target values remain in the workout format')
@@ -213,6 +247,57 @@ describe('assistant tracked workout table skill', () => {
     )
     expect(skill).not.toContain('bounded recovery offer')
     expect(skill).not.toContain('No active live workout was found')
+  })
+
+  it('limits create-first replacement to losslessly representable unfinished drafts', async () => {
+    const skill = await readFile(
+      path.join(resolveAssistantSkillsRoot(), 'tracked-table', 'SKILL.md'),
+      'utf8',
+    )
+    const compactSkill = skill.replaceAll(/\s+/gu, ' ')
+
+    expect(compactSkill).toContain(
+      'Create-first replacement is limited to one exact ad-hoc unfinished draft that the batch-start command can represent without loss.',
+    )
+    expect(compactSkill).toContain(
+      'a request naming yesterday, an older date, a completed workout, an older workout id, or an older card stays on the exact-record correction path and never enters this start-and-delete workflow.',
+    )
+    expect(compactSkill).toContain(
+      'Every existing set must be an unlogged placeholder.',
+    )
+    expect(compactSkill).toContain(
+      'retain the old workout and use the existing exact-record correction path; never issue the start-and-delete sequence.',
+    )
+    expect(compactSkill).toContain(
+      "the qualifying draft's exact `--started-at`, `--type`, and, when present, `--note`",
+    )
+    expect(compactSkill).toContain(
+      'Only after a verified creation or exactly-one recovery, run',
+    )
+    expect(compactSkill).toContain(
+      '`vault-cli workout delete <old_evt_id> --expected-revision <proposal_revision>`.',
+    )
+    expect(compactSkill).toContain(
+      'If the result is missing, interrupted, or otherwise ambiguous after invocation, treat the approval as consumed',
+    )
+    expect(compactSkill).toContain(
+      'never run `workout start` again for that approval.',
+    )
+    expect(compactSkill).toContain(
+      '`vault-cli workout list --from <old-start-local-date> --to <old-start-local-date> --limit 200 --format json`',
+    )
+    expect(compactSkill).toContain(
+      'exclude the old event id, and exact-read every remaining candidate with `workout show`.',
+    )
+    expect(compactSkill).toContain(
+      'Exactly one match recovers its canonical id and may continue to guarded deletion.',
+    )
+    expect(compactSkill).toContain(
+      'With zero matches, multiple matches, an incomplete bounded list, or any failed read, keep every record',
+    )
+    expect(compactSkill).toContain(
+      'Never retry creation or infer a candidate by recency.',
+    )
   })
 
   it('uses reminder references without reviving a workout singleton', async () => {

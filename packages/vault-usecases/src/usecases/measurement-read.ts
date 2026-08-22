@@ -32,6 +32,7 @@ import {
 import {
   normalizeMetricSlug,
 } from './measurement.js'
+import { readExactEventRecord } from './exact-event-record.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const TRACKED_MEASUREMENT_EVENT_KINDS = ['measurement', 'body_measurement'] as const
@@ -129,7 +130,12 @@ async function loadTrackedMeasurementRecord(
 }
 
 export async function showMeasurementRecord(vault: string, lookup: string) {
-  const record = await loadTrackedMeasurementRecord(vault, lookup, TRACKED_MEASUREMENT_EVENT_KINDS, 'measurement')
+  const { record } = await readExactEventRecord({
+    vault,
+    lookup,
+    entityLabel: 'measurement',
+    expectedKinds: TRACKED_MEASUREMENT_EVENT_KINDS,
+  })
 
   return {
     vault,

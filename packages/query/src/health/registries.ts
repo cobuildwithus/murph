@@ -562,6 +562,7 @@ export interface HabitatQueryEntity extends RegistryQueryEntity {
   domain: string | null;
   aspect: string | null;
   indicators: Record<string, unknown> | null;
+  indicatorNotes: Record<string, unknown> | null;
   indicatorRecordedAt: Record<string, unknown> | null;
   note: string | null;
 }

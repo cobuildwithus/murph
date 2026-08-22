@@ -28,6 +28,7 @@ import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
@@ -278,11 +279,21 @@ import {
   MURPH_ASK_GROK_TOOL,
   parseAskGrokArguments,
 } from './dynamic-tools/ask-grok.js'
+import {
+  executeAnalyzeVideoDynamicTool,
+  MURPH_ANALYZE_VIDEO_TOOL,
+  parseAnalyzeVideoArguments,
+} from './dynamic-tools/analyze-video.js'
 import type {
   AskGrokToolArgs,
   AskGrokToolRuntime,
   AskGrokTurnState,
 } from './ask-grok-tool.js'
+import type {
+  AnalyzeVideoToolArgs,
+  AnalyzeVideoToolRuntime,
+  AnalyzeVideoTurnState,
+} from './analyze-video-tool.js'
 export * from './dynamic-tool-catalog.js'
 import {
   asRecord,
@@ -460,6 +471,28 @@ const groupVaultShareProjectionScopeSchema = z.unknown().transform((value, conte
   return scope
 })
 
+const groupLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) =>
+      Array.from(value).length
+      <= HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+    { message: 'groupLabel exceeds the Unicode code-point limit' },
+  )
+
+const groupHandoffContextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) =>
+      Array.from(value).length
+      <= HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+    { message: 'context exceeds the Unicode code-point limit' },
+  )
+
 const groupQuestionSchema = z
   .string()
   .trim()
@@ -486,18 +519,15 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask'),
-      groupLabel: z
-        .string()
-        .trim()
-        .min(1)
-        .refine(
-          (value) =>
-            Array.from(value).length
-            <= HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-          { message: 'groupLabel exceeds the Unicode code-point limit' },
-        )
-        .optional(),
+      groupLabel: groupLabelSchema.optional(),
       question: groupQuestionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('handoff'),
+      context: groupHandoffContextSchema,
+      groupLabel: groupLabelSchema.optional(),
     })
     .strict(),
   z
@@ -1068,6 +1098,12 @@ export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
+  /**
+   * Trusted runtime-owned text that must be delivered when the model supplies
+   * no response text or card. Analyze-video uses this for the best completed
+   * tool outcome so successful observations cannot disappear behind no-reply.
+   */
+  requiredFinalResponseFallback?: string
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
@@ -1119,6 +1155,7 @@ type MurphGroupToolRequest =
       {
         action:
           | 'ask'
+          | 'handoff'
           | 'ask_current_sender'
           | 'record_current_sender_daily_metric'
           | 'ask_member'
@@ -1146,6 +1183,11 @@ type MurphGroupToolRequest =
       action: 'ask'
       groupLabel?: string
       question: string
+    }
+  | {
+      action: 'handoff'
+      context: string
+      groupLabel?: string
     }
   | {
       action: 'ask_current_sender'
@@ -1247,6 +1289,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'analyze-video'
+      args: AnalyzeVideoToolArgs
+    }
+  | {
       kind: 'ask-grok'
       args: AskGrokToolArgs
     }
@@ -1297,6 +1343,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-analyze-video-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1715,6 +1765,20 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
+    case MURPH_ANALYZE_VIDEO_TOOL.name: {
+      const parsed = parseAnalyzeVideoArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-analyze-video-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'analyze-video',
+        args: parsed.args,
+      }
+    }
     case MURPH_ASK_GROK_TOOL.name: {
       const parsed = parseAskGrokArguments(request.arguments)
       if (!parsed.ok) {
@@ -2067,6 +2131,8 @@ export async function executeMurphDynamicToolRequest(input: {
   vaultRoot?: string | null
   voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
@@ -2159,6 +2225,8 @@ export async function executeMurphDynamicToolRequest(input: {
       )
     case 'invalid-generate-song-arguments':
       return toolTextResult(false, 'invalid song generation arguments')
+    case 'invalid-analyze-video-arguments':
+      return toolTextResult(false, 'invalid analyze_video arguments')
     case 'invalid-ask-grok-arguments':
       return toolTextResult(false, 'invalid ask_grok arguments')
     case 'invalid-progress-arguments':
@@ -3311,6 +3379,29 @@ export async function executeMurphDynamicToolRequest(input: {
         recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
+    case 'analyze-video': {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (userActionScope?.conversationScope !== 'direct') {
+        return toolTextResult(
+          false,
+          'video analysis requires a verified private direct conversation',
+        )
+      }
+      return await executeAnalyzeVideoDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        acceptedInputIds: userActionScope.acceptedInputIds,
+        attachmentAuthorities:
+          input.hostedToolContext
+            ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? null,
+        args: input.request.args,
+        materializeWorkspaceArtifacts:
+          input.materializeWorkspaceArtifacts ?? null,
+        runtime: input.analyzeVideoRuntime ?? null,
+        turnState: input.analyzeVideoTurnState ?? null,
+        vaultRoot: input.vaultRoot ?? null,
       })
     }
     case 'ask-grok': {
@@ -4846,6 +4937,30 @@ async function executeGroupTool(input: {
       originAssistantInputId,
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
+    }
+  } else if (input.request.action === 'handoff') {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (userActionScope?.conversationScope !== 'direct') {
+      return toolTextResult(
+        false,
+        'group handoff requires a fresh user request in a personal direct conversation',
+      )
+    }
+    const originAssistantInputId = userActionScope.acceptedInputIds.at(-1) ?? null
+    if (!originAssistantInputId) {
+      return toolTextResult(
+        false,
+        'group handoff requires fresh user-sourced input for this turn',
+      )
+    }
+    request = {
+      action: 'handoff',
+      context: input.request.context,
+      ...(input.request.groupLabel === undefined
+        ? {}
+        : { groupLabel: input.request.groupLabel }),
+      originAssistantInputId,
     }
   } else if (input.request.action === 'ask_current_sender') {
     const userActionScope =
@@ -6890,6 +7005,7 @@ function parseGroupArguments(
   }
   if (
     parsed.data.action === 'ask'
+    || parsed.data.action === 'handoff'
     || parsed.data.action === 'ask_member'
     || parsed.data.action === 'post_disclosure_request'
     || parsed.data.action === 'revoke_disclosure_grant'

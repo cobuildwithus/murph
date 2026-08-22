@@ -447,6 +447,7 @@ function projectEntityAttributes(
       "aspect",
       "domain",
       "indicators",
+      "indicatorNotes",
       "indicatorRecordedAt",
       "note",
     ]);

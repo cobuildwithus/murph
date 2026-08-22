@@ -5,7 +5,7 @@ import {
 } from "@murphai/contracts";
 import type { BrowserVaultCoreCapableQueryClient } from "@murphai/query/browser-replica-client";
 
-import type { HabitatValues } from "./home-model";
+import type { HabitatIndicatorNotes, HabitatValues } from "./home-model";
 
 export function selectEnvironmentHabitatValues(
   client: BrowserVaultCoreCapableQueryClient,
@@ -42,6 +42,39 @@ export function selectEnvironmentHabitatValues(
   }
 
   return values;
+}
+
+export function selectEnvironmentHabitatIndicatorNotes(
+  client: BrowserVaultCoreCapableQueryClient,
+): HabitatIndicatorNotes {
+  const notes: HabitatIndicatorNotes = {};
+
+  for (const entity of client.entities.list({ families: ["habitat"] })) {
+    const aspectId = entity.attributes.aspect;
+    const storedNotes = entity.attributes.indicatorNotes;
+    if (typeof aspectId !== "string" || !isRecord(storedNotes)) {
+      continue;
+    }
+
+    const aspect = getHabitatAspectDefinition(aspectId);
+    if (!aspect) {
+      continue;
+    }
+
+    const aspectNotes: Record<string, string> = {};
+    for (const indicator of aspect.indicators) {
+      const note = storedNotes[indicator.id];
+      if (typeof note === "string" && note.trim().length > 0) {
+        aspectNotes[indicator.id] = note;
+      }
+    }
+
+    if (Object.keys(aspectNotes).length > 0) {
+      notes[aspect.id] = aspectNotes;
+    }
+  }
+
+  return notes;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
