@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  buildKernelCliEnvironmentForTest,
+  buildKernelTunnelArgumentsForTest,
   completeExternalJunctionAuthorizationForTest,
   completeHostedLocalJunctionAuthorizationForTest,
   readHostedLocalJunctionBrowserConfigForTest,
@@ -150,6 +152,71 @@ function authorizationFrame(input: {
 }
 
 describe("hosted-local Junction wearable browser authorization", () => {
+  it("uses the local browser transport unless the caller selects Kernel", () => {
+    const config = createConfig();
+
+    expect(config.browserTransport).toBe("local");
+    expect(config.kernelApiKey).toBeNull();
+  });
+
+  it("accepts only a headless WHOOP Kernel browser on explicit localhost", () => {
+    const config = createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    });
+
+    expect(config.browserTransport).toBe("kernel");
+    expect(config.browserChannel).toBeUndefined();
+    expect(config.kernelApiKey).toBe("kernel-test-key");
+    expect(config.kernelCliPath).toBe("/opt/kernel-tools/kernel");
+    expect(config.manualAuthorizationAllowed).toBe(false);
+  });
+
+  it("rejects Kernel without its exact authority and loopback CLI contract", () => {
+    expect(() => createConfig({
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+    })).toThrow("requires KERNEL_API_KEY");
+
+    expect(() => createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "1",
+    })).toThrow(
+      "Kernel browser transport requires an explicit http://localhost:<port>",
+    );
+  });
+
+  it("builds an exact reverse tunnel with a narrowly inherited environment", () => {
+    expect(buildKernelTunnelArgumentsForTest("kernel-session-1", 43123)).toEqual([
+      "browsers",
+      "ssh",
+      "kernel-session-1",
+      "-R",
+      "43123:localhost:43123",
+    ]);
+    expect(buildKernelCliEnvironmentForTest("kernel-test-key", {
+      HOME: "/workspace/operator",
+      JUNCTION_API_KEY: "must-not-pass",
+      LANG: "en_US.UTF-8",
+      MURPH_E2E_PROVIDER_PASSWORD: "must-not-pass",
+      NODE_ENV: "production",
+      PATH: "/usr/bin",
+    })).toEqual({
+      HOME: "/workspace/operator",
+      KERNEL_API_KEY: "kernel-test-key",
+      LANG: "en_US.UTF-8",
+      NODE_ENV: "production",
+      PATH: "/usr/bin",
+    });
+  });
+
   it("fails a continuous external challenge after the bounded grace period", async () => {
     let now = 0;
     const page = {
