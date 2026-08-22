@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-08-21",
+  "order": 200,
+  "item": {
+    "id": "scheduled-conversations-recover-more-reliably",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Scheduled conversations recover more reliably",
+    "summary": "Scheduled reminders and follow-ups no longer stop because of an internal assistant-startup metadata check.",
+    "details": "The workspace isolation and runtime safeguards remain in place; this removes a redundant check that could turn otherwise valid scheduled conversations into repeated retries.",
+    "relevanceTags": [
+      "assistant",
+      "automations",
+      "reliability"
+    ],
+    "sourcePullRequests": [
+      2143
+    ]
+  }
+}
