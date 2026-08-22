@@ -38,6 +38,10 @@ import {
   getAvailableHostedPublicReferralRewards,
 } from "@/src/lib/hosted-growth/referral-program";
 import {
+  MURPH_PUBLIC_STRUCTURED_DATA,
+  serializeStructuredData,
+} from "@/src/lib/public-agent-content";
+import {
   createMurphPageMetadata,
   MURPH_DEFAULT_METADATA_DESCRIPTION,
   MURPH_DEFAULT_METADATA_TITLE,
@@ -138,6 +142,15 @@ export default async function HomePage() {
 
   return (
     <HomepageAuthRuntimeProvider authenticated={authenticated}>
+      {MURPH_PUBLIC_STRUCTURED_DATA.map((structuredData) => (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: serializeStructuredData(structuredData),
+          }}
+          key={structuredData["@id"]}
+          type="application/ld+json"
+        />
+      ))}
       <MurphCardHandoffGate />
       <main className="min-h-screen bg-[#f5f0e8] antialiased">
         <StickyNav

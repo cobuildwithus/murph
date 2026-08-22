@@ -40,6 +40,8 @@ function XIcon() {
 
 const footerLinks = {
   murph: [
+    { label: "About", href: "/about", external: false },
+    { label: "Contact", href: "/contact", external: false },
     { label: "Clubs", href: "/clubs", external: false },
     { label: "Referrals", href: "/refer", external: false },
     { label: "Changelog", href: "/changelog", external: false },
@@ -106,7 +108,7 @@ export function SiteFooter({
                 Murph
               </span>
               <nav
-                className="grid gap-2 sm:grid-flow-col sm:grid-rows-5 sm:gap-x-12 md:grid-rows-4"
+                className="grid gap-2 sm:grid-flow-col sm:grid-rows-6 sm:gap-x-12 md:grid-rows-4"
                 aria-label="Product links"
               >
                 {productLinks.map((link) => (
