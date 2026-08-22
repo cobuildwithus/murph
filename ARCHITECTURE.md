@@ -1462,7 +1462,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Personal and exact Family-member top-ups use the server-owned $5, $10, or $25
   one-time offers. Hosted-group funding keeps the same purchase owner and
   payer/beneficiary split, but its primary flow is a durable payer authorization
-  for one group with a $5, $10, or $20 calendar-month maximum. Activation is an
+  for one group with a $5, $10, $20, or $50 calendar-month maximum. Activation is an
   ordinary $5 usage-credit purchase available at any current group-capacity
   state. Later purchases are deterministic exact-$5 `HostedUsageCreditPurchase`
   rows admitted only at the existing beneficiary-serialized
@@ -3867,6 +3867,29 @@ the frozen batch also contains later same-route conversation input; compound bat
 does not erase generated-image provenance. That later input may use the retained
 `raw/captures/**` ref through an independently authorized action such as the existing
 group-avatar path.
+A separately exposed physical-note recovery action is accepted-message-only and
+does not depend on image completion. It authorizes one Web-owned provider metadata
+reconciliation for the oldest unresolved guard, never a provider create or recall.
+Web first claims the exact accepted assistant input in a durable recovery row
+under the member lock and binds it to a versioned fingerprint of the normalized
+target kind and reference, including the explicit no-target case, plus that
+selected guard. Reusing the accepted input with a different target selector
+fails closed as unconfirmed under the same lock without a provider read or
+state transition. A completed exact-selector replay
+returns the stored bounded response without another provider read or transition;
+an interrupted pre-terminal claim remains unconfirmed and fails closed. When
+provider evidence permits a terminal result, Web commits the note transition,
+paid-usage settlement, blocker narrowing, remaining-guard fact, and stored
+recovery response in the same member-locked transaction. A result-write failure
+therefore rolls back every terminal mutation and leaves the same note eligible
+for a new accepted recovery input. Thus a restarted
+assistant turn cannot use one accepted request to advance a second guard, and a
+new accepted input is required for each additional reconciliation.
+Direct and authenticated-group authority is rechecked at the Web boundary; recent
+absence and indeterminate evidence remain pending, while only aged proven absence
+can clear the guard. Web returns the checked guard's outcome separately from a
+derived remaining-unresolved fact, so clearing one legacy guard cannot be reported
+as an indeterminate check merely because another independent guard still blocks.
 Native provider resume is only the fast path: the transcript owner also commits a
 bounded runtime-authored provenance marker for every trusted ready generated-image
 completion. An attached image retains its actual response ordinal; a completion

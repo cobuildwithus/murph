@@ -1,6 +1,10 @@
+import { createHash } from "node:crypto";
+
 import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_PHYSICAL_NOTES_PATH = "/api/internal/physical-notes" as const;
+export const HOSTED_PHYSICAL_NOTE_RECOVERY_PATH =
+  "/api/internal/physical-notes/recovery" as const;
 export const HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS = 45_000;
 
 export const hostedPhysicalNoteRecipientSchema = z
@@ -58,6 +62,59 @@ export const hostedPhysicalNoteSendResponseSchema = z
   })
   .strict();
 
+export const hostedPhysicalNoteRecoveryRequestSchema = z
+  .object({
+    originAssistantInputId: z.string().regex(/^ain_[0-9a-f]{32}$/u),
+    targetKind: z.enum(["recovery", "send"]).nullable().optional(),
+    targetOriginAssistantInputId: z
+      .string()
+      .regex(/^ain_[0-9a-f]{32}$/u)
+      .nullable()
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const hasTargetKind = value.targetKind !== undefined
+      && value.targetKind !== null;
+    const hasTargetOrigin = value.targetOriginAssistantInputId !== undefined
+      && value.targetOriginAssistantInputId !== null;
+    if (hasTargetKind !== hasTargetOrigin) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "targetKind and targetOriginAssistantInputId must be supplied together.",
+        path: hasTargetKind ? ["targetOriginAssistantInputId"] : ["targetKind"],
+      });
+    }
+  });
+
+export const hostedPhysicalNoteRecoveryResponseSchema = z
+  .object({
+    remainingUnresolved: z.boolean().nullable(),
+    retryAfter: z.string().datetime({ offset: true }).nullable(),
+    settledUsageCostUsdMicros: z.string().regex(/^\d+$/u).nullable(),
+    status: z.enum([
+      "accepted",
+      "clear",
+      "pending",
+      "permission_denied",
+      "unavailable",
+    ]),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      value.status !== "accepted"
+      && value.settledUsageCostUsdMicros !== null
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Only accepted recovery can report settled usage.",
+        path: ["settledUsageCostUsdMicros"],
+      });
+    }
+  });
+
 export type HostedPhysicalNoteRecipient = z.infer<
   typeof hostedPhysicalNoteRecipientSchema
 >;
@@ -73,6 +130,12 @@ export type HostedPhysicalNoteSendRequest = z.infer<
 export type HostedPhysicalNoteSendResponse = z.infer<
   typeof hostedPhysicalNoteSendResponseSchema
 >;
+export type HostedPhysicalNoteRecoveryRequest = z.infer<
+  typeof hostedPhysicalNoteRecoveryRequestSchema
+>;
+export type HostedPhysicalNoteRecoveryResponse = z.infer<
+  typeof hostedPhysicalNoteRecoveryResponseSchema
+>;
 
 export function parseHostedPhysicalNoteSendRequest(
   value: unknown,
@@ -84,6 +147,46 @@ export function parseHostedPhysicalNoteSendResponse(
   value: unknown,
 ): HostedPhysicalNoteSendResponse {
   return hostedPhysicalNoteSendResponseSchema.parse(value);
+}
+
+export function parseHostedPhysicalNoteRecoveryRequest(
+  value: unknown,
+): HostedPhysicalNoteRecoveryRequest {
+  return hostedPhysicalNoteRecoveryRequestSchema.parse(value);
+}
+
+export function parseHostedPhysicalNoteRecoveryResponse(
+  value: unknown,
+): HostedPhysicalNoteRecoveryResponse {
+  return hostedPhysicalNoteRecoveryResponseSchema.parse(value);
+}
+
+export function createHostedPhysicalNoteRequestKey(input: {
+  originAssistantInputId: string;
+}): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify({
+      originAssistantInputId: input.originAssistantInputId,
+      schema: "murph.send-physical-note.request-key.v2",
+    }))
+    .digest("hex");
+  return `physical_note_${digest}`;
+}
+
+export function createHostedPhysicalNoteRecoveryRequestFingerprint(
+  input: Pick<
+    HostedPhysicalNoteRecoveryRequest,
+    "targetKind" | "targetOriginAssistantInputId"
+  >,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      schema: "murph.resolve-physical-note.request-fingerprint.v1",
+      targetKind: input.targetKind ?? null,
+      targetOriginAssistantInputId:
+        input.targetOriginAssistantInputId ?? null,
+    }))
+    .digest("hex");
 }
 
 export function normalizeHostedPhysicalNoteRecipient(

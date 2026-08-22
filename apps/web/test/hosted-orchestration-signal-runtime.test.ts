@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => {
 });
 
 const defaultWorkflowOptions = {
-  ensureRuntimeProcessingStartToCloseTimeoutMs: 15_000,
+  ensureRuntimeProcessingStartToCloseTimeoutMs: 25_000,
 };
 
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({

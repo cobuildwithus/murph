@@ -529,12 +529,12 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
   it("parses monthly sponsorship as an exact $5 activation with an explicit cap", () => {
     expect(parseHostedGroupSponsorshipCheckoutRequest({
       clientRequestKey: CLIENT_REQUEST_KEY,
-      monthlyCapMinor: 1_000,
+      monthlyCapMinor: 5_000,
       offerCode: "usage_5_usd",
       sponsorshipKind: "monthly",
     })).toEqual({
       clientRequestKey: CLIENT_REQUEST_KEY,
-      monthlyCapMinor: 1_000,
+      monthlyCapMinor: 5_000,
       offerCode: "usage_5_usd",
       recoveryOnly: false,
       sponsorship: null,

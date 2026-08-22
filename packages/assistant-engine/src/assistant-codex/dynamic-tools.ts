@@ -2686,6 +2686,121 @@ export async function executeMurphDynamicToolRequest(input: {
         )
       }
     }
+    case 'resolve-physical-note': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const resolvePhysicalNote = hostedToolContext?.physicalNotes?.resolve
+      const userActionScope =
+        hostedToolContext?.currentUserActionScope?.() ?? null
+      const explicitOriginCandidate = userActionScope
+        ? resolvePhysicalNoteExplicitOriginInputId({
+            acceptedInputIds: userActionScope.acceptedInputIds,
+            conversationScope: userActionScope.conversationScope,
+            messageRef: input.request.messageRef,
+          })
+        : null
+      const originAssistantInputId = explicitOriginCandidate && userActionScope
+        ? await authorizeDynamicToolEffectOrigin({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            conversationScope: userActionScope.conversationScope,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: explicitOriginCandidate,
+          })
+        : null
+      if (!resolvePhysicalNote || !originAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note recovery requires the exact current authorizing Message ref and hosted recovery transport',
+        )
+      }
+
+      try {
+        const result = await resolvePhysicalNote({
+          originAssistantInputId,
+          ...(input.request.targetMessageRef
+            ? {
+                targetKind: input.request.targetKind,
+                targetOriginAssistantInputId: input.request.targetMessageRef,
+              }
+            : {}),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+        switch (result.status) {
+          case 'accepted':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              result.remainingUnresolved
+                ? `${physicalNoteRecoveryAcceptedCopy(result.settledUsageCostUsdMicros)} A different unresolved submission remains and needs another explicit recovery request.`
+                : physicalNoteRecoveryAcceptedCopy(
+                    result.settledUsageCostUsdMicros,
+                  ),
+              result.remainingUnresolved,
+              null,
+              result.settledUsageCostUsdMicros,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'clear':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              result.remainingUnresolved
+                ? 'The checked earlier submission was cleared. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing.'
+                : 'The checked earlier submission was cleared. No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'pending':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              'The earlier outcome is still unconfirmed and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
+              result.remainingUnresolved,
+              result.retryAfter,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'permission_denied':
+            return physicalNoteRecoveryToolResult(
+              false,
+              result.status,
+              'The earlier submission was not changed because recovery is not available to the current participant.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'unavailable':
+            return physicalNoteRecoveryToolResult(
+              false,
+              result.status,
+              'Physical-note recovery is currently unavailable. The earlier submission was not cleared; nothing new was sent and no automatic retry is running.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+        }
+      } catch {
+        return physicalNoteRecoveryToolResult(
+          false,
+          'unavailable',
+          'The recovery response was lost, so the earlier submission\'s final state is unconfirmed. Do not claim it cleared or was accepted. Nothing new was sent and no automatic retry is running.',
+          null,
+          null,
+          null,
+          input.request.targetMessageRef ?? null,
+          input.request.targetKind ?? null,
+        )
+      }
+    }
     case 'send-physical-note': {
       const hostedToolContext = input.hostedToolContext ?? null
       const physicalNotes = hostedToolContext?.physicalNotes ?? null
@@ -6715,6 +6830,39 @@ function toolTextResult(
       contentItems: [{ type: 'inputText', text }],
     },
   }
+}
+
+function physicalNoteRecoveryToolResult(
+  success: boolean,
+  status: 'accepted' | 'clear' | 'pending' | 'permission_denied' | 'unavailable',
+  note: string,
+  remainingUnresolved: boolean | null,
+  retryAfter: string | null = null,
+  settledUsageCostUsdMicros: string | null = null,
+  targetMessageRef: string | null = null,
+  targetKind: 'recovery' | 'send' | null = null,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    success,
+    JSON.stringify({
+      note,
+      remainingUnresolved,
+      retryAfter,
+      settledUsageCostUsdMicros,
+      status,
+      ...(targetMessageRef ? { targetMessageRef } : {}),
+      ...(targetKind ? { targetKind } : {}),
+    }),
+  )
+}
+
+function physicalNoteRecoveryAcceptedCopy(
+  settledUsageCostUsdMicros: string | null,
+): string {
+  const usage = settledUsageCostUsdMicros === null
+    ? ''
+    : ` The earlier accepted note used ${settledUsageCostUsdMicros} USD micros of Murph time. Recovery itself added no separate fee.`
+  return `The earlier note was accepted for printing, not delivered, and cannot be treated as canceled.${usage} This recovery sent nothing new.`
 }
 
 function invalidDynamicToolArgumentsResult(
