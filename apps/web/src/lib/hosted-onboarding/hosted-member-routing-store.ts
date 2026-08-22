@@ -2,6 +2,7 @@
  * Owns hosted member messaging-routing lookup and binding surfaces.
  */
 import { Prisma } from "@prisma/client";
+import { normalizeHostedEmailReplyAliasLookupKey } from "@murphai/hosted-execution/hosted-email";
 
 import {
   buildHostedMemberRoutingPrivateColumns,
@@ -25,7 +26,7 @@ import {
   type HostedMemberRoutingLookup,
   type HostedMemberRoutingLookupRecord,
 } from "./hosted-member-routing-state";
-import { type HostedOnboardingReadClient } from "./shared";
+import { lockHostedMemberRow, type HostedOnboardingReadClient } from "./shared";
 
 export {
   acquireHostedMemberHomeLinqRouteLockTx,
@@ -135,14 +136,115 @@ export async function hasHostedMemberEstablishedLinqHomeRoute(input: {
   return Boolean(routingRecord?.linqChatLookupKey);
 }
 
+export interface HostedMemberReplyAliasState {
+  generation: number;
+  lookupKey: string | null;
+}
+
+export async function readHostedMemberReplyAliasState(input: {
+  memberId: string;
+  prisma: HostedOnboardingReadClient;
+}): Promise<HostedMemberReplyAliasState | null> {
+  const routing = await input.prisma.hostedMemberRouting.findUnique({
+    where: { memberId: input.memberId },
+    select: {
+      replyAliasGeneration: true,
+      replyAliasLookupKey: true,
+    },
+  });
+  const lookupKey = normalizeHostedEmailReplyAliasLookupKey(
+    routing?.replyAliasLookupKey,
+  );
+  if (!routing) {
+    return null;
+  }
+  const generation = requireHostedMemberReplyAliasGeneration(
+    routing.replyAliasGeneration ?? 0,
+  );
+  return { generation, lookupKey };
+}
+
+export async function resolveHostedMemberReplyAliasRegistrationTx(input: {
+  candidateLookupKey?: string | null;
+  fallbackGeneration: number;
+  fallbackLookupKey: string;
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<HostedMemberReplyAliasState> {
+  const candidateLookupKey = normalizeHostedEmailReplyAliasLookupKey(
+    input.candidateLookupKey,
+  );
+  const fallbackLookupKey = normalizeHostedEmailReplyAliasLookupKey(
+    input.fallbackLookupKey,
+  );
+  if (!fallbackLookupKey) {
+    throw new TypeError("Hosted member reply alias fallback key is invalid.");
+  }
+  const fallbackGeneration = requireHostedMemberReplyAliasGeneration(
+    input.fallbackGeneration,
+  );
+
+  await lockHostedMemberRow(input.prisma, input.memberId);
+  const current = await readHostedMemberReplyAliasState({
+    memberId: input.memberId,
+    prisma: input.prisma,
+  });
+  if ((current?.generation ?? 0) !== fallbackGeneration) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EMAIL_REPLY_ALIAS_STALE",
+      message: "Hosted email reply alias changed and must be re-resolved.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+  if (current?.lookupKey) {
+    if (candidateLookupKey && candidateLookupKey !== current.lookupKey) {
+      throw hostedOnboardingError({
+        code: "HOSTED_EMAIL_REPLY_ALIAS_STALE",
+        message: "Hosted email reply alias changed and must be re-resolved.",
+        httpStatus: 409,
+        retryable: true,
+      });
+    }
+    return current;
+  }
+
+  if (candidateLookupKey && candidateLookupKey !== fallbackLookupKey) {
+    throw hostedOnboardingError({
+      code: "HOSTED_EMAIL_REPLY_ALIAS_STALE",
+      message: "Hosted email reply alias changed and must be re-resolved.",
+      httpStatus: 409,
+      retryable: true,
+    });
+  }
+
+  const lookupKey = fallbackLookupKey;
+  await upsertHostedMemberReplyAliasLookupKeyTx({
+    memberId: input.memberId,
+    prisma: input.prisma,
+    replyAliasGeneration: fallbackGeneration,
+    replyAliasLookupKey: lookupKey,
+  });
+  return { generation: fallbackGeneration, lookupKey };
+}
+
 export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
   memberId: string;
   prisma: Prisma.TransactionClient;
-  replyAliasLookupKey: string;
+  replyAliasGeneration?: number;
+  replyAliasLookupKey: string | null;
 }): Promise<void> {
-  const lookupKey = input.replyAliasLookupKey.trim();
-  if (!lookupKey) {
-    throw new TypeError("Hosted member reply alias lookup key must be a non-empty string.");
+  const lookupKey = normalizeHostedEmailReplyAliasLookupKey(
+    input.replyAliasLookupKey,
+  );
+  if (input.replyAliasLookupKey !== null && !lookupKey) {
+    throw new TypeError("Hosted member reply alias lookup key must be current-format lowercase hex.");
+  }
+  const generation = input.replyAliasGeneration ?? 0;
+  if (!Number.isSafeInteger(generation) || generation < 0 || generation > 2_147_483_647) {
+    throw new TypeError(
+      "Hosted member reply alias generation must be a non-negative 32-bit integer.",
+    );
   }
 
   const routingPrivateColumns = await buildHostedMemberRoutingPrivateColumns({
@@ -163,14 +265,23 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
     },
     create: {
       memberId: input.memberId,
+      replyAliasGeneration: generation,
       replyAliasLookupKey: lookupKey,
       telegramUserLookupKey: null,
       ...routingPrivateColumns,
     },
     update: {
+      replyAliasGeneration: generation,
       replyAliasLookupKey: lookupKey,
     },
   });
+}
+
+function requireHostedMemberReplyAliasGeneration(value: number): number {
+  if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
+    throw new TypeError("Hosted member reply alias generation is invalid.");
+  }
+  return value;
 }
 
 export async function lookupHostedMemberRoutingByTelegramUserLookupKey(input: {

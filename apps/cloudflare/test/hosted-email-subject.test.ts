@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { parseHostedEmailThreadTarget } from '@murphai/runtime-state'
+import { createHostedEmailUserReplyAliasRoute } from '@murphai/hosted-execution/hosted-email'
 
 import {
   HostedEmailSendValidationError,
@@ -38,14 +39,24 @@ describe('hosted Cloudflare email subject handling', () => {
 
   beforeEach(() => {
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockReset()
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async () =>
-      new Response(JSON.stringify({ ok: true }), {
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(async () => {
+      const replyAlias = await createHostedEmailUserReplyAliasRoute({
+        domain: config.domain,
+        localPart: config.localPart,
+        signingSecret: config.signingSecret,
+        userId: 'user_123',
+      })
+      return new Response(JSON.stringify({
+        address: replyAlias.address,
+        aliasKey: replyAlias.aliasKey,
+        ok: true,
+      }), {
         headers: {
           'content-type': 'application/json; charset=utf-8',
         },
         status: 200,
-      }),
-    )
+      })
+    })
   })
 
   afterEach(() => {

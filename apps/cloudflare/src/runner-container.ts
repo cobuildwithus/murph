@@ -4307,7 +4307,9 @@ function assertRunnerContainerEnsureProcessingUserIds(
 function normalizeRunnerRuntimeProcessingMode(
   value: unknown,
 ): RunnerRuntimeProcessingMode {
-  return value === "inbox_media_retention" || value === "system_mailbox"
+  return value === "environment_interview"
+      || value === "inbox_media_retention"
+      || value === "system_mailbox"
     ? value
     : "default";
 }

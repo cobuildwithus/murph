@@ -16,6 +16,7 @@ vi.mock("@murphai/hosted-execution", async () => {
 });
 
 import {
+  createHostedEmailUserReplyAliasRoute,
   HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
   HOSTED_EMAIL_REGISTER_REPLY_ALIAS_CALLBACK_PATH,
   HOSTED_EMAIL_RESOLVE_ROUTE_CALLBACK_PATH,
@@ -31,6 +32,7 @@ import { EmailMessage } from "cloudflare:email";
 
 import type { HostedEmailConfig } from "../src/hosted-email/config.ts";
 import {
+  readHostedEmailHeaderBytes,
   readHostedEmailMessageBytes,
   readHostedEmailRawMessage,
   writeHostedEmailRawMessage,
@@ -66,6 +68,7 @@ const TEST_CONFIG: HostedEmailConfig = {
   domain: "mail.example.test",
   fromAddress: "assistant@mail.example.test",
   localPart: "assistant",
+  publicAddress: "mail@mail.withmurph.ai",
   signingSecret: "super-secret-signing-key",
 };
 const TEST_KEY = new Uint8Array(Array.from({ length: 32 }, (_, index) => index + 1));
@@ -79,6 +82,23 @@ const AUTHENTICATED_SENDER = {
   dmarcPass: true,
   spfAligned: false,
 };
+
+async function createTestReplyAliasRegistrationResponse(): Promise<Response> {
+  const route = await createHostedEmailUserReplyAliasRoute({
+    domain: TEST_CONFIG.domain!,
+    localPart: TEST_CONFIG.localPart,
+    signingSecret: TEST_CONFIG.signingSecret!,
+    userId: "user_123",
+  });
+  return new Response(JSON.stringify({
+    address: route.address,
+    aliasKey: route.aliasKey,
+    ok: true,
+  }), {
+    headers: { "content-type": "application/json; charset=utf-8" },
+    status: 200,
+  });
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -97,18 +117,8 @@ describe("hosted email routing and transport", () => {
 
   it("creates one stable reply alias per user and resolves inbound alias mail through it", async () => {
     webControlPlane.fetchHostedExecutionWebControlPlaneResponse
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      }))
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
+      .mockResolvedValueOnce(await createTestReplyAliasRegistrationResponse())
       .mockResolvedValueOnce(new Response(JSON.stringify({ userId: "user_123" }), {
         headers: {
           "content-type": "application/json; charset=utf-8",
@@ -426,19 +436,27 @@ describe("hosted email routing and transport", () => {
     })).rejects.toThrow(/maximum accepted size/u);
   });
 
+  it("reads only a bounded complete header block for public bootstrap", async () => {
+    const headerBytes = await readHostedEmailHeaderBytes(
+      "From: Member <member@example.test>\r\nSubject: private\r\n\r\nbody must stay unread",
+      { maxBytes: 128 },
+    );
+
+    expect(new TextDecoder().decode(headerBytes ?? undefined)).toBe(
+      "From: Member <member@example.test>\r\nSubject: private\r\n\r\n",
+    );
+    await expect(readHostedEmailHeaderBytes("x".repeat(32), {
+      maxBytes: 16,
+    })).resolves.toBeNull();
+  });
+
   it("sends outbound mail with the stable per-user reply alias and returns a thread target", async () => {
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      await createTestReplyAliasRegistrationResponse(),
+    );
 
     const response = await sendHostedEmailMessage({
       config: TEST_CONFIG,
@@ -986,15 +1004,9 @@ describe("hosted email routing and transport", () => {
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
+      createTestReplyAliasRegistrationResponse,
+    );
 
     const initial = await sendHostedEmailMessage({
       config: TEST_CONFIG,
@@ -1056,15 +1068,9 @@ describe("hosted email routing and transport", () => {
     const emailBinding = {
       send: vi.fn(async (_message: unknown) => undefined),
     };
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockImplementation(
+      createTestReplyAliasRegistrationResponse,
+    );
     const threadedTarget = serializeHostedEmailThreadTarget(createHostedEmailThreadTarget({
       cc: [],
       lastMessageId: "<thread-last@example.test>",
@@ -1119,15 +1125,9 @@ describe("hosted email routing and transport", () => {
 
   it("redacts the primary recipient when the native binding send fails", async () => {
     const primaryRecipient = ["owner", "example.com"].join("@");
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      await createTestReplyAliasRegistrationResponse(),
+    );
 
     await expect(sendHostedEmailMessage({
       config: TEST_CONFIG,
@@ -1175,15 +1175,9 @@ describe("hosted email routing and transport", () => {
       subject: "Murph update",
       to: [primaryRecipient, "bob@example.com"],
     });
-    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(new Response(
-      JSON.stringify({ ok: true }),
-      {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-        },
-        status: 200,
-      },
-    ));
+    webControlPlane.fetchHostedExecutionWebControlPlaneResponse.mockResolvedValue(
+      await createTestReplyAliasRegistrationResponse(),
+    );
 
     await expect(sendHostedEmailMessage({
       config: TEST_CONFIG,

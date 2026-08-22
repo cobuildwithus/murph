@@ -37,6 +37,10 @@ import {
   relativePathStrings,
   toEventUpsertVaultCliError,
 } from './vault-usecase-helpers.js'
+import {
+  isExactEventLookup,
+  readExactEventRecord,
+} from './exact-event-record.js'
 
 const DEFAULT_LIST_LIMIT = 50
 const CAPTURE_TAG = 'capture'
@@ -677,6 +681,19 @@ async function loadCaptureRecord(vault: string, lookup: string): Promise<QueryRe
   const normalizedLookup = normalizeOptionalText(lookup)
   if (!normalizedLookup) {
     throw new VaultCliError('contract_invalid', 'Capture lookup is required.')
+  }
+
+  if (isExactEventLookup(normalizedLookup)) {
+    const { record } = await readExactEventRecord({
+      vault,
+      lookup: normalizedLookup,
+      entityLabel: 'capture',
+      expectedKinds: ['note'],
+    })
+    if (isCaptureRecord(record)) {
+      return record
+    }
+    throw new VaultCliError('not_found', `No capture found for "${normalizedLookup}".`)
   }
 
   const query = await loadQueryRuntime('capture query reads')

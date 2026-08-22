@@ -1,4 +1,5 @@
 import {
+  type EventRecord,
   normalizeIanaTimeZone,
   normalizeStrictIsoTimestamp,
 } from '@murphai/contracts'
@@ -6,6 +7,15 @@ import {
   loadQueryRuntime,
   type QueryCanonicalEntity,
 } from '../query-runtime.js'
+import {
+  toCommandShowEntity,
+  toExactEventQueryRecord,
+} from '../commands/query-record-command-helpers.js'
+import {
+  isExactEventLookup,
+  readExactEventRecord,
+  readOwnedEventRecord,
+} from './exact-event-record.js'
 import { loadTextInput } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -23,14 +33,17 @@ interface EventMutationCoreRuntime {
     vaultRoot: string
     payload: JsonObject
     allowSpecializedKindRewrite?: boolean
+    expectedRevision?: number
   }): Promise<{
     eventId: string
     ledgerFile: string
     created: boolean
+    event: EventRecord
   }>
   deleteEvent(input: {
     vaultRoot: string
     eventId: string
+    expectedRevision?: number
   }): Promise<{
     eventId: string
     kind: string
@@ -79,6 +92,7 @@ interface EventRecordMutationLookupInput {
   lookup: string
   entityLabel: string
   expectedKinds?: readonly string[]
+  expectedRevision?: number
 }
 
 interface EditEventRecordInput extends EventRecordMutationLookupInput {
@@ -86,6 +100,10 @@ interface EditEventRecordInput extends EventRecordMutationLookupInput {
   set?: string[]
   clear?: string[]
   dayKeyPolicy?: 'keep' | 'recompute'
+  validatedEvent?: {
+    event: EventRecord
+    ledgerFile: string
+  }
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
@@ -131,6 +149,27 @@ function eventRecordMatchesDirectLookup(
 async function requireEventRecord(
   input: EventRecordMutationLookupInput,
 ): Promise<QueryCanonicalEntity> {
+  const normalizedLookup = input.lookup.trim()
+  if (isExactEventLookup(normalizedLookup)) {
+    return (await readExactEventRecord({
+      vault: input.vault,
+      lookup: normalizedLookup,
+      entityLabel: input.entityLabel,
+      expectedKinds: input.expectedKinds,
+    })).record
+  }
+  const ownedKind = input.expectedKinds?.length === 1
+    && (input.expectedKinds[0] === 'document' || input.expectedKinds[0] === 'meal')
+    ? input.expectedKinds[0]
+    : null
+  if (ownedKind) {
+    return (await readOwnedEventRecord({
+      vault: input.vault,
+      lookup: normalizedLookup,
+      kind: ownedKind,
+    })).record
+  }
+
   const query = await loadQueryRuntime()
   const readModel = await query.readVault(input.vault)
   const record = query.lookupEntityById(readModel, input.lookup)
@@ -221,6 +260,16 @@ function resolveCanonicalEventId(record: QueryCanonicalEntity): string {
   }
 
   return record.primaryLookupId
+}
+
+function resolveEventRevision(record: QueryCanonicalEntity): number {
+  const lifecycle = isJsonObject(record.attributes.lifecycle)
+    ? record.attributes.lifecycle
+    : null
+  const revision = lifecycle?.revision
+  return typeof revision === 'number' && Number.isInteger(revision) && revision >= 1
+    ? revision
+    : 1
 }
 
 function preserveCanonicalEventIdentity(
@@ -407,7 +456,19 @@ async function loadEventMutationCoreRuntime(): Promise<EventMutationCoreRuntime>
 }
 
 export async function editEventRecord(input: EditEventRecordInput) {
-  const record = await requireEventRecord(input)
+  const record = input.validatedEvent
+    ? toExactEventQueryRecord(
+      input.validatedEvent.event,
+      input.validatedEvent.ledgerFile,
+    )
+    : await requireEventRecord(input)
+  if (!eventRecordMatchesDirectLookup(record, input.lookup)) {
+    throw new VaultCliError(
+      'not_found',
+      `No ${input.entityLabel} found for "${input.lookup}".`,
+    )
+  }
+  ensureExpectedEventKind(record, input.entityLabel, input.expectedKinds)
   const payload = buildMutableEventPayload(record)
   const nextPayload = await applyRecordPatch({
     record: payload,
@@ -439,13 +500,17 @@ export async function editEventRecord(input: EditEventRecordInput) {
       vaultRoot: input.vault,
       payload: memberOwnedPayload,
       allowSpecializedKindRewrite: true,
+      expectedRevision: input.expectedRevision ?? resolveEventRevision(record),
     })
+    const committedRecord = toExactEventQueryRecord(result.event, result.ledgerFile)
 
     return {
       eventId: result.eventId,
       lookupId: result.eventId,
       ledgerFile: result.ledgerFile,
       created: result.created,
+      record: committedRecord,
+      entity: toCommandShowEntity(committedRecord),
     }
   } catch (error) {
     throw toEventUpsertVaultCliError(error)
@@ -463,6 +528,7 @@ export async function deleteEventRecord(
     const result = await core.deleteEvent({
       vaultRoot: input.vault,
       eventId,
+      expectedRevision: input.expectedRevision ?? resolveEventRevision(record),
     })
 
     return {
@@ -481,6 +547,10 @@ export async function deleteEventRecord(
       },
       EVENT_CONTRACT_INVALID: {
         code: 'contract_invalid',
+      },
+      EVENT_REVISION_CONFLICT: {
+        code: 'conflict',
+        message: `The ${input.entityLabel} changed before it could be deleted. Re-read the exact record before trying again.`,
       },
     })
   }

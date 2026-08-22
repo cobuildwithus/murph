@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
 
 import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
 import {
   buildHostedExecutionDeviceSyncWake,
+  buildHostedExecutionEnvironmentInterviewCompletedWake,
   buildHostedExecutionMemberActivatedWake,
   buildHostedExecutionMemberChannelsUpdatedWake,
 } from "@murphai/hosted-execution";
@@ -39,6 +41,8 @@ const modelFreeFrontierUserId =
   `member_local_temporal_model_free_frontier_${Date.now()}`;
 const defaultOwnedFrontierUserId =
   `member_local_temporal_default_owned_frontier_${Date.now()}`;
+const environmentInterviewUserId =
+  `member_local_temporal_environment_interview_${Date.now()}`;
 
 const streamDevLogs = process.env.MURPH_E2E_STREAM_DEV_LOGS === "1";
 const workerPersistDirOverride = process.env.MURPH_E2E_CF_PERSIST_DIR?.trim() || null;
@@ -132,6 +136,80 @@ describe("hosted local Temporal orchestration e2e", () => {
     );
     expect(finalStatus.workspace).not.toBeNull();
     expect(finalStatus.lastErrorCode ?? null).toBeNull();
+  }, 300_000);
+
+  it("routes an Environment interview through its model-free runtime owner", async () => {
+    const activeScenario = requireScenario();
+    await activeScenario.seedActiveHostedMember({
+      memberId: environmentInterviewUserId,
+    });
+    await activeScenario.runWake(
+      buildActivationWake(environmentInterviewUserId, "environment-interview"),
+      environmentInterviewUserId,
+    );
+    const activationStatus = await activeScenario.waitForHostedCompletion(
+      environmentInterviewUserId,
+    );
+    const activationReplicaRef =
+      activationStatus.workspace?.browserVaultReplicaRef;
+    const providerRequestBaseline = activeScenario.assistantProviderRequests.length;
+    const completedAt = new Date().toISOString();
+    const completionId = randomUUID();
+    const eventId = `environment-interview:${completionId}`;
+    const append = await appendHostedExecutionWakeForTest({
+      environment: activeScenario.runtimeEnv,
+      wake: buildHostedExecutionEnvironmentInterviewCompletedWake({
+        completedAt,
+        completionId,
+        eventId,
+        memberId: environmentInterviewUserId,
+        occurredAt: completedAt,
+        topics: [{
+          answers: [{
+            aspectId: "sleep-environment",
+            indicatorId: "night_temp_c",
+            note: "The bedroom stays near 19 degrees at night.",
+            value: 19,
+          }],
+          topicId: "sleep:0",
+        }],
+      }),
+    });
+    const signalStartedAt = new Date();
+    const signal = await signalHostedMailboxAppendRuntimeForTest({
+      environment: activeScenario.runtimeEnv,
+      expectedUserId: environmentInterviewUserId,
+      mailboxItemId: append.wake.id,
+    });
+
+    const workflowState = await waitForWorkflowExecutionState({
+      env: activeScenario.runtimeEnv,
+      executionNotBefore: signalStartedAt,
+      workflowId: signal.workflowId,
+    });
+    expect(workflowState.lastExecutionErrorCode).toBeNull();
+    expect(workflowState.lastExecutionKind).toMatch(/runtime_/u);
+
+    const finalStatus = await activeScenario.waitForHostedCompletion(
+      environmentInterviewUserId,
+    );
+    expect(finalStatus.lastErrorCode ?? null).toBeNull();
+    expect(finalStatus.workspace?.browserVaultReplicaRef).not.toBeNull();
+    expect(finalStatus.workspace?.browserVaultReplicaRef).not.toEqual(
+      activationReplicaRef,
+    );
+    await expect(readHostedMailboxItemForTest({
+      dedupeKey: eventId,
+      environment: activeScenario.runtimeEnv,
+      userId: environmentInterviewUserId,
+    })).resolves.toMatchObject({
+      consumedAt: expect.any(String),
+      kind: "environment-interview.completed",
+      lane: "system",
+    });
+    expect(activeScenario.assistantProviderRequests).toHaveLength(
+      providerRequestBaseline,
+    );
   }, 300_000);
 
   it("runs due retention for a paused member without assistant provider work", async () => {

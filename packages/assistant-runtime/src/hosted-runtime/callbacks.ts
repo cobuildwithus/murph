@@ -1726,6 +1726,43 @@ export async function resolveHostedAssistantOutboxNextWakeAt(input: {
   return wakeAt;
 }
 
+export interface HostedAssistantDeliveryIntentState {
+  intentId: string;
+  nextWakeAt: string | null;
+  terminal: boolean;
+}
+
+export async function resolveHostedAssistantDeliveryIntentState(input: {
+  deliveryIdempotencyKey: string;
+  now?: Date;
+  vaultRoot: string;
+}): Promise<HostedAssistantDeliveryIntentState | null> {
+  const matches = (await listAssistantOutboxIntents(input.vaultRoot)).filter(
+    (intent) =>
+      intent.deliveryIdempotencyKey === input.deliveryIdempotencyKey,
+  );
+  if (matches.length === 0) {
+    return null;
+  }
+  if (matches.length > 1) {
+    throw new TypeError(
+      "An exact hosted delivery identity matched multiple outbox intents.",
+    );
+  }
+  const intent = matches[0]!;
+  return {
+    intentId: intent.intentId,
+    nextWakeAt: resolveHostedAssistantOutboxIntentWakeAt(
+      intent,
+      input.now ?? new Date(),
+    ),
+    terminal:
+      intent.status === "sent"
+      || intent.status === "failed"
+      || intent.status === "abandoned",
+  };
+}
+
 function resolveHostedAssistantDeliveryBoundaryWakeAt(
   intents: readonly AssistantOutboxIntent[],
   now: Date,

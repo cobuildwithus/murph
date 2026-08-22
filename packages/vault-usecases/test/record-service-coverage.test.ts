@@ -197,6 +197,14 @@ async function loadManifestReadUsecases(queryRuntime: {
   readVault: (vault: string) => Promise<unknown>;
   lookupEntityById: (readModel: unknown, lookup: string) => QueryRecord | null;
 }) {
+  const readOwnedEventRecord = vi.fn(async (input: { lookup: string; kind: string }) => {
+    const readModel = await queryRuntime.readVault('./vault')
+    const record = queryRuntime.lookupEntityById(readModel, input.lookup)
+    if (!record || record.kind !== input.kind) {
+      throw new VaultCliError('not_found', `No ${input.kind} found for "${input.lookup}".`)
+    }
+    return { event: record.attributes, ledgerFile: record.path, record }
+  })
   const documentMeal = await importWithMocks<
     typeof import("../src/usecases/document-meal-read.ts")
   >("../src/usecases/document-meal-read.ts", {
@@ -207,6 +215,9 @@ async function loadManifestReadUsecases(queryRuntime: {
         loadQueryRuntime: vi.fn(async () => queryRuntime),
       }),
     ),
+    "../src/usecases/exact-event-record.ts": () => ({
+      readOwnedEventRecord,
+    }),
   });
   const workoutRead = await importWithMocks<
     typeof import("../src/usecases/workout-read.ts")
@@ -234,6 +245,7 @@ afterEach(() => {
   vi.doUnmock("../src/query-runtime.ts");
   vi.doUnmock("../src/commands/query-record-command-helpers.ts");
   vi.doUnmock("../src/usecases/event-record-mutations.ts");
+  vi.doUnmock("../src/usecases/exact-event-record.ts");
   vi.doUnmock("../src/usecases/provider-event.ts");
 });
 
@@ -575,7 +587,7 @@ describe("public barrel exports", () => {
 });
 
 describe("record service seams", () => {
-  test("document/meal read wrappers route through the query runtime and event mutations", async () => {
+  test("document/meal exact reads use their canonical owner while lists use the query runtime", async () => {
     const queryRuntime = {
       readVault: vi.fn(async () => ({ vault: "./vault" })),
       lookupEntityById: vi.fn((_readModel: unknown, lookup: string) =>
@@ -636,8 +648,19 @@ describe("record service seams", () => {
         }),
       ]),
     };
-    const editEventRecord = vi.fn(async (input: { lookup: string }) => ({ lookupId: input.lookup }));
+    const editEventRecord = vi.fn(async (input: { lookup: string }) => ({
+      lookupId: input.lookup,
+      record: queryRuntime.lookupEntityById({}, input.lookup)!,
+    }));
     const deleteEventRecord = vi.fn(async () => ({ lookupId: "meal_1", deleted: true }));
+    const readOwnedEventRecord = vi.fn(async (input: { lookup: string; kind: string }) => {
+      const readModel = await queryRuntime.readVault();
+      const record = queryRuntime.lookupEntityById(readModel, input.lookup);
+      if (!record || record.kind !== input.kind) {
+        throw new VaultCliError('not_found', `No ${input.kind} found for "${input.lookup}".`)
+      }
+      return { event: record.attributes, ledgerFile: record.path, record };
+    });
 
     const documentMeal = await importWithMocks<
       typeof import("../src/usecases/document-meal-read.ts")
@@ -652,6 +675,9 @@ describe("record service seams", () => {
       "../src/usecases/event-record-mutations.ts": () => ({
         editEventRecord,
         deleteEventRecord,
+      }),
+      "../src/usecases/exact-event-record.ts": () => ({
+        readOwnedEventRecord,
       }),
     });
 

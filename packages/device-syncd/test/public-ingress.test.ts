@@ -2376,7 +2376,7 @@ test("public ingress bounds a delayed setup-A webhook by the replacement setup l
     assert.deepEqual(store.recordedSourceDataArrivals, []);
     assert.equal(acceptedCalls, 0);
     assert.equal(dirtySatisfiedCalls, 0);
-    assert.equal(sourceObservedCalls, 0);
+    assert.equal(sourceObservedCalls, 1);
 
     const unchanged = store.getConnectionByExternalAccount("junction", externalAccountId);
     assert.equal(unchanged?.connectedAt, startAt.toISOString());
@@ -4258,6 +4258,54 @@ test("public ingress scopes durable webhook traces by external account while pre
     `member_b:acct_02:${scopeWebhookTraceId("demo", "demo-b", "provider-event-1")}`,
   ]);
   assert.equal(legacyOwnerLookupCalls, 0);
+});
+
+test("public ingress defers exact-source admission when the source row is missing", async () => {
+  const store = new InMemoryPublicIngressStore();
+  let acceptedCalls = 0;
+  let observedCalls = 0;
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([
+      createFakeProvider({
+        async verifyAndParseWebhook() {
+          return {
+            acceptanceMode: "level_dirty_hint",
+            externalAccountId: "demo-abc",
+            eventType: "provider.connection.updated",
+            sourceProviderSlug: "apple_health_kit",
+            traceId: "trace-missing-source",
+            jobs: [],
+          };
+        },
+      }),
+    ]),
+    store,
+    hooks: {
+      onConnectionSourceObserved() {
+        observedCalls += 1;
+        return { sourceAdmissionDeferred: true };
+      },
+      onWebhookAccepted({ account, claimToken, sourceAdmissionDeferred, traceId }) {
+        acceptedCalls += 1;
+        assert.equal(sourceAdmissionDeferred, true);
+        return completeWebhookAcceptDurably(store, account, traceId, claimToken);
+      },
+    },
+  });
+  const begin = await ingress.startConnection({ provider: "demo" });
+  await ingress.handleOAuthCallback({ provider: "demo", state: begin.state, code: "abc" });
+  const account = store.getConnectionByExternalAccount("demo", "demo-abc");
+  assert.ok(account);
+  assert.equal(store.listConnectionSources({ connectionId: account.id }).length, 0);
+
+  const result = await ingress.handleWebhook("demo", new Headers(), Buffer.from("{}"));
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.duplicate, false);
+  assert.equal(observedCalls, 1);
+  assert.equal(acceptedCalls, 1);
+  assert.equal(store.completedWebhookTraceCalls, 1);
 });
 
 test("public ingress claims and completes already-satisfied dirty hints", async () => {

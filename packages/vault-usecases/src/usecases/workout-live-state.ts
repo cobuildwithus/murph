@@ -1,4 +1,5 @@
 import {
+  eventRecordSchema,
   normalizeStrictIsoTimestamp,
   type WorkoutExercise,
   type WorkoutSession,
@@ -18,7 +19,7 @@ import {
 } from '../commands/query-record-command-helpers.js'
 import { loadWorkoutCoreRuntime } from './workout-core.js'
 import {
-  editWorkoutRecordAfterValidatedExerciseReplacement,
+  editWorkoutRecordAfterValidatedExerciseUpdate,
 } from './workout.js'
 import { showWorkoutRecord, workoutLookupSchema } from './workout-read.js'
 import {
@@ -164,13 +165,24 @@ export async function updateLiveWorkoutExercises(
     exercises,
     options,
   )
-  return editWorkoutRecordAfterValidatedExerciseReplacement({
+  const parsedEvent = eventRecordSchema.safeParse(shown.entity.data)
+  if (!parsedEvent.success || parsedEvent.data.kind !== 'activity_session' || !shown.entity.path) {
+    throw new VaultCliError(
+      'contract_invalid',
+      `Workout ${shown.entity.id} does not contain a valid canonical event.`,
+    )
+  }
+  return editWorkoutRecordAfterValidatedExerciseUpdate({
     durationMinutes: update.durationMinutes,
     endedAt: update.endedAt,
     exercises: update.exercises,
     lastMemberActionId: options.lastMemberActionId,
     lookup: shown.entity.id,
     vault: shown.vault,
+    validatedEvent: {
+      event: parsedEvent.data,
+      ledgerFile: shown.entity.path,
+    },
   })
 }
 

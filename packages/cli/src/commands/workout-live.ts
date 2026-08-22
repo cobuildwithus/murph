@@ -12,12 +12,104 @@ import {
   logLiveWorkoutSet,
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
+  type StartLiveWorkoutExerciseInput,
 } from '@murphai/vault-usecases/workouts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  compactInteger,
+  parseCompactFields,
+  rejectUnsupportedCompactFields,
+  requireCompactString,
+} from './compact-field-spec.js'
 
 const workoutIdOption = z
   .string()
   .regex(/^evt_[0-9A-Za-z]+$/u)
   .describe('Canonical workout id returned by workout start or workout show.')
+
+const exerciseModeSchema = z.enum([
+  'weight_reps',
+  'bodyweight',
+  'assisted_bodyweight',
+  'weighted_bodyweight',
+  'duration',
+  'cardio',
+])
+
+const initialExerciseFields = new Set([
+  'name',
+  'reps',
+  'sets',
+  'sourceExerciseId',
+  'groupId',
+  'mode',
+  'unitOverride',
+  'note',
+])
+
+function invalidInitialExercise(message: string): never {
+  throw new VaultCliError('invalid_option', message)
+}
+
+function parseInitialExercise(
+  entry: string,
+): StartLiveWorkoutExerciseInput {
+  const fields = parseCompactFields(
+    entry,
+    'exercise',
+    invalidInitialExercise,
+  )
+  rejectUnsupportedCompactFields(
+    fields,
+    'exercise',
+    initialExerciseFields,
+    invalidInitialExercise,
+  )
+  const setCount = compactInteger(
+    fields,
+    'sets',
+    'exercise',
+    invalidInitialExercise,
+  )
+  const reps = compactInteger(
+    fields,
+    'reps',
+    'exercise',
+    invalidInitialExercise,
+  )
+  const mode = fields.get('mode')
+  const parsedMode = mode === undefined
+    ? undefined
+    : exerciseModeSchema.safeParse(mode)
+  if (parsedMode !== undefined && !parsedMode.success) {
+    invalidInitialExercise('--exercise field mode is invalid.')
+  }
+  const unitOverride = fields.get('unitOverride')
+  if (unitOverride !== undefined && unitOverride !== 'lb' && unitOverride !== 'kg') {
+    invalidInitialExercise('--exercise field unitOverride must be lb or kg.')
+  }
+  const parsedUnitOverride = unitOverride === 'lb' || unitOverride === 'kg'
+    ? unitOverride
+    : undefined
+
+  return {
+    name: requireCompactString(
+      fields,
+      'name',
+      'exercise',
+      invalidInitialExercise,
+    ),
+    ...(reps === undefined ? {} : { reps }),
+    ...(setCount === undefined ? {} : { setCount }),
+    ...(fields.has('sourceExerciseId')
+      ? { sourceExerciseId: fields.get('sourceExerciseId') }
+      : {}),
+    ...(fields.has('groupId') ? { groupId: fields.get('groupId') } : {}),
+    ...(parsedMode?.success ? { mode: parsedMode.data } : {}),
+    ...(parsedUnitOverride ? { unitOverride: parsedUnitOverride } : {}),
+    ...(fields.has('note') ? { note: fields.get('note') } : {}),
+  }
+}
 
 const exerciseIdOption = z
   .string()
@@ -48,7 +140,7 @@ const requiredSetOrderOption = z
 export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
   workout.command('start', {
     description:
-      'Start a canonical live workout, optionally from a saved workout format.',
+      'Start one complete canonical live workout, optionally from a saved workout format.',
     args: z.object({
       name: z
         .string()
@@ -67,11 +159,15 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         },
       },
       {
-        description: 'Start an empty strength session.',
+        description: 'Start an ad-hoc session with its ordered exercises.',
         args: {
           name: "'Hotel gym'",
         },
         options: {
+          exercise: [
+            "'name=Goblet squat;sets=3;reps=10;mode=weight_reps;unitOverride=lb'",
+            "'name=Row, neutral grip;sets=3;reps=12;mode=weight_reps'",
+          ],
           vault: './vault',
         },
       },
@@ -84,6 +180,13 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .min(1)
         .optional()
         .describe('Optional saved workout-format id, slug, or exact title.'),
+      exercise: z
+        .array(z.string().min(1).max(1000))
+        .max(100)
+        .optional()
+        .describe(
+          'Initial exercise grammar: name=... with optional sets/reps/sourceExerciseId/groupId/mode/unitOverride/note. reps is one exact member-stated count for every set. Repeat --exercise; repeat order becomes canonical order. Commas are preserved.',
+        ),
       type: z
         .string()
         .min(1)
@@ -109,6 +212,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         activityType: options.type,
         note: options.note,
         startedAt: options.startedAt,
+        exercises: options.exercise?.map(parseInitialExercise) ?? [],
       })
     },
   })
@@ -153,16 +257,7 @@ export function registerWorkoutLiveCommands(workout: Cli.Cli): void {
         .max(80)
         .optional()
         .describe('Optional superset or circuit group id.'),
-      mode: z
-        .enum([
-          'weight_reps',
-          'bodyweight',
-          'assisted_bodyweight',
-          'weighted_bodyweight',
-          'duration',
-          'cardio',
-        ])
-        .optional(),
+      mode: exerciseModeSchema.optional(),
       unitOverride: z.enum(['lb', 'kg']).optional(),
       note: z.string().min(1).max(4000).optional(),
       sets: z

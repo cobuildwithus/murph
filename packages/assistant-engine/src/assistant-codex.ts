@@ -91,6 +91,10 @@ import {
   type AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
 import {
+  createAnalyzeVideoTurnState,
+  type AnalyzeVideoToolRuntime,
+} from './assistant-codex/analyze-video-tool.js'
+import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
   consumeCompleteLines,
@@ -205,6 +209,9 @@ export type {
 export type {
   AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
+export type {
+  AnalyzeVideoToolRuntime,
+} from './assistant-codex/analyze-video-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -533,6 +540,7 @@ export interface CodexAppServerTurnInput {
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
 }
@@ -781,6 +789,7 @@ export async function executeCodexAppServerTurn(
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+    analyzeVideoRuntime: input.analyzeVideoRuntime ?? null,
     askGrokRuntime: input.askGrokRuntime ?? null,
   }
 
@@ -3186,8 +3195,9 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
-  // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
-  // assistant turn, owned here and threaded into the dynamic-tool executor.
+  // Trusted turn-scoped provider-call ceilings: one counter per assistant turn,
+  // owned here and threaded into the dynamic-tool executor.
+  const analyzeVideoTurnState = createAnalyzeVideoTurnState()
   const askGrokTurnState = createAskGrokTurnState()
   const groupSharedReadTurnState = {
     currentSenderDecisionByMessageRef: new Map(),
@@ -3222,6 +3232,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
@@ -3229,6 +3240,10 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
+  let requiredFinalResponseFallbackOutcome:
+    | 'analyze-video-failure'
+    | 'analyze-video-success'
+    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -3334,6 +3349,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
 
@@ -4706,6 +4722,11 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          analyzeVideoRuntime:
+            dynamicToolRequest.kind === 'analyze-video'
+              ? input.analyzeVideoRuntime ?? null
+              : null,
+          analyzeVideoTurnState,
           askGrokRuntime:
             dynamicToolRequest.kind === 'ask-grok'
               ? input.askGrokRuntime ?? null
@@ -4718,6 +4739,20 @@ async function runCodexAppServerTurnOnProcess(
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
+      }
+      if (dynamicToolRequest.kind === 'analyze-video') {
+        const analyzeVideoFallback = normalizeNullableString(
+          result.requiredFinalResponseFallback,
+        )
+        if (analyzeVideoFallback !== null) {
+          if (result.rpcResult.success) {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
+          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
+          }
+        }
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -5893,6 +5928,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const requiredSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage) ??
+    requiredFinalResponseFallback ??
+    semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -5901,22 +5940,25 @@ async function runCodexAppServerTurnOnProcess(
       : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
     appendRequiredAutomationLocalAtClarification(
-      semanticFinalMessage,
+      requiredSemanticFinalMessage,
       requiredAutomationLocalAtClarificationsInOrder,
     ),
     requiredVaultFileApprovalUrls,
   )
+  const semanticTranscriptMessage = finalResponseCard
+    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
+      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      : renderAssistantResponseCardText(finalResponseCard)
+    : finalResponseCardTextFallback
+      ? renderAssistantWorkoutResponseCardTranscriptText(
+          finalResponseCardTextFallback,
+        )
+      : normalizeNullableString(modelFinalMessage) ??
+        (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    finalResponseCard
-      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-        : renderAssistantResponseCardText(finalResponseCard)
-      : finalResponseCardTextFallback
-        ? renderAssistantWorkoutResponseCardTranscriptText(
-            finalResponseCardTextFallback,
-          )
-        : normalizeNullableString(modelFinalMessage) ??
-          (finalResponseMedia.length > 0 ? '' : null),
+    normalizeNullableString(semanticTranscriptMessage) ??
+      requiredFinalResponseFallback ??
+      semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (

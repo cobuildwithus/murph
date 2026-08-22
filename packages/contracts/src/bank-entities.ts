@@ -342,6 +342,7 @@ const checkedBankEntityDefinitions = [
             domain: helpers.firstString(attributes, ["domain"]),
             aspect: helpers.firstString(attributes, ["aspect"]),
             indicators: helpers.firstObject(attributes, ["indicators"]),
+            indicatorNotes: helpers.firstObject(attributes, ["indicatorNotes"]),
             indicatorRecordedAt: helpers.firstObject(attributes, ["indicatorRecordedAt"]),
             note: helpers.firstString(attributes, ["note"]),
           };

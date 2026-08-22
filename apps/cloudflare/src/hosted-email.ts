@@ -31,6 +31,7 @@ export {
 } from "./hosted-email/transport.ts";
 
 const HOSTED_EMAIL_MAX_RAW_MESSAGE_BYTES = 20 * 1024 * 1024;
+export const HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MAX_HEADER_BYTES = 64 * 1024;
 const HOSTED_EMAIL_RAW_MESSAGE_KEY_SALT = "murph.hosted.email.raw-message-key.v1";
 const HOSTED_EMAIL_RAW_MESSAGE_RECOVERY_SCHEMA =
   "murph.hosted-email.raw-message-recovery.v1";
@@ -270,6 +271,110 @@ export async function readHostedEmailMessageBytes(
   }
 
   return await readHostedEmailReadableStream(input, maxBytes);
+}
+
+export async function readHostedEmailHeaderBytes(
+  input: HostedEmailWorkerRequest["raw"],
+  options: { maxBytes?: number } = {},
+): Promise<Uint8Array | null> {
+  const maxBytes = options.maxBytes ?? HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MAX_HEADER_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new TypeError("Hosted email header byte limit must be a positive integer.");
+  }
+
+  if (typeof input === "string") {
+    // UTF-8 can use four bytes per code point. Slice before encoding so an
+    // attacker-controlled body never causes an unbounded allocation here.
+    const bounded = new TextEncoder().encode(input.slice(0, maxBytes + 4));
+    return sliceHostedEmailHeaderBytes(bounded, maxBytes);
+  }
+
+  if (input instanceof Uint8Array) {
+    return sliceHostedEmailHeaderBytes(input.subarray(0, maxBytes + 4), maxBytes);
+  }
+
+  if (input instanceof ArrayBuffer) {
+    return sliceHostedEmailHeaderBytes(
+      new Uint8Array(input, 0, Math.min(input.byteLength, maxBytes + 4)),
+      maxBytes,
+    );
+  }
+
+  return readHostedEmailHeaderReadableStream(input, maxBytes);
+}
+
+async function readHostedEmailHeaderReadableStream(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const reader = stream.getReader();
+  const bounded = new Uint8Array(maxBytes + 4);
+  let length = 0;
+
+  try {
+    while (length <= maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return null;
+      }
+      if (!value || value.byteLength === 0) {
+        continue;
+      }
+
+      const remaining = bounded.byteLength - length;
+      const copied = Math.min(value.byteLength, remaining);
+      bounded.set(value.subarray(0, copied), length);
+      length += copied;
+
+      const header = sliceHostedEmailHeaderBytes(bounded.subarray(0, length), maxBytes);
+      if (header) {
+        await reader.cancel().catch(() => undefined);
+        return header;
+      }
+      if (length > maxBytes || value.byteLength > copied) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+    }
+
+    await reader.cancel().catch(() => undefined);
+    return null;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function sliceHostedEmailHeaderBytes(
+  bytes: Uint8Array,
+  maxBytes: number,
+): Uint8Array | null {
+  const end = findHostedEmailHeaderEnd(bytes);
+  if (end === null || end > maxBytes) {
+    return null;
+  }
+  return bytes.slice(0, end);
+}
+
+function findHostedEmailHeaderEnd(bytes: Uint8Array): number | null {
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    if (
+      index + 3 < bytes.byteLength
+      && bytes[index] === 13
+      && bytes[index + 1] === 10
+      && bytes[index + 2] === 13
+      && bytes[index + 3] === 10
+    ) {
+      return index + 4;
+    }
+    if (
+      index + 1 < bytes.byteLength
+      && bytes[index] === 10
+      && bytes[index + 1] === 10
+    ) {
+      return index + 2;
+    }
+  }
+  return null;
 }
 
 async function readHostedEmailReadableStream(

@@ -83,15 +83,15 @@ describe("ConnectedAccountCard", () => {
       React.createElement(
         SettingsContactLink,
         {
-          href: "mailto:murph@mail.withmurph.ai",
+          href: "mailto:mail@mail.withmurph.ai",
           label: "Email Murph",
         },
-        "Email murph@mail.withmurph.ai",
+        "Email mail@mail.withmurph.ai",
       ),
     );
 
-    expect(markup).toContain("mailto:murph@mail.withmurph.ai");
-    expect(markup).toContain("Email murph@mail.withmurph.ai");
+    expect(markup).toContain("mailto:mail@mail.withmurph.ai");
+    expect(markup).toContain("Email mail@mail.withmurph.ai");
     expect(markup).toContain("text-xs");
     expect(markup).toContain("hover:underline");
   });

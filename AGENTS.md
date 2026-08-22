@@ -7,6 +7,15 @@ current requirement. Add a dependency, abstraction, service, state owner, or
 process only when concrete product, security, test, or measured performance
 evidence proves the simpler design insufficient.
 
+For roughly 90% of Murph tasks—the ordinary, reversible ones—trust the Codex
+model to follow clear prompt instructions and use its native controls. Prefer
+one direct prompt rule over feature-specific sandboxes, permission profiles,
+supervisors, or state machines, including for memory automation. Add enforcement
+machinery only for a concrete security, privacy, authorization, canonical-write,
+or irreversible-effect boundary, or when production evidence shows prompt
+guidance and native Codex controls are insufficient. Follow
+`docs/contracts/00-invariants.md` § Trust Codex Native Capabilities.
+
 ## Purpose
 
 This file is the compact routing map for agent work in this repository.

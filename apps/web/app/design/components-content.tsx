@@ -72,6 +72,7 @@ import {
 } from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
+import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -1007,19 +1008,27 @@ export function ComponentsContent() {
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "processing" }}
+                state={{ baselineValues: "{}", status: "processing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "refreshing" }}
+                state={{
+                  factsAdded: 3,
+                  factsChanged: true,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: true, status: "updated" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: false, status: "updated" }}
+                state={{
+                  factsAdded: 0,
+                  factsChanged: false,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
@@ -1932,7 +1941,7 @@ export function ComponentsContent() {
                   </span>
                 </div>
                 <HostedEmailMurphContactDialog
-                  murphEmailAddress="murph@mail.withmurph.ai"
+                  murphEmailAddress={MURPH_CONTACT_EMAIL}
                   userEmailAddress={variant.userEmail}
                 />
               </div>
