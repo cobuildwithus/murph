@@ -37,6 +37,7 @@ import {
   runBoundedCommand,
 } from "./native-ios-hosted-e2e-support.mjs";
 import {
+  inspectRetryableNativeIosFailureCode,
   inspectRetryableNativeIosPullRequest,
   parseNativeIosHostedE2eRetryArgs,
   retryNativeIosHostedE2e,
@@ -77,6 +78,7 @@ function retryablePullRequest(headSha = SHA) {
       repo: { full_name: "cobuildwithus/murph" },
       sha: headSha,
     },
+    draft: false,
     number: 42,
     state: "open",
     user: { type: "User" },
@@ -222,9 +224,45 @@ test("PR selector targets Web candidates and leaves controller rollout to truste
   assert.match(workflow, /RUN_ATTEMPT: \$\{\{ github\.run_attempt \}\}/u);
   assert.match(
     workflow,
-    /Retry with node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\}; native reruns do not enter the live queue\./u,
+    /Retry only xcodebuild_failed with node scripts\/native-ios-hosted-e2e-retry\.mjs --pr \$\{PR_NUMBER\} --failure-code xcodebuild_failed; native reruns do not enter the live queue\./u,
   );
-  assert.equal(runWorkflowSelector(workflow, "apps/web/app/page.tsx"), "selected");
+  assert.doesNotMatch(
+    workflow,
+    /^\s+apps\/web\/\*\|/mu,
+    "the selector must not admit every hosted Web path",
+  );
+  for (const file of [
+    "apps/web/app/api/device-sync/companion/admission/route.ts",
+    "apps/web/app/api/device-sync/companion/initial-onboarding/contact-card/route.ts",
+    "apps/web/app/api/device-sync/companion/sign-in-token/route.ts",
+    "apps/web/app/api/device-sync/companion/status/route.ts",
+    "apps/web/src/lib/hosted-onboarding/request-auth.ts",
+    "apps/web/src/lib/device-sync/control-plane.ts",
+    "apps/web/prisma/schema.prisma",
+    "packages/device-syncd/src/hosted-runtime.ts",
+  ]) {
+    assert.equal(runWorkflowSelector(workflow, file), "selected", file);
+  }
+  for (const file of [
+    "apps/web/app/page.tsx",
+    "apps/web/app/changelog/page.tsx",
+    "apps/web/changelog/README.md",
+    "apps/web/src/components/marketing/hero.tsx",
+    "apps/web/test/dashboard-home-page.test.tsx",
+    "packages/assistant-runtime/src/index.ts",
+    "packages/health-commons/src/index.ts",
+  ]) {
+    assert.equal(runWorkflowSelector(workflow, file), "neutral", file);
+  }
+  const broadWebMutation = workflow.replace(
+    '              case "${file}" in\n',
+    '              case "${file}" in\n                apps/web/*|\\\n',
+  );
+  assert.equal(
+    runWorkflowSelector(broadWebMutation, "apps/web/app/page.tsx"),
+    "selected",
+    "the unrelated Web mutation must demonstrate why the broad pattern is forbidden",
+  );
   assert.equal(TRUSTED_DEFAULT_BRANCH_CONTROLLERS.length, 5);
   for (const controller of TRUSTED_DEFAULT_BRANCH_CONTROLLERS) {
     assert.equal(runWorkflowSelector(workflow, controller), "neutral", controller);
@@ -258,7 +296,7 @@ test("commit status descriptions distinguish real-run proof from every non-run p
     [
       { RUN_ATTEMPT: "2" },
       "failure",
-      "Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42; native reruns do not enter the live queue.",
+      "Retry only xcodebuild_failed with node scripts/native-ios-hosted-e2e-retry.mjs --pr 42 --failure-code xcodebuild_failed; native reruns do not enter the live queue.",
     ],
     [
       { SELECT_RESULT: "failure" },
@@ -335,15 +373,53 @@ test("native iOS retry route is documented instead of direct workflow reruns", a
   for (const document of documents) {
     assert.match(
       document,
-      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number>/u,
+      /node scripts\/native-ios-hosted-e2e-retry\.mjs --pr <number> --failure-code xcodebuild_failed/u,
     );
   }
 });
 
-test("native iOS retry helper accepts only one positive PR number", () => {
-  assert.deepEqual(parseNativeIosHostedE2eRetryArgs(["--pr", "42"]), { prNumber: 42 });
-  for (const argv of [[], ["42"], ["--pr", "0"], ["--pr", "01"], ["--pr", "42", "extra"]]) {
+test("native iOS retry helper requires one positive PR number and the infrastructure code", () => {
+  assert.deepEqual(
+    parseNativeIosHostedE2eRetryArgs([
+      "--pr",
+      "42",
+      "--failure-code",
+      "xcodebuild_failed",
+    ]),
+    { failureCode: "xcodebuild_failed", prNumber: 42 },
+  );
+  for (const argv of [
+    [],
+    ["42"],
+    ["--pr", "0", "--failure-code", "xcodebuild_failed"],
+    ["--pr", "01", "--failure-code", "xcodebuild_failed"],
+    ["--pr", "42"],
+    ["--failure-code", "xcodebuild_failed", "--pr", "42"],
+    ["--pr", "42", "--failure-code", "xcodebuild_failed", "extra"],
+  ]) {
     assert.throws(() => parseNativeIosHostedE2eRetryArgs(argv), /Usage:/u);
+  }
+});
+
+test("native iOS retry rejects journey, product, legacy, and contract failure codes", () => {
+  assert.equal(inspectRetryableNativeIosFailureCode("xcodebuild_failed"), "xcodebuild_failed");
+  for (const failureCode of [
+    "fresh_signup_and_onboarding_failed",
+    "returning_privy_otp_failed",
+    "initial_privy_otp_failed",
+    "junction_connect_failed",
+    "connected_state_failed",
+    "healthkit_authorization_failed",
+    "returning_member_state_failed",
+    "returning_member_shell_failed",
+    "healthkit_authorization_sheet_missing",
+    "workflow_contract_validation_failed",
+  ]) {
+    assert.throws(
+      () => inspectRetryableNativeIosFailureCode(failureCode),
+      /allowlisted infrastructure failure code xcodebuild_failed/u,
+      failureCode,
+    );
   }
 });
 
@@ -380,6 +456,7 @@ test("native iOS retry helper revalidates the current head before rerunning Repo
   const calls = [];
   let prReads = 0;
   const result = await retryNativeIosHostedE2e({
+    failureCode: "xcodebuild_failed",
     prNumber: 42,
     request: async (request) => {
       calls.push(request);
@@ -396,7 +473,12 @@ test("native iOS retry helper revalidates the current head before rerunning Repo
       throw new Error(`Unexpected request: ${JSON.stringify(request)}`);
     },
   });
-  assert.deepEqual(result, { headSha: SHA, prNumber: 42, repoHygieneRunId: 321 });
+  assert.deepEqual(result, {
+    failureCode: "xcodebuild_failed",
+    headSha: SHA,
+    prNumber: 42,
+    repoHygieneRunId: 321,
+  });
   assert.equal(prReads, 2);
   assert.deepEqual(calls.at(-1), {
     endpoint: "repos/cobuildwithus/murph/actions/runs/321/rerun",
@@ -408,6 +490,7 @@ test("native iOS retry helper fails closed when the PR head moves", async () => 
   let prReads = 0;
   let posted = false;
   await assert.rejects(() => retryNativeIosHostedE2e({
+    failureCode: "xcodebuild_failed",
     prNumber: 42,
     request: async (request) => {
       if (request.endpoint === "repos/cobuildwithus/murph/pulls/42") {
@@ -420,6 +503,26 @@ test("native iOS retry helper fails closed when the PR head moves", async () => 
     },
   }), /head changed/u);
   assert.equal(posted, false);
+});
+
+test("native iOS retry requires the current PR to remain ready", () => {
+  assert.throws(() => inspectRetryableNativeIosPullRequest({
+    ...retryablePullRequest(),
+    draft: true,
+  }, { expectedPrNumber: 42 }), /must be ready for review/u);
+});
+
+test("native iOS retry rejects a product failure before making a GitHub request", async () => {
+  let requested = false;
+  await assert.rejects(() => retryNativeIosHostedE2e({
+    failureCode: "fresh_signup_and_onboarding_failed",
+    prNumber: 42,
+    request: async () => {
+      requested = true;
+      return null;
+    },
+  }), /allowlisted infrastructure failure code xcodebuild_failed/u);
+  assert.equal(requested, false);
 });
 
 test("native iOS retry helper preserves the workflow trust boundary", () => {

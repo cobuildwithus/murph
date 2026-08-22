@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-17
+Last verified: 2026-08-21
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -35,6 +35,23 @@ The delivery path decides who owns broad verification:
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
+
+### Pull Request Exact-Head Lifecycle
+
+Repository-created pull requests are draft-first. Opening a PR explicitly as
+non-draft remains the deliberate bypass for entering expensive CI immediately.
+The expensive pull-request workflows admit only non-draft `opened` or
+`reopened` events and `ready_for_review`; they do not run expensive proof on
+`synchronize`. A synchronize event records the new exact head through a
+read-only observer, then a trusted default-branch controller returns a ready PR
+to draft only while that event still names the current SHA. Mark the PR ready
+again to prove that exact head. A skipped job is not exact-head success, and
+required check names remain bound to the jobs that actually execute the proof.
+
+`PR Evidence` intentionally remains lightweight on `synchronize` so policy and
+rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
+`synchronize`, but owns only the read-only receipt consumed by the draft-reset
+controller. Main-branch push CI is unchanged.
 
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
@@ -71,10 +88,14 @@ Native companion auth/control/device-sync PRs additionally use the applicable
 `Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
 `agent-docs/references/testing-ci-map.md`.
 A canceled native workflow must not be rerun directly because the rerun retains
-its original queue identity. From an authenticated operator checkout, use
-`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
-open same-repository human-authored PR and exact current head before rerunning a
-successful exact-head Repo Hygiene owner, whose completion creates a fresh
+its original queue identity. Manual native iOS retry is infrastructure-only.
+From an authenticated operator checkout, use
+`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed`
+only for the explicit allowlisted `xcodebuild_failed` infrastructure failure.
+The helper rejects journey, product, legacy-contract, and workflow-contract
+failure codes, requires the PR to remain ready, and revalidates the open
+same-repository human-authored PR and exact current head before rerunning a
+successful exact-head Repo Hygiene owner. Its completion creates a fresh
 applicable iOS and Android waiter without widening the protected environment or
 secret boundary.
 A status description that records a real pass is production-shaped evidence:
