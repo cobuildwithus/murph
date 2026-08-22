@@ -3819,6 +3819,7 @@ describe("assistant turn finalizer seam", () => {
     });
 
     const saved = await persistAssistantTurnAndSession({
+      assistantTranscriptStandaloneContext: true,
       assistantTranscriptText: "Send the reminder once.",
       input: {
         prompt: "Send the reminder once.",
@@ -3847,6 +3848,7 @@ describe("assistant turn finalizer seam", () => {
       [
         {
           kind: "assistant",
+          standaloneAssistantContext: true,
           text: "Send the reminder once.",
         },
       ]

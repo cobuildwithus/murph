@@ -648,6 +648,9 @@ export async function appendAssistantTranscriptEntriesWithRefs(
         ...(normalizeNullableString(entry.sourceOutboxIntentId)
           ? { sourceOutboxIntentId: entry.sourceOutboxIntentId }
           : {}),
+        ...(entry.standaloneAssistantContext === true
+          ? { standaloneAssistantContext: true as const }
+          : {}),
         ...(contentReceivedAt
           ? { contentReceivedAt }
           : {}),
@@ -764,6 +767,9 @@ function parseAssistantTranscriptEntries(
       createdAt,
       ...(normalizeNullableString(entry.sourceOutboxIntentId)
         ? { sourceOutboxIntentId: entry.sourceOutboxIntentId }
+        : {}),
+      ...(entry.standaloneAssistantContext === true
+        ? { standaloneAssistantContext: true as const }
         : {}),
       ...(contentReceivedAt
         ? { contentReceivedAt }

@@ -124,6 +124,7 @@ describe('automation model continuity', () => {
       [
         {
           kind: 'assistant',
+          standaloneAssistantContext: true,
           text: reminderText,
         },
       ],
@@ -422,6 +423,7 @@ async function persistAutomationTurn(input: {
   turnInput: Parameters<typeof resolveAssistantTurnRoute>[0]
 }): Promise<AssistantSession> {
   return await persistAssistantTurnAndSession({
+    assistantTranscriptStandaloneContext: true,
     assistantTranscriptText: input.text,
     input: input.turnInput,
     persistUserPromptToTranscript: false,

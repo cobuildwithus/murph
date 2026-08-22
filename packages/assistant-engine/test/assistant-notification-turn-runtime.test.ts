@@ -1019,6 +1019,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: 'Fixed welcome text',
         createdAt: expect.any(String),
       },
@@ -1253,6 +1254,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: 'Fixed welcome text',
         createdAt: expect.any(String),
       },
@@ -2410,6 +2412,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
+      assistantTranscriptStandaloneContext: true,
       providerResumeStateAction: 'persist-from-provider-turn',
     }),
   )
