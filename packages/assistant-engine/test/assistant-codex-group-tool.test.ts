@@ -69,9 +69,12 @@ import {
   executeMurphDynamicToolRequest,
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   MURPH_DYNAMIC_TOOLS,
+  MURPH_GROUP_FAMILY_TOOLS,
+  MURPH_GROUP_DATA_TOOL,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
   MURPH_GROUP_TOOL,
+  MURPH_GROUP_TOOL_FAMILY_ACTIONS,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -189,6 +192,10 @@ function maximumSourceTaggedWorkoutRecords() {
 describe("murph.group dynamic tool", () => {
   it("advertises the supported actions", () => {
     expect(MURPH_GROUP_TOOL.deferLoading).toBe(true);
+    expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_TOOL);
+    for (const familyTool of MURPH_GROUP_FAMILY_TOOLS) {
+      expect(MURPH_DYNAMIC_TOOLS).toContain(familyTool);
+    }
     expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_SHARED_READ_TOOL);
     expect(MURPH_DYNAMIC_TOOLS)
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
@@ -378,6 +385,64 @@ describe("murph.group dynamic tool", () => {
       .toContain("transport failure proves neither");
   });
 
+  it("advertises strict family-specific schemas", () => {
+    const expectedRootKeys = {
+      group_consult: [
+        "action", "context", "grantId", "groupLabel", "message_ref", "question",
+      ],
+      group_data: [
+        "action", "audience", "date", "displayName", "grantId", "message_ref",
+        "metric", "permissionText", "projectionScopes", "standaloneLink", "unit", "value",
+      ],
+      group_membership: ["action", "membershipId", "setup"],
+      group_usage: ["action", "message_ref", "policyCode", "policyCodes"],
+      group_chat: [
+        "action", "alt", "avatarPrompt", "avatarSource", "displayName", "imageRef",
+        "outputFormat", "prompt", "quality", "referenceImageRefs", "size",
+      ],
+      group_email: ["action", "html", "subject", "text"],
+    } as const;
+
+    for (const tool of MURPH_GROUP_FAMILY_TOOLS) {
+      expect(tool.deferLoading).toBe(true);
+      expect(tool.inputSchema.additionalProperties).toBe(false);
+      expect(tool.inputSchema.required).toEqual(["action"]);
+      expect(tool.inputSchema.properties.action).toMatchObject({
+        enum: MURPH_GROUP_TOOL_FAMILY_ACTIONS[tool.name],
+      });
+      expect(Object.keys(tool.inputSchema.properties).sort())
+        .toEqual([...expectedRootKeys[tool.name]].sort());
+      expect(tool.inputSchema.oneOf.every((branch) =>
+        branch.additionalProperties === false
+      )).toBe(true);
+      for (const forbiddenField of [
+        "groupId", "memberId", "providerMessageId", "route", "sender",
+      ]) {
+        expect(tool.inputSchema.properties).not.toHaveProperty(forbiddenField);
+      }
+    }
+
+    expect(MURPH_GROUP_DATA_TOOL.inputSchema.oneOf).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            action: { const: "read_shared" },
+            projectionScopes: {},
+          }),
+          required: ["action", "projectionScopes"],
+        }),
+        expect.objectContaining({
+          properties: expect.objectContaining({
+            action: { const: "read_shared" },
+            audience: {},
+            projectionScopes: {},
+          }),
+          required: ["action", "audience", "projectionScopes"],
+        }),
+      ]),
+    );
+  });
+
   it("advertises the least-privileged group surface for the available ports", () => {
     const readerOnlyGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
@@ -431,8 +496,15 @@ describe("murph.group dynamic tool", () => {
     const fullGroupTools = resolveMurphDynamicTools({
       groupAvailable: true,
       groupSharedReadAvailable: true,
-    }).filter((tool) => tool.namespace === "murph" && tool.name === "group");
-    expect(fullGroupTools).toEqual([MURPH_GROUP_TOOL]);
+    }).filter((tool) =>
+      tool.namespace === "murph" && tool.name.startsWith("group_")
+    );
+    expect(fullGroupTools).toEqual(MURPH_GROUP_FAMILY_TOOLS);
+    expect(resolveMurphDynamicTools({
+      groupAvailable: true,
+      groupSharedReadAvailable: true,
+    }).filter((tool) => tool.namespace === "murph" && tool.name === "group"))
+      .toEqual([]);
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {

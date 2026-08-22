@@ -195,3 +195,125 @@ export function deriveAutomationModelInputSchema(
   }
   return containsReference(modelSchema) ? canonicalSchema : modelSchema
 }
+
+export const AUTOMATION_PATCH_MUTATION_KEYS = [
+  'activeUntil',
+  'assistantTargetOverride',
+  'continuityPolicy',
+  'contextReferences',
+  'instructions',
+  'plannedOccurrenceOffsetMs',
+  'retargetToCurrentConversation',
+  'schedule',
+  'slug',
+  'status',
+  'summary',
+  'supportKind',
+  'supportSeriesId',
+  'tags',
+  'title',
+] as const
+
+/**
+ * Zod refinements are not represented by z.toJSONSchema. Restore the existing
+ * rules that fit Codex's compact supported schema subset; conditional support
+ * ownership and recovery coupling remain explicit in the description and full
+ * runtime validation feedback.
+ */
+export function addAutomationModelInputRefinementConstraints(
+  modelSchema: JsonSchemaObject,
+): JsonSchemaObject {
+  const properties = requireJsonSchemaObject(
+    modelSchema.properties,
+    'automation model properties',
+  )
+  addNonemptyTargetOverrideConstraint(properties.assistantTargetOverride)
+  addExactlyOneLocalDateConstraint(properties.schedule)
+
+  const branches = requireJsonSchemaObjectArray(
+    modelSchema.oneOf,
+    'automation action contracts',
+  )
+  for (const branch of branches) {
+    const branchProperties = requireJsonSchemaObject(
+      branch.properties,
+      'automation action properties',
+    )
+    const action = requireJsonSchemaObject(
+      branchProperties.action,
+      'automation action property',
+    ).const
+    if (action !== 'patch') {
+      continue
+    }
+    branch.allOf = [{
+      anyOf: AUTOMATION_PATCH_MUTATION_KEYS.map((key) => ({ required: [key] })),
+    }]
+  }
+  return modelSchema
+}
+
+function addNonemptyTargetOverrideConstraint(value: unknown): void {
+  const schema = requireJsonSchemaObject(value, 'assistantTargetOverride schema')
+  const objectBranch = requireJsonSchemaObjectArray(
+    schema.anyOf,
+    'assistantTargetOverride variants',
+  ).find((branch) => branch.type === 'object')
+  if (!objectBranch) {
+    throw new Error('Automation target override object schema is missing.')
+  }
+  objectBranch.anyOf = [
+    { required: ['model'] },
+    { required: ['reasoningEffort'] },
+  ]
+}
+
+function addExactlyOneLocalDateConstraint(value: unknown): void {
+  const schema = requireJsonSchemaObject(value, 'automation schedule schema')
+  const localAtSchedule = requireJsonSchemaObjectArray(
+    schema.anyOf,
+    'automation schedule variants',
+  ).find((branch) => {
+    const properties = isJsonSchemaObject(branch.properties)
+      ? branch.properties
+      : null
+    const kind = properties && isJsonSchemaObject(properties.kind)
+      ? properties.kind
+      : null
+    return kind?.const === 'at'
+  })
+  if (!localAtSchedule) {
+    throw new Error('Automation local-at schedule schema is missing.')
+  }
+  const localAt = requireJsonSchemaObject(
+    requireJsonSchemaObject(
+      localAtSchedule.properties,
+      'automation local-at schedule properties',
+    ).localAt,
+    'automation local-at schema',
+  )
+  localAt.oneOf = [
+    { required: ['date'] },
+    { required: ['relativeDay'] },
+  ]
+}
+
+function requireJsonSchemaObject(
+  value: unknown,
+  label: string,
+): JsonSchemaObject {
+  if (!isJsonSchemaObject(value)) {
+    throw new TypeError(`Expected ${label}.`)
+  }
+  return value
+}
+
+function requireJsonSchemaObjectArray(
+  value: unknown,
+  label: string,
+): JsonSchemaObject[] {
+  if (!Array.isArray(value) || !value.every(isJsonSchemaObject)) {
+    throw new TypeError(`Expected ${label}.`)
+  }
+  return value
+}

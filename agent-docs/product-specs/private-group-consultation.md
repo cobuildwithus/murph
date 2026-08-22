@@ -20,7 +20,7 @@ owns the answer.
 
 Use three small layers:
 
-1. `murph.group(action="ask")` is the product action.
+1. `murph.group_consult(action="ask")` is the product action.
 2. `assistant.ask.requested` and `assistant.ask.completed` are the generic
    encrypted mailbox protocol.
 3. `executeReadOnlyAssistantAsk` is the target-owned, one-shot, read-only Codex
@@ -45,7 +45,7 @@ same-process Codex multiplexer.
 
 Assistant Ask remains the read-only consultation primitive above. A member may
 also explicitly ask their private Murph to **post bounded verified context into
-one joined group**. That is a separate `murph.group(action="handoff")` action,
+one joined group**. That is a separate `murph.group_consult(action="handoff")` action,
 not a result-routing mode for Assistant Ask.
 
 Web binds one fresh accepted private input to one exact current membership
@@ -414,7 +414,7 @@ Existing mailbox, workspace, and account rules remain authoritative.
 - `packages/hosted-execution`: add strict `assistant.ask.requested` and
   `assistant.ask.completed` contracts, limits, origin binding, parsers,
   builders, and wake identities.
-- `packages/assistant-engine`: add `murph.group(action="ask")` and the fresh
+- `packages/assistant-engine`: add `murph.group_consult(action="ask")` and the fresh
   personal-input/one-ask policy.
 - `apps/web`: add automatic membership resolution, stable request-id replay,
   the narrow explicit-id append, target preflight, and idempotent completion.

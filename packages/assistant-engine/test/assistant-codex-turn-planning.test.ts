@@ -2401,13 +2401,13 @@ describe('assistant Codex turn planning', () => {
         expect.arrayContaining([
           'assistant_style',
           'generate_image',
-          'group',
+          'group_chat',
           'personalization',
           'submit_product_feedback',
         ]),
       )
       expect(
-        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group'),
+        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group_chat'),
       ).toMatchObject({ deferLoading: true })
 
       const foregroundSession = await applyAssistantSessionCodexResumeStateAction({
@@ -4071,7 +4071,12 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_search',
         'connected_apps_execute',
         'automation',
-        'group',
+        'group_consult',
+        'group_data',
+        'group_membership',
+        'group_usage',
+        'group_chat',
+        'group_email',
         'assistant_configuration',
         'assistant_style',
         'personalization',

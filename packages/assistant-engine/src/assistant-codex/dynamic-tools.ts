@@ -266,9 +266,6 @@ import {
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
 import {
-  buildResponseCardValidationFeedback,
-} from './response-card-validation-feedback.js'
-import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
@@ -314,6 +311,8 @@ import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
+  MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME,
   MURPH_GROUP_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
@@ -790,50 +789,7 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
 
 type GroupArguments = z.infer<typeof groupArgumentsSchema>
 
-const GROUP_TOOL_FAMILY_ACTIONS = {
-  group_consult: [
-    'ask',
-    'handoff',
-    'ask_current_sender',
-    'clarify_current_sender',
-    'continue_current_sender_in_group',
-    'continue_current_sender_privately',
-    'ask_member',
-  ],
-  group_data: [
-    'record_current_sender_daily_metric',
-    'post_disclosure_request',
-    'revoke_disclosure_grant',
-    'read_shared',
-    'offer_access',
-    'revoke_own_email_share',
-  ],
-  group_membership: [
-    'read_current',
-    'prepare_next_group',
-    'read_next_group',
-    'cancel_next_group',
-    'list_memberships',
-    'leave_membership',
-  ],
-  group_usage: [
-    'read_usage',
-    'read_usage_referral',
-    'arm_usage_referral',
-    'cancel_usage_referral',
-    'create_signup_referral_link',
-  ],
-  group_chat: [
-    'read_chat_name',
-    'update_display_name',
-    'read_chat_participants',
-    'set_chat_avatar',
-    'share_contact_card',
-  ],
-  group_email: ['send_email'],
-} as const satisfies Record<string, readonly GroupArguments['action'][]>
-
-type GroupToolFamilyName = keyof typeof GROUP_TOOL_FAMILY_ACTIONS
+type GroupToolFamilyName = keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS
 type GroupParserToolName = typeof MURPH_GROUP_TOOL.name | GroupToolFamilyName
 
 function buildGroupFamilyArgumentsSchema(
@@ -852,22 +808,22 @@ function buildGroupFamilyArgumentsSchema(
 const groupArgumentsSchemaByToolName = {
   [MURPH_GROUP_TOOL.name]: groupArgumentsSchema,
   group_consult: buildGroupFamilyArgumentsSchema(
-    GROUP_TOOL_FAMILY_ACTIONS.group_consult,
+    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult,
   ),
   group_data: buildGroupFamilyArgumentsSchema(
-    GROUP_TOOL_FAMILY_ACTIONS.group_data,
+    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_data,
   ),
   group_membership: buildGroupFamilyArgumentsSchema(
-    GROUP_TOOL_FAMILY_ACTIONS.group_membership,
+    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_membership,
   ),
   group_usage: buildGroupFamilyArgumentsSchema(
-    GROUP_TOOL_FAMILY_ACTIONS.group_usage,
+    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_usage,
   ),
   group_chat: buildGroupFamilyArgumentsSchema(
-    GROUP_TOOL_FAMILY_ACTIONS.group_chat,
+    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_chat,
   ),
   group_email: buildGroupFamilyArgumentsSchema(
-    GROUP_TOOL_FAMILY_ACTIONS.group_email,
+    MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_email,
   ),
 } as const satisfies Record<GroupParserToolName, unknown>
 
@@ -2290,62 +2246,134 @@ export async function executeMurphDynamicToolRequest(input: {
       }
     }
     case 'invalid-device-arguments':
-      return toolTextResult(false, 'invalid device arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_device_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-labs-arguments':
-      return toolTextResult(false, 'invalid labs arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_labs_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-pending-vault-files-arguments':
-      return toolTextResult(false, 'invalid pending vault-file arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_pending_vault_files_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-group-room-model-arguments':
-      return toolTextResult(false, 'invalid group room-model arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_group_room_model_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-member-memory-arguments':
-      return toolTextResult(false, 'invalid member-memory arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_member_memory_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-connected-apps-arguments':
-      return toolTextResult(false, 'invalid connected-app arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_connected_apps_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-assistant-style-arguments':
-      return toolTextResult(false, 'invalid assistant style arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_assistant_style_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-generate-image-arguments':
-      return toolTextResult(false, 'invalid image generation arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_generate_image_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-computer-arguments':
-      return toolTextResult(false, 'invalid computer tool arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_computer_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-generate-voice-memo-arguments':
       return invalidDynamicToolArgumentsResult(
         'invalid_generate_voice_memo_arguments',
         input.request.validationDigest,
       )
     case 'invalid-generate-song-arguments':
-      return toolTextResult(false, 'invalid song generation arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_generate_song_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-analyze-video-arguments':
-      return toolTextResult(false, 'invalid analyze_video arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_analyze_video_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-ask-grok-arguments':
-      return toolTextResult(false, 'invalid ask_grok arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_ask_grok_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-progress-arguments':
-      return toolTextResult(false, 'invalid progress update arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_progress_update_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-reaction-arguments':
-      return toolTextResult(false, 'invalid reaction arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_reaction_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-reply-target-arguments':
-      return toolTextResult(false, 'invalid reply target arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_reply_target_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-product-feedback-arguments':
-      return toolTextResult(false, 'invalid product feedback arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_product_feedback_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-family-plan-arguments':
-      return toolTextResult(false, 'invalid family plan arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_family_plan_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-personalization-arguments':
-      return toolTextResult(false, 'invalid personalization arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_personalization_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-plan-usage-arguments':
-      return toolTextResult(false, 'invalid plan usage arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_plan_usage_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-imessage-contact-arguments':
-      return toolTextResult(false, 'invalid iMessage contact arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_imessage_contact_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-subscription-arguments':
-      return toolTextResult(false, 'invalid subscription arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_subscription_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-assistant-configuration-arguments':
-      return toolTextResult(false, 'invalid assistant configuration arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_assistant_configuration_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-group-arguments':
-      return toolTextResult(false, 'invalid group arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_group_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-finish-without-reply-arguments':
-      return toolTextResult(false, 'invalid no-reply arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_finish_without_reply_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-response-card-arguments':
-      return toolTextResult(
-        false,
-        buildResponseCardValidationFeedback(input.request.validationDigest),
+      return invalidDynamicToolArgumentsResult(
+        'invalid_response_card_arguments',
+        input.request.validationDigest,
       )
     case 'response-card-envelope-too-large':
       if (input.privateDirectResponseCardAllowed !== true) {
@@ -2376,13 +2404,25 @@ export async function executeMurphDynamicToolRequest(input: {
         input.request.validationDigest,
       )
     case 'invalid-send-vault-file-arguments':
-      return toolTextResult(false, 'invalid vault file arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_send_vault_file_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-phone-call-arguments':
-      return toolTextResult(false, 'invalid phone-call arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_phone_call_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-physical-note-arguments':
-      return toolTextResult(false, 'invalid physical-note arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_physical_note_arguments',
+        input.request.validationDigest,
+      )
     case 'invalid-clinical-records-connect-link-arguments':
-      return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
+      return invalidDynamicToolArgumentsResult(
+        'invalid_clinical_records_connect_link_arguments',
+        input.request.validationDigest,
+      )
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-group-challenge-response-card':
@@ -7237,7 +7277,7 @@ function parseGroupArguments(
         error: parsed.error,
         rawInput: value,
         schemaName: `${qualifiedToolName}.input`,
-        schemaRootKeys: ['action', 'message_ref'],
+        schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
         toolName: qualifiedToolName,
       }),
     }
@@ -7358,12 +7398,13 @@ function parseGroupArguments(
               {
                 code: z.ZodIssueCode.custom,
                 message: 'set_chat_avatar with avatarSource="generate" requires prompt',
+                params: { murphExpectedShape: 'generated_avatar_prompt' },
                 path: ['prompt'],
               },
             ]),
             rawInput: value,
             schemaName: `${qualifiedToolName}.input`,
-            schemaRootKeys: ['action'],
+            schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
             toolName: qualifiedToolName,
           }),
         }
@@ -7394,12 +7435,13 @@ function parseGroupArguments(
             {
               code: z.ZodIssueCode.custom,
               message: 'set_chat_avatar with avatarSource="image_ref" requires imageRef',
+              params: { murphExpectedShape: 'existing_avatar_image_ref' },
               path: ['imageRef'],
             },
           ]),
           rawInput: value,
           schemaName: `${qualifiedToolName}.input`,
-          schemaRootKeys: ['action'],
+          schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
           toolName: qualifiedToolName,
         }),
       }
@@ -7481,7 +7523,7 @@ function parseGroupArguments(
       }]),
       rawInput: value,
       schemaName: `${qualifiedToolName}.input`,
-      schemaRootKeys: ['action', 'message_ref'],
+      schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
       toolName: qualifiedToolName,
     }),
   }

@@ -176,6 +176,9 @@ import type {
 import type {
   AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
+import type {
+  SafeToolCallValidationDigest,
+} from './assistant/tool-validation-digest.js'
 import {
   ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   normalizeAssistantResponseMediaList,
@@ -6601,39 +6604,10 @@ function isInvalidDynamicToolRequest(
 ): request is Extract<
   MurphDynamicToolRequest,
   {
-    kind:
-      | 'invalid-generate-image-arguments'
-      | 'invalid-automation-arguments'
-      | 'invalid-assistant-style-arguments'
-      | 'invalid-computer-arguments'
-      | 'invalid-device-arguments'
-      | 'invalid-generate-voice-memo-arguments'
-      | 'invalid-pending-vault-files-arguments'
-      | 'invalid-finish-without-reply-arguments'
-      | 'invalid-progress-arguments'
-      | 'invalid-reaction-arguments'
-      | 'invalid-reply-target-arguments'
-      | 'invalid-product-feedback-arguments'
-      | 'invalid-response-card-arguments'
-      | 'invalid-response-media-arguments'
+    validationDigest: SafeToolCallValidationDigest
   }
 > {
-  return (
-    request.kind === 'invalid-generate-image-arguments' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'invalid-assistant-style-arguments' ||
-    request.kind === 'invalid-computer-arguments' ||
-    request.kind === 'invalid-device-arguments' ||
-    request.kind === 'invalid-generate-voice-memo-arguments' ||
-    request.kind === 'invalid-pending-vault-files-arguments' ||
-    request.kind === 'invalid-finish-without-reply-arguments' ||
-    request.kind === 'invalid-progress-arguments' ||
-    request.kind === 'invalid-reaction-arguments' ||
-    request.kind === 'invalid-reply-target-arguments' ||
-    request.kind === 'invalid-product-feedback-arguments' ||
-    request.kind === 'invalid-response-card-arguments' ||
-    request.kind === 'invalid-response-media-arguments'
-  )
+  return 'validationDigest' in request
 }
 
 function isSerializedDynamicToolRequest(

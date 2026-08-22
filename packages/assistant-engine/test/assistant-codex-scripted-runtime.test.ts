@@ -61,6 +61,7 @@ import {
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_DATA_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
@@ -4054,7 +4055,7 @@ text(JSON.stringify(result));
               action: 'offer_access',
               projectionScopes: [{ projectionKind: 'steps-days.v0' }],
             },
-            name: 'group',
+            name: 'group_data',
             namespace: 'murph',
           },
         })
@@ -7122,10 +7123,10 @@ if (!tool) {
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
     expect(invalidOutput).toContain(
-      '"field":"card.totals.proteinGrams.mealCount"',
+      '"path":["card","totals","proteinGrams","mealCount"]',
     )
     expect(invalidOutput).toContain(
-      '"expected":"zero_iff_total_null"',
+      '"murphExpectedShape":"zero_iff_total_null"',
     )
     expect(invalidOutput).not.toContain('challengeSlug')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
@@ -7136,6 +7137,54 @@ if (!tool) {
     expect(result.finalMessage).toContain('100g protein (status unavailable)')
     expect(result.finalMessage).not.toBe('CARD_REPAIRED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('records focused group-family schema rejections through the standard diagnostic', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            action: 'read_shared',
+            projectionScopes: [],
+          },
+          name: 'group_data',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_DATA_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_GROUP_DATA_TOOL],
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group data read.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_group_arguments')
+    expect(invalidOutput).toContain('projectionScopes')
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        issueKind: 'schema_rejection',
+        operation: 'murph.group_data',
+      }),
+      expect.objectContaining({
+        component: 'assistant.codex-action',
+        errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+        issueKind: 'tool_error',
+        operation: 'dynamic.tool.call',
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs))
+      .not.toContain('validationIssues')
+    expect(result.finalMessage).toBe('GROUP_DATA_REJECTED')
   })
 
   it('keeps malformed group-card repair feedback on the group contract', {
@@ -7163,9 +7212,9 @@ if (!tool) {
     const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
       ?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
-    expect(invalidOutput).toContain('"field":"challengeSlug"')
-    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
-    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(invalidOutput).toContain('"path":["challengeSlug"]')
+    expect(invalidOutput).toContain('"path":["pageRevisionDigest"]')
+    expect(invalidOutput).not.toContain('"path":["card"]')
     expect(result.responseCard).toBeNull()
     expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
@@ -11157,7 +11206,7 @@ text(JSON.stringify(result));
             subject: 'Scheduled update',
             text: 'Scheduled update',
           },
-          name: 'group',
+          name: 'group_email',
           namespace: 'murph',
         },
       },
@@ -11235,7 +11284,7 @@ text(JSON.stringify(result));
         {
           functionCall: {
             arguments: { action: 'share_contact_card' },
-            name: 'group',
+            name: 'group_chat',
             namespace: 'murph',
           },
         },
@@ -11316,7 +11365,7 @@ text(JSON.stringify(result));
       {
         functionCall: {
           arguments: { action: 'read_chat_participants' },
-          name: 'group',
+          name: 'group_chat',
           namespace: 'murph',
         },
       },
@@ -11413,7 +11462,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -11443,7 +11492,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: `ain_${'f'.repeat(32)}`,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -11520,7 +11569,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },

@@ -1299,6 +1299,298 @@ export const MURPH_GROUP_TOOL = {
   },
 } as const
 
+type MurphGroupToolAction =
+  (typeof MURPH_GROUP_TOOL_BASE.inputSchema.properties.action.enum)[number]
+type MurphGroupToolPropertyName = Exclude<
+  keyof typeof MURPH_GROUP_TOOL_BASE.inputSchema.properties,
+  'action'
+>
+
+export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
+  group_consult: [
+    'ask',
+    'handoff',
+    'ask_current_sender',
+    'clarify_current_sender',
+    'continue_current_sender_in_group',
+    'continue_current_sender_privately',
+    'ask_member',
+  ],
+  group_data: [
+    'record_current_sender_daily_metric',
+    'post_disclosure_request',
+    'revoke_disclosure_grant',
+    'read_shared',
+    'offer_access',
+    'revoke_own_email_share',
+  ],
+  group_membership: [
+    'read_current',
+    'prepare_next_group',
+    'read_next_group',
+    'cancel_next_group',
+    'list_memberships',
+    'leave_membership',
+  ],
+  group_usage: [
+    'read_usage',
+    'read_usage_referral',
+    'arm_usage_referral',
+    'cancel_usage_referral',
+    'create_signup_referral_link',
+  ],
+  group_chat: [
+    'read_chat_name',
+    'update_display_name',
+    'read_chat_participants',
+    'set_chat_avatar',
+    'share_contact_card',
+  ],
+  group_email: ['send_email'],
+} as const satisfies Record<string, readonly MurphGroupToolAction[]>
+
+interface MurphGroupToolActionVariant {
+  properties: readonly MurphGroupToolPropertyName[]
+  required?: readonly MurphGroupToolPropertyName[]
+  propertyOverrides?: Partial<
+    Record<MurphGroupToolPropertyName, Record<string, unknown>>
+  >
+}
+
+const MURPH_GROUP_TOOL_ACTION_CONTRACTS = {
+  ask: [{ properties: ['question', 'groupLabel'], required: ['question'] }],
+  handoff: [{ properties: ['context', 'groupLabel'], required: ['context'] }],
+  ask_current_sender: [{
+    properties: ['message_ref'],
+    required: ['message_ref'],
+  }],
+  clarify_current_sender: [{
+    properties: ['message_ref'],
+    required: ['message_ref'],
+  }],
+  continue_current_sender_in_group: [{
+    properties: ['message_ref'],
+    required: ['message_ref'],
+  }],
+  continue_current_sender_privately: [{
+    properties: ['message_ref'],
+    required: ['message_ref'],
+  }],
+  ask_member: [{
+    properties: ['grantId', 'question'],
+    required: ['grantId', 'question'],
+  }],
+  record_current_sender_daily_metric: [{
+    properties: ['date', 'message_ref', 'metric', 'unit', 'value'],
+    required: ['date', 'message_ref', 'metric', 'unit', 'value'],
+  }],
+  post_disclosure_request: [{
+    properties: ['permissionText'],
+    required: ['permissionText'],
+  }],
+  revoke_disclosure_grant: [{
+    properties: ['grantId'],
+    required: ['grantId'],
+  }],
+  read_shared: [
+    {
+      properties: ['projectionScopes'],
+      required: ['projectionScopes'],
+    },
+    {
+      properties: ['audience', 'projectionScopes'],
+      required: ['audience', 'projectionScopes'],
+    },
+  ],
+  offer_access: [{
+    properties: ['displayName', 'projectionScopes', 'standaloneLink'],
+  }],
+  revoke_own_email_share: [{
+    properties: ['message_ref'],
+    required: ['message_ref'],
+  }],
+  read_current: [{ properties: [] }],
+  prepare_next_group: [{ properties: ['setup'] }],
+  read_next_group: [{ properties: [] }],
+  cancel_next_group: [{ properties: [] }],
+  list_memberships: [{ properties: [] }],
+  leave_membership: [{
+    properties: ['membershipId'],
+    required: ['membershipId'],
+  }],
+  read_usage: [{ properties: [] }],
+  read_usage_referral: [{ properties: ['message_ref'] }],
+  arm_usage_referral: [{
+    properties: ['policyCodes'],
+    required: ['policyCodes'],
+  }],
+  cancel_usage_referral: [{
+    properties: ['policyCode'],
+    required: ['policyCode'],
+  }],
+  create_signup_referral_link: [{ properties: ['message_ref'] }],
+  read_chat_name: [{ properties: [] }],
+  update_display_name: [{
+    properties: ['displayName'],
+    required: ['displayName'],
+  }],
+  read_chat_participants: [{ properties: [] }],
+  set_chat_avatar: [
+    {
+      properties: [
+        'alt',
+        'avatarSource',
+        'outputFormat',
+        'prompt',
+        'quality',
+        'referenceImageRefs',
+        'size',
+      ],
+      required: ['avatarSource', 'prompt'],
+      propertyOverrides: { avatarSource: { const: 'generate' } },
+    },
+    {
+      properties: ['alt', 'avatarSource', 'imageRef'],
+      required: ['avatarSource', 'imageRef'],
+      propertyOverrides: { avatarSource: { const: 'image_ref' } },
+    },
+  ],
+  share_contact_card: [{ properties: ['avatarPrompt'] }],
+  send_email: [{
+    properties: ['html', 'subject', 'text'],
+    required: ['html', 'subject'],
+  }],
+} as const satisfies Record<
+  MurphGroupToolAction,
+  readonly MurphGroupToolActionVariant[]
+>
+
+const murphGroupToolActionContracts: Readonly<
+  Record<MurphGroupToolAction, readonly MurphGroupToolActionVariant[]>
+> = MURPH_GROUP_TOOL_ACTION_CONTRACTS
+
+function buildMurphGroupFamilyInputSchema(
+  actions: readonly MurphGroupToolAction[],
+) {
+  const propertyNames = new Set<MurphGroupToolPropertyName>()
+  for (const action of actions) {
+    for (const variant of murphGroupToolActionContracts[action]) {
+      for (const propertyName of variant.properties) {
+        propertyNames.add(propertyName)
+      }
+    }
+  }
+
+  const properties: Record<string, unknown> = {
+    action: { type: 'string', enum: actions },
+  }
+  for (const propertyName of propertyNames) {
+    properties[propertyName] =
+      MURPH_GROUP_TOOL_BASE.inputSchema.properties[propertyName]
+  }
+
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties,
+    required: ['action'],
+    oneOf: actions.flatMap((action) =>
+      murphGroupToolActionContracts[action].map((variant) => ({
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { const: action },
+          ...Object.fromEntries(variant.properties.map((propertyName) => [
+            propertyName,
+            variant.propertyOverrides?.[propertyName] ?? {},
+          ])),
+        },
+        required: ['action', ...(variant.required ?? [])],
+      }))),
+  } as const
+}
+
+function buildMurphGroupFamilyTool<
+  const Name extends keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+>(input: {
+  actions: (typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS)[Name]
+  description: string
+  name: Name
+}) {
+  return {
+    namespace: 'murph',
+    name: input.name,
+    deferLoading: true,
+    description: input.description,
+    inputSchema: buildMurphGroupFamilyInputSchema(input.actions),
+  } as const
+}
+
+export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_consult',
+  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_consult,
+  description:
+    'Consult a joined group or the current sender through the authorized current conversation. The host binds member, group, route, input, and occurrence; supply no identifiers. ask returns privately and asks are async. handoff queues verified context for one group-authored message after an explicit request. Current-sender actions require the exact accepted message_ref. Scheduled ask_member replay must keep the same question. Results authorize nothing else.',
+})
+
+export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_data',
+  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_data,
+  description:
+    'Read consent-aware shared group data, record an exact current-sender daily metric, or manage the current group disclosure/access surface. The host binds member, group, route, input, and occurrence; supply no identifiers. read_shared partial is incomplete. A recorded metric is durable only when accepted; unavailable means not recorded and transport failure proves neither. Results authorize nothing else.',
+})
+
+export const MURPH_GROUP_MEMBERSHIP_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_membership',
+  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_membership,
+  description:
+    'Read or change only the current member\'s hosted-group setup and memberships. The host binds the member and current authority; supply no member, group, route, or provider identifiers. Use only an exact membershipId from the immediately preceding list_memberships result. read_current is membership and permission setup, never shared records.',
+})
+
+export const MURPH_GROUP_USAGE_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_usage',
+  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_usage,
+  description:
+    'Read current hosted-group usage, funding, and referral options or apply one explicit referral choice. The host binds the member, group, route, and accepted input; supply no identifiers. In a group, sender-specific referral reads and signup links use the exact accepted message_ref. Returned URLs and options authorize only the matching requested follow-up.',
+})
+
+export const MURPH_GROUP_CHAT_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_chat',
+  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_chat,
+  description:
+    'Read or update presentation for the current authorized group chat, or share its contact card. The host binds the group and provider route; supply no thread or participant target. update_display_name and set_chat_avatar status=ok means provider acceptance. group=null proves neither absence nor a stored label. Participant display names are presentation only, never identity or authority.',
+})
+
+export const MURPH_GROUP_EMAIL_TOOL = buildMurphGroupFamilyTool({
+  name: 'group_email',
+  actions: MURPH_GROUP_TOOL_FAMILY_ACTIONS.group_email,
+  description:
+    'Queue one authorized group automation email after preparing consent-aware address-free facts with murph.group_data read_shared audience=group_email. The host binds the group and revalidates current recipients and grants. accepted means queued, not delivered. Never supply recipient addresses or identifiers.',
+})
+
+export const MURPH_GROUP_FAMILY_TOOLS = [
+  MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_DATA_TOOL,
+  MURPH_GROUP_MEMBERSHIP_TOOL,
+  MURPH_GROUP_USAGE_TOOL,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_EMAIL_TOOL,
+] as const
+
+export const MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME = {
+  group: Object.keys(MURPH_GROUP_TOOL_BASE.inputSchema.properties),
+  group_consult: Object.keys(MURPH_GROUP_CONSULT_TOOL.inputSchema.properties),
+  group_data: Object.keys(MURPH_GROUP_DATA_TOOL.inputSchema.properties),
+  group_membership: Object.keys(MURPH_GROUP_MEMBERSHIP_TOOL.inputSchema.properties),
+  group_usage: Object.keys(MURPH_GROUP_USAGE_TOOL.inputSchema.properties),
+  group_chat: Object.keys(MURPH_GROUP_CHAT_TOOL.inputSchema.properties),
+  group_email: Object.keys(MURPH_GROUP_EMAIL_TOOL.inputSchema.properties),
+} satisfies Record<
+  typeof MURPH_GROUP_TOOL.name
+    | (typeof MURPH_GROUP_FAMILY_TOOLS)[number]['name'],
+  readonly string[]
+>
+
 export const MURPH_SEND_VAULT_FILE_TOOL = {
   namespace: 'murph',
   name: 'send_vault_file',
@@ -1542,7 +1834,7 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_PLAN_USAGE_TOOL,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_SUBSCRIPTION_TOOL,
-  MURPH_GROUP_TOOL,
+  ...MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GENERATE_SONG_TOOL,
   MURPH_ANALYZE_VIDEO_TOOL,
@@ -1664,7 +1956,9 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_PLAN_USAGE_TOOL, defaultOff((a) => a.planUsageAvailable)],
     [MURPH_IMESSAGE_CONTACT_TOOL, defaultOff((a) => a.imessageContactAvailable)],
     [MURPH_SUBSCRIPTION_TOOL, defaultOff((a) => a.subscriptionAvailable)],
-    [MURPH_GROUP_TOOL, defaultOff((a) => a.groupAvailable)],
+    ...MURPH_GROUP_FAMILY_TOOLS.map(
+      (tool) => [tool, defaultOff((a) => a.groupAvailable)] as const,
+    ),
     [MURPH_GROUP_ROOM_MODEL_TOOL, defaultOff((a) => a.groupRoomModelAvailable)],
     [MURPH_PERSONALIZATION_TOOL, defaultOff((a) => a.personalizationAvailable)],
     [MURPH_GENERATE_VOICE_MEMO_TOOL, defaultOff((a) => a.voiceMemoGenerationAvailable)],

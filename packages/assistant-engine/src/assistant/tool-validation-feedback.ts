@@ -1,9 +1,13 @@
 import type {
   SafeToolCallValidationDigest,
 } from './tool-validation-digest.js'
+import {
+  readModelToolCallValidationReason,
+} from './tool-validation-digest.js'
 
 const MAX_TOOL_CALL_REPAIR_HINTS = 4
 const MAX_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 1_600
+const MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 60_000
 
 export interface ToolCallValidationFeedbackOptions {
   error: string
@@ -16,9 +20,9 @@ interface ToolCallRepairHint {
 }
 
 /**
- * Build bounded model-visible repair guidance from the value-free validation
- * digest. Submitted values, received shapes, and rejected key names are never
- * copied into the response.
+ * Return the originating validator's complete reason to the model while it is
+ * still available in memory. Persisted or reconstructed digests fall back to
+ * bounded, value-free repair hints.
  */
 export function buildToolCallValidationFeedback(
   digest: SafeToolCallValidationDigest,
@@ -26,6 +30,21 @@ export function buildToolCallValidationFeedback(
 ): string {
   const error = normalizeFeedbackToken(options.error, 96)
     ?? 'invalid_tool_arguments'
+  const modelValidationReason = readModelToolCallValidationReason(digest)
+  if (modelValidationReason) {
+    const detailedFeedback = JSON.stringify({
+      error,
+      validationIssues: parseModelValidationReason(modelValidationReason),
+    })
+    if (Buffer.byteLength(detailedFeedback, 'utf8')
+      <= MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH) {
+      return detailedFeedback
+    }
+    return buildBoundedTruncatedValidationFeedback({
+      error,
+      modelValidationReason,
+    })
+  }
   const hints = (digest.pathIssues ?? [])
     .map((issue): ToolCallRepairHint | null => {
       const field = normalizeFeedbackToken(issue.path, 160)
@@ -62,6 +81,40 @@ export function buildToolCallValidationFeedback(
   return feedback.length <= MAX_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH
     ? feedback
     : genericFeedback
+}
+
+function buildBoundedTruncatedValidationFeedback(input: {
+  error: string
+  modelValidationReason: string
+}): string {
+  const build = (end: number) => JSON.stringify({
+    error: input.error,
+    validationReason: input.modelValidationReason.slice(0, end),
+    validationReasonTruncated: true,
+  })
+  let lower = 0
+  let upper = input.modelValidationReason.length
+  let result = build(0)
+  while (lower <= upper) {
+    const midpoint = Math.floor((lower + upper) / 2)
+    const candidate = build(midpoint)
+    if (Buffer.byteLength(candidate, 'utf8')
+      <= MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH) {
+      result = candidate
+      lower = midpoint + 1
+    } else {
+      upper = midpoint - 1
+    }
+  }
+  return result
+}
+
+function parseModelValidationReason(reason: string): unknown {
+  try {
+    return JSON.parse(reason)
+  } catch {
+    return reason
+  }
 }
 
 function validationHintRank(code: string): number {
