@@ -44,6 +44,10 @@ export async function loadEnvironmentConditions(input: {
       operation: "execute",
     },
   });
+  console.info(
+    "Environment conditions geocoding response shape.",
+    describeProviderValueShape(geocoding),
+  );
   const place = readGeocodedPlace(geocoding);
   if (!place) {
     throw hostedOnboardingError({
@@ -163,4 +167,35 @@ function readAirQuality(value: unknown): EnvironmentConditions["airQuality"] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function describeProviderValueShape(
+  value: unknown,
+  depth = 0,
+): unknown {
+  if (Array.isArray(value)) {
+    return {
+      item: depth < 3 && value.length > 0
+        ? describeProviderValueShape(value[0], depth + 1)
+        : null,
+      length: value.length,
+      type: "array",
+    };
+  }
+  if (isRecord(value)) {
+    const keys = Object.keys(value).sort().slice(0, 20);
+    return {
+      fields: depth < 3
+        ? Object.fromEntries(
+            keys.map((key) => [
+              key,
+              describeProviderValueShape(value[key], depth + 1),
+            ]),
+          )
+        : null,
+      keys,
+      type: "object",
+    };
+  }
+  return { type: value === null ? "null" : typeof value };
 }
