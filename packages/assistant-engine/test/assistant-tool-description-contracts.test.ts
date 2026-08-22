@@ -83,4 +83,9 @@ describe("assistant tool description call contracts", () => {
 
     expect(total).toBeLessThanOrEqual(6_700);
   });
+
+  it("keeps group handoff discovery and pending-state semantics explicit", () => {
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("hand off");
+    expect(MURPH_GROUP_CONSULT_TOOL.description).toContain("queued, not sent");
+  });
 });

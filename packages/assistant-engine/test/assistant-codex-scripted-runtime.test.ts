@@ -61,6 +61,7 @@ import {
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_DATA_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
@@ -10022,6 +10023,72 @@ text(result.output);
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
+  })
+
+  it('discovers a group handoff and reports accepted as queued', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph hand off verified context to a joined group',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'handoff',
+            context: 'I finished the race.',
+            groupLabel: 'Running Club',
+          },
+          name: 'group_consult',
+          namespace: 'murph',
+        },
+      },
+      { text: 'I queued that for Running Club; it has not been sent yet.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async (request) => {
+          groupRequests.push(request)
+          return {
+            action: 'handoff',
+            result: { status: 'accepted', targetLabel: 'Running Club' },
+          }
+        }),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'a'.repeat(32)}`],
+          conversationId: 'conversation-handoff',
+          conversationScope: 'direct',
+          inboundMailboxItemIds: ['mailbox-handoff'],
+          originSessionId: 'session-handoff',
+          recipientKey: 'member:current',
+        }),
+      },
+      prompt: 'Tell my running group that I finished the race.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group_consult"',
+    )
+    expect(groupRequests).toEqual([
+      expect.objectContaining({
+        action: 'handoff',
+        context: 'I finished the race.',
+        groupLabel: 'Running Club',
+      }),
+    ])
+    expect(result.finalMessage).toBe(
+      'I queued that for Running Club; it has not been sent yet.',
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
   it('keeps physical-note recovery deferred until an explicit request discovers it', {

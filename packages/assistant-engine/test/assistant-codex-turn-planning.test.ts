@@ -3823,6 +3823,14 @@ describe('assistant Codex turn planning', () => {
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    for (const plan of [attendedPlan, scheduledPlan]) {
+      expect(plan.systemPrompt).toContain(
+        '`murph.group action="read_shared"`',
+      )
+      expect(plan.systemPrompt).not.toContain('`murph.group_data')
+      expect(plan.systemPrompt).not.toContain('`murph.group_membership')
+      expect(plan.systemPrompt).not.toContain('`murph.group_email')
+    }
     expect(attendedPlan.dynamicTools).toContainEqual(
       expect.objectContaining({
         namespace: 'murph',
@@ -4082,6 +4090,15 @@ describe('assistant Codex turn planning', () => {
         'personalization',
         'create_phone_call',
       ]),
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_data action="read_shared"`',
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_email action="send_email"`',
+    )
+    expect(plan.systemPrompt).not.toContain(
+      '`murph.group action="read_shared"`',
     )
     const groupAssistantConfigurationTool = plan.dynamicTools.find(
       (tool) => tool.name === 'assistant_configuration',

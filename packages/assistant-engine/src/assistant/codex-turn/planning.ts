@@ -823,6 +823,12 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantHostedLabsAvailable:
         privateInteractiveProviderTurn &&
         input.hostedToolContext?.labsTool != null,
+      assistantHostedGroupToolSurface:
+        input.hostedToolContext?.groupTool != null
+          ? 'families'
+          : input.hostedToolContext?.groupSharedReader != null
+            ? 'shared_read'
+            : 'none',
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
       assistantProgressUpdatesAvailable: input.progressDelivery != null,

@@ -1407,7 +1407,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask the group, a member, or current sender; continue private/group threads.',
+    'Ask or hand off to a group/member/sender; host binds authority. Accepted handoff is queued, not sent.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
