@@ -51,15 +51,36 @@ Updated: 2026-08-23
   automation across unrelated authorization pages.
 - Bind the behavior to Garmin plus the exact trusted host and path. Require the
   observed exact checkbox and positive-action cardinality, select all three
-  data-sharing checkboxes, and fail closed on any future shape change.
+  data-sharing checkboxes, and fail closed when those checkboxes or the exact
+  positive action change. Unrelated negative actions and links stay outside the
+  gate.
 - Keep `Cancel`, generic links, raw page text, credentials, and account identity
   outside the automation and diagnostics.
+- Treat `Save` as one external consent effect: after its first click, wait a
+  bounded interval for departure from the exact route and fail without another
+  submission if the result remains unresolved.
+- Replace Playwright checkbox failures at the new boundary with a fixed
+  timeout/other category so provider content cannot enter protected CI logs.
+
+## ReviewGPT
+
+- Final round 1 passed the original pushed head with no findings.
+- The preliminary specialist pass found four medium issues. All were accepted;
+  none were rejected: narrow an overbroad docs claim, make checkbox failures
+  content-free, prevent repeated `Save` submissions, and add real-Chromium
+  exact-route/nearby-route coverage. The supplied tests-only coverage patch was
+  inspected, passed `git apply --check`, and was applied deliberately.
+- Remediation adds one content-free action boundary, one bounded departure wait,
+  and existing-smoke-boundary tests. It adds no retry, service, state owner,
+  queue, dependency, or shared provider action.
 
 ## Verification
 
-- Focused browser suite: 33 tests passed, including success only after all three
+- Focused browser suite: 34 tests passed, including success only after all three
   boxes are selected and failure on changed checkbox or `Save` cardinality.
-- Hosted Web typecheck passed.
+- Real headed-Chromium smoke suite: 7 tests passed, including exact-route,
+  nearby-route refusal, and content-free obstructed-checkbox proof.
+- Hosted Web typecheck passed after remediation.
 - Workflow/config contract checks if their contract changes.
 - `pnpm docs:drift`, `git diff --check`, privacy review, ReviewGPT, exact-head
   required CI, and the protected post-merge Garmin run.

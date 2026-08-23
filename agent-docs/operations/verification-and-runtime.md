@@ -271,8 +271,10 @@ mitigation that cleared the provider challenge observed in headless automation;
 only a successful protected-main run proves the complete result. On Garmin's
 exact `/partner/oauthConfirm` route, the unattended runner requires exactly
 three available data-sharing checkboxes and one enabled `Save` action before it
-continues. A changed consent shape fails closed. The CI boundary keeps manual
-authorization disabled and challenge handling fail-closed.
+continues. Changes to that checkbox count or availability, or to the exact
+`Save` count or state, fail closed; unrelated negative actions and links are not
+part of that gate. The CI boundary keeps manual authorization disabled and
+challenge handling fail-closed.
 The profile can reuse a still-valid Garmin session, while an expired session
 falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),

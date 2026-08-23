@@ -991,6 +991,48 @@ describe("hosted-local Junction wearable browser authorization", () => {
     },
   );
 
+  it("submits Garmin consent only once while the first Save result is unresolved", async () => {
+    let now = 0;
+    let saveClicks = 0;
+    const mainFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          saveClicks += 1;
+        },
+        text: "Save",
+      }],
+      checkboxes: Array.from({ length: 3 }, () => ({
+        checked: false,
+        text: "",
+      })),
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => "https://connect.garmin.com/partner/oauthConfirm",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).rejects.toThrow(
+      "Garmin consent Save did not leave the consent route.",
+    );
+    expect(saveClicks).toBe(1);
+    expect(now).toBe(15_000);
+  });
+
   it("always disables manual completion in headless mode", () => {
     expect(createConfig({
       CI: undefined,

@@ -557,6 +557,11 @@ async function completeExternalAuthorization(
       if (completedGarminPartnerConsent) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
+        await waitForGarminPartnerConsentDeparture(
+          page,
+          Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+          now,
+        );
         await page.waitForTimeout(750);
         continue;
       }
@@ -607,11 +612,9 @@ async function completeGarminPartnerConsent(
   page: Page,
   source: BrowserConfig["source"],
 ): Promise<boolean> {
-  const url = new URL(page.url());
   if (
     source !== "garmin"
-    || url.hostname !== "connect.garmin.com"
-    || url.pathname !== "/partner/oauthConfirm"
+    || !isGarminPartnerConsentUrl(page.url())
   ) {
     return false;
   }
@@ -634,7 +637,7 @@ async function completeGarminPartnerConsent(
     ) {
       throw new Error("Garmin consent data-sharing checkbox was unavailable.");
     }
-    await checkbox.check();
+    await checkAuthorizationCheckbox(checkbox);
     if (!await checkbox.isChecked().catch(() => false)) {
       throw new Error("Garmin consent data-sharing checkbox was not selected.");
     }
@@ -650,6 +653,25 @@ async function completeGarminPartnerConsent(
   }
   await clickAuthorizationControl(saveAction);
   return true;
+}
+
+function isGarminPartnerConsentUrl(value: string): boolean {
+  const url = new URL(value);
+  return url.hostname === "connect.garmin.com"
+    && url.pathname === "/partner/oauthConfirm";
+}
+
+async function waitForGarminPartnerConsentDeparture(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  while (isGarminPartnerConsentUrl(page.url()) && now() < deadline) {
+    await page.waitForTimeout(250);
+  }
+  if (isGarminPartnerConsentUrl(page.url())) {
+    throw new Error("Garmin consent Save did not leave the consent route.");
+  }
 }
 
 async function completeAuthorizationAndRequireCallback(
@@ -832,6 +854,19 @@ async function clickAuthorizationControl(
       ? "timeout"
       : "other";
     throw new Error(`Authorization action failed (${category}).`);
+  }
+}
+
+async function checkAuthorizationCheckbox(
+  checkbox: Pick<Locator, "check">,
+): Promise<void> {
+  try {
+    await checkbox.check();
+  } catch (error) {
+    const category = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout"
+      : "other";
+    throw new Error(`Authorization consent selection failed (${category}).`);
   }
 }
 
