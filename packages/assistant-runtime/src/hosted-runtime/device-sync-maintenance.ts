@@ -1806,6 +1806,7 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_CODE_FIELDS = [
   "failureCauseCode",
   "failureCauseName",
   "failureErrorName",
+  "junctionWorkoutStreamTimestampCardinalityKind",
   "normalizationFailureReason",
   "normalizationSourceProvider",
   "normalizationTimestampKind",
@@ -1843,6 +1844,8 @@ const DEVICE_SYNC_FAILURE_DIAGNOSTIC_REASON_FIELDS = [
 
 const DEVICE_SYNC_FAILURE_DIAGNOSTIC_NUMBER_FIELDS = [
   "normalizationRowOrdinal",
+  "junctionWorkoutStreamMaxTimestampCount",
+  "junctionWorkoutStreamTimestampCount",
   "providerHttpStatus",
   "providerRequestBodyFieldCount",
   "providerRequestCandidateCount",

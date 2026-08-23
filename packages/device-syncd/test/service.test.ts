@@ -15,7 +15,10 @@ import {
   JunctionSparseCalendarRepairNormalizationError,
   prepareDeviceProviderSnapshotImport,
 } from "@murphai/importers";
-import { buildJunctionDailyTimeseriesAggregateResourceId } from "@murphai/importers/device-providers/junction";
+import {
+  buildJunctionDailyTimeseriesAggregateResourceId,
+  JunctionWorkoutStreamTimestampCardinalityError,
+} from "@murphai/importers/device-providers/junction";
 import { openSqliteRuntimeDatabase, writeSqliteRuntimeUserVersion } from "@murphai/runtime-state/node";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
 
@@ -11866,6 +11869,52 @@ test.each([
         : {}),
       normalizationTimestampKind: "invalid",
       normalizationTimestampSemantics: "unknown",
+    });
+  } finally {
+    close();
+  }
+});
+
+test("device sync service preserves bounded Junction workout-stream cardinality diagnostics", async () => {
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-workout-cardinality-diagnostics");
+  const { service, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    providers: [
+      createFakeProvider({
+        async executeJob() {
+          throw new JunctionWorkoutStreamTimestampCardinalityError({
+            kind: "over_limit",
+            maxTimestampCount: 100_000,
+            timestampCount: 100_127,
+          });
+        },
+      }),
+    ],
+  });
+
+  try {
+    const begin = await service.startConnection({ provider: "demo" });
+    await service.handleOAuthCallback({
+      provider: "demo",
+      state: begin.state,
+      code: "junction-workout-cardinality-diagnostic",
+    });
+
+    await service.runWorkerOnce();
+    const [diagnostic] = service.listJobFailureDiagnostics();
+    assert.ok(diagnostic);
+    assert.equal(diagnostic.code, "SYNC_JOB_FAILED");
+    assert.equal(diagnostic.retryable, false);
+    assert.deepEqual(diagnostic.details, {
+      failureErrorName: "JunctionWorkoutStreamTimestampCardinalityError",
+      junctionWorkoutStreamMaxTimestampCount: 100_000,
+      junctionWorkoutStreamTimestampCardinalityKind: "over_limit",
+      junctionWorkoutStreamTimestampCount: 100_127,
     });
   } finally {
     close();
