@@ -267,9 +267,12 @@ checksum-pinned Kernel CLI plus checksum-pinned `websocat`, which the CLI uses
 for a reverse SSH tunnel from the Kernel browser VM to hosted-local Web. The
 unattended proof uses a headed remote stealth browser with telemetry disabled
 and a dedicated persistent Garmin canary profile. Headed Chromium is the narrow
-mitigation under test for the provider challenge observed in headless
-automation; only a successful protected-main run proves the result. The CI
-boundary keeps manual authorization disabled and challenge handling fail-closed.
+mitigation that cleared the provider challenge observed in headless automation;
+only a successful protected-main run proves the complete result. On Garmin's
+exact `/partner/oauthConfirm` route, the unattended runner requires exactly
+three available data-sharing checkboxes and one enabled `Save` action before it
+continues. A changed consent shape fails closed. The CI boundary keeps manual
+authorization disabled and challenge handling fail-closed.
 The profile can reuse a still-valid Garmin session, while an expired session
 falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),

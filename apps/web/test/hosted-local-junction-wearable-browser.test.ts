@@ -134,6 +134,7 @@ function roleLocator(
     checked?: boolean;
     detachAfterFirstText?: boolean;
     enabled?: boolean;
+    onCheck?: () => void;
     onClick?: () => void;
     text: string;
     value?: string;
@@ -184,6 +185,11 @@ function roleLocator(
             control !== undefined && other.includesControl?.(control) ? 1 : 0
           ),
         })),
+        check: vi.fn(async () => {
+          if (!control) return;
+          control.checked = true;
+          control.onCheck?.();
+        }),
         click: vi.fn(async () => control?.onClick?.()),
         getAttribute: vi.fn(async (name: string) => {
           if (name === "aria-label") return control?.ariaLabel ?? null;
@@ -205,7 +211,10 @@ function authorizationFrame(input: {
   links?: Parameters<typeof roleLocator>[0];
 }) {
   return {
-    getByRole: vi.fn((role: string, options?: { name?: RegExp }) => {
+    getByRole: vi.fn((
+      role: string,
+      options?: { exact?: boolean; name?: RegExp | string },
+    ) => {
       const controls = role === "button"
         ? input.buttons ?? []
         : role === "link"
@@ -213,10 +222,16 @@ function authorizationFrame(input: {
         : role === "checkbox"
         ? input.checkboxes ?? []
         : [];
-      return roleLocator(options?.name
-        ? controls.filter((control) => options.name?.test(
-          control.accessibleName ?? control.text,
-        ))
+      const requestedName = options?.name;
+      return roleLocator(requestedName
+        ? controls.filter((control) => {
+          const accessibleName = control.accessibleName ?? control.text;
+          return typeof requestedName === "string"
+            ? options.exact
+              ? accessibleName === requestedName
+              : accessibleName.includes(requestedName)
+            : requestedName.test(accessibleName);
+        })
         : controls);
     }),
     url: () => "https://id.whoop.com/sign-in",
@@ -871,6 +886,110 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1.",
     ].join(" "));
   });
+
+  it("selects the exact Garmin data-sharing set before the route-bound Save action", async () => {
+    let atMurph = false;
+    let now = 0;
+    let saveClicked = false;
+    let cancelClicked = false;
+    const checkboxes = [
+      { checked: false, text: "" },
+      { checked: false, text: "" },
+      { checked: false, text: "" },
+    ];
+    const mainFrame = authorizationFrame({
+      buttons: [
+        {
+          onClick: () => {
+            saveClicked = true;
+            atMurph = checkboxes.every((checkbox) => checkbox.checked);
+          },
+          text: "Save",
+        },
+        {
+          onClick: () => {
+            cancelClicked = true;
+          },
+          text: "Cancel",
+        },
+      ],
+      checkboxes,
+      links: [
+        { text: "Learn More" },
+        { text: "Privacy Policy" },
+      ],
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => atMurph
+        ? "https://app.example.test/home"
+        : "https://connect.garmin.com/partner/oauthConfirm",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).resolves.toBeUndefined();
+
+    expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(true);
+    expect(saveClicked).toBe(true);
+    expect(cancelClicked).toBe(false);
+    expect(now).toBe(750);
+  });
+
+  it.each([
+    { checkboxCount: 2, saveCount: 1 },
+    { checkboxCount: 3, saveCount: 2 },
+  ])(
+    "fails closed when the exact Garmin consent shape changes (%o)",
+    async ({ checkboxCount, saveCount }) => {
+      let now = 0;
+      const mainFrame = authorizationFrame({
+        buttons: Array.from({ length: saveCount }, () => ({ text: "Save" })),
+        checkboxes: Array.from({ length: checkboxCount }, () => ({
+          checked: false,
+          text: "",
+        })),
+      });
+      const page = {
+        frames: () => [mainFrame],
+        getByRole: mainFrame.getByRole,
+        locator: vi.fn(() => emptyLocator()),
+        mainFrame: () => mainFrame,
+        title: vi.fn(async () => "Garmin Partner Auth"),
+        url: () => "https://connect.garmin.com/partner/oauthConfirm",
+        waitForTimeout: vi.fn(async (duration: number) => {
+          now += duration;
+        }),
+      };
+
+      await expect(completeExternalJunctionAuthorizationForTest(
+        page as never,
+        createConfig({
+          MURPH_E2E_CONNECT_URL:
+            "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+          MURPH_E2E_PROVIDER_SOURCE: "garmin",
+        }),
+        () => now,
+      )).rejects.toThrow(
+        checkboxCount === 2
+          ? "Garmin consent expected exactly 3 data-sharing checkboxes."
+          : "Garmin consent did not expose one enabled Save action.",
+      );
+    },
+  );
 
   it("always disables manual completion in headless mode", () => {
     expect(createConfig({
