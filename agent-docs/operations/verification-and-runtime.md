@@ -320,7 +320,11 @@ continues. `Save` is one-shot and may advance on that pathname only when both
 the `permissionsUpdated` and `selectedCapabilities` markers appear; the runner
 then uses the existing positive/negative classifier, where negative matching
 wins, and submits the selected confirmation action once while waiting up to the
-bounded progress window for route departure.
+bounded progress window for route departure. If that window expires on the
+advanced consent route, the failure includes only content-free action,
+checkbox, and frame counts so a protected-main run can distinguish an
+unchanged action surface from same-route DOM progression without exposing
+provider content.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual
