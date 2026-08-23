@@ -55,15 +55,16 @@ Updated: 2026-08-23
 
 ## Verification
 
-- Focused browser-runner unit suite.
-- Real headed-Chromium exact-route, nearby-route, partial-marker, and
-  content-free checkbox proof.
+- Focused browser-runner unit suite, including direct route departure and a
+  partial-marker failure.
+- Real headed-Chromium exact-route, nearby-route, and content-free checkbox
+  proof.
 - Hosted Web typecheck, docs drift, diff/privacy checks, ReviewGPT, exact-head
   required CI, and the protected post-merge Garmin canary.
 
 Completed local proof:
 
-- Browser-runner unit suite: 36 passed.
+- Browser-runner unit suite: 37 passed.
 - Real headed-Chromium smoke: 7 passed.
 - Hosted Web typecheck: passed.
 - Docs drift and diff checks: passed.

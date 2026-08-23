@@ -986,6 +986,68 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(1_500);
   });
 
+  it("completes Garmin consent when Save departs directly to Murph", async () => {
+    let atMurph = false;
+    let now = 0;
+    let saveClicks = 0;
+    let cancelClicks = 0;
+    const checkboxes = [
+      { checked: false, text: "" },
+      { checked: false, text: "" },
+      { checked: false, text: "" },
+    ];
+    const mainFrame = authorizationFrame({
+      buttons: [
+        {
+          onClick: () => {
+            saveClicks += 1;
+            atMurph = checkboxes.every((checkbox) => checkbox.checked);
+          },
+          text: "Save",
+        },
+        {
+          onClick: () => {
+            cancelClicks += 1;
+          },
+          text: "Cancel",
+        },
+      ],
+      checkboxes,
+      links: [
+        { text: "Learn More" },
+        { text: "Privacy Policy" },
+      ],
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => atMurph
+        ? "https://app.example.test/home"
+        : "https://connect.garmin.com/partner/oauthConfirm",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).resolves.toBeUndefined();
+
+    expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(true);
+    expect(saveClicks).toBe(1);
+    expect(cancelClicks).toBe(0);
+    expect(now).toBe(750);
+  });
+
   it("fails closed on a partial Garmin consent progression marker pair", async () => {
     let agreeClicks = 0;
     const mainFrame = authorizationFrame({
