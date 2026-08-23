@@ -128,6 +128,8 @@ import {
   type HostedLinqFirstContactAdmissionDecision,
 } from "./linq-first-contact-admission";
 import {
+  abandonHostedLinqInstantFirstTurn,
+  claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn,
   startHostedLinqInstantFirstTurnGeneration,
   type HostedLinqInstantFirstTurnGeneration,
@@ -600,11 +602,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               prisma,
             })
           : null;
-      const startInstantFirstTurnGeneration = (memberId: string): void => {
+      const startInstantFirstTurnGeneration = async (): Promise<void> => {
         if (
           instantFirstTurnGeneration
-          || firstContactAdmissionDecision?.kind !== "allow"
-          || firstContactAdmissionDecision.source !== "model"
           || planningEvent.event_type !== "message.received"
           || !isHostedLinqInstantStartEventCandidate({
             event: requireHostedLinqMessageReceivedEvent(planningEvent),
@@ -618,14 +618,22 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         if (!context.participantContact) {
           return;
         }
-        const generation = startHostedLinqInstantFirstTurnGeneration({
-          memberId,
+        const request = buildHostedLinqFirstContactAdmissionRequest({
+          context,
+          event: planningEvent,
+          participantContact: context.participantContact,
+        });
+        const claim = await claimHostedLinqInstantFirstTurn({
+          linqChatId: context.summary.chatId,
           prisma,
-          request: buildHostedLinqFirstContactAdmissionRequest({
-            context,
-            event: planningEvent,
-            participantContact: context.participantContact,
-          }),
+          request,
+        });
+        if (claim.kind === "unavailable") {
+          return;
+        }
+        const generation = startHostedLinqInstantFirstTurnGeneration({
+          claim,
+          request,
           ...(input.signal ? { signal: input.signal } : {}),
         });
         // Enrollment or later planning can still choose the ordinary signup
@@ -634,6 +642,21 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         // retained so the eligible path still receives the exact error.
         void generation.catch(() => undefined);
         instantFirstTurnGeneration = generation;
+      };
+      const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
+        if (
+          !instantFirstTurnGeneration
+          || planningEvent.event_type !== "message.received"
+        ) {
+          return;
+        }
+        const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+        await abandonHostedLinqInstantFirstTurn({
+          eventId: event.event_id,
+          linqChatId: context.summary.chatId,
+          prisma,
+          reason,
+        });
       };
       let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = async (instantStartAllowed = true) => {
@@ -828,6 +851,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               "first-contact-admission-budget-exhausted",
             );
           } else {
+            // The exact chat/event now owns one durable reply obligation.
+            // Reply generation has no side effects, so it can run beside the
+            // classifier while provider work still waits for persisted allow.
+            await startInstantFirstTurnGeneration();
             let classifiedAdmission: Awaited<ReturnType<typeof classifyHostedLinqFirstContactAdmission>>;
             try {
               classifiedAdmission = await classifyHostedLinqFirstContactAdmission({
@@ -849,6 +876,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
               });
             if (firstContactAdmissionDecision.kind === "block") {
+              await abandonInstantFirstTurn("admission-blocked");
               plan = await planAfterBlockedAdmission();
             } else {
               plan = await runPlan();
@@ -863,11 +891,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
 
       if (plan.instantStartEnrollment) {
         const instantStartEnrollment = plan.instantStartEnrollment;
-        // Start the tool-free Luna turn as soon as the exact model-source
-        // admission has produced a member target. Enrollment and container
-        // prewarm continue in parallel; delivery still waits for active access
-        // and the canonical inbound mailbox append below.
-        startInstantFirstTurnGeneration(instantStartEnrollment.memberId);
         // The member row is committed, so show feedback immediately while
         // enrollment and the cold runtime path continue. This hint carries no
         // authority and has no effect on the reply path.
@@ -933,11 +956,16 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         );
       }
       const activeWakeHandoff = plan.wakeHandoffs?.[0];
-      if (activeWakeHandoff) {
+      if (
+        activeWakeHandoff
+        && firstContactAdmissionDecision?.kind === "allow"
+        && firstContactAdmissionDecision.source === "model"
+      ) {
         // Exact-event webhook recovery can arrive after enrollment already
-        // committed, so it no longer sees the enrollment plan above. Reusing
-        // the same Luna idempotency key here recovers that accepted first turn.
-        startInstantFirstTurnGeneration(activeWakeHandoff.userId);
+        // committed, so it no longer sees the enrollment plan above. Reclaim
+        // the same ledger identity and sealed body rather than minting another
+        // reply obligation.
+        await startInstantFirstTurnGeneration();
       }
     } catch (error) {
       // A recognized home-route owner whose permanent route no longer matches
@@ -1097,7 +1125,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
             // The conversation checkpoint will import activation as well once
             // the exact provider delivery is reconciled. Signaling activation
             // alone here could let the runtime answer the same inbound while
-            // the Luna send is still ambiguous.
+            // the Web-owned send is still ambiguous.
             pendingInstantStartActivationWake = null;
           }
           throw error;

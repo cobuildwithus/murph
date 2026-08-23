@@ -14,7 +14,9 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasHostedLinqInviteSignupLiveDeliveryTx,
   hasHostedLinqGroupLineRecoveryAuthorityTx,
+  hasConflictingHostedLinqInstantFirstTurnForChatTx,
   hasUnresolvedHostedLinqProviderDispatchForChatTx,
+  HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   markHostedAiUsageLimitNoticeDeliveryRetryableTx,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
@@ -1403,8 +1405,101 @@ describe("hosted Linq observability stores", () => {
         linqChatLookupKey: {
           in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
         },
-        failedAt: null,
-        status: "provider_dispatch_started",
+        OR: expect.arrayContaining([
+          {
+            failedAt: null,
+            status: "provider_dispatch_started",
+          },
+          expect.objectContaining({
+            template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+          }),
+        ]),
+      }),
+    });
+  });
+
+  it("detects another unresolved instant first-turn obligation in the chat", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce({
+      id: "hld_earlier_first_turn",
+    });
+
+    await expect(hasConflictingHostedLinqInstantFirstTurnForChatTx({
+      eventId: "evt_current",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+    })).resolves.toBe(true);
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: expect.objectContaining({
+        linqChatLookupKey: {
+          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
+        },
+        sourceRef: {
+          not: createHostedLinqDeliverySourceRefLookupKey("evt_current"),
+        },
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      }),
+    });
+  });
+
+  it("advances only the exact owned pre-provider attempt before sending", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:00:00.000Z");
+    const updatedAt = new Date("2026-03-26T12:00:00.100Z");
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt,
+      deliveredAt: null,
+      failureCode: null,
+      failedAt: null,
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_instant_first_turn",
+      lastReceiptAt: null,
+      linqChatLookupKey:
+        createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
+      messageLookupKey: null,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_web_instant_first_turn",
+      sourceRef:
+        createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
+      status: "attempted",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      updatedAt,
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      advancePreProviderAttempt: true,
+      attemptedAt: new Date("2026-03-26T12:00:01.000Z"),
+      idempotencyKey: "linq-instant-first-turn-v1:event",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: "evt_first_turn",
+      status: "provider_dispatch_started",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: true,
+      id: "hld_instant_first_turn",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: expect.objectContaining({ status: "provider_dispatch_started" }),
+      where: expect.objectContaining({
+        attemptedAt,
+        id: "hld_instant_first_turn",
+        sourceRef:
+          createHostedLinqDeliverySourceRefLookupKey("evt_first_turn"),
+        status: "attempted",
+        updatedAt,
       }),
     });
   });

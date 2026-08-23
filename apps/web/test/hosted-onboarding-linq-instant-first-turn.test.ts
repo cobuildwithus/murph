@@ -1,31 +1,63 @@
 import type { PrismaClient } from "@prisma/client";
-import {
-  ASSISTANT_USAGE_SCHEMA,
-  createAssistantUsageId,
-  type AssistantUsageRecord,
-} from "@murphai/hosted-execution/assistant-usage";
+import { MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE } from "@murphai/contracts";
+import type { Response as OpenAiResponse } from "openai/resources/responses/responses";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   appendPreparedHostedMailboxEnvelopeTx: vi.fn(),
+  acquireHostedLinqChatOwnershipLockTx: vi.fn(),
   claimHostedLinqDeliveryProviderDispatchTx: vi.fn(),
   environment: {
     linqFirstContactAdmissionModel: "gpt-5.6-luna",
     linqFirstContactAdmissionOpenAiApiKey: "test-openai-key" as string | null,
   },
+  hasConflictingHostedLinqInstantFirstTurnForChatTx: vi.fn(),
+  hostedMemberRoutingRecordsEqual: vi.fn(),
   hostedLinqDeliveryFindUnique: vi.fn(),
   hostedLinqDeliveryUpdate: vi.fn(),
   hostedLinqDeliveryUpdateMany: vi.fn(),
   hostedMailboxItemUpdateMany: vi.fn(),
   logHostedOnboardingDiagnostic: vi.fn(),
+  lockHostedMemberRoutingStateTx: vi.fn(),
   markHostedLinqDeliveryAcceptedTx: vi.fn(),
   markHostedLinqDeliverySendFailedTx: vi.fn(),
+  markHostedLinqDeliverySkippedTx: vi.fn(),
   prepareHostedMailboxEnvelopeAppend: vi.fn(),
+  projectHostedMemberRoutingState: vi.fn(),
+  readActiveHostedMemberAccess: vi.fn(),
+  readHostedMemberRoutingRecord: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
+  readHostedThreadRouteByThreadIdentity: vi.fn(),
   recordHostedAiUsageRecords: vi.fn(),
+  resolveHostedMemberDirectRoute: vi.fn(),
   sendHostedLinqChatMessage: vi.fn(),
+}));
+
+vi.mock("@/src/lib/hosted-routing/linq-chat-ownership-lock", () => ({
+  acquireHostedLinqChatOwnershipLockTx:
+    mocks.acquireHostedLinqChatOwnershipLockTx,
+}));
+
+vi.mock("@/src/lib/hosted-routing/thread-route-store", () => ({
+  readHostedThreadRouteByThreadIdentity:
+    mocks.readHostedThreadRouteByThreadIdentity,
+}));
+
+vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
+  resolveHostedMemberDirectRoute: mocks.resolveHostedMemberDirectRoute,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-routing-store", () => ({
+  hostedMemberRoutingRecordsEqual: mocks.hostedMemberRoutingRecordsEqual,
+  lockHostedMemberRoutingStateTx: mocks.lockHostedMemberRoutingStateTx,
+  projectHostedMemberRoutingState: mocks.projectHostedMemberRoutingState,
+  readHostedMemberRoutingRecord: mocks.readHostedMemberRoutingRecord,
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({
+  readActiveHostedMemberAccess: mocks.readActiveHostedMemberAccess,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
@@ -62,10 +94,13 @@ vi.mock("@/src/lib/hosted-execution/usage", () => ({
 vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   claimHostedLinqDeliveryProviderDispatchTx:
     mocks.claimHostedLinqDeliveryProviderDispatchTx,
+  hasConflictingHostedLinqInstantFirstTurnForChatTx:
+    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE: "instant_first_turn_v1",
   markHostedLinqDeliveryAcceptedTx: mocks.markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx:
     mocks.markHostedLinqDeliverySendFailedTx,
+  markHostedLinqDeliverySkippedTx: mocks.markHostedLinqDeliverySkippedTx,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/linq-client", () => ({
@@ -78,7 +113,9 @@ vi.mock("@/src/lib/hosted-onboarding/linq-observability-identifiers", () => ({
 }));
 
 import {
+  claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn,
+  isHostedLinqInstantFirstTurnRequestEligible,
   startHostedLinqInstantFirstTurnGeneration,
 } from "@/src/lib/hosted-onboarding/linq-instant-first-turn";
 
@@ -105,6 +142,7 @@ const WAKE_HANDOFF = {
 function createPrisma(): PrismaClient {
   const transaction = {
     hostedLinqDelivery: {
+      findUnique: mocks.hostedLinqDeliveryFindUnique,
       update: mocks.hostedLinqDeliveryUpdate,
       updateMany: mocks.hostedLinqDeliveryUpdateMany,
     },
@@ -127,9 +165,9 @@ function createPrisma(): PrismaClient {
 }
 
 function buildOpenAiResponse(input: {
-  action: "defer" | "reply";
+  kind: "answer" | "welcome";
   message: string;
-}): Response {
+}): globalThis.Response {
   return new Response(JSON.stringify({
     created_at: 1_787_400_000,
     id: "resp_123",
@@ -160,46 +198,19 @@ function buildOpenAiResponse(input: {
   });
 }
 
-function buildUsage(): AssistantUsageRecord {
-  const turnId = "turn_linq_instant_test";
+function buildUsageResponse(): OpenAiResponse {
+  // This fixture supplies only fields read by usage accounting.
+  // @ts-expect-error -- deliberate narrow provider response fixture.
   return {
-    apiKeyEnv:
-      "HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_OPENAI_API_KEY",
-    attemptCount: 1,
-    baseUrl: "https://api.openai.com/v1",
-    cacheWriteTokens: null,
-    cachedInputTokens: 0,
-    credentialSource: "platform",
-    featureKey: "linq-instant-first-turn",
-    gatewayTags: [],
-    inputTokens: 90,
-    memberId: WAKE_HANDOFF.userId,
-    occurredAt: "2026-08-22T21:00:00.000Z",
-    outputTokens: 22,
-    provider: "openai",
-    providerName: "OpenAI",
-    providerRequestId: "resp_123",
-    providerRequestOutcome: "succeeded",
-    providerRequestOrdinal: 0,
-    rawUsageJson: null,
-    rawUsageJsonHash: null,
-    reasoningTokens: 0,
-    reportingUserId: null,
-    requestedModel: "gpt-5.6-luna",
-    routeId: null,
-    schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-5.6-luna-2026-08-01",
-    sessionId: turnId,
-    stripeMeterSource: "murph",
-    surface: "hosted-web",
-    tokenPricingBasis: "standard",
-    totalTokens: 112,
-    triggerKind: "linq-instant-first-turn",
-    turnId,
-    turnProfileJson: null,
-    usageId: createAssistantUsageId({ attemptCount: 1, turnId }),
-    usageExtractionSourcePath: "openai.responses.usage",
-    usageExtractionVersion: "openai-responses-v1",
+    id: "resp_123",
+    model: "gpt-5.6-luna-2026-08-01",
+    usage: {
+      input_tokens: 90,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 22,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 112,
+    },
   };
 }
 
@@ -208,7 +219,13 @@ describe("hosted Linq instant first turn", () => {
     vi.clearAllMocks();
     mocks.environment.linqFirstContactAdmissionModel = "gpt-5.6-luna";
     mocks.environment.linqFirstContactAdmissionOpenAiApiKey = "test-openai-key";
-    mocks.hostedLinqDeliveryFindUnique.mockResolvedValue(null);
+    mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx.mockResolvedValue(
+      false,
+    );
+    mocks.hostedMemberRoutingRecordsEqual.mockReturnValue(true);
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValue({
+      payloadCiphertext: null,
+    });
     mocks.recordHostedAiUsageRecords.mockResolvedValue({ recordedIds: [] });
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
       claimed: true,
@@ -217,6 +234,16 @@ describe("hosted Linq instant first turn", () => {
     mocks.hostedLinqDeliveryUpdate.mockResolvedValue({ id: "delivery_123" });
     mocks.hostedLinqDeliveryUpdateMany.mockResolvedValue({ count: 1 });
     mocks.hostedMailboxItemUpdateMany.mockResolvedValue({ count: 2 });
+    mocks.projectHostedMemberRoutingState.mockResolvedValue({ route: "linq" });
+    mocks.readActiveHostedMemberAccess.mockResolvedValue({ id: "access_123" });
+    mocks.readHostedMemberRoutingRecord.mockResolvedValue({
+      memberId: WAKE_HANDOFF.userId,
+    });
+    mocks.readHostedThreadRouteByThreadIdentity.mockResolvedValue(null);
+    mocks.resolveHostedMemberDirectRoute.mockReturnValue({
+      channel: "linq",
+      threadId: "chat_123",
+    });
     mocks.sendHostedLinqChatMessage.mockResolvedValue({
       chatId: "chat_123",
       messageCreatedAt: "2026-08-22T21:00:01.000Z",
@@ -232,6 +259,7 @@ describe("hosted Linq instant first turn", () => {
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(null);
+    mocks.markHostedLinqDeliverySkippedTx.mockResolvedValue(null);
     mocks.appendPreparedHostedMailboxEnvelopeTx.mockResolvedValue({
       mailboxItemId: "mailbox_outbound",
     });
@@ -243,22 +271,71 @@ describe("hosted Linq instant first turn", () => {
     });
   });
 
-  it("requests one tool-free low-reasoning Luna reply with strict output", async () => {
+  it("limits the web path to a direct, plain-text-only iMessage", () => {
+    expect(isHostedLinqInstantFirstTurnRequestEligible(REQUEST)).toBe(true);
+    for (const request of [
+      { ...REQUEST, partTypes: ["text", "image"] },
+      { ...REQUEST, partTypes: ["image"] },
+      { ...REQUEST, service: "sms" as const },
+      { ...REQUEST, participantContactKind: "email" as const },
+      { ...REQUEST, text: "   " },
+    ]) {
+      expect(isHostedLinqInstantFirstTurnRequestEligible(request)).toBe(false);
+    }
+  });
+
+  it("claims durable chat ownership before requesting a model reply", async () => {
+    await expect(claimHostedLinqInstantFirstTurn({
+      linqChatId: "chat_123",
+      prisma: createPrisma(),
+      request: REQUEST,
+    })).resolves.toEqual({ kind: "generate" });
+
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledOnce();
+    expect(
+      mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
+    ).toHaveBeenCalledWith(expect.objectContaining({
+      eventId: REQUEST.eventId,
+      linqChatId: "chat_123",
+    }));
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceRef: REQUEST.eventId,
+        status: "attempted",
+      }),
+    );
+  });
+
+  it("resumes the same encrypted obligation without regenerating", async () => {
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      payloadCiphertext: "sealed:Exact prior reply",
+    });
+
+    await expect(claimHostedLinqInstantFirstTurn({
+      linqChatId: "chat_123",
+      prisma: createPrisma(),
+      request: REQUEST,
+    })).resolves.toEqual({ kind: "resume" });
+    await expect(startHostedLinqInstantFirstTurnGeneration({
+      claim: { kind: "resume" },
+      request: REQUEST,
+    })).resolves.toEqual({ kind: "resume" });
+  });
+
+  it("requests one tool-free Murph answer with strict output", async () => {
     mocks.environment.linqFirstContactAdmissionModel = "gpt-5.4-nano";
     const fetchMock = vi.fn().mockResolvedValue(buildOpenAiResponse({
-      action: "reply",
+      kind: "answer",
       message: "I can help you understand your health, track patterns, and turn goals into practical next steps. What are you working on?",
     }));
     vi.stubGlobal("fetch", fetchMock);
 
     const result = await startHostedLinqInstantFirstTurnGeneration({
-      memberId: WAKE_HANDOFF.userId,
-      prisma: createPrisma(),
+      claim: { kind: "generate" },
       request: REQUEST,
     });
     expect(result).toMatchObject({
       kind: "reply",
-      persisted: false,
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
@@ -279,22 +356,37 @@ describe("hosted Linq instant first turn", () => {
         verbosity: "low",
       },
     });
-    expect(body.instructions).toContain("You have no tools");
-    expect(body.instructions).toContain("Choose defer");
+    expect(body.instructions).toContain("cannot see account history");
+    expect(body.instructions).toContain("Return kind \"welcome\"");
+    expect(body.instructions).not.toContain("Luna");
     expect(body.instructions).not.toContain("new user");
   });
 
-  it("defers model output that contains a URL", async () => {
+  it("uses Murph's package-owned canonical welcome verbatim", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
-      action: "reply",
+      kind: "welcome",
+      message: "This model-authored text must not be sent.",
+    })));
+
+    await expect(startHostedLinqInstantFirstTurnGeneration({
+      claim: { kind: "generate" },
+      request: { ...REQUEST, text: "Hey Murph" },
+    })).resolves.toMatchObject({
+      kind: "reply",
+      message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    });
+  });
+
+  it("makes unsafe model output unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(buildOpenAiResponse({
+      kind: "answer",
       message: "Read https://example.com",
     })));
 
     await expect(startHostedLinqInstantFirstTurnGeneration({
-      memberId: WAKE_HANDOFF.userId,
-      prisma: createPrisma(),
+      claim: { kind: "generate" },
       request: REQUEST,
-    })).resolves.toMatchObject({ kind: "defer" });
+    })).resolves.toEqual({ kind: "unavailable" });
   });
 
   it("delivers the accepted reply and wakes through two consumed conversation rows", async () => {
@@ -303,8 +395,10 @@ describe("hosted Linq instant first turn", () => {
       generation: {
         kind: "reply",
         message: "Hey! What would you like help with?",
-        persisted: false,
-        usage: buildUsage(),
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
       },
       inboundMessageId: "inbound_message_123",
       participantContact: {
@@ -354,8 +448,10 @@ describe("hosted Linq instant first turn", () => {
       generation: {
         kind: "reply",
         message: "Hey! What would you like help with?",
-        persisted: false,
-        usage: buildUsage(),
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
       },
       inboundMessageId: "inbound_message_123",
       participantContact: {
@@ -388,8 +484,10 @@ describe("hosted Linq instant first turn", () => {
       generation: {
         kind: "reply",
         message: "Hey! What would you like help with?",
-        persisted: false,
-        usage: buildUsage(),
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
       },
       inboundMessageId: "inbound_message_123",
       participantContact: {
@@ -409,7 +507,7 @@ describe("hosted Linq instant first turn", () => {
     expect(mocks.readHostedMailboxItemByDedupeKey).not.toHaveBeenCalled();
   });
 
-  it("reuses the encrypted outbox body without another Luna request", async () => {
+  it("reuses the encrypted outbox body without another model request", async () => {
     mocks.hostedLinqDeliveryFindUnique.mockResolvedValue({
       acceptedAt: null,
       deliveredAt: null,
@@ -423,16 +521,22 @@ describe("hosted Linq instant first turn", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(startHostedLinqInstantFirstTurnGeneration({
-      memberId: WAKE_HANDOFF.userId,
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation: { kind: "resume" },
+      inboundMessageId: "inbound_message_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "phone_lookup_123",
+        value: "+15551234567",
+      },
       prisma: createPrisma(),
-      request: REQUEST,
-    })).resolves.toEqual({
-      kind: "reply",
-      message: "Exact prior reply",
-      persisted: true,
-      usage: null,
-    });
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    })).resolves.toMatchObject({ kind: "accepted" });
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Exact prior reply" }),
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -448,8 +552,10 @@ describe("hosted Linq instant first turn", () => {
       generation: {
         kind: "reply",
         message: "Hey! What would you like help with?",
-        persisted: false,
-        usage: buildUsage(),
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
       },
       inboundMessageId: "inbound_message_123",
       participantContact: {
@@ -482,8 +588,10 @@ describe("hosted Linq instant first turn", () => {
       generation: {
         kind: "reply",
         message: "Hey! What would you like help with?",
-        persisted: false,
-        usage: buildUsage(),
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
       },
       inboundMessageId: "inbound_message_123",
       participantContact: {

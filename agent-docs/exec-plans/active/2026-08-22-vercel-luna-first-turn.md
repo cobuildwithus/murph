@@ -1,16 +1,16 @@
-# Vercel Luna first turn
+# Web-owned first turn
 
 ## Goal
 
-Answer an eligible instant-start iMessage first contact directly from Web with
-a bounded tool-free Luna turn, then hand the completed exchange to the hosted
+Answer an eligible instant-start plain-text iMessage first contact directly from
+Web with a bounded tool-free Murph turn, then hand the completed exchange to the hosted
 runtime so the next inbound uses the ordinary stateful runtime with correct
 conversation context.
 
 Success criteria:
 
-- The fast response starts only after the existing first-contact classifier
-  has durably allowed the exact event.
+- Web durably claims the exact chat/event before generation; reply generation
+  and the existing first-contact classifier then run in parallel.
 - Web sends at most one answer for the exact first inbound through the existing
   Linq delivery and idempotency lifecycle.
 - Provider acceptance consumes the original conversation mailbox item and
@@ -60,9 +60,10 @@ was delivered.
 1. Map the current classifier, instant-start activation, mailbox append, Linq
    runtime delivery, usage-accounting, and transcript-import seams and choose
    the smallest reuse path.
-2. Add one bounded Web-owned Luna response request after exact admission. Use a
-   narrow Murph first-turn prompt and a structured defer outcome for requests
-   that need runtime capabilities.
+2. Claim one bounded Web-owned response obligation before generation, then run
+   the classifier and tool-free model request in parallel. Use Murph's canonical
+   package welcome for greetings/identity openers and a structured answer for
+   every concrete plain-text request.
 3. On a reply outcome, preserve ordinary activation and same-line routing,
    send through the existing Linq delivery lifecycle, and atomically project
    provider acceptance into original-mailbox consumption plus one encrypted
@@ -70,7 +71,7 @@ was delivered.
 4. Wake the existing runtime with only the durable outbound pointer. The
    existing consumed-conversation importer restores the user and delivered
    assistant exchange in order with no reply obligation.
-5. On defer, generation failure, or pre-accept provider failure, use the
+5. On generation failure or pre-accept provider failure, use the
    existing original-conversation signal and runtime reply path. On ambiguous
    provider outcome, reconcile the same delivery identity before choosing a
    fallback.
@@ -79,24 +80,31 @@ was delivered.
 
 ## Verification
 
-- Focused Web owner tests pass: 8 tests cover the strict Luna request, unsafe
-  output deferral, accepted continuity, buffered failure, atomic rollback,
-  encrypted-body replay, ambiguous send suppression, and definitive fallback.
+- Focused Web owner tests cover strict Murph output, canonical welcome,
+  plain-text eligibility, durable pre-generation ownership, accepted continuity,
+  atomic rollback, encrypted-body replay, ambiguous send suppression, and
+  definitive fallback. A credential-gated seven-case real-model semantic matrix
+  exercises greetings, capabilities, concrete health questions, missing
+  personal context, requested actions, and urgent safety guidance without a
+  live Linq destination.
 - The full focused Linq dispatch file passes 206 tests, including parallel
   generation/prewarm, outbound-checkpoint wake, activation continuation, and
   ambiguous-delivery wake suppression.
-- Existing assistant-runtime consumed-conversation tests pass 109 tests for
-  context-only import, null reply targets, and a fresh conversation tail after
-  that context.
-- Web typecheck, changed-file ESLint, Prisma validation, and `git diff --check`
-  pass. All 200 migrations applied to an isolated local database, and a
-  transaction-rolled-back SQL probe proved the all-null/all-set constraint and
-  member-deletion cascade.
-- Provider capture with identical synthetic direct text and
-  `gpt-tokenizer` 3.4.0 `o200k_harmony` measured the unchanged first classifier
-  request at 339 tokens / 1,481 UTF-8 bytes at base and head. The new second,
-  direct-only Luna request is 381 tokens / 1,634 bytes; group turns never enter
-  this path. Temporary capture code and payloads were removed.
+- Delivery-store tests pass 137 cases, including exact attempted-to-provider
+  advancement and conflicting chat ownership; webhook idempotency and Linq
+  transport pass 109 cases.
+- Web typecheck, changed-file ESLint, Prisma validation, `git diff --check`, the
+  expand-only migration guard, and the reviewed migration/schema snapshots
+  pass. The payload migration now contains only nullable columns, its member
+  foreign key, and its index.
+- `pnpm test:diff` exits 0. Its Web lane passes 850 files and 11,026 tests,
+  changed-app typecheck, lint with no errors, dev smoke, and production build.
+  The workspace boundary step still reports two unrelated pre-existing Junction
+  test-import diagnostics outside this PR.
+- The production prompt test proves the fixed tool-free request and strict
+  welcome-or-answer schema. The real-model matrix is intentionally opt-in and
+  skipped locally because no provider credential is configured; it has no Linq
+  call or destination.
 - Public changelog fragment validation passes 7 tests, and the Web typecheck
   passes with source PR 2173 included.
 - Required exact-head PR CI and preliminary Product UX, prompt, and coverage
@@ -104,7 +112,7 @@ was delivered.
 
 ## State
 
-Active. Implementation, focused local proof, and changelog packaging are complete. The design reuses
+Active. The remediated candidate, local proof, and changelog packaging are complete. The design reuses
 the existing delivery ledger as the only provider outbox, stores the exact
 pending body encrypted for ambiguous recovery, and represents the completed
 exchange as two ordinary consumed conversation rows. Candidate review,

@@ -174,6 +174,9 @@ import {
   isHostedLinqInstantStartCandidate,
   isHostedLinqInstantStartEligible,
 } from "./linq-instant-start";
+import {
+  hasConflictingHostedLinqInstantFirstTurnForChatTx,
+} from "./linq-delivery-store";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
 import {
   readHostedGroupJoinOutreachReplyContextTx,
@@ -2337,6 +2340,21 @@ export async function planHostedOnboardingLinqWebhook(input: {
       prisma: input.prisma,
       recipientPhone: bindingResult.recipientPhone,
     }) ?? participantContact;
+
+    if (await hasConflictingHostedLinqInstantFirstTurnForChatTx({
+      eventId: input.event.event_id,
+      linqChatId: summary.chatId,
+      prisma: input.prisma,
+    })) {
+      throw hostedOnboardingError({
+        code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+        details: { reason: "earlier-chat-reply-unresolved" },
+        httpStatus: 503,
+        message:
+          "An earlier Web-owned reply is still reconciling for this chat.",
+        retryable: true,
+      });
+    }
 
     if (groupJoinContext) {
       const invite = await issueHostedInviteTx({

@@ -779,8 +779,10 @@ Last verified: 2026-08-20
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
-  Once the exact persisted admission is a model-source allow, Web may run one
-  bounded tool-free Luna generation beside enrollment and shell prewarm. The
+  Before generation, Web claims the exact eligible plain-text chat/event in the
+  existing delivery ledger under the chat lock. It then runs one bounded
+  tool-free Murph reply generation beside the admission classifier, enrollment,
+  and shell prewarm. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
   A reply claim extends the existing `HostedLinqDelivery` row with the exact
@@ -796,8 +798,11 @@ Last verified: 2026-08-20
   is then signaled from the consumed outbound checkpoint, so mailbox replay
   imports both rows as context with null reply targets and the next member
   message continues through the normal runtime without a duplicate first
-  response. Generation timeout, unavailable configuration, unsafe output, or a
-  model `defer` leaves the existing inbound runtime path unchanged. This adds no
+  response. A different inbound or direct-to-group transition waits behind an
+  unresolved first-turn obligation, and the exact route, direct audience,
+  active access, and unconsumed inbound are revalidated before send and
+  finalization. Generation timeout, unavailable configuration, unsafe output,
+  or an ineligible multipart message leaves the existing inbound runtime path unchanged. This adds no
   second queue, transcript store, workflow kind, or runtime state owner; all
   database work remains exact-event and single-row rather than collection
   fanout.

@@ -3,7 +3,10 @@ import "server-only";
 import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
-import { containsHttpUrlText } from "@murphai/contracts";
+import {
+  containsHttpUrlText,
+  MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+} from "@murphai/contracts";
 import {
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -32,9 +35,11 @@ import { getPrisma } from "../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
 import {
   claimHostedLinqDeliveryProviderDispatchTx,
+  hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
+  markHostedLinqDeliverySkippedTx,
 } from "./linq-delivery-store";
 import {
   sendHostedLinqChatMessage,
@@ -52,6 +57,20 @@ import {
 } from "./logging";
 import { getHostedOnboardingEnvironment } from "./runtime";
 import type { HostedWebhookWakeHandoff } from "./webhook-service-types";
+import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import {
+  readHostedThreadRouteByThreadIdentity,
+} from "../hosted-routing/thread-route-store";
+import {
+  hostedMemberRoutingRecordsEqual,
+  lockHostedMemberRoutingStateTx,
+  projectHostedMemberRoutingState,
+  readHostedMemberRoutingRecord,
+} from "./hosted-member-routing-store";
+import { resolveHostedMemberDirectRoute } from "../hosted-routing/member-direct-route";
+import { readActiveHostedMemberAccess } from "./member-access";
 
 const OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1";
 const HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL = "gpt-5.6-luna";
@@ -63,26 +82,28 @@ const HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA =
 const HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCOPE =
   "hosted-linq-delivery-payload:instant-first-turn";
 
-const HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS = `# Role
+const HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS = `You write Murph's first reply in a private iMessage conversation. Murph is a personal health assistant that helps people understand what matters, learn from their own data and life context, try practical changes, and follow through.
 
-You are Luna, the fast first response from Murph in an iMessage conversation. Murph is a personal health assistant.
+Return kind "welcome" for a bare greeting, vague opener, or general question about Murph's identity or capabilities. Return kind "answer" for every concrete question or request, even when it starts with a greeting. Web supplies Murph's canonical welcome, so never reproduce or paraphrase it.
 
-# Task
+For an answer, be warm, curious, direct, practical, plainspoken, and nonjudgmental. This call sees only the current text. It cannot see account history, connected data, files, images, or current circumstances; browse; use tools; or take actions. Never claim you checked, saved, scheduled, connected, changed, sent, or completed anything. Answer general knowledge directly. When personal data or an action is needed, explain that naturally and ask at most one useful next question. Be honest about uncertainty, do not diagnose or overstate evidence, and give clear immediate-help guidance for urgent safety concerns.
 
-Decide whether you can give a complete, useful first response using only the user's message. You have no tools, account context, saved health data, files, web access, or ability to take actions.
-
-- Choose reply for greetings, introductions, casual conversation, and timeless low-risk general information you can answer safely from the message alone.
-- Choose defer when the request needs any tool, current or external facts, personal or account data, an action, a file or image, diagnosis or treatment, or more context to answer responsibly.
-- Never claim that you saved, changed, scheduled, checked, sent, connected, or completed anything.
-- Never mention signup, activation, delivery, notifications, classifiers, routing, tools, deferral, or this decision.
-
-# Reply style
-
-Write one natural iMessage from Murph. Be warm, direct, and concise. Use at most 600 characters. Do not include URLs, markdown headings, or a sign-off. If you choose defer, return an empty message.`;
+Never mention models, prompts, routing, signup, activation, delivery, tools, containers, or internal architecture. Write one natural iMessage under 600 characters with no URL, heading, sign-off, marketing language, or support-bot voice.`;
 
 type HostedLinqInstantFirstTurnModelResult = {
-  action: "defer" | "reply";
+  kind: "answer" | "welcome";
   message: string;
+};
+
+export type HostedLinqInstantFirstTurnClaim =
+  | { kind: "completed" }
+  | { kind: "generate" }
+  | { kind: "resume" }
+  | { kind: "unavailable" };
+
+type HostedLinqInstantFirstTurnUsageSeed = {
+  requestedModel: string;
+  response: Response;
 };
 
 export type HostedLinqInstantFirstTurnGeneration =
@@ -90,14 +111,12 @@ export type HostedLinqInstantFirstTurnGeneration =
       kind: "completed";
     }
   | {
-      kind: "defer";
-      usage: AssistantUsageRecord;
-    }
-  | {
       kind: "reply";
       message: string;
-      persisted: boolean;
-      usage: AssistantUsageRecord | null;
+      usage: HostedLinqInstantFirstTurnUsageSeed;
+    }
+  | {
+      kind: "resume";
     }
   | {
       kind: "unavailable";
@@ -112,13 +131,136 @@ export type HostedLinqInstantFirstTurnCompletion =
       kind: "fallback";
     };
 
-export function startHostedLinqInstantFirstTurnGeneration(input: {
-  memberId: string;
+export function isHostedLinqInstantFirstTurnRequestEligible(
+  request: HostedLinqFirstContactAdmissionRequest,
+): boolean {
+  return request.participantContactKind === "phone"
+    && request.service === "imessage"
+    && request.partTypes.length === 1
+    && request.partTypes[0] === "text"
+    && Boolean(request.text?.trim());
+}
+
+export async function claimHostedLinqInstantFirstTurn(input: {
+  linqChatId: string;
   prisma?: PrismaClient;
+  request: HostedLinqFirstContactAdmissionRequest;
+}): Promise<HostedLinqInstantFirstTurnClaim> {
+  if (!isHostedLinqInstantFirstTurnRequestEligible(input.request)) {
+    return { kind: "unavailable" };
+  }
+  const prisma = input.prisma ?? getPrisma();
+  const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
+    input.request.eventId,
+  );
+  try {
+    return await prisma.$transaction(async (tx) => {
+      await acquireHostedLinqChatOwnershipLockTx({
+        chatId: input.linqChatId,
+        tx,
+      });
+      if (await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma: tx,
+        threadId: input.linqChatId,
+      })) {
+        return { kind: "unavailable" } as const;
+      }
+      if (await hasConflictingHostedLinqInstantFirstTurnForChatTx({
+        eventId: input.request.eventId,
+        linqChatId: input.linqChatId,
+        prisma: tx,
+      })) {
+        throw buildHostedLinqInstantFirstTurnRetryError(
+          "earlier-chat-reply-unresolved",
+        );
+      }
+
+      const claim = await claimHostedLinqDeliveryProviderDispatchTx({
+        idempotencyKey,
+        linqChatId: input.linqChatId,
+        prisma: tx,
+        reclaimStalePreProviderAttempt: true,
+        source: "hosted_web_instant_first_turn",
+        sourceRef: input.request.eventId,
+        status: "attempted",
+        targetKind: "thread",
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      });
+      if (!claim.claimed) {
+        if (claim.outcome === "completed") {
+          return { kind: "completed" } as const;
+        }
+        throw buildHostedLinqInstantFirstTurnRetryError(
+          claim.outcome === "incompatible"
+            ? "delivery-intent-incompatible"
+            : "delivery-in-flight",
+        );
+      }
+      if (!claim.id) {
+        throw new Error("Hosted Linq instant first-turn claim has no row id.");
+      }
+      const delivery = await tx.hostedLinqDelivery.findUnique({
+        select: { payloadCiphertext: true },
+        where: { id: claim.id },
+      });
+      if (!delivery) {
+        throw new Error("Hosted Linq instant first-turn claim was not retained.");
+      }
+      return delivery.payloadCiphertext
+        ? { kind: "resume" } as const
+        : { kind: "generate" } as const;
+    });
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY"
+    ) {
+      throw error;
+    }
+    throw buildHostedLinqInstantFirstTurnRetryError(
+      "delivery-claim-unconfirmed",
+      error,
+    );
+  }
+}
+
+export function startHostedLinqInstantFirstTurnGeneration(input: {
+  claim: HostedLinqInstantFirstTurnClaim;
   request: HostedLinqFirstContactAdmissionRequest;
   signal?: AbortSignal;
 }): Promise<HostedLinqInstantFirstTurnGeneration> {
+  if (input.claim.kind !== "generate") {
+    return Promise.resolve(input.claim);
+  }
   return generateHostedLinqInstantFirstTurn(input);
+}
+
+export async function abandonHostedLinqInstantFirstTurn(input: {
+  eventId: string;
+  linqChatId: string;
+  prisma?: PrismaClient;
+  reason: string;
+}): Promise<void> {
+  const prisma = input.prisma ?? getPrisma();
+  await prisma.$transaction(async (tx) => {
+    await acquireHostedLinqChatOwnershipLockTx({
+      chatId: input.linqChatId,
+      tx,
+    });
+    await markHostedLinqDeliverySkippedTx({
+      idempotencyKey: buildHostedLinqInstantFirstTurnIdempotencyKey(
+        input.eventId,
+      ),
+      linqChatId: input.linqChatId,
+      prisma: tx,
+      reason: input.reason,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: input.eventId,
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    });
+  });
 }
 
 export async function completeHostedLinqInstantFirstTurn(input: {
@@ -131,6 +273,10 @@ export async function completeHostedLinqInstantFirstTurn(input: {
   wakeHandoff: HostedWebhookWakeHandoff;
 }): Promise<HostedLinqInstantFirstTurnCompletion> {
   const prisma = input.prisma ?? getPrisma();
+  const chatId = requireNonEmptyString(
+    input.wakeHandoff.linqChatId,
+    "Hosted Linq instant first-turn chat id",
+  );
   if (input.generation.kind === "completed") {
     return readCompletedHostedLinqInstantFirstTurn({
       prisma,
@@ -138,38 +284,100 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     });
   }
   if (input.generation.kind === "unavailable") {
+    await abandonHostedLinqInstantFirstTurn({
+      eventId: input.wakeHandoff.eventId,
+      linqChatId: chatId,
+      prisma,
+      reason: "generation-unavailable",
+    });
     return { kind: "fallback" };
   }
 
-  if (input.generation.usage) {
+  let message: string;
+  const resumed = input.generation.kind === "resume";
+  if (input.generation.kind === "resume") {
+    const persisted = await readHostedLinqInstantFirstTurnPayload({
+      eventId: input.wakeHandoff.eventId,
+      memberId: input.wakeHandoff.userId,
+      prisma,
+    });
+    if (persisted.kind === "completed") {
+      return readCompletedHostedLinqInstantFirstTurn({
+        prisma,
+        wakeHandoff: input.wakeHandoff,
+      });
+    }
+    if (persisted.kind === "unavailable") {
+      return { kind: "fallback" };
+    }
+    if (persisted.kind !== "reply") {
+      throw buildHostedLinqInstantFirstTurnRetryError(
+        "delivery-payload-incomplete",
+      );
+    }
+    message = persisted.message;
+  } else {
+    message = input.generation.message;
+  }
+
+  if (input.generation.kind === "reply") {
     await recordHostedLinqInstantFirstTurnUsageBestEffort({
       prisma,
-      usage: input.generation.usage,
+      usage: buildHostedLinqInstantFirstTurnUsageRecord({
+        eventId: input.wakeHandoff.eventId,
+        memberId: input.wakeHandoff.userId,
+        requestedModel: input.generation.usage.requestedModel,
+        response: input.generation.usage.response,
+      }),
       userId: input.wakeHandoff.userId,
     });
-  }
-  if (input.generation.kind === "defer") {
-    return { kind: "fallback" };
   }
 
   const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
     input.wakeHandoff.eventId,
   );
-  let payloadCiphertext: string;
-  try {
-    payloadCiphertext = await sealHostedLinqInstantFirstTurnPayload({
-      idempotencyKey,
-      message: input.generation.message,
-      prisma,
-      userId: input.wakeHandoff.userId,
-    });
-  } catch (error) {
-    if (input.generation.persisted) {
+  let payloadCiphertext: string | null = null;
+  if (!resumed) {
+    try {
+      payloadCiphertext = await sealHostedLinqInstantFirstTurnPayload({
+        idempotencyKey,
+        message,
+        prisma,
+        userId: input.wakeHandoff.userId,
+      });
+    } catch {
+      await abandonHostedLinqInstantFirstTurn({
+        eventId: input.wakeHandoff.eventId,
+        linqChatId: chatId,
+        prisma,
+        reason: "payload-seal-unavailable",
+      });
+      return { kind: "fallback" };
+    }
+  }
+  const routingRecord = await readHostedMemberRoutingRecord({
+    memberId: input.wakeHandoff.userId,
+    prisma,
+  });
+  const routingState = routingRecord
+    ? await projectHostedMemberRoutingState(routingRecord, prisma)
+    : null;
+  const directRoute = resolveHostedMemberDirectRoute(routingState);
+  if (
+    directRoute?.channel !== "linq"
+    || directRoute.threadId !== chatId
+  ) {
+    if (resumed) {
       throw buildHostedLinqInstantFirstTurnRetryError(
-        "delivery-payload-unavailable",
-        error,
+        "direct-route-changed",
       );
     }
+    await abandonHostedLinqInstantFirstTurn({
+      eventId: input.wakeHandoff.eventId,
+      linqChatId: chatId,
+      prisma,
+      reason: "direct-route-changed",
+    });
     return { kind: "fallback" };
   }
   let claim: Awaited<ReturnType<
@@ -177,9 +385,45 @@ export async function completeHostedLinqInstantFirstTurn(input: {
   >>;
   try {
     claim = await prisma.$transaction(async (tx) => {
+      await lockHostedMemberRoutingStateTx({
+        memberId: input.wakeHandoff.userId,
+        prisma: tx,
+      });
+      const currentRoutingRecord = await readHostedMemberRoutingRecord({
+        memberId: input.wakeHandoff.userId,
+        prisma: tx,
+      });
+      if (
+        !hostedMemberRoutingRecordsEqual(currentRoutingRecord, routingRecord)
+        || !(await readActiveHostedMemberAccess({
+          memberId: input.wakeHandoff.userId,
+          prisma: tx,
+        }))
+      ) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          httpStatus: 409,
+          message: "Hosted Linq instant first-turn route authority changed.",
+          retryable: false,
+        });
+      }
+      await acquireHostedLinqChatOwnershipLockTx({ chatId, tx });
+      if (await readHostedThreadRouteByThreadIdentity({
+        channel: "linq",
+        prisma: tx,
+        threadId: chatId,
+      })) {
+        throw hostedOnboardingError({
+          code: "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH",
+          httpStatus: 409,
+          message: "Hosted Linq instant first-turn chat is no longer direct.",
+          retryable: false,
+        });
+      }
       const claimed = await claimHostedLinqDeliveryProviderDispatchTx({
+        advancePreProviderAttempt: true,
         idempotencyKey,
-        linqChatId: input.wakeHandoff.linqChatId,
+        linqChatId: chatId,
         prisma: tx,
         reclaimStalePreProviderAttempt: true,
         source: "hosted_web_instant_first_turn",
@@ -188,7 +432,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
         targetKind: "thread",
         template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
       });
-      if (claimed.claimed && claimed.id) {
+      if (claimed.claimed && claimed.id && payloadCiphertext) {
         await tx.hostedLinqDelivery.update({
           data: {
             payloadCiphertext,
@@ -201,6 +445,19 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       return claimed;
     });
   } catch (error) {
+    if (
+      !resumed
+      && isHostedOnboardingError(error)
+      && error.code === "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH"
+    ) {
+      await abandonHostedLinqInstantFirstTurn({
+        eventId: input.wakeHandoff.eventId,
+        linqChatId: chatId,
+        prisma,
+        reason: "direct-route-changed",
+      });
+      return { kind: "fallback" };
+    }
     throw buildHostedLinqInstantFirstTurnRetryError(
       "delivery-claim-unconfirmed",
       error,
@@ -223,12 +480,9 @@ export async function completeHostedLinqInstantFirstTurn(input: {
   let sendResult: HostedLinqSendResult;
   try {
     sendResult = await sendHostedLinqChatMessage({
-      chatId: requireNonEmptyString(
-        input.wakeHandoff.linqChatId,
-        "Hosted Linq instant first-turn chat id",
-      ),
+      chatId,
       idempotencyKey,
-      message: input.generation.message,
+      message,
       replyToMessageId: input.inboundMessageId,
     });
   } catch (error) {
@@ -289,7 +543,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     return await finalizeHostedLinqInstantFirstTurn({
       acceptedAt: parseOptionalDate(sendResult.messageCreatedAt) ?? new Date(),
       inboundMessageId: input.inboundMessageId,
-      message: input.generation.message,
+      message,
       participantContact: input.participantContact,
       prisma,
       providerChatId:
@@ -314,47 +568,10 @@ export async function completeHostedLinqInstantFirstTurn(input: {
 }
 
 async function generateHostedLinqInstantFirstTurn(input: {
-  memberId: string;
-  prisma?: PrismaClient;
   request: HostedLinqFirstContactAdmissionRequest;
   signal?: AbortSignal;
 }): Promise<HostedLinqInstantFirstTurnGeneration> {
   const text = input.request.text?.trim() ?? "";
-  let persisted: Awaited<ReturnType<
-    typeof readHostedLinqInstantFirstTurnPayload
-  >>;
-  try {
-    persisted = await readHostedLinqInstantFirstTurnPayload({
-      eventId: input.request.eventId,
-      memberId: input.memberId,
-      prisma: input.prisma ?? getPrisma(),
-    });
-  } catch (error) {
-    if (
-      isHostedOnboardingError(error)
-      && error.code === "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY"
-    ) {
-      throw error;
-    }
-    throw buildHostedLinqInstantFirstTurnRetryError(
-      "delivery-payload-unavailable",
-      error,
-    );
-  }
-  if (persisted.kind === "completed") {
-    return persisted;
-  }
-  if (persisted.kind === "unavailable") {
-    return persisted;
-  }
-  if (persisted.kind === "reply") {
-    return {
-      kind: "reply",
-      message: persisted.message,
-      persisted: true,
-      usage: null,
-    };
-  }
   const environment = getHostedOnboardingEnvironment();
   const apiKey = environment.linqFirstContactAdmissionOpenAiApiKey;
   if (!text || !apiKey) {
@@ -390,22 +607,25 @@ async function generateHostedLinqInstantFirstTurn(input: {
         timeout: HOSTED_LINQ_INSTANT_FIRST_TURN_TIMEOUT_MS,
       },
     );
-    const usage = buildHostedLinqInstantFirstTurnUsageRecord({
-      eventId: input.request.eventId,
-      memberId: input.memberId,
-      requestedModel: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
-      response,
-    });
     const result = response.status === "completed"
       ? parseHostedLinqInstantFirstTurnModelResult(response.output_text)
       : null;
-    if (!result || result.action === "defer") {
-      return { kind: "defer", usage };
+    if (!result) {
+      return { kind: "unavailable" };
     }
-    const message = normalizeHostedLinqInstantFirstTurnMessage(result.message);
+    const message = result.kind === "welcome"
+      ? MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE
+      : normalizeHostedLinqInstantFirstTurnMessage(result.message);
     return message
-      ? { kind: "reply", message, persisted: false, usage }
-      : { kind: "defer", usage };
+      ? {
+          kind: "reply",
+          message,
+          usage: {
+            requestedModel: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
+            response,
+          },
+        }
+      : { kind: "unavailable" };
   } catch (error) {
     logHostedOnboardingDiagnostic(
       "hosted-onboarding.webhook.linq.instant-first-turn-generation",
@@ -419,7 +639,7 @@ async function generateHostedLinqInstantFirstTurn(input: {
   }
 }
 
-function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
+export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
   text: string;
 }): ResponseCreateParamsNonStreaming {
   return {
@@ -439,8 +659,8 @@ function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
         schema: {
           additionalProperties: false,
           properties: {
-            action: {
-              enum: ["reply", "defer"],
+            kind: {
+              enum: ["welcome", "answer"],
               type: "string",
             },
             message: {
@@ -448,7 +668,7 @@ function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
               type: "string",
             },
           },
-          required: ["action", "message"],
+          required: ["kind", "message"],
           type: "object",
         },
         strict: true,
@@ -553,6 +773,7 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
     const consumed = await tx.hostedMailboxItem.updateMany({
       data: { consumedAt: input.acceptedAt },
       where: {
+        consumedAt: null,
         id: {
           in: [
             input.wakeHandoff.mailboxItemId,
@@ -858,13 +1079,13 @@ function parseHostedLinqInstantFirstTurnModelResult(
     }
     const record = parsed as Record<string, unknown>;
     if (
-      (record.action !== "reply" && record.action !== "defer")
+      (record.kind !== "answer" && record.kind !== "welcome")
       || typeof record.message !== "string"
     ) {
       return null;
     }
     return {
-      action: record.action,
+      kind: record.kind,
       message: record.message,
     };
   } catch {
