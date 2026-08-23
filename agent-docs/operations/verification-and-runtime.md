@@ -324,7 +324,9 @@ bounded progress window for route departure. If that window expires on the
 advanced consent route, the failure includes only content-free action,
 checkbox, and frame counts so a protected-main run can distinguish an
 unchanged action surface from same-route DOM progression without exposing
-provider content.
+provider content. The runner re-reads the route after collecting those counts;
+if Garmin departs during that asynchronous sample, the current route wins over
+the stale pre-sample observation and the callback proof continues.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual

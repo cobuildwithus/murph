@@ -1045,6 +1045,61 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(15_000);
   });
 
+  it("accepts Garmin departure while sampling the terminal consent surface", async () => {
+    let now = 0;
+    let agreeClicks = 0;
+    let sampledSurface = false;
+    const confirmationFrame = authorizationFrame({
+      buttons: [
+        {
+          onClick: () => {
+            agreeClicks += 1;
+          },
+          text: "Agree",
+        },
+        { text: "Do Not Agree" },
+      ],
+    });
+    const mainFrame = {
+      ...confirmationFrame,
+      getByRole: (...args: Parameters<typeof confirmationFrame.getByRole>) => {
+        if (now >= 15_000) sampledSurface = true;
+        return confirmationFrame.getByRole(...args);
+      },
+    };
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => sampledSurface
+        ? "https://app.example.test/home"
+        : [
+          "https://connect.garmin.com/partner/oauthConfirm",
+          "?oauth_token=opaque&oauth_callback=opaque",
+          "&permissionsUpdated=1&selectedCapabilities=opaque",
+        ].join(""),
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).resolves.toBeUndefined();
+
+    expect(agreeClicks).toBe(1);
+    expect(sampledSurface).toBe(true);
+    expect(now).toBe(15_750);
+  });
+
   it("completes Garmin consent when Save departs directly to Murph", async () => {
     let atMurph = false;
     let now = 0;
