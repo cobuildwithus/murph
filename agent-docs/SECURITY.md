@@ -1438,6 +1438,21 @@ Last verified: 2026-08-20
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- Public Temporal compatibility credentials belong only to the protected
+  `temporal-compatibility` GitHub Environment. The GitHub App installation is
+  limited to private `cobuildwithus/murph-cloud` and grants only Actions write
+  plus Contents read. The `workflow_run` controller executes default-branch
+  code, classifies and revalidates the exact public head before token minting,
+  and checks out only the public default branch. Candidate code executes only
+  in the unprivileged Repo Hygiene job, which uploads one exact-run/head fixture
+  artifact. The trusted controller bounds and canonicalizes that artifact as
+  untrusted JSON, pins the reviewed private SHA and SHA-suffixed immutable
+  lightweight tag from `.github/temporal-compatibility-controller.json`, and
+  accepts only the returned exact private run and proof-digest job. Private CI
+  must never check out or import public candidate code. Neither side may restore
+  candidate-controlled caches beside credentials, read private logs or
+  artifacts, expose reader revisions publicly, or accept workflow/check names
+  from the candidate.
 - The public automated live Junction wearable canary uses only sandbox Junction
   authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials

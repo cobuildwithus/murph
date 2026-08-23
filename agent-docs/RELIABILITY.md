@@ -248,6 +248,20 @@ Last verified: 2026-08-20
   executable. PR and production jobs are separately non-canceling; production
   uses a non-destructive identity lifecycle. See
   `agent-docs/operations/native-android-hosted-e2e.md`.
+- Required Temporal compatibility is one public commit status backed by a
+  trusted default-branch controller and the private owner's immutable
+  supported-reader manifest. Irrelevant changes complete without private work;
+  relevant changes require the same current public head throughout selection
+  and dispatch. The exact candidate producer runs in unprivileged public CI;
+  the trusted controller sends only its bounded canonical fixture JSON and
+  digest to private CI. The private proof digest binds public SHA, request id,
+  supported-reader digest, and producer digest. Missing artifacts or dispatch
+  identity, stale heads, incomplete pagination, duplicate or failed readers,
+  skipped proof jobs, a mismatched digest, cancellation, or private failure
+  cannot publish success. Once dispatch
+  returns a run id, uncertain polling or timeout cancels only that run, escalates
+  to force-cancel only if ordinary cancellation does not make it terminal, and
+  never searches for or cancels a guessed run.
 - Native iMessage nutrition-card delivery falls back to its already-derived
   ordinary text only after Linq definitively rejects the app-card request with
   HTTP 400, 415, or 422. Before that text enters the provider, the existing
