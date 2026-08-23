@@ -61,6 +61,7 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   resolveDeviceProviderApplication: vi.fn(),
+  scheduleHostedSourceDeliveryStallNotices: vi.fn(),
   writeHostedRuntimeLogs: vi.fn(),
 }));
 
@@ -108,6 +109,14 @@ vi.mock("@/src/lib/device-sync/provider-applications", () => ({
   isMemberOwnedDeviceProviderApplicationProvider: (value: unknown) =>
     value === "strava",
   resolveDeviceProviderApplication: mocks.resolveDeviceProviderApplication,
+}));
+
+vi.mock("@/src/lib/device-sync/source-delivery-stall-notice", async (importOriginal) => ({
+  ...(await importOriginal<typeof import(
+    "@/src/lib/device-sync/source-delivery-stall-notice"
+  )>()),
+  scheduleHostedSourceDeliveryStallNotices:
+    mocks.scheduleHostedSourceDeliveryStallNotices,
 }));
 
 function buildHostedRecord(

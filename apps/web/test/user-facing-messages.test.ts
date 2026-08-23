@@ -24,6 +24,7 @@ const TEST_TEMPLATE_KEYS = [
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
+  "linq.device_delivery_stalled",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
   "linq.ai_usage.family_limit_reached",
@@ -61,6 +62,11 @@ const TEST_CONTEXT_BY_KEY = {
   },
   "linq.home_redirect": {
     homeRecipientPhone: "+15555550123",
+  },
+  "linq.device_delivery_stalled": {
+    companionAppName: "Garmin Connect",
+    deviceDisplayName: "watch",
+    providerDisplayName: "Garmin",
   },
   "linq.ai_usage.starter_limit_reached": {
     settingsUrl: "https://withmurph.ai/settings?usageRecovery=true#subscription",
@@ -155,6 +161,17 @@ describe("user-facing message variants", () => {
 
   it("identifies Murph in every phone signup invite", () => {
     expectEveryVariantMatches("linq.invite_signup", /Murph/u);
+  });
+
+  it("keeps wearable recovery checks practical, conversational, and link-free", () => {
+    for (const text of collectRenderedTexts("linq.device_delivery_stalled")) {
+      expect(text).toMatch(/Garmin/u);
+      expect(text).toMatch(/Garmin Connect/u);
+      expect(text).toMatch(/charg|battery/iu);
+      expect(text).toMatch(/sync/iu);
+      expect(text).toMatch(/\?$/u);
+      expect(text).not.toMatch(/https?:\/\//iu);
+    }
   });
 
   it("keeps thread allowance copy neutral while explaining the pause", () => {

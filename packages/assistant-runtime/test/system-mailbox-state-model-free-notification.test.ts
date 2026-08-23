@@ -6,8 +6,12 @@ import {
 
 type PendingItem = Parameters<typeof isHostedSystemMailboxModelFreeExactNotificationItem>[0];
 
-function exactNotification(input: { dedupeKey?: string; laneSeq: string }): PendingItem {
-  const deliveryDedupeToken = "group-join:membership";
+function exactNotification(input: {
+  dedupeKey?: string;
+  deliveryDedupeToken?: string;
+  laneSeq: string;
+}): PendingItem {
+  const deliveryDedupeToken = input.deliveryDedupeToken ?? "group-join:membership";
   const mailboxDedupeKey = input.dedupeKey
     ?? `assistant.notification.requested:${deliveryDedupeToken}`;
   return {
@@ -52,6 +56,13 @@ describe("blocked model-free exact notification frontier", () => {
     expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification)).toBe(true);
     expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later, notification] }).pending).toEqual([notification]);
     expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later] }).pending).toEqual([later]);
+  });
+
+  it("admits a canonical exact wearable delivery-stall notice", () => {
+    expect(isHostedSystemMailboxModelFreeExactNotificationItem(exactNotification({
+      deliveryDedupeToken: "device-delivery-stalled:v1:abc123",
+      laneSeq: "1",
+    }))).toBe(true);
   });
 
   it("does not overtake a generic notification at the durable frontier", () => {
