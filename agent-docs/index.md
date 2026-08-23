@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-22
+Last verified: 2026-08-23
 
 ## Purpose
 
@@ -19,6 +19,13 @@ and dedicated risk-matched catalog/study evidence.
 The contract and its proof are specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/references/testing-ci-map.md`.
+
+A validated final ReviewGPT `ROUND_OUTCOME: PASS` proceeds directly to the
+parent's remaining completion checks without a user-resume pause. Preliminary
+specialist results and final `FINDINGS` results retain the evidence-backed
+finding-disposition pause. This boundary is specified by
+`agent-docs/operations/completion-workflow.md` and
+`agent-docs/operations/pr-reviewgpt-loop.md`.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
