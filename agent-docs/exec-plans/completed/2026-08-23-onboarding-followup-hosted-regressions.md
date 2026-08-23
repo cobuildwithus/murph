@@ -1,6 +1,6 @@
 # Onboarding Follow-up Hosted Regression Repair
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -33,8 +33,15 @@ foreground reply owner.
 
 ## Verification
 
-- Run focused Cloudflare test compilation/typecheck and the affected local
-  unit surfaces.
-- Use exact-head hosted integration CI for both full-stack scenarios.
-- Complete the required preliminary and final ReviewGPT gates before merge.
-
+- `pnpm --dir apps/cloudflare typecheck`
+- `pnpm exec vitest run --config apps/cloudflare/vitest.config.ts --no-coverage apps/cloudflare/test/hosted-local-e2e-support.test.ts`
+  (24 tests passed)
+- Exact-head private hosted integration:
+  - Telegram + idle checkpoint E2E passed.
+  - Hosted foreground reply priority E2E passed.
+- Preliminary ReviewGPT specialist pass: `SPECIALIST_OUTCOME: PASS` with no
+  findings or patch. The final cross-cutting gate is exempt because the patch
+  changes tests and this execution plan only.
+- Parent first-principles review found no remaining correctness, privacy, or
+  simplification issue in the changed test paths.
+Completed: 2026-08-23
