@@ -1,8 +1,8 @@
 # Make Starter enrollment consent-owned
 
-Status: active
+Status: completed
 Created: 2026-08-22
-Updated: 2026-08-22
+Updated: 2026-08-23
 
 ## Goal
 
@@ -149,8 +149,8 @@ Updated: 2026-08-22
   typechecking and lint pass on the simplified candidate. The recovery proof
   covers every supported direct-billing recovery status with retained
   Subscription identity and confirms the join owner routes to Subscription.
-- Verdict: local implementation proof passes; exact-head CI and ReviewGPT round
-  3 remain pending.
+- Verdict: ready. Focused implementation proof, exact-head required CI, and
+  ReviewGPT round 4 pass with no remaining finding.
 
 ## Verification
 
@@ -162,3 +162,17 @@ Updated: 2026-08-22
   the invite continuation; the first scope does not enroll; the final scope
   enrolls once; unrelated consent calls do not enroll; ReviewGPT and required
   CI have no unresolved accepted findings.
+
+## Completion
+
+- The accepted round-3 simplification removed 30 net production lines: the
+  canonical enrollment service is single-mode, while the consent adapter maps
+  only the existing messaging-required and enrollment-blocked owner errors to
+  a deferred continuation.
+- Five focused Web Vitest files passed 111 tests. Web typechecking passed; lint
+  completed with no errors and only pre-existing warnings; `git diff --check`
+  and the identifier/secret-pattern scan passed.
+- ReviewGPT round 4 audited the full sensitive snapshot and returned PASS with
+  no finding. The parent final review found no remaining accepted or actionable
+  issue.
+Completed: 2026-08-23
