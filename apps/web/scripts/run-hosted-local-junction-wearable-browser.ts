@@ -722,6 +722,14 @@ async function waitForGarminPartnerConfirmationDeparture(
   }
   if (step === "permissions_updated") {
     const surface = await describeAuthorizationSurface(page);
+    step = readGarminPartnerConsentStep(page.url());
+    if (step === null) return;
+    if (step === "invalid") {
+      throw new Error("Garmin consent exposed an invalid progression state.");
+    }
+    if (step === "selection") {
+      throw new Error("Garmin consent confirmation returned to the selection state.");
+    }
     throw new Error(
       `Garmin consent confirmation did not leave the consent route. ${surface}`,
     );

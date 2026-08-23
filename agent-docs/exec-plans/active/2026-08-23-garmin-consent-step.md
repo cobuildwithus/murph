@@ -34,6 +34,11 @@ Updated: 2026-08-23
   phase-specific failure proves that repeated submission is fixed, but the
   existing URL-only observation cannot distinguish an ignored click from a
   same-route DOM transition.
+- PR #2187 added that content-free observation. Its protected-main run showed
+  no recognized Garmin actions and three unrelated Murph actions while the
+  browser was already on Murph home, proving Garmin departed during the
+  asynchronous terminal surface sample. The helper then threw from its stale
+  pre-sample route state instead of honoring the current route.
 
 ## Scope
 
@@ -74,6 +79,10 @@ Updated: 2026-08-23
   but submit its selected positive action only once and require route departure
   within the existing 15-second progress window. A stalled confirmation fails
   with its redacted Garmin phase instead of resetting the timer through clicks.
+- After a terminal surface sample, re-read the current route before throwing.
+  A departure during that asynchronous sample continues to the existing
+  callback proof; unchanged, invalid, and regressed Garmin states still fail
+  closed.
 
 ## Verification
 
