@@ -1144,7 +1144,7 @@ Last verified: 2026-08-20
   activation wake; its fixed-page initialization is exact-replay idempotent and
   fail-open so it cannot block the accepted first group message.
 - Current-chat naming is one on-demand provider read through
-  `murph.group action="read_chat_name"`. It uses the current durable route and
+  `murph.group_chat action="read_chat_name"`. It uses the current durable route and
   existing bounded Linq or Telegram request timeout and does not retry, cache,
   reconcile, or add a state owner. Provider failure returns `unavailable`; an
   absent title or Linq-synthesized handle label returns `none`. New-group setup

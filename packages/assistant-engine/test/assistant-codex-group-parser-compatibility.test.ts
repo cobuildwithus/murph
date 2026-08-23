@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from "@murphai/hosted-execution";
@@ -7,7 +5,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   listMurphDynamicToolNames,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_FAMILY_TOOLS,
+  MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_NAME,
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 
@@ -18,48 +18,7 @@ if (!DAILY_METRIC) {
   throw new Error("Expected at least one member-reported daily metric.");
 }
 
-const GROUP_FAMILY_ACTIONS = {
-  group_consult: [
-    "ask",
-    "handoff",
-    "ask_current_sender",
-    "clarify_current_sender",
-    "continue_current_sender_in_group",
-    "continue_current_sender_privately",
-    "ask_member",
-  ],
-  group_data: [
-    "record_current_sender_daily_metric",
-    "post_disclosure_request",
-    "revoke_disclosure_grant",
-    "read_shared",
-    "offer_access",
-    "revoke_own_email_share",
-  ],
-  group_membership: [
-    "read_current",
-    "prepare_next_group",
-    "read_next_group",
-    "cancel_next_group",
-    "list_memberships",
-    "leave_membership",
-  ],
-  group_usage: [
-    "read_usage",
-    "read_usage_referral",
-    "arm_usage_referral",
-    "cancel_usage_referral",
-    "create_signup_referral_link",
-  ],
-  group_chat: [
-    "read_chat_name",
-    "update_display_name",
-    "read_chat_participants",
-    "set_chat_avatar",
-    "share_contact_card",
-  ],
-  group_email: ["send_email"],
-} as const;
+const GROUP_FAMILY_ACTIONS = MURPH_GROUP_TOOL_FAMILY_ACTIONS;
 
 type GroupFamilyName = keyof typeof GROUP_FAMILY_ACTIONS;
 type GroupAction = (typeof GROUP_FAMILY_ACTIONS)[GroupFamilyName][number];
@@ -170,12 +129,11 @@ function groupToolCall(
 describe("murph.group parser-first family compatibility", () => {
   it("partitions all 30 advertised actions exactly once", () => {
     const familyActions = Object.values(GROUP_FAMILY_ACTIONS).flat();
-    const advertisedActions = MURPH_GROUP_TOOL
-      .inputSchema.allOf[0].properties.action.enum;
 
     expect(familyActions).toHaveLength(30);
     expect(new Set(familyActions).size).toBe(familyActions.length);
-    expect([...familyActions].sort()).toEqual([...advertisedActions].sort());
+    expect([...familyActions].sort())
+      .toEqual(Object.keys(GROUP_ACTION_FIXTURES).sort());
   });
 
   it("normalizes every family action exactly like the legacy parser", () => {
@@ -183,7 +141,7 @@ describe("murph.group parser-first family compatibility", () => {
       for (const action of actions) {
         const argumentsValue = GROUP_ACTION_FIXTURES[action];
         const legacy = readMurphDynamicToolRequest(
-          groupToolCall(MURPH_GROUP_TOOL.name, argumentsValue),
+          groupToolCall(MURPH_GROUP_TOOL_NAME, argumentsValue),
         );
         const family = readMurphDynamicToolRequest(
           groupToolCall(familyName, argumentsValue),
@@ -271,17 +229,14 @@ describe("murph.group parser-first family compatibility", () => {
     });
   });
 
-  it("leaves the advertised descriptor and catalog names unchanged", () => {
-    expect(createHash("sha256")
-      .update(JSON.stringify(MURPH_GROUP_TOOL))
-      .digest("hex"))
-      .toBe("7ca2e594d2fab08fab1988e18018b70043173be6da2d7ca69d9b981bad77e736");
-
+  it("advertises the six families without the legacy surface", () => {
     const advertisedNames = listMurphDynamicToolNames();
     for (const familyName of Object.keys(GROUP_FAMILY_ACTIONS)) {
-      expect(advertisedNames).not.toContain(`murph.${familyName}`);
+      expect(advertisedNames).toContain(`murph.${familyName}`);
     }
     expect(advertisedNames.filter((name) => name === "murph.group"))
-      .toEqual(["murph.group"]);
+      .toEqual([]);
+    expect(MURPH_GROUP_FAMILY_TOOLS.map((tool) => tool.name))
+      .toEqual(Object.keys(GROUP_FAMILY_ACTIONS));
   });
 });

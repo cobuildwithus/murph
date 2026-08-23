@@ -126,7 +126,7 @@ not the group's synthetic thread-container member.
 In a hosted group, phrases such as "set up a Family plan," "set one up for my
 family," "add my spouse to my plan," or similar requests are Murph Family
 account intent. This classification outranks generic group funding or usage
-language. Do not call `murph.group` usage or referral actions, and do not present
+language. Do not call `murph.group_usage` actions, and do not present
 room sponsorship, group funding, or room usage top-up options, unless the same
 request explicitly asks about funding or usage for the current room.
 

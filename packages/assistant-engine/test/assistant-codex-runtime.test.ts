@@ -1349,7 +1349,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
+                  text: '{"error":"invalid_response_media_arguments","validationIssues":[{"code":"custom","message":"Assistant response media URLs must be valid public HTTPS image URLs.","params":{"murphExpectedShape":"public_https_image_url"},"path":["media",0,"url"]}]}',
                 },
               ],
             },
@@ -3681,7 +3681,7 @@ describe('assistant codex runtime', () => {
                 message_ref: earlierInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           child.stdout.write(jsonLine({
@@ -3693,7 +3693,7 @@ describe('assistant codex runtime', () => {
                 message_ref: independentInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           child.stdout.write(jsonLine({
@@ -3705,7 +3705,7 @@ describe('assistant codex runtime', () => {
                 message_ref: laterInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
 
@@ -3830,11 +3830,11 @@ describe('assistant codex runtime', () => {
             method: 'item/tool/call',
             params: {
               arguments: {
-                action: 'message_current_sender',
+                action: 'continue_current_sender_privately',
                 message_ref: inputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           await privateStarted.promise
@@ -3847,7 +3847,7 @@ describe('assistant codex runtime', () => {
                 message_ref: inputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
 
@@ -3899,7 +3899,7 @@ describe('assistant codex runtime', () => {
       expectedMode: 'continuation' as const,
       expectedNoticeCount: 1,
       label: 'group continuation',
-      laterAction: 'message_current_sender' as const,
+      laterAction: 'continue_current_sender_privately' as const,
     },
   ])('claims an earlier current-sender $label before a contradictory new request', async ({
     earlierAction,
@@ -3979,7 +3979,7 @@ describe('assistant codex runtime', () => {
                   message_ref: inputId,
                 },
                 namespace: 'murph',
-                tool: 'group',
+                tool: 'group_consult',
               },
             }),
             jsonLine({
@@ -3991,7 +3991,7 @@ describe('assistant codex runtime', () => {
                   message_ref: inputId,
                 },
                 namespace: 'murph',
-                tool: 'group',
+                tool: 'group_consult',
               },
             }),
           ].join(''))
@@ -16791,7 +16791,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid progress update arguments',
+                  text: '{"error":"invalid_progress_update_arguments","validationIssues":[{"origin":"string","code":"too_small","minimum":1,"inclusive":true,"path":["text"],"message":"Too small: expected string to have >=1 characters"}]}',
                 },
               ],
             },
@@ -16896,7 +16896,7 @@ describe('assistant codex runtime', () => {
               success: false,
               contentItems: [{
                 type: 'inputText',
-                text: 'invalid pending vault-file arguments',
+                text: '{"error":"invalid_pending_vault_files_arguments","validationIssues":[{"origin":"string","code":"invalid_format","format":"regex","pattern":"/^outbox_[0-9a-f]{32}$/u","path":["intentIds",0],"message":"Invalid string: must match pattern /^outbox_[0-9a-f]{32}$/u"}]}',
               }],
             },
           })
@@ -22170,7 +22170,7 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'group',
+                  tool: 'group_membership',
                   arguments: { action: 'list_memberships' },
                   turnId: 'turn-steered-finals',
                 },
@@ -22196,7 +22196,7 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'group',
+                  tool: 'group_data',
                   arguments: { action: 'offer_access' },
                   turnId: 'turn-steered-finals',
                 },

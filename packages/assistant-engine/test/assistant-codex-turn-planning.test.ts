@@ -2401,13 +2401,13 @@ describe('assistant Codex turn planning', () => {
         expect.arrayContaining([
           'assistant_style',
           'generate_image',
-          'group',
+          'group_chat',
           'personalization',
           'submit_product_feedback',
         ]),
       )
       expect(
-        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group'),
+        foregroundPlan.dynamicTools.find((tool) => tool.name === 'group_chat'),
       ).toMatchObject({ deferLoading: true })
 
       const foregroundSession = await applyAssistantSessionCodexResumeStateAction({
@@ -3823,6 +3823,14 @@ describe('assistant Codex turn planning', () => {
     )
     expect(groupPermissionOfferRequest).not.toHaveBeenCalled()
     expect(groupSharedRead).not.toHaveBeenCalled()
+    for (const plan of [attendedPlan, scheduledPlan]) {
+      expect(plan.systemPrompt).toContain(
+        '`murph.group action="read_shared"`',
+      )
+      expect(plan.systemPrompt).not.toContain('`murph.group_data')
+      expect(plan.systemPrompt).not.toContain('`murph.group_membership')
+      expect(plan.systemPrompt).not.toContain('`murph.group_email')
+    }
     expect(attendedPlan.dynamicTools).toContainEqual(
       expect.objectContaining({
         namespace: 'murph',
@@ -4071,12 +4079,26 @@ describe('assistant Codex turn planning', () => {
         'connected_apps_search',
         'connected_apps_execute',
         'automation',
-        'group',
+        'group_consult',
+        'group_data',
+        'group_membership',
+        'group_usage',
+        'group_chat',
+        'group_email',
         'assistant_configuration',
         'assistant_style',
         'personalization',
         'create_phone_call',
       ]),
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_data action="read_shared"`',
+    )
+    expect(plan.systemPrompt).toContain(
+      '`murph.group_email action="send_email"`',
+    )
+    expect(plan.systemPrompt).not.toContain(
+      '`murph.group action="read_shared"`',
     )
     const groupAssistantConfigurationTool = plan.dynamicTools.find(
       (tool) => tool.name === 'assistant_configuration',
