@@ -1053,6 +1053,7 @@ async function disconnectJunctionAccount(
   page: Page,
   config: BrowserConfig,
 ): Promise<void> {
+  await page.waitForLoadState("load", { timeout: config.timeoutMs });
   await page
     .getByRole("button", { name: new RegExp(`^Disconnect (?:${config.label}|account)$`, "i") })
     .click();
@@ -1199,6 +1200,7 @@ export {
   closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,

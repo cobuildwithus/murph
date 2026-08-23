@@ -39,6 +39,10 @@ Updated: 2026-08-23
   browser was already on Murph home, proving Garmin departed during the
   asynchronous terminal surface sample. The helper then threw from its stale
   pre-sample route state instead of honoring the current route.
+- PR #2188 fixed that race. Its protected-main run completed authorization,
+  callback, connected-state, and persisted-reload proof, then exposed a later
+  cleanup race: `DOMContentLoaded` made the server-rendered Disconnect button
+  visible before its client handler was ready, so the click opened no dialog.
 
 ## Scope
 
@@ -83,6 +87,8 @@ Updated: 2026-08-23
   A departure during that asynchronous sample continues to the existing
   callback proof; unchanged, invalid, and regressed Garmin states still fail
   closed.
+- Before disconnect cleanup, require the reloaded connect page's load boundary
+  so the visible server-rendered action has its client handler.
 
 ## Verification
 
