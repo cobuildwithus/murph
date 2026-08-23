@@ -986,6 +986,59 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(1_500);
   });
 
+  it("submits Garmin confirmation only once while route departure is unresolved", async () => {
+    let now = 0;
+    let agreeClicks = 0;
+    let disagreeClicks = 0;
+    const mainFrame = authorizationFrame({
+      buttons: [
+        {
+          onClick: () => {
+            agreeClicks += 1;
+          },
+          text: "Agree",
+        },
+        {
+          onClick: () => {
+            disagreeClicks += 1;
+          },
+          text: "Do Not Agree",
+        },
+      ],
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => [
+        "https://connect.garmin.com/partner/oauthConfirm",
+        "?oauth_token=opaque&oauth_callback=opaque",
+        "&permissionsUpdated=1&selectedCapabilities=opaque",
+      ].join(""),
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).rejects.toThrow(
+      "Garmin consent confirmation did not leave the consent route.",
+    );
+
+    expect(agreeClicks).toBe(1);
+    expect(disagreeClicks).toBe(0);
+    expect(now).toBe(15_000);
+  });
+
   it("completes Garmin consent when Save departs directly to Murph", async () => {
     let atMurph = false;
     let now = 0;

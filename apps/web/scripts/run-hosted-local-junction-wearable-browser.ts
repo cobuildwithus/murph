@@ -564,15 +564,25 @@ async function completeExternalAuthorization(
         continue;
       }
 
-      await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(
-        page,
-        AUTH_ACTIONS,
-        config.source,
-      );
+      const garminConfirmation = config.source === "garmin"
+        && readGarminPartnerConsentStep(page.url()) === "permissions_updated";
+      let clicked: boolean;
+      if (garminConfirmation) {
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      } else {
+        await checkRequiredConsentCheckboxes(page);
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      }
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
+        if (garminConfirmation) {
+          await waitForGarminPartnerConfirmationDeparture(
+            page,
+            Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+            now,
+          );
+        }
         await page.waitForTimeout(750);
         continue;
       }
@@ -691,6 +701,27 @@ async function waitForGarminPartnerConsentProgression(
   }
   if (step === "selection") {
     throw new Error("Garmin consent Save did not advance the consent flow.");
+  }
+}
+
+async function waitForGarminPartnerConfirmationDeparture(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "permissions_updated" && now() < deadline) {
+    await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
+  }
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent confirmation returned to the selection state.");
+  }
+  if (step === "permissions_updated") {
+    throw new Error("Garmin consent confirmation did not leave the consent route.");
   }
 }
 

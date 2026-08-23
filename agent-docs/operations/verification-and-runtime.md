@@ -318,7 +318,9 @@ exact `/partner/oauthConfirm` route, the unattended runner requires exactly
 three available data-sharing checkboxes and one enabled `Save` action before it
 continues. `Save` is one-shot and may advance on that pathname only when both
 the `permissionsUpdated` and `selectedCapabilities` markers appear; the runner
-then resumes its existing positive-action loop, where negative matching wins.
+then uses the existing positive/negative classifier, where negative matching
+wins, and submits the selected confirmation action once while waiting up to the
+bounded progress window for route departure.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual

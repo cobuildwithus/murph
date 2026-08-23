@@ -21,6 +21,13 @@ Updated: 2026-08-23
   visible enabled buttons render: exactly one positive action and one action
   that matches both the positive and negative classifiers. The existing action
   loop would select only the positive action because negative matching wins.
+- PR #2175 merged the exact step recognition. Its protected-main canary proved
+  that `Save` now advances, but the positive confirmation action remained on
+  the same route long enough for the loop to click it repeatedly until the
+  parent killed the browser child at its outer timeout. Earlier runs failed in
+  roughly 80 seconds at the first `Save`; the merged run lasted roughly eight
+  minutes inside the browser proof and ended with an opaque `SIGTERM`, proving
+  the progress-reset defect rather than the original selection-step defect.
 
 ## Scope
 
@@ -37,8 +44,10 @@ Updated: 2026-08-23
 1. [x] Prove the live two-step consent mechanism with content-free diagnostics.
 2. [x] Implement the smallest exact-step progression rule and regression
    coverage.
-3. Run focused verification, ReviewGPT, and exact-head CI in a follow-up PR.
-4. Merge and require a successful exact post-merge protected Garmin canary.
+3. [x] Run focused verification, ReviewGPT, and exact-head CI in PR #2175.
+4. [x] Merge PR #2175 and inspect its exact protected-main Garmin canary.
+5. Submit the confirmation action once, run the follow-up completion gates,
+   merge, and require a successful exact post-merge protected Garmin canary.
 
 ## Decisions
 
@@ -52,6 +61,10 @@ Updated: 2026-08-23
   exactly one safe action on the live surface.
 - Preserve the one-shot `Save` effect; the wait succeeds on either the observed
   same-route progression or route departure and never clicks `Save` again.
+- Preserve the existing positive/negative classifier for the advanced state,
+  but submit its selected positive action only once and require route departure
+  within the existing 15-second progress window. A stalled confirmation fails
+  with its redacted Garmin phase instead of resetting the timer through clicks.
 
 ## Verification
 
@@ -64,7 +77,7 @@ Updated: 2026-08-23
 
 Completed local proof:
 
-- Browser-runner unit suite: 37 passed.
+- Browser-runner unit suite: 38 passed.
 - Real headed-Chromium smoke: 7 passed.
 - Hosted Web typecheck: passed.
 - Docs drift and diff checks: passed.
