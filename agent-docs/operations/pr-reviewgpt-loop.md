@@ -255,10 +255,10 @@ Pause before any remediation or artifact download.
 
 After the user resumes, or immediately when the sole accepted finding qualifies
 for the `Complexity Collapse` exception, handle only accepted findings against
-the real code and tests. If the response attaches `reviewgpt-coverage.patch`, retain the exact
-review thread URL, artifact index, and selected lane. Download only that
-assistant-owned artifact from the same thread with the managed lane's CDP
-endpoint, for example:
+the real code and tests. If the response attaches `reviewgpt-coverage.patch`,
+retain the exact review thread URL, artifact index, and selected lane. Download
+only that assistant-owned artifact from the same thread with the managed lane's
+CDP endpoint, for example:
 
 ```bash
 pnpm exec cobuild-review-gpt thread download \
@@ -752,10 +752,10 @@ worktree active, and stop. Do not poll for a quiet base.
 ## Stop Condition
 
 - Stop when the exact current patch has a resolved result, local triage produces
-  zero accepted findings, and any required Finding Disposition Pause is complete.
-  A resolved result is `ROUND_OUTCOME: PASS`, which requires no user-resume
-  pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected for an
-  evidence-backed reason after the pause.
+  zero accepted findings, and every required finding-disposition boundary is
+  complete. A resolved result is `ROUND_OUTCOME: PASS`, which requires no
+  user-resume pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected
+  for an evidence-backed reason after its disposition boundary.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
