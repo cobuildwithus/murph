@@ -15,6 +15,7 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationRequestedWake,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDailyMetricReportedWake,
@@ -496,6 +497,8 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   initialGroupRoomModelMarkdown?: string | null;
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   occurredAt: string;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
@@ -518,6 +521,14 @@ export function buildHostedExecutionMemberActivatedWake(input: {
       ? {}
       : { initialGroupRoomModelMarkdown }),
     memberChannels: { ...input.memberChannels },
+    onboardingFollowupEnrollment: input.onboardingFollowupEnrollment ?? true,
+    ...(input.onboardingFollowupRoute === undefined
+      ? {}
+      : {
+          onboardingFollowupRoute: input.onboardingFollowupRoute
+            ? cloneAssistantNotificationRoute(input.onboardingFollowupRoute)
+            : null,
+        }),
     ...(input.signupWelcome === undefined
       ? {}
       : {

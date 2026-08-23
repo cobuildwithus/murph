@@ -2385,8 +2385,21 @@ binding and encrypted conversation mailbox append remain one Web-owned
 transaction; unmanaged, ambiguous, disabled, flagged, critical, unhealthy, or
 structurally unavailable recipient lines cannot establish this exact-line
 authority, and ordinary fallback selection remains fail-closed when no eligible
-line exists. Successful welcome delivery seeds the existing finite
-unfinished-onboarding automation, with at most one low-pressure opportunity on
+line exists. Member activation owns unfinished-onboarding follow-up enrollment
+for every signup path. It persists the canonical onboarding start at the
+activation timestamp and carries an optional direct follow-up route separately
+from the optional signup welcome. A present route seeds the existing finite
+automation before optional welcome delivery, so standard Linq and suppressed-
+welcome Linq instant-start share one transition. Telegram activation remains
+silent; when no bot thread exists yet, the persisted onboarding start is the
+durable pending fact and managed-automation reconciliation uses the first later
+deliverable direct route. That delayed seed stays anchored to the activation
+window and becomes a no-op after its cutoff. Activation seed failures retry
+through the activation mailbox, while later-route failures reuse the existing
+bounded managed-setup wake ladder. Canonical slug idempotency and onboarding
+state preserve completed or archived follow-ups as closed. No delivery receipt,
+channel-specific state, queue, or scheduler is another enrollment owner.
+The automation has at most one low-pressure opportunity on
 each of the next three local days and the existing completion, decline,
 response, suspension, and expiry stops. The companion path does not send the
 separate signup welcome email. A committed activation whose runtime wake is not
@@ -3444,7 +3457,28 @@ for bounded provider cleanup and audit compatibility; those fields never grant
 capacity. The ops growth read derives current starter activation from the
 immutable starter grant and maps invalid source references to Unknown while
 exposing only the existing masked phone hint; it never decrypts contact data
-for attribution. Operator recovery is not acquisition: an exhausted canonical
+for attribution.
+
+Invited Web onboarding continues from launch consent inside the authenticated
+consent request rather than relying on a later browser-only enrollment effect.
+The join client supplies its invite code as an explicit continuation hint; the
+legal-consent owner first commits the requested scope and continues only when
+the authoritative returned status has both launch scopes current. The existing
+Starter enrollment boundary then revalidates invite/member matching,
+suspension, messaging readiness, direct billing, and Family recovery under its
+member/beneficiary lock before any append-only grant. Messaging or billing
+recovery defers successfully to the existing server-rendered join owner. Join
+rendering and consent continuation share the canonical recoverable-billing
+predicate; retained Subscription identity is checked before paid evidence, so
+recovery cannot be mistaken for active access. An actual Starter enrollment
+returns its canonical destination through the same request so the browser can
+reuse the existing full-document Home or armed group-start handoff. The hint
+grants no authority by itself. The existing Starter island remains a recovery
+path for already-consented historical or interrupted states; Privy
+authentication webhooks are not activation authority and do not replace the
+consent-owned continuation.
+
+Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
 version, appends immutable history with a distinct Ops source, and is excluded

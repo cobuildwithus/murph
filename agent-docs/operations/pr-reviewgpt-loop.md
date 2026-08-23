@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-21
+Last verified: 2026-08-23
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -25,7 +25,7 @@ asks for a final bug hunt.
 
 For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until
 the latest substantive round is resolved, local triage has zero accepted
-findings, its finding-disposition pause is complete, and PR CI is green on the
+findings, any required finding-disposition pause is complete, and PR CI is green on the
 final head. A round is resolved by `ROUND_OUTCOME: PASS`, or by
 `ROUND_OUTCOME: FINDINGS` when the parent accepts none and records concrete
 disposition evidence. A completed anomaly retrospective may justify continuing
@@ -113,10 +113,13 @@ do not use a generic wake handoff as authority to apply an artifact.
 
 ## Finding Disposition Pause
 
-Every substantive `PASS` or `FINDINGS` result from either ReviewGPT stage pauses
-the workflow before remediation, artifact application, another review, or
-merge. Validate the exact response first, then have the parent triage every
-finding. The user handoff states the result and, for each finding, the parent's
+Every substantive preliminary specialist result and every final `FINDINGS`
+result pauses the workflow before remediation, artifact application, another
+review, or merge. A validated final `ROUND_OUTCOME: PASS` has no findings to
+disposition and proceeds directly to the remaining parent review and merge
+checks without a user-resume pause. For a result that requires the pause,
+validate the exact response first, then have the parent triage every finding.
+The user handoff states the result and, for each finding, the parent's
 accepted or rejected disposition, concrete code or path evidence, current user
 or operational harm, and the smallest justified fix with its complexity cost.
 
@@ -620,8 +623,10 @@ the current user explicitly asks for it.
    migrations, shims, dual writes, queues, capability negotiation, or
    reconciliation for a low-incidence temporary window.
 
-   Apply the Finding Disposition Pause after completing this triage. Steps 5–7
-   begin only after the user resumes, and only for accepted findings.
+   For a `FINDINGS` result, apply the Finding Disposition Pause after completing
+   this triage. Steps 5–7 begin only after the user resumes, and only for
+   accepted findings. A validated `ROUND_OUTCOME: PASS` continues without that
+   pause.
 
 5. Before another tactical fix, run the anomaly retrospective when any of these
    is true:
@@ -729,9 +734,10 @@ worktree active, and stop. Do not poll for a quiet base.
 ## Stop Condition
 
 - Stop when the exact current patch has a resolved result, local triage produces
-  zero accepted findings, and the Finding Disposition Pause is complete. A
-  resolved result is `ROUND_OUTCOME: PASS`, or `ROUND_OUTCOME: FINDINGS` with
-  every finding rejected for an evidence-backed reason.
+  zero accepted findings, and any required Finding Disposition Pause is complete.
+  A resolved result is `ROUND_OUTCOME: PASS`, which requires no user-resume
+  pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected for an
+  evidence-backed reason after the pause.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the
