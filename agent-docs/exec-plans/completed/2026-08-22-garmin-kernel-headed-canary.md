@@ -1,6 +1,6 @@
 # Run the Garmin canary in headed Kernel Chromium
 
-Status: active
+Status: completed
 Created: 2026-08-22
 Updated: 2026-08-22
 
@@ -44,12 +44,13 @@ Updated: 2026-08-22
 
 ## Tasks
 
-1. Update the Kernel config boundary and protected workflow to use headed remote
-   Chromium for Garmin.
-2. Add focused regression coverage and align the operational contract.
-3. Run focused tests, typecheck, docs drift, and privacy/diff review.
-4. Open the follow-up PR, run required ReviewGPT/CI gates, merge, and prove the
-   protected `main` Garmin canary succeeds.
+1. [x] Update the Kernel config boundary and protected workflow to use headed
+   remote Chromium for Garmin.
+2. [x] Add focused regression coverage and align the operational contract.
+3. [x] Run focused tests, typecheck, docs drift, and privacy/diff review.
+4. [x] Open the follow-up PR and resolve the required ReviewGPT gates.
+5. [ ] Merge after exact-head CI and prove the protected `main` Garmin canary
+   succeeds. This remains the merge owner's fail-closed completion boundary.
 
 ## Decisions
 
@@ -57,12 +58,28 @@ Updated: 2026-08-22
   do not add retries or classify the challenge as success.
 - Use Kernel's existing headed automation capability; do not add a CAPTCHA
   solver or a new browser service.
+- Preserve an upstream pre-effect admission check because the live suite resets
+  and deregisters provider state. Align that check with the browser-child gate
+  and cover the exact workflow-shaped handoff instead of deleting it.
+- Treat headed Chromium as a mitigation until a protected post-merge run proves
+  the real provider flow; do not claim success from static or simulated tests.
 
 ## Verification
 
-- Commands to run: focused web browser tests, workflow contract tests, web and
-  harness typechecks, `pnpm docs:drift`, `git diff --check`, required PR CI, and
-  the protected post-merge workflow.
-- Expected outcomes: all static/focused checks green; ReviewGPT resolved; exact
-  PR head green; real Garmin connect, callback, reload, disconnect, and provider
-  deregistration green on `main`.
+- Focused browser authorization suite: 30 tests passed.
+- Workflow contract suite: 7 tests passed.
+- Live-suite configuration boundary: 6 tests passed and the 7 real-provider
+  cases remained intentionally skipped by the focused filter.
+- Web, Cloudflare, and hosted-local harness typechecks passed.
+- `pnpm docs:drift` and `git diff --check` passed; the privacy scan found no
+  direct personal identifier in the patch.
+- Preliminary ReviewGPT found the stale upstream headed-Kernel rejection and an
+  overclaim in the verification guide. Both were accepted and corrected with a
+  narrow predicate, direct regression tests, and wording only.
+- Final ReviewGPT round 1 independently found the same upstream rejection. It
+  was accepted and corrected; no finding was rejected.
+- Final ReviewGPT round 2 performed a fresh full-snapshot audit of the corrected
+  head and passed with no findings.
+- Required PR CI and the protected post-merge Garmin run remain authorization-
+  boundary checks. The task must not be reported shipped unless both pass.
+Completed: 2026-08-22
