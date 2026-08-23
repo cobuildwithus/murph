@@ -58,7 +58,7 @@ export interface JunctionWorkoutStreamReductionInput {
   readonly summary: unknown;
 }
 
-export type JunctionWorkoutStreamTimestampCardinalityKind = "empty" | "over_limit";
+export type JunctionWorkoutStreamTimestampCardinalityKind = "over_limit";
 
 export interface JunctionWorkoutStreamTimestampCardinalityDiagnostic {
   readonly kind: JunctionWorkoutStreamTimestampCardinalityKind;
@@ -166,9 +166,12 @@ export function reduceJunctionWorkoutStreamPayload(
   const summary = record(input.summary, "workout summary");
   const stream = record(input.stream, "workout stream");
   const times = array(stream.time, "workout time");
-  if (times.length === 0 || times.length > input.maxSamples) {
+  if (times.length === 0) {
+    return undefined;
+  }
+  if (times.length > input.maxSamples) {
     throw new JunctionWorkoutStreamTimestampCardinalityError({
-      kind: times.length === 0 ? "empty" : "over_limit",
+      kind: "over_limit",
       maxTimestampCount: input.maxSamples,
       timestampCount: times.length,
     });

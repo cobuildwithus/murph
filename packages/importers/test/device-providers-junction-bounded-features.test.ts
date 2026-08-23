@@ -267,7 +267,7 @@ test("workout stream reduction is bounded by admitted samples and never preserve
     return true;
   });
 
-  assert.throws(() => reduceJunctionWorkoutStreamPayload({
+  assert.equal(reduceJunctionWorkoutStreamPayload({
     maxSamples: 1,
     summary: {
       id: "workout-empty",
@@ -276,15 +276,7 @@ test("workout stream reduction is bounded by admitted samples and never preserve
     stream: {
       time: [],
     },
-  }), (error: unknown) => {
-    assert.ok(error instanceof JunctionWorkoutStreamTimestampCardinalityError);
-    assert.deepEqual(error.diagnostic, {
-      kind: "empty",
-      maxTimestampCount: 1,
-      timestampCount: 0,
-    });
-    return true;
-  });
+  }), undefined);
 });
 
 test("workout stream reduction preserves heart-rate halves and cycling cadence semantics", () => {

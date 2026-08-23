@@ -1592,7 +1592,12 @@ Last verified: 2026-08-20
   hydrating the full projected vault. Its public `workoutFeatures` carries only
   the source provider, activity type, start time, unit-bearing compact overall
   scalars, and live splits; provider workout IDs and source-instance IDs remain
-  internal.
+  internal. A structurally valid empty timestamp array is a no-feature result
+  for that reconcile: it performs no canonical import, completes the current
+  candidate so the window can advance, and is fetched again by a later
+  scheduled reconcile. Existing canonical facets remain untouched. A stream
+  above the admitted sample limit remains a terminal bounded-cardinality
+  failure.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

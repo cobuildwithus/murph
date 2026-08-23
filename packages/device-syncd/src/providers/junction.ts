@@ -5221,7 +5221,7 @@ export function createJunctionDeviceSyncProvider(
       }
 
       if (feature === undefined) {
-        input.context.logger.warn?.("Skipping Junction workout with unaligned metric cardinality.", {
+        input.context.logger.warn?.("Skipping Junction workout without an importable stream feature.", {
           errorCode: "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
           provider: "junction",
           resource: "workout_stream",

@@ -21804,7 +21804,7 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(maximumActiveStreams, 1);
 });
 
-test("Junction workout_stream skips malformed metric cardinality without blocking valid workouts", async () => {
+test("Junction workout_stream skips empty or malformed streams without blocking valid workouts", async () => {
   const importedSnapshots: unknown[] = [];
   const warningCodes: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
@@ -21812,9 +21812,7 @@ test("Junction workout_stream skips malformed metric cardinality without blockin
     streamResponse: (workoutId) => createJsonResponse(
       workoutId === "workout-1"
         ? {
-            time: [1_775_131_200, 1_775_133_000],
-            heartrate: [100, 160],
-            distance: [0],
+            time: [],
           }
         : workoutId === "workout-2"
           ? {
@@ -21865,6 +21863,44 @@ test("Junction workout_stream skips malformed metric cardinality without blockin
     "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
     "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
   ]);
+});
+
+test("Junction workout_stream refetches an empty stream on a later reconcile", async () => {
+  const importedSnapshots: unknown[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1"],
+    streamResponse: (_workoutId, streamRequest) => createJsonResponse(
+      streamRequest === 1
+        ? { time: [] }
+        : {
+            time: [1_775_131_200, 1_775_133_000],
+            heartrate: [100, 160],
+            distance: [0, 5_000],
+          },
+    ),
+  });
+  const context = createJunctionJobContext({
+    importSnapshot: async (snapshot) => {
+      importedSnapshots.push(snapshot);
+      return { imported: true };
+    },
+  });
+
+  await executeJunctionJob(
+    harness.provider,
+    context,
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  assert.equal(importedSnapshots.length, 0);
+
+  await executeJunctionJob(
+    harness.provider,
+    context,
+    createJunctionWorkoutStreamResourceJob(),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-1"]);
+  assert.equal(importedSnapshots.length, 1);
 });
 
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {
