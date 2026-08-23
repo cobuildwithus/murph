@@ -49,6 +49,10 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..
 
 function pullRequest(overrides = {}) {
   return {
+    base: {
+      ref: "main",
+      repo: { full_name: "cobuildwithus/murph" },
+    },
     changed_files: 1,
     head: {
       repo: { full_name: "cobuildwithus/murph" },
@@ -114,6 +118,7 @@ function proofJobs({ proofDigest = compatibilityProofDigest({
 
 function compatibilityArgs(overrides = {}) {
   return {
+    expectedBaseRef: "main",
     expectedPrivateSha: PRIVATE_SHA,
     privateRef: PRIVATE_REF,
     privateToken: "private-token",
@@ -168,16 +173,23 @@ test("classifier leaves unrelated documentation neutral", () => {
 
 test("pull-request inspection binds the open exact head and trust source", () => {
   assert.deepEqual(inspectPullRequest(pullRequest(), {
+    expectedBaseRef: "main",
     expectedHeadSha: PUBLIC_SHA,
     prNumber: 42,
     repository: "cobuildwithus/murph",
-  }), { changedFiles: 1, headSha: PUBLIC_SHA, trusted: true });
+  }), {
+    changedFiles: 1,
+    headSha: PUBLIC_SHA,
+    targetsDefaultBranch: true,
+    trusted: true,
+  });
 });
 
 test("pull-request inspection rejects a stale workflow-run head", () => {
   assert.throws(() => inspectPullRequest(pullRequest({
     head: { repo: { full_name: "cobuildwithus/murph" }, sha: "d".repeat(40) },
   }), {
+    expectedBaseRef: "main",
     expectedHeadSha: PUBLIC_SHA,
     prNumber: 42,
     repository: "cobuildwithus/murph",
@@ -188,25 +200,67 @@ test("pull-request inspection rejects fork and bot authority without rejecting c
   assert.equal(inspectPullRequest(pullRequest({
     head: { repo: { full_name: "fork/murph" }, sha: PUBLIC_SHA },
   }), {
+    expectedBaseRef: "main",
     expectedHeadSha: PUBLIC_SHA,
     prNumber: 42,
     repository: "cobuildwithus/murph",
   }).trusted, false);
   assert.equal(inspectPullRequest(pullRequest({ user: { type: "Bot" } }), {
+    expectedBaseRef: "main",
     expectedHeadSha: PUBLIC_SHA,
     prNumber: 42,
     repository: "cobuildwithus/murph",
   }).trusted, false);
 });
 
+test("pull-request inspection isolates the canonical status to the default base", () => {
+  assert.equal(inspectPullRequest(pullRequest({
+    base: {
+      ref: "stack-base",
+      repo: { full_name: "cobuildwithus/murph" },
+    },
+  }), {
+    expectedBaseRef: "main",
+    expectedHeadSha: PUBLIC_SHA,
+    prNumber: 42,
+    repository: "cobuildwithus/murph",
+  }).targetsDefaultBranch, false);
+
+  for (const base of [
+    undefined,
+    { ref: "main" },
+    { ref: "main", repo: { full_name: "fork/murph" } },
+    { ref: "", repo: { full_name: "cobuildwithus/murph" } },
+  ]) {
+    assert.throws(() => inspectPullRequest(pullRequest({ base }), {
+      expectedBaseRef: "main",
+      expectedHeadSha: PUBLIC_SHA,
+      prNumber: 42,
+      repository: "cobuildwithus/murph",
+    }), /base/u);
+  }
+});
+
 test("pre-dispatch head proof rechecks same-repository human authority", () => {
   assert.throws(() => inspectExactPublicHead(pullRequest({
     head: { repo: { full_name: "fork/murph" }, sha: PUBLIC_SHA },
   }), {
+    expectedBaseRef: "main",
     expectedSha: PUBLIC_SHA,
     prNumber: 42,
     repository: "cobuildwithus/murph",
   }), /no longer a same-repository human-authored head/u);
+  assert.throws(() => inspectExactPublicHead(pullRequest({
+    base: {
+      ref: "stack-base",
+      repo: { full_name: "cobuildwithus/murph" },
+    },
+  }), {
+    expectedBaseRef: "main",
+    expectedSha: PUBLIC_SHA,
+    prNumber: 42,
+    repository: "cobuildwithus/murph",
+  }), /no longer targets the default branch/u);
 });
 
 test("changed-file pagination requires every declared entry", () => {
@@ -227,6 +281,7 @@ test("selection treats a renamed relevant owner as relevant", async () => {
     return jsonResponse([{ filename: "docs/moved.ts", previous_filename: "apps/web/src/old.ts" }]);
   }, async () => {
     const result = await selectPullRequest({
+      expectedBaseRef: "main",
       expectedHeadSha: PUBLIC_SHA,
       prNumber: 42,
       repository: "cobuildwithus/murph",
@@ -244,6 +299,7 @@ test("selection fails safe above GitHub's changed-file listing ceiling", async (
     throw new Error(`unexpected URL ${url}`);
   }, async () => {
     const result = await selectPullRequest({
+      expectedBaseRef: "main",
       expectedHeadSha: PUBLIC_SHA,
       prNumber: 42,
       repository: "cobuildwithus/murph",
@@ -654,6 +710,30 @@ test("workflow keeps credentials behind trusted selection and publishes one stab
   assert.match(workflow, /environment: temporal-compatibility/u);
   assert.match(workflow, /owner: cobuildwithus\n\s+repositories: murph-cloud/u);
   assert.match(workflow, /permission-actions: write\n\s+permission-contents: read/u);
+  assert.match(
+    workflow,
+    /EXPECTED_BASE_REF: \$\{\{ github\.event\.repository\.default_branch \}\}/u,
+  );
+  assert.equal(
+    workflow.match(/EXPECTED_BASE_REF: \$\{\{ github\.event\.repository\.default_branch \}\}/gu)?.length,
+    2,
+  );
+  assert.match(
+    workflow,
+    /targets_default_branch: \$\{\{ steps\.select\.outputs\.targets_default_branch \}\}/u,
+  );
+  assert.match(
+    workflow,
+    /- name: Mark stable status pending\n\s+if: \$\{\{ steps\.select\.outputs\.targets_default_branch == 'true' \}\}/u,
+  );
+  assert.match(
+    workflow,
+    /compatibility:\n[\s\S]*?if: \$\{\{ github\.event\.workflow_run\.conclusion == 'success' && needs\.select-pr\.outputs\.targets_default_branch == 'true' && needs\.select-pr\.outputs\.selected == 'true' && needs\.select-pr\.outputs\.trusted == 'true' \}\}/u,
+  );
+  assert.match(
+    workflow,
+    /required:\n[\s\S]*?if: \$\{\{ always\(\) && github\.event\.workflow_run\.event == 'pull_request' && github\.event\.workflow_run\.pull_requests\[0\] != null && needs\.select-pr\.outputs\.targets_default_branch == 'true' \}\}/u,
+  );
   assert.match(workflow, /run-id: \$\{\{ github\.event\.workflow_run\.id \}\}/u);
   assert.match(workflow, /temporal-compatibility-producer-\$\{\{ needs\.select-pr\.outputs\.head_sha \}\}/u);
   assert.doesNotMatch(workflow, /TEMPORAL_COMPATIBILITY_PRIVATE_EXPECTED_SHA/u);

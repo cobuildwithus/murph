@@ -259,6 +259,36 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     expect(
       isAllowedTemporalCompatibilityHandoff(
         'temporal-compatibility.yml',
+        workflow.replace(
+          " && needs.select-pr.outputs.targets_default_branch == 'true'",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}\n",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          '      - name: Dispatch exact private reader matrix\n        env:\n          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}\n',
+          '      - name: Dispatch exact private reader matrix\n        env:\n',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
         removeWorkflowStep(workflow, 'Revalidate exact PR head before credentialed setup'),
         'workflow_run handoff trigger',
       ),
@@ -475,10 +505,39 @@ function isAllowedTemporalCompatibilityHandoff(
   const workflowRun = triggers.workflow_run
   const selectPr = jobs['select-pr']
   const compatibility = jobs.compatibility
+  const required = jobs.required
   if (
     !isRecord(workflowRun)
     || !isRecord(selectPr)
     || !isRecord(compatibility)
+    || !isRecord(required)
+  ) {
+    return false
+  }
+
+  const selectOutputs = selectPr.outputs
+  const selectSteps = selectPr.steps
+  if (!isRecord(selectOutputs) || !Array.isArray(selectSteps)) {
+    return false
+  }
+  const selectStep = selectSteps.find((step) =>
+    isRecord(step) && step.name === 'Resolve exact PR head and compatibility owners'
+  )
+  const pendingStep = selectSteps.find((step) =>
+    isRecord(step) && step.name === 'Mark stable status pending'
+  )
+  const compatibilitySteps = compatibility.steps
+  const dispatchStep = Array.isArray(compatibilitySteps)
+    ? compatibilitySteps.find((step) =>
+      isRecord(step) && step.name === 'Dispatch exact private reader matrix'
+    )
+    : null
+  if (
+    !isRecord(selectStep)
+    || !isRecord(selectStep.env)
+    || !isRecord(pendingStep)
+    || !isRecord(dispatchStep)
+    || !isRecord(dispatchStep.env)
   ) {
     return false
   }
@@ -491,8 +550,13 @@ function isAllowedTemporalCompatibilityHandoff(
     && permissions['pull-requests'] === 'read'
     && permissions.statuses === 'write'
     && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
-    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+    && selectOutputs.targets_default_branch === '${{ steps.select.outputs.targets_default_branch }}'
+    && selectStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
+    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' }}"
+    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
     && compatibility.environment === 'temporal-compatibility'
+    && dispatchStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
+    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}"
     && hasTemporalCompatibilityPermissions(compatibility.permissions)
     && hasEarlyExactPrHeadRevalidation(
       compatibility.steps,

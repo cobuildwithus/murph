@@ -456,7 +456,8 @@ Hosted Temporal producer/reader compatibility uses one public exact-SHA status
 and one protected default-branch controller. Private Murph Cloud retains the
 immutable supported-reader manifest and reader execution; the public controller
 owns conservative selection, exact dispatch/run/attestation validation, and
-fail-closed status publication. The contract is jointly specified by
+fail-closed status publication only for pull requests targeting the exact
+default base repository and ref. The contract is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, `agent-docs/RELIABILITY.md`,
 `agent-docs/references/hosted-temporal-orchestration.md`, and
 `agent-docs/references/testing-ci-map.md`.

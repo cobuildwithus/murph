@@ -28,6 +28,7 @@ jobs:
     outputs:
       head_sha: ${{ steps.select.outputs.head_sha }}
       selected: ${{ steps.select.outputs.selected }}
+      targets_default_branch: ${{ steps.select.outputs.targets_default_branch }}
       trusted: ${{ steps.select.outputs.trusted }}
     steps:
       - name: Checkout trusted controller
@@ -39,12 +40,14 @@ jobs:
       - name: Resolve exact PR head and compatibility owners
         id: select
         env:
+          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
           EXPECTED_HEAD_SHA: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/hosted-orchestration-compatibility.mjs select
 
       - name: Mark stable status pending
+        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           STATUS_SHA: ${{ steps.select.outputs.head_sha }}
@@ -59,7 +62,7 @@ jobs:
   compatibility:
     name: Prove supported Temporal readers
     needs: select-pr
-    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}
     environment: temporal-compatibility
     runs-on: ubuntu-24.04
     timeout-minutes: 70
@@ -110,6 +113,7 @@ jobs:
 
       - name: Dispatch exact private reader matrix
         env:
+          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}
           PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           PUBLIC_SHA: ${{ needs.select-pr.outputs.head_sha }}
           TEMPORAL_COMPATIBILITY_PRIVATE_GITHUB_TOKEN: ${{ steps.private-app-token.outputs.token }}
@@ -128,7 +132,7 @@ jobs:
     needs:
       - select-pr
       - compatibility
-    if: ${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}
+    if: ${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

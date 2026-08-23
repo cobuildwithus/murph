@@ -654,6 +654,9 @@ The hard-cut architecture is accepted when:
   gates.
 - Relevant public producer, contract, hosted-runtime, harness, and CI-owner
   changes publish one exact-SHA `Temporal compatibility` status. The public
+  controller validates the pull request's exact base repository and ref; only
+  pull requests targeting the default branch may publish that SHA-global
+  status, so stacked non-default-branch pull requests cannot overwrite it. The
   candidate producer runs only in unprivileged Repo Hygiene and hands the
   trusted controller a run/head-bound bounded JSON artifact. The controller
   never owns worker code or reader policy: private Murph Cloud receives only

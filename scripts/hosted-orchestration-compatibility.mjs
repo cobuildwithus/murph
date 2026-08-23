@@ -62,8 +62,14 @@ export function isTemporalCompatibilityRelevantPath(value) {
     || RELEVANT_PREFIXES.some((prefix) => filePath.startsWith(prefix));
 }
 
-export function inspectPullRequest(raw, { expectedHeadSha, prNumber, repository }) {
+export function inspectPullRequest(raw, {
+  expectedBaseRef,
+  expectedHeadSha,
+  prNumber,
+  repository,
+}) {
   assertRecord(raw, "pull request");
+  assertSafeId(expectedBaseRef, "expected public base ref", 255, /^[A-Za-z0-9._/-]+$/u);
   assertSha(expectedHeadSha, "expected public SHA");
   assertRepository(repository, "public repository");
   if (raw.number !== prNumber || raw.state !== "open" || !isRecord(raw.head)) {
@@ -78,11 +84,25 @@ export function inspectPullRequest(raw, { expectedHeadSha, prNumber, repository 
   if (!Number.isSafeInteger(changedFiles) || changedFiles < 0) {
     throw new Error("Public pull request changed-file count is invalid.");
   }
+  if (
+    !isRecord(raw.base)
+    || !isRecord(raw.base.repo)
+    || raw.base.repo.full_name !== repository
+  ) {
+    throw new Error("Public pull request base repository is invalid.");
+  }
+  const baseRef = requiredString(raw.base.ref, "public pull request base ref");
+  assertSafeId(baseRef, "public pull request base ref", 255, /^[A-Za-z0-9._/-]+$/u);
   const trusted = isRecord(raw.head.repo)
     && raw.head.repo.full_name === repository
     && isRecord(raw.user)
     && raw.user.type === "User";
-  return { changedFiles, headSha, trusted };
+  return {
+    changedFiles,
+    headSha,
+    targetsDefaultBranch: baseRef === expectedBaseRef,
+    trusted,
+  };
 }
 
 export function inspectChangedFilePage(raw, { expectedCount, page }) {
@@ -104,13 +124,19 @@ export function inspectChangedFilePage(raw, { expectedCount, page }) {
   });
 }
 
-export async function selectPullRequest({ expectedHeadSha, prNumber, repository, token }) {
+export async function selectPullRequest({
+  expectedBaseRef,
+  expectedHeadSha,
+  prNumber,
+  repository,
+  token,
+}) {
   const encodedRepository = encodeRepository(repository);
   const pullRequest = inspectPullRequest(await fetchJson(
     `https://api.github.com/repos/${encodedRepository}/pulls/${prNumber}`,
     { headers: githubHeaders(token) },
     "public pull request lookup",
-  ), { expectedHeadSha, prNumber, repository });
+  ), { expectedBaseRef, expectedHeadSha, prNumber, repository });
 
   if (pullRequest.changedFiles > MAX_CHANGED_FILES) {
     return { ...pullRequest, selected: true };
@@ -219,14 +245,23 @@ export function inspectPrivateWorkflow(raw) {
   return raw.id;
 }
 
-export function inspectExactPublicHead(raw, { expectedSha, prNumber, repository }) {
+export function inspectExactPublicHead(raw, {
+  expectedBaseRef,
+  expectedSha,
+  prNumber,
+  repository,
+}) {
   const inspected = inspectPullRequest(raw, {
+    expectedBaseRef,
     expectedHeadSha: expectedSha,
     prNumber,
     repository,
   });
   if (!inspected.trusted) {
     throw new Error("Public pull request is no longer a same-repository human-authored head.");
+  }
+  if (!inspected.targetsDefaultBranch) {
+    throw new Error("Public pull request no longer targets the default branch.");
   }
   return inspected.headSha;
 }
@@ -391,6 +426,7 @@ export async function listAllRunJobs({ runId, token }) {
 }
 
 export async function runTemporalCompatibility({
+  expectedBaseRef,
   expectedPrivateSha,
   privateToken,
   privateRef,
@@ -404,6 +440,7 @@ export async function runTemporalCompatibility({
   sleepFn = sleep,
 }) {
   assertRepository(publicRepository, "public repository");
+  assertSafeId(expectedBaseRef, "expected public base ref", 255, /^[A-Za-z0-9._/-]+$/u);
   assertSha(publicSha, "public SHA");
   assertSafeId(requestId, "request id", 120);
   requiredString(privateToken, "private GitHub token");
@@ -429,7 +466,12 @@ export async function runTemporalCompatibility({
     `https://api.github.com/repos/${encodedPublicRepository}/pulls/${prNumber}`,
     { headers: githubHeaders(publicToken) },
     "public pull request revalidation",
-  ), { expectedSha: publicSha, prNumber, repository: publicRepository });
+  ), {
+    expectedBaseRef,
+    expectedSha: publicSha,
+    prNumber,
+    repository: publicRepository,
+  });
 
   const runId = inspectDispatchReceipt(await fetchJson(
     `https://api.github.com/repos/${encodedPrivateRepository}/actions/workflows/${encodeURIComponent(TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW)}/dispatches`,
@@ -591,15 +633,23 @@ async function postRunControl(repository, runId, operation, token) {
 }
 
 async function runSelectCommand() {
+  const expectedBaseRef = requiredEnv("EXPECTED_BASE_REF");
   const expectedHeadSha = requiredEnv("EXPECTED_HEAD_SHA");
   const prNumber = positiveInteger(requiredEnv("PR_NUMBER"), "pull request number");
   const repository = requiredEnv("GITHUB_REPOSITORY");
   const token = requiredEnv("TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN");
   delete process.env.TEMPORAL_COMPATIBILITY_PUBLIC_GITHUB_TOKEN;
-  const selected = await selectPullRequest({ expectedHeadSha, prNumber, repository, token });
+  const selected = await selectPullRequest({
+    expectedBaseRef,
+    expectedHeadSha,
+    prNumber,
+    repository,
+    token,
+  });
   await writeOutputs({
     head_sha: selected.headSha,
     selected: String(selected.selected),
+    targets_default_branch: String(selected.targetsDefaultBranch),
     trusted: String(selected.trusted),
   });
 }
@@ -612,6 +662,7 @@ async function runCompatibilityCommand(args) {
   const policy = inspectControllerPolicy(JSON.parse(await readFile(requiredArg(args, "policy"), "utf8")));
   const producer = inspectProducerFixtures(await readFile(requiredArg(args, "fixtures"), "utf8"));
   await runTemporalCompatibility({
+    expectedBaseRef: requiredEnv("EXPECTED_BASE_REF"),
     expectedPrivateSha: policy.privateSha,
     privateToken,
     privateRef: policy.privateRef,
