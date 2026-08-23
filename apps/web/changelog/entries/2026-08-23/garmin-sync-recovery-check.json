@@ -9,6 +9,6 @@
     "summary": "Murph can now text you when an established Garmin connection stops providing new data, with a quick check that often restores syncing.",
     "details": "The check is limited to recently active direct conversations and appears at most once for each extended quiet period. Murph does not send a follow-up when data resumes.",
     "relevanceTags": ["wearables", "garmin", "reliability"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [2189]
   }
 }
