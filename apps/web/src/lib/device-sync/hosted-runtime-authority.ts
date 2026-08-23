@@ -373,6 +373,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     userId: input.trustedUserId,
   });
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
+  const noticeCandidates: HostedSourceDeliveryStallNoticeCandidate[] = [];
 
   // Assistant-runtime maintenance owns per-attempt job failure telemetry. Web
   // applies only the resulting canonical connection state.
@@ -722,12 +723,13 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
       },
     );
     updates.push(appliedResult.applied);
-    scheduleHostedSourceDeliveryStallNotices({
-      candidates: appliedResult.noticeCandidates,
-      now: appliedAt,
-      userId: input.trustedUserId,
-    });
+    noticeCandidates.push(...appliedResult.noticeCandidates);
   }
+  scheduleHostedSourceDeliveryStallNotices({
+    candidates: noticeCandidates,
+    now: appliedAt,
+    userId: input.trustedUserId,
+  });
 
   return {
     appliedAt,
