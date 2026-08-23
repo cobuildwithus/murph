@@ -54,36 +54,53 @@ describe("hosted headed browser boundary", () => {
   });
 
   it.runIf(smokeEnabled)(
-    "checks the exact Garmin consent set before the route-bound Save action",
+    "completes Garmin's exact two-step consent flow",
     async () => {
       const browser = await chromium.launch({ headless: false });
       try {
         const page = await browser.newPage();
-        await page.route("https://connect.garmin.com/**", (route) => route.fulfill({
-          body: [
-            '<input type="checkbox">',
-            '<input type="checkbox">',
-            '<input type="checkbox">',
-            '<button id="save">Save</button>',
-            '<button onclick="location.href=\'https://app.example.test/cancel\'">',
-            "Cancel</button>",
-            "<script>",
-            "document.querySelector('#save').addEventListener('click', () => {",
-            "const allChecked = [...document.querySelectorAll('input[type=checkbox]')]",
-            ".every((input) => input.checked);",
-            "location.href = allChecked",
-            "? 'https://app.example.test/home'",
-            ": 'https://app.example.test/incomplete';",
-            "});",
-            "</script>",
-          ].join(""),
-          contentType: "text/html",
-        }));
+        await page.route("https://connect.garmin.com/**", (route) => {
+          const url = new URL(route.request().url());
+          const progressed = url.searchParams.has("permissionsUpdated")
+            && url.searchParams.has("selectedCapabilities");
+          return route.fulfill({
+            body: progressed
+              ? [
+                '<button onclick="location.href=\'https://app.example.test/home\'">',
+                "Agree</button>",
+                '<button onclick="location.href=\'https://app.example.test/declined\'">',
+                "Do Not Agree</button>",
+              ].join("")
+              : [
+                '<input type="checkbox">',
+                '<input type="checkbox">',
+                '<input type="checkbox">',
+                '<button id="save">Save</button>',
+                '<button onclick="location.href=\'https://app.example.test/cancel\'">',
+                "Cancel</button>",
+                "<script>",
+                "document.querySelector('#save').addEventListener('click', () => {",
+                "const allChecked = [...document.querySelectorAll('input[type=checkbox]')]",
+                ".every((input) => input.checked);",
+                "location.href = allChecked",
+                "? 'https://connect.garmin.com/partner/oauthConfirm",
+                "?oauth_token=opaque&oauth_callback=opaque",
+                "&permissionsUpdated=1&selectedCapabilities=opaque'",
+                ": 'https://app.example.test/incomplete';",
+                "});",
+                "</script>",
+              ].join(""),
+            contentType: "text/html",
+          });
+        });
         await page.route("https://app.example.test/**", (route) => route.fulfill({
           body: "",
           contentType: "text/html",
         }));
-        await page.goto("https://connect.garmin.com/partner/oauthConfirm");
+        await page.goto([
+          "https://connect.garmin.com/partner/oauthConfirm",
+          "?oauth_token=opaque&oauth_callback=opaque",
+        ].join(""));
 
         await expect(completeExternalJunctionAuthorizationForTest(
           page,

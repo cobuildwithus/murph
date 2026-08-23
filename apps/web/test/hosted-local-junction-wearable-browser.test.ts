@@ -888,22 +888,26 @@ describe("hosted-local Junction wearable browser authorization", () => {
     ].join(" "));
   });
 
-  it("selects the exact Garmin data-sharing set before the route-bound Save action", async () => {
-    let atMurph = false;
+  it("completes Garmin's exact two-step consent flow", async () => {
+    let step: "selection" | "confirmation" | "murph" = "selection";
     let now = 0;
-    let saveClicked = false;
+    let saveClicks = 0;
+    let agreeClicks = 0;
     let cancelClicked = false;
+    let disagreeClicked = false;
     const checkboxes = [
       { checked: false, text: "" },
       { checked: false, text: "" },
       { checked: false, text: "" },
     ];
-    const mainFrame = authorizationFrame({
+    const selectionFrame = authorizationFrame({
       buttons: [
         {
           onClick: () => {
-            saveClicked = true;
-            atMurph = checkboxes.every((checkbox) => checkbox.checked);
+            saveClicks += 1;
+            if (checkboxes.every((checkbox) => checkbox.checked)) {
+              step = "confirmation";
+            }
           },
           text: "Save",
         },
@@ -920,15 +924,45 @@ describe("hosted-local Junction wearable browser authorization", () => {
         { text: "Privacy Policy" },
       ],
     });
+    const confirmationFrame = authorizationFrame({
+      buttons: [
+        {
+          onClick: () => {
+            agreeClicks += 1;
+            step = "murph";
+          },
+          text: "Agree",
+        },
+        {
+          onClick: () => {
+            disagreeClicked = true;
+          },
+          text: "Do Not Agree",
+        },
+      ],
+    });
+    const currentFrame = () => step === "selection"
+      ? selectionFrame
+      : confirmationFrame;
     const page = {
-      frames: () => [mainFrame],
-      getByRole: mainFrame.getByRole,
+      frames: () => [currentFrame()],
+      getByRole: (...args: Parameters<typeof selectionFrame.getByRole>) =>
+        currentFrame().getByRole(...args),
       locator: vi.fn(() => emptyLocator()),
-      mainFrame: () => mainFrame,
+      mainFrame: currentFrame,
       title: vi.fn(async () => "Garmin Partner Auth"),
-      url: () => atMurph
+      url: () => step === "murph"
         ? "https://app.example.test/home"
-        : "https://connect.garmin.com/partner/oauthConfirm",
+        : step === "confirmation"
+        ? [
+          "https://connect.garmin.com/partner/oauthConfirm",
+          "?oauth_token=opaque&oauth_callback=opaque",
+          "&permissionsUpdated=1&selectedCapabilities=opaque",
+        ].join("")
+        : [
+          "https://connect.garmin.com/partner/oauthConfirm",
+          "?oauth_token=opaque&oauth_callback=opaque",
+        ].join(""),
       waitForTimeout: vi.fn(async (duration: number) => {
         now += duration;
       }),
@@ -945,9 +979,47 @@ describe("hosted-local Junction wearable browser authorization", () => {
     )).resolves.toBeUndefined();
 
     expect(checkboxes.every((checkbox) => checkbox.checked)).toBe(true);
-    expect(saveClicked).toBe(true);
+    expect(saveClicks).toBe(1);
+    expect(agreeClicks).toBe(1);
     expect(cancelClicked).toBe(false);
-    expect(now).toBe(750);
+    expect(disagreeClicked).toBe(false);
+    expect(now).toBe(1_500);
+  });
+
+  it("fails closed on a partial Garmin consent progression marker pair", async () => {
+    let agreeClicks = 0;
+    const mainFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          agreeClicks += 1;
+        },
+        text: "Agree",
+      }],
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => [
+        "https://connect.garmin.com/partner/oauthConfirm",
+        "?oauth_token=opaque&oauth_callback=opaque&permissionsUpdated=1",
+      ].join(""),
+      waitForTimeout: vi.fn(async () => undefined),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+    )).rejects.toThrow(
+      "Garmin consent exposed an invalid progression state.",
+    );
+    expect(agreeClicks).toBe(0);
   });
 
   it.each([
@@ -1028,7 +1100,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
       () => now,
     )).rejects.toThrow(
-      "Garmin consent Save did not leave the consent route.",
+      "Garmin consent Save did not advance the consent flow.",
     );
     expect(saveClicks).toBe(1);
     expect(now).toBe(15_000);
