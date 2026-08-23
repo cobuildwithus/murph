@@ -9179,6 +9179,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
 
   it("keeps a model-approved new contact on the signup-link path when routing selects another line", async () => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+      kind: "generate",
+    });
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+      kind: "reply",
+      message: "What would you like help with?",
+      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+    });
     const incomingLinePhone = "+15550000000";
     const fallbackLinePhone = "+15550100001";
     const createdInviteCode = "code_instant_start_cross_line";
@@ -9310,6 +9318,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       to: ["+15551234567"],
     });
     expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      eventId: "evt_instant_start_cross_line",
+      linqChatId: "chat_instant_start_cross_line",
+      prisma,
+      reason: "planner-selected-non-instant-path",
+    });
+    expect(mocks.abandonHostedLinqInstantFirstTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.createHostedLinqChat.mock.invocationCallOrder[0]!);
+    expect(mocks.completeHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -9360,6 +9377,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   }) => {
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
     configureEnrollment();
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+      kind: "generate",
+    });
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+      kind: "reply",
+      message: "What would you like help with?",
+      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+    });
     const invite = {
       channel: "linq",
       id: "invite_instant_start_fallback",
@@ -9448,6 +9473,8 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
       expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
         .not.toHaveBeenCalled();
+      expect(mocks.abandonHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+      expect(mocks.completeHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
       return;
     }
 
@@ -9476,6 +9503,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       }),
     );
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      eventId: "evt_instant_start_fallback",
+      linqChatId: "chat_123",
+      prisma,
+      reason: "planner-selected-non-instant-path",
+    });
+    expect(mocks.abandonHostedLinqInstantFirstTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]!);
+    expect(mocks.completeHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
     if (activationCommitted) {
       expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
         .toHaveBeenCalledWith({
@@ -10298,7 +10334,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       eventId: "evt_transactional_first_contact_block",
       linqChatId: "chat_123",
       prisma,
-      reason: "admission-blocked",
+      reason: "planner-selected-non-instant-path",
     });
     expect(transactionDecisionCreateMany).not.toHaveBeenCalled();
     expect(rootDecisionCreateMany).toHaveBeenCalledWith({
@@ -11311,6 +11347,14 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   it("fails open to the signup link, not instant start, when the classifier is unavailable", async () => {
     mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+      kind: "generate",
+    });
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+      kind: "reply",
+      message: "What would you like help with?",
+      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+    });
     mocks.classifyHostedLinqFirstContactAdmission.mockRejectedValueOnce(hostedOnboardingError({
       code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
       details: {
@@ -11371,6 +11415,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         eventId: "evt_classifier_transport_retry",
+        service: "iMessage",
       }),
       signature: null,
       timestamp: null,
@@ -11415,6 +11460,15 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.sendHostedLinqReadReceipt).not.toHaveBeenCalled();
     expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
       .not.toHaveBeenCalled();
+    expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+      eventId: "evt_classifier_transport_retry",
+      linqChatId: "chat_123",
+      prisma,
+      reason: "planner-selected-non-instant-path",
+    });
+    expect(mocks.abandonHostedLinqInstantFirstTurn.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]!);
+    expect(mocks.completeHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
   });
 
   it("does not fail open for plain errors that only mimic the classifier-unavailable code", async () => {

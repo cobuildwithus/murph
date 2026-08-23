@@ -113,6 +113,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-observability-identifiers", () => ({
 }));
 
 import {
+  abandonHostedLinqInstantFirstTurn,
   claimHostedLinqInstantFirstTurn,
   completeHostedLinqInstantFirstTurn,
   isHostedLinqInstantFirstTurnRequestEligible,
@@ -304,6 +305,32 @@ describe("hosted Linq instant first turn", () => {
         status: "attempted",
       }),
     );
+  });
+
+  it("terminalizes a speculative claim under the same chat lock", async () => {
+    const prisma = createPrisma();
+
+    await abandonHostedLinqInstantFirstTurn({
+      eventId: REQUEST.eventId,
+      linqChatId: "chat_123",
+      prisma,
+      reason: "planner-selected-non-instant-path",
+    });
+
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledWith({
+      chatId: "chat_123",
+      tx: expect.any(Object),
+    });
+    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linqChatId: "chat_123",
+        reason: "planner-selected-non-instant-path",
+        sourceRef: REQUEST.eventId,
+        template: "instant_first_turn_v1",
+      }),
+    );
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx.mock.invocationCallOrder[0]!)
+      .toBeLessThan(mocks.markHostedLinqDeliverySkippedTx.mock.invocationCallOrder[0]!);
   });
 
   it("resumes the same encrypted obligation without regenerating", async () => {

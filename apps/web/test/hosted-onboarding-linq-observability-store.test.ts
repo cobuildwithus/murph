@@ -1433,13 +1433,23 @@ describe("hosted Linq observability stores", () => {
     expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
       select: { id: true },
       where: expect.objectContaining({
+        acceptedAt: null,
+        deliveredAt: null,
         linqChatLookupKey: {
           in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
         },
+        skippedAt: null,
         sourceRef: {
           not: createHostedLinqDeliverySourceRefLookupKey("evt_current"),
         },
         template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+        OR: [
+          { failedAt: null, status: "attempted" },
+          {
+            payloadCiphertext: { not: null },
+            status: { in: ["provider_dispatch_started", "failed"] },
+          },
+        ],
       }),
     });
   });

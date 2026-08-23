@@ -80,10 +80,12 @@ was delivered.
 
 ## Verification
 
-- Focused Web owner tests cover strict Murph output, canonical welcome,
+- Focused Web owner tests pass 356 cases covering strict Murph output, canonical welcome,
   plain-text eligibility, durable pre-generation ownership, accepted continuity,
+  centralized fallback terminalization, retry-preserving enrollment failure,
   atomic rollback, encrypted-body replay, ambiguous send suppression, and
-  definitive fallback. A credential-gated seven-case real-model semantic matrix
+  definitive fallback. Webhook idempotency and Linq transport pass another 109
+  cases. A credential-gated seven-case real-model semantic matrix
   exercises greetings, capabilities, concrete health questions, missing
   personal context, requested actions, and urgent safety guidance without a
   live Linq destination.
@@ -112,11 +114,40 @@ was delivered.
 
 ## State
 
-Active. The remediated candidate, local proof, and changelog packaging are complete. The design reuses
+Active. The round 2 correction, focused local proof, and changelog packaging are complete. The design reuses
 the existing delivery ledger as the only provider outbox, stores the exact
 pending body encrypted for ambiguous recovery, and represents the completed
 exchange as two ordinary consumed conversation rows. Candidate review,
 exact-head gates, and completion remain.
+
+## ReviewGPT round 2 retrospective
+
+ReviewGPT round 2 required a retrospective because the first remediation moved
+durable ownership before generation but did not terminate that speculative
+claim when the completed planner selected signup or another non-instant path.
+The new chat fence could therefore turn a supported fallback into a permanent
+block for later messages.
+
+The original requirement still needs the classifier and reply generation to
+overlap, while generation must not begin without restart-safe ownership. The
+claim therefore remains speculative in the existing delivery ledger. The
+smallest correction is one planner-convergence decision: an exact
+model-approved active direct wake continues the Web reply, and every other
+successfully planned outcome marks the same claim skipped before any fallback
+side effect. Retryable planner failures retain the claim for exact-event
+recovery. This central rule replaces the model-block-only cleanup and adds no
+owner, state, queue, scheduler, service, dependency, lease, or reconciliation
+loop.
+
+From the first-reviewed head to the round 2 head, review remediation added the
+existing-ledger preclaim, chat and route fencing, encrypted exact-body retry,
+canonical Murph welcome ownership, plain-text eligibility, and focused proof.
+Authored-source additions rose from 1,065 to 1,441, an increase of 376, below
+the repository's 500-line remediation trigger. The correction shrinks the
+ownership decision to one terminal branch and prove model block, classifier
+unavailability, non-retryable enrollment failure, alternate-line/signup
+fallback, successful Web dispatch, ambiguous delivery, exact retry, later
+direct inbound, and group transition without adding lifecycle machinery.
 
 ## Working Set
 

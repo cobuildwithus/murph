@@ -584,6 +584,23 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     let firstContactAdmissionClassified = false;
     let instantFirstTurnGeneration:
       Promise<HostedLinqInstantFirstTurnGeneration> | null = null;
+    let instantFirstTurnOwnsFinalPlan = false;
+    let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
+    const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
+      if (
+        !instantFirstTurnGeneration
+        || planningEvent.event_type !== "message.received"
+      ) {
+        return;
+      }
+      const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
+      await abandonHostedLinqInstantFirstTurn({
+        eventId: event.event_id,
+        linqChatId: context.summary.chatId,
+        prisma,
+        reason,
+      });
+    };
     try {
       const shouldReuseRecordedFirstContactAdmission =
         planningEvent.event_type === "message.received"
@@ -595,13 +612,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               getHostedOnboardingEnvironment().linqInstantStartPhonePrefixes,
           })
         );
-      let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null =
-        shouldReuseRecordedFirstContactAdmission
-          ? await readRecordedHostedLinqFirstContactAdmissionDecision({
-              eventId: event.event_id,
-              prisma,
-            })
-          : null;
+      firstContactAdmissionDecision = shouldReuseRecordedFirstContactAdmission
+        ? await readRecordedHostedLinqFirstContactAdmissionDecision({
+            eventId: event.event_id,
+            prisma,
+          })
+        : null;
       const startInstantFirstTurnGeneration = async (): Promise<void> => {
         if (
           instantFirstTurnGeneration
@@ -642,21 +658,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         // retained so the eligible path still receives the exact error.
         void generation.catch(() => undefined);
         instantFirstTurnGeneration = generation;
-      };
-      const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
-        if (
-          !instantFirstTurnGeneration
-          || planningEvent.event_type !== "message.received"
-        ) {
-          return;
-        }
-        const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
-        await abandonHostedLinqInstantFirstTurn({
-          eventId: event.event_id,
-          linqChatId: context.summary.chatId,
-          prisma,
-          reason,
-        });
       };
       let requiredPendingGroupSetupCandidateId: string | null = null;
       const runPlan = async (instantStartAllowed = true) => {
@@ -876,7 +877,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 prisma,
               });
             if (firstContactAdmissionDecision.kind === "block") {
-              await abandonInstantFirstTurn("admission-blocked");
               plan = await planAfterBlockedAdmission();
             } else {
               plan = await runPlan();
@@ -983,6 +983,18 @@ export async function handleHostedOnboardingLinqWebhook(input: {
         throw error;
       }
       plan = recoveredPlan;
+    }
+    instantFirstTurnOwnsFinalPlan = Boolean(
+      instantFirstTurnGeneration
+      && firstContactAdmissionDecision?.kind === "allow"
+      && firstContactAdmissionDecision.source === "model"
+      && plan.wakeHandoffs?.[0],
+    );
+    if (instantFirstTurnGeneration && !instantFirstTurnOwnsFinalPlan) {
+      // The speculative claim lets generation overlap admission. Once planning
+      // chooses any other completed path, terminate that exact claim before a
+      // signup or alternate-route side effect can become the visible owner.
+      await abandonInstantFirstTurn("planner-selected-non-instant-path");
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {
       desiredSideEffectCount: plan.desiredSideEffects.length,
@@ -1097,6 +1109,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     if (
       wakeHandoff
       && instantFirstTurnGeneration
+      && instantFirstTurnOwnsFinalPlan
       && planningEvent.event_type === "message.received"
     ) {
       const context = resolveHostedOnboardingLinqMessageContext(planningEvent);

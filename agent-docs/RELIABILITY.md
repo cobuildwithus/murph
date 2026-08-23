@@ -782,7 +782,11 @@ Last verified: 2026-08-20
   Before generation, Web claims the exact eligible plain-text chat/event in the
   existing delivery ledger under the chat lock. It then runs one bounded
   tool-free Murph reply generation beside the admission classifier, enrollment,
-  and shell prewarm. The
+  and shell prewarm. After the planner converges and before any fallback side
+  effect, only an exact model-approved active direct wake retains that claim for
+  Web delivery; every other successfully planned outcome marks the same row
+  skipped. Retryable planning failures leave it unresolved for exact-event
+  recovery. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
   A reply claim extends the existing `HostedLinqDelivery` row with the exact

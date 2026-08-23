@@ -1539,8 +1539,12 @@ hint before stopping that container. A denied admission starts nothing. The
 appends the original conversation item. For an exact model-approved instant
 start, Web may already have a bounded tool-free Murph result generated beside
 admission and enrollment after the exact chat/event acquired its delivery-ledger
-claim. An unavailable result leaves the original conversation
-checkpoint unchanged. An accepted result instead passes through the existing
+claim. Once planning converges, only an exact model-approved active direct wake
+keeps that claim for Web delivery. Every completed non-instant plan marks the
+same row skipped before its fallback side effect, while a retryable planning
+failure retains the row for exact-event recovery. An unavailable result leaves
+the original conversation checkpoint unchanged. An accepted result instead
+passes through the existing
 Linq delivery ledger, then Web atomically appends its ordinary self-authored
 conversation row, stamps the original inbound and that outbound row consumed,
 clears the encrypted pending body, and substitutes the outbound checkpoint for
