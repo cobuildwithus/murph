@@ -89,6 +89,9 @@ export interface DeviceSyncJobFailureDiagnosticDetails {
   failureCauseName?: string;
   failureErrorCause?: string;
   failureErrorName?: string;
+  junctionWorkoutStreamMaxTimestampCount?: number;
+  junctionWorkoutStreamTimestampCardinalityKind?: string;
+  junctionWorkoutStreamTimestampCount?: number;
   normalizationFailureReason?: string;
   normalizationRowOrdinal?: number;
   normalizationSourceProvider?: string;

@@ -110,6 +110,7 @@ import {
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
@@ -170,6 +171,7 @@ export {
 export {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
