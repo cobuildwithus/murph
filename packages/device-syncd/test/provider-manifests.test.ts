@@ -284,6 +284,7 @@ describe("deviceSyncProviderManifests", () => {
     expect(getConfiguredDeviceSyncProviderJobDefinition("junction", "resource")).toMatchObject({
       payload: {
         workoutStreamCursor: { kind: "string", includeInHostedHint: true },
+        workoutStreamEmptyReplay: { kind: "boolean", includeInHostedHint: true },
       },
     });
     expect(getConfiguredDeviceSyncProviderJobDefinition("oura", "resource")).toMatchObject({
@@ -634,6 +635,7 @@ describe("deviceSyncProviderManifests", () => {
           sourceInstanceId: "garmin-watch-1",
           sourceProviderSlug: "garmin",
           sourceType: "watch",
+          workoutStreamEmptyReplay: true,
           windowEnd: "2026-04-03T00:00:00.000Z",
           windowStart: "2026-04-02T00:00:00.000Z",
         },
@@ -645,6 +647,7 @@ describe("deviceSyncProviderManifests", () => {
       sourceInstanceId: "garmin-watch-1",
       sourceProviderSlug: "garmin",
       sourceType: "watch",
+      workoutStreamEmptyReplay: true,
       windowEnd: "2026-04-03T00:00:00.000Z",
       windowStart: "2026-04-02T00:00:00.000Z",
     });

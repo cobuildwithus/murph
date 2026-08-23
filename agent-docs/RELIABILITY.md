@@ -1594,10 +1594,14 @@ Last verified: 2026-08-20
   scalars, and live splits; provider workout IDs and source-instance IDs remain
   internal. A structurally valid empty timestamp array is a no-feature result
   for that reconcile: it performs no canonical import, completes the current
-  candidate so the window can advance, and is fetched again by a later
-  scheduled reconcile. Existing canonical facets remain untouched. A stream
-  above the admitted sample limit remains a terminal bounded-cardinality
-  failure.
+  candidate so the window can advance, and schedules one exact-day resource
+  replay 24 hours later. That replay remains owned even when an older backfill
+  day or the oldest rolling-reconcile day leaves the next reconcile horizon;
+  its explicit guard prevents another delayed replay. The day-scoped dedupe key
+  coalesces multiple empty workouts to one replay, so a bounded backfill can add
+  at most one replay per admitted day while keeping the existing 32-workout
+  serial cap. Existing canonical facets remain untouched. A stream above the
+  admitted sample limit remains a terminal bounded-cardinality failure.
 - A member-owned device provider application's revision is its credential
   epoch. OAuth state and established connections retain the exact application
   id and revision; credential replacement is blocked while a bound connection

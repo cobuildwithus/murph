@@ -21828,7 +21828,7 @@ test("Junction workout_stream skips empty or malformed streams without blocking 
     ),
   });
 
-  await executeJunctionJob(
+  const initial = await executeJunctionJob(
     harness.provider,
     createJunctionJobContext({
       importSnapshot: async (snapshot) => {
@@ -21842,6 +21842,27 @@ test("Junction workout_stream skips empty or malformed streams without blocking 
       },
     }),
     createJunctionWorkoutStreamResourceJob(),
+  );
+  const continuation = requireValue(
+    initial.scheduledJobs?.find((job) =>
+      job.kind === "resource" && job.payload?.workoutStreamEmptyReplay !== true
+    ),
+    "empty workout should preserve an immediate continuation",
+  );
+  await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+      logger: {
+        warn: (_message, metadata) => {
+          if (typeof metadata?.errorCode === "string") warningCodes.push(metadata.errorCode);
+        },
+      },
+    }),
+    createJobFromInput(continuation),
   );
 
   assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
@@ -21860,12 +21881,29 @@ test("Junction workout_stream skips empty or malformed streams without blocking 
   });
   assert.deepEqual(workoutIds, ["workout-3"]);
   assert.deepEqual(warningCodes, [
-    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+    "JUNCTION_WORKOUT_STREAM_EMPTY",
     "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
   ]);
 });
 
-test("Junction workout_stream refetches an empty stream on a later reconcile", async () => {
+test.each([
+  {
+    jobKind: "backfill" as const,
+    label: "ten-day-old backfill day",
+    timeseriesCursor: "2026-04-05T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  },
+  {
+    jobKind: "reconcile" as const,
+    label: "oldest rolling reconcile day",
+    timeseriesCursor: "2026-04-08T00:00:00.000Z",
+    windowStart: "2026-04-08T00:00:00.000Z",
+  },
+])("Junction workout_stream replays an empty $label after it leaves the normal horizon", async ({
+  jobKind,
+  timeseriesCursor,
+  windowStart,
+}) => {
   const importedSnapshots: unknown[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
     listWorkoutIds: () => ["workout-1"],
@@ -21879,28 +21917,84 @@ test("Junction workout_stream refetches an empty stream on a later reconcile", a
           },
     ),
   });
+  const importSnapshot = async (snapshot: unknown) => {
+    importedSnapshots.push(snapshot);
+    return { imported: true };
+  };
   const context = createJunctionJobContext({
-    importSnapshot: async (snapshot) => {
-      importedSnapshots.push(snapshot);
-      return { imported: true };
-    },
+    now: "2026-04-15T12:00:00.000Z",
+    importSnapshot,
   });
 
-  await executeJunctionJob(
+  const initial = await executeJunctionJob(
     harness.provider,
     context,
-    createJunctionWorkoutStreamResourceJob(),
+    createJob(jobKind, {
+      timeseriesCursor,
+      timeseriesResourceCursor: "workout_stream",
+      windowEnd: "2026-04-15T00:00:00.000Z",
+      windowStart,
+    }),
   );
   assert.equal(importedSnapshots.length, 0);
+  const replay = requireValue(
+    initial.scheduledJobs?.find((job) => job.payload?.workoutStreamEmptyReplay === true),
+    "empty workout should schedule one bounded exact-day replay",
+  );
+  assert.equal(replay.kind, "resource");
+  assert.equal(replay.availableAt, "2026-04-16T12:00:00.000Z");
+  assert.equal(replay.payload?.windowStart, timeseriesCursor);
+  assert.equal(
+    replay.payload?.windowEnd,
+    new Date(Date.parse(timeseriesCursor) + 24 * 60 * 60_000).toISOString(),
+  );
 
-  await executeJunctionJob(
+  const replayResult = await executeJunctionJob(
     harness.provider,
-    context,
-    createJunctionWorkoutStreamResourceJob(),
+    createJunctionJobContext({
+      now: "2026-04-16T12:00:00.000Z",
+      importSnapshot,
+    }),
+    createJobFromInput(replay),
   );
 
   assert.deepEqual(harness.streamRequests, ["workout-1", "workout-1"]);
   assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    replayResult.scheduledJobs?.some((job) =>
+      job.payload?.workoutStreamEmptyReplay === true
+    ) ?? false,
+    false,
+  );
+});
+
+test("Junction workout_stream empty replay cannot schedule another delayed replay", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2"],
+    streamResponse: () => createJsonResponse({ time: [] }),
+  });
+  const context = createJunctionJobContext({ now: "2026-04-16T12:00:00.000Z" });
+  const initial = await executeJunctionJob(
+    harness.provider,
+    context,
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  const replay = requireValue(
+    initial.scheduledJobs?.find((job) => job.payload?.workoutStreamEmptyReplay === true),
+    "initial empty stream should schedule its bounded replay",
+  );
+
+  const replayResult = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ now: "2026-04-17T12:00:00.000Z" }),
+    createJobFromInput(replay),
+  );
+
+  assert.equal(replayResult.scheduledJobs?.length, 1);
+  const continuation = requireValue(replayResult.scheduledJobs?.[0]);
+  assert.equal(continuation.availableAt, undefined);
+  assert.equal(continuation.dedupeKey, replay.dedupeKey);
+  assert.equal(continuation.payload?.workoutStreamEmptyReplay, true);
 });
 
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {

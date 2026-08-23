@@ -3286,9 +3286,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           kind: "resource",
           payload: {
             objectId: "",
-            resource: "heartrate",
+            resource: "workout_stream",
             resourceCategory: "timeseries",
             sourceProviderSlug: "",
+            workoutStreamEmptyReplay: true,
             windowStart: "2026-04-08T00:00:00Z",
           },
         },
@@ -3296,8 +3297,9 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
-      resource: "heartrate",
+      resource: "workout_stream",
       resourceCategory: "timeseries",
+      workoutStreamEmptyReplay: true,
       windowStart: "2026-04-08T00:00:00.000Z",
     });
   });

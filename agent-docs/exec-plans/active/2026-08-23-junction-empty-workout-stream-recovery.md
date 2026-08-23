@@ -16,8 +16,9 @@ Updated: 2026-08-23
   fail the surrounding reconcile.
 - The empty response does not run a canonical import, so an existing feature is
   left untouched.
-- A later reconcile for the same workout fetches the provider stream again and
-  imports it when timestamps become available.
+- One delayed exact-day replay fetches the provider stream again and imports it
+  when timestamps become available, including after an older day leaves the
+  ordinary rolling reconcile horizon.
 - Over-limit timestamp arrays remain bounded and fail closed with the existing
   typed aggregate-only diagnostic.
 - Focused reducer and provider tests, affected typechecks, required review gates,
@@ -42,9 +43,9 @@ Updated: 2026-08-23
 ## Tasks
 
 1. Change only the empty timestamp case to the reducer's existing no-feature
-   result; retain the over-limit error.
-2. Add focused reducer and provider coverage proving no import on empty and a
-   successful import on a later populated reconcile.
+   result, retain the over-limit error, and schedule one guarded exact-day replay.
+2. Add focused reducer and provider coverage proving no import on empty, one
+   bounded exact-day replay, and successful import when that replay is populated.
 3. Update the owning reliability docs and public changelog.
 4. Run focused tests and typechecks, review the exact diff, push a candidate,
    and complete the repository review and CI gates.
@@ -57,6 +58,13 @@ Updated: 2026-08-23
   --no-coverage test/device-providers-junction-bounded-features.test.ts`
   (13 passed)
 - `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
-  --no-coverage test/junction-provider.test.ts` (323 passed)
+  --no-coverage test/junction-provider.test.ts` (325 passed)
+- `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
+  --no-coverage test/provider-manifests.test.ts` (31 passed)
+- `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
+  --no-coverage test/hosted-runtime.test.ts` (100 passed)
+- `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage
+  apps/web/test/changelog-fragments.test.ts` (7 passed)
 - `pnpm --filter @murphai/importers typecheck`
 - `pnpm --filter @murphai/device-syncd typecheck`
+- `pnpm --dir apps/web typecheck`

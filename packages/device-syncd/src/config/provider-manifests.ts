@@ -238,6 +238,7 @@ const JUNCTION_DEVICE_SYNC_JOB_DEFINITIONS = {
       temporalAuthorityTimeZone: stringJobField({ includeInHostedHint: true }),
       webhookDataJson: stringJobField({ includeInHostedHint: true }),
       workoutStreamCursor: stringJobField({ includeInHostedHint: true }),
+      workoutStreamEmptyReplay: booleanJobField({ includeInHostedHint: true }),
       windowEnd: stringJobField({ includeInHostedHint: true }),
       windowStart: stringJobField({ includeInHostedHint: true }),
     },
