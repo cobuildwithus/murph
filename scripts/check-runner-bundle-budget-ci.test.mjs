@@ -23,6 +23,14 @@ test("accepts the checked-in deployment-faithful budget gate", async () => {
   assert.deepEqual(issueCodes(await readWorkflow()), []);
 });
 
+test("rejects synchronize admission to the deployment budget gate", async () => {
+  const source = (await readWorkflow()).replace(
+    "types: [opened, reopened, ready_for_review]",
+    "types: [opened, synchronize, reopened, ready_for_review]",
+  );
+  assert.ok(issueCodes(source).includes("missing-ready-only-pull-request-trigger"));
+});
+
 test("rejects moving the authoritative byte measurement to macOS", async () => {
   const source = (await readWorkflow()).replace(
     "  production-runner-bundle-budget-linux:\n    name: Production runner bundle budget (ubuntu)\n    runs-on: ubuntu-24.04",

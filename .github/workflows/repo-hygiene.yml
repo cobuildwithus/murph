@@ -2,6 +2,7 @@ name: Repo Hygiene
 
 on:
   pull_request:
+    types: [opened, reopened, ready_for_review]
   push:
     branches:
       - main
@@ -49,6 +50,12 @@ jobs:
     name: Tracked private/build artifacts
     runs-on: ubuntu-24.04
     steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
@@ -69,6 +76,9 @@ jobs:
 
       - name: Guard hosted Stripe billing CI boundary
         run: pnpm hosted-billing:ci-guard
+
+      - name: Test pull-request exact-head CI contract
+        run: node --test scripts/pull-request-ci-policy.test.mjs
 
       - name: Test native iOS hosted E2E control contract
         run: node --test scripts/native-ios-hosted-e2e.test.mjs

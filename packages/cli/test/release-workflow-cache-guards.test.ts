@@ -99,6 +99,7 @@ describe('GitHub Actions cache trust-boundary guards', () => {
           if (
             isAllowedHostSupportTypeScriptCache(file, workflow, description)
             || isAllowedNativeHostedE2eHandoff(file, workflow, description)
+            || isAllowedPrHeadDraftResetHandoff(file, workflow, description)
             || isAllowedTemporalCompatibilityHandoff(file, workflow, description)
           ) {
             continue
@@ -220,6 +221,62 @@ describe('GitHub Actions cache trust-boundary guards', () => {
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
+  })
+
+  it('allows only the exact-head trusted pull-request draft-reset handoff', () => {
+    const workflow = readFileSync(
+      path.join(workflowsDir, 'pr-head-draft-reset.yml'),
+      'utf8',
+    )
+
+    expect(
+      isAllowedPrHeadDraftResetHandoff(
+        'pr-head-draft-reset.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+
+    for (const [file, mutation] of [
+      ['renamed-draft-reset.yml', workflow],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace('workflows: ["Pull Request Head Change"]', 'workflows: ["Repo Hygiene"]'),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace('  pull-requests: write', '  contents: write'),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '    name: Return synchronized pull request to draft',
+          '    name: Return synchronized pull request to draft\n    permissions:\n      contents: write',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          'if [[ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then',
+          'if [[ -z "${current_head_sha}" ]]; then',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '    steps:\n      - name: Convert the exact synchronized head to draft',
+          '    steps:\n      - uses: actions/checkout@untrusted\n      - name: Convert the exact synchronized head to draft',
+        ),
+      ],
+    ] as const) {
+      expect(
+        isAllowedPrHeadDraftResetHandoff(
+          file,
+          mutation,
+          'workflow_run handoff trigger',
+        ),
+      ).toBe(false)
+    }
   })
 
   it('allows only the trusted Temporal compatibility workflow_run controller', () => {
@@ -475,6 +532,84 @@ function isAllowedNativeHostedE2eHandoff(
       file !== 'native-android-hosted-e2e.yml'
       || hasAndroidAppCredentials(prLive.steps)
     )
+  )
+}
+
+function isAllowedPrHeadDraftResetHandoff(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (
+    file !== 'pr-head-draft-reset.yml'
+    || description !== 'workflow_run handoff trigger'
+    || workflow.includes('secrets.')
+    || workflow.includes('pull_request_target')
+  ) {
+    return false
+  }
+
+  const parsedWorkflow: unknown = parse(workflow)
+  if (!isRecord(parsedWorkflow)) {
+    return false
+  }
+
+  const triggers = parsedWorkflow.on
+  const permissions = parsedWorkflow.permissions
+  const jobs = parsedWorkflow.jobs
+  if (!isRecord(triggers) || !isRecord(permissions) || !isRecord(jobs)) {
+    return false
+  }
+
+  const workflowRun = triggers.workflow_run
+  const resetJob = jobs['return-to-draft']
+  if (
+    !isRecord(workflowRun)
+    || !isRecord(resetJob)
+    || !Array.isArray(resetJob.steps)
+    || resetJob.steps.length !== 1
+  ) {
+    return false
+  }
+
+  const resetStep = resetJob.steps[0]
+  if (!isRecord(resetStep) || !isRecord(resetStep.env) || typeof resetStep.run !== 'string') {
+    return false
+  }
+
+  return (
+    isStringArray(workflowRun.workflows, ['Pull Request Head Change'])
+    && isStringArray(workflowRun.types, ['completed'])
+    && Object.keys(triggers).join(',') === 'workflow_run'
+    && Object.keys(permissions).join(',') === 'pull-requests'
+    && permissions['pull-requests'] === 'write'
+    && resetJob.permissions === undefined
+    && resetJob.if === "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}"
+    && resetStep.name === 'Convert the exact synchronized head to draft'
+    && resetStep.shell === 'bash'
+    && resetStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'
+    && resetStep.env.GH_TOKEN === '${{ github.token }}'
+    && resetStep.env.HEAD_BRANCH === '${{ github.event.workflow_run.head_branch }}'
+    && resetStep.env.HEAD_REPOSITORY === '${{ github.event.workflow_run.head_repository.full_name }}'
+    && !workflow.includes('github.event.workflow_run.pull_requests[0]')
+    && !resetStep.run.includes('commits/${EXPECTED_HEAD_SHA}/pulls')
+    && resetStep.run.includes('HEAD_OWNER="${HEAD_REPOSITORY%%/*}"')
+    && resetStep.run.includes('gh api --method GET --paginate --slurp')
+    && resetStep.run.includes('repos/${GITHUB_REPOSITORY}/pulls')
+    && resetStep.run.includes('-f state=open')
+    && resetStep.run.includes('-f head="${HEAD_OWNER}:${HEAD_BRANCH}"')
+    && resetStep.run.includes('if [[ "${candidate_count}" != 1 ]]; then')
+    && resetStep.run.includes('.base.repo.full_name == $base_repository')
+    && resetStep.run.includes('.head.repo.full_name == $head_repository')
+    && resetStep.run.includes('.head.ref == $head_branch')
+    && resetStep.run.includes('.head.sha == $head_sha')
+    && resetStep.run.includes('.state == "open"')
+    && resetStep.run.includes('gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"')
+    && resetStep.run.includes('if [[ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then')
+    && resetStep.run.includes('if [[ "${state}" != open ]]; then')
+    && resetStep.run.includes('if [[ "${draft}" == true ]]; then')
+    && resetStep.run.includes('convertPullRequestToDraft')
+    && resetStep.run.includes('"${converted_draft}" == true')
   )
 }
 
