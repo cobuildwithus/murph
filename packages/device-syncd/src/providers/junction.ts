@@ -21,6 +21,7 @@ import {
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   buildJunctionDailyTimeseriesAggregateResourceId,
   canNormalizeJunctionSleepCycleRecordToCompactStages,
@@ -6073,16 +6074,27 @@ async function fetchJunctionWorkoutStreamFeature(
     signal,
     workoutId: candidate.workoutId,
   });
-  const streamRecord = readPlainObject(stream);
-  return {
-    emptyTimestampArray:
-      Array.isArray(streamRecord?.time) && streamRecord.time.length === 0,
-    feature: reduceJunctionWorkoutStreamPayload({
-      maxSamples,
-      stream,
-      summary: candidate.summary,
-    }),
-  };
+  try {
+    return {
+      emptyTimestampArray: false,
+      feature: reduceJunctionWorkoutStreamPayload({
+        maxSamples,
+        stream,
+        summary: candidate.summary,
+      }),
+    };
+  } catch (error) {
+    if (
+      error instanceof JunctionWorkoutStreamTimestampCardinalityError
+      && error.diagnostic.kind === "empty"
+    ) {
+      return {
+        emptyTimestampArray: true,
+        feature: undefined,
+      };
+    }
+    throw error;
+  }
 }
 
 function withJunctionSourceProviderFallback(
