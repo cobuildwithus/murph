@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-22
+Last verified: 2026-08-23
 
 ## Purpose
 
@@ -19,6 +19,13 @@ and dedicated risk-matched catalog/study evidence.
 The contract and its proof are specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/references/testing-ci-map.md`.
+
+A validated final ReviewGPT `ROUND_OUTCOME: PASS` proceeds directly to the
+parent's remaining completion checks without a user-resume pause. Preliminary
+specialist results and final `FINDINGS` results retain the evidence-backed
+finding-disposition pause. This boundary is specified by
+`agent-docs/operations/completion-workflow.md` and
+`agent-docs/operations/pr-reviewgpt-loop.md`.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
@@ -193,6 +200,19 @@ Telegram direct and authenticated-group Rich Message authority, optional
 catalog-position image provenance, single-message fallback ownership, and
 valid-envelope retry classification across all Telegram send operations are
 specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
+
+Durable onboarding follow-up enrollment is activation-owned across standard
+Linq, Linq instant-start, and Telegram. Activation persists one canonical start
+and independently carries any available direct route; a missing Telegram route
+is filled later by ordinary managed reconciliation without moving the original
+finite window. Welcome delivery is optional and never owns enrollment.
+Every new activation wake emits enrollment intent; genuine member activation
+enrolls while synthetic group-thread containers explicitly opt out. Legacy
+wakes default to enrollment during rollout. Direct-route enforcement, bounded
+write retry, archive preservation, and hosted-local proof are specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`,
+`packages/assistant-runtime/README.md`, and
+`agent-docs/references/testing-ci-map.md`.
 
 Linq signup-delivery failure suppression uses member-serialized, indexed
 existence reads for the exact five-attempt identity and the member/day live set.
@@ -590,7 +610,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router and compact agent work contract for task classes, proportional Product UX planning and walkthrough routing, action authority, evidence/tool use, focused local PR proof with exact-head CI ownership, user-visible ReviewGPT disposition pauses, review gates, commit paths, worktree isolation, and safe retirement. | Agent workflow routing | High | 2026-08-21 |
 | `agent-docs/operations/product-ux.md` | Single owner for proportional Product UX planning, post-code walkthroughs, and preliminary review across affected people, minimum current requirements, current writer/consumer gates, complete journeys, risk-based evidence, and parent-owned finding dispositions. | Product UX workflow | High | 2026-08-21 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Protected native Android hosted E2E ownership, exact Web/Android source binding, the single shared hosted-native PR credential and identity lifecycle environment, refreshable repository-scoped GitHub App credentials, receipted and unreceipted dispatch fencing, production-canary isolation, privacy boundary, rollout order, and physical-device proof gap. | Native Android verification operations | High | 2026-08-21 |
-| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-candidate docs-drift CI comparisons, event-time-ready draft-reset receipts with base-repository-filtered exact workflow-run head resolution for same-repository and fork feature/default-branch PRs, broad exact-head CI for PRs, the protected-main headed-Kernel Garmin Junction canary with unattended route-bound fail-closed two-step consent automation, manual-path preservation, one-shot submission, and content-free action failures, fail-closed tag-release matrices with exact-head packing, native iOS and Android hosted E2E statuses whose explicit real-journey passes are production-shaped proof, the shared infrastructure-only exact-head retry owner, namespace-only cleanup inside a disposable shared Junction sandbox, claim-based rendered evidence, canonical command and executor semantics, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-23 |
+| `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-candidate docs-drift CI comparisons, deliberate near-merge Ready admission with authenticated-agent `gh pr ready` ownership, event-time-ready draft-reset receipts with base-repository-filtered exact workflow-run head resolution for same-repository and fork feature/default-branch PRs, broad exact-head CI for PRs, the protected-main headed-Kernel Garmin Junction canary with unattended route-bound fail-closed two-step consent automation, manual-path preservation, one-shot submission, and content-free action failures, fail-closed tag-release matrices with exact-head packing, native iOS and Android hosted E2E statuses whose explicit real-journey passes are production-shaped proof, the shared infrastructure-only exact-head retry owner, namespace-only cleanup inside a disposable shared Junction sandbox, claim-based rendered evidence, canonical command and executor semantics, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-23 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Point-in-time production catalog at its exact audited base covering interactive transactions and explicit locks, starvation classifications, retained-lock evidence policy, replacement patterns, PR ordering, and privacy-safe observability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, optional local canonical verification with explicit Crabbox-on-Blacksmith escalation and an exclusive heavyweight lane, focused PR proof, direct-default acceptance, scoped diff and repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method. | Verification performance policy | Medium | 2026-07-29 |
 | `agent-docs/operations/completion-workflow.md` | Outcome-based completion with proportional Product UX plans and walkthroughs, claim-based evidence, a concise PR contract, ordered exact-head ReviewGPT gates, a mandatory pause for parent accept/reject dispositions before remediation, focused local proof, broad PR CI, scoped commit and plan closure, and merge-readiness handoff. | Completion workflow | High | 2026-08-21 |
