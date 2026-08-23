@@ -310,6 +310,22 @@ scheduled-reminder scenario adds the production-path proof: an ordinary group
 newsletter automation invokes `read_shared`, wakes from its alarm, and sends only to the
 exact admitted group thread.
 
+Durable onboarding follow-up enrollment coverage is owner-split. Hosted-
+execution contract tests preserve the optional route independent of welcome
+delivery and emit explicit enrollment on new activation wakes. Web activation
+tests cover standard Linq, Linq instant-start, an established Telegram thread,
+and the synthetic group-thread opt-out. Assistant-runtime tests prove
+route-only and welcome-plus-route activation, Telegram welcome suppression,
+synthetic group exclusion, missing-field compatibility, retryable seed failure,
+and legacy notification non-ownership. Assistant-engine tests prove
+activation replay stability, delayed route availability, direct-only routing,
+the activation-anchored cutoff, completed-state closure, and archive
+preservation. The hosted-local Telegram first-contact scenario proves silent
+route-less activation, the ordinary first direct reply, and inbound replay
+without another provider turn or reply.
+The existing hosted-local scheduled-reminder scenario remains the downstream
+proof for Telegram scheduler, outbox, and provider delivery.
+
 Private assistant-image coverage is also owner-split. Shared contract tests
 accept only bounded `vault_image` descriptors; assistant-engine tests prove
 canonical generated-image captures plus path, hash, byte-count, filename, MIME,

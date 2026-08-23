@@ -2385,8 +2385,21 @@ binding and encrypted conversation mailbox append remain one Web-owned
 transaction; unmanaged, ambiguous, disabled, flagged, critical, unhealthy, or
 structurally unavailable recipient lines cannot establish this exact-line
 authority, and ordinary fallback selection remains fail-closed when no eligible
-line exists. Successful welcome delivery seeds the existing finite
-unfinished-onboarding automation, with at most one low-pressure opportunity on
+line exists. Member activation owns unfinished-onboarding follow-up enrollment
+for every signup path. It persists the canonical onboarding start at the
+activation timestamp and carries an optional direct follow-up route separately
+from the optional signup welcome. A present route seeds the existing finite
+automation before optional welcome delivery, so standard Linq and suppressed-
+welcome Linq instant-start share one transition. Telegram activation remains
+silent; when no bot thread exists yet, the persisted onboarding start is the
+durable pending fact and managed-automation reconciliation uses the first later
+deliverable direct route. That delayed seed stays anchored to the activation
+window and becomes a no-op after its cutoff. Activation seed failures retry
+through the activation mailbox, while later-route failures reuse the existing
+bounded managed-setup wake ladder. Canonical slug idempotency and onboarding
+state preserve completed or archived follow-ups as closed. No delivery receipt,
+channel-specific state, queue, or scheduler is another enrollment owner.
+The automation has at most one low-pressure opportunity on
 each of the next three local days and the existing completion, decline,
 response, suspension, and expiry stops. The companion path does not send the
 separate signup welcome email. A committed activation whose runtime wake is not

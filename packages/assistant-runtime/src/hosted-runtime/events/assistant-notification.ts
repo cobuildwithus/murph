@@ -5,11 +5,10 @@ import {
   buildHostedAssistantContextFingerprintDetails,
   initializeAssistantGroupRoomModel,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
-  resolveMurphOnboardingFollowupSchedule,
+  seedMurphOnboardingFollowupFromStartedOnboarding,
   sendAssistantNotification,
-  upsertAssistantCronAutomation,
+  startAssistantOnboarding,
   type AssistantExecutionContext,
-  type AssistantNotificationResult,
   type AssistantTurnEnvironment,
 } from "@murphai/assistant-engine";
 import type {
@@ -24,6 +23,7 @@ import type {
   HostedExecutionSystemWake,
   HostedRuntimeEvent,
 } from "@murphai/hosted-execution";
+import type { AssistantCronJob } from "@murphai/operator-config/assistant-cli-contracts";
 import {
   buildHostedExecutionAssistantNotificationRequestedWake,
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
@@ -157,6 +157,14 @@ export async function executeHostedMemberActivatedWake(input: {
   vaultRoot: string;
 }): Promise<HostedMailboxOutcome> {
   const redactedLogEntries: HostedExecutionRedactedLogEntry[] = [];
+  const ownsOnboardingFollowup =
+    input.wake.onboardingFollowupEnrollment !== false;
+  if (ownsOnboardingFollowup) {
+    await startAssistantOnboarding({
+      startedAt: input.wake.occurredAt,
+      vault: input.vaultRoot,
+    });
+  }
   const initialGroupRoomModelMarkdown =
     input.wake.initialGroupRoomModelMarkdown;
   if (initialGroupRoomModelMarkdown) {
@@ -187,10 +195,33 @@ export async function executeHostedMemberActivatedWake(input: {
   }
 
   const signupWelcome = input.wake.signupWelcome;
+  const onboardingFollowupRoute = ownsOnboardingFollowup
+    ? input.wake.onboardingFollowupRoute === undefined
+      ? signupWelcome?.route ?? null
+      : input.wake.onboardingFollowupRoute
+    : null;
+  const seededOnboardingFollowupWakeAt = onboardingFollowupRoute
+    ? await seedOnboardingFollowupAutomation({
+        logDetails: buildHostedOnboardingFollowupLogDetails(
+          onboardingFollowupRoute,
+        ),
+        redactedLogEntries,
+        route: onboardingFollowupRoute,
+        stableKey: input.wake.userId,
+        vaultRoot: input.vaultRoot,
+        wake: input.wake,
+      })
+    : null;
   if (!signupWelcome) {
     return createNoopMailboxEffect({
       conversationMetrics: null,
       mailboxLane: "member-activated",
+      ...(seededOnboardingFollowupWakeAt
+        ? {
+            nextWakeAt: seededOnboardingFollowupWakeAt,
+            nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+          }
+        : {}),
       redactedLogEntries,
     });
   }
@@ -210,6 +241,12 @@ export async function executeHostedMemberActivatedWake(input: {
     return createNoopMailboxEffect({
       conversationMetrics: null,
       mailboxLane: "member-activated",
+      ...(seededOnboardingFollowupWakeAt
+        ? {
+            nextWakeAt: seededOnboardingFollowupWakeAt,
+            nextWakeReason: HOSTED_ASSISTANT_WAKE_REASON,
+          }
+        : {}),
       redactedLogEntries,
     });
   }
@@ -221,7 +258,6 @@ export async function executeHostedMemberActivatedWake(input: {
       wake: input.wake,
     }),
   );
-  let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
 
   try {
@@ -238,15 +274,6 @@ export async function executeHostedMemberActivatedWake(input: {
       ),
     );
     notificationDecisionKind = notificationResult?.decision.kind ?? null;
-    seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
-      logDetails: buildHostedMemberActivationSignupWelcomeLogDetails(input.wake),
-      notificationResult,
-      redactedLogEntries,
-      route: signupWelcome.route,
-      stableKey: input.wake.userId,
-      vaultRoot: input.vaultRoot,
-      wake: input.wake,
-    });
   } catch (error) {
     redactedLogEntries.push(
       emitHostedMemberActivationSignupWelcomeLifecycleLog({
@@ -311,7 +338,6 @@ export async function executeHostedAssistantNotificationWake(input: {
       redactedLogEntries,
     });
   }
-  let seededOnboardingFollowupWakeAt: string | null = null;
   let notificationDecisionKind: string | null = null;
   let deliveryIntentIds: string[] = [];
 
@@ -336,17 +362,6 @@ export async function executeHostedAssistantNotificationWake(input: {
         ? deliveryOutcome.intentId
         : null;
     deliveryIntentIds = deliveryIntentId ? [deliveryIntentId] : [];
-    if (isHostedSignupWelcomeNotification(input.wake)) {
-      seededOnboardingFollowupWakeAt = await maybeSeedOnboardingFollowupAutomation({
-        logDetails: buildHostedAssistantNotificationLogDetails(input.wake),
-        notificationResult,
-        redactedLogEntries,
-        route: input.wake.notification.route,
-        stableKey: input.wake.userId,
-        vaultRoot: input.vaultRoot,
-        wake: input.wake,
-      });
-    }
   } catch (error) {
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
       redactedLogEntries.push(
@@ -382,47 +397,30 @@ export async function executeHostedAssistantNotificationWake(input: {
     conversationMetrics: null,
     deliveryIntentIds,
     mailboxLane: "assistant-notification",
-    nextWakeAt: seededOnboardingFollowupWakeAt,
-    nextWakeReason: seededOnboardingFollowupWakeAt ? HOSTED_ASSISTANT_WAKE_REASON : null,
     redactedLogEntries,
   });
 }
 
-async function maybeSeedOnboardingFollowupAutomation(input: {
+async function seedOnboardingFollowupAutomation(input: {
   logDetails: HostedExecutionStructuredLogDetails;
-  notificationResult: AssistantNotificationResult | undefined;
   redactedLogEntries: HostedExecutionRedactedLogEntry[];
   route: HostedExecutionAssistantNotificationRoute;
   stableKey: string;
   vaultRoot: string;
   wake: HostedExecutionSystemWake;
 }): Promise<string | null> {
-  if (
-    !didAssistantNotificationAcceptDelivery(input.notificationResult)
-    && !wasAssistantNotificationSupersededByPriorFirstContact(input.notificationResult)
-  ) {
-    return null;
-  }
-
   try {
-    // Route deliverability (e.g. Linq participant routes without a Linq
-    // delivery source) is enforced by upsertAssistantCronAutomation's target
-    // validation; an undeliverable route lands in the catch below.
-    const job = await upsertAssistantCronAutomation({
-      firstOccurrenceActiveDayCount:
-        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.opportunityDays,
-      firstOccurrenceActiveUntilLocalTime:
-        MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.activeUntilLocalTime,
-      firstOccurrencePolicy: "after-current-local-day",
-      instructions: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.instructions,
+    // The canonical seed helper enforces route deliverability (for example,
+    // Linq participant routes without a Linq delivery source).
+    const result = await seedMurphOnboardingFollowupFromStartedOnboarding({
       route: buildOnboardingFollowupAutomationRoute(input.route),
-      schedule: resolveMurphOnboardingFollowupSchedule(input.stableKey),
-      slug: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
-      summary: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.summary,
-      tags: [...MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.tags],
-      title: MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.title,
+      stableKey: input.stableKey,
       vault: input.vaultRoot,
     });
+    if (result.kind !== "ready") {
+      return null;
+    }
+    const job = result.job;
     try {
       input.redactedLogEntries.push(
         emitHostedOnboardingFollowupSeededLog({
@@ -444,13 +442,13 @@ async function maybeSeedOnboardingFollowupAutomation(input: {
         wake: input.wake,
       }),
     );
-    return null;
+    throw error;
   }
 }
 
 function emitHostedOnboardingFollowupSeededLog(input: {
   details: HostedExecutionStructuredLogDetails;
-  job: Awaited<ReturnType<typeof upsertAssistantCronAutomation>>;
+  job: AssistantCronJob;
   wake: HostedExecutionSystemWake;
 }): HostedExecutionRedactedLogEntry {
   const details = {
@@ -482,23 +480,6 @@ function emitHostedOnboardingFollowupSeededLog(input: {
   };
 }
 
-function didAssistantNotificationAcceptDelivery(
-  result: AssistantNotificationResult | undefined,
-): boolean {
-  const outcomeKind = result?.deliveryOutcome?.kind;
-  return outcomeKind === "sent" || outcomeKind === "queued";
-}
-
-// A signup-welcome turn only skips when first contact was already accepted on
-// this route (the user is mid-conversation). Onboarding is underway in that
-// case, so the follow-up automation must still be seeded; it self-archives
-// once onboarding completes and the upsert is idempotent by slug.
-function wasAssistantNotificationSupersededByPriorFirstContact(
-  result: AssistantNotificationResult | undefined,
-): boolean {
-  return result?.decision.kind === "skip";
-}
-
 function buildOnboardingFollowupAutomationRoute(
   route: HostedExecutionAssistantNotificationRoute,
 ): AutomationRoute {
@@ -518,7 +499,7 @@ function buildOnboardingFollowupAutomationRoute(
   return {
     channel: route.channel,
     deliverySource: delivery.source ?? null,
-    deliveryTarget: delivery.kind === "explicit" ? delivery.target : null,
+    deliveryTarget: delivery.kind === "participant" ? null : delivery.target,
     identityId: route.identityId,
     participantId: delivery.kind === "participant" ? delivery.target : null,
     threadId:
@@ -615,6 +596,18 @@ function buildHostedMemberActivationSignupWelcomeLogDetails(
     deliveryDispatchMode: "queue-only",
     firstContact: true,
     responsePolicyKind: "require_send_exact_text",
+    route,
+  });
+}
+
+function buildHostedOnboardingFollowupLogDetails(
+  route: HostedExecutionAssistantNotificationRoute,
+): HostedExecutionStructuredLogDetails {
+  return buildHostedAssistantNotificationRouteLogDetails({
+    deliveryDedupeTokenPresent: false,
+    deliveryDispatchMode: "activation",
+    firstContact: false,
+    responsePolicyKind: "none",
     route,
   });
 }

@@ -713,6 +713,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     }),
     memberChannels: resolveHostedThreadContainerMemberChannels(input.channel),
     memberId: containerMemberId,
+    onboardingFollowupEnrollment: false,
     occurredAt: input.occurredAt.toISOString(),
     ...(input.initialGroupRoomModelMarkdown
       ? { initialGroupRoomModelMarkdown: input.initialGroupRoomModelMarkdown }
