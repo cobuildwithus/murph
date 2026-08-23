@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-23",
+  "order": 100,
+  "item": {
+    "id": "wearable-workout-stream-recovery",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Connected workouts keep syncing",
+    "summary": "Workout sync now keeps moving when a connected source temporarily has no detailed stream data.",
+    "details": "Murph leaves your existing workout facts untouched and checks again on a later sync instead of blocking the rest of the connection.",
+    "relevanceTags": ["devices", "reliability", "workouts"],
+    "sourcePullRequests": [2183]
+  }
+}
