@@ -61,6 +61,8 @@ Updated: 2026-08-23
   submission if the result remains unresolved.
 - Replace Playwright checkbox failures at the new boundary with a fixed
   timeout/other category so provider content cannot enter protected CI logs.
+- Keep the existing headed manual-authorization path manual; only unattended
+  runs may use the route-bound Garmin consent action.
 
 ## ReviewGPT
 
@@ -73,11 +75,17 @@ Updated: 2026-08-23
 - Remediation adds one content-free action boundary, one bounded departure wait,
   and existing-smoke-boundary tests. It adds no retry, service, state owner,
   queue, dependency, or shared provider action.
+- Final round 2 found one purpose-drift issue: the helper also ran in the
+  existing headed manual path. The finding was accepted and none were rejected.
+  The fix reuses `manualAuthorizationAllowed` to scope the helper to unattended
+  runs and adds one focused regression test; it introduces no new abstraction,
+  state, service, retry, or ownership boundary.
 
 ## Verification
 
-- Focused browser suite: 34 tests passed, including success only after all three
-  boxes are selected and failure on changed checkbox or `Save` cardinality.
+- Focused browser suite: 35 tests passed, including success only after all three
+  boxes are selected, failure on changed checkbox or `Save` cardinality, and
+  preservation of the existing headed manual path.
 - Real headed-Chromium smoke suite: 7 tests passed, including exact-route,
   nearby-route refusal, and content-free obstructed-checkbox proof.
 - Hosted Web typecheck passed after remediation.

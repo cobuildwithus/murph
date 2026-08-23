@@ -550,10 +550,8 @@ async function completeExternalAuthorization(
         }
       }
 
-      const completedGarminPartnerConsent = await completeGarminPartnerConsent(
-        page,
-        config.source,
-      );
+      const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
+        && await completeGarminPartnerConsent(page, config.source);
       if (completedGarminPartnerConsent) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;

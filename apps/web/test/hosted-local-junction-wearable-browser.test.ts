@@ -191,6 +191,7 @@ function roleLocator(
           control.onCheck?.();
         }),
         click: vi.fn(async () => control?.onClick?.()),
+        evaluate: vi.fn(async () => control?.text ?? ""),
         getAttribute: vi.fn(async (name: string) => {
           if (name === "aria-label") return control?.ariaLabel ?? null;
           if (name === "value") return control?.value ?? null;
@@ -1031,6 +1032,53 @@ describe("hosted-local Junction wearable browser authorization", () => {
     );
     expect(saveClicks).toBe(1);
     expect(now).toBe(15_000);
+  });
+
+  it("leaves exact Garmin consent untouched for a headed manual run", async () => {
+    let now = 0;
+    let saveClicks = 0;
+    const checkboxes = Array.from({ length: 3 }, () => ({
+      checked: false,
+      text: "",
+    }));
+    const mainFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          saveClicks += 1;
+        },
+        text: "Save",
+      }],
+      checkboxes,
+    });
+    const page = {
+      frames: () => [mainFrame],
+      getByRole: mainFrame.getByRole,
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: () => mainFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => "https://connect.garmin.com/partner/oauthConfirm",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+    const config = createConfig({
+      CI: undefined,
+      MURPH_E2E_CONNECT_URL:
+        "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+    });
+
+    expect(config.manualAuthorizationAllowed).toBe(true);
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      config,
+      () => now,
+    )).rejects.toThrow(
+      "Timed out before Junction returned the browser to Murph.",
+    );
+    expect(checkboxes.every((checkbox) => !checkbox.checked)).toBe(true);
+    expect(saveClicks).toBe(0);
+    expect(now).toBe(30_000);
   });
 
   it("always disables manual completion in headless mode", () => {
