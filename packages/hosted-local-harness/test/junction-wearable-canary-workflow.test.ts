@@ -52,11 +52,11 @@ describe("live Junction wearable canary workflow", () => {
       .map((match) => match[1])
       .sort();
     expect(secretNames).toEqual([
+      "GARMIN_CANARY_EMAIL",
+      "GARMIN_CANARY_PASSWORD",
       "JUNCTION_API_KEY",
       "JUNCTION_CLIENT_USER_ID_SECRET",
       "KERNEL_API_KEY",
-      "WHOOP_CANARY_EMAIL",
-      "WHOOP_CANARY_PASSWORD",
     ]);
     expect(workflow).not.toContain("actions/upload-artifact");
     expect(workflow).not.toContain("WHOOP_CLIENT_ID");
@@ -89,9 +89,9 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain("JUNCTION_ENV: sandbox");
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
-    expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
+    expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: garmin");
     expect(workflow).toContain("MURPH_E2E_PROVIDER_BROWSER: kernel");
-    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "1"');
+    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
     expect(workflow).toContain("      - name: Prepare pinned Kernel tunnel tools\n");
     expect(workflow).toContain(
       "https://github.com/kernel/cli/releases/download/v0.31.0/kernel_0.31.0_linux_amd64.tar.gz",
@@ -138,7 +138,7 @@ describe("live Junction wearable canary workflow", () => {
     );
     expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
     expect(browserRunner).toContain(
-      'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
+      'disclosureSourceName: source === "garmin"',
     );
   });
 

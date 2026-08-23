@@ -1438,8 +1438,23 @@ Last verified: 2026-08-20
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- Public Temporal compatibility credentials belong only to the protected
+  `temporal-compatibility` GitHub Environment. The GitHub App installation is
+  limited to private `cobuildwithus/murph-cloud` and grants only Actions write
+  plus Contents read. The `workflow_run` controller executes default-branch
+  code, classifies and revalidates the exact public head before token minting,
+  and checks out only the public default branch. Candidate code executes only
+  in the unprivileged Repo Hygiene job, which uploads one exact-run/head fixture
+  artifact. The trusted controller bounds and canonicalizes that artifact as
+  untrusted JSON, pins the reviewed private SHA and SHA-suffixed immutable
+  lightweight tag from `.github/temporal-compatibility-controller.json`, and
+  accepts only the returned exact private run and proof-digest job. Private CI
+  must never check out or import public candidate code. Neither side may restore
+  candidate-controlled caches beside credentials, read private logs or
+  artifacts, expose reader revisions publicly, or accept workflow/check names
+  from the candidate.
 - The public automated live Junction wearable canary uses only sandbox Junction
-  authority, Kernel browser authority, and a dedicated WHOOP test account. Keep
+  authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
   exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
   protected `main`, and never duplicate them as repository secrets. The
@@ -1459,7 +1474,7 @@ Last verified: 2026-08-20
   `KERNEL_API_KEY` must pass only to the isolated browser child, never the
   hosted-local Web, Worker, runner, Temporal, bundle, cleanup, or generic browser
   environment. The Kernel browser must keep telemetry disabled and use only the
-  dedicated WHOOP canary profile; clear hosted-local cookies before deleting the
+  dedicated Garmin canary profile; clear hosted-local cookies before deleting the
   browser so only external authorization session state is eligible for profile
   persistence.
   Oura web authentication requires a fresh emailed one-time code, so its live

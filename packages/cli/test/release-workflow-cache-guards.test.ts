@@ -100,6 +100,7 @@ describe('GitHub Actions cache trust-boundary guards', () => {
             isAllowedHostSupportTypeScriptCache(file, workflow, description)
             || isAllowedNativeHostedE2eHandoff(file, workflow, description)
             || isAllowedPrHeadDraftResetHandoff(file, workflow, description)
+            || isAllowedTemporalCompatibilityHandoff(file, workflow, description)
           ) {
             continue
           }
@@ -276,6 +277,120 @@ describe('GitHub Actions cache trust-boundary guards', () => {
         ),
       ).toBe(false)
     }
+  })
+
+  it('allows only the trusted Temporal compatibility workflow_run controller', () => {
+    const workflow = readFileSync(
+      path.join(workflowsDir, 'temporal-compatibility.yml'),
+      'utf8',
+    )
+
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'release.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('- Repo Hygiene', '- Release'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(" && needs.select-pr.outputs.trusted == 'true'", ''),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          " && needs.select-pr.outputs.targets_default_branch == 'true'",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}\n",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          '      - name: Dispatch exact private reader matrix\n        env:\n          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}\n',
+          '      - name: Dispatch exact private reader matrix\n        env:\n',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        removeWorkflowStep(workflow, 'Revalidate exact PR head before credentialed setup'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replaceAll(
+          'ref: ${{ github.event.repository.default_branch }}',
+          'ref: ${{ needs.select-pr.outputs.head_sha }}',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('      actions: read\n', ''),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('      actions: read', '      actions: none'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          '      pull-requests: read\n    steps:',
+          '      pull-requests: read\n      statuses: write\n    steps:',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('repositories: murph-cloud', 'repositories: murph'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
   })
 })
 
@@ -498,6 +613,120 @@ function isAllowedPrHeadDraftResetHandoff(
   )
 }
 
+function isAllowedTemporalCompatibilityHandoff(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (
+    file !== 'temporal-compatibility.yml'
+    || description !== 'workflow_run handoff trigger'
+  ) {
+    return false
+  }
+
+  const parsedWorkflow: unknown = parse(workflow)
+  if (!isRecord(parsedWorkflow)) {
+    return false
+  }
+
+  const triggers = parsedWorkflow.on
+  const permissions = parsedWorkflow.permissions
+  const jobs = parsedWorkflow.jobs
+  if (!isRecord(triggers) || !isRecord(permissions) || !isRecord(jobs)) {
+    return false
+  }
+
+  const workflowRun = triggers.workflow_run
+  const selectPr = jobs['select-pr']
+  const compatibility = jobs.compatibility
+  const required = jobs.required
+  if (
+    !isRecord(workflowRun)
+    || !isRecord(selectPr)
+    || !isRecord(compatibility)
+    || !isRecord(required)
+  ) {
+    return false
+  }
+
+  const selectOutputs = selectPr.outputs
+  const selectSteps = selectPr.steps
+  if (!isRecord(selectOutputs) || !Array.isArray(selectSteps)) {
+    return false
+  }
+  const selectStep = selectSteps.find((step) =>
+    isRecord(step) && step.name === 'Resolve exact PR head and compatibility owners'
+  )
+  const pendingStep = selectSteps.find((step) =>
+    isRecord(step) && step.name === 'Mark stable status pending'
+  )
+  const compatibilitySteps = compatibility.steps
+  const dispatchStep = Array.isArray(compatibilitySteps)
+    ? compatibilitySteps.find((step) =>
+      isRecord(step) && step.name === 'Dispatch exact private reader matrix'
+    )
+    : null
+  if (
+    !isRecord(selectStep)
+    || !isRecord(selectStep.env)
+    || !isRecord(pendingStep)
+    || !isRecord(dispatchStep)
+    || !isRecord(dispatchStep.env)
+  ) {
+    return false
+  }
+
+  return (
+    isStringArray(workflowRun.workflows, ['Repo Hygiene'])
+    && isStringArray(workflowRun.types, ['completed'])
+    && Object.keys(permissions).sort().join(',') === 'contents,pull-requests,statuses'
+    && permissions.contents === 'read'
+    && permissions['pull-requests'] === 'read'
+    && permissions.statuses === 'write'
+    && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
+    && selectOutputs.targets_default_branch === '${{ steps.select.outputs.targets_default_branch }}'
+    && selectStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
+    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' }}"
+    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+    && compatibility.environment === 'temporal-compatibility'
+    && dispatchStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
+    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}"
+    && hasTemporalCompatibilityPermissions(compatibility.permissions)
+    && hasEarlyExactPrHeadRevalidation(
+      compatibility.steps,
+      'Checkout trusted controller',
+    )
+    && hasTrustedControlPlaneCheckout(
+      compatibility.steps,
+      'Checkout trusted controller',
+    )
+    && hasTemporalCompatibilityAppToken(compatibility.steps)
+    && workflow.includes('node scripts/hosted-orchestration-compatibility.mjs run')
+  )
+}
+
+function hasTemporalCompatibilityAppToken(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+
+  const token = value.find((step) =>
+    isRecord(step) && step.name === 'Mint private compatibility token'
+  )
+  if (!isRecord(token) || !isRecord(token.with)) {
+    return false
+  }
+
+  return token.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1'
+    && token.with['app-id'] === '${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}'
+    && token.with['private-key'] === '${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}'
+    && token.with.owner === 'cobuildwithus'
+    && token.with.repositories === 'murph-cloud'
+    && token.with['permission-actions'] === 'write'
+    && token.with['permission-contents'] === 'read'
+}
+
 function hasAndroidAppCredentials(value: unknown): boolean {
   if (!Array.isArray(value)) {
     return false
@@ -517,6 +746,17 @@ function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
   }
 
   return Object.keys(value).sort().join(',') === 'contents,pull-requests'
+    && value.contents === 'read'
+    && value['pull-requests'] === 'read'
+}
+
+function hasTemporalCompatibilityPermissions(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return Object.keys(value).sort().join(',') === 'actions,contents,pull-requests'
+    && value.actions === 'read'
     && value.contents === 'read'
     && value['pull-requests'] === 'read'
 }

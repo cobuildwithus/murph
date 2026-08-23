@@ -283,7 +283,7 @@ removes only mutable resources whose exact run ownership was proved. Repository
 files contain only the protected Environment contract names; sandbox values
 remain external to the checkout.
 
-## Live Junction WHOOP Canary Verification
+## Live Junction Garmin Canary Verification
 
 The public live wearable canary is a protected-main external-provider proof,
 not a pull-request check. Its focused hermetic owner proof is:
@@ -302,15 +302,24 @@ the guarded review context, but no executable cross-owner equality guard links
 them. The credential-free setup must also install and smoke-check a
 checksum-pinned Kernel CLI plus checksum-pinned `websocat`, which the CLI uses
 for a reverse SSH tunnel from the Kernel browser VM to hosted-local Web. The
-unattended proof uses a headless stealth browser with telemetry disabled and a
-dedicated persistent WHOOP canary profile; the profile can reuse a still-valid
-WHOOP session, while an expired session falls back to the dedicated login. See
+unattended proof uses a headed remote stealth browser with telemetry disabled
+and a dedicated persistent Garmin canary profile. Headed Chromium is the narrow
+mitigation that cleared the provider challenge observed in headless automation;
+only a successful protected-main run proves the complete result. On Garmin's
+exact `/partner/oauthConfirm` route, the unattended runner requires exactly
+three available data-sharing checkboxes and one enabled `Save` action before it
+continues. Changes to that checkbox count or availability, or to the exact
+`Save` count or state, fail closed; unrelated negative actions and links are not
+part of that gate. The CI boundary keeps manual authorization disabled and
+challenge handling fail-closed.
+The profile can reuse a still-valid Garmin session, while an expired session
+falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
 [CDP](https://www.kernel.sh/docs/browsers/cdp), and
 [stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
 Keep those setup steps free of Environment secrets; only the final
 browser-canary step may receive Kernel authority, Junction sandbox authority,
-and the dedicated WHOOP login. A real authorization proof remains available
+and the dedicated Garmin login. A real authorization proof remains available
 only after the exact workflow reaches protected `main`, where non-canceling
 concurrency serializes the dedicated provider account. Do not weaken the
 protected-branch gate or expose live credentials to a pull request to obtain

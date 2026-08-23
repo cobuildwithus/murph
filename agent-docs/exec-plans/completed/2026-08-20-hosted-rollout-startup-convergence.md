@@ -14,11 +14,14 @@ Success criteria:
 - Fatal, stale, stopped, poisoned, architecture-mismatched, and
   previously-ready unhealthy containers retain bounded cleanup.
 - Cleanup captured for an old start cannot invalidate a newer replacement.
-- Focused tests, typecheck, exact-head CI, and ReviewGPT pass.
+- Focused tests, typecheck, and exact-head CI pass. No additional ReviewGPT
+  round runs after the user explicitly stopped the review loop.
 
 ## Constraints
 
-- Do not deploy, mutate production state, merge, or activate remediation.
+- Keep this public follow-up scoped to the container lifecycle owner; the
+  separately authorized private worker deployment resumes only after its PR
+  and exact-head gates pass.
 - Keep retry responses and fail-closed behavior bounded.
 - Add no durable lifecycle state, queue, or second lifecycle owner.
 - Keep production evidence aggregate and free of member identifiers.
@@ -118,22 +121,26 @@ That premise is now invalidated. The corrective decision is:
   without destroy, and then proves a later warm-health failure still recycles
   that same anchored record.
 - A stale never-ready start older than 20 seconds still enters bounded cleanup.
+- A private integration run later reproduced the remaining callback order three
+  times: old-shell cleanup settled, a replacement start was issued, then the
+  old shell's delayed `onStop` cleared the provisional replacement before its
+  `onStart` arrived.
+- The focused regression failed on current `main` with `Hosted runner container
+  changed while cold readiness was recorded`, then passed after `onStop` stopped
+  clearing a provisional replacement. The existing bounded readiness deadline
+  remains the ambiguity fallback; no state owner or persistence was added.
+- The complete `runner-container.test.ts` file passes 210 tests, the Cloudflare
+  typecheck passes, and the formerly failing hosted-local retryable-outbox
+  foreground-restart scenario passes end to end in 132.90 seconds.
 
 ## State
 
-Active. ReviewGPT round 7 returned one material delayed-lifecycle-error finding
-at the hard cap, and its smallest deletion-only production correction is
-implemented with an ordering regression. Current `main` merged cleanly twice
-without manual conflict resolution, including the upstream repair for the
-unrelated Web release-test mock failure and updated native device-sync timeout
-proof. The earlier merge exposed one synthetic preemption fixture that changed
-`lastChange` on every read and omitted the real `onStart` hook; the fixture now
-uses one stable platform timestamp and the existing lifecycle callback, with no
-production-code expansion. Focused verification, parent final review, and
-exact-head CI remain; the merged corrected tree passes 424 focused Cloudflare
-tests, 550 hosted-execution tests, 32 focused Web tests, and the Cloudflare and
-hosted-execution typechecks. The hard cap prohibits an automatic round 8. The
-PR remains draft and no production action is authorized.
+Implementation complete. PR #2090 merged the bounded startup-convergence owner,
+and the follow-up closes the one generation-blind `onStop` order exposed by the
+private integration gate. The correction is one provisional-start guard plus
+one ordering regression. Focused unit, typecheck, and hosted-local E2E proof are
+green. Exact-head GitHub CI remains the merge gate. Per the user's explicit
+instruction, no ReviewGPT round runs after round 7.
 
 ## Working Set
 
@@ -148,3 +155,6 @@ PR remains draft and no production action is authorized.
 - `apps/cloudflare/test/deploy-automation.test.ts`
 - `apps/cloudflare/test/container-image-contract.test.ts`
 - `apps/cloudflare/DEPLOY.md`
+Status: completed
+Updated: 2026-08-22
+Completed: 2026-08-22
