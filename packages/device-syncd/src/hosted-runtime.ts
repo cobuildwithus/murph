@@ -782,6 +782,7 @@ const HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS: Readonly<
   webhookDataJson: "string",
   workoutStreamCursor: "string",
   workoutStreamEmptyReplay: "boolean",
+  workoutStreamEmptySeen: "boolean",
   windowEnd: "isoTimestamp",
   windowStart: "isoTimestamp",
 });

@@ -58,11 +58,13 @@ Updated: 2026-08-23
   --no-coverage test/device-providers-junction-bounded-features.test.ts`
   (13 passed)
 - `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
-  --no-coverage test/junction-provider.test.ts` (325 passed)
+  --no-coverage test/junction-provider.test.ts` (326 passed)
 - `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
   --no-coverage test/provider-manifests.test.ts` (31 passed)
 - `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
   --no-coverage test/hosted-runtime.test.ts` (100 passed)
+- `pnpm --dir packages/device-syncd exec vitest run --config vitest.config.ts
+  --no-coverage test/service.test.ts` (140 passed)
 - `pnpm exec vitest run --config apps/web/vitest.config.ts --no-coverage
   apps/web/test/changelog-fragments.test.ts` (7 passed)
 - `pnpm --filter @murphai/importers typecheck`

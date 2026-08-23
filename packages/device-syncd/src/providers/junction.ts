@@ -238,6 +238,7 @@ interface JunctionFullJobTimeseriesContinuation {
   timeseriesResourceCursor: string;
   timeseriesWindowHours: 1 | 24;
   workoutStreamCursor: string | null;
+  workoutStreamEmptySeen: boolean;
 }
 
 interface JunctionFullJobTimeseriesResourceCursor {
@@ -257,6 +258,7 @@ interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportRe
     windowStart: string;
   };
   workoutStreamCursor: string | null;
+  workoutStreamEmptySeen: boolean;
 }
 
 interface JunctionWorkoutStreamFeatureFetchResult {
@@ -1957,6 +1959,7 @@ export function createJunctionDeviceSyncProvider(
           timeseriesWindowHours: 24,
           window,
           workoutStreamCursor: null,
+          workoutStreamEmptySeen: false,
         })
       : null;
     if (timeseriesContinuation || temporalContinuationJobs.length > 0) {
@@ -3083,6 +3086,7 @@ export function createJunctionDeviceSyncProvider(
             effectiveResource,
             sourceProviderSlug,
             completedWorkoutStreamIdentities,
+            job.payload.workoutStreamEmptySeen === true,
           );
           const result = withJunctionSkippedResourceMetadata(
             context,
@@ -3095,6 +3099,7 @@ export function createJunctionDeviceSyncProvider(
                   workoutStreamCursor: effectiveResource === "workout_stream"
                     ? dailyImport.workoutStreamCursor
                     : undefined,
+                  workoutStreamEmptySeen: dailyImport.workoutStreamEmptySeen,
                 })
               : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
@@ -4649,6 +4654,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     sourceProviderSlug?: string | null,
     completedWorkoutStreamIdentities: ReadonlySet<string> = new Set(),
+    workoutStreamEmptySeen = false,
   ): Promise<JunctionDailyTimeseriesImportResult> {
     let resumeWorkoutStreamIdentities = new Set(completedWorkoutStreamIdentities);
     let madeProgress = false;
@@ -4662,6 +4668,7 @@ export function createJunctionDeviceSyncProvider(
         if (madeProgress) {
           return {
             workoutStreamCursor,
+            workoutStreamEmptySeen,
             yieldedAt: window.windowStart,
           };
         }
@@ -4678,23 +4685,27 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
           windowEnd: window.windowEnd,
           windowStart: window.windowStart,
+          workoutStreamEmptySeen,
         });
         workoutStreamCursor = workoutImport.workoutStreamCursor;
+        workoutStreamEmptySeen = workoutImport.emptyTimestampArraySeen;
         madeProgress ||= workoutImport.madeProgress;
-        if (workoutImport.emptyTimestampArraySeen) {
+        if (workoutImport.yieldedAt) {
+          return {
+            workoutStreamCursor,
+            workoutStreamEmptySeen,
+            yieldedAt: workoutImport.yieldedAt,
+          };
+        }
+        if (workoutStreamEmptySeen) {
           return {
             emptyWorkoutStreamReplayWindow: {
               windowEnd: window.windowEnd,
               windowStart: window.windowStart,
             },
-            workoutStreamCursor,
-            yieldedAt: window.windowStart,
-          };
-        }
-        if (workoutImport.yieldedAt) {
-          return {
-            workoutStreamCursor,
-            yieldedAt: workoutImport.yieldedAt,
+            workoutStreamCursor: null,
+            workoutStreamEmptySeen: false,
+            yieldedAt: window.windowEnd,
           };
         }
         madeProgress = true;
@@ -4715,6 +4726,7 @@ export function createJunctionDeviceSyncProvider(
             if (madeProgress) {
               return {
                 workoutStreamCursor,
+                workoutStreamEmptySeen: false,
                 yieldedAt: window.windowStart,
               };
             }
@@ -4737,6 +4749,7 @@ export function createJunctionDeviceSyncProvider(
     }
     return {
       workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
       yieldedAt: null,
     };
   }
@@ -4793,7 +4806,10 @@ export function createJunctionDeviceSyncProvider(
         && policy?.normalizationMode !== "hourly_or_session_feature")
       || (!resourceCursor.restartFromWindowStart
         && resource !== "workout_stream"
-        && job.payload.workoutStreamCursor !== undefined)
+        && (
+          job.payload.workoutStreamCursor !== undefined
+          || job.payload.workoutStreamEmptySeen !== undefined
+        ))
     ) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
@@ -4803,6 +4819,9 @@ export function createJunctionDeviceSyncProvider(
       Date.parse(window.windowEnd),
     )).toISOString();
     let workoutStreamCursor: string | null = null;
+    let workoutStreamReplayWindow:
+      | { windowEnd: string; windowStart: string }
+      | undefined;
 
     if (resource === "workout_stream") {
       try {
@@ -4816,6 +4835,7 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
           windowEnd: executionWindowEnd,
           windowStart: timeseriesCursor,
+          workoutStreamEmptySeen: job.payload.workoutStreamEmptySeen === true,
         });
         historicalProviderRecordsSeen ||=
           sourceProviderSlug !== null
@@ -4830,12 +4850,6 @@ export function createJunctionDeviceSyncProvider(
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
             job,
-            replayWindow: workoutImport.emptyTimestampArraySeen
-              ? {
-                  windowEnd: executionWindowEnd,
-                  windowStart: timeseriesCursor,
-                }
-              : undefined,
             skippedOptionalResources,
             sourceProviders,
             continuation: {
@@ -4843,10 +4857,17 @@ export function createJunctionDeviceSyncProvider(
               timeseriesResourceCursor: resource,
               timeseriesWindowHours,
               workoutStreamCursor,
+              workoutStreamEmptySeen: workoutImport.emptyTimestampArraySeen,
             },
             window,
           });
         }
+        workoutStreamReplayWindow = workoutImport.emptyTimestampArraySeen
+          ? {
+              windowEnd: executionWindowEnd,
+              windowStart: timeseriesCursor,
+            }
+          : undefined;
       } catch (error) {
         if (error instanceof JunctionTimeseriesProgressError) {
           historicalProviderRecordsSeen ||=
@@ -4873,6 +4894,7 @@ export function createJunctionDeviceSyncProvider(
               timeseriesResourceCursor: resource,
               timeseriesWindowHours,
               workoutStreamCursor: error.workoutStreamCursor,
+              workoutStreamEmptySeen: error.workoutStreamEmptySeen,
             },
             window,
           });
@@ -4929,6 +4951,7 @@ export function createJunctionDeviceSyncProvider(
               timeseriesResourceCursor: resource,
               timeseriesWindowHours: 1,
               workoutStreamCursor: null,
+              workoutStreamEmptySeen: false,
             },
             window,
           });
@@ -4942,6 +4965,7 @@ export function createJunctionDeviceSyncProvider(
       historicalProviderRecordsSeen,
       historicalRecordsSeen,
       job,
+      replayWindow: workoutStreamReplayWindow,
       skippedOptionalResources,
       sourceProviders,
       continuation: resolveNextFullJobTimeseriesContinuation({
@@ -5127,6 +5151,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[];
     windowEnd: string;
     windowStart: string;
+    workoutStreamEmptySeen?: boolean;
   }): Promise<JunctionWorkoutStreamImportResult> {
     const policy = resolveJunctionTimeseriesResourcePolicy("workout_stream");
     const maxWorkouts = policy?.maxRecordsPerWindow;
@@ -5139,11 +5164,12 @@ export function createJunctionDeviceSyncProvider(
     let historicalProviderRecordsSeen = false;
     let historicalRecordsSeen = false;
     let madeProgress = false;
+    let workoutStreamEmptySeen = input.workoutStreamEmptySeen === true;
     const carryTerminalProgressOrThrow = (error: unknown): JunctionWorkoutStreamImportResult => {
       if (isJunctionJobSignalAbort(error, input.context.signal)) {
         if (input.allowImmediateYield || madeProgress) {
           return {
-            emptyTimestampArraySeen: false,
+            emptyTimestampArraySeen: workoutStreamEmptySeen,
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
             madeProgress,
@@ -5163,6 +5189,7 @@ export function createJunctionDeviceSyncProvider(
           {
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
+            workoutStreamEmptySeen,
           },
         );
       }
@@ -5201,7 +5228,7 @@ export function createJunctionDeviceSyncProvider(
       if (input.context.shouldYield?.()) {
         if (input.allowImmediateYield || madeProgress) {
           return {
-            emptyTimestampArraySeen: false,
+            emptyTimestampArraySeen: workoutStreamEmptySeen,
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
             madeProgress,
@@ -5265,16 +5292,8 @@ export function createJunctionDeviceSyncProvider(
         });
         completedIdentities.add(candidate.identity);
         madeProgress = true;
-        return {
-          emptyTimestampArraySeen: true,
-          historicalProviderRecordsSeen,
-          historicalRecordsSeen,
-          madeProgress,
-          workoutStreamCursor: encodeJunctionWorkoutStreamCompletedIdentities(
-            completedIdentities,
-          ),
-          yieldedAt: input.windowStart,
-        };
+        workoutStreamEmptySeen = true;
+        continue;
       }
 
       if (feature === undefined) {
@@ -5328,7 +5347,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return {
-      emptyTimestampArraySeen: false,
+      emptyTimestampArraySeen: workoutStreamEmptySeen,
       historicalProviderRecordsSeen,
       historicalRecordsSeen,
       madeProgress,
@@ -5481,6 +5500,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     workoutStreamCursor?: string | null;
+    workoutStreamEmptySeen?: boolean;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
@@ -5693,6 +5713,7 @@ export function createJunctionDeviceSyncProvider(
     timeseriesWindowHours: 1 | 24;
     window: { windowEnd: string; windowStart: string };
     workoutStreamCursor: string | null;
+    workoutStreamEmptySeen: boolean;
   }): DeviceSyncJobInput | null {
     if (input.job.kind !== "backfill" && input.job.kind !== "reconcile") {
       return null;
@@ -5753,6 +5774,9 @@ export function createJunctionDeviceSyncProvider(
         ...(input.workoutStreamCursor
           ? { workoutStreamCursor: input.workoutStreamCursor }
           : {}),
+        ...(input.workoutStreamEmptySeen
+          ? { workoutStreamEmptySeen: true }
+          : {}),
       },
       priority: input.job.priority,
       windowEnd: input.window.windowEnd,
@@ -5768,6 +5792,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     workoutStreamCursor?: string | null;
+    workoutStreamEmptySeen?: boolean;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -5807,6 +5832,9 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
       workoutStreamCursor: input.workoutStreamCursor || undefined,
+      workoutStreamEmptySeen: input.workoutStreamEmptySeen === true
+        ? true
+        : undefined,
     });
     return {
       kind: "resource",
@@ -9140,6 +9168,7 @@ function resolveNextFullJobTimeseriesContinuation(input: {
       timeseriesResourceCursor: input.resource,
       timeseriesWindowHours: input.timeseriesWindowHours,
       workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
     };
   }
 
@@ -9150,6 +9179,7 @@ function resolveNextFullJobTimeseriesContinuation(input: {
         timeseriesResourceCursor: nextResource,
         timeseriesWindowHours: 24,
         workoutStreamCursor: null,
+        workoutStreamEmptySeen: false,
       }
     : null;
 }

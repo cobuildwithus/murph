@@ -21843,26 +21843,11 @@ test("Junction workout_stream skips empty or malformed streams without blocking 
     }),
     createJunctionWorkoutStreamResourceJob(),
   );
-  const continuation = requireValue(
-    initial.scheduledJobs?.find((job) =>
-      job.kind === "resource" && job.payload?.workoutStreamEmptyReplay !== true
-    ),
-    "empty workout should preserve an immediate continuation",
-  );
-  await executeJunctionJob(
-    harness.provider,
-    createJunctionJobContext({
-      importSnapshot: async (snapshot) => {
-        importedSnapshots.push(snapshot);
-        return { imported: true };
-      },
-      logger: {
-        warn: (_message, metadata) => {
-          if (typeof metadata?.errorCode === "string") warningCodes.push(metadata.errorCode);
-        },
-      },
-    }),
-    createJobFromInput(continuation),
+  assert.equal(
+    initial.scheduledJobs?.filter((job) =>
+      job.payload?.workoutStreamEmptyReplay === true
+    ).length,
+    1,
   );
 
   assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
@@ -21990,11 +21975,77 @@ test("Junction workout_stream empty replay cannot schedule another delayed repla
     createJobFromInput(replay),
   );
 
-  assert.equal(replayResult.scheduledJobs?.length, 1);
-  const continuation = requireValue(replayResult.scheduledJobs?.[0]);
-  assert.equal(continuation.availableAt, undefined);
-  assert.equal(continuation.dedupeKey, replay.dedupeKey);
-  assert.equal(continuation.payload?.workoutStreamEmptyReplay, true);
+  assert.equal(replayResult.scheduledJobs?.length ?? 0, 0);
+  assert.deepEqual(harness.streamRequests, [
+    "workout-1",
+    "workout-2",
+    "workout-1",
+    "workout-2",
+  ]);
+});
+
+test("Junction workout_stream retains empty-day replay ownership across a retryable candidate", async () => {
+  const importedWorkoutIds: string[] = [];
+  let allowImport = false;
+  let progressCursor: string | null = null;
+  const failure = new DeviceSyncError({
+    code: "TEST_WORKOUT_STREAM_RETRYABLE",
+    message: "retry the populated candidate",
+    retryable: true,
+  });
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2"],
+    streamResponse: (workoutId) => createJsonResponse(
+      workoutId === "workout-1"
+        ? { time: [] }
+        : {
+            time: [1_775_131_200],
+            heartrate: [120],
+          },
+    ),
+  });
+  const importSnapshot = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    const workoutId = String(feature?.workoutId);
+    if (!allowImport) throw failure;
+    importedWorkoutIds.push(workoutId);
+    return { imported: true };
+  };
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionJobContext({ importSnapshot }),
+      createJunctionWorkoutStreamResourceJob(),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
+      assert.equal(error.failure, failure);
+      assert.equal(error.workoutStreamEmptySeen, true);
+      progressCursor = error.workoutStreamCursor;
+      return true;
+    },
+  );
+  allowImport = true;
+
+  const result = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob({
+      workoutStreamCursor: requireValue(progressCursor),
+      workoutStreamEmptySeen: true,
+    }),
+  );
+
+  assert.deepEqual(importedWorkoutIds, ["workout-2"]);
+  assert.equal(
+    result.scheduledJobs?.filter((job) =>
+      job.payload?.workoutStreamEmptyReplay === true
+    ).length,
+    1,
+  );
 });
 
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {

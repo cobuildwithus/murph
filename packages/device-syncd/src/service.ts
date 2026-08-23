@@ -1436,6 +1436,8 @@ class DeviceSyncServiceController {
               payload: {
                 ...job.payload,
                 windowStart: timeseriesProgress.windowStart,
+                workoutStreamEmptySeen:
+                  timeseriesProgress.workoutStreamEmptySeen || undefined,
                 workoutStreamCursor:
                   timeseriesProgress.workoutStreamCursor ?? undefined,
               },
