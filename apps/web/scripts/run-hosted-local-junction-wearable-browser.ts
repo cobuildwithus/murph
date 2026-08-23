@@ -555,7 +555,7 @@ async function completeExternalAuthorization(
       if (completedGarminPartnerConsent) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
-        await waitForGarminPartnerConsentDeparture(
+        await waitForGarminPartnerConsentProgression(
           page,
           Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
           now,
@@ -610,11 +610,13 @@ async function completeGarminPartnerConsent(
   page: Page,
   source: BrowserConfig["source"],
 ): Promise<boolean> {
-  if (
-    source !== "garmin"
-    || !isGarminPartnerConsentUrl(page.url())
-  ) {
+  if (source !== "garmin") {
     return false;
+  }
+  const step = readGarminPartnerConsentStep(page.url());
+  if (step === null || step === "permissions_updated") return false;
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
   }
 
   const checkboxes = page.getByRole("checkbox");
@@ -653,22 +655,42 @@ async function completeGarminPartnerConsent(
   return true;
 }
 
-function isGarminPartnerConsentUrl(value: string): boolean {
+type GarminPartnerConsentStep =
+  | "invalid"
+  | "permissions_updated"
+  | "selection";
+
+function readGarminPartnerConsentStep(
+  value: string,
+): GarminPartnerConsentStep | null {
   const url = new URL(value);
-  return url.hostname === "connect.garmin.com"
-    && url.pathname === "/partner/oauthConfirm";
+  if (
+    url.hostname !== "connect.garmin.com"
+    || url.pathname !== "/partner/oauthConfirm"
+  ) {
+    return null;
+  }
+  const permissionsUpdated = url.searchParams.has("permissionsUpdated");
+  const selectedCapabilities = url.searchParams.has("selectedCapabilities");
+  if (permissionsUpdated !== selectedCapabilities) return "invalid";
+  return permissionsUpdated ? "permissions_updated" : "selection";
 }
 
-async function waitForGarminPartnerConsentDeparture(
+async function waitForGarminPartnerConsentProgression(
   page: Page,
   deadline: number,
   now: () => number,
 ): Promise<void> {
-  while (isGarminPartnerConsentUrl(page.url()) && now() < deadline) {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "selection" && now() < deadline) {
     await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
   }
-  if (isGarminPartnerConsentUrl(page.url())) {
-    throw new Error("Garmin consent Save did not leave the consent route.");
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent Save did not advance the consent flow.");
   }
 }
 
