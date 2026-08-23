@@ -89,6 +89,26 @@ behind retained model-free maintenance work.
   existing prompt planner and runtime-owner boundaries; the expiry correction
   adds no persisted field, queue, scheduler, or lifecycle state.
 
+## Round-two retrospective
+
+- The inclusive ten-minute deadline belongs at provider admission. A handoff
+  that has not crossed that boundary at expiry terminally stops; an outbox
+  intent durably created before provider admission remains owned by the
+  existing idempotent delivery drain and may finish afterward.
+- The previous correction checked expiry during system-mailbox notification
+  preparation, before asynchronous context hydration, the assistant turn lock,
+  and provider planning. That repeated the original separation between expiry
+  authority and the boundary where new provider work becomes possible.
+- The correction consolidates the decision in the existing
+  `beforeProviderAcceptedInputs` authority hook, derives the deadline from the
+  trusted wake timestamp and existing TTL, and removes the earlier duplicate
+  timing branch. It adds no persisted expiry field or new runtime owner.
+- Production-shaped proof begins before expiry, advances through the inclusive
+  boundary before provider admission, and requires zero provider starts, zero
+  new delivery intents, terminal source consumption, handled-frontier progress,
+  and preservation of any already-durable outbox intent. A companion case keeps
+  the final pre-expiry millisecond admissible.
+
 ## Deployment
 
 Prefer a rolling-compatible public runtime change that derives the existing

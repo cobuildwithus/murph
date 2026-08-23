@@ -9,13 +9,17 @@ import {
   createAssistantOutboxIntent,
   listAssistantOutboxIntents,
   readAssistantOutboxIntent,
+  sendAssistantNotification,
   type AssistantExecutionContext,
 } from "@murphai/assistant-engine";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  prepareHostedAssistantNotificationSystemMailboxWake,
+  executeHostedAssistantNotificationWake,
 } from "../src/hosted-runtime/events/assistant-notification.ts";
+import {
+  executeHostedMailboxEvent,
+} from "../src/hosted-runtime/events.ts";
 import type {
   HostedRuntimePlatform,
 } from "../src/hosted-runtime/platform.ts";
@@ -35,11 +39,22 @@ import {
 
 const mocks = vi.hoisted(() => ({
   executeHostedMailboxEvent: vi.fn(),
+  sendAssistantNotification: vi.fn(),
+}));
+
+vi.mock("@murphai/assistant-engine", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@murphai/assistant-engine")>(),
+  sendAssistantNotification: mocks.sendAssistantNotification,
 }));
 
 vi.mock("../src/hosted-runtime/events.ts", () => ({
   executeHostedMailboxEvent: mocks.executeHostedMailboxEvent,
 }));
+
+type AssistantNotificationInput = Parameters<
+  typeof sendAssistantNotification
+>[0];
+type HostedMailboxEventInput = Parameters<typeof executeHostedMailboxEvent>[0];
 
 const OCCURRED_AT = "2036-08-22T19:00:00.000Z";
 const EXPIRES_AT = new Date(
@@ -60,6 +75,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(BEFORE_EXPIRY);
   mocks.executeHostedMailboxEvent.mockReset();
+  mocks.sendAssistantNotification.mockReset();
 });
 
 afterEach(() => {
@@ -67,24 +83,68 @@ afterEach(() => {
 });
 
 describe("hosted group context handoff expiry", () => {
-  it("allows provider preparation until the final millisecond before expiry", async () => {
+  it("allows provider admission until the final millisecond before expiry", async () => {
     const wake = createGroupContextHandoffWake();
+    const providerStarted = new Error("Synthetic provider start sentinel.");
+    let providerStarts = 0;
+    mocks.sendAssistantNotification.mockImplementation(
+      async (input: AssistantNotificationInput) => {
+        await input.beforeProviderAcceptedInputs?.({
+          acceptedInputs: [],
+          turnId: "turn_context_handoff_synthetic",
+        });
+        providerStarts += 1;
+        throw providerStarted;
+      },
+    );
 
-    await expect(prepareHostedAssistantNotificationSystemMailboxWake({
-      assertExternalThreadRouteAuthority: undefined,
+    await expect(executeHostedAssistantNotificationWake({
       executionContext: EXECUTION_CONTEXT,
-      mailboxDedupeKey: EVENT_ID,
-      signal: null,
+      forceQueueOnly: true,
+      sourceMailboxItemId: "mailbox_context_handoff_synthetic",
+      vaultRoot: "/synthetic-vault",
       wake,
-    })).resolves.toEqual({ kind: "execute", wake });
+    })).rejects.toBe(providerStarted);
+    expect(providerStarts).toBe(1);
   });
 
-  it("terminally consumes a recovered sending handoff at inclusive expiry before provider work", async () => {
+  it("terminally consumes a recovered sending handoff that crosses inclusive expiry before provider admission", async () => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-context-handoff-expiry-",
     );
     const item = createSendingGroupContextHandoffItem();
-    vi.setSystemTime(EXPIRES_AT);
+    let providerStarts = 0;
+
+    mocks.sendAssistantNotification.mockImplementation(
+      async (input: AssistantNotificationInput) => {
+        expect(Date.now()).toBe(Date.parse(BEFORE_EXPIRY));
+        vi.setSystemTime(EXPIRES_AT);
+        await input.beforeProviderAcceptedInputs?.({
+          acceptedInputs: [],
+          turnId: "turn_context_handoff_synthetic",
+        });
+        providerStarts += 1;
+        throw new Error("Provider should not start after handoff expiry.");
+      },
+    );
+    mocks.executeHostedMailboxEvent.mockImplementation(
+      async (eventInput: HostedMailboxEventInput) => {
+        if (
+          eventInput.wake.kind !== "assistant.notification.requested"
+          || eventInput.executionContext === null
+        ) {
+          throw new TypeError("Expected an assistant notification event.");
+        }
+        return await executeHostedAssistantNotificationWake({
+          executionContext: eventInput.executionContext,
+          forceQueueOnly:
+            eventInput.forceQueueOnlyAssistantNotification === true,
+          sourceMailboxItemId: eventInput.sourceMailboxItemId ?? null,
+          vaultRoot: eventInput.vaultRoot,
+          wake: eventInput.wake,
+        });
+      },
+    );
 
     try {
       const durableIntent = await createAssistantOutboxIntent({
@@ -131,7 +191,7 @@ describe("hosted group context handoff expiry", () => {
 
       const result = await prepareHostedSystemMailboxItemForCheckpoint({
         executionContext: EXECUTION_CONTEXT,
-        now: () => EXPIRES_AT,
+        now: () => BEFORE_EXPIRY,
         runtime: createRuntime(),
         runtimeEnv: {},
         vaultRoot: workspace.vaultRoot,
@@ -142,7 +202,7 @@ describe("hosted group context handoff expiry", () => {
         metrics: {
           deliveryIntentIds: [],
           mailboxLane: "assistant-notification",
-          redactedLogEntries: [
+          redactedLogEntries: expect.arrayContaining([
             expect.objectContaining({
               redacted: expect.objectContaining({
                 eventCode:
@@ -150,11 +210,13 @@ describe("hosted group context handoff expiry", () => {
                 terminalDisposition: "context_handoff_expired",
               }),
             }),
-          ],
+          ]),
         },
         status: "processed",
       });
-      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
+      expect(mocks.sendAssistantNotification).toHaveBeenCalledTimes(1);
+      expect(providerStarts).toBe(0);
 
       const after = await readHostedSystemMailboxState(workspace.vaultRoot);
       expect(after.pending).toEqual([]);

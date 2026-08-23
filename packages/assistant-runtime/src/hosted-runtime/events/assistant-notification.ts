@@ -49,6 +49,8 @@ type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0
 
 const HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX =
   "assistant.notification.requested:";
+const HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED_ERROR_CODE =
+  "HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED";
 const HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX =
   "usage-referral-reward:";
 
@@ -60,9 +62,7 @@ type HostedAssistantNotificationSystemMailboxPreparation =
   | {
       kind: "terminal_no_send";
       outcome: HostedMailboxOutcome;
-      reason:
-        | "context_handoff_expired"
-        | "external_route_authority_stale";
+      reason: "external_route_authority_stale";
     };
 
 export type HostedLegacyUsageReferralAuthorityClassification =
@@ -100,39 +100,6 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
       throw new TypeError(
         "Hosted group context handoff mailbox identity is invalid.",
       );
-    }
-    const occurredAtMs = Date.parse(input.wake.occurredAt);
-    if (!Number.isFinite(occurredAtMs)) {
-      throw new TypeError(
-        "Hosted group context handoff occurrence time is invalid.",
-      );
-    }
-    const expiresAtMs =
-      occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
-    if (Date.now() >= expiresAtMs) {
-      return {
-        kind: "terminal_no_send",
-        outcome: createNoopMailboxEffect({
-          conversationMetrics: null,
-          deliveryIntentIds: [],
-          mailboxLane: "assistant-notification",
-          redactedLogEntries: [
-            emitHostedAssistantNotificationLifecycleLog({
-              extraDetails: {
-                eventCode:
-                  "assistant.notification.context_handoff_expired_terminal_no_send",
-                terminalDisposition: "context_handoff_expired",
-              },
-              level: "info",
-              message:
-                "Hosted group context handoff ended without new delivery after its bounded lifetime elapsed.",
-              phase: "wake.running",
-              wake: input.wake,
-            }),
-          ],
-        }),
-        reason: "context_handoff_expired",
-      };
     }
   }
 
@@ -398,6 +365,28 @@ export async function executeHostedAssistantNotificationWake(input: {
       });
     }
   } catch (error) {
+    if (isHostedGroupContextHandoffExpiredError(error)) {
+      redactedLogEntries.push(
+        emitHostedAssistantNotificationLifecycleLog({
+          extraDetails: {
+            eventCode:
+              "assistant.notification.context_handoff_expired_terminal_no_send",
+            terminalDisposition: "context_handoff_expired",
+          },
+          level: "info",
+          message:
+            "Hosted group context handoff ended without new delivery after its bounded lifetime elapsed.",
+          phase: "wake.running",
+          wake: input.wake,
+        }),
+      );
+      return createNoopMailboxEffect({
+        conversationMetrics: null,
+        deliveryIntentIds: [],
+        mailboxLane: "assistant-notification",
+        redactedLogEntries,
+      });
+    }
     if (!shouldSkipFailedHostedAssistantNotification(input.wake)) {
       redactedLogEntries.push(
         emitHostedAssistantNotificationLifecycleLog({
@@ -851,13 +840,24 @@ function buildAssistantNotificationInput(
   if (privateAssistantAskCompletion) {
     requireHostedPrivateAssistantAskCompletionNotification(wake);
   }
-  if (
+  const contextHandoffExpiresAtMs =
     isHostedGroupContextHandoffNotificationCandidate(wake)
-  ) {
-    requireHostedGroupContextHandoffNotification(wake);
-  }
+      ? requireHostedGroupContextHandoffNotification(wake)
+      : null;
   return buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
+    ...(contextHandoffExpiresAtMs === null
+      ? {}
+      : {
+          beforeProviderAcceptedInputs: () => {
+            if (Date.now() >= contextHandoffExpiresAtMs) {
+              throw new VaultCliError(
+                HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED_ERROR_CODE,
+                "Hosted group context handoff expired before provider admission.",
+              );
+            }
+          },
+        }),
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
     deliveryDispatchMode: forceQueueOnly
       ? "queue-only"
@@ -905,6 +905,8 @@ function buildAssistantNotificationInput(
 function buildAssistantNotificationInputFromRoute(input: {
   answeredMailboxItemIds?: AssistantNotificationInput["answeredMailboxItemIds"];
   assistantTurnOrdinal: string;
+  beforeProviderAcceptedInputs?:
+    AssistantNotificationInput["beforeProviderAcceptedInputs"];
   deliveryDedupeToken: AssistantNotificationInput["deliveryDedupeToken"];
   deliveryDispatchMode: AssistantNotificationInput["deliveryDispatchMode"];
   deliveryIdempotencyKey: AssistantNotificationInput["deliveryIdempotencyKey"];
@@ -940,6 +942,9 @@ function buildAssistantNotificationInputFromRoute(input: {
       route,
       wake: input.wake,
     }),
+    ...(input.beforeProviderAcceptedInputs
+      ? { beforeProviderAcceptedInputs: input.beforeProviderAcceptedInputs }
+      : {}),
     channel: route.channel,
     deliveryDedupeToken: input.deliveryDedupeToken,
     deliveryDispatchMode: input.deliveryDispatchMode,
@@ -1025,7 +1030,7 @@ function isHostedGroupContextHandoffNotificationCandidate(
 
 function requireHostedGroupContextHandoffNotification(
   wake: HostedExecutionAssistantNotificationRequestedWake,
-): void {
+): number {
   const handoff = wake.notification.groupContextHandoff;
   const authority = wake.notification.externalThreadRouteAuthority;
   const route = wake.notification.route;
@@ -1052,6 +1057,20 @@ function requireHostedGroupContextHandoffNotification(
       "Hosted group context handoff notification proof is invalid.",
     );
   }
+  const occurredAtMs = Date.parse(wake.occurredAt);
+  if (!Number.isFinite(occurredAtMs)) {
+    throw new TypeError(
+      "Hosted group context handoff occurrence time is invalid.",
+    );
+  }
+  return occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
+}
+
+function isHostedGroupContextHandoffExpiredError(
+  error: unknown,
+): boolean {
+  return error instanceof VaultCliError
+    && error.code === HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED_ERROR_CODE;
 }
 
 function requireHostedPrivateAssistantAskCompletionNotification(
