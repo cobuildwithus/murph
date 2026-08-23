@@ -890,6 +890,51 @@ describe('murph.attach_response_card', () => {
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'New authoring uses V2 with fiber and five required goal snapshots; nullable V2 goals and nutrition V1 remain legacy replay and rendering compatibility only',
     )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'use one workflow and end with one card or concise fallback. Never narrate safety, totals, estimation, or target resolution.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'progress owner',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'When exactly one compatible canonical calorie owner exists, use it and ignore every globally ambiguous calories target.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Only without a canonical owner may targetId daily-calories with metric calories and unit kcal substitute',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'daily-protein / protein-grams / g, daily-carbohydrates / carbs-grams / g, daily-fat / fat-grams / g, and daily-fiber / fiber-grams / g',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Any other calories target is not dietary authority even when co-located with all four nutrition metrics.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Never mutate a Goal to repair its key.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'retry the same id once with vault-cli show <same-id> --format json',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Continue only from one complete unambiguous canonical record; otherwise fail closed.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
+      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
+    )
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('globally ambiguous calories target').length - 1,
+    ).toBe(1)
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('retry the same id once').length - 1,
+    ).toBe(1)
+    expect(
+      MURPH_ATTACH_RESPONSE_CARD_TOOL.description
+        .split('Author only dietary-calories').length - 1,
+    ).toBe(1)
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toContain(
       'V2 adds fiber and nullable goal snapshots',
     )
@@ -909,7 +954,7 @@ describe('murph.attach_response_card', () => {
       'Keep this active-target authority read separate from any all-status lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'Require exactly one unambiguous applicable exact point target in each fixed card unit: dietary-calories in kcal, and protein-grams, carbs-grams, fat-grams, and fiber-grams in g, resolved across active canonical Goals',
+      'canonical dietary-calories in kcal plus protein-grams, carbs-grams, fat-grams, and fiber-grams in g, across active Goals',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Each target must use selected-value comparator between with identical numeric value and highValue',
@@ -1015,9 +1060,6 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'never select by title, substance, severity, context-snapshot visibility, or the default list prefix',
-    )
-    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'If any required detail read fails or is unreadable, use the same fail-closed behavior',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'As part of that same pre-numeric and pre-activation gate, also run its bounded lossless vault-cli measurement entry list read over the canonical 45-day window',

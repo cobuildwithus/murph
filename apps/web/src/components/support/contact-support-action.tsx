@@ -1,9 +1,10 @@
 import { MailIcon } from "lucide-react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 
+import { MURPH_SUPPORT_EMAIL } from "@/src/lib/public-contact";
 import { cn } from "@/src/lib/utils";
 
-export const MURPH_SUPPORT_EMAIL = "support@withmurph.ai";
+export { MURPH_SUPPORT_EMAIL };
 
 export function buildContactSupportMailto({
   body,

@@ -101,6 +101,10 @@ vi.mock("@/src/components/ui/radio-group", () => ({
       onClick: () => onValueChange?.("2000"),
       type: "button",
     }, "Choose $20"),
+    createElement("button", {
+      onClick: () => onValueChange?.("5000"),
+      type: "button",
+    }, "Choose $50"),
   ),
 }));
 
@@ -427,7 +431,7 @@ test("offers a read-only recheck after bounded pending polls without starting an
 test("binds a confirmed cap increase to the displayed authorization", async () => {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => ({
     json: async () => ({
-      management: { ...baseManagement, monthlyCapMinor: 2_000 },
+      management: { ...baseManagement, monthlyCapMinor: 5_000 },
     }),
     ok: true,
     init,
@@ -445,8 +449,9 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     },
   ));
   try {
-    const capButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Choose $20");
+    const capButton = [...rendered.container.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent === "Choose $50",
+    );
     assert.ok(capButton);
     await act(async () => {
       capButton.click();
@@ -455,15 +460,17 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
     assert.equal(fetchMock.mock.calls.length, 0);
 
     const applyButton = [...rendered.container.querySelectorAll("button")]
-      .find((candidate) => candidate.textContent === "Review $20 limit");
+      .find((candidate) => candidate.textContent === "Review $50 limit");
     assert.ok(applyButton);
     await act(async () => {
       applyButton.click();
     });
 
-    expect(rendered.container.textContent).toContain("Increase your limit to $20?");
     expect(rendered.container.textContent).toContain(
-      "Your monthly limit will change from $10 to $20",
+      "Increase your limit to $50?",
+    );
+    expect(rendered.container.textContent).toContain(
+      "Your monthly limit will change from $10 to $50",
     );
     expect(rendered.container.textContent).toContain(
       "When automatic refills are on, Murph may charge $5 at a time",
@@ -475,7 +482,7 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       "[data-slot='alert-dialog-action']",
     );
     assert.ok(confirmButton);
-    expect(confirmButton.textContent).toBe("Increase to $20");
+    expect(confirmButton.textContent).toBe("Increase to $50");
     await act(async () => {
       confirmButton.click();
     });
@@ -486,7 +493,7 @@ test("binds a confirmed cap increase to the displayed authorization", async () =
       action: "change_cap",
       authorizationId: AUTHORIZATION_ID,
       confirmed: true,
-      monthlyCapMinor: 2_000,
+      monthlyCapMinor: 5_000,
     });
   } finally {
     await rendered.cleanup();

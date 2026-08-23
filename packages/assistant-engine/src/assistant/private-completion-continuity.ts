@@ -230,6 +230,7 @@ async function reconcileAssistantPrivateCompletionIntent(input: {
           createdAt: continuity.transcriptCreatedAt,
           kind: 'assistant',
           sourceOutboxIntentId: journalIntent.intentId,
+          standaloneAssistantContext: true,
           text: journalIntent.message,
         }),
       ],

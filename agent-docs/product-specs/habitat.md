@@ -235,7 +235,7 @@ Zone/aspect grades (A–E or `unknown`) render on the home visualization — spe
   distinct from the larger set of optional and conversational details that a
   voice walkthrough can still collect.
 - Each zone offers a conversational handoff.
-- Current outdoor weather and air quality derive transiently from the member-stated city through a server-owned provider key. The browser sends only that city to the authenticated same-origin endpoint; results are not persisted as Habitat facts and outdoor air is never presented as indoor air.
+- Current outdoor weather and air quality derive transiently from the member-stated city through fixed OpenWeather endpoints and the server-owned key. The browser sends only that city to the authenticated same-origin endpoint. Server cache shares the public geocoding result for 30 days and the combined current conditions for 10 minutes without storing member identity or the provider key. Results are not persisted as Habitat facts, and outdoor air is never presented as indoor air.
 - Public Open Graph previews remain generic. An authenticated, member-started
   share action can create a personal image with the derived score and coverage.
   That image excludes location, answers, notes, and other private Habitat facts.

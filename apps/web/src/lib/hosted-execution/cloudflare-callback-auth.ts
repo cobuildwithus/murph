@@ -17,6 +17,8 @@ import {
 const DEFAULT_HOSTED_CLOUDFLARE_CALLBACK_KEY_ID = "v1";
 const HOSTED_CLOUDFLARE_CALLBACK_MAX_TIMESTAMP_SKEW_MS = 60_000;
 const HOSTED_CLOUDFLARE_CALLBACK_NONCE_MIN_LENGTH = 16;
+const HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_NONCE_OWNER =
+  "system:temporal-worker-binding-admission";
 const HOSTED_CLOUDFLARE_CALLBACK_SIGNING_ALGORITHM: EcKeyImportParams = {
   name: "ECDSA",
   namedCurve: "P-256",
@@ -56,8 +58,37 @@ export async function requireHostedCloudflareCallbackRequest(
   request: Request,
   options: HostedCloudflareCallbackRequestOptions,
 ): Promise<string> {
-  const verification = requireHostedCloudflareCallbackVerificationEnvironment(process.env);
   const userId = requireHostedExecutionUserId(request);
+  await requireHostedCloudflareSignedRequest(request, options, {
+    nonceOwner: userId,
+    signatureUserId: userId,
+  });
+  return userId;
+}
+
+export async function requireHostedCloudflareSystemCallbackRequest(
+  request: Request,
+  options: HostedCloudflareCallbackRequestOptions,
+): Promise<string> {
+  if (request.headers.has(HOSTED_EXECUTION_USER_ID_HEADER)) {
+    throw unauthorizedCloudflareCallbackError();
+  }
+
+  return requireHostedCloudflareSignedRequest(request, options, {
+    nonceOwner: HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_NONCE_OWNER,
+    signatureUserId: null,
+  });
+}
+
+async function requireHostedCloudflareSignedRequest(
+  request: Request,
+  options: HostedCloudflareCallbackRequestOptions,
+  identity: {
+    nonceOwner: string;
+    signatureUserId: string | null;
+  },
+): Promise<string> {
+  const verification = requireHostedCloudflareCallbackVerificationEnvironment(process.env);
   const url = new URL(request.url);
   const { keyId, nonce, signature, timestamp } = readHostedExecutionSignatureHeaders(request.headers);
   const normalizedNonce = normalizeOptionalString(nonce);
@@ -103,7 +134,7 @@ export async function requireHostedCloudflareCallbackRequest(
     search: url.search,
     signature,
     timestamp,
-    userId,
+    userId: identity.signatureUserId,
   });
 
   if (!verified) {
@@ -119,7 +150,7 @@ export async function requireHostedCloudflareCallbackRequest(
     now: new Date(nowMs).toISOString(),
     path: url.pathname,
     search: url.search,
-    userId,
+    userId: identity.nonceOwner,
   });
 
   if (!consumed) {
@@ -130,7 +161,7 @@ export async function requireHostedCloudflareCallbackRequest(
     });
   }
 
-  return userId;
+  return normalizedKeyId;
 }
 
 export async function requireHostedCloudflareCallbackJsonRequest(

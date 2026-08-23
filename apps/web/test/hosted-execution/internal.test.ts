@@ -14,6 +14,7 @@ import { HostedOnboardingError } from "../../src/lib/hosted-onboarding/errors";
 import {
   requireHostedCloudflareCallbackJsonRequest,
   requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareSystemCallbackRequest,
 } from "../../src/lib/hosted-execution/cloudflare-callback-auth";
 import type { HostedCallbackRequestNonceStore } from "../../src/lib/hosted-execution/internal-request-nonces";
 import { requireVercelCronRequest } from "../../src/lib/hosted-execution/vercel-cron";
@@ -185,6 +186,65 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     } satisfies Partial<HostedOnboardingError>);
   });
 
+  it("accepts a system callback without a member header and rejects its replay", async () => {
+    const nonceStore = new MemoryNonceStore();
+    const input = {
+      body: "",
+      method: "GET",
+      nonce: "456789abcdef0123456789abcdef0123",
+      path: "/api/internal/hosted-orchestration/temporal-worker/binding-admission",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: null,
+    } as const;
+
+    await expect(
+      requireHostedCloudflareSystemCallbackRequest(
+        await createSignedCallbackRequest(input),
+        {
+          maxBodyBytes: 0,
+          nonceStore,
+          nowMs: FIXED_NOW_MS,
+        },
+      ),
+    ).resolves.toBe("v1");
+
+    await expect(
+      requireHostedCloudflareSystemCallbackRequest(
+        await createSignedCallbackRequest(input),
+        {
+          maxBodyBytes: 0,
+          nonceStore,
+          nowMs: FIXED_NOW_MS,
+        },
+      ),
+    ).rejects.toMatchObject({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_REPLAYED",
+      httpStatus: 401,
+    } satisfies Partial<HostedOnboardingError>);
+  });
+
+  it("rejects a system callback that presents a member-bound header", async () => {
+    const request = await createSignedCallbackRequest({
+      body: "",
+      method: "GET",
+      nonce: "56789abcdef0123456789abcdef01234",
+      path: "/api/internal/hosted-orchestration/temporal-worker/binding-admission",
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "member_123",
+    });
+
+    await expect(
+      requireHostedCloudflareSystemCallbackRequest(request, {
+        maxBodyBytes: 0,
+        nonceStore: new MemoryNonceStore(),
+        nowMs: FIXED_NOW_MS,
+      }),
+    ).rejects.toMatchObject({
+      code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED",
+      httpStatus: 401,
+    } satisfies Partial<HostedOnboardingError>);
+  });
+
   it("rejects signed Cloudflare callbacks that exceed the configured body limit", async () => {
     const request = await createSignedCallbackRequest({
       body: JSON.stringify({ eventId: "evt_123" }),
@@ -309,15 +369,17 @@ describe("requireHostedCloudflareCallbackRequest", () => {
 
 async function createSignedCallbackRequest(input: {
   body: string;
+  method?: string;
   nonce: string;
   path: string;
   privateJwkJson: string;
   search?: string;
-  userId: string;
+  userId: string | null;
 }): Promise<Request> {
+  const method = input.method ?? "POST";
   const headers = await createHostedCloudflareCallbackHeaders({
     keyId: "v1",
-    method: "POST",
+    method,
     nonce: input.nonce,
     path: input.path,
     payload: input.body,
@@ -333,13 +395,15 @@ async function createSignedCallbackRequest(input: {
   }
 
   return new Request(requestUrl.toString(), {
-    body: input.body,
+    ...(method === "GET" ? {} : { body: input.body }),
     headers: {
       ...headers,
       "content-type": "application/json; charset=utf-8",
-      [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId,
+      ...(input.userId
+        ? { [HOSTED_EXECUTION_USER_ID_HEADER]: input.userId }
+        : {}),
     },
-    method: "POST",
+    method,
   });
 }
 
@@ -352,7 +416,7 @@ async function createHostedCloudflareCallbackHeaders(input: {
   privateKeyJwkJson: string;
   search: string;
   timestamp: string;
-  userId: string;
+  userId: string | null;
 }): Promise<Record<string, string>> {
   const key = await crypto.subtle.importKey(
     "jwk",

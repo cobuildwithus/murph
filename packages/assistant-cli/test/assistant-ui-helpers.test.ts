@@ -29,6 +29,22 @@ import {
   sanitizeAssistantTerminalText,
 } from '../src/assistant/ui/view-model.js'
 
+test('reopened chat renders the visible workout follow-up marker unchanged', () => {
+  const message =
+    'How many reps did you get?\n\n' +
+    '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]'
+
+  assert.deepEqual(
+    seedChatEntries([{
+      schema: 'murph.assistant-transcript-entry.v1',
+      kind: 'assistant',
+      text: message,
+      createdAt: '2026-04-08T00:00:01.000Z',
+    }]),
+    [{ kind: 'assistant', text: message }],
+  )
+})
+
 test('theme helpers prefer terminal color hints, capture launch baselines, and adapt open chat mode on macOS', () => {
   assert.equal(inferAssistantInkThemeModeFromColorFgbg('0;15'), 'light')
   assert.equal(inferAssistantInkThemeModeFromColorFgbg('7;0'), 'dark')

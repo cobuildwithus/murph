@@ -8,6 +8,7 @@ import {
   HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import { SqliteDeviceSyncStore } from "@murphai/device-syncd/service";
 import {
   restoreHostedExecutionContext,
@@ -6341,9 +6342,40 @@ describe("runHostedAssistantAutomationLane", () => {
 describe("runHostedDeviceSyncWakeLane", () => {
   it("runs only the hosted device-sync lane", async () => {
     const logRequests: HostedRuntimeLogRequest[] = [];
+    const queueJobKinds = [
+      "backfill",
+      "deauthorization",
+      "deauthorize",
+      "delete",
+      "push_source_recovery",
+      "reconcile",
+      "resource",
+      "authorization",
+    ] as const;
     const drainWorker = vi.fn()
       .mockResolvedValueOnce(1)
       .mockResolvedValue(0);
+    const listPendingJobsForAccount = vi.fn()
+      .mockReturnValueOnce(Array.from(
+        { length: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1 },
+        (_, index) => ({
+          attempts: index % 4,
+          createdAt: "2026-04-07T23:58:00.000Z",
+          kind: queueJobKinds[index % queueJobKinds.length],
+          status: index === 0 ? "running" : "queued",
+        }),
+      ))
+      .mockReturnValueOnce([
+        {
+          attempts: 3,
+          createdAt: "2026-04-07T23:58:00.000Z",
+          kind: "resource",
+          status: "queued",
+        },
+      ]);
+    mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+      listPendingJobsForAccount,
+    });
     mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
       close: vi.fn(),
       drainWorker,
@@ -6386,8 +6418,9 @@ describe("runHostedDeviceSyncWakeLane", () => {
       runtimeLogPlatform: {
         logPort: {
           async write(request) {
-            logRequests.push(request);
-            return { loggedCount: request.entries.length };
+            const parsed = parseHostedRuntimeLogRequest(request);
+            logRequests.push(parsed);
+            return { loggedCount: parsed.entries.length };
           },
         },
       },
@@ -6406,6 +6439,16 @@ describe("runHostedDeviceSyncWakeLane", () => {
       postCheckpointRecord: null,
     });
     expect(drainWorker).toHaveBeenCalledWith(1, "local_scheduled_account");
+    expect(listPendingJobsForAccount).toHaveBeenNthCalledWith(
+      1,
+      "local_scheduled_account",
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+    );
+    expect(listPendingJobsForAccount).toHaveBeenNthCalledWith(
+      2,
+      "local_scheduled_account",
+      HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT + 1,
+    );
     expect(shouldYieldDeviceSync).toHaveBeenCalled();
     expect(mocks.runAssistantAutomationPass).not.toHaveBeenCalled();
     const lifecycleEntries = logRequests
@@ -6433,12 +6476,145 @@ describe("runHostedDeviceSyncWakeLane", () => {
           passStage: "completed",
           postCheckpointRecordPresent: false,
           processedJobs: 1,
+          pendingJobCountAfter: 1,
+          pendingJobCountAfterTruncated: false,
+          pendingJobCountBefore: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+          pendingJobCountBeforeTruncated: true,
+          pendingJobKindCountsAfter: ["resource=1"],
+          pendingJobKindCountsBefore: [
+            "backfill=13",
+            "deauth=26",
+            "delete=13",
+            "other=12",
+            "push_source_recovery=12",
+            "reconcile=12",
+            "resource=12",
+          ],
+          pendingJobMaxAttemptsAfter: 3,
+          pendingJobMaxAttemptsBefore: 3,
+          pendingJobOldestAgeMsAfter: expect.any(Number),
+          pendingJobOldestAgeMsBefore: expect.any(Number),
+          pendingJobQueueSampleLimit: HOSTED_DEVICE_SYNC_PASS_JOB_LIMIT,
+          pendingQueuedJobCountAfter: 1,
+          pendingQueuedJobCountBefore: 99,
+          pendingRunningJobCountAfter: 0,
+          pendingRunningJobCountBefore: 1,
+          queueSnapshotAfterPresent: true,
+          queueSnapshotBeforePresent: true,
           skipped: false,
+          workerJobLimitReached: false,
           yieldReason: null,
         }),
         workspaceVersion: "8",
       }),
     ]);
+  });
+
+  it("retains queue snapshots when the worker drain yields to its timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T00:00:00.000Z"));
+    try {
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      let markDrainStarted: () => void = () => undefined;
+      const drainStarted = new Promise<void>((resolve) => {
+        markDrainStarted = resolve;
+      });
+      const drainWorker = vi.fn(async () => {
+        markDrainStarted();
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        return 1;
+      });
+      const listPendingJobsForAccount = vi.fn()
+        .mockReturnValueOnce([{
+          attempts: 0,
+          createdAt: "2026-04-07T23:59:00.000Z",
+          kind: "deauthorization",
+          status: "queued",
+        }])
+        .mockReturnValueOnce([{
+          attempts: 1,
+          createdAt: "2026-04-07T23:59:00.000Z",
+          kind: "deauthorization",
+          status: "queued",
+        }]);
+      mocks.requireHostedRuntimeDeviceSyncStore.mockReturnValue({
+        listPendingJobsForAccount,
+      });
+      mocks.createHostedRuntimeDeviceSyncService.mockReturnValue({
+        close: vi.fn(),
+        drainWorker,
+        getNextJobWakeAt: () => "2026-04-08T00:00:00.000Z",
+        getNextWakeAt: () => "2026-04-08T00:00:00.000Z",
+        listAccounts: vi.fn(() => []),
+        listJobFailureDiagnostics: vi.fn(() => []),
+        runSchedulerOnce: vi.fn(async () => undefined),
+      });
+
+      const resultPromise = runHostedDeviceSyncWakeLane({
+        deviceSyncPort: createMaintenanceDeviceSyncPortStub(),
+        resolvedConfig: {
+          deviceSync: DEVICE_SYNC_CONFIG,
+        },
+        runtimeLogPlatform: {
+          logPort: {
+            async write(request) {
+              const parsed = parseHostedRuntimeLogRequest(request);
+              logRequests.push(parsed);
+              return { loggedCount: parsed.entries.length };
+            },
+          },
+        },
+        timeoutMs: 50,
+        vaultRoot: "/tmp/vault-root",
+        wake: {
+          eventId: "evt_device_sync_worker_timeout",
+          kind: "device-sync.wake",
+          occurredAt: "2026-04-08T00:00:00.000Z",
+          reason: "reconcile_due",
+          userId: "member_123",
+        },
+      });
+
+      await drainStarted;
+      await vi.advanceTimersByTimeAsync(100);
+      await expect(resultPromise).resolves.toEqual({
+        deviceSyncProcessed: 1,
+        deviceSyncSkipped: true,
+        nextWakeAt: "2026-04-08T00:00:30.100Z",
+        nextWakeReason: "device-sync.reconcile",
+        parserProcessed: 0,
+        postCheckpointRecord: null,
+      });
+      await drainHostedRuntimeLogWritesBestEffort();
+
+      const finishedEntry = logRequests
+        .flatMap((request) => request.entries)
+        .find((entry) => entry.eventCode === "device-sync.pass_finished");
+      expect(logRequests
+        .flatMap((request) => request.entries)
+        .filter((entry) => entry.eventCode.startsWith("device-sync.pass_"))
+        .map((entry) => entry.eventCode)).toEqual([
+          "device-sync.pass_started",
+          "device-sync.pass_finished",
+        ]);
+      expect(finishedEntry?.redactedJson).toEqual(expect.objectContaining({
+        outcome: "yielded",
+        passStage: "worker_drain",
+        pendingJobCountAfter: 1,
+        pendingJobCountBefore: 1,
+        pendingJobKindCountsAfter: ["deauth=1"],
+        pendingJobKindCountsBefore: ["deauth=1"],
+        pendingJobMaxAttemptsAfter: 1,
+        pendingJobMaxAttemptsBefore: 0,
+        processedJobs: 1,
+        queueSnapshotAfterPresent: true,
+        queueSnapshotBeforePresent: true,
+        workerJobLimitReached: false,
+        yieldReason: "timeout",
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not wait for lifecycle log transport before device-sync work or return", async () => {

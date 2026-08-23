@@ -698,9 +698,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
     ...(assistantResearchAvailable
-      ? [buildAssistantResearchScoutCapabilityText({
-          progressUpdateMode: authenticatedGroupChatRuntime ? 'group' : 'direct',
-        })]
+      ? [buildAssistantResearchScoutCapabilityText()]
       : []),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
@@ -827,6 +825,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
         input.hostedToolContext?.labsTool != null,
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+      assistantProgressUpdatesAvailable: input.progressDelivery != null,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
@@ -1000,6 +999,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&
           input.hostedToolContext?.privateImageUrlPublisher != null,
+        physicalNoteRecoveryAvailable:
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.physicalNotes?.resolve === 'function',
         phoneCallsAvailable:
           input.hostedToolContext?.phoneCalls != null &&
           (
@@ -1182,6 +1185,13 @@ export async function resolveAssistantRouteTurnPlan(input: {
   }
 }
 
+type TranscriptHistoryCandidate = {
+  contentIncomplete: boolean
+  message: AssistantProviderConversationMessage
+  standaloneAssistantContext: boolean
+  userPromptKey: string | null
+}
+
 async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
   currentUserPrompt: string
   sessionId: string
@@ -1192,12 +1202,6 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     entries = await listAssistantTranscriptEntries(input.vault, input.sessionId)
   } catch {
     return []
-  }
-
-  type TranscriptHistoryCandidate = {
-    contentIncomplete: boolean
-    message: AssistantProviderConversationMessage
-    userPromptKey: string | null
   }
 
   let historyIncomplete =
@@ -1213,6 +1217,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
           content: ASSISTANT_NO_REPLY_TRANSCRIPT_HISTORY_TEXT,
           role: 'assistant',
         },
+        standaloneAssistantContext: false,
         userPromptKey: null,
       }]
     }
@@ -1228,6 +1233,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
               ),
               role: 'assistant',
             },
+            standaloneAssistantContext: false,
             userPromptKey: null,
           }]
         : []
@@ -1256,6 +1262,14 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
             content,
             role: entry.kind,
           },
+          standaloneAssistantContext:
+            entry.kind === 'assistant'
+            && (
+              entry.standaloneAssistantContext === true
+              // Private completions written before the generic semantic field
+              // already carry durable import provenance.
+              || entry.sourceOutboxIntentId !== undefined
+            ),
           userPromptKey: entry.kind === 'user' && rawContent
             ? normalizeAssistantConversationHistoryText(rawContent)
             : null,
@@ -1291,7 +1305,7 @@ async function resolveAssistantCommittedTranscriptHistoryMessages(input: {
     contentIncomplete)
 
   return limitAssistantConversationHistoryMessages(
-    messages.map(({ message }) => message),
+    messages,
     historyIncomplete,
   )
 }
@@ -1318,21 +1332,23 @@ function shouldDropTrailingCurrentUserPrompt(input: {
 }
 
 function limitAssistantConversationHistoryMessages(
-  messages: readonly AssistantProviderConversationMessage[],
+  messages: readonly TranscriptHistoryCandidate[],
   historyIncomplete: boolean,
 ): AssistantProviderConversationMessage[] {
   let incomplete =
     historyIncomplete ||
     messages.length > ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT
   const countLimited = messages.slice(-ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_LIMIT)
-  const retained: AssistantProviderConversationMessage[] = []
+  const retained: TranscriptHistoryCandidate[] = []
   let retainedBytes = 0
 
-  for (const message of [...countLimited].reverse()) {
-    if (typeof message.content !== 'string') {
+  for (const candidate of [...countLimited].reverse()) {
+    if (typeof candidate.message.content !== 'string') {
       continue
     }
-    const messageBytes = assistantConversationHistoryUtf8Bytes(message.content)
+    const messageBytes = assistantConversationHistoryUtf8Bytes(
+      candidate.message.content,
+    )
     if (messageBytes === 0) {
       continue
     }
@@ -1343,14 +1359,16 @@ function limitAssistantConversationHistoryMessages(
       incomplete = true
       break
     }
-    retained.push(message)
+    retained.push(candidate)
     retainedBytes += messageBytes
   }
 
   retained.reverse()
   if (!incomplete) {
-    return retained
+    return retained.map(({ message }) => message)
   }
+
+  retainedBytes -= dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
   const marker: AssistantProviderConversationMessage = {
     content: ASSISTANT_BOUNDED_CONVERSATION_HISTORY_INCOMPLETE_TEXT,
@@ -1365,13 +1383,45 @@ function limitAssistantConversationHistoryMessages(
       ASSISTANT_ROUTE_COMMITTED_TRANSCRIPT_HISTORY_TOTAL_BYTES
   ) {
     const removed = retained.shift()
-    if (!removed || typeof removed.content !== 'string') {
+    if (!removed || typeof removed.message.content !== 'string') {
       continue
     }
-    retainedBytes -= assistantConversationHistoryUtf8Bytes(removed.content)
+    retainedBytes -= assistantConversationHistoryUtf8Bytes(
+      removed.message.content,
+    )
   }
+  dropLeadingAssistantMessagesBeforeFirstRetainedUser(retained)
 
-  return [marker, ...retained]
+  return [marker, ...retained.map(({ message }) => message)]
+}
+
+function dropLeadingAssistantMessagesBeforeFirstRetainedUser(
+  messages: TranscriptHistoryCandidate[],
+): number {
+  const firstUserIndex = messages.findIndex(
+    ({ message }) => message.role === 'user',
+  )
+  if (firstUserIndex === 0) {
+    return 0
+  }
+  let removed: TranscriptHistoryCandidate[]
+  if (firstUserIndex < 0) {
+    removed = []
+    for (const candidate of messages.splice(0, messages.length)) {
+      if (!candidate.standaloneAssistantContext) {
+        removed.push(candidate)
+      } else {
+        messages.push(candidate)
+      }
+    }
+  } else {
+    removed = messages.splice(0, firstUserIndex)
+  }
+  return removed.reduce((total, candidate) => (
+    typeof candidate.message.content === 'string'
+      ? total + assistantConversationHistoryUtf8Bytes(candidate.message.content)
+      : total
+  ), 0)
 }
 
 async function measureRoutePlanningAsync<TResult>(

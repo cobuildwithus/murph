@@ -797,6 +797,11 @@ export const assistantTranscriptEntrySchema = z.object({
   kind: z.enum(assistantTranscriptEntryKindValues),
   text: z.string(),
   createdAt: isoTimestampSchema,
+  // True when an assistant entry begins a conversation turn without an
+  // originating member entry in this transcript and remains meaningful as
+  // context for the member's next reply. Omission is the ordinary dependent
+  // assistant-reply case and keeps existing persisted entries compatible.
+  standaloneAssistantContext: z.literal(true).optional(),
   // Stable provenance for replay-safe imports that originate from a durable
   // outbox delivery rather than a provider turn.
   sourceOutboxIntentId: assistantOutboxIntentIdSchema.optional(),

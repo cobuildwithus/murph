@@ -1,0 +1,197 @@
+type JsonSchemaObject = Record<string, unknown>
+
+function isJsonSchemaObject(value: unknown): value is JsonSchemaObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+}
+
+function withoutTopLevelDescription(schema: JsonSchemaObject): JsonSchemaObject {
+  const result: JsonSchemaObject = {}
+  for (const [key, value] of Object.entries(schema)) {
+    if (key !== 'description') {
+      result[key] = value
+    }
+  }
+  return result
+}
+
+function schemaKey(value: unknown): string {
+  return JSON.stringify(value)
+}
+
+function schemaAlternatives(schema: JsonSchemaObject): unknown[] {
+  const normalized = withoutTopLevelDescription(schema)
+  if (
+    Object.keys(normalized).length === 1
+    && Array.isArray(normalized.anyOf)
+  ) {
+    return normalized.anyOf
+  }
+  return [normalized]
+}
+
+function schemaCovers(
+  candidate: JsonSchemaObject,
+  other: JsonSchemaObject,
+): boolean {
+  const candidateKeys = new Set(schemaAlternatives(candidate).map(schemaKey))
+  return schemaAlternatives(other).every((item) => candidateKeys.has(schemaKey(item)))
+}
+
+function mergePropertySchemas(schemas: JsonSchemaObject[]): JsonSchemaObject {
+  const unique = [...new Map(schemas.map((schema) => {
+    const semanticSchema = withoutTopLevelDescription(schema)
+    return [schemaKey(semanticSchema), semanticSchema] as const
+  })).values()]
+  let merged: JsonSchemaObject
+  if (unique.length === 1) {
+    merged = unique[0]
+  } else {
+    const covering = unique.find((candidate) =>
+      unique.every((other) => schemaCovers(candidate, other)))
+    merged = covering ?? { anyOf: unique }
+  }
+  return merged
+}
+
+function buildActionPropertyConstraint(
+  actionSchema: JsonSchemaObject,
+  mergedSchema: JsonSchemaObject,
+): JsonSchemaObject {
+  const actionSemanticSchema = withoutTopLevelDescription(actionSchema)
+  const mergedSemanticSchema = withoutTopLevelDescription(mergedSchema)
+  const semanticConstraint = schemaKey(actionSemanticSchema) === schemaKey(
+    mergedSemanticSchema,
+  )
+    ? {}
+    : actionSemanticSchema
+  return semanticConstraint
+}
+
+function containsReference(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsReference)
+  }
+  if (!isJsonSchemaObject(value)) {
+    return false
+  }
+  return Object.entries(value).some(
+    ([key, item]) => key === '$ref' || containsReference(item),
+  )
+}
+
+export function deriveAutomationModelInputSchema(
+  canonicalSchema: JsonSchemaObject,
+): JsonSchemaObject {
+  if (containsReference(canonicalSchema)) {
+    return canonicalSchema
+  }
+
+  const branches = canonicalSchema.oneOf
+  if (!Array.isArray(branches) || branches.length === 0) {
+    return canonicalSchema
+  }
+
+  const actions: string[] = []
+  const propertyOrder: string[] = []
+  const propertyVariants = new Map<string, JsonSchemaObject[]>()
+  const branchByAction: Array<{
+    action: string
+    properties: JsonSchemaObject
+    required: string[]
+  }> = []
+
+  for (const branch of branches) {
+    if (
+      !isJsonSchemaObject(branch)
+      || branch.type !== 'object'
+      || branch.additionalProperties !== false
+      || !isJsonSchemaObject(branch.properties)
+      || !isStringArray(branch.required)
+      || !branch.required.includes('action')
+    ) {
+      return canonicalSchema
+    }
+
+    const actionSchema = branch.properties.action
+    if (
+      !isJsonSchemaObject(actionSchema)
+      || typeof actionSchema.const !== 'string'
+      || actions.includes(actionSchema.const)
+    ) {
+      return canonicalSchema
+    }
+    const action = actionSchema.const
+    actions.push(action)
+
+    for (const [name, propertySchema] of Object.entries(branch.properties)) {
+      if (!isJsonSchemaObject(propertySchema)) {
+        return canonicalSchema
+      }
+      if (name === 'action') {
+        continue
+      }
+      if (!propertyVariants.has(name)) {
+        propertyOrder.push(name)
+        propertyVariants.set(name, [])
+      }
+      propertyVariants.get(name)?.push(propertySchema)
+    }
+
+    branchByAction.push({
+      action,
+      properties: branch.properties,
+      required: branch.required,
+    })
+  }
+
+  const properties: JsonSchemaObject = {
+    action: {
+      enum: actions,
+    },
+  }
+  for (const name of propertyOrder) {
+    const variants = propertyVariants.get(name)
+    if (!variants || variants.length === 0) {
+      return canonicalSchema
+    }
+    properties[name] = mergePropertySchemas(variants)
+  }
+
+  const actionContracts: JsonSchemaObject[] = []
+  for (const branch of branchByAction) {
+    const actionProperties: JsonSchemaObject = {
+      action: { const: branch.action },
+    }
+    for (const [name, propertySchema] of Object.entries(branch.properties)) {
+      if (name === 'action' || !isJsonSchemaObject(propertySchema)) {
+        continue
+      }
+      const mergedSchema = properties[name]
+      if (!isJsonSchemaObject(mergedSchema)) {
+        return canonicalSchema
+      }
+      actionProperties[name] = buildActionPropertyConstraint(
+        propertySchema,
+        mergedSchema,
+      )
+    }
+    actionContracts.push({
+      properties: actionProperties,
+      required: branch.required,
+      additionalProperties: false,
+    })
+  }
+
+  const modelSchema: JsonSchemaObject = {
+    type: 'object',
+    properties,
+    required: ['action'],
+    oneOf: actionContracts,
+    additionalProperties: false,
+  }
+  return containsReference(modelSchema) ? canonicalSchema : modelSchema
+}
