@@ -93,6 +93,7 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
+const GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT = 3;
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
 const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
 const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
@@ -549,6 +550,20 @@ async function completeExternalAuthorization(
         }
       }
 
+      const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
+        && await completeGarminPartnerConsent(page, config.source);
+      if (completedGarminPartnerConsent) {
+        automationBlockedObservedAt = null;
+        blockedWindowObservedChallenge = false;
+        await waitForGarminPartnerConsentDeparture(
+          page,
+          Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+          now,
+        );
+        await page.waitForTimeout(750);
+        continue;
+      }
+
       await checkRequiredConsentCheckboxes(page);
       const clicked = await clickFirstVisibleAction(
         page,
@@ -589,6 +604,72 @@ async function completeExternalAuthorization(
   }
 
   throw new Error("Timed out before Junction returned the browser to Murph.");
+}
+
+async function completeGarminPartnerConsent(
+  page: Page,
+  source: BrowserConfig["source"],
+): Promise<boolean> {
+  if (
+    source !== "garmin"
+    || !isGarminPartnerConsentUrl(page.url())
+  ) {
+    return false;
+  }
+
+  const checkboxes = page.getByRole("checkbox");
+  if (await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
+    throw new Error(
+      `Garmin consent expected exactly ${GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT} data-sharing checkboxes.`,
+    );
+  }
+  for (
+    let index = 0;
+    index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
+    index += 1
+  ) {
+    const checkbox = checkboxes.nth(index);
+    if (
+      !await checkbox.isVisible().catch(() => false)
+      || !await checkbox.isEnabled().catch(() => false)
+    ) {
+      throw new Error("Garmin consent data-sharing checkbox was unavailable.");
+    }
+    await checkAuthorizationCheckbox(checkbox);
+    if (!await checkbox.isChecked().catch(() => false)) {
+      throw new Error("Garmin consent data-sharing checkbox was not selected.");
+    }
+  }
+
+  const save = page.getByRole("button", { exact: true, name: "Save" });
+  if (await save.count() !== 1) {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+  const saveAction = save.nth(0);
+  if (await readAuthorizationActionState(saveAction) !== "enabled") {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+  await clickAuthorizationControl(saveAction);
+  return true;
+}
+
+function isGarminPartnerConsentUrl(value: string): boolean {
+  const url = new URL(value);
+  return url.hostname === "connect.garmin.com"
+    && url.pathname === "/partner/oauthConfirm";
+}
+
+async function waitForGarminPartnerConsentDeparture(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  while (isGarminPartnerConsentUrl(page.url()) && now() < deadline) {
+    await page.waitForTimeout(250);
+  }
+  if (isGarminPartnerConsentUrl(page.url())) {
+    throw new Error("Garmin consent Save did not leave the consent route.");
+  }
 }
 
 async function completeAuthorizationAndRequireCallback(
@@ -771,6 +852,19 @@ async function clickAuthorizationControl(
       ? "timeout"
       : "other";
     throw new Error(`Authorization action failed (${category}).`);
+  }
+}
+
+async function checkAuthorizationCheckbox(
+  checkbox: Pick<Locator, "check">,
+): Promise<void> {
+  try {
+    await checkbox.check();
+  } catch (error) {
+    const category = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout"
+      : "other";
+    throw new Error(`Authorization consent selection failed (${category}).`);
   }
 }
 

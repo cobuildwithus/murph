@@ -24,6 +24,22 @@ function createWhoopConfig() {
   });
 }
 
+function createGarminConfig() {
+  return readHostedLocalJunctionBrowserConfigForTest({
+    CI: "1",
+    NODE_ENV: "test",
+    MURPH_E2E_CONNECT_URL:
+      "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+    MURPH_E2E_HOSTED_SESSION_COOKIE: "opaque-session",
+    MURPH_E2E_PROVIDER_EMAIL: "browser-canary@example.invalid",
+    MURPH_E2E_PROVIDER_HEADLESS: "0",
+    MURPH_E2E_PROVIDER_PASSWORD: "opaque-password",
+    MURPH_E2E_PROVIDER_SOURCE: "garmin",
+    MURPH_E2E_PROVIDER_TIMEOUT_MS: "30000",
+    MURPH_E2E_WEB_BASE_URL: "https://app.example.test",
+  });
+}
+
 describe("hosted headed browser boundary", () => {
   it.runIf(smokeEnabled)("launches Chromium headed inside the CI virtual display", async () => {
     const browser = await chromium.launch({ headless: false });
@@ -36,6 +52,143 @@ describe("hosted headed browser boundary", () => {
       await browser.close();
     }
   });
+
+  it.runIf(smokeEnabled)(
+    "checks the exact Garmin consent set before the route-bound Save action",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        await page.route("https://connect.garmin.com/**", (route) => route.fulfill({
+          body: [
+            '<input type="checkbox">',
+            '<input type="checkbox">',
+            '<input type="checkbox">',
+            '<button id="save">Save</button>',
+            '<button onclick="location.href=\'https://app.example.test/cancel\'">',
+            "Cancel</button>",
+            "<script>",
+            "document.querySelector('#save').addEventListener('click', () => {",
+            "const allChecked = [...document.querySelectorAll('input[type=checkbox]')]",
+            ".every((input) => input.checked);",
+            "location.href = allChecked",
+            "? 'https://app.example.test/home'",
+            ": 'https://app.example.test/incomplete';",
+            "});",
+            "</script>",
+          ].join(""),
+          contentType: "text/html",
+        }));
+        await page.route("https://app.example.test/**", (route) => route.fulfill({
+          body: "",
+          contentType: "text/html",
+        }));
+        await page.goto("https://connect.garmin.com/partner/oauthConfirm");
+
+        await expect(completeExternalJunctionAuthorizationForTest(
+          page,
+          createGarminConfig(),
+        )).resolves.toBeUndefined();
+        expect(new URL(page.url()).pathname).toBe("/home");
+      } finally {
+        await browser.close();
+      }
+    },
+  );
+
+  it.runIf(smokeEnabled)(
+    "does not authorize an exact-looking Garmin consent surface on another route",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        await page.route("https://connect.garmin.com/**", (route) => route.fulfill({
+          body: [
+            '<input type="checkbox">',
+            '<input type="checkbox">',
+            '<input type="checkbox">',
+            '<button onclick="location.href=\'https://app.example.test/unexpected\'">',
+            "Save</button>",
+          ].join(""),
+          contentType: "text/html",
+        }));
+        await page.route("https://app.example.test/**", (route) => route.fulfill({
+          body: "",
+          contentType: "text/html",
+        }));
+        await page.goto("https://connect.garmin.com/partner/oauthReview");
+        let now = 0;
+        const timedPage = new Proxy(page, {
+          get(target, property) {
+            if (property === "waitForTimeout") {
+              return async (duration: number) => {
+                now += duration;
+              };
+            }
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        });
+
+        await expect(completeExternalJunctionAuthorizationForTest(
+          timedPage,
+          createGarminConfig(),
+          () => now,
+        )).rejects.toThrow(
+          "Garmin did not expose an automated authorization action.",
+        );
+        await expect(page.locator('input[type="checkbox"]:checked').count())
+          .resolves.toBe(0);
+        expect(new URL(page.url()).pathname).toBe("/partner/oauthReview");
+        expect(now).toBe(15_000);
+      } finally {
+        await browser.close();
+      }
+    },
+  );
+
+  it.runIf(smokeEnabled)(
+    "keeps a failed Garmin consent checkbox action content-free",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      try {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(1_000);
+        await page.route("https://connect.garmin.com/**", (route) => route.fulfill({
+          body: [
+            '<input type="checkbox">',
+            '<input type="checkbox">',
+            '<input type="checkbox">',
+            "<button>Save</button>",
+            '<div style="position:fixed;inset:0;z-index:1">',
+            "overlay-synthetic-private-marker</div>",
+          ].join(""),
+          contentType: "text/html",
+        }));
+        await page.goto("https://connect.garmin.com/partner/oauthConfirm");
+
+        let failure: Error | undefined;
+        try {
+          await completeExternalJunctionAuthorizationForTest(
+            page,
+            createGarminConfig(),
+          );
+        } catch (error) {
+          if (error instanceof Error) failure = error;
+        }
+        expect(failure?.message).toBe(
+          "Authorization consent selection failed (timeout).",
+        );
+        expect(failure?.message).not.toContain("synthetic-private-marker");
+        expect(failure?.message).not.toContain("connect.garmin.com");
+        expect(failure?.message).not.toContain("browser-canary@example.invalid");
+        expect(failure?.message).not.toContain("opaque-password");
+      } finally {
+        await browser.close();
+      }
+    },
+    120_000,
+  );
 
   it.runIf(smokeEnabled)(
     "reports Playwright authorization semantics across frames without content",
