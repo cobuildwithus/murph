@@ -1,6 +1,6 @@
 # Usage-limit Delivery Overlap Recovery
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -35,3 +35,4 @@ conversation work overlap.
 - Run focused tests and relevant typechecks.
 - Prove the production-shaped ambiguity scenario against PR 46.
 - Complete the required completion and ReviewGPT gates before merge.
+Completed: 2026-08-23
