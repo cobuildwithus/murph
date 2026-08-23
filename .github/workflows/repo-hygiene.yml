@@ -2,6 +2,7 @@ name: Repo Hygiene
 
 on:
   pull_request:
+    types: [opened, reopened, ready_for_review]
   push:
     branches:
       - main
@@ -16,10 +17,45 @@ permissions:
   contents: read
 
 jobs:
+  temporal-compatibility-producer:
+    name: Exact Temporal producer fixture
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact public candidate
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Execute exact production wire projection
+        run: >-
+          node scripts/temporal-compatibility-producer-fixtures.ts
+          --output temporal-compatibility-producer-fixtures.json
+
+      - name: Upload exact producer fixture
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: temporal-compatibility-producer-${{ github.event.pull_request.head.sha }}
+          path: temporal-compatibility-producer-fixtures.json
+          if-no-files-found: error
+          retention-days: 1
+
   tracked-artifacts:
     name: Tracked private/build artifacts
     runs-on: ubuntu-24.04
     steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           persist-credentials: false
@@ -41,11 +77,17 @@ jobs:
       - name: Guard hosted Stripe billing CI boundary
         run: pnpm hosted-billing:ci-guard
 
+      - name: Test pull-request exact-head CI contract
+        run: node --test scripts/pull-request-ci-policy.test.mjs
+
       - name: Test native iOS hosted E2E control contract
         run: node --test scripts/native-ios-hosted-e2e.test.mjs
 
       - name: Test native Android hosted E2E control contract
         run: node --test scripts/native-android-hosted-e2e.test.mjs
+
+      - name: Test Temporal compatibility control contract
+        run: node --test scripts/hosted-orchestration-compatibility.test.mjs
 
       - name: Check tracked private/build artifacts
         run: pnpm no-js

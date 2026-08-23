@@ -868,12 +868,13 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
   });
 
   mocks.requestHostedOnboardingJson
-    .mockResolvedValueOnce(legalAcceptedStatus)
-    .mockResolvedValueOnce(acceptedStatus);
+    .mockResolvedValueOnce({ ...legalAcceptedStatus, starterEnrollment: null })
+    .mockResolvedValueOnce({ ...acceptedStatus, starterEnrollment: null });
 
   const { cleanup, container, window } = await renderClientComponent(
     createElement(JoinInviteLegalConsentIsland, {
       initialStatus: currentStatus,
+      inviteCode: "invite-code",
     }),
     { requireButton: false },
   );
@@ -889,10 +890,117 @@ test("JoinInviteLegalConsentIsland keeps accepted consent visible while route re
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({
+      payload: expect.objectContaining({
+        inviteCode: "invite-code",
+        scope: "launch.legal",
+      }),
+      url: "/api/legal/consent/accept",
+    }),
+  );
+  expect(mocks.requestHostedOnboardingJson).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({
+      payload: expect.objectContaining({
+        inviteCode: "invite-code",
+        scope: "launch.health-data",
+      }),
+      url: "/api/legal/consent/accept",
+    }),
+  );
+
   expect(container.textContent).toContain("Terms");
   expect(container.textContent).toContain("Health data");
   expect(container.textContent).toContain("Continuing...");
   expect(continueButton.disabled).toBe(true);
+  await cleanup();
+});
+
+test("JoinInviteLegalConsentIsland reloads Home after consent-owned Starter enrollment", async () => {
+  const currentStatus = createConsentStatus({
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    launchGranted: true,
+  });
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({ ...legalAcceptedStatus, starterEnrollment: null })
+    .mockResolvedValueOnce({
+      ...acceptedStatus,
+      starterEnrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+
+  const { cleanup, container, replaceLocation, window } =
+    await renderClientComponent(
+      createElement(JoinInviteLegalConsentIsland, {
+        initialStatus: currentStatus,
+        inviteCode: "invite-code",
+      }),
+      { requireButton: false },
+    );
+  const continueButton = findButtonByText(container, /^Consent$/);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(replaceLocation).toHaveBeenCalledWith("/home");
+  });
+  expect(mocks.refresh).not.toHaveBeenCalled();
+  await cleanup();
+});
+
+test("JoinInviteLegalConsentIsland preserves an armed group-start handoff", async () => {
+  const currentStatus = createConsentStatus({
+    launchGranted: false,
+  });
+  const legalAcceptedStatus = createConsentStatus({
+    launchHealthDataGranted: false,
+    launchLegalGranted: true,
+  });
+  const acceptedStatus = createConsentStatus({
+    launchGranted: true,
+  });
+  mocks.requestHostedOnboardingJson
+    .mockResolvedValueOnce({ ...legalAcceptedStatus, starterEnrollment: null })
+    .mockResolvedValueOnce({
+      ...acceptedStatus,
+      starterEnrollment: {
+        redirectPath: "/home",
+        status: "enrolled",
+      },
+    });
+  const sessionStorage = createMemoryStorage();
+  armHostedGroupStartHandoff({ storage: sessionStorage });
+
+  const { cleanup, container, replaceLocation, window } =
+    await renderClientComponent(
+      createElement(JoinInviteLegalConsentIsland, {
+        initialStatus: currentStatus,
+        inviteCode: "invite-code",
+      }),
+      { requireButton: false, sessionStorage },
+    );
+  const continueButton = findButtonByText(container, /^Consent$/);
+
+  await act(async () => {
+    continueButton.dispatchEvent(new window.Event("click", { bubbles: true }));
+  });
+
+  await vi.waitFor(() => {
+    expect(replaceLocation).toHaveBeenCalledWith("/groups/start");
+  });
+  expect(mocks.refresh).not.toHaveBeenCalled();
   await cleanup();
 });
 

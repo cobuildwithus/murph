@@ -6825,6 +6825,7 @@ describe("Linq group chat auto-provision", () => {
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).toHaveBeenNthCalledWith(1, {
       envelope: expect.objectContaining({
         kind: "member.activated",
+        onboardingFollowupEnrollment: false,
         userId: containerCreate.data.memberId,
       }),
       tx: prisma,

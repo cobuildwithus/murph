@@ -547,7 +547,7 @@ inventing a billing menu:
   private Settings handoff; a sponsored non-owner is told that the Family
   owner must make the change, while Family Max has no higher current tier; and
 - a hosted group gets a proactive first heads-up: on the first trusted
-  low-usage turn the assistant calls `murph.group action="read_usage"` once.
+  low-usage turn the assistant calls `murph.group_usage action="read_usage"` once.
   `fundingNeeded` is the only assistant-facing urgency signal. It is false when
   capacity is healthy and while a low room has an automatic refill available
   or already pending, including a current-period payment already bound before
@@ -599,7 +599,7 @@ the personal subscription handoff are not substitutes for this Family gate.
 Classify a group-thread allowance from its source, never by comparing its
 numeric cap with a trial cap. `murph.plan_usage` still returns
 `group_not_supported`; group capacity is not projected as a personal plan or a
-synthetic personal allowance. The existing `murph.group` tool's `read_usage`
+synthetic personal allowance. The `murph.group_usage` tool's `read_usage`
 action reports `fundingNeeded`, the current first-party funding URL, and an
 integer `includedUsageUsedPercent` on every successful current response.
 

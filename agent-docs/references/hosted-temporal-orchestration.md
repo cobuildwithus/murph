@@ -682,6 +682,20 @@ The hard-cut architecture is accepted when:
   public Temporal worker implementation cannot re-enter production source
   silently. Murph Cloud independently owns Workflow bundle and replay-policy
   gates.
+- Relevant public producer, contract, hosted-runtime, harness, and CI-owner
+  changes publish one exact-SHA `Temporal compatibility` status. The public
+  controller validates the pull request's exact base repository and ref; only
+  pull requests targeting the default branch may publish that SHA-global
+  status, so stacked non-default-branch pull requests cannot overwrite it. The
+  candidate producer runs only in unprivileged Repo Hygiene and hands the
+  trusted controller a run/head-bound bounded JSON artifact. The controller
+  never owns worker code or reader policy: private Murph Cloud receives only
+  serialized fixture data, declares the immutable supported-reader set,
+  automatically includes its pinned controller revision, runs every reader,
+  and returns one producer-and-reader proof digest. The committed public policy
+  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
+  skipped, canceled, duplicated, malformed, or failed proof remains red or
+  pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

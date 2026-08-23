@@ -8,6 +8,7 @@ import {
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   reduceJunctionElectrocardiogramVoltageRecords,
   reduceJunctionWorkoutStreamPayload,
@@ -255,7 +256,35 @@ test("workout stream reduction is bounded by admitted samples and never preserve
       time: [1_783_000_000, 1_783_000_001],
       heartrate: [100, 100],
     },
-  }), /1-1 timestamps/u);
+  }), (error: unknown) => {
+    assert.ok(error instanceof JunctionWorkoutStreamTimestampCardinalityError);
+    assert.match(error.message, /1-1 timestamps/u);
+    assert.deepEqual(error.diagnostic, {
+      kind: "over_limit",
+      maxTimestampCount: 1,
+      timestampCount: 2,
+    });
+    return true;
+  });
+
+  assert.throws(() => reduceJunctionWorkoutStreamPayload({
+    maxSamples: 1,
+    summary: {
+      id: "workout-empty",
+      sourceProviderSlug: "garmin",
+    },
+    stream: {
+      time: [],
+    },
+  }), (error: unknown) => {
+    assert.ok(error instanceof JunctionWorkoutStreamTimestampCardinalityError);
+    assert.deepEqual(error.diagnostic, {
+      kind: "empty",
+      maxTimestampCount: 1,
+      timestampCount: 0,
+    });
+    return true;
+  });
 });
 
 test("workout stream reduction preserves heart-rate halves and cycling cadence semantics", () => {

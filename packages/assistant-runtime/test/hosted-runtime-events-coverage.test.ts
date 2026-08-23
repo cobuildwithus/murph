@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   scheduleDeviceActivityTriggeredAutomations: vi.fn(),
   runHostedDeviceSyncWakeLane: vi.fn(),
   sendAssistantNotification: vi.fn(),
+  startAssistantOnboarding: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -45,6 +46,7 @@ vi.mock("@murphai/assistant-engine", async () => {
     executeCodexManagedAccountOperation: mocks.executeCodexManagedAccountOperation,
     scheduleDeviceActivityTriggeredAutomations: mocks.scheduleDeviceActivityTriggeredAutomations,
     sendAssistantNotification: mocks.sendAssistantNotification,
+    startAssistantOnboarding: mocks.startAssistantOnboarding,
   };
 });
 

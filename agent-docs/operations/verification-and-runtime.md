@@ -1,6 +1,6 @@
 # Verification And Runtime
 
-Last verified: 2026-08-17
+Last verified: 2026-08-21
 ## Verification Ownership By Delivery Path
 
 The delivery path decides who owns broad verification:
@@ -35,6 +35,40 @@ The delivery path decides who owns broad verification:
 Focused local proof is still mandatory for changed behavior. The PR rule moves
 the broad suite to CI; it does not permit an untested push or make a green
 unrelated check sufficient.
+
+### Pull Request Exact-Head Lifecycle
+
+Repository-created pull requests are draft-first. Opening a PR explicitly as
+non-draft remains the deliberate bypass for entering expensive CI immediately.
+Treat Ready as deliberate near-merge admission, not as a way to get broad CI
+feedback during ordinary development. Keep the PR draft through routine pushes
+and known remediation. An authenticated agent completing an owned PR lane
+should run `gh pr ready <number>` only after focused local proof and the parent
+candidate review are complete, the exact pushed head is the intended merge
+candidate, and no PR-specific edit is already known. That Ready event starts
+the expensive workflows automatically.
+The expensive pull-request workflows admit only non-draft `opened` or
+`reopened` events and `ready_for_review`; they do not run expensive proof on
+`synchronize`. A synchronize event that occurred while the PR was ready records
+the new exact head through a successful read-only observer receipt, then a
+trusted default-branch controller returns the PR to draft only while that event
+still names the current SHA. The controller lists open PRs in the base
+repository with GitHub's validated `head=owner:branch` filter, then resolves
+exactly one target from the workflow-run head repository, branch, and SHA. Fork
+default branches therefore follow the same path without depending on GitHub
+populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
+resolutions fail closed before the sole draft mutation. A
+synchronize event that occurred while the PR was already draft produces no
+consumable receipt, so delayed handling cannot undo a newer Ready action on the
+unchanged SHA. After a later push returns the PR to draft, re-establish the
+candidate conditions above before marking it Ready again to prove the new exact
+head. A skipped job is not exact-head success, and required check names remain
+bound to the jobs that actually execute the proof.
+
+`PR Evidence` intentionally remains lightweight on `synchronize` so policy and
+rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
+`synchronize`, but owns only the event-time-ready read-only receipt consumed by
+the draft-reset controller. Main-branch push CI is unchanged.
 
 For changes to the shared Playwright Chromium install wrapper or any workflow
 that calls it, run `bash -n scripts/install-playwright-chromium.sh` and the
@@ -71,12 +105,23 @@ Native companion auth/control/device-sync PRs additionally use the applicable
 `Native iOS hosted E2E` and `Native Android hosted E2E` statuses described in
 `agent-docs/references/testing-ci-map.md`.
 A canceled native workflow must not be rerun directly because the rerun retains
-its original queue identity. From an authenticated operator checkout, use
-`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>`; it revalidates the
-open same-repository human-authored PR and exact current head before rerunning a
-successful exact-head Repo Hygiene owner, whose completion creates a fresh
-applicable iOS and Android waiter without widening the protected environment or
-secret boundary.
+its original queue identity. Manual native retry is infrastructure-only. From
+an authenticated operator checkout, use
+`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed`
+only for the explicit allowlisted iOS `xcodebuild_failed` infrastructure
+failure, after inspecting and recording that closed failure code from the
+private run. The supplied failure code is an operator attestation: the helper
+validates the allowlisted literal but does not discover or verify its run
+provenance. When the Android controller reports that a direct workflow rerun
+could not enter the live queue, its status supplies the corresponding
+attestation; use
+`node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code android_workflow_rerun`.
+Non-allowlisted journey, product, legacy-contract, and workflow-contract
+literals are rejected. The helper requires the PR to remain ready and
+revalidates the open same-repository human-authored PR and exact current head
+before rerunning a successful exact-head Repo Hygiene owner. Its completion
+creates a fresh applicable iOS and Android waiter without widening the
+protected environment or secret boundary.
 A status description that records a real pass is production-shaped evidence:
 exact hosted PR Web deployment plus real Privy/Junction and HealthKit or Health
 Connect native flow.
@@ -246,7 +291,7 @@ removes only mutable resources whose exact run ownership was proved. Repository
 files contain only the protected Environment contract names; sandbox values
 remain external to the checkout.
 
-## Live Junction WHOOP Canary Verification
+## Live Junction Garmin Canary Verification
 
 The public live wearable canary is a protected-main external-provider proof,
 not a pull-request check. Its focused hermetic owner proof is:
@@ -265,15 +310,24 @@ the guarded review context, but no executable cross-owner equality guard links
 them. The credential-free setup must also install and smoke-check a
 checksum-pinned Kernel CLI plus checksum-pinned `websocat`, which the CLI uses
 for a reverse SSH tunnel from the Kernel browser VM to hosted-local Web. The
-unattended proof uses a headless stealth browser with telemetry disabled and a
-dedicated persistent WHOOP canary profile; the profile can reuse a still-valid
-WHOOP session, while an expired session falls back to the dedicated login. See
+unattended proof uses a headed remote stealth browser with telemetry disabled
+and a dedicated persistent Garmin canary profile. Headed Chromium is the narrow
+mitigation that cleared the provider challenge observed in headless automation;
+only a successful protected-main run proves the complete result. On Garmin's
+exact `/partner/oauthConfirm` route, the unattended runner requires exactly
+three available data-sharing checkboxes and one enabled `Save` action before it
+continues. Changes to that checkbox count or availability, or to the exact
+`Save` count or state, fail closed; unrelated negative actions and links are not
+part of that gate. The CI boundary keeps manual authorization disabled and
+challenge handling fail-closed.
+The profile can reuse a still-valid Garmin session, while an expired session
+falls back to the dedicated login. See
 Kernel's [SSH tunnel](https://www.kernel.sh/docs/browsers/ssh),
 [CDP](https://www.kernel.sh/docs/browsers/cdp), and
 [stealth](https://www.kernel.sh/docs/browsers/bot-detection/stealth) contracts.
 Keep those setup steps free of Environment secrets; only the final
 browser-canary step may receive Kernel authority, Junction sandbox authority,
-and the dedicated WHOOP login. A real authorization proof remains available
+and the dedicated Garmin login. A real authorization proof remains available
 only after the exact workflow reaches protected `main`, where non-canceling
 concurrency serializes the dedicated provider account. Do not weaken the
 protected-branch gate or expose live credentials to a pull request to obtain
