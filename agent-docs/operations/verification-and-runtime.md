@@ -40,6 +40,13 @@ unrelated check sufficient.
 
 Repository-created pull requests are draft-first. Opening a PR explicitly as
 non-draft remains the deliberate bypass for entering expensive CI immediately.
+Treat Ready as deliberate near-merge admission, not as a way to get broad CI
+feedback during ordinary development. Keep the PR draft through routine pushes
+and known remediation. An authenticated agent completing an owned PR lane
+should run `gh pr ready <number>` only after focused local proof and the parent
+candidate review are complete, the exact pushed head is the intended merge
+candidate, and no PR-specific edit is already known. That Ready event starts
+the expensive workflows automatically.
 The expensive pull-request workflows admit only non-draft `opened` or
 `reopened` events and `ready_for_review`; they do not run expensive proof on
 `synchronize`. A synchronize event that occurred while the PR was ready records
@@ -53,9 +60,10 @@ populating `workflow_run.pull_requests`. Zero, ambiguous, or mismatched
 resolutions fail closed before the sole draft mutation. A
 synchronize event that occurred while the PR was already draft produces no
 consumable receipt, so delayed handling cannot undo a newer Ready action on the
-unchanged SHA. Mark the PR ready again to prove the new exact head. A skipped
-job is not exact-head success, and required check names remain bound to the jobs
-that actually execute the proof.
+unchanged SHA. After a later push returns the PR to draft, re-establish the
+candidate conditions above before marking it Ready again to prove the new exact
+head. A skipped job is not exact-head success, and required check names remain
+bound to the jobs that actually execute the proof.
 
 `PR Evidence` intentionally remains lightweight on `synchronize` so policy and
 rendered-evidence metadata stay current. `Pull Request Head Change` also runs on
