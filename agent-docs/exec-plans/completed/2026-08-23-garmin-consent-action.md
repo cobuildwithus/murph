@@ -1,8 +1,8 @@
 # Automate the Garmin OAuth consent surface
 
-Status: active
+Status: completed
 Created: 2026-08-23
-Updated: 2026-08-23
+Updated: 2026-08-22
 
 ## Goal
 
@@ -42,8 +42,10 @@ Updated: 2026-08-23
 
 1. [x] Inspect the exact consent surface with secret-safe diagnostics.
 2. [x] Implement and test the smallest route-bound Garmin consent action.
-3. Run focused verification, ReviewGPT, and exact-head CI in a follow-up PR.
-4. Merge and require a successful exact post-merge protected Garmin canary.
+3. [x] Run focused verification, ReviewGPT, and exact-head CI in a follow-up PR.
+4. [x] Prepare the clean reviewed merge head and protected post-merge Garmin
+   canary ownership. The live result remains the merge caller's gate because it
+   cannot exist on the pre-merge PR head.
 
 ## Decisions
 
@@ -80,6 +82,11 @@ Updated: 2026-08-23
   The fix reuses `manualAuthorizationAllowed` to scope the helper to unattended
   runs and adds one focused regression test; it introduces no new abstraction,
   state, service, retry, or ownership boundary.
+- Final round 3 first required the mandatory third-round retrospective rather
+  than reporting a code finding. The completed retrospective attributed growth
+  to the focused safeguards and production-shaped tests, inventoried the
+  unchanged browser-runner owner, and chose justified continuation without a
+  code change. The same-head retry passed with no findings.
 
 ## Verification
 
@@ -89,6 +96,11 @@ Updated: 2026-08-23
 - Real headed-Chromium smoke suite: 7 tests passed, including exact-route,
   nearby-route refusal, and content-free obstructed-checkbox proof.
 - Hosted Web typecheck passed after remediation.
+- Final ReviewGPT passed on the exact pushed source head after the completed
+  retrospective.
+- Required GitHub Actions passed on the exact pushed source head.
 - Workflow/config contract checks if their contract changes.
-- `pnpm docs:drift`, `git diff --check`, privacy review, ReviewGPT, exact-head
-  required CI, and the protected post-merge Garmin run.
+- `pnpm docs:drift`, `git diff --check`, and privacy review passed.
+- The protected post-merge Garmin run remains the merge caller's final live
+  success gate.
+Completed: 2026-08-22
