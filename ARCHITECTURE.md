@@ -3457,7 +3457,28 @@ for bounded provider cleanup and audit compatibility; those fields never grant
 capacity. The ops growth read derives current starter activation from the
 immutable starter grant and maps invalid source references to Unknown while
 exposing only the existing masked phone hint; it never decrypts contact data
-for attribution. Operator recovery is not acquisition: an exhausted canonical
+for attribution.
+
+Invited Web onboarding continues from launch consent inside the authenticated
+consent request rather than relying on a later browser-only enrollment effect.
+The join client supplies its invite code as an explicit continuation hint; the
+legal-consent owner first commits the requested scope and continues only when
+the authoritative returned status has both launch scopes current. The existing
+Starter enrollment boundary then revalidates invite/member matching,
+suspension, messaging readiness, direct billing, and Family recovery under its
+member/beneficiary lock before any append-only grant. Messaging or billing
+recovery defers successfully to the existing server-rendered join owner. Join
+rendering and consent continuation share the canonical recoverable-billing
+predicate; retained Subscription identity is checked before paid evidence, so
+recovery cannot be mistaken for active access. An actual Starter enrollment
+returns its canonical destination through the same request so the browser can
+reuse the existing full-document Home or armed group-start handoff. The hint
+grants no authority by itself. The existing Starter island remains a recovery
+path for already-consented historical or interrupted states; Privy
+authentication webhooks are not activation authority and do not replace the
+consent-owned continuation.
+
+Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
 version, appends immutable history with a distinct Ops source, and is excluded
