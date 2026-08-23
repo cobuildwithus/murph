@@ -1031,7 +1031,13 @@ describe("hosted-local Junction wearable browser authorization", () => {
       }),
       () => now,
     )).rejects.toThrow(
-      "Garmin consent confirmation did not leave the consent route.",
+      [
+        "Garmin consent confirmation did not leave the consent route.",
+        "Authorization surface: childFrames=0 mainActions=1",
+        "mainEnabledActions=1 mainOtherActions=0",
+        "childActions=0 childEnabledActions=0 childOtherActions=0",
+        "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0.",
+      ].join(" "),
     );
 
     expect(agreeClicks).toBe(1);

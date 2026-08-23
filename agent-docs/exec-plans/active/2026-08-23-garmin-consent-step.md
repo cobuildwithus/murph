@@ -28,13 +28,19 @@ Updated: 2026-08-23
   roughly 80 seconds at the first `Save`; the merged run lasted roughly eight
   minutes inside the browser proof and ended with an opaque `SIGTERM`, proving
   the progress-reset defect rather than the original selection-step defect.
+- PR #2182 submitted the positive confirmation action once. Its exact
+  protected-main canary failed after the bounded 15-second confirmation window
+  because Garmin remained on the advanced consent route. The shorter,
+  phase-specific failure proves that repeated submission is fixed, but the
+  existing URL-only observation cannot distinguish an ignored click from a
+  same-route DOM transition.
 
 ## Scope
 
 - In scope: recognize the exact query-bound progression, resume the existing
-  safe action loop, add focused unit and real-Chromium coverage, update the
-  directly affected verification contract, and require a passing protected
-  post-merge canary.
+  safe action loop, add focused unit and real-Chromium coverage, add
+  content-free stalled-confirmation diagnostics, update the directly affected
+  verification contract, and require a passing protected post-merge canary.
 - Out of scope: new action text, broad click heuristics, retries, provider-state
   repair, credential changes, Oura/WHOOP behavior, or weaker callback/cleanup
   assertions.
@@ -46,8 +52,11 @@ Updated: 2026-08-23
    coverage.
 3. [x] Run focused verification, ReviewGPT, and exact-head CI in PR #2175.
 4. [x] Merge PR #2175 and inspect its exact protected-main Garmin canary.
-5. Submit the confirmation action once, run the follow-up completion gates,
-   merge, and require a successful exact post-merge protected Garmin canary.
+5. [x] Submit the confirmation action once, run the follow-up completion gates,
+   merge PR #2182, and inspect its exact post-merge protected Garmin canary.
+6. Capture the stalled post-click surface without provider content, use that
+   evidence for the smallest correction, and require a successful exact
+   post-merge protected Garmin canary.
 
 ## Decisions
 
