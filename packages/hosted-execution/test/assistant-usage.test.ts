@@ -731,7 +731,6 @@ test("assistant usage parsing validates the turn profile allowlist", () => {
   const profile = {
     modelContextWindow: 258400,
     requestCount: 2,
-    reasoningEffort: "high",
     requests: [
       { cachedInput: 0, input: 32000, output: 120 },
       { cachedInput: 31872, input: 33000, output: 80 },
@@ -759,7 +758,7 @@ test("assistant usage parsing validates the turn profile allowlist", () => {
   assert.deepEqual(
     parseAssistantUsageRecord({
       ...baseRecord,
-      turnProfileJson: profile,
+      turnProfileJson: { ...profile, reasoningEffort: "high" },
     }).turnProfileJson,
     profile,
   );
@@ -974,8 +973,6 @@ test("assistant usage parsing drops out-of-contract turn profiles without failin
         outputChars: 1,
       }],
     },
-    { ...validProfile, reasoningEffort: "not valid" },
-    { ...validProfile, reasoningEffort: "x".repeat(33) },
   ];
 
   for (const profile of invalidProfiles) {
