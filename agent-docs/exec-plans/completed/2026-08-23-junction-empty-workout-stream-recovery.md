@@ -1,6 +1,6 @@
 # Recover empty Junction workout streams
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -70,3 +70,12 @@ Updated: 2026-08-23
 - `pnpm --filter @murphai/importers typecheck`
 - `pnpm --filter @murphai/device-syncd typecheck`
 - `pnpm --dir apps/web typecheck`
+
+## Merge-boundary handoff
+
+- The implementation, focused verification, preliminary specialist review, and
+  final ReviewGPT round 2 are complete on the pushed candidate.
+- Merge, protected production deployment, and live recovery proof remain
+  operational steps after this plan is archived; they are not claimed complete
+  by this snapshot.
+Completed: 2026-08-23
