@@ -1,6 +1,6 @@
 # Diagnose stalled Junction workout-stream sync without dropping data
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -75,3 +75,4 @@ Updated: 2026-08-23
   PR gates and exact-head CI.
 - Expected outcomes: all checks pass, emitted logs contain the three new fields,
   and privacy assertions prove no raw workout or provider payload escapes.
+Completed: 2026-08-23
