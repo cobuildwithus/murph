@@ -253,14 +253,14 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(config.manualAuthorizationAllowed).toBe(false);
   });
 
-  it("accepts a headless Garmin Kernel browser with a password", () => {
+  it("accepts a headed Garmin Kernel browser in CI without manual authorization", () => {
     const config = createConfig({
       KERNEL_API_KEY: "kernel-test-key",
       MURPH_E2E_CONNECT_URL:
         "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
       MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
       MURPH_E2E_PROVIDER_BROWSER: "kernel",
-      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_PROVIDER_HEADLESS: "0",
       MURPH_E2E_PROVIDER_SOURCE: "garmin",
       MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
     });
@@ -268,10 +268,49 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(config).toMatchObject({
       browserTransport: "kernel",
       disclosureSourceName: "Garmin",
+      headless: false,
       label: "Garmin",
       manualAuthorizationAllowed: false,
       source: "garmin",
     });
+  });
+
+  it("keeps Kernel unavailable to Oura, headed WHOOP, and manual runs", () => {
+    const expectedError =
+      "Kernel browser transport requires unattended Garmin or headless WHOOP authorization.";
+    expect(() => createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=oura",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_OTP: "123456",
+      MURPH_E2E_PROVIDER_PASSWORD: undefined,
+      MURPH_E2E_PROVIDER_SOURCE: "oura",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    })).toThrow(expectedError);
+
+    expect(() => createConfig({
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=whoop",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "0",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    })).toThrow(expectedError);
+
+    expect(() => createConfig({
+      CI: undefined,
+      KERNEL_API_KEY: "kernel-test-key",
+      MURPH_E2E_CONNECT_URL:
+        "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
+      MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
+      MURPH_E2E_PROVIDER_BROWSER: "kernel",
+      MURPH_E2E_PROVIDER_HEADLESS: "0",
+      MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
+    })).toThrow(expectedError);
   });
 
   it("rejects Kernel without its exact authority and loopback CLI contract", () => {
@@ -327,7 +366,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
         "http://localhost:43123/connect#deviceConnectIntent=opaque&connectSource=garmin",
       MURPH_E2E_KERNEL_CLI_PATH: "/opt/kernel-tools/kernel",
       MURPH_E2E_PROVIDER_BROWSER: "kernel",
-      MURPH_E2E_PROVIDER_HEADLESS: "1",
+      MURPH_E2E_PROVIDER_HEADLESS: "0",
       MURPH_E2E_PROVIDER_SOURCE: "garmin",
       MURPH_E2E_WEB_BASE_URL: "http://localhost:43123",
     });
@@ -365,7 +404,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "murph-junction-garmin-canary",
     );
     expect(kernelLifecycleMocks.createAutomationBrowser).toHaveBeenCalledWith({
-      headless: true,
+      headless: false,
       profileName: "murph-junction-garmin-canary",
       saveChanges: true,
       timeoutSeconds: 90,

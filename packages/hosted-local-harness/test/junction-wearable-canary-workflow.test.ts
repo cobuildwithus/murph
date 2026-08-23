@@ -91,7 +91,7 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
     expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: garmin");
     expect(workflow).toContain("MURPH_E2E_PROVIDER_BROWSER: kernel");
-    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "1"');
+    expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
     expect(workflow).toContain("      - name: Prepare pinned Kernel tunnel tools\n");
     expect(workflow).toContain(
       "https://github.com/kernel/cli/releases/download/v0.31.0/kernel_0.31.0_linux_amd64.tar.gz",

@@ -936,9 +936,16 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
-  if (browserTransport === "kernel" && (source === "oura" || !headless)) {
+  if (
+    browserTransport === "kernel"
+    && (
+      source === "oura"
+      || manualAuthorizationAllowed
+      || (source === "whoop" && !headless)
+    )
+  ) {
     throw new Error(
-      "Kernel browser transport is reserved for unattended headless Garmin or WHOOP canaries.",
+      "Kernel browser transport requires unattended Garmin or headless WHOOP authorization.",
     );
   }
   const kernelApiKey = browserTransport === "kernel"
