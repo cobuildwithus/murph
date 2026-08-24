@@ -383,6 +383,11 @@ test('built duplicate-vault failures emit one safe machine document in every mod
       envelope: true,
       format: 'toon',
     },
+    {
+      args: ['--full-output', '--format', 'yaml'],
+      envelope: true,
+      format: 'yaml',
+    },
   ] as const
 
   for (const mode of modes) {

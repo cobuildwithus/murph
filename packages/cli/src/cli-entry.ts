@@ -396,8 +396,7 @@ export async function renderMurphCliEntrypointError(
     ...(projected.hint ? { hint: projected.hint } : {}),
     ...(projected.stage ? { stage: projected.stage } : {}),
   }
-  const outputBody =
-    argv.includes('--full-output') && (format === 'json' || format === 'toon')
+  const outputBody = argv.includes('--full-output')
     ? {
         ok: false,
         error: errorBody,

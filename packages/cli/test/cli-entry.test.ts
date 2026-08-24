@@ -261,7 +261,7 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
   assert.equal(rendered.output.includes("second"), false);
 });
 
-test("renderMurphCliEntrypointError wraps only JSON and TOON with full-output", async () => {
+test("renderMurphCliEntrypointError wraps every formatter with full-output", async () => {
   const error = new VaultCliError(
     "invalid_option",
     "Pass vault only once.",
@@ -299,8 +299,9 @@ test("renderMurphCliEntrypointError wraps only JSON and TOON with full-output", 
     ["--vault", "one", "--vault", "two", "--full-output", "--format", "yaml"],
     { human: true },
   );
-  assert.match(yaml.output, /^code:\s+invalid_option$/mu);
-  assert.doesNotMatch(yaml.output, /^error:/mu);
+  assert.match(yaml.output, /^ok:\s+false$/mu);
+  assert.match(yaml.output, /^error:/mu);
+  assert.match(yaml.output, /^\s+code:\s+invalid_option$/mu);
 });
 
 test("renderMurphCliEntrypointError defaults non-interactive failures to machine TOON", async () => {
