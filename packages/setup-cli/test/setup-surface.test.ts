@@ -35,8 +35,17 @@ async function runJsonCli(args: string[]): Promise<{
     data?: unknown
     error?: {
       code?: string
+      fieldErrors?: Array<{
+        code?: string
+        expected: string
+        message: string
+        path: string
+        received: string
+      }>
+      hint?: string
       message?: string
       retryable?: boolean
+      stage?: string
     }
   }
   exitCode: number | null

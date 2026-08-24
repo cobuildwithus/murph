@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -22,10 +23,14 @@ import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { createVaultCli } from '../src/vault-cli.js'
 import { runMurphCliEntrypoint } from '../src/cli-entry.js'
 import {
+  binPath,
+  ensureCliRuntimeArtifacts,
   type CliEnvelope,
   requireData,
+  repoRoot,
   runCli,
   runRawCli,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
@@ -251,6 +256,43 @@ async function runJsonCli<TData>(
     envelope: JSON.parse(output.join('').trim()) as CliEnvelope<TData>,
     exitCode,
   }
+}
+
+async function runBuiltCliProcess(args: string[]): Promise<{
+  exitCode: number
+  stderr: string
+  stdout: string
+}> {
+  await ensureCliRuntimeArtifacts()
+
+  return await new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [binPath, ...args],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        }),
+        maxBuffer: 8 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ exitCode: 0, stderr, stdout })
+          return
+        }
+
+        if (typeof error.code !== 'number') {
+          reject(error)
+          return
+        }
+
+        resolve({ exitCode: error.code, stderr, stdout })
+      },
+    )
+  })
 }
 
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
