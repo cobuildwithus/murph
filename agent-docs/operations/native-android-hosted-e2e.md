@@ -18,6 +18,16 @@ the shared identity concurrently. The Android postcondition is platform
 specific and requires Junction provider slug `health_connect`; the existing iOS
 postcondition remains `apple_health_kit`.
 
+PR admission selects only the companion admission, auth-diagnostics,
+onboarding, consent, sign-in-token, and status routes; their hosted
+device-sync/runtime/config dependency closure; and the shared/native Android
+controller owners. Renamed paths are evaluated. Unrelated hosted Web UI,
+content, tests, Health Commons, and assistant-runtime changes publish a
+path-filtered success without consuming the shared live slot. Android and iOS
+retain the same dependency closure because both native journeys exercise the
+same hosted companion surface; Android additionally selects its private
+dispatcher and controller files.
+
 Production deployment events run a separate non-destructive canary. The
 controller proves the deployment SHA is protected-main history and that the
 current production alias still resolves to that exact SHA before dispatching.

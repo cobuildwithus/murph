@@ -988,9 +988,13 @@ keep the one-second presentation-only deadline and late-result rejection.
 - The native companion auth/control/device-sync acceptance lane is `.github/workflows/native-ios-hosted-e2e.yml`. It runs from trusted default-branch `workflow_run` code after Repo Hygiene and selects only the companion admission/auth-diagnostics/onboarding/consent/sign-in-token/status routes, their hosted device-sync/runtime/config owners, and the true workspace package/control-plane closure. Renamed paths remain evaluated; unrelated `apps/web` UI, content, and tests do not select the lane. The controller publishes the stable `Native iOS hosted E2E` commit status. Workflow concurrency is keyed by PR number with non-canceling default single-pending behavior, while the destructive live job retains its one repo-wide `queue: max` slot. The exact head is revalidated before checkout/setup and again after the private tag proof immediately before dispatch. A selected same-repository human-authored PR enters the protected `native-ios-hosted-e2e` environment; fork/bot or missing-environment cases fail closed rather than receiving live authority. Do not rerun a canceled native workflow directly: a rerun keeps its old run identity and is rejected before the live group. Manual retry is infrastructure-only: from an authenticated operator checkout, run `node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code xcodebuild_failed` only after inspecting and recording that closed iOS failure code from the private run. The supplied code is an operator attestation; the helper validates the allowlisted literal but does not discover or verify run provenance. When the Android status reports that a direct workflow rerun did not enter the live queue, its status supplies the corresponding attestation and directs `node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code android_workflow_rerun`. Non-allowlisted journey/product and contract-validation literals are rejected. The helper proves the PR remains ready, open, same-repository, human-authored, and at the same exact head, then reruns the newest successful exact-head Repo Hygiene owner so its completion emits fresh iOS and Android workflow waiters.
 - `.github/workflows/native-android-hosted-e2e.yml` is the parallel trusted
   Android controller and publishes `Native Android hosted E2E`. It uses the
-  same conservative Web selection and destructive `native-ios-hosted-e2e-live`
-  lock because both lanes own the same protected identity, isolated database,
-  Junction namespace, and Vercel target. Its public-to-private contract v1 adds
+  same companion admission/auth/onboarding/consent/token/status dependency
+  closure as iOS, plus shared and Android-specific controller owners. Renamed
+  paths are evaluated; unrelated hosted Web UI, content, tests, Health Commons,
+  and assistant-runtime changes do not consume the live slot. It retains the
+  destructive `native-ios-hosted-e2e-live` lock because both lanes own the same
+  protected identity, isolated database, Junction namespace, and Vercel target.
+  Its public-to-private contract v1 adds
   the exact Android SHA, immutable lightweight tag, and short dispatch expiry
   to the exact Web SHA/origin, mode, correlation id, and identity lifecycle.
   The returned private run id must stay bound to that tag's commit. An

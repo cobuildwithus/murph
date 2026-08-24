@@ -581,14 +581,46 @@ test("trusted workflow is pinned, protected, source-bound, and shares the destru
   }
 });
 
-test("Android workflow selector executes representative selected and neutral paths", async () => {
+test("Android workflow selector admits only the hosted companion dependency closure", async () => {
   const workflow = await readFile(
     path.join(ROOT, ".github", "workflows", "native-android-hosted-e2e.yml"),
     "utf8",
   );
+  const iosWorkflow = await readFile(
+    path.join(ROOT, ".github", "workflows", "native-ios-hosted-e2e.yml"),
+    "utf8",
+  );
+  const androidControllerPatterns = new Set([
+    "scripts/native-ios-hosted-e2e*",
+    "scripts/native-android-hosted-e2e*",
+    ".github/workflows/native-android-hosted-e2e.yml",
+    "agent-docs/operations/native-android-hosted-e2e.md",
+  ]);
+  assert.deepEqual(
+    workflowSelectorPatterns(workflow).filter((pattern) => !androidControllerPatterns.has(pattern)),
+    workflowSelectorPatterns(iosWorkflow),
+    "the hosted companion dependency closure must stay aligned across native platforms",
+  );
+  assert.doesNotMatch(
+    workflow,
+    /^\s+apps\/web\/\*\|/mu,
+    "the selector must not admit every hosted Web path",
+  );
   for (const selected of [
-    "apps/web/app/page.tsx",
+    "apps/web/app/api/device-sync/companion/admission/route.ts",
+    "apps/web/app/api/device-sync/companion/auth-diagnostics/route.ts",
+    "apps/web/app/api/device-sync/companion/initial-onboarding/contact-card/route.ts",
+    "apps/web/app/api/device-sync/companion/legal-consent/route.ts",
+    "apps/web/app/api/device-sync/companion/sign-in-token/route.ts",
+    "apps/web/app/api/device-sync/companion/status/route.ts",
+    "apps/web/src/lib/hosted-onboarding/request-auth.ts",
+    "apps/web/src/lib/hosted-messages/user-facing-messages.ts",
+    "apps/web/src/lib/device-sync/control-plane.ts",
+    "apps/web/prisma/schema.prisma",
+    "packages/device-syncd/src/hosted-runtime.ts",
     "scripts/native-android-hosted-e2e-native.mjs",
+    "scripts/native-ios-hosted-e2e-identity.mjs",
+    ".github/workflows/native-ios-hosted-e2e.yml",
     ".github/workflows/native-android-hosted-e2e.yml",
   ]) {
     assert.equal(runWorkflowSelector(workflow, selected), "selected", selected);
@@ -596,9 +628,25 @@ test("Android workflow selector executes representative selected and neutral pat
   for (const neutral of [
     "README.md",
     "agent-docs/product-specs/companion-app.md",
+    "apps/web/app/page.tsx",
+    "apps/web/app/changelog/page.tsx",
+    "apps/web/changelog/README.md",
+    "apps/web/src/components/marketing/hero.tsx",
+    "apps/web/test/dashboard-home-page.test.tsx",
+    "packages/assistant-runtime/src/index.ts",
+    "packages/health-commons/src/index.ts",
   ]) {
     assert.equal(runWorkflowSelector(workflow, neutral), "neutral", neutral);
   }
+  const broadWebMutation = workflow.replace(
+    '              case "${file}" in\n',
+    '              case "${file}" in\n                apps/web/*|\\\n',
+  );
+  assert.equal(
+    runWorkflowSelector(broadWebMutation, "apps/web/app/page.tsx"),
+    "selected",
+    "the unrelated Web mutation must demonstrate why the broad pattern is forbidden",
+  );
 });
 
 test("Android commit status shell distinguishes retry, skip, trust, live pass, and failure", async () => {
@@ -721,13 +769,11 @@ function extractWorkflowStepScript(workflow, stepName) {
 }
 
 function runWorkflowSelector(workflow, file) {
-  const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
-  assert.ok(match?.groups?.patterns, "workflow selector case was not found");
   const script = [
     "set -euo pipefail",
     'file="$1"',
     'case "${file}" in',
-    `${match.groups.patterns})`,
+    `${workflowSelectorPatternSource(workflow)})`,
     '  printf "selected\\n"',
     "  ;;",
     "*)",
@@ -741,4 +787,19 @@ function runWorkflowSelector(workflow, file) {
   assert.equal(result.error, undefined);
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
+}
+
+function workflowSelectorPatterns(workflow) {
+  return workflowSelectorPatternSource(workflow)
+    .replace(/\\\n\s*/gu, "")
+    .trim()
+    .split("|")
+    .map((pattern) => pattern.trim())
+    .filter(Boolean);
+}
+
+function workflowSelectorPatternSource(workflow) {
+  const match = /case "\$\{file\}" in\n(?<patterns>[\s\S]*?)\)\n\s+selected=true\n\s+break/u.exec(workflow);
+  assert.ok(match?.groups?.patterns, "workflow selector case was not found");
+  return match.groups.patterns;
 }
