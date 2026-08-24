@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "choose-the-model-for-background-work",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Choose the model for background work",
+    "summary": "Murph now officially supports asking a bounded background task to use another available model instead of inheriting the conversation model.",
+    "details": "If you do not name a model, background work still inherits the conversation model. A requested model must be available to the hosted runtime, and usage is attributed to the model actually used.",
+    "relevanceTags": ["assistant", "background-work", "models"],
+    "sourcePullRequests": [2225]
+  }
+}
