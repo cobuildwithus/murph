@@ -145,7 +145,11 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
 // Nutrition and provider recovery metadata add 6,153 B to the lazy CLI graph.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_473_801;
+// The follow-up nutrition recovery correction at exact candidate
+// 65de007f50ed05b3f5abbd2dc142a23223364828 measured 9,477,676 B in canonical
+// local production assembly, a 3,875 B total-only increase in the existing lazy
+// error and protocol-validation graph. Entry and static-startup limits stay put.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_477_676;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
