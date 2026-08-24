@@ -72,6 +72,12 @@ describe('hosted domain dynamic tools', () => {
       'Generic save is create-only',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'An archived-only same-name automation does not block a fresh save',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'If an active or paused automation already exists, use action=inspect and then a versioned patch',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Inspect is read-only and returns the authoritative stored version plus scheduler timing projection',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(

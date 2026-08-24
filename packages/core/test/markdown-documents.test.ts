@@ -586,6 +586,58 @@ describe("markdown document primitives", () => {
     expect(created.record.automationId).not.toBe(archived.record.automationId);
     expect(created.record.slug).toBe("mobility-reminder-2");
     expect(created.record.relativePath).toBe("bank/automations/mobility-reminder-2.md");
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:01:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "active",
+        title: "Mobility reminder",
+      }),
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+
+    await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2031-02-15T12:02:00.000Z"),
+      status: "paused",
+    });
+    await expect(upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:03:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "active",
+        title: "Mobility reminder",
+      }),
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+
+    await patchAutomation({
+      vaultRoot,
+      lookup: created.record.automationId,
+      now: new Date("2031-02-15T12:04:00.000Z"),
+      status: "archived",
+    });
+    const recreated = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:05:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "active",
+        title: "Mobility reminder",
+      }),
+    });
+
+    expect(recreated.created).toBe(true);
+    expect(recreated.record.automationId).not.toBe(created.record.automationId);
+    expect(recreated.record.slug).toBe("mobility-reminder-3");
+    const records = await listAutomations({ vaultRoot });
+    expect(records.items.filter((record) => record.status === "active")).toEqual([
+      recreated.record,
+    ]);
     await expect(showAutomation({
       slug: "mobility-reminder",
       vaultRoot,

@@ -149,20 +149,33 @@ function resolveAvailableAutomationCreateSlug(
   records: readonly AutomationRecord[],
   requestedSlug: string,
 ): string {
-  const usedSlugs = new Set(records.map((record) => record.slug));
-  if (!usedSlugs.has(requestedSlug)) {
+  const recordsBySlug = new Map(records.map((record) => [record.slug, record]));
+  if (!recordsBySlug.has(requestedSlug)) {
     return requestedSlug;
   }
 
+  let availableSlug: string | undefined;
   for (let index = 2; index <= records.length + 2; index += 1) {
     const suffix = `-${index}`;
     const stem = requestedSlug
       .slice(0, AUTOMATION_SLUG_MAX_LENGTH - suffix.length)
       .replace(/-+$/u, "");
     const candidate = `${stem}${suffix}`;
-    if (!usedSlugs.has(candidate)) {
-      return candidate;
+    const existingRecord = recordsBySlug.get(candidate);
+    if (existingRecord === undefined) {
+      availableSlug ??= candidate;
+      continue;
     }
+    if (existingRecord.status !== "archived") {
+      throw new VaultError(
+        "VAULT_AUTOMATION_CONFLICT",
+        "Automation already exists; use a versioned patch to change it.",
+      );
+    }
+  }
+
+  if (availableSlug !== undefined) {
+    return availableSlug;
   }
 
   throw new VaultError(

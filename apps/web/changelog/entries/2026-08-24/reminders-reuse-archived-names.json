@@ -6,7 +6,7 @@
     "kind": "improvement",
     "priority": 3,
     "title": "Reminders can reuse familiar names",
-    "summary": "Creating a reminder now works when an older reminder with the same name is no longer active.",
+    "summary": "Creating a reminder now works when an older reminder with the same name has been archived.",
     "details": "Murph keeps the older reminder intact and saves the new request as a separate schedule.",
     "relevanceTags": ["reminders", "reliability"],
     "sourcePullRequests": [2216]
