@@ -1,6 +1,6 @@
 # Clarify reminder occurrence projection
 
-Status: active
+Status: completed
 Created: 2026-08-23
 
 ## Product UX
@@ -22,7 +22,7 @@ Replace the overloaded timing-verification boolean with one explicit occurrence-
 
 ## Scope
 
-- In scope: hosted automation response contract, projection mapping, reminder-edit guidance, focused tests, and the public changelog.
+- In scope: hosted automation response contract, projection mapping, reminder-edit guidance, focused tests, the public changelog, and the user-requested ReviewGPT disposition rule for non-production-only remediation.
 - Out of scope: scheduler semantics, retry policy, reminder persistence, delivery ownership, database schema, and new lifecycle state.
 
 ## Tasks
@@ -32,6 +32,7 @@ Replace the overloaded timing-verification boolean with one explicit occurrence-
 3. Update assistant guidance so pending recurring projection confirms the saved schedule and asks for no member action, while an in-flight one-shot avoids a delivery promise and offers rescheduling; retain honest failure wording for true readback errors.
 4. Run focused tests, package typechecks, privacy/diff inspection, Product UX walkthrough, and required completion reviews.
 5. Commit, push, open a draft PR, run ReviewGPT with CI, and resolve accepted findings before handoff.
+6. Let fully non-production ReviewGPT remediation continue after a user-visible disposition update when it is limited to isolated tests/fixtures, non-runtime docs/process text, or PR/review evidence; preserve the ordinary pause for every production-affecting correction.
 
 ## Architecture decision
 
@@ -51,3 +52,7 @@ The runtime already owns both canonical reminder reads and scheduler projection.
 - Assistant Engine and Assistant Runtime package typechecks pass.
 - Complete first provider-visible requests captured through the pinned Codex App Server with identical direct and group reminder fixtures, `gpt-5.6-terra`, low reasoning, production code mode, and `gpt-tokenizer` 3.4.0 `o200k_harmony` now grow by 232 tokens and 1,208 UTF-8 bytes in each route. Direct changes from 26,890 tokens / 124,124 bytes to 27,122 / 125,332; group changes from 22,751 / 105,397 to 22,983 / 106,605. The accepted schedule-kind remediation was measured by deterministically replacing only the reviewed pending-projection fragment in the same complete serialized requests; it adds 76 tokens and 389 bytes to the first candidate. The total delta remains entirely in assembled reminder guidance; tool/schema/generated guidance and other provider-visible fields are unchanged after volatile paths and identifiers are normalized.
 - Product UX walkthrough: a pending active recurrence confirms the saved reminder and requires no member action; a pending active one-shot confirms the save without promising delivery and offers rescheduling if the time passes; unavailable projection stays honest; resolved, device-triggered, exhausted, scheduler, and delivery behavior remain unchanged.
+- Final ReviewGPT round 2 found one accepted disclosure-only issue: changing the provider-visible developer/tool contract rotates the first eligible turn of an existing automation-capable private or group session onto a fresh provider thread. Existing bounded committed-history replay preserves up to 24 messages, 4,000 bytes per message, and 12,000 bytes total; the replacement thread resumes normally on the following turn, though the member may need one clarification when older context falls outside that replay window. The PR deployment notes now make that first-turn behavior, rollback symmetry, and private/group smoke checks explicit, and the required same-round disclosure retry passed with no remaining findings.
+- The ReviewGPT workflow now has one effect-based `Non-Production Remediation` exception in addition to `Complexity Collapse`: all accepted corrections must stay inside isolated tests/fixtures/direct proof, non-runtime repository docs/process text, or PR/review evidence. Any runtime, product, contract, config, generated artifact, data, dependency, deployment, external-state, or destructive effect retains the turn-ending pause. The focused CLI workflow contract passes 45 tests with one intentional skip, and the developer-workflow/Frog guards pass 23 tests.
+Updated: 2026-08-24
+Completed: 2026-08-24

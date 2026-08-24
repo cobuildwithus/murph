@@ -1935,7 +1935,14 @@ describe('monorepo release flow coverage audit', () => {
       /A validated final `ROUND_OUTCOME: PASS` has no\s+findings to disposition and proceeds directly/u,
     )
     expect(prReviewGptLoop).toContain(
-      'One narrow exception completes the disposition boundary',
+      'Two narrow exceptions complete the disposition boundary',
+    )
+    expect(prReviewGptLoop).toContain('`Non-Production Remediation`')
+    expect(prReviewGptLoop).toContain(
+      'complete correction changes no production source',
+    )
+    expect(prReviewGptLoop).toMatch(
+      /every\s+accepted finding must qualify/u,
     )
     expect(prReviewGptLoop).toMatch(
       /continue the ReviewGPT loop without asking the user for\s+separate permission/u,
