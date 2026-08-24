@@ -941,7 +941,7 @@ function createIntegratedImporterServices(): ImporterServices {
           reuseExact,
         })
       } catch (error) {
-        const inputFileError = toImporterInputFileVaultCliError(error)
+        const inputFileError = toImporterInputFileVaultCliError(error, file)
         if (inputFileError !== error) {
           throw inputFileError
         }
@@ -1554,9 +1554,7 @@ function createIntegratedQueryServices(): QueryServices {
         await materializeExportPack(vault, pack.files)
       } catch (error) {
         throw toVaultCliFilesystemError(error, {
-          stage: 'export_store',
           message: 'The export pack could not be stored in the vault.',
-          hint: 'Check vault storage and permissions before retrying.',
           fieldPath: 'vault',
         })
       }
@@ -1566,9 +1564,7 @@ function createIntegratedQueryServices(): QueryServices {
           await materializeExportPack(out, pack.files)
         } catch (error) {
           throw toVaultCliFilesystemError(error, {
-            stage: 'export_output',
             message: 'The export pack could not be written to the output directory.',
-            hint: 'Choose a writable --out directory and retry.',
             fieldPath: 'out',
           })
         }

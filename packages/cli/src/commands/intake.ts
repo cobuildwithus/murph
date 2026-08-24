@@ -110,7 +110,7 @@ export function registerIntakeCommands(cli: Cli.Cli, services: VaultServices) {
             ledgerFile: result.ledgerPath,
           }
         } catch (error) {
-          throw toAssessmentImportVaultCliError(error)
+          throw toAssessmentImportVaultCliError(error, args.file)
         }
       },
     },

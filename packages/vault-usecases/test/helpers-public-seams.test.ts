@@ -440,6 +440,7 @@ describe("helper barrel exports", () => {
           errors: [
             "$.title: private-submitted-title is too long",
             "$.links[2].targetId: private-submitted-id is invalid",
+            "$.fields.private-submitted-key: private-submitted-value is invalid",
           ],
         },
       }),
@@ -457,23 +458,21 @@ describe("helper barrel exports", () => {
     if (!(eventContractError instanceof VaultCliError)) {
       throw new Error("expected event validation to map to VaultCliError");
     }
-    expect(eventContractError.repair).toEqual({
-      stage: "validation",
-      hint: "Correct the listed event fields and retry.",
-      fields: [
+    expect(eventContractError.context?.issues).toEqual([
         {
-          path: "title",
-          code: "contract_invalid",
-          message: "Value does not satisfy the record contract.",
+          path: ["title"],
+          code: "custom",
         },
         {
-          path: "links.2.targetId",
-          code: "contract_invalid",
-          message: "Value does not satisfy the record contract.",
+          path: ["links"],
+          code: "custom",
         },
-      ],
-    });
-    expect(JSON.stringify(eventContractError.repair)).not.toContain("private-submitted");
+        {
+          path: ["fields"],
+          code: "custom",
+        },
+    ]);
+    expect(JSON.stringify(eventContractError.context?.issues)).not.toContain("private-submitted");
 
     const missingEventTitle = toEventUpsertVaultCliError(
       Object.assign(new Error("Event payload requires a title."), {
@@ -483,9 +482,8 @@ describe("helper barrel exports", () => {
     );
     expect(missingEventTitle).toEqual(expect.objectContaining({
       code: "contract_invalid",
-      repair: expect.objectContaining({
-        stage: "validation",
-        fields: [expect.objectContaining({ path: "title", missing: true })],
+      context: expect.objectContaining({
+        issues: [expect.objectContaining({ path: ["title"], code: "invalid_type" })],
       }),
     }));
 
@@ -497,38 +495,48 @@ describe("helper barrel exports", () => {
     );
     expect(unrelatedInvalidInput).toEqual(expect.objectContaining({
       code: "contract_invalid",
-      repair: undefined,
+      context: expect.not.objectContaining({ issues: expect.anything() }),
     }));
 
     const inputFileError = toImporterInputFileVaultCliError(
-      Object.assign(new Error("missing /private/member-file.json"), { code: "ENOENT" }),
+      Object.assign(new Error("missing synthetic input"), {
+        code: "ENOENT",
+        path: "/synthetic/member-file.json",
+      }),
+      "/synthetic/member-file.json",
     );
     expect(inputFileError).toEqual(expect.objectContaining({
       code: "not_found",
       message: "The input file was not found.",
-      repair: expect.objectContaining({
-        stage: "input_file",
-        hint: "Choose an existing regular file for the file argument and retry.",
-        fields: [expect.objectContaining({ path: "file", code: "not_found" })],
+      context: expect.objectContaining({
+        issues: [expect.objectContaining({ path: ["file"], code: "custom" })],
       }),
     }));
-    expect(JSON.stringify(inputFileError)).not.toContain("/private/member-file.json");
+    expect(JSON.stringify(inputFileError)).not.toContain("/synthetic/member-file.json");
+
+    const vaultPermissionError = Object.assign(new Error("vault metadata is unreadable"), {
+      code: "EACCES",
+      path: "/synthetic/vault/vault.json",
+    });
+    expect(
+      toImporterInputFileVaultCliError(
+        vaultPermissionError,
+        "/synthetic/member-file.json",
+      ),
+    ).toBe(vaultPermissionError);
 
     const exportWriteError = toVaultCliFilesystemError(
       Object.assign(new Error("ENOSPC at /private/output"), { code: "ENOSPC" }),
       {
-        stage: "export_output",
         message: "The export pack could not be written.",
-        hint: "Choose a writable --out directory and retry.",
         fieldPath: "out",
       },
     );
     expect(exportWriteError).toEqual(expect.objectContaining({
       code: "storage_unavailable",
-      context: { retryable: false },
-      repair: expect.objectContaining({
-        stage: "export_output",
-        fields: [expect.objectContaining({ path: "out" })],
+      context: expect.objectContaining({
+        retryable: false,
+        issues: [expect.objectContaining({ path: ["out"] })],
       }),
     }));
     expect(JSON.stringify(exportWriteError)).not.toContain("/private/output");
@@ -543,7 +551,9 @@ describe("helper barrel exports", () => {
     expect(missingAssessmentError).toEqual(expect.objectContaining({
       code: "not_found",
       message: "The requested assessment response was not found.",
-      repair: expect.objectContaining({ stage: "lookup" }),
+      context: expect.objectContaining({
+        issues: [expect.objectContaining({ path: ["id"] })],
+      }),
     }));
     expect((missingAssessmentError as VaultCliError).message).not.toContain("private-id");
 
@@ -574,13 +584,6 @@ describe("helper barrel exports", () => {
         context: expect.objectContaining({
           retryable: false,
           vaultCode: storedError.code,
-        }),
-        repair: expect.objectContaining({
-          hint: expect.stringContaining("cannot repair stored assessment data"),
-          stage:
-            storedError.code === "VAULT_INVALID_JSONL"
-              ? "assessment_read"
-              : "assessment_validation",
         }),
       }));
       expect(JSON.stringify(mapped)).not.toMatch(

@@ -18,10 +18,7 @@ import {
   resolveVaultRelativePath,
   toVaultCliFilesystemError,
 } from '@murphai/vault-usecases/helpers'
-import {
-  VaultCliError,
-  type VaultCliRepairInput,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 type JsonObject = Record<string, unknown>
@@ -30,9 +27,6 @@ interface StoredManifestRecovery {
   subject: string
   missingCode: string
   invalidCode: string
-  missingHint: string
-  invalidHint: string
-  readHint: string
 }
 
 const exportPackFileSchema = z
@@ -80,23 +74,11 @@ const exportPackManifestRecovery: StoredManifestRecovery = {
   subject: 'export pack',
   missingCode: 'manifest_missing',
   invalidCode: 'manifest_invalid',
-  missingHint:
-    'The CLI cannot reconstruct or repair this stored export pack manifest. Create a new pack with export pack create.',
-  invalidHint:
-    'The CLI cannot repair this stored export pack manifest. Create a new pack with export pack create.',
-  readHint:
-    'Check vault access before retrying; the CLI cannot repair the stored export pack manifest itself.',
 }
 const assessmentManifestRecovery: StoredManifestRecovery = {
   subject: 'assessment raw-import',
   missingCode: 'manifest_missing',
   invalidCode: 'manifest_invalid',
-  missingHint:
-    'The CLI cannot reconstruct or repair this stored assessment manifest. Run intake list to choose another assessment or use intake import on the original source.',
-  invalidHint:
-    'The CLI cannot repair this stored assessment manifest. Run intake list to choose another assessment or use intake import on the original source.',
-  readHint:
-    'Check vault access before retrying; the CLI cannot repair the stored assessment manifest itself.',
 }
 
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
@@ -125,15 +107,9 @@ function exportPackNotFoundError() {
   return new VaultCliError(
     'not_found',
     'The requested export pack was not found.',
-    { retryable: false },
     {
-      stage: 'lookup',
-      hint: 'Run export pack list and retry with an existing pack id.',
-      fields: [{
-        path: 'id',
-        code: 'not_found',
-        message: 'No stored export pack matches this id.',
-      }],
+      retryable: false,
+      issues: [{ code: 'custom', path: ['id'] }],
     },
   )
 }
@@ -152,9 +128,7 @@ async function storedExportPackDirectoryExists(
     }
 
     throw toVaultCliFilesystemError(error, {
-      stage: 'manifest_lookup',
       message: 'The stored export pack directory could not be inspected.',
-      hint: 'Check vault export-directory permissions before retrying.',
     })
   }
 }
@@ -167,55 +141,52 @@ function readErrorCode(error: unknown): string | null {
   return typeof error.code === 'string' ? error.code : null
 }
 
-function manifestValidationRepair(
-  error: unknown,
-  hint: string,
-): VaultCliRepairInput {
+function manifestValidationContext(error: unknown) {
   const issues =
     error && typeof error === 'object' && 'issues' in error && Array.isArray(error.issues)
       ? error.issues
       : []
 
   return {
-    stage: 'manifest_validation',
-    hint,
-    fields: issues.map((issue) => {
+    retryable: false,
+    issues: issues.map((issue) => {
       const issueRecord = issue && typeof issue === 'object' ? issue : null
       const issueCode =
         issueRecord && 'code' in issueRecord && typeof issueRecord.code === 'string'
-          ? issueRecord.code
-          : undefined
+          ? safeValidationIssueCode(issueRecord.code)
+          : 'custom'
       const issuePath =
         issueRecord && 'path' in issueRecord && Array.isArray(issueRecord.path)
-          ? issueRecord.path.filter(
-              (segment: unknown): segment is PropertyKey =>
-                typeof segment === 'string' || typeof segment === 'number',
-            )
+          ? topLevelValidationPath(issueRecord.path)
           : []
+      const expected =
+        issueRecord
+        && 'expected' in issueRecord
+        && typeof issueRecord.expected === 'string'
+        && /^(?:array|boolean|null|number|object|string|undefined)$/u.test(issueRecord.expected)
+          ? issueRecord.expected
+          : undefined
 
       return {
         path: issuePath,
-        ...(issueCode ? { code: issueCode } : {}),
-        message: manifestValidationMessage(issueCode),
+        code: issueCode,
+        ...(expected ? { expected } : {}),
       }
     }),
   }
 }
 
-function manifestValidationMessage(code: string | undefined) {
-  switch (code) {
-    case 'invalid_type':
-      return 'Manifest field has the wrong type.'
-    case 'too_big':
-      return 'Manifest field exceeds the allowed maximum.'
-    case 'too_small':
-      return 'Manifest field is below the allowed minimum.'
-    case 'invalid_value':
-    case 'invalid_enum_value':
-      return 'Manifest field is not one of the allowed values.'
-    default:
-      return 'Manifest field failed validation.'
-  }
+function safeValidationIssueCode(code: string) {
+  return /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(code)
+    ? code
+    : 'custom'
+}
+
+function topLevelValidationPath(pathSegments: readonly unknown[]) {
+  const topLevel = pathSegments[0]
+  return typeof topLevel === 'string' && /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(topLevel)
+    ? [topLevel]
+    : []
 }
 
 async function readJsonRelativeFile<T>(
@@ -234,10 +205,6 @@ async function readJsonRelativeFile<T>(
         'invalid_path',
         `The stored ${recovery.subject} manifest path is invalid.`,
         { retryable: false },
-        {
-          stage: 'manifest_lookup',
-          hint: recovery.invalidHint,
-        },
       )
     }
 
@@ -251,9 +218,7 @@ async function readJsonRelativeFile<T>(
   } catch (error) {
     if (readErrorCode(error) !== 'ENOENT' && readErrorCode(error) !== 'ENOTDIR') {
       throw toVaultCliFilesystemError(error, {
-        stage: 'manifest_read',
         message: `The stored ${recovery.subject} manifest could not be read.`,
-        hint: recovery.readHint,
       })
     }
 
@@ -261,10 +226,6 @@ async function readJsonRelativeFile<T>(
       recovery.missingCode,
       `The stored ${recovery.subject} manifest is missing.`,
       { retryable: false },
-      {
-        stage: 'manifest_read',
-        hint: recovery.missingHint,
-      },
     )
   }
 
@@ -276,15 +237,9 @@ async function readJsonRelativeFile<T>(
     throw new VaultCliError(
       recovery.invalidCode,
       `The stored ${recovery.subject} manifest is not valid JSON.`,
-      { retryable: false },
       {
-        stage: 'manifest_parse',
-        hint: recovery.invalidHint,
-        fields: [{
-          path: '$',
-          code: 'invalid_json',
-          message: 'Manifest must contain valid JSON.',
-        }],
+        retryable: false,
+        issues: [{ code: 'invalid_format', path: [] }],
       },
     )
   }
@@ -295,8 +250,7 @@ async function readJsonRelativeFile<T>(
     throw new VaultCliError(
       recovery.invalidCode,
       `The stored ${recovery.subject} manifest does not match the expected JSON shape.`,
-      { retryable: false },
-      manifestValidationRepair(error, recovery.invalidHint),
+      manifestValidationContext(error),
     )
   }
 }
@@ -321,15 +275,9 @@ async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
     throw new VaultCliError(
       'not_found',
       'The requested assessment was not found.',
-      { retryable: false },
       {
-        stage: 'lookup',
-        hint: 'Run intake list and retry with an existing assessment id.',
-        fields: [{
-          path: 'id',
-          code: 'not_found',
-          message: 'No stored assessment matches this id.',
-        }],
+        retryable: false,
+        issues: [{ code: 'custom', path: ['id'] }],
       },
     )
   }
@@ -345,10 +293,6 @@ function resolveAssessmentRawFile(record: AssessmentEntity) {
       'raw_missing',
       'The stored assessment does not declare a raw artifact path.',
       { retryable: false },
-      {
-        stage: 'manifest_lookup',
-        hint: assessmentManifestRecovery.missingHint,
-      },
     )
   }
 
@@ -376,10 +320,6 @@ async function resolveStoredRawManifestFile(
         'invalid_path',
         'The stored assessment raw artifact path is invalid.',
         { retryable: false },
-        {
-          stage: 'manifest_lookup',
-          hint: assessmentManifestRecovery.invalidHint,
-        },
       )
     }
 
@@ -393,9 +333,7 @@ async function resolveStoredRawManifestFile(
   } catch (error) {
     if (readErrorCode(error) !== 'ENOENT' && readErrorCode(error) !== 'ENOTDIR') {
       throw toVaultCliFilesystemError(error, {
-        stage: 'manifest_read',
         message: 'The stored assessment raw-import directory could not be read.',
-        hint: assessmentManifestRecovery.readHint,
       })
     }
 
@@ -403,10 +341,6 @@ async function resolveStoredRawManifestFile(
       assessmentManifestRecovery.missingCode,
       'The stored assessment raw-import directory is missing.',
       { retryable: false },
-      {
-        stage: 'manifest_read',
-        hint: assessmentManifestRecovery.missingHint,
-      },
     )
   }
 
@@ -424,10 +358,6 @@ async function resolveStoredRawManifestFile(
       assessmentManifestRecovery.missingCode,
       'The stored assessment raw-import manifest is missing.',
       { retryable: false },
-      {
-        stage: 'manifest_read',
-        hint: assessmentManifestRecovery.missingHint,
-      },
     )
   }
 
@@ -515,15 +445,9 @@ async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
     throw new VaultCliError(
       'manifest_invalid',
       'The stored export pack manifest does not match its directory.',
-      { retryable: false },
       {
-        stage: 'manifest_validation',
-        hint: exportPackManifestRecovery.invalidHint,
-        fields: [{
-          path: 'packId',
-          code: 'mismatch',
-          message: 'Manifest packId must match its export pack directory.',
-        }],
+        retryable: false,
+        issues: [{ code: 'custom', path: ['packId'] }],
       },
     )
   }
@@ -633,9 +557,7 @@ export async function listStoredExportPacks(
       return []
     }
     throw toVaultCliFilesystemError(error, {
-      stage: 'export_list',
       message: 'Stored export packs could not be listed.',
-      hint: 'Check vault export-directory permissions before retrying.',
     })
   }
 
@@ -699,9 +621,7 @@ export async function materializeStoredExportPack(input: {
     await materializeExportPack(outDir, files)
   } catch (error) {
     throw toVaultCliFilesystemError(error, {
-      stage: 'export_output',
       message: 'The export pack could not be written to the output directory.',
-      hint: 'Choose a writable --out directory and retry.',
       fieldPath: input.out ? 'out' : 'vault',
     })
   }
@@ -726,9 +646,7 @@ export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
     pruned = await retireMaterializedExportPack(vaultRoot, receipt)
   } catch (error) {
     throw toVaultCliFilesystemError(error, {
-      stage: 'export_prune',
       message: 'The stored export pack could not be pruned.',
-      hint: 'Check vault export-directory permissions before retrying.',
     })
   }
   if (!pruned) {

@@ -9,6 +9,7 @@ import { test } from 'vitest'
 import {
   requireData,
   runCli,
+  runRawCli,
   type CliEnvelope,
   type CliErrorEnvelope,
 } from './cli-test-helpers.js'
@@ -55,8 +56,8 @@ async function importAssessmentManifestFixture(vaultRoot: string, key: string) {
   }
 }
 
-test.sequential('built CLI returns bounded event import and edit repair fields', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-repair-'))
+test.sequential('built CLI returns bounded event import and edit fields', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-recovery-'))
   const payloadPath = path.join(vaultRoot, 'event-input.json')
   const privateTitle = `private-event-title-${'x'.repeat(170)}`
 
@@ -87,7 +88,7 @@ test.sequential('built CLI returns bounded event import and edit repair fields',
     assert.equal(importError.code, 'contract_invalid')
     assert.equal(importError.retryable, false)
     assert.equal(importError.stage, 'validation')
-    assert.equal(importError.hint, 'Correct the listed event fields and retry.')
+    assert.equal(importError.hint, undefined)
     assert.equal(importError.fieldErrors?.some((field) => field.path === 'title'), true)
     assertDoesNotEcho(invalidImport, [privateTitle, payloadPath, vaultRoot])
 
@@ -133,8 +134,102 @@ test.sequential('built CLI returns bounded event import and edit repair fields',
   }
 })
 
+test.sequential('built CLI never exposes submitted event record keys in import or edit errors', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-event-record-key-recovery-'))
+  const payloadPath = path.join(vaultRoot, 'event-input.json')
+  const privateConfounderKey = 'private_confounder_key_7f3a'
+  const privateFieldKey = 'private_field_key_9b2c'
+  const privateKeys = [privateConfounderKey, privateFieldKey]
+
+  try {
+    await initializeVault({ vaultRoot })
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        kind: 'intervention_session',
+        occurredAt: '2026-08-24T12:00:00.000Z',
+        title: 'Recovery session',
+        interventionType: 'sauna',
+        confounders: {
+          [privateConfounderKey]: { nested: 'invalid' },
+        },
+        fields: {
+          [privateFieldKey]: { nested: 'invalid' },
+        },
+      }),
+      'utf8',
+    )
+
+    const importArgs = [
+      'event',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ]
+    const invalidImport = await runCli(importArgs)
+    const importError = requireError(invalidImport)
+
+    assert.equal(importError.code, 'contract_invalid')
+    assert.equal(importError.stage, 'validation')
+    assert.equal((importError.fieldErrors?.length ?? 0) > 0, true)
+    assert.equal(
+      importError.fieldErrors?.every((field) => ['$', 'confounders', 'fields'].includes(field.path)),
+      true,
+    )
+    assertDoesNotEcho(invalidImport, [...privateKeys, payloadPath, vaultRoot])
+    const rawImportError = await runRawCli(importArgs)
+    for (const privateKey of privateKeys) {
+      assert.doesNotMatch(rawImportError, new RegExp(privateKey, 'u'))
+    }
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        kind: 'intervention_session',
+        occurredAt: '2026-08-24T12:00:00.000Z',
+        title: 'Recovery session',
+        interventionType: 'sauna',
+        confounders: {
+          [privateConfounderKey]: 'synthetic value',
+        },
+        fields: {
+          [privateFieldKey]: 'synthetic value',
+        },
+      }),
+      'utf8',
+    )
+    const imported = await runCli<{ eventId: string }>(importArgs)
+    assert.equal(imported.ok, true, JSON.stringify(imported))
+
+    const editArgs = [
+      'event',
+      'edit',
+      requireData(imported).eventId,
+      '--title',
+      `invalid-title-${'x'.repeat(170)}`,
+      '--vault',
+      vaultRoot,
+    ]
+    const invalidEdit = await runCli(editArgs)
+    const editError = requireError(invalidEdit)
+
+    assert.equal(editError.code, 'contract_invalid')
+    assert.equal(editError.stage, 'validation')
+    assert.equal(editError.fieldErrors?.some((field) => field.path === 'title'), true)
+    assertDoesNotEcho(invalidEdit, [...privateKeys, requireData(imported).eventId, vaultRoot])
+    const rawEditError = await runRawCli(editArgs)
+    for (const privateKey of privateKeys) {
+      assert.doesNotMatch(rawEditError, new RegExp(privateKey, 'u'))
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('built CLI classifies document and intake file inputs without paths', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-file-repair-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-file-recovery-'))
   const missingPath = path.join(vaultRoot, 'private-missing-input.json')
   const lockedPath = path.join(vaultRoot, 'private-locked-input.json')
   const documentPath = path.join(vaultRoot, 'document-input.md')
@@ -157,9 +252,8 @@ test.sequential('built CLI classifies document and intake file inputs without pa
 
       assert.equal(missingError.code, 'not_found')
       assert.equal(missingError.retryable, false)
-      assert.equal(missingError.stage, 'input_file')
-      assert.match(missingError.hint ?? '', /file argument/u)
-      assert.doesNotMatch(missingError.hint ?? '', /--file/u)
+      assert.equal(missingError.stage, 'validation')
+      assert.equal(missingError.hint, undefined)
       assert.equal(missingError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(missing, [missingPath, vaultRoot])
 
@@ -174,9 +268,8 @@ test.sequential('built CLI classifies document and intake file inputs without pa
 
       assert.equal(directoryError.code, 'invalid_path')
       assert.equal(directoryError.retryable, false)
-      assert.equal(directoryError.stage, 'input_file')
-      assert.match(directoryError.hint ?? '', /file argument/u)
-      assert.doesNotMatch(directoryError.hint ?? '', /--file/u)
+      assert.equal(directoryError.stage, 'validation')
+      assert.equal(directoryError.hint, undefined)
       assert.equal(directoryError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(directory, [vaultRoot])
     }
@@ -184,22 +277,23 @@ test.sequential('built CLI classifies document and intake file inputs without pa
     await writeFile(lockedPath, '{}\n', 'utf8')
     await chmod(lockedPath, 0o000)
     try {
-      const unreadable = await runCli([
-        'intake',
-        'import',
-        lockedPath,
-        '--vault',
-        vaultRoot,
-      ])
-      const unreadableError = requireError(unreadable)
+      for (const command of ['document', 'intake'] as const) {
+        const unreadable = await runCli([
+          command,
+          'import',
+          lockedPath,
+          '--vault',
+          vaultRoot,
+        ])
+        const unreadableError = requireError(unreadable)
 
-      assert.equal(unreadableError.code, 'permission_denied')
-      assert.equal(unreadableError.retryable, false)
-      assert.equal(unreadableError.stage, 'input_file')
-      assert.match(unreadableError.hint ?? '', /file argument/u)
-      assert.doesNotMatch(unreadableError.hint ?? '', /--file/u)
-      assert.equal(unreadableError.fieldErrors?.[0]?.path, 'file')
-      assertDoesNotEcho(unreadable, [lockedPath, vaultRoot])
+        assert.equal(unreadableError.code, 'permission_denied')
+        assert.equal(unreadableError.retryable, false)
+        assert.equal(unreadableError.stage, 'validation')
+        assert.equal(unreadableError.hint, undefined)
+        assert.equal(unreadableError.fieldErrors?.[0]?.path, 'file')
+        assertDoesNotEcho(unreadable, [lockedPath, vaultRoot])
+      }
     } finally {
       await chmod(lockedPath, 0o600)
     }
@@ -223,8 +317,49 @@ test.sequential('built CLI classifies document and intake file inputs without pa
   }
 })
 
-test.sequential('built CLI returns private repair for malformed assessment JSON without writes', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-json-repair-'))
+test.sequential('built CLI does not blame readable import sources for vault permission failures', async () => {
+  const workRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-vault-permission-recovery-'))
+  const vaultRoot = path.join(workRoot, 'vault')
+  const vaultMetadataPath = path.join(vaultRoot, 'vault.json')
+  const documentPath = path.join(workRoot, 'document-input.md')
+  const intakePath = path.join(workRoot, 'intake-input.json')
+
+  try {
+    await initializeVault({ vaultRoot })
+    await writeFile(documentPath, '# Recovery document\n', 'utf8')
+    await writeFile(intakePath, '{"answer":"ready"}\n', 'utf8')
+    await chmod(vaultMetadataPath, 0o000)
+    try {
+      for (const [command, file, extraArgs] of [
+        ['document', documentPath, []],
+        ['intake', intakePath, ['--occurred-at', '2026-08-24']],
+      ] as const) {
+        const imported = await runCli([
+          command,
+          'import',
+          file,
+          ...extraArgs,
+          '--vault',
+          vaultRoot,
+        ])
+        const importError = requireError(imported)
+
+        assert.equal(importError.code, 'permission_denied')
+        assert.equal(importError.stage, 'filesystem')
+        assert.notEqual(importError.fieldErrors?.some((field) => field.path === 'file'), true)
+        assert.doesNotMatch(importError.hint ?? '', /selected file|file argument/u)
+        assertDoesNotEcho(imported, [file, vaultMetadataPath, vaultRoot])
+      }
+    } finally {
+      await chmod(vaultMetadataPath, 0o600)
+    }
+  } finally {
+    await rm(workRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('built CLI returns a private malformed-JSON error without writes', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-json-recovery-'))
   const assessmentPath = path.join(vaultRoot, 'private-malformed-assessment.json')
   const malformedContents = '{"private-assessment-value":'
 
@@ -245,7 +380,7 @@ test.sequential('built CLI returns private repair for malformed assessment JSON 
     assert.equal(importError.code, 'invalid_payload')
     assert.equal(importError.retryable, false)
     assert.equal(importError.stage, 'validation')
-    assert.match(importError.hint ?? '', /valid JSON object/u)
+    assert.equal(importError.hint, undefined)
     assert.equal(importError.fieldErrors?.[0]?.path, '$')
     assertDoesNotEcho(imported, [malformedContents, assessmentPath, vaultRoot])
     assert.deepEqual(
@@ -257,8 +392,8 @@ test.sequential('built CLI returns private repair for malformed assessment JSON 
   }
 })
 
-test.sequential('built CLI returns field repair for intake title and lookup failures', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-repair-'))
+test.sequential('built CLI returns fields for intake title and lookup failures', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-recovery-'))
   const privateFileName = `${'private-assessment-title-'.padEnd(180, 'x')}.json`
   const assessmentPath = path.join(vaultRoot, privateFileName)
   const privateAssessmentId = 'asmt_private_missing_response'
@@ -309,8 +444,8 @@ test.sequential('built CLI returns field repair for intake title and lookup fail
 
     assert.equal(projectionError.code, 'not_found')
     assert.equal(projectionError.retryable, false)
-    assert.equal(projectionError.stage, 'lookup')
-    assert.match(projectionError.hint ?? '', /intake list/u)
+    assert.equal(projectionError.stage, 'validation')
+    assert.equal(projectionError.hint, undefined)
     assert.equal(projectionError.fieldErrors?.[0]?.path, 'id')
     assertDoesNotEcho(missingProjection, [privateAssessmentId, vaultRoot])
   } finally {
@@ -319,7 +454,7 @@ test.sequential('built CLI returns field repair for intake title and lookup fail
 })
 
 test.sequential('built CLI keeps stored assessment ledger failures terminal and private', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-assessment-ledger-repair-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-assessment-ledger-recovery-'))
   const ledgerPath = path.join(vaultRoot, 'ledger', 'assessments', '2026', '2026-08.jsonl')
   const requestedAssessmentId = 'private-requested-assessment-id'
   const storedAssessmentId = 'asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8'
@@ -341,8 +476,8 @@ test.sequential('built CLI keeps stored assessment ledger failures terminal and 
 
     assert.equal(malformedLedgerError.code, 'assessment_store_invalid')
     assert.equal(malformedLedgerError.retryable, false)
-    assert.equal(malformedLedgerError.stage, 'assessment_read')
-    assert.match(malformedLedgerError.hint ?? '', /cannot repair stored assessment data/u)
+    assert.equal(malformedLedgerError.stage, undefined)
+    assert.equal(malformedLedgerError.hint, undefined)
     assertDoesNotEcho(malformedLedger, [
       requestedAssessmentId,
       privateLedgerValue,
@@ -375,8 +510,8 @@ test.sequential('built CLI keeps stored assessment ledger failures terminal and 
 
     assert.equal(invalidStoredRecordError.code, 'assessment_store_invalid')
     assert.equal(invalidStoredRecordError.retryable, false)
-    assert.equal(invalidStoredRecordError.stage, 'assessment_validation')
-    assert.match(invalidStoredRecordError.hint ?? '', /cannot repair stored assessment data/u)
+    assert.equal(invalidStoredRecordError.stage, undefined)
+    assert.equal(invalidStoredRecordError.hint, undefined)
     assertDoesNotEcho(invalidStoredRecord, [
       requestedAssessmentId,
       storedAssessmentId,
@@ -390,7 +525,7 @@ test.sequential('built CLI keeps stored assessment ledger failures terminal and 
 })
 
 test.sequential('built CLI keeps intake manifest stored-state failures terminal and private', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-manifest-repair-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-manifest-recovery-'))
   const missingAssessmentId = 'asmt_private_missing_manifest_record'
 
   try {
@@ -407,8 +542,8 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(missingRecordError.code, 'not_found')
     assert.equal(missingRecordError.retryable, false)
-    assert.equal(missingRecordError.stage, 'lookup')
-    assert.match(missingRecordError.hint ?? '', /intake list/u)
+    assert.equal(missingRecordError.stage, 'validation')
+    assert.equal(missingRecordError.hint, undefined)
     assert.equal(missingRecordError.fieldErrors?.[0]?.path, 'id')
     assertDoesNotEcho(missingRecord, [missingAssessmentId, vaultRoot])
 
@@ -434,9 +569,8 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(missingManifestError.code, 'manifest_missing')
     assert.equal(missingManifestError.retryable, false)
-    assert.equal(missingManifestError.stage, 'manifest_read')
-    assert.match(missingManifestError.hint ?? '', /cannot reconstruct or repair/u)
-    assert.doesNotMatch(missingManifestError.hint ?? '', /restore|recreate/iu)
+    assert.equal(missingManifestError.stage, undefined)
+    assert.equal(missingManifestError.hint, undefined)
     assertDoesNotEcho(missingManifest, [
       missingManifestFixture.assessmentId,
       missingManifestFixture.manifestFile,
@@ -467,9 +601,8 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(invalidJsonError.code, 'manifest_invalid')
     assert.equal(invalidJsonError.retryable, false)
-    assert.equal(invalidJsonError.stage, 'manifest_parse')
-    assert.match(invalidJsonError.hint ?? '', /cannot repair/u)
-    assert.doesNotMatch(invalidJsonError.hint ?? '', /restore|recreate/iu)
+    assert.equal(invalidJsonError.stage, 'validation')
+    assert.equal(invalidJsonError.hint, undefined)
     assert.equal(invalidJsonError.fieldErrors?.[0]?.path, '$')
     assertDoesNotEcho(invalidJson, [
       invalidJsonFixture.assessmentId,
@@ -513,9 +646,8 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(invalidSchemaError.code, 'manifest_invalid')
     assert.equal(invalidSchemaError.retryable, false)
-    assert.equal(invalidSchemaError.stage, 'manifest_validation')
-    assert.match(invalidSchemaError.hint ?? '', /cannot repair/u)
-    assert.doesNotMatch(invalidSchemaError.hint ?? '', /restore|recreate/iu)
+    assert.equal(invalidSchemaError.stage, 'validation')
+    assert.equal(invalidSchemaError.hint, undefined)
     assert.equal((invalidSchemaError.fieldErrors?.length ?? 0) > 0, true)
     assertDoesNotEcho(invalidSchema, [
       invalidSchemaFixture.assessmentId,
@@ -534,7 +666,7 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 })
 
 test.sequential('built CLI rejects invalid journal ids and streams before mutation', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-repair-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-recovery-'))
   const privateEventId = 'private-event-id'
   const privateStream = 'private-stream'
 
@@ -576,7 +708,7 @@ test.sequential('built CLI rejects invalid journal ids and streams before mutati
 })
 
 test.sequential('built CLI classifies malformed manifests and export output failures', async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-repair-'))
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-recovery-'))
   const missingPackId = 'private-missing-pack-id'
   const missingManifestPackId = 'private-missing-manifest-pack-id'
   const privatePackId = 'private-pack-id'
@@ -615,8 +747,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
       assert.equal(missingError.code, 'not_found')
       assert.equal(missingError.retryable, false)
-      assert.equal(missingError.stage, 'lookup')
-      assert.match(missingError.hint ?? '', /export pack list/u)
+      assert.equal(missingError.stage, 'validation')
+      assert.equal(missingError.hint, undefined)
       assert.equal(missingError.fieldErrors?.[0]?.path, 'id')
       assertDoesNotEcho(missing, [missingPackId, vaultRoot])
     }
@@ -634,8 +766,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
       assert.equal(missingManifestError.code, 'manifest_missing')
       assert.equal(missingManifestError.retryable, false)
-      assert.equal(missingManifestError.stage, 'manifest_read')
-      assert.match(missingManifestError.hint ?? '', /cannot reconstruct or repair/u)
+      assert.equal(missingManifestError.stage, undefined)
+      assert.equal(missingManifestError.hint, undefined)
       assertDoesNotEcho(missingManifest, [missingManifestPackId, vaultRoot])
     }
 
@@ -660,9 +792,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(invalidJsonManifestError.code, 'manifest_invalid')
     assert.equal(invalidJsonManifestError.retryable, false)
-    assert.equal(invalidJsonManifestError.stage, 'manifest_parse')
-    assert.match(invalidJsonManifestError.hint ?? '', /export pack create/u)
-    assert.doesNotMatch(invalidJsonManifestError.hint ?? '', /restore|recreate/iu)
+    assert.equal(invalidJsonManifestError.stage, 'validation')
+    assert.equal(invalidJsonManifestError.hint, undefined)
     assert.equal(invalidJsonManifestError.fieldErrors?.[0]?.path, '$')
     assertDoesNotEcho(invalidJsonManifest, [
       invalidJsonPackId,
@@ -694,9 +825,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(malformedError.code, 'manifest_invalid')
     assert.equal(malformedError.retryable, false)
-    assert.equal(malformedError.stage, 'manifest_validation')
-    assert.match(malformedError.hint ?? '', /export pack create/u)
-    assert.doesNotMatch(malformedError.hint ?? '', /restore|recreate/iu)
+    assert.equal(malformedError.stage, 'validation')
+    assert.equal(malformedError.hint, undefined)
     assert.equal((malformedError.fieldErrors?.length ?? 0) > 0, true)
     assertDoesNotEcho(malformed, [privatePackId, privateManifestValue, vaultRoot])
 
@@ -731,9 +861,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(mismatchedError.code, 'manifest_invalid')
     assert.equal(mismatchedError.retryable, false)
-    assert.equal(mismatchedError.stage, 'manifest_validation')
-    assert.match(mismatchedError.hint ?? '', /export pack create/u)
-    assert.doesNotMatch(mismatchedError.hint ?? '', /restore|recreate/iu)
+    assert.equal(mismatchedError.stage, 'validation')
+    assert.equal(mismatchedError.hint, undefined)
     assert.equal(mismatchedError.fieldErrors?.[0]?.path, 'packId')
     assertDoesNotEcho(mismatched, [
       createdPackId,
@@ -759,8 +888,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(unwritableError.code, 'invalid_path')
     assert.equal(unwritableError.retryable, false)
-    assert.equal(unwritableError.stage, 'export_output')
-    assert.match(unwritableError.hint ?? '', /--out/u)
+    assert.equal(unwritableError.stage, 'validation')
+    assert.equal(unwritableError.hint, undefined)
     assert.equal(unwritableError.fieldErrors?.[0]?.path, 'out')
     assertDoesNotEcho(unwritable, [blockingFile, blockedOutput, vaultRoot])
   } finally {

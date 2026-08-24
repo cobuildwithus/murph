@@ -103,24 +103,15 @@ test('stored export pack helpers tolerate a missing exports root and enforce man
       assert.equal(serialized.includes('different-pack-id'), false)
       assert.equal(serialized.includes('pack-alpha'), false)
       assert.deepEqual(
-        (error as { repair?: unknown }).repair,
-        {
-          stage: 'manifest_validation',
-          hint:
-            'The CLI cannot repair this stored export pack manifest. Create a new pack with export pack create.',
-          fields: [{
-            path: 'packId',
-            code: 'mismatch',
-            message: 'Manifest packId must match its export pack directory.',
-          }],
-        },
+        (error as { context?: { issues?: unknown } }).context?.issues,
+        [{ path: ['packId'], code: 'custom' }],
       )
       return true
     },
   )
 })
 
-test('stored export pack schema errors retain bounded field repair without manifest values', async () => {
+test('stored export pack schema errors retain bounded issue paths without manifest values', async () => {
   const vaultRoot = await createTempDir('murph-cli-export-invalid-manifest-')
   const { showStoredExportPack } = await import(
     '../src/commands/export-intake-read-helpers.js'
@@ -153,13 +144,9 @@ test('stored export pack schema errors retain bounded field repair without manif
       assert.equal(serialized.includes(privateValue), false)
       assert.equal(serialized.includes(vaultRoot), false)
       assert.equal(serialized.includes('pack-invalid'), false)
-      assert.deepEqual(
-        (error as { repair?: { stage?: string; fields?: Array<{ path?: string }> } }).repair?.stage,
-        'manifest_validation',
-      )
       assert.equal(
-        (error as { repair?: { fields?: Array<{ path?: string }> } }).repair?.fields
-          ?.some((field) => field.path === 'manifest.recordCount'),
+        (error as { context?: { issues?: Array<{ path?: string[] }> } }).context?.issues
+          ?.some((issue) => issue.path?.[0] === 'manifest'),
         true,
       )
       return true

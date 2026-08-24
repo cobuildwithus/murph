@@ -1,9 +1,6 @@
 import path from 'node:path'
 
-import {
-  VaultCliError,
-  type VaultCliRepairInput,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
@@ -233,113 +230,49 @@ interface VaultErrorMapping {
   code: string
   message?: string
   details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
-  repair?: VaultCliRepairInput | ((details: Record<string, unknown>) => VaultCliRepairInput)
 }
 
-function contractValidationRepair(
-  details: Record<string, unknown>,
-  hint: string,
-): VaultCliRepairInput {
+function contractValidationDetails(details: Record<string, unknown>) {
   const errors = Array.isArray(details.errors) ? details.errors : []
 
   return {
-    stage: 'validation',
-    hint,
-    fields: errors.map((issue) => ({
+    issues: errors.map((issue) => ({
       path: contractIssuePath(issue),
-      code: 'contract_invalid',
-      message: 'Value does not satisfy the record contract.',
+      code: 'custom',
     })),
   }
 }
 
-function contractIssuePath(issue: unknown): string | readonly PropertyKey[] {
+function contractIssuePath(issue: unknown): readonly string[] {
   if (typeof issue !== 'string') {
-    return '$'
+    return []
   }
 
-  const separatorIndex = issue.indexOf(':')
-  const pathText = (separatorIndex >= 0 ? issue.slice(0, separatorIndex) : issue).trim()
-  if (pathText === '$') {
-    return '$'
-  }
-
-  if (!pathText.startsWith('$')) {
-    return '$'
-  }
-
-  const segments: PropertyKey[] = []
-  let remaining = pathText.slice(1)
-
-  while (remaining.length > 0) {
-    const propertyMatch = /^\.([A-Za-z_][A-Za-z0-9_-]*)/u.exec(remaining)
-    if (propertyMatch?.[1]) {
-      segments.push(propertyMatch[1])
-      remaining = remaining.slice(propertyMatch[0].length)
-      continue
-    }
-
-    const indexMatch = /^\[(\d+)\]/u.exec(remaining)
-    if (indexMatch?.[1]) {
-      const index = Number(indexMatch[1])
-      if (!Number.isSafeInteger(index)) {
-        return '$'
-      }
-      segments.push(index)
-      remaining = remaining.slice(indexMatch[0].length)
-      continue
-    }
-
-    return '$'
-  }
-
-  return segments.length > 0 ? segments : '$'
+  const topLevelPath = /^\$\.([A-Za-z_][A-Za-z0-9_-]*)(?=[:.\[])/u.exec(issue.trim())
+  return topLevelPath?.[1] ? [topLevelPath[1]] : []
 }
 
 const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   EVENT_KIND_INVALID: {
     code: 'contract_invalid',
-    repair: {
-      stage: 'validation',
-      hint: 'Choose a supported event kind and retry.',
-      fields: [{
-        path: 'kind',
-        code: 'invalid_value',
-        message: 'Use a supported event kind.',
-      }],
+    details: {
+      issues: [{ code: 'invalid_value', path: ['kind'] }],
     },
   },
   EVENT_OCCURRED_AT_MISSING: {
     code: 'invalid_timestamp',
-    repair: {
-      stage: 'validation',
-      hint: 'Add an ISO 8601 occurredAt value and retry.',
-      fields: [{
-        path: 'occurredAt',
-        code: 'missing',
-        missing: true,
-        message: 'An occurrence timestamp is required.',
-        expected: 'ISO 8601 timestamp',
-      }],
+    details: {
+      issues: [{ code: 'invalid_type', path: ['occurredAt'], expected: 'string' }],
     },
   },
   EVENT_CONTRACT_INVALID: {
     code: 'contract_invalid',
-    repair: (details) => contractValidationRepair(
-      details,
-      'Correct the listed event fields and retry.',
-    ),
+    details: contractValidationDetails,
   },
   EVENT_ID_NOT_ALLOWED: {
     code: 'invalid_option',
-    repair: {
-      stage: 'validation',
-      hint: 'Remove eventId; generic imports derive identity from externalRef.',
-      fields: [{
-        path: 'eventId',
-        code: 'unsupported',
-        message: 'Generic event imports do not accept a caller-provided event id.',
-      }],
+    details: {
+      issues: [{ code: 'unrecognized_keys', path: ['eventId'] }],
     },
   },
   EVENT_MISSING: {
@@ -350,15 +283,8 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   },
   INVALID_TIMESTAMP: {
     code: 'invalid_timestamp',
-    repair: {
-      stage: 'validation',
-      hint: 'Correct the event timestamp and retry with an ISO 8601 value.',
-      fields: [{
-        path: '$',
-        code: 'invalid_value',
-        message: 'One event timestamp is invalid.',
-        expected: 'ISO 8601 timestamp',
-      }],
+    details: {
+      issues: [{ code: 'invalid_format', path: [] }],
     },
   },
   INVALID_INPUT: {
@@ -391,10 +317,6 @@ export function toVaultCliError(
     typeof mapping?.details === 'function'
       ? mapping.details(error.details ?? {})
       : mapping?.details
-  const mappedRepair =
-    typeof mapping?.repair === 'function'
-      ? mapping.repair(error.details ?? {})
-      : mapping?.repair
 
   return new VaultCliError(
     mapping?.code ?? 'vault_error',
@@ -404,7 +326,6 @@ export function toVaultCliError(
       ...error.details,
       ...mappedDetails,
     },
-    mappedRepair,
   )
 }
 
@@ -419,15 +340,8 @@ export function toEventUpsertVaultCliError(error: unknown) {
       ...eventUpsertVaultErrorMappings,
       INVALID_INPUT: {
         code: 'contract_invalid',
-        repair: {
-          stage: 'validation',
-          hint: 'Add a non-empty event title and retry.',
-          fields: [{
-            path: 'title',
-            code: 'missing',
-            missing: true,
-            message: 'A non-empty event title is required.',
-          }],
+        details: {
+          issues: [{ code: 'invalid_type', path: ['title'], expected: 'string' }],
         },
       },
     })
@@ -436,62 +350,42 @@ export function toEventUpsertVaultCliError(error: unknown) {
   return toVaultCliError(error, eventUpsertVaultErrorMappings)
 }
 
-export function toImporterInputFileVaultCliError(error: unknown) {
+export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: string) {
   if (error instanceof VaultCliError) {
     return error
   }
 
   const errorCode = readErrorCode(error)
-  if (errorCode === 'ENOENT') {
+  const targetsInputFile = errorTargetsInputFile(error, inputFilePath)
+  if (errorCode === 'ENOENT' && targetsInputFile) {
     return new VaultCliError(
       'not_found',
       'The input file was not found.',
-      undefined,
       {
-        stage: 'input_file',
-        hint: 'Choose an existing regular file for the file argument and retry.',
-        fields: [{
-          path: 'file',
-          code: 'not_found',
-          message: 'The selected input file does not exist.',
-          expected: 'existing regular file',
-        }],
+        issues: [{ code: 'custom', path: ['file'] }],
       },
     )
   }
 
-  if (errorCode === 'ERR_IMPORT_PATH_NOT_FILE' || errorCode === 'EISDIR' || errorCode === 'ENOTDIR') {
+  if (
+    errorCode === 'ERR_IMPORT_PATH_NOT_FILE'
+    || ((errorCode === 'EISDIR' || errorCode === 'ENOTDIR') && targetsInputFile)
+  ) {
     return new VaultCliError(
       'invalid_path',
       'The input path is not a regular file.',
-      undefined,
       {
-        stage: 'input_file',
-        hint: 'Choose a regular file, not a directory, for the file argument.',
-        fields: [{
-          path: 'file',
-          code: 'invalid_type',
-          message: 'The selected input path must be a regular file.',
-          expected: 'regular file',
-        }],
+        issues: [{ code: 'invalid_type', path: ['file'], expected: 'string' }],
       },
     )
   }
 
-  if (errorCode === 'EACCES' || errorCode === 'EPERM') {
+  if ((errorCode === 'EACCES' || errorCode === 'EPERM') && targetsInputFile) {
     return new VaultCliError(
       'permission_denied',
       'The input file could not be read.',
-      undefined,
       {
-        stage: 'input_file',
-        hint: 'Grant read access to the selected file argument and retry.',
-        fields: [{
-          path: 'file',
-          code: 'permission_denied',
-          message: 'The selected input file is not readable.',
-          expected: 'readable regular file',
-        }],
+        issues: [{ code: 'custom', path: ['file'] }],
       },
     )
   }
@@ -502,9 +396,7 @@ export function toImporterInputFileVaultCliError(error: unknown) {
 export function toVaultCliFilesystemError(
   error: unknown,
   input: {
-    stage: string
     message: string
-    hint: string
     fieldPath?: string
   },
 ) {
@@ -517,15 +409,13 @@ export function toVaultCliFilesystemError(
     if (errorCode === 'ENOENT') {
       return {
         code: 'not_found',
-        fieldCode: 'not_found',
-        fieldMessage: 'A required filesystem path does not exist.',
+        issueCode: 'custom',
       }
     }
     if (errorCode === 'EACCES' || errorCode === 'EPERM' || errorCode === 'EROFS') {
       return {
         code: 'permission_denied',
-        fieldCode: 'permission_denied',
-        fieldMessage: 'The selected filesystem path is not writable.',
+        issueCode: 'custom',
       }
     }
     if (
@@ -536,15 +426,13 @@ export function toVaultCliFilesystemError(
     ) {
       return {
         code: 'invalid_path',
-        fieldCode: 'invalid_type',
-        fieldMessage: 'The selected filesystem path has the wrong type.',
+        issueCode: 'invalid_type',
       }
     }
     if (errorCode === 'ENOSPC' || errorCode === 'EDQUOT') {
       return {
         code: 'storage_unavailable',
-        fieldCode: 'storage_unavailable',
-        fieldMessage: 'The selected filesystem has no writable capacity.',
+        issueCode: 'custom',
       }
     }
     return null
@@ -557,23 +445,20 @@ export function toVaultCliFilesystemError(
   return new VaultCliError(
     classification.code,
     input.message,
-    { retryable: false },
     {
-      stage: input.stage,
-      hint: input.hint,
-      fields: input.fieldPath
+      retryable: false,
+      issues: input.fieldPath
         ? [{
-            path: input.fieldPath,
-            code: classification.fieldCode,
-            message: classification.fieldMessage,
+            path: [input.fieldPath],
+            code: classification.issueCode,
           }]
         : [],
     },
   )
 }
 
-export function toAssessmentImportVaultCliError(error: unknown) {
-  const inputFileError = toImporterInputFileVaultCliError(error)
+export function toAssessmentImportVaultCliError(error: unknown, inputFilePath: string) {
+  const inputFileError = toImporterInputFileVaultCliError(error, inputFilePath)
   if (inputFileError !== error) {
     return inputFileError
   }
@@ -581,22 +466,13 @@ export function toAssessmentImportVaultCliError(error: unknown) {
   return toVaultCliError(error, {
     ASSESSMENT_INVALID_JSON: {
       code: 'invalid_payload',
-      repair: {
-        stage: 'validation',
-        hint: 'Provide one valid JSON object in the assessment file and retry.',
-        fields: [{
-          path: '$',
-          code: 'invalid_json',
-          message: 'The assessment file must contain one valid JSON object.',
-        }],
+      details: {
+        issues: [{ code: 'invalid_format', path: [] }],
       },
     },
     ASSESSMENT_RESPONSE_INVALID: {
       code: 'contract_invalid',
-      repair: (details) => contractValidationRepair(
-        details,
-        'Correct the listed assessment fields and retry.',
-      ),
+      details: contractValidationDetails,
     },
   })
 }
@@ -607,11 +483,6 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
       'assessment_store_invalid',
       'The stored assessment ledger is not valid JSONL.',
       { retryable: false, vaultCode: error.code },
-      {
-        stage: 'assessment_read',
-        hint:
-          'The CLI cannot repair stored assessment data. Repair the assessment ledger before retrying, or re-import the original source after stored state is valid.',
-      },
     )
   }
 
@@ -620,11 +491,6 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
       'assessment_store_invalid',
       'Stored assessment data does not match the assessment contract.',
       { retryable: false, vaultCode: error.code },
-      {
-        stage: 'assessment_validation',
-        hint:
-          'The CLI cannot repair stored assessment data. Repair the assessment ledger before retrying, or re-import the original source after stored state is valid.',
-      },
     )
   }
 
@@ -632,22 +498,12 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
     ASSESSMENT_RESPONSE_NOT_FOUND: {
       code: 'not_found',
       message: 'The requested assessment response was not found.',
-      repair: {
-        stage: 'lookup',
-        hint: 'Run intake list and retry with an existing assessment id.',
-        fields: [{
-          path: 'id',
-          code: 'not_found',
-          message: 'No assessment response matches this id.',
-        }],
+      details: {
+        issues: [{ code: 'custom', path: ['id'] }],
       },
     },
     ASSESSMENT_RESPONSE_PROJECT_INVALID: {
       code: 'contract_invalid',
-      repair: {
-        stage: 'projection',
-        hint: 'Inspect the assessment response before retrying projection.',
-      },
     },
   })
 }
@@ -658,6 +514,18 @@ function readErrorCode(error: unknown): string | null {
   }
 
   return typeof error.code === 'string' ? error.code : null
+}
+
+function errorTargetsInputFile(error: unknown, inputFilePath: string): boolean {
+  if (!error || typeof error !== 'object' || !('path' in error)) {
+    return false
+  }
+
+  if (typeof error.path !== 'string') {
+    return false
+  }
+
+  return path.resolve(error.path) === path.resolve(inputFilePath)
 }
 
 export function toVaultMetadataCliError(error: unknown) {

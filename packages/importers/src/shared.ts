@@ -215,7 +215,10 @@ export async function inspectFileAsset(
     if (candidate.code === "ENOENT") {
       throw Object.assign(
         new Error(`${role}Path does not point to an existing file`),
-        { code: "ENOENT" },
+        {
+          code: "ENOENT",
+          path: typeof candidate.path === "string" ? candidate.path : sourcePath,
+        },
       );
     }
 
