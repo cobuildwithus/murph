@@ -145,7 +145,8 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
 // Device, wearable, and route recovery metadata add 8,146 B to the lazy CLI graph.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_475_794;
+// Retry-aware elevation recovery sets the reviewed Linux baseline at 9,476,041 B.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_476_041;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
