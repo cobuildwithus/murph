@@ -1,6 +1,6 @@
 # Complete Garmin's second OAuth consent step
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -63,9 +63,9 @@ Updated: 2026-08-23
 4. [x] Merge PR #2175 and inspect its exact protected-main Garmin canary.
 5. [x] Submit the confirmation action once, run the follow-up completion gates,
    merge PR #2182, and inspect its exact post-merge protected Garmin canary.
-6. Capture the stalled post-click surface without provider content, use that
-   evidence for the smallest correction, and require a successful exact
-   post-merge protected Garmin canary.
+6. [x] Capture the stalled post-click surface without provider content, use
+   that evidence for the smallest correction, and require a successful exact
+   post-merge protected Garmin canary through PRs #2187, #2188, and #2190.
 
 ## Decisions
 
@@ -106,3 +106,11 @@ Completed local proof:
   that proves Disconnect remains untouched until its client handler is ready.
 - Hosted Web typecheck: passed.
 - Docs drift and diff checks: passed.
+- PR #2190 exact-head required CI: passed.
+- Final ReviewGPT: passed on exact head
+  `53ced433d3ea1113883df6260ada46a773ee32cb` with no findings remaining.
+- Protected-main Garmin canary run `32678929622`: passed on merge commit
+  `e0707099f477a0bb562801e2aeda39a28016513b`. The real-browser assertion
+  proved automatic callback completion, connected state after callback and
+  reload, and confirmed disconnect cleanup.
+Completed: 2026-08-23
