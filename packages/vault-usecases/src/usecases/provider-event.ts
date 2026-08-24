@@ -405,7 +405,6 @@ export function parseProviderPayload(value: unknown) {
     throw new VaultCliError(
       'contract_invalid',
       'Provider payload is invalid.',
-      { errors: result.error.flatten() },
     )
   }
 
@@ -779,9 +778,10 @@ function normalizeRequiredSamplePayloadText(value: unknown, field: 'stream' | 'u
         {
           code: 'invalid_type',
           expected: 'string',
-          path: [field],
+          publicPath: [field],
         },
       ],
+      stage: 'validation',
     },
   )
 }
@@ -794,11 +794,12 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
       {
         issues: [
           {
-            path: ['samples'],
+            publicPath: ['samples'],
             code: 'invalid_type',
             expected: 'array',
           },
         ],
+        stage: 'validation',
       },
     )
   }
@@ -806,7 +807,7 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
   const invalidMembers: Array<{
     code: 'invalid_type'
     expected: 'object'
-    path: [string, number]
+    publicPath: [string, number]
   }> = []
   const samples: JsonObject[] = []
 
@@ -817,7 +818,7 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
     }
 
     invalidMembers.push({
-      path: ['samples', index],
+      publicPath: ['samples', index],
       code: 'invalid_type',
       expected: 'object',
     })
@@ -827,7 +828,7 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
     throw new VaultCliError(
       'invalid_payload',
       'Samples payload contains non-object entries.',
-      { issues: invalidMembers },
+      { issues: invalidMembers, stage: 'validation' },
     )
   }
 
@@ -849,10 +850,11 @@ function toSampleImportCliError(error: unknown): unknown {
       {
         issues: [
           {
-            path: ['stream'],
+            publicPath: ['stream'],
             code: 'custom',
           },
         ],
+        stage: 'validation',
       },
     )
   }
@@ -872,7 +874,7 @@ function toSampleImportCliError(error: unknown): unknown {
   if (!issue) {
     return cliError
   }
-  const fieldPath = sampleField === 'unit'
+  const publicPath = sampleField === 'unit'
     ? ['unit']
     : ['samples', sampleIndex, sampleField]
 
@@ -882,10 +884,11 @@ function toSampleImportCliError(error: unknown): unknown {
     {
       issues: [
         {
-          path: fieldPath,
+          publicPath,
           ...issue,
         },
       ],
+      stage: 'validation',
     },
   )
 }

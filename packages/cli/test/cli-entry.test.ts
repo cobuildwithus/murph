@@ -183,7 +183,6 @@ test("renderMurphCliEntrypointError uses a value-free unknown failure", async ()
     [
       "Error: The command failed without a safe recoverable detail.",
       "Stage: command",
-      "Hint: Check the command inputs and runtime status before retrying.",
     ].join("\n"),
   );
   assert.equal(rendered.output.includes(submittedValue), false);
@@ -201,10 +200,12 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
           code: "invalid_value",
           expected: "IANA time zone",
           path: ["schedule", "timeZone"],
+          publicPath: ["schedule", "timeZone"],
           message: privateValue,
         },
       ],
       retryable: false,
+      stage: "validation",
     },
   );
 

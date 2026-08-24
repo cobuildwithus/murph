@@ -264,14 +264,14 @@ function toCsvSampleCliError(error: unknown): unknown {
   return new VaultCliError(
     'invalid_payload',
     message,
-    { issues },
+    { issues, stage: 'validation' },
   )
 }
 
 interface CsvSampleIssue {
   code: 'custom'
   expected: 'array' | 'string'
-  path: readonly PropertyKey[]
+  publicPath: readonly (string | number)[]
 }
 
 const CSV_SKIP_REASON_MESSAGES: Readonly<Record<string, string>> = {
@@ -291,22 +291,22 @@ function toCsvSampleIssues(value: unknown): CsvSampleIssue[] {
   }
 
   if (value.code === 'timestamp_column_inference_failed') {
-    return [{ code: 'custom', expected: 'string', path: ['tsColumn'] }]
+    return [{ code: 'custom', expected: 'string', publicPath: ['tsColumn'] }]
   }
   if (value.code === 'value_column_inference_failed') {
-    return [{ code: 'custom', expected: 'string', path: ['valueColumn'] }]
+    return [{ code: 'custom', expected: 'string', publicPath: ['valueColumn'] }]
   }
 
   if (value.code !== 'no_importable_rows') {
     return []
   }
 
-  const path = toCsvSamplesIssuePath(value.path)
-  if (!path || readCsvSkipCounts(value.message).length === 0) {
+  const publicPath = toCsvSamplesIssuePath(value.path)
+  if (!publicPath || readCsvSkipCounts(value.message).length === 0) {
     return []
   }
 
-  return [{ code: 'custom', expected: 'array', path }]
+  return [{ code: 'custom', expected: 'array', publicPath }]
 }
 
 interface CsvSkipCount {

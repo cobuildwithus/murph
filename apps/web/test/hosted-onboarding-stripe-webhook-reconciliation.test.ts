@@ -347,7 +347,9 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       select: { dedupeKey: true, id: true, userId: true },
       where: {
         id: { in: ["mailbox_item_activation_123"] },
-        kind: "member.activated",
+        kind: {
+          in: ["member.activated", "runtime.maintenance-requested"],
+        },
       },
     });
     expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledTimes(2);
@@ -361,11 +363,97 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       }));
   });
 
-  it("replays the maximum current Family activation set in receipt order without fanout", async () => {
+  it.each([
+    {
+      eventId: "evt_access_restored_invoice",
+      eventType: "invoice.paid",
+      source: "invoice",
+    },
+    {
+      eventId: "evt_access_restored_dispute",
+      eventType: "charge.dispute.updated",
+      source: "dispute",
+    },
+    {
+      eventId: "evt_access_restored_family",
+      eventType: "customer.subscription.updated",
+      source: "family",
+    },
+  ])("keeps completed $source access-restoration handoffs retryable when the runtime signal is unavailable", async ({
+    eventId,
+    eventType,
+    source,
+  }) => {
+    const mailboxItemId = `mailbox_access_restored_${source}`;
+    const hostedExecutionEventId = `runtime-control:access-restored:${source}`;
+    const findMany = vi.fn().mockResolvedValue([{
+      dedupeKey: hostedExecutionEventId,
+      id: mailboxItemId,
+      userId: "member_123",
+    }]);
+    const prisma = createPrisma({
+      hostedMailboxItem: { findMany },
+      hostedStripeEvent: {
+        findUnique: vi.fn().mockResolvedValue({
+          activationResultJson: {
+            activationMailboxItemIds: [mailboxItemId],
+            schema: "hosted.stripe.activation-result.v1",
+          },
+          claimExpiresAt: null,
+          nextAttemptAt: new Date("2026-04-23T00:00:00.000Z"),
+          status: HostedStripeEventStatus.completed,
+          type: eventType,
+          updatedAt: new Date("2026-04-23T00:00:00.000Z"),
+        }),
+      },
+    });
+    mocks.reconcileHostedStripeEventById.mockResolvedValue(null);
+    mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult.mockResolvedValue({
+      accepted: false,
+      configured: true,
+      errorCode: "TEMPORAL_SIGNAL_FAILED",
+      mailboxItemIdPresent: true,
+      signalAccepted: false,
+      workflowIdPresent: true,
+    });
+
+    await expect(processRecordedHostedStripeWebhookEvent({
+      eventId,
+      prisma: prisma as never,
+      timeoutMs: 5_000,
+    })).resolves.toEqual({
+      accepted: false,
+      required: true,
+    });
+
+    expect(findMany).toHaveBeenCalledWith({
+      select: { dedupeKey: true, id: true, userId: true },
+      where: {
+        id: { in: [mailboxItemId] },
+        kind: {
+          in: ["member.activated", "runtime.maintenance-requested"],
+        },
+      },
+    });
+    expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMemberActivationRuntimeWakeBestEffortResult)
+      .toHaveBeenCalledWith({
+        hostedExecutionEventId,
+        mailboxItemId,
+        memberId: "member_123",
+        prisma,
+        source: "stripe.webhook.activation",
+        timeoutMs: 5_000,
+      });
+  });
+
+  it("replays the maximum mixed activation and maintenance set in receipt order without fanout", async () => {
     const activationPointers = Array.from({ length: 6 }, (_, index) => {
       const ordinal = index + 1;
       return {
-        dedupeKey: `member.activated:family:${ordinal}`,
+        dedupeKey: index === 1
+          ? "runtime-control:access-restored:family"
+          : `member.activated:family:${ordinal}`,
         id: `mailbox_family_${ordinal}`,
         userId: `member_family_${ordinal}`,
       };
@@ -418,7 +506,9 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       select: { dedupeKey: true, id: true, userId: true },
       where: {
         id: { in: activationPointers.map((pointer) => pointer.id) },
-        kind: "member.activated",
+        kind: {
+          in: ["member.activated", "runtime.maintenance-requested"],
+        },
       },
     });
     expect(mocks.stripeEventsRetrieve).not.toHaveBeenCalled();
@@ -467,7 +557,9 @@ describe("hosted Stripe webhook reconciliation helpers", () => {
       select: { dedupeKey: true, id: true, userId: true },
       where: {
         id: { in: ["mailbox_item_deleted_member"] },
-        kind: "member.activated",
+        kind: {
+          in: ["member.activated", "runtime.maintenance-requested"],
+        },
       },
     });
     expect(prisma.hostedStripeEvent.findUnique).toHaveBeenCalledTimes(2);
