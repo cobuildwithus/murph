@@ -91,10 +91,10 @@ describe("assistant tool description call contracts", () => {
 
   it("distinguishes fresh current-sender handoffs from clarification continuations", () => {
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "message_current_sender starts a fresh, complete private handoff now",
+      "For a complete current-sender private request, use message_current_sender",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
-      "Before asking a follow-up to choose group or private delivery, call clarify_current_sender",
+      "Before asking any follow-up needed to complete a current-sender handoff, call clarify_current_sender",
     );
     expect(MURPH_GROUP_CONSULT_TOOL.description).toContain(
       "continue_current_sender_privately or continue_current_sender_in_group only on a later Message",

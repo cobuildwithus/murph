@@ -83,7 +83,7 @@ Updated: 2026-08-24
 - Assistant Engine typecheck: passed.
 - Changelog registry: 38 focused tests passed; Web typecheck passed.
 - Normalized real Codex App Server capture with `gpt-tokenizer` 3.4.0
-  `o200k_harmony`: the initial deferred-tool request is unchanged at 13,843
+  `o200k_harmony`: the initial deferred-tool request is unchanged at 13,887
   tokens / 58,845 UTF-8 bytes. The first request after `group_consult` discovery
-  changes from 16,973 tokens / 72,448 bytes to 17,038 / 72,803, a delta of 65
-  tokens / 355 bytes entirely from the tool description.
+  changes from 17,021 tokens / 72,448 bytes to 17,083 / 72,790, a delta of 62
+  tokens / 342 bytes entirely from the tool description.

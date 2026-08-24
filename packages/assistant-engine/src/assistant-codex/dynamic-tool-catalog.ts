@@ -1254,7 +1254,7 @@ function buildMurphGroupFamilyTool<
 export const MURPH_GROUP_CONSULT_TOOL = buildMurphGroupFamilyTool({
   name: 'group_consult',
   description:
-    'Ask or hand off to a group, member, or sender; host binds authority. For the current sender, message_current_sender starts a fresh, complete private handoff now. Before asking a follow-up to choose group or private delivery, call clarify_current_sender. Use continue_current_sender_privately or continue_current_sender_in_group only on a later Message answering that persisted clarification; never for a fresh request. Accepted handoff is queued, not sent.',
+    'Ask or hand off to a group/member/sender; host binds authority. For a complete current-sender private request, use message_current_sender. Before asking any follow-up needed to complete a current-sender handoff, call clarify_current_sender. Use continue_current_sender_privately or continue_current_sender_in_group only on a later Message answering that persisted clarification; never for a fresh request. Accepted handoff is queued, not sent.',
 })
 
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
