@@ -349,7 +349,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     }
 
     const response = await fetchLabelsApi(config, fetchImpl, url, env)
-    const payload = await parseLabelsApiPayload(config, response, apiResponseSchema)
+    const payload = await parseLabelsResponsePayload(config, response, apiResponseSchema)
 
     return searchResultSchema.parse({
       source: config.resultSource,
@@ -396,7 +396,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       },
       method: 'POST',
     })
-    const payload = await parseLabelsBatchApiPayload(
+    const payload = await parseLabelsResponsePayload(
       config,
       response,
       batchApiResponseSchema,
@@ -512,30 +512,29 @@ function readHostedDataApiProviderCredential<TSource extends string>(
   )
 }
 
-async function parseLabelsApiPayload(
+async function parseLabelsResponsePayload<TPayload>(
   config: HostedDataApiLabelsClientConfig<string>,
   response: Response,
-  responseSchema: z.ZodType<{ items: HostedDataApiLabelSearchItem[] }>,
-): Promise<{ items: HostedDataApiLabelSearchItem[] }> {
-  try {
-    const payload: unknown = await response.json()
-    return responseSchema.parse(payload)
-  } catch (error) {
-    throw createLabelsInvalidResponseError(config, response.status, error)
-  }
-}
+  responseSchema: z.ZodType<TPayload>,
+): Promise<TPayload> {
+  let payload: unknown
 
-async function parseLabelsBatchApiPayload(
-  config: HostedDataApiLabelsClientConfig<string>,
-  response: Response,
-  responseSchema: z.ZodType<{ results: HostedDataApiLabelSearchResultItem[] }>,
-): Promise<{ results: HostedDataApiLabelSearchResultItem[] }> {
   try {
-    const payload: unknown = await response.json()
-    return responseSchema.parse(payload)
+    payload = await response.json()
   } catch (error) {
+    if (readSafeErrorName(error) !== 'SyntaxError') {
+      throw createLabelsResponseBodyTransportError(config, response.status, error)
+    }
+
     throw createLabelsInvalidResponseError(config, response.status, error)
   }
+
+  const parsed = responseSchema.safeParse(payload)
+  if (!parsed.success) {
+    throw createLabelsInvalidResponseError(config, response.status, parsed.error)
+  }
+
+  return parsed.data
 }
 
 function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
@@ -565,6 +564,7 @@ function createLabelsTransportError<TSource extends string>(
   error: unknown,
 ): VaultCliError {
   const transportErrorName = readSafeErrorName(error)
+  const transportErrorCode = readSafeErrorCode(error)
   const timedOut = transportErrorName === 'TimeoutError'
     || transportErrorName === 'AbortError'
 
@@ -580,10 +580,43 @@ function createLabelsTransportError<TSource extends string>(
       retryable: true,
       timedOut,
       transportErrorName,
+      transportErrorCode,
     },
     {
       stage: 'provider',
       hint: 'Retry the label search because no successful provider response was received.',
+    },
+  )
+}
+
+function createLabelsResponseBodyTransportError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+  error: unknown,
+): VaultCliError {
+  const transportErrorName = readSafeErrorName(error)
+  const transportErrorCode = readSafeErrorCode(error)
+  const timedOut = transportErrorName === 'TimeoutError'
+    || transportErrorName === 'AbortError'
+
+  return new VaultCliError(
+    timedOut
+      ? `${config.errorCodePrefix}_response_body_timed_out`
+      : `${config.errorCodePrefix}_response_body_failed`,
+    timedOut
+      ? `${config.searchDescription} response body timed out.`
+      : `${config.searchDescription} received a response whose body could not be read.`,
+    {
+      failureStage: 'response_body',
+      retryable: true,
+      status,
+      timedOut,
+      transportErrorName,
+      transportErrorCode,
+    },
+    {
+      stage: 'response_body',
+      hint: 'Retry the label search because the successful provider response body could not be read.',
     },
   )
 }
@@ -676,25 +709,46 @@ function createLabelsInvalidResponseError<TSource extends string>(
     `${config.errorCodePrefix}_invalid_response`,
     `${config.searchDescription} received an invalid successful response.`,
     {
-      failureStage: 'response_body',
+      failureStage: 'response_validation',
       retryable: false,
       status,
-      transportErrorName: readSafeErrorName(error),
+      validationErrorName: readSafeErrorName(error),
     },
     {
-      stage: 'provider',
+      stage: 'response_validation',
       hint: 'Do not retry the same request unchanged; report the provider response-contract failure.',
     },
   )
 }
 
 function readSafeErrorName(error: unknown): string | undefined {
-  if (!(error instanceof Error)) {
+  if (
+    typeof error !== 'object'
+    || error === null
+    || !('name' in error)
+    || typeof error.name !== 'string'
+  ) {
     return undefined
   }
 
   const name = normalizeNullableString(error.name)
   return name && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name)
     ? name
+    : undefined
+}
+
+function readSafeErrorCode(error: unknown): string | undefined {
+  if (
+    typeof error !== 'object'
+    || error === null
+    || !('code' in error)
+    || typeof error.code !== 'string'
+  ) {
+    return undefined
+  }
+
+  const code = normalizeNullableString(error.code)
+  return code && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u.test(code)
+    ? code
     : undefined
 }

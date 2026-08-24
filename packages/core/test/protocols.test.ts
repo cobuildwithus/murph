@@ -282,6 +282,37 @@ test("protocol selectors and system frontmatter fail closed on conflicts", async
   );
 });
 
+test("protocol candidate validation exposes bounded field metadata", async () => {
+  const vaultRoot = await makeTempDirectory("murph-protocol-candidate-validation");
+  await initializeVault({ vaultRoot });
+
+  await assert.rejects(
+    () =>
+      upsertProtocol({
+        vaultRoot,
+        slug: "invalid-candidate",
+        title: "Invalid Candidate",
+        frontmatter: {
+          ...validProtocolFrontmatterPatch(),
+          effectiveSpec: "PrivateProtocolSpecSentinel",
+        },
+      }),
+    (error) => {
+      if (!(error instanceof VaultError) || error.code !== "VAULT_INVALID_PROTOCOL") {
+        return false;
+      }
+
+      assert.equal(error.details.validationSource, "submitted_candidate");
+      assert.deepEqual(error.details.fields, [{
+        path: ["effectiveSpec"],
+        code: "invalid_type",
+      }]);
+      assert.doesNotMatch(JSON.stringify(error.details), /PrivateProtocolSpecSentinel/u);
+      return true;
+    },
+  );
+});
+
 test("protocol reads reject non-canonical frontmatter", async () => {
   const vaultRoot = await makeTempDirectory("murph-protocol-strict");
   await initializeVault({ vaultRoot });
@@ -309,6 +340,11 @@ test("protocol reads reject non-canonical frontmatter", async () => {
       "effectiveSpecHash: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "protocolRevisionId: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "unexpectedField: should-fail",
+      "\"private field\": should-also-fail",
+      ...Array.from(
+        { length: 11 },
+        (_value, index) => `extraField${index + 1}: should-fail`,
+      ),
       "---",
       "# Broken protocol",
       "",
@@ -317,9 +353,28 @@ test("protocol reads reject non-canonical frontmatter", async () => {
 
   await assert.rejects(
     () => readProtocol({ vaultRoot, slug: "broken" }),
-    (error) =>
-      error instanceof VaultError &&
-      error.code === "VAULT_INVALID_PROTOCOL",
+    (error) => {
+      if (!(error instanceof VaultError) || error.code !== "VAULT_INVALID_PROTOCOL") {
+        return false;
+      }
+
+      assert.equal(error.details.validationSource, "stored_vault_state");
+      const fields = error.details.fields;
+      assert.ok(Array.isArray(fields));
+      assert.equal(fields.length, 12);
+      assert.deepEqual(fields.slice(0, 2), [
+        {
+          path: [],
+          code: "unrecognized_keys",
+        },
+        {
+          path: ["unexpectedField"],
+          code: "unrecognized_keys",
+        },
+      ]);
+      assert.doesNotMatch(JSON.stringify(error.details), /private field|should-also-fail/u);
+      return true;
+    },
   );
 });
 
@@ -347,7 +402,11 @@ test("protocol reads reject stale derived hashes after manual edits", async () =
     (error) =>
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_PROTOCOL" &&
-      error.details?.field === "effectiveSpecHash",
+      error.details.validationSource === "stored_vault_state" &&
+      JSON.stringify(error.details.fields) === JSON.stringify([{
+        path: ["effectiveSpecHash"],
+        code: "stale_value",
+      }]),
   );
 
   await fs.writeFile(
@@ -360,6 +419,10 @@ test("protocol reads reject stale derived hashes after manual edits", async () =
     (error) =>
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_PROTOCOL" &&
-      error.details?.field === "protocolRevisionId",
+      error.details.validationSource === "stored_vault_state" &&
+      JSON.stringify(error.details.fields) === JSON.stringify([{
+        path: ["protocolRevisionId"],
+        code: "stale_value",
+      }]),
   );
 });

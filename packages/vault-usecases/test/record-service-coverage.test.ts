@@ -79,6 +79,7 @@ import {
   normalizeStringArray,
   relativePathEntries,
   stringArray,
+  toValidationRepairFields,
   uniqueStrings,
 } from "../src/usecases/vault-usecase-helpers.ts";
 import {
@@ -489,6 +490,28 @@ describe("shared and vault helper functions", () => {
     ]);
     assert.deepEqual(compactObject({ a: 1, b: undefined, c: null }), { a: 1, c: null });
     assert.deepEqual(relativePathEntries([{ relativePath: "x.md" }]), ["x.md"]);
+  });
+
+  test("expands safe unrecognized keys and uses the parent for unsafe keys", () => {
+    const fields = toValidationRepairFields([{
+      path: ["effectiveSpec"],
+      code: "unrecognized_keys",
+      keys: ["unsupportedField", "private field sentinel"],
+    }]);
+
+    assert.deepEqual(fields, [
+      {
+        path: ["effectiveSpec"],
+        code: "unrecognized_keys",
+        message: "One or more fields under this path are not supported.",
+      },
+      {
+        path: ["effectiveSpec", "unsupportedField"],
+        code: "unrecognized_keys",
+        message: "Field is not supported.",
+      },
+    ]);
+    assert.doesNotMatch(JSON.stringify(fields), /private field sentinel/u);
   });
 });
 

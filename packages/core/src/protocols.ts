@@ -26,7 +26,7 @@ import {
   stripUndefined,
 } from "./bank/shared.ts";
 
-import type { FrontmatterObject } from "./types.ts";
+import type { FrontmatterObject, UnknownRecord } from "./types.ts";
 
 export const PROTOCOL_SCHEMA_VERSION = CONTRACT_SCHEMA_VERSION.protocolFrontmatter;
 export const PROTOCOL_DOC_TYPE = FRONTMATTER_DOC_TYPES.protocol;
@@ -40,6 +40,16 @@ const PROTOCOL_SYSTEM_FIELDS = new Set([
   "slug",
   "title",
 ]);
+const MAX_PROTOCOL_VALIDATION_FIELDS = 12;
+const SAFE_PROTOCOL_FIELD_SEGMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/u;
+
+type ProtocolValidationSource = "submitted_candidate" | "stored_vault_state";
+
+interface ProtocolValidationIssue {
+  code?: unknown;
+  keys?: unknown;
+  path: readonly PropertyKey[];
+}
 
 export type ProtocolRef = ContractProtocolRef;
 
@@ -129,6 +139,7 @@ export interface ReadProtocolInput {
 function validateProtocolFrontmatter(
   value: unknown,
   relativePath: string,
+  validationSource: ProtocolValidationSource,
 ): ProtocolFrontmatter {
   const parsed = protocolFrontmatterSchema.safeParse(value);
 
@@ -138,15 +149,84 @@ function validateProtocolFrontmatter(
       `Protocol frontmatter for "${relativePath}" has an unexpected shape.`,
       {
         relativePath,
-        issues: parsed.error.issues.map((issue) => ({
-          path: issue.path.join("."),
-          message: issue.message,
-        })),
+        validationSource,
+        fields: protocolValidationFields(parsed.error.issues),
       },
     );
   }
 
   return parsed.data;
+}
+
+function protocolValidationFields(
+  issues: readonly ProtocolValidationIssue[],
+): UnknownRecord[] {
+  const fields: UnknownRecord[] = [];
+
+  for (const issue of issues) {
+    const code = protocolValidationCode(issue.code);
+
+    if (code === "unrecognized_keys") {
+      const keys = Array.isArray(issue.keys) ? issue.keys : [];
+      const requiresParentFallback = keys.length === 0
+        || keys.some((key) =>
+          typeof key !== "string"
+          || !SAFE_PROTOCOL_FIELD_SEGMENT_PATTERN.test(key)
+        );
+
+      if (requiresParentFallback) {
+        fields.push({
+          path: protocolValidationPath(issue.path),
+          code,
+        });
+      }
+
+      for (const key of keys) {
+        if (
+          typeof key === "string"
+          && SAFE_PROTOCOL_FIELD_SEGMENT_PATTERN.test(key)
+        ) {
+          fields.push({
+            path: [...protocolValidationPath(issue.path), key],
+            code,
+          });
+        }
+      }
+    } else {
+      fields.push({
+        path: protocolValidationPath(issue.path),
+        code,
+      });
+    }
+
+    if (fields.length >= MAX_PROTOCOL_VALIDATION_FIELDS) {
+      return fields.slice(0, MAX_PROTOCOL_VALIDATION_FIELDS);
+    }
+  }
+
+  return fields;
+}
+
+function protocolValidationPath(
+  path: readonly PropertyKey[],
+): Array<string | number> {
+  return path.flatMap((segment) =>
+    typeof segment === "string"
+      || (
+        typeof segment === "number"
+        && Number.isSafeInteger(segment)
+        && segment >= 0
+      )
+      ? [segment]
+      : []
+  );
+}
+
+function protocolValidationCode(code: unknown): string {
+  return typeof code === "string"
+    && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/u.test(code)
+    ? code
+    : "invalid_value";
 }
 
 function frontmatterString(value: FrontmatterObject | undefined, fieldName: string): string | undefined {
@@ -303,7 +383,11 @@ function assertProtocolDerivedHashes(
       `Protocol frontmatter for "${relativePath}" has a stale effectiveSpecHash.`,
       {
         relativePath,
-        field: "effectiveSpecHash",
+        validationSource: "stored_vault_state",
+        fields: [{
+          path: ["effectiveSpecHash"],
+          code: "stale_value",
+        }],
       },
     );
   }
@@ -314,7 +398,11 @@ function assertProtocolDerivedHashes(
       `Protocol frontmatter for "${relativePath}" has a stale protocolRevisionId.`,
       {
         relativePath,
-        field: "protocolRevisionId",
+        validationSource: "stored_vault_state",
+        fields: [{
+          path: ["protocolRevisionId"],
+          code: "stale_value",
+        }],
       },
     );
   }
@@ -326,7 +414,11 @@ function parseProtocolRecord(
   markdown: string,
 ): ProtocolRecord {
   const parsed = parseFrontmatterDocument(markdown);
-  const entity = validateProtocolFrontmatter(attributes, relativePath);
+  const entity = validateProtocolFrontmatter(
+    attributes,
+    relativePath,
+    "stored_vault_state",
+  );
   assertProtocolDerivedHashes(entity, parsed.body, relativePath);
 
   return {
@@ -424,6 +516,7 @@ export async function upsertProtocol(
           ...derivedHashes,
         }),
         target.relativePath,
+        "submitted_candidate",
       );
 
       return {

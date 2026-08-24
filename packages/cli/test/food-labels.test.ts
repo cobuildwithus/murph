@@ -636,6 +636,16 @@ describe('searchFoodLabels', () => {
       status: 429,
     },
     {
+      code: 'food_labels_api_request_timed_out',
+      retryable: true,
+      status: 408,
+    },
+    {
+      code: 'food_labels_api_response_failed',
+      retryable: false,
+      status: 422,
+    },
+    {
       code: 'food_labels_api_service_unavailable',
       retryable: true,
       status: 503,
@@ -656,11 +666,46 @@ describe('searchFoodLabels', () => {
 
       assert.ok(error instanceof VaultCliError)
       assert.equal(error.code, code)
+      assert.equal(error.context?.failureStage, 'response')
       assert.equal(error.context?.retryable, retryable)
       assert.equal(error.context?.status, status)
-      assert.doesNotMatch(error.message, /private-provider-body|private-food-query/u)
+      assert.equal(error.context?.timedOut, status === 408 ? true : undefined)
+      assert.equal(error.repair?.stage, 'provider')
+      assert.doesNotMatch(
+        JSON.stringify({
+          context: error.context,
+          message: error.message,
+          repair: error.repair,
+        }),
+        /private-provider-body|private-food-query/u,
+      )
     },
   )
+
+  it('classifies generic network failures with bounded transport metadata', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      throw Object.assign(new TypeError('private network cause'), {
+        code: 'UND_ERR_CONNECT_TIMEOUT',
+      })
+    })
+
+    const error = await searchFoodLabels(
+      { q: 'private-network-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'food_labels_api_request_failed')
+    assert.equal(error.context?.failureStage, 'request')
+    assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.transportErrorName, 'TypeError')
+    assert.equal(error.context?.transportErrorCode, 'UND_ERR_CONNECT_TIMEOUT')
+    assert.equal(error.repair?.stage, 'provider')
+    assert.doesNotMatch(
+      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      /private network cause|private-network-query/u,
+    )
+  })
 
   it('classifies timeouts as retryable without exposing the transport cause', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => {
@@ -679,7 +724,64 @@ describe('searchFoodLabels', () => {
     assert.equal(error.context?.retryable, true)
     assert.equal(error.context?.timedOut, true)
     assert.equal(error.context?.transportErrorName, 'TimeoutError')
+    assert.equal(error.repair?.stage, 'provider')
     assert.doesNotMatch(error.message, /private timeout cause|private-timeout-query/u)
+  })
+
+  it('makes response-body transport timeouts retryable without exposing the cause', async () => {
+    const response = new Response('{}', { status: 200 })
+    const bodyError = Object.assign(new Error('private response body timeout'), {
+      name: 'AbortError',
+      code: 'ABORT_ERR',
+    })
+    vi.spyOn(response, 'json').mockRejectedValue(bodyError)
+    const fetchMock = vi.fn<typeof fetch>(async () => response)
+
+    const error = await searchFoodLabels(
+      { q: 'private-response-body-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'food_labels_api_response_body_timed_out')
+    assert.equal(error.context?.failureStage, 'response_body')
+    assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.status, 200)
+    assert.equal(error.context?.timedOut, true)
+    assert.equal(error.context?.transportErrorName, 'AbortError')
+    assert.equal(error.context?.transportErrorCode, 'ABORT_ERR')
+    assert.equal(error.repair?.stage, 'response_body')
+    assert.doesNotMatch(
+      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      /private response body timeout|private-response-body-query/u,
+    )
+  })
+
+  it('keeps malformed JSON terminal and separate from body transport failures', async () => {
+    const providerBody = 'private-malformed-json-sentinel'
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      `{${providerBody}`,
+      {
+        headers: { 'content-type': 'application/json' },
+        status: 200,
+      },
+    ))
+
+    const error = await searchFoodLabels(
+      { q: 'private-malformed-json-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'food_labels_api_invalid_response')
+    assert.equal(error.context?.failureStage, 'response_validation')
+    assert.equal(error.context?.retryable, false)
+    assert.equal(error.context?.validationErrorName, 'SyntaxError')
+    assert.equal(error.repair?.stage, 'response_validation')
+    assert.doesNotMatch(
+      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      /private-malformed-json-sentinel|private-malformed-json-query/u,
+    )
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {
@@ -899,6 +1001,33 @@ describe('searchFoodLabelsBatch', () => {
       name: 'ZodError',
     })
     assert.equal(fetchMock.mock.calls.length, 0)
+  })
+
+  it('shares retryable response-body transport recovery with batch searches', async () => {
+    const response = new Response('{}', { status: 200 })
+    const bodyError = Object.assign(new TypeError('private batch body failure'), {
+      code: 'UND_ERR_SOCKET',
+    })
+    vi.spyOn(response, 'json').mockRejectedValue(bodyError)
+    const fetchMock = vi.fn<typeof fetch>(async () => response)
+
+    const error = await searchFoodLabelsBatch(
+      { queries: ['private-batch-query'] },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'food_labels_api_response_body_failed')
+    assert.equal(error.context?.failureStage, 'response_body')
+    assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.timedOut, false)
+    assert.equal(error.context?.transportErrorName, 'TypeError')
+    assert.equal(error.context?.transportErrorCode, 'UND_ERR_SOCKET')
+    assert.equal(error.repair?.stage, 'response_body')
+    assert.doesNotMatch(
+      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      /private batch body failure|private-batch-query/u,
+    )
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {

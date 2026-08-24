@@ -519,6 +519,42 @@ test('food label provider classification survives the final machine envelope wit
   }
 })
 
+test('food label response-body transport recovery survives the final machine envelope', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const submittedQuery = 'private-response-body-food-query'
+  const response = new Response('{}', { status: 200 })
+  vi.spyOn(response, 'json').mockRejectedValue(Object.assign(
+    new TypeError('private response body transport cause'),
+    { code: 'UND_ERR_SOCKET' },
+  ))
+  const fetchMock = vi.fn<typeof fetch>(async () => response)
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_response_body_failed')
+      assert.equal(result.envelope.error.retryable, true)
+      assert.equal(result.envelope.error.stage, 'response_body')
+      assert.match(result.envelope.error.hint ?? '', /response body could not be read/u)
+    }
+    assert.doesNotMatch(
+      JSON.stringify(result.envelope),
+      /private response body transport cause|private-response-body-food-query/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
 test('food save validation exposes a repair field without echoing the submitted value', async () => {
   const privateTitle = 'Private Food Title'
   const privateTag = 'PrivateTagSentinel'

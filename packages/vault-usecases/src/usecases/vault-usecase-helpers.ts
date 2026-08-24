@@ -13,6 +13,7 @@ import {
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/
+const SAFE_REPAIR_FIELD_SEGMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/u
 
 interface VaultPathRuntime {
   resolveVaultPathOnDisk(inputVaultRoot: string, relativePath: string): Promise<{
@@ -202,14 +203,52 @@ export function compactObject<TRecord extends Record<string, unknown>>(record: T
 export function toValidationRepairFields(
   issues: readonly {
     code?: unknown
+    keys?: unknown
     path: readonly PropertyKey[]
   }[],
 ): VaultCliRepairFieldInput[] {
-  return issues.map((issue) => ({
-    path: issue.path,
-    code: typeof issue.code === 'string' ? issue.code : 'invalid_value',
-    message: validationRepairMessage(issue.code),
-  }))
+  return issues.flatMap((issue) => {
+    const code = typeof issue.code === 'string' ? issue.code : 'invalid_value'
+
+    if (code !== 'unrecognized_keys') {
+      return [{
+        path: issue.path,
+        code,
+        message: validationRepairMessage(code),
+      }]
+    }
+
+    const keys = Array.isArray(issue.keys) ? issue.keys : []
+    const fields: VaultCliRepairFieldInput[] = []
+    const requiresParentFallback = keys.length === 0
+      || keys.some((key) =>
+        typeof key !== 'string'
+        || !SAFE_REPAIR_FIELD_SEGMENT_PATTERN.test(key)
+      )
+
+    if (requiresParentFallback) {
+      fields.push({
+        path: issue.path,
+        code,
+        message: 'One or more fields under this path are not supported.',
+      })
+    }
+
+    for (const key of keys) {
+      if (
+        typeof key === 'string'
+        && SAFE_REPAIR_FIELD_SEGMENT_PATTERN.test(key)
+      ) {
+        fields.push({
+          path: [...issue.path, key],
+          code,
+          message: validationRepairMessage(code),
+        })
+      }
+    }
+
+    return fields
+  })
 }
 
 function validationRepairMessage(code: unknown): string {

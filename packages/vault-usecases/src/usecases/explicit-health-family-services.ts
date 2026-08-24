@@ -64,7 +64,10 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
-import { toVaultCliError } from "./vault-usecase-helpers.js";
+import {
+  toValidationRepairFields,
+  toVaultCliError,
+} from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -152,34 +155,23 @@ function isPrivateProtocolVaultError(error: unknown): error is PrivateProtocolVa
 function protocolRepairFields(
   details: Record<string, unknown> | undefined,
 ): VaultCliRepairFieldInput[] {
-  const issues = Array.isArray(details?.issues) ? details.issues : [];
-  const fields = issues.flatMap((issue): VaultCliRepairFieldInput[] => {
-    if (typeof issue !== "object" || issue === null || Array.isArray(issue)) {
+  const fields = Array.isArray(details?.fields) ? details.fields : [];
+  const issues = fields.flatMap((field) => {
+    if (typeof field !== "object" || field === null || Array.isArray(field)) {
       return [];
     }
 
-    const path = "path" in issue && typeof issue.path === "string"
-      ? issue.path
-      : "$";
+    if (!("path" in field) || !Array.isArray(field.path)) {
+      return [];
+    }
+
     return [{
-      path,
-      code: "invalid_value",
-      message: "Value failed protocol validation.",
+      path: field.path,
+      code: "code" in field ? field.code : undefined,
     }];
   });
 
-  if (fields.length > 0) {
-    return fields;
-  }
-
-  const field = typeof details?.field === "string" ? details.field : null;
-  return field
-    ? [{
-        path: field,
-        code: "invalid_value",
-        message: "Value failed protocol validation.",
-      }]
-    : [];
+  return toValidationRepairFields(issues);
 }
 
 function toPrivateProtocolVaultCliError(error: unknown): unknown {
@@ -188,10 +180,30 @@ function toPrivateProtocolVaultCliError(error: unknown): unknown {
   }
 
   if (error.code === "VAULT_INVALID_PROTOCOL") {
+    if (error.details?.validationSource !== "submitted_candidate") {
+      return new VaultCliError(
+        "vault_state_invalid",
+        "Stored protocol state is invalid.",
+        {
+          vaultCode: error.code,
+          validationSource: error.details?.validationSource === "stored_vault_state"
+            ? "stored_vault_state"
+            : "unknown",
+        },
+        {
+          stage: "vault_state",
+          hint: "Repair or restore the stored protocol record before retrying the command.",
+        },
+      );
+    }
+
     return new VaultCliError(
       "contract_invalid",
       "Protocol payload is invalid.",
-      { vaultCode: error.code },
+      {
+        vaultCode: error.code,
+        validationSource: "submitted_candidate",
+      },
       {
         stage: "validation",
         hint: "Correct the listed protocol fields and retry the command.",

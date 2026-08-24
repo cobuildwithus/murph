@@ -421,11 +421,17 @@ describe('searchSupplementLabels', () => {
 
     assert.ok(error instanceof VaultCliError)
     assert.equal(error.code, 'supplement_labels_api_invalid_response')
-    assert.equal(error.context?.failureStage, 'response_body')
+    assert.equal(error.context?.failureStage, 'response_validation')
     assert.equal(error.context?.retryable, false)
     assert.equal(error.context?.status, 200)
+    assert.equal(error.context?.validationErrorName, 'ZodError')
+    assert.equal(error.repair?.stage, 'response_validation')
     assert.doesNotMatch(
-      error.message,
+      JSON.stringify({
+        context: error.context,
+        message: error.message,
+        repair: error.repair,
+      }),
       /private-malformed-provider-body|private-supplement-query/u,
     )
   })
