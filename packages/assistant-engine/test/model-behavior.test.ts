@@ -3373,6 +3373,12 @@ describe('assistant conversation scope', () => {
       'When `occurrenceProjection.status: unavailable`, confirm that the write succeeded',
     )
     expect(prompt).toContain(
+      'When an unavailable projection includes `stale_recurring_occurrence`, say that the recurring occurrence is overdue and its next occurrence could not be confirmed',
+    )
+    expect(prompt).toContain(
+      'Do not describe it as current scheduler work, promise automatic recovery, or say that no member action is needed',
+    )
+    expect(prompt).toContain(
       'A save or patch result already includes its host-owned readback',
     )
     expect(prompt).toContain(
