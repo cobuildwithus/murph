@@ -1163,6 +1163,53 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(750);
   });
 
+  it("resumes authorization when an incomplete Garmin consent route departs", async () => {
+    let atMurph = false;
+    let now = 0;
+    let signInClicks = 0;
+    const consentFrame = authorizationFrame({});
+    const signInFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          signInClicks += 1;
+          atMurph = true;
+        },
+        text: "Sign In",
+      }],
+    });
+    const currentFrame = () => now < 500 ? consentFrame : signInFrame;
+    const page = {
+      frames: () => [currentFrame()],
+      getByRole: (
+        ...args: Parameters<typeof consentFrame.getByRole>
+      ) => currentFrame().getByRole(...args),
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: currentFrame,
+      title: vi.fn(async () => "Garmin Sign In"),
+      url: () => atMurph
+        ? "https://app.example.test/home"
+        : now < 500
+          ? "https://connect.garmin.com/partner/oauthConfirm"
+          : "https://sso.garmin.com/portal/sso/en-US/sign-in",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).resolves.toBeUndefined();
+
+    expect(signInClicks).toBe(1);
+    expect(now).toBe(1_250);
+  });
+
   it("fails closed on a partial Garmin consent progression marker pair", async () => {
     let agreeClicks = 0;
     const mainFrame = authorizationFrame({
@@ -1238,6 +1285,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
           ? "Garmin consent expected exactly 3 data-sharing checkboxes."
           : "Garmin consent did not expose one enabled Save action.",
       );
+      expect(now).toBe(15_000);
     },
   );
 

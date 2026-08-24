@@ -551,7 +551,12 @@ async function completeExternalAuthorization(
       }
 
       const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
-        && await completeGarminPartnerConsent(page, config.source);
+        && await completeGarminPartnerConsent(
+          page,
+          config.source,
+          Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+          now,
+        );
       if (completedGarminPartnerConsent) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
@@ -619,22 +624,52 @@ async function completeExternalAuthorization(
 async function completeGarminPartnerConsent(
   page: Page,
   source: BrowserConfig["source"],
+  deadline: number,
+  now: () => number,
 ): Promise<boolean> {
   if (source !== "garmin") {
     return false;
   }
-  const step = readGarminPartnerConsentStep(page.url());
+  let step = readGarminPartnerConsentStep(page.url());
   if (step === null || step === "permissions_updated") return false;
   if (step === "invalid") {
     throw new Error("Garmin consent exposed an invalid progression state.");
   }
 
-  const checkboxes = page.getByRole("checkbox");
-  if (await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
+  let checkboxes = page.getByRole("checkbox");
+  let checkboxCount = await checkboxes.count();
+  let save = page.getByRole("button", { exact: true, name: "Save" });
+  let saveAction: Locator | null = null;
+  while (step === "selection" && now() < deadline) {
+    if (checkboxCount === GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
+      if (await save.count() === 1) {
+        const candidate = save.nth(0);
+        if (await readAuthorizationActionState(candidate) === "enabled") {
+          saveAction = candidate;
+          break;
+        }
+      }
+    }
+    await page.waitForTimeout(Math.min(250, Math.max(1, deadline - now())));
+    step = readGarminPartnerConsentStep(page.url());
+    checkboxes = page.getByRole("checkbox");
+    checkboxCount = await checkboxes.count();
+    save = page.getByRole("button", { exact: true, name: "Save" });
+  }
+  step = readGarminPartnerConsentStep(page.url());
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step !== "selection") return false;
+  if (checkboxCount !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
     throw new Error(
       `Garmin consent expected exactly ${GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT} data-sharing checkboxes.`,
     );
   }
+  if (saveAction === null) {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+
   for (
     let index = 0;
     index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
@@ -653,14 +688,6 @@ async function completeGarminPartnerConsent(
     }
   }
 
-  const save = page.getByRole("button", { exact: true, name: "Save" });
-  if (await save.count() !== 1) {
-    throw new Error("Garmin consent did not expose one enabled Save action.");
-  }
-  const saveAction = save.nth(0);
-  if (await readAuthorizationActionState(saveAction) !== "enabled") {
-    throw new Error("Garmin consent did not expose one enabled Save action.");
-  }
   await clickAuthorizationControl(saveAction);
   return true;
 }
