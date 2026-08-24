@@ -24,26 +24,7 @@ export const isoTimestampSchema = z
 export const localDateSchema = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
-  .refine(isRealCalendarDate, 'Expected a real calendar date in YYYY-MM-DD form.')
   .describe('Calendar date in YYYY-MM-DD form.')
-
-function isRealCalendarDate(value: string): boolean {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value)
-  if (!match) {
-    return false
-  }
-
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  if (month < 1 || month > 12 || day < 1) {
-    return false
-  }
-
-  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  return day <= daysInMonth[month - 1]!
-}
 
 export const occurredAtOptionSchema = z
   .union([isoTimestampSchema, localDateSchema])

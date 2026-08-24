@@ -162,35 +162,161 @@ function projectDeviceToolError(
           stage,
           hint: 'Retry reconcile later for the same account.',
         }
-      case 'device_sync_invalid_response':
-        return {
-          code: error.code,
-          message: 'The device service returned an invalid response.',
-          retryable: true,
-          stage,
-          hint: 'Retry the device operation. If it repeats, treat device management as temporarily unavailable.',
-        }
-      case 'device_sync_request_failed':
-      case 'device_sync_unavailable':
-        return {
-          code: error.code,
-          message: 'The device service is temporarily unavailable.',
-          retryable:
-            typeof error.context?.retryable === 'boolean'
-              ? error.context.retryable
-              : true,
-          stage,
-          hint: 'Retry the device operation later.',
-        }
     }
   }
 
+  const hostedError = readHostedWebControlPlaneResponseError(error)
+  if (hostedError) {
+    if (action === 'reconcile') {
+      switch (hostedError.code) {
+        case 'ACCOUNT_DISCONNECTED':
+        case 'ACCOUNT_REAUTHORIZATION_REQUIRED':
+          return {
+            code: hostedError.code,
+            message: 'This device account must be reconnected before reconciliation.',
+            retryable: false,
+            stage,
+            hint: 'Run list_accounts again, then connect its provider before retrying reconcile.',
+          }
+        case 'CONNECTION_NOT_FOUND':
+          return {
+            code: hostedError.code,
+            message: 'That device account is no longer available.',
+            retryable: false,
+            stage,
+            hint: 'Run list_accounts and retry reconcile with a current accountId.',
+          }
+        case 'RECONCILE_WAKE_NOT_ACCEPTED':
+          return projectKnownHostedRetryableDeviceError({
+            code: hostedError.code,
+            message: 'Device reconciliation could not be queued right now.',
+            retryable: hostedError.retryable,
+            retryHint: 'Retry reconcile later for the same account.',
+            stage,
+          })
+      }
+    }
+
+    if (action === 'connect') {
+      switch (hostedError.code) {
+        case 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE':
+          return projectKnownHostedRetryableDeviceError({
+            code: hostedError.code,
+            message: 'Device connection links are temporarily unavailable.',
+            retryable: hostedError.retryable,
+            retryHint: 'Retry connect later for the same provider.',
+            stage,
+          })
+        case 'HOSTED_DEVICE_CONNECT_PERSONAL_MEMBER_REQUIRED':
+          return {
+            code: hostedError.code,
+            message: 'Device connections require a private member conversation.',
+            retryable: false,
+            stage,
+            hint: 'Continue in the member\'s private Murph conversation before retrying connect.',
+          }
+        case 'HOSTED_DEVICE_CONNECT_TARGET_NOT_CONFIGURED':
+          return {
+            code: hostedError.code,
+            message: 'That device provider is not configured for connection.',
+            retryable: false,
+            stage,
+            hint: 'Retry connect with a provider exposed in the current device context.',
+          }
+        case 'INVALID_REQUEST':
+          return {
+            code: hostedError.code,
+            message: 'The device connection request was invalid.',
+            retryable: false,
+            stage,
+            hint: 'Retry connect with one provider from the current device context and no extra fields.',
+          }
+        case 'HOSTED_DEVICE_CONNECT_LINK_INVALID_MESSAGING_RETURN_TARGET':
+          return {
+            code: hostedError.code,
+            message: 'The device connection return target is invalid.',
+            retryable: false,
+            stage,
+            hint: 'Continue in a supported private iMessage or Telegram conversation before retrying connect.',
+          }
+      }
+    }
+  }
+
+  return genericDeviceToolFailure(stage)
+}
+
+function projectKnownHostedRetryableDeviceError(input: {
+  code: string
+  message: string
+  retryable: boolean
+  retryHint: string
+  stage: string
+}): DeviceToolErrorProjection {
+  if (!input.retryable) {
+    return genericDeviceToolFailure(input.stage, input.code)
+  }
+
   return {
-    code: 'device_operation_unavailable',
-    message: 'The device operation is unavailable.',
+    code: input.code,
+    message: input.message,
     retryable: true,
+    stage: input.stage,
+    hint: input.retryHint,
+  }
+}
+
+function genericDeviceToolFailure(
+  stage: string,
+  code = 'device_operation_unavailable',
+): DeviceToolErrorProjection {
+  return {
+    code,
+    message: 'The device operation could not be completed.',
+    retryable: false,
     stage,
-    hint: 'Retry the device operation later.',
+    hint: 'Do not retry the same device operation unchanged.',
+  }
+}
+
+function readHostedWebControlPlaneResponseError(error: unknown): {
+  code: string | null
+  retryable: boolean
+} | null {
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return null
+  }
+
+  const record = error as Record<string, unknown>
+  const context = record.context
+  if (!context || typeof context !== 'object' || Array.isArray(context)) {
+    return null
+  }
+
+  const contextRecord = context as Record<string, unknown>
+  const status = record.status
+  const retryable = record.retryable
+  const code = record.code
+  if (
+    record.name !== 'HostedWebControlPlaneResponseError' ||
+    typeof status !== 'number' ||
+    !Number.isSafeInteger(status) ||
+    status < 400 ||
+    status > 599 ||
+    record.statusCode !== status ||
+    contextRecord.status !== status ||
+    contextRecord.statusCode !== status ||
+    typeof record.forwardedFromWeb !== 'boolean' ||
+    (retryable !== undefined && typeof retryable !== 'boolean') ||
+    contextRecord.retryable !== retryable ||
+    (code !== undefined && typeof code !== 'string')
+  ) {
+    return null
+  }
+
+  return {
+    code: typeof code === 'string' ? code : null,
+    retryable: retryable === true,
   }
 }
 

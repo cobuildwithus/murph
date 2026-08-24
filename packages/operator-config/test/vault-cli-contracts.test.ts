@@ -85,12 +85,17 @@ test('workout result contracts retain exercise-owned live tracking facts', async
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
 })
 
-test('local calendar dates reject impossible days and retain leap days', async () => {
+test('journal results retain regex-shaped local date key compatibility', async () => {
   vi.resetModules()
-  const { localDateSchema } = await import('../src/vault-cli-contracts.ts')
+  const { journalEnsureResultSchema } = await import('../src/vault-cli-contracts.ts')
 
-  assert.equal(localDateSchema.safeParse('2024-02-29').success, true)
-  assert.equal(localDateSchema.safeParse('2026-02-29').success, false)
-  assert.equal(localDateSchema.safeParse('2026-04-31').success, false)
-  assert.equal(localDateSchema.safeParse('2026-13-01').success, false)
+  const parsed = journalEnsureResultSchema.parse({
+    created: false,
+    date: '2026-02-30',
+    journalPath: 'journal/2026/02/2026-02-30.md',
+    lookupId: 'journal_day:2026-02-30',
+    vault: './vault',
+  })
+
+  assert.equal(parsed.date, '2026-02-30')
 })

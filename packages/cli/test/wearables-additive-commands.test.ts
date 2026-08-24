@@ -677,9 +677,15 @@ test('wearables metric validation rejects unsupported metrics without echoing th
   assert.equal(showWearableMetricLatest.mock.calls.length, 0)
 })
 
-test('wearables validation rejects impossible dates and reversed ranges before querying', async () => {
+test('wearables input dates retain leap days and reject impossible dates before querying', async () => {
   const { cli, services } = createWearablesCliAndServices()
-  const showWearableDay = vi.fn()
+  const vault = '/tmp/wearables-additive-vault'
+  const showWearableDay = vi.fn(async (input: { date: string }) => ({
+    date: input.date,
+    filters: { providers: [] },
+    summary: null,
+    vault,
+  }))
   const showWearableLatest = vi.fn()
   Object.defineProperties(services.query, {
     showWearableDay: {
@@ -693,13 +699,24 @@ test('wearables validation rejects impossible dates and reversed ranges before q
       writable: true,
     },
   })
+
+  const leapDay = await runInProcessJsonCli(cli, [
+    'wearables',
+    'day',
+    '2024-02-29',
+    '--vault',
+    vault,
+  ])
+  assert.equal(leapDay.envelope.ok, true)
+  assert.equal(showWearableDay.mock.calls.length, 1)
+
   const impossibleDate = '2026-02-30'
   const impossible = await runInProcessJsonCli(cli, [
     'wearables',
     'day',
     impossibleDate,
     '--vault',
-    '/tmp/wearables-additive-vault',
+    vault,
   ])
   if (impossible.envelope.ok) {
     throw new Error('expected an impossible date error envelope')
@@ -710,30 +727,80 @@ test('wearables validation rejects impossible dates and reversed ranges before q
     true,
   )
   assert.equal(JSON.stringify(impossible.envelope).includes(impossibleDate), false)
+  assert.equal(showWearableDay.mock.calls.length, 1)
+
+  for (const option of ['--date', '--from', '--to'] as const) {
+    const result = await runInProcessJsonCli(cli, [
+      'wearables',
+      'latest',
+      '--vault',
+      vault,
+      option,
+      impossibleDate,
+    ])
+    if (result.envelope.ok) {
+      throw new Error(`expected an impossible ${option} error envelope`)
+    }
+    assert.equal(result.envelope.error.code, 'VALIDATION_ERROR', option)
+    assert.equal(
+      result.envelope.error.fieldErrors?.some(
+        (issue) => issue.path === option.slice(2),
+      ),
+      true,
+      option,
+    )
+    assert.equal(JSON.stringify(result.envelope).includes(impossibleDate), false)
+  }
+
+  assert.equal(showWearableLatest.mock.calls.length, 0)
+})
+
+test('every range-bearing wearable command rejects reversed dates before querying', async () => {
+  const cases = [
+    { args: ['wearables', 'latest'], method: 'showWearableLatest' },
+    { args: ['wearables', 'metric', 'latest', 'hrv'], method: 'showWearableMetricLatest' },
+    { args: ['wearables', 'metric', 'trend', 'hrv'], method: 'showWearableMetricTrend' },
+    { args: ['wearables', 'sleep', 'list'], method: 'listWearableSleep' },
+    { args: ['wearables', 'sleep', 'pattern'], method: 'showWearableSleepPattern' },
+    { args: ['wearables', 'activity', 'list'], method: 'listWearableActivity' },
+    { args: ['wearables', 'body', 'list'], method: 'listWearableBodyState' },
+    { args: ['wearables', 'recovery', 'list'], method: 'listWearableRecovery' },
+    { args: ['wearables', 'sources', 'list'], method: 'listWearableSources' },
+    { args: ['wearables', 'drift'], method: 'showWearableDrift' },
+  ] as const
 
   const from = '2026-04-05'
   const to = '2026-04-01'
-  const reversed = await runInProcessJsonCli(cli, [
-    'wearables',
-    'latest',
-    '--vault',
-    '/tmp/wearables-additive-vault',
-    '--from',
-    from,
-    '--to',
-    to,
-  ])
-  if (reversed.envelope.ok) {
-    throw new Error('expected a reversed date range error envelope')
+  for (const testCase of cases) {
+    const { cli, services } = createWearablesCliAndServices()
+    const query = vi.fn()
+    Object.defineProperty(services.query, testCase.method, {
+      configurable: true,
+      value: query,
+      writable: true,
+    })
+
+    const reversed = await runInProcessJsonCli(cli, [
+      ...testCase.args,
+      '--vault',
+      '/tmp/wearables-additive-vault',
+      '--from',
+      from,
+      '--to',
+      to,
+    ])
+    if (reversed.envelope.ok) {
+      throw new Error(`expected a reversed range error for ${testCase.args.join(' ')}`)
+    }
+    assert.equal(reversed.envelope.error.code, 'invalid_option', testCase.method)
+    assert.equal(
+      reversed.envelope.error.fieldErrors?.some((issue) => issue.path === 'to'),
+      true,
+      testCase.method,
+    )
+    const rendered = JSON.stringify(reversed.envelope)
+    assert.equal(rendered.includes(from), false, testCase.method)
+    assert.equal(rendered.includes(to), false, testCase.method)
+    assert.equal(query.mock.calls.length, 0, testCase.method)
   }
-  assert.equal(reversed.envelope.error.code, 'invalid_option')
-  assert.equal(
-    reversed.envelope.error.fieldErrors?.some((issue) => issue.path === 'to'),
-    true,
-  )
-  const rendered = JSON.stringify(reversed.envelope)
-  assert.equal(rendered.includes(from), false)
-  assert.equal(rendered.includes(to), false)
-  assert.equal(showWearableDay.mock.calls.length, 0)
-  assert.equal(showWearableLatest.mock.calls.length, 0)
 })

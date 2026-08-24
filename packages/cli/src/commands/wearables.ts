@@ -1,5 +1,8 @@
 import { Cli, z } from 'incur'
-import { wearablePreferenceProviderValues } from '@murphai/contracts'
+import {
+  isStrictIsoDate,
+  wearablePreferenceProviderValues,
+} from '@murphai/contracts'
 import {
   resolveWearableCanonicalMetricKey,
   wearableCanonicalMetricKeys,
@@ -58,6 +61,10 @@ const repeatableProviderOptionSchema = z
   .describe(
     'Optional provider filter. Repeat --provider for multiple values such as oura, whoop, or garmin.',
   )
+const wearableInputDateSchema = localDateSchema.refine(
+  isStrictIsoDate,
+  'Expected a real calendar date in YYYY-MM-DD form.',
+)
 const wearableMetricArgSchema = z.object({
   metric: z
     .string()
@@ -72,7 +79,7 @@ const wearableMetricArgSchema = z.object({
     ),
 })
 const wearableDayArgSchema = z.object({
-  date: localDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
+  date: wearableInputDateSchema.describe('Calendar date in YYYY-MM-DD form.'),
 })
 
 const wearableMetricConfidenceSummarySchema = z.object({
@@ -616,11 +623,11 @@ function requireAdditiveWearablesQueryMethod<
 
 function withWearableListOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     limit: z
       .number()
@@ -634,22 +641,22 @@ function withWearableListOptions() {
 
 function withWearableSurfaceOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
   })
 }
 
 function withWearableComparisonOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     windowDays: wearableWindowDaysOptionSchema,
   })
@@ -657,11 +664,11 @@ function withWearableComparisonOptions() {
 
 function withWearableSleepPatternOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional one-day filter. When present, Murph treats it as both --from and --to.'),
-    from: localDateSchema.optional().describe('Inclusive lower date bound.'),
-    to: localDateSchema.optional().describe('Inclusive upper date bound.'),
+    from: wearableInputDateSchema.optional().describe('Inclusive lower date bound.'),
+    to: wearableInputDateSchema.optional().describe('Inclusive upper date bound.'),
     provider: repeatableProviderOptionSchema,
     timeZone: timeZoneSchema
       .optional()
@@ -672,7 +679,7 @@ function withWearableSleepPatternOptions() {
 
 function withPersonalPatternOptions() {
   return withBaseOptions({
-    date: localDateSchema
+    date: wearableInputDateSchema
       .optional()
       .describe('Optional last action date in YYYY-MM-DD form. Defaults to today.'),
     windowDays: personalPatternWindowDaysOptionSchema,
