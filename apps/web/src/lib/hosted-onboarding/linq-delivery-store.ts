@@ -2835,7 +2835,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     && input.delivery.template === "ai_usage_quota"
     && input.source === HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
     && input.delivery.source === HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE
-    && input.delivery.sourceRef === input.data.sourceRef
     && input.delivery.targetKind === input.data.targetKind
     && input.delivery.linqChatLookupKey === input.data.linqChatLookupKey
     && input.delivery.acceptedAt === null
