@@ -215,7 +215,7 @@ describe('projectVaultCliError', () => {
     },
   )
 
-  test('redacts unexpected exception paths while retaining bounded repair text', () => {
+  test('redacts unexpected exception paths while retaining bounded error text', () => {
     const privatePath = '/private/workspace/member-vault/data.json'
     const projection = projectVaultCliError(
       new Error(`Unexpected parser failure in ${privatePath}`),
@@ -233,7 +233,7 @@ describe('projectVaultCliError', () => {
   test('does not return provider-shaped or credential-bearing unknown messages', () => {
     for (const message of [
       '{"error":{"message":"private-provider-response"}}',
-      'access_token=<REDACTED>',
+      'Bearer <REDACTED_TOKEN>',
     ]) {
       const projection = projectVaultCliError(new Error(message))
 
@@ -242,7 +242,7 @@ describe('projectVaultCliError', () => {
         'The command failed without a safe recoverable detail.',
       )
       expect(JSON.stringify(projection)).not.toContain('private-provider-response')
-      expect(JSON.stringify(projection)).not.toContain('private-token')
+      expect(JSON.stringify(projection)).not.toContain('<REDACTED_TOKEN>')
     }
   })
 })
