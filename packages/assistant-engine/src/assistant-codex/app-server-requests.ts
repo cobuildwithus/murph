@@ -50,7 +50,18 @@ export function buildCodexThreadStartParams(
       includeServiceName: true,
       input,
     }),
-    experimentalRawEvents: true,
+  }
+}
+
+export function buildCodexThreadMetadataResumeParams(
+  codexThreadId: string,
+): Record<string, unknown> {
+  return {
+    excludeTurns: true,
+    threadId: assertCodexRpcIdentifier({
+      field: 'threadId',
+      value: codexThreadId,
+    }),
   }
 }
 

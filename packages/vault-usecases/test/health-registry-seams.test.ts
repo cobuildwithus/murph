@@ -269,8 +269,9 @@ describe("health registry family seams", () => {
       context: {
         validationSource: "submitted_candidate",
         vaultCode: "VAULT_INVALID_PROTOCOL",
+        stage: "validation",
         issues: [{
-          path: ["effectiveSpec"],
+          publicPath: ["effectiveSpec"],
           code: "invalid_type",
         }],
       },

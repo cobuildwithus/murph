@@ -67,11 +67,13 @@ async function runJsonCli(args: string[]): Promise<{
           issues: [
             {
               path: ['assistant', 'provider'],
+              publicPath: ['assistant', 'provider'],
               code: 'invalid_value',
               message: 'private raw validation message',
               expected: 'string',
             },
           ],
+          stage: 'validation',
         },
       )
     },

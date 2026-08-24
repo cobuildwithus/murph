@@ -1649,7 +1649,7 @@ test('root chat fails closed when the terminal cannot provide interactive raw-mo
   assert.equal(result.stderr, '')
   assert.equal(
     result.stdout,
-    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
+    'Error (interactive_input_unavailable): Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
   )
 })
 
@@ -1665,7 +1665,7 @@ test('root chat surfaces the interactive-input failure before any json result ca
   assert.equal(result.stderr, '')
   assert.equal(
     result.stdout,
-    'Error: Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
+    'Error (interactive_input_unavailable): Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.\n',
   )
 })
 

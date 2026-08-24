@@ -46,6 +46,7 @@ import {
   stringArrayOption,
   stringOption,
 } from './record-mutation-command-helpers.js'
+import { publicValidationIssue } from './public-validation-issue.js'
 
 const foodStatusSchema = z.enum(FOOD_STATUSES)
 const nutritionProvenanceSourceSchema = z.enum(NUTRITION_PROVENANCE_SOURCES)
@@ -59,6 +60,61 @@ const foodIdSchema = z
 const regimenIdSchema = z
   .string()
   .regex(/^reg_[A-Za-z0-9_-]+$/u, 'Expected a reg_* id.')
+
+const FOOD_PUBLIC_VALIDATION_FIELDS = new Set([
+  'aliases',
+  'attachedRegimenIds',
+  'brand',
+  'calories',
+  'carbsGrams',
+  'confidence',
+  'fatGrams',
+  'fiberGrams',
+  'foodId',
+  'ingredients',
+  'kind',
+  'links',
+  'location',
+  'note',
+  'nutrition',
+  'perServing',
+  'proteinGrams',
+  'provenance',
+  'serving',
+  'slug',
+  'source',
+  'sourceDetail',
+  'status',
+  'summary',
+  'tags',
+  'targetId',
+  'title',
+  'type',
+  'vendor',
+  'waterGrams',
+])
+
+function foodValidationPublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] | undefined {
+  const publicPath: Array<string | number> = []
+  for (const segment of path) {
+    if (
+      typeof segment === 'number' &&
+      Number.isSafeInteger(segment) &&
+      segment >= 0
+    ) {
+      publicPath.push(segment)
+      continue
+    }
+    if (typeof segment === 'string' && FOOD_PUBLIC_VALIDATION_FIELDS.has(segment)) {
+      publicPath.push(segment)
+      continue
+    }
+    return undefined
+  }
+  return publicPath
+}
 
 const foodScaffoldResultSchema = z.object({
   vault: pathSchema,
@@ -254,7 +310,13 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodSavePaylo
       'contract_invalid',
       'Food save options are invalid.',
       {
-        issues: parsed.error.issues,
+        issues: parsed.error.issues.flatMap((issue) => {
+          const publicPath = foodValidationPublicPath(issue.path)
+          return publicPath === undefined
+            ? []
+            : [publicValidationIssue(issue, publicPath)]
+        }),
+        stage: 'validation',
       },
     )
   }

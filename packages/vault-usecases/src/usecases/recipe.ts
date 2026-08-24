@@ -106,6 +106,48 @@ const recipePayloadSchema = z
 
 export type RecipePayload = z.infer<typeof recipePayloadSchema>
 
+const RECIPE_PUBLIC_VALIDATION_FIELDS = new Set([
+  'cookTimeMinutes',
+  'cuisine',
+  'dishType',
+  'ingredients',
+  'prepTimeMinutes',
+  'recipeId',
+  'relatedConditionIds',
+  'relatedGoalIds',
+  'servings',
+  'slug',
+  'source',
+  'status',
+  'steps',
+  'summary',
+  'tags',
+  'title',
+  'totalTimeMinutes',
+])
+
+function recipeValidationPublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] | undefined {
+  const publicPath: Array<string | number> = []
+  for (const segment of path) {
+    if (
+      typeof segment === 'number' &&
+      Number.isSafeInteger(segment) &&
+      segment >= 0
+    ) {
+      publicPath.push(segment)
+      continue
+    }
+    if (typeof segment === 'string' && RECIPE_PUBLIC_VALIDATION_FIELDS.has(segment)) {
+      publicPath.push(segment)
+      continue
+    }
+    return undefined
+  }
+  return publicPath
+}
+
 export function scaffoldRecipePayload() {
   return {
     title: 'Sheet Pan Salmon Bowls',
@@ -144,7 +186,13 @@ export function parseRecipePayload(value: unknown) {
       'contract_invalid',
       'Recipe payload is invalid.',
       {
-        issues: result.error.issues,
+        issues: result.error.issues.flatMap((issue) => {
+          const publicPath = recipeValidationPublicPath(issue.path)
+          return publicPath === undefined
+            ? []
+            : [{ code: issue.code, publicPath }]
+        }),
+        stage: 'validation',
       },
     )
   }

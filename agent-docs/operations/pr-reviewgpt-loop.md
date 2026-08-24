@@ -139,18 +139,33 @@ candidate, download or apply an artifact, launch another review, or merge until
 the user resumes the task. `INVALID` and `RETROSPECTIVE_REQUIRED` retain their
 existing stop behavior rather than using this disposition path.
 
-One narrow exception completes the disposition boundary without ending the
-turn: the substantive result contains exactly one finding, ReviewGPT classifies
-it as `Complexity Collapse`, and the parent independently accepts it after
-proving that the correction preserves every requested behavior and invariant,
-stays within the current task's existing edit authority, and yields net deletion
-or removes concrete concepts or owners without replacement machinery. Report
-the result and evidence-backed disposition as a progress update, then remediate,
-verify, push, and continue the ReviewGPT loop without asking the user for
-separate permission. Use the ordinary turn-ending pause if there is another
-finding, the collapse is rejected, requested behavior or the intended outcome
-would change, scope or authority would expand, or a destructive or external
-action needs new approval. This exception does not bypass an anomaly
+Two narrow exceptions complete the disposition boundary without ending the
+turn after the parent reports every finding and its evidence-backed disposition
+as a progress update:
+
+- `Complexity Collapse`: the substantive result contains exactly one finding,
+  ReviewGPT classifies it as `Complexity Collapse`, and the parent independently
+  accepts it after proving that the correction preserves every requested
+  behavior and invariant, stays within the current task's existing edit
+  authority, and yields net deletion or removes concrete concepts or owners
+  without replacement machinery.
+- `Non-Production Remediation`: every accepted finding in the result can be
+  corrected entirely in isolated tests, fixtures, or direct-proof scaffolding;
+  authored repository docs or process text that is not consumed at runtime; or
+  PR-body, review-comment, and review-evidence updates. The parent must prove the
+  complete correction changes no production source, user-visible or runtime
+  behavior, provider/tool/API/schema contract, runtime or deployment config,
+  runtime-consumed or generated artifact, persisted data, dependency,
+  deployment, external state, or destructive action. Rejected findings may
+  coexist because their evidence-backed disposition is terminal, but every
+  accepted finding must qualify.
+
+After either exception qualifies, remediate, verify, push when applicable, and
+continue the ReviewGPT loop without asking the user for separate permission.
+Use the ordinary turn-ending pause when an accepted finding does not qualify,
+the correction expands beyond the proven boundary, requested behavior or the
+intended outcome would change, scope or authority would expand, or a destructive
+or external action needs new approval. Neither exception bypasses an anomaly
 retrospective or the seven-round hard cap.
 
 ## Preliminary Specialist Pass
@@ -253,9 +268,10 @@ same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
 specialist pass; do not split or rerun it by lens. Apply the Finding Disposition
 Pause before any remediation or artifact download.
 
-After the user resumes, or immediately when the sole accepted finding qualifies
-for the `Complexity Collapse` exception, handle only accepted findings against
-the real code and tests. If the response attaches `reviewgpt-coverage.patch`,
+After the user resumes, or immediately after the parent reports dispositions
+under a qualifying `Complexity Collapse` or `Non-Production Remediation`
+exception, handle only accepted findings against the real code and tests. If the
+response attaches `reviewgpt-coverage.patch`,
 retain the exact review thread URL, artifact index, and selected lane. Download
 only that assistant-owned artifact from the same thread with the managed lane's
 CDP endpoint, for example:
@@ -641,10 +657,11 @@ the current user explicitly asks for it.
 
    Apply the Finding Disposition Pause after completing this triage for every
    substantive specialist result and final `FINDINGS` result. Steps 5–7 begin
-   only after the user resumes, except that a sole accepted finding that
-   qualifies for the behavior-preserving `Complexity Collapse` exception may
-   proceed immediately. Remediation remains limited to accepted findings. A
-   validated final `ROUND_OUTCOME: PASS` continues without that pause.
+   only after the user resumes, except that a qualifying `Complexity Collapse`
+   or `Non-Production Remediation` exception may proceed immediately after the
+   parent reports every disposition. Remediation remains limited to accepted
+   findings and the proven exception boundary. A validated final
+   `ROUND_OUTCOME: PASS` continues without that pause.
 
 5. Before another tactical fix, run the anomaly retrospective when any of these
    is true:
