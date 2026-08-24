@@ -402,20 +402,50 @@ function normalizeExpectedDirectionEntries(
     return undefined
   }
 
-  return values.map((entry) => {
+  return values.map((entry, index) => {
     const separatorIndex = entry.indexOf('=')
     if (separatorIndex < 0) {
       throw new VaultCliError(
         'invalid_option',
         '--expected-direction entries must use biomarker:key=direction form.',
+        undefined,
+        {
+          fields: [{
+            path: ['expectedDirection', index],
+            code: 'invalid_format',
+            message: 'Use biomarker:key=direction form.',
+            expected: 'biomarker:key=increase|decrease|stabilize',
+          }],
+          hint: 'Repair the listed --expected-direction entry and retry experiment start.',
+          stage: 'option_validation',
+        },
+      )
+    }
+
+    const direction = experimentSignalDirectionSchema.safeParse(
+      entry.slice(separatorIndex + 1).trim(),
+    )
+    if (!direction.success) {
+      throw new VaultCliError(
+        'invalid_option',
+        '--expected-direction uses an unsupported direction.',
+        undefined,
+        {
+          fields: [{
+            path: ['expectedDirection', index],
+            code: 'invalid_value',
+            message: 'Direction must be increase, decrease, or stabilize.',
+            expected: 'increase|decrease|stabilize',
+          }],
+          hint: 'Repair the listed --expected-direction entry and retry experiment start.',
+          stage: 'option_validation',
+        },
       )
     }
 
     return {
       biomarkerKey: entry.slice(0, separatorIndex).trim(),
-      direction: experimentSignalDirectionSchema.parse(
-        entry.slice(separatorIndex + 1).trim(),
-      ),
+      direction: direction.data,
     }
   })
 }
@@ -611,7 +641,7 @@ function buildPrimaryOutcomeFromOptions(input: {
         'Comparison and metric-capture options are only valid for metric outcomes.',
       )
     }
-    return experimentPrimaryOutcomeSchema.parse(
+    return parseExperimentPrimaryOutcomeOptions(
       compactRecord({ kind, key, label }),
     )
   }
@@ -650,13 +680,53 @@ function buildPrimaryOutcomeFromOptions(input: {
           sourceMetricKey: input.primaryOutcomeSourceMetricKey,
         }
       : existingCapture
-  return experimentPrimaryOutcomeSchema.parse(compactRecord({
+  return parseExperimentPrimaryOutcomeOptions(compactRecord({
     kind,
     key,
     label,
     statistic: input.comparisonStatistic ?? existingStatistic,
     capture,
   }))
+}
+
+function parseExperimentPrimaryOutcomeOptions(
+  value: Record<string, unknown>,
+): ExperimentPrimaryOutcome {
+  const parsed = experimentPrimaryOutcomeSchema.safeParse(value)
+  if (parsed.success) {
+    return parsed.data
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'Primary outcome options failed validation.',
+    undefined,
+    {
+      fields: parsed.error.issues.map((issue) => ({
+        path: PRIMARY_OUTCOME_OPTION_BY_PATH[issue.path.join('.')]
+          ?? 'primaryOutcome',
+        code: issue.code,
+        message: issue.path[0] === 'key'
+          ? 'Use a stable Health Commons outcome key.'
+          : 'This primary outcome option has an invalid value.',
+        ...(issue.path[0] === 'key'
+          ? { expected: 'biomarker:<outcome-slug>' }
+          : {}),
+      })),
+      hint: 'Repair the listed --primary-outcome option and retry experiment start.',
+      stage: 'option_validation',
+    },
+  )
+}
+
+const PRIMARY_OUTCOME_OPTION_BY_PATH: Readonly<Record<string, string>> = {
+  'capture.fieldId': 'primaryOutcomeSessionField',
+  'capture.sourceMetricKey': 'primaryOutcomeSourceMetricKey',
+  'capture.unit': 'primaryOutcomeUnit',
+  key: 'primaryOutcomeKey',
+  kind: 'primaryOutcomeKind',
+  label: 'primaryOutcomeLabel',
+  statistic: 'comparisonStatistic',
 }
 
 function resolveStartWindows(input: {

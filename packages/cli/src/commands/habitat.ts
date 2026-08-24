@@ -15,6 +15,7 @@ import {
   validateHabitatIndicatorValue,
 } from '@murphai/contracts'
 import {
+  isVaultError,
   listHabitatAspects,
   readHabitatAspect,
   upsertHabitatAspect,
@@ -270,6 +271,73 @@ function habitatRecordPayload(record: Awaited<ReturnType<typeof readHabitatAspec
   }
 }
 
+function unknownHabitatAspectError(): VaultCliError {
+  return new VaultCliError(
+    'contract_invalid',
+    'The habitat aspect is not present in the catalog.',
+    undefined,
+    {
+      fields: [{
+        path: 'aspect',
+        code: 'invalid_value',
+        message: 'Choose an aspect id from the habitat catalog.',
+      }],
+      hint: 'Run habitat catalog to list supported aspect ids.',
+      stage: 'validation',
+    },
+  )
+}
+
+function mapHabitatCoreError(error: unknown): unknown {
+  if (!isVaultError(error)) {
+    return error
+  }
+
+  if (error.code === 'HABITAT_MISSING') {
+    return new VaultCliError(
+      'not_found',
+      'The requested habitat aspect was not found.',
+      undefined,
+      {
+        fields: [{
+          path: 'lookup',
+          code: 'not_found',
+          message: 'No habitat record matched this lookup.',
+        }],
+        hint: 'Run habitat list to find saved habitat aspects, or habitat save to create one.',
+        stage: 'read',
+      },
+    )
+  }
+
+  if (error.code === 'HABITAT_FRONTMATTER_INVALID') {
+    return new VaultCliError(
+      'contract_invalid',
+      'A saved habitat record has invalid frontmatter.',
+      undefined,
+      {
+        fields: [{
+          path: '$',
+          code: 'contract_invalid',
+          message: 'The saved habitat record does not match the habitat contract.',
+        }],
+        hint: 'Run validate for this vault to inspect the malformed record before retrying.',
+        stage: 'read',
+      },
+    )
+  }
+
+  return error
+}
+
+async function runHabitatCore<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation()
+  } catch (error) {
+    throw mapHabitatCoreError(error)
+  }
+}
+
 export function registerHabitatCommands(cli: Cli.Cli) {
   const habitat = Cli.create('habitat', {
     description:
@@ -305,18 +373,24 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatSaveResultSchema,
     async run({ args, options }) {
-      const result = await upsertHabitatAspect({
-        vaultRoot: options.vault,
-        aspect: args.aspect,
-        indicators: parseIndicatorAssignments(args.aspect, options.indicator),
-        indicatorNotes: parseIndicatorNoteAssignments(
-          args.aspect,
-          options.indicatorNote,
-        ),
-        recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
-        note: options.note,
-        body: options.body,
-      })
+      if (!getHabitatAspectDefinition(args.aspect)) {
+        throw unknownHabitatAspectError()
+      }
+
+      const result = await runHabitatCore(
+        () => upsertHabitatAspect({
+          vaultRoot: options.vault,
+          aspect: args.aspect,
+          indicators: parseIndicatorAssignments(args.aspect, options.indicator),
+          indicatorNotes: parseIndicatorNoteAssignments(
+            args.aspect,
+            options.indicatorNote,
+          ),
+          recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
+          note: options.note,
+          body: options.body,
+        }),
+      )
 
       return {
         vault: options.vault,
@@ -338,10 +412,12 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     output: habitatShowResultSchema,
     async run({ args, options }) {
       const lookup = args.lookup.trim()
-      const record = await readHabitatAspect(
-        lookup.startsWith('hab_')
-          ? { vaultRoot: options.vault, habitatId: lookup }
-          : { vaultRoot: options.vault, slug: lookup },
+      const record = await runHabitatCore(
+        () => readHabitatAspect(
+          lookup.startsWith('hab_')
+            ? { vaultRoot: options.vault, habitatId: lookup }
+            : { vaultRoot: options.vault, slug: lookup },
+        ),
       )
 
       return {
@@ -359,7 +435,9 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatListResultSchema,
     async run({ options }) {
-      const records = (await listHabitatAspects(options.vault)).filter(
+      const records = (await runHabitatCore(
+        () => listHabitatAspects(options.vault),
+      )).filter(
         (record) => !options.domain || record.domain === options.domain,
       )
 
@@ -386,7 +464,9 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatCoverageResultSchema,
     async run({ options }) {
-      const records = await listHabitatAspects(options.vault)
+      const records = await runHabitatCore(
+        () => listHabitatAspects(options.vault),
+      )
       const coverage = computeHabitatCoverage(
         records.map((record) => ({
           aspect: record.aspect,
@@ -422,10 +502,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
       if (args.aspect) {
         const aspect = getHabitatAspectDefinition(args.aspect)
         if (!aspect) {
-          throw new VaultCliError(
-            'contract_invalid',
-            `Unknown habitat aspect "${args.aspect}".`,
-          )
+          throw unknownHabitatAspectError()
         }
 
         return {

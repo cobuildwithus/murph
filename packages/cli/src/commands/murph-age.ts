@@ -201,6 +201,14 @@ export const murphAgeModelCardStatusResultSchema = z.object({
   researchReadyCardIds: z.array(murphAgeModelCardIdSchema),
   schemaVersion: z.literal('murph.age.model-card-status.v2'),
   warnings: z.array(z.object({
+    artifactIssue: z.enum([
+      'artifact_unreadable',
+      'directory_unreadable',
+      'duplicate_card_id',
+      'invalid_json',
+      'invalid_schema',
+      'policy_violation',
+    ]),
     code: murphAgeWarningCodeSchema,
   })),
 })
@@ -1894,7 +1902,10 @@ export function registerMurphAgeCommands(
           .filter((policy) => policy.researchUsable)
           .map((policy) => policy.cardId),
         schemaVersion: 'murph.age.model-card-status.v2' as const,
-        warnings: loaded.warnings.map((warning) => ({ code: warning.code })),
+        warnings: loaded.warnings.map((warning) => ({
+          artifactIssue: warning.artifactIssue,
+          code: warning.code,
+        })),
       }
     },
   })
@@ -2101,7 +2112,7 @@ function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayl
 async function loadMurphAgeSubmittedPreviewReport(
   options: MurphAgeSubmittedPreviewOptions,
 ) {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
   )
 
@@ -2114,7 +2125,7 @@ async function loadMurphAgeSubmittedPreviewReport(
 async function loadMurphAgeSubmittedCalculatorReport(
   options: MurphAgeSubmittedPreviewOptions & { mode: z.infer<typeof murphAgeModeSchema> },
 ) {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2153,7 +2164,7 @@ async function loadMurphAgeSubmittedCalculatorReport(
 async function loadMurphAgeSubmittedCalculatorViewBundle(
   options: MurphAgeSubmittedPreviewOptions & { includeResearchPreview: boolean },
 ): Promise<MurphAgeSubmittedCalculatorViewBundle> {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2213,6 +2224,46 @@ async function loadMurphAgeSubmittedCalculatorViewBundle(
   }
 }
 
+function parseMurphAgeSubmittedPayload(
+  value: unknown,
+): MurphAgeSubmittedPreviewPayload {
+  const parsed = murphAgeSubmittedPreviewPayloadSchema.safeParse(value)
+  if (parsed.success) {
+    return parsed.data
+  }
+
+  throw new VaultCliError(
+    'invalid_payload',
+    'Murph Age submitted input failed validation.',
+    undefined,
+    {
+      fields: parsed.error.issues.map((issue) => ({
+        path: issue.path,
+        code: issue.code,
+        message: murphAgeValidationMessage(issue.code),
+      })),
+      hint: 'Repair the listed JSON fields and retry with the same input option.',
+      stage: 'validation',
+    },
+  )
+}
+
+function murphAgeValidationMessage(code: string): string {
+  switch (code) {
+    case 'invalid_type':
+      return 'Value does not match the required type.'
+    case 'too_big':
+      return 'Value exceeds the allowed maximum.'
+    case 'too_small':
+      return 'Value is below the allowed minimum.'
+    case 'invalid_value':
+    case 'invalid_enum_value':
+      return 'Value is not one of the allowed options.'
+    default:
+      return 'Value failed Murph Age input validation.'
+  }
+}
+
 function toMurphAgePublicWarnings(
   warnings: ReadonlyArray<{
     code: z.infer<typeof murphAgeWarningCodeSchema>
@@ -2248,7 +2299,50 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
     )
   }
   if (Array.isArray(parsed)) return parsed
-  if (!isPlainRecord(parsed)) return []
+  if (!isPlainRecord(parsed)) {
+    throw new VaultCliError(
+      'invalid_payload',
+      'Murph Age aggregate evidence input must be a receipt object, an array, or a supported wrapper object.',
+      undefined,
+      {
+        fields: [{
+          path: '$',
+          code: 'invalid_type',
+          message: 'Use a JSON object or array for aggregate evidence input.',
+        }],
+        hint: 'Pass one receipt object, an array of receipts, or a wrapper containing a receipt array.',
+        stage: 'validation',
+      },
+    )
+  }
+
+  const wrappers = [
+    'cards',
+    'receipts',
+    'evidenceCards',
+    'incrementEvaluationCards',
+  ] as const
+  for (const wrapper of wrappers) {
+    if (
+      Object.prototype.hasOwnProperty.call(parsed, wrapper) &&
+      !Array.isArray(parsed[wrapper])
+    ) {
+      throw new VaultCliError(
+        'invalid_payload',
+        'Murph Age aggregate evidence wrapper fields must contain arrays.',
+        undefined,
+        {
+          fields: [{
+            path: wrapper,
+            code: 'invalid_type',
+            message: 'This wrapper field must contain an array of receipt objects.',
+          }],
+          hint: 'Replace the wrapper field with an array, or pass one receipt object without a wrapper.',
+          stage: 'validation',
+        },
+      )
+    }
+  }
   if (Array.isArray(parsed.cards)) return parsed.cards
   if (Array.isArray(parsed.receipts)) return parsed.receipts
   if (Array.isArray(parsed.evidenceCards)) return parsed.evidenceCards

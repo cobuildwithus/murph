@@ -1230,6 +1230,23 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
         updated: true as const,
       },
     }
+  }).catch((error: unknown) => {
+    throw toVaultCliError(error, {
+      VAULT_EXPERIMENT_CONFLICT: {
+        code: 'conflict',
+        message: 'An experiment with this slug already exists with different plan data.',
+        preserveDetails: false,
+        repair: {
+          fields: [{
+            path: 'experiment.slug',
+            code: 'conflict',
+            message: 'Choose a different slug or inspect the existing experiment before editing it.',
+          }],
+          hint: 'Run experiment show for the existing experiment, then use experiment edit or choose a different slug.',
+          stage: 'write',
+        },
+      },
+    })
   })
 }
 

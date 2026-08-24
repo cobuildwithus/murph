@@ -138,7 +138,10 @@ interface MurphAgeModelCardStatusReport {
   productReadyCardIds: string[]
   researchReadyCardIds: string[]
   schemaVersion: string
-  warnings: Array<{ code: string }>
+  warnings: Array<{
+    artifactIssue: string
+    code: string
+  }>
 }
 
 interface MurphAgeAggregateEvidenceStatusReport {
@@ -938,6 +941,151 @@ test('age evidence reports malformed JSON without echoing receipt text', async (
     }
   } finally {
     await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age evidence rejects invalid top-level and wrapper shapes with repair fields', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-shape-'))
+  const scalarPath = path.join(payloadRoot, 'scalar.json')
+  const wrapperPath = path.join(payloadRoot, 'wrapper.json')
+  const privateMarker = 'private-evidence-marker'
+  try {
+    await writeFile(scalarPath, '42')
+    await writeFile(wrapperPath, JSON.stringify({
+      cards: { privateMarker },
+    }))
+
+    const scalar = await runSliceCliResult<unknown>([
+      'age',
+      'evidence',
+      '--input',
+      `@${scalarPath}`,
+    ])
+    const wrapper = await runSliceCliResult<unknown>([
+      'age',
+      'evidence',
+      '--input',
+      `@${wrapperPath}`,
+    ])
+
+    for (const result of [scalar, wrapper]) {
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) {
+        assert.fail('expected invalid evidence shape to return an error envelope')
+      }
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.match(result.envelope.error.hint ?? '', /array|receipt object/u)
+      assert.equal((result.envelope.error.fieldErrors?.length ?? 0) > 0, true)
+      const encoded = JSON.stringify(result.envelope)
+      for (const forbidden of [privateMarker, payloadRoot, scalarPath, wrapperPath]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden)
+      }
+    }
+    if (!wrapper.envelope.ok) {
+      assert.equal(wrapper.envelope.error.fieldErrors?.[0]?.path, 'cards')
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age submitted-data commands return bounded field repair without echoing values', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-input-repair-'))
+  const payloadPath = path.join(payloadRoot, 'payload.json')
+  const privateMarker = 'private-as-of-marker'
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      asOf: privateMarker,
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [{ metricKey: 'HbA1c', value: 5.4 }],
+    }))
+
+    for (const command of ['preview', 'preview-view', 'calculate', 'calculate-bundle']) {
+      const result = await runSliceCliResult<unknown>([
+        'age',
+        command,
+        '--input',
+        `@${payloadPath}`,
+      ])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) {
+        assert.fail(`expected age ${command} to return an error envelope`)
+      }
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(
+        result.envelope.error.fieldErrors?.some((field) => field.path === 'asOf'),
+        true,
+      )
+      assert.match(result.envelope.error.hint ?? '', /listed JSON fields/u)
+      const encoded = JSON.stringify(result.envelope)
+      for (const forbidden of [privateMarker, payloadRoot, payloadPath]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden)
+      }
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age model-cards classifies artifact warnings without exposing artifact data', async () => {
+  const vaultRoot = await createProjectionVault()
+  const artifactRoot = defaultMurphAgeModelCardArtifactRoot(vaultRoot)
+  const notDirectoryPath = path.join(vaultRoot, 'private-model-card-root.json')
+  const privateMarker = 'private-model-card-marker'
+  try {
+    await mkdir(artifactRoot, { recursive: true })
+    await writeFile(path.join(artifactRoot, 'invalid-json.json'), `{${privateMarker}`)
+    await writeFile(path.join(artifactRoot, 'invalid-schema.json'), JSON.stringify({
+      privateMarker,
+      schemaVersion: 'unsupported',
+    }))
+    await writeLocalModelCardArtifact(vaultRoot, 'valid-a.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+    await writeLocalModelCardArtifact(vaultRoot, 'valid-b.json', {
+      cardId: 'lab9_bp_body_10y_acm_research',
+      model: fixtureLab9ResearchModel(),
+      schemaVersion: MURPH_AGE_MODEL_CARD_ARTIFACT_SCHEMA_VERSION,
+    })
+    await writeFile(notDirectoryPath, privateMarker)
+
+    const status = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+    ]))
+
+    assert.deepEqual(status.warnings, [
+      { artifactIssue: 'invalid_json', code: 'INVALID_INPUT' },
+      { artifactIssue: 'invalid_schema', code: 'INVALID_INPUT' },
+      { artifactIssue: 'duplicate_card_id', code: 'INVALID_INPUT' },
+    ])
+    const directoryFailure = requireData(await runSliceCli<MurphAgeModelCardStatusReport>([
+      'age',
+      'model-cards',
+      '--vault',
+      vaultRoot,
+      '--model-card-artifact-root',
+      notDirectoryPath,
+    ]))
+    assert.deepEqual(directoryFailure.warnings, [
+      { artifactIssue: 'directory_unreadable', code: 'INVALID_INPUT' },
+    ])
+
+    const encoded = JSON.stringify([status, directoryFailure])
+    for (const forbidden of [privateMarker, artifactRoot, notDirectoryPath, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true })
   }
 })
 

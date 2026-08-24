@@ -1,6 +1,9 @@
 import path from 'node:path'
 
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  VaultCliError,
+  type VaultCliRepairInput,
+} from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
@@ -230,6 +233,8 @@ interface VaultErrorMapping {
   code: string
   message?: string
   details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
+  preserveDetails?: boolean
+  repair?: VaultCliRepairInput
 }
 
 const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
@@ -287,9 +292,10 @@ export function toVaultCliError(
     mapping?.message ?? error.message,
     {
       vaultCode: error.code,
-      ...error.details,
+      ...(mapping?.preserveDetails === false ? {} : error.details),
       ...mappedDetails,
     },
+    mapping?.repair,
   )
 }
 

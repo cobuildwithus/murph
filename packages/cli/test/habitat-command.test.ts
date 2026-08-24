@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import { Cli } from "incur";
 import { test } from "vitest";
@@ -107,6 +108,97 @@ test("habitat save reports catalog value errors before the core write boundary",
 
     assert.match(requireErrorMessage(enumResult), /Expected one of: blackout, partial, bright/u);
     assert.match(requireErrorMessage(numericResult), /expects a number, got "Infinity"/u);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("habitat commands map unknown and missing aspects to bounded recovery fields", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-cli-habitat-");
+  const privateAspect = "private-unknown-aspect";
+  const privateLookup = "private-missing-lookup";
+
+  try {
+    await initializeVault({ vaultRoot });
+    const cli = createHabitatCli();
+    const unknown = await runInProcessJsonCli(cli, [
+      "habitat",
+      "save",
+      privateAspect,
+      "--vault",
+      vaultRoot,
+    ]);
+    const missing = await runInProcessJsonCli(cli, [
+      "habitat",
+      "show",
+      privateLookup,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(unknown.envelope.ok, false);
+    assert.equal(missing.envelope.ok, false);
+    if (unknown.envelope.ok || missing.envelope.ok) {
+      assert.fail("expected unknown and missing habitat aspects to fail");
+    }
+    assert.equal(unknown.envelope.error.code, "contract_invalid");
+    assert.equal(unknown.envelope.error.stage, "validation");
+    assert.equal(unknown.envelope.error.fieldErrors?.[0]?.path, "aspect");
+    assert.match(unknown.envelope.error.hint ?? "", /habitat catalog/u);
+    assert.equal(missing.envelope.error.code, "not_found");
+    assert.equal(missing.envelope.error.stage, "read");
+    assert.equal(missing.envelope.error.fieldErrors?.[0]?.path, "lookup");
+    assert.match(missing.envelope.error.hint ?? "", /habitat list|habitat save/u);
+
+    const encoded = JSON.stringify([unknown.envelope, missing.envelope]);
+    for (const forbidden of [privateAspect, privateLookup, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("habitat reads classify invalid saved frontmatter without exposing record data", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-cli-habitat-");
+  const privateMarker = "private-habitat-frontmatter-marker";
+
+  try {
+    await initializeVault({ vaultRoot });
+    const habitatRoot = path.join(vaultRoot, "bank", "habitat");
+    await mkdir(habitatRoot, { recursive: true });
+    await writeFile(
+      path.join(habitatRoot, "private-record.md"),
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.habitat.v1",
+        "docType: habitat",
+        `privateMarker: ${privateMarker}`,
+        "---",
+        "",
+      ].join("\n"),
+    );
+
+    const cli = createHabitatCli();
+    const result = await runInProcessJsonCli(cli, [
+      "habitat",
+      "list",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.envelope.ok, false);
+    if (result.envelope.ok) {
+      assert.fail("expected malformed habitat record to fail");
+    }
+    assert.equal(result.envelope.error.code, "contract_invalid");
+    assert.equal(result.envelope.error.stage, "read");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "$");
+    assert.match(result.envelope.error.hint ?? "", /Run validate/u);
+    const encoded = JSON.stringify(result.envelope);
+    for (const forbidden of [privateMarker, "private-record.md", vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

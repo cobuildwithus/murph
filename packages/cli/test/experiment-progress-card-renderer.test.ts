@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import {
   experimentProgressCardSchema,
 } from "@murphai/contracts";
 import { initializeVault } from "@murphai/core";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import sharp from "sharp";
 import { test } from "vitest";
 
@@ -278,6 +279,45 @@ test("progress-card renderer makes unavailable direction context visible and acc
       "Morning light & recovery <check> experiment progress",
     );
     assert.doesNotMatch(healthyMedia.alt ?? "", /Direction context unavailable/u);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card persistence reports a stable integrity stage without exposing paths", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-integrity-"),
+  );
+  const privateMarker = "private-corrupt-progress-card-marker";
+  try {
+    await initializeVault({ vaultRoot });
+    const input = {
+      card: CARD,
+      experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFP",
+      vaultRoot,
+    };
+    const media = await renderAndSaveExperimentProgressCard(input);
+    await writeFile(path.join(vaultRoot, media.ref), privateMarker);
+
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard(input);
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_integrity_failed");
+    assert.equal(captured.repair?.stage, "integrity");
+    assert.match(captured.repair?.hint ?? "", /repair-experiment-media/u);
+    const encoded = JSON.stringify({
+      code: captured.code,
+      message: captured.message,
+      repair: captured.repair,
+    });
+    for (const forbidden of [privateMarker, media.ref, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

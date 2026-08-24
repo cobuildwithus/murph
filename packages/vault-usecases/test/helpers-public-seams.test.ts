@@ -700,6 +700,29 @@ describe("helper barrel exports", () => {
       }),
     );
 
+    const redactedMapping = toVaultCliError(
+      Object.assign(new Error("Conflict"), {
+        name: "VaultError",
+        code: "VAULT_EXPERIMENT_CONFLICT",
+        details: { relativePath: "private/path.md" },
+      }),
+      {
+        VAULT_EXPERIMENT_CONFLICT: {
+          code: "conflict",
+          message: "Experiment plan data conflicts.",
+          preserveDetails: false,
+          repair: { stage: "write" },
+        },
+      },
+    );
+    expect(redactedMapping).toEqual(
+      expect.objectContaining({
+        code: "conflict",
+        context: { vaultCode: "VAULT_EXPERIMENT_CONFLICT" },
+        repair: expect.objectContaining({ stage: "write" }),
+      }),
+    );
+
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-vault-helper-existing-"));
 
     try {
