@@ -75,7 +75,7 @@ import { readActiveHostedMemberAccess } from "./member-access";
 
 const OPENAI_RESPONSES_BASE_URL = "https://api.openai.com/v1";
 const HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL = "gpt-5.6-luna";
-const HOSTED_LINQ_INSTANT_FIRST_TURN_TIMEOUT_MS = 6_000;
+const HOSTED_LINQ_INSTANT_FIRST_TURN_TIMEOUT_MS = 18_000;
 const HOSTED_LINQ_INSTANT_FIRST_TURN_MAX_CHARS = 600;
 const HOSTED_LINQ_INSTANT_FIRST_TURN_PROMPT_VERSION = "v1";
 const HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA =
@@ -685,9 +685,9 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
       role: "user",
     }],
     instructions: HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS,
-    max_output_tokens: 300,
+    max_output_tokens: 1_200,
     model: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
-    reasoning: { effort: "none" },
+    reasoning: { effort: "high" },
     service_tier: "priority",
     store: false,
     text: {

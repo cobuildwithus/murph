@@ -34,6 +34,9 @@ Success criteria:
   and runtime transcript owners.
 - Keep the fast responder tool-free and first-contact-only. It must not claim
   account, health-data, scheduling, or other tool effects it cannot perform.
+- Run the bounded reply model with high reasoning, priority service, and an
+  18-second hard deadline; retain the strict 600-character reply schema and
+  fall back to the ordinary runtime when generation does not complete.
 - Preserve the classifier as the admission authority; a speculative response
   may not be sent before exact model-source allowance, activation, current
   same-line routing, and access all succeed.
@@ -80,7 +83,7 @@ was delivered.
 
 ## Verification
 
-- Six focused Web suites pass 479 cases covering strict Murph output, canonical
+- Six focused Web suites cover strict high-reasoning Murph output, canonical
   welcome, complete plain-text eligibility, durable pre-generation ownership,
   accepted continuity, exact-event runtime egress authority, centralized and
   confirmed fallback terminalization, failed-planning claim release, actual
@@ -91,6 +94,11 @@ was delivered.
   exercises greetings, capabilities, concrete health questions, missing
   personal context, requested actions, and urgent safety guidance without a
   live Linq destination.
+- Deterministic owner-composed proof runs the actual Web claim, structured model
+  request, Linq acceptance, exact outbound mailbox append, two-row consumption,
+  and outbound checkpoint handoff. The runtime import proof then treats that
+  consumed inbound/outbound pair as context and makes only the next distinct
+  inbound replyable.
 - The full focused Linq dispatch file passes 209 tests, including parallel
   generation/prewarm, outbound-checkpoint wake, activation continuation, and
   ambiguous-delivery wake suppression, exact-bound completeness, and full
@@ -99,12 +107,15 @@ was delivered.
   expand-only migration guard, and the reviewed migration/schema snapshots
   pass. The payload migration now contains only nullable columns, its member
   foreign key, and its index.
-- `pnpm test:diff` exits 0. Its Web lane passes 850 files and 11,048 tests,
-  changed-app typecheck, lint with no errors, dev smoke, and production build.
-  The workspace boundary step still reports two unrelated pre-existing Junction
-  test-import diagnostics outside this PR.
-- The production prompt test proves the fixed tool-free request and strict
-  welcome-or-answer schema. The real-model matrix is intentionally opt-in and
+- `pnpm test:diff` exits 0. Assistant Runtime passes 90 files and 2,479 tests;
+  Web passes 788 files and 11,107 tests plus typecheck, lint with no errors, dev
+  smoke, and production build; Cloudflare passes 156 files and 2,678 tests.
+  Workspace boundaries and the provider, logging, crypto, and Temporal guards
+  pass.
+- The production request-shape test proves the high-reasoning, priority,
+  tool-free request, expanded reasoning budget, and strict welcome-or-answer
+  schema; direct generation keeps one 18-second hard deadline. The real-model
+  matrix is intentionally opt-in and
   skipped locally because no provider credential is configured; it has no Linq
   call or destination.
 - Public changelog fragment validation passes 7 tests, and the Web typecheck

@@ -440,9 +440,9 @@ describe("hosted Linq instant first turn", () => {
     const body = JSON.parse(String(requestInit.body));
     expect(body).toMatchObject({
       input: [{ content: REQUEST.text, role: "user" }],
-      max_output_tokens: 300,
+      max_output_tokens: 1_200,
       model: "gpt-5.6-luna",
-      reasoning: { effort: "none" },
+      reasoning: { effort: "high" },
       service_tier: "priority",
       store: false,
       text: {
@@ -471,6 +471,83 @@ describe("hosted Linq instant first turn", () => {
     })).resolves.toMatchObject({
       kind: "reply",
       message: MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
+    });
+  });
+
+  it("runs one high-reasoning reply from durable claim through the runtime handoff", async () => {
+    const prisma = createPrisma();
+    const reply =
+      "A short walk after dinner can help your muscles use glucose, which may soften the post-meal blood-sugar rise.";
+    const fetchMock = vi.fn().mockResolvedValue(buildOpenAiResponse({
+      kind: "answer",
+      message: reply,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const claim = await claimHostedLinqInstantFirstTurn({
+      linqChatId: "chat_123",
+      prisma,
+      request: REQUEST,
+    });
+    const generation = await startHostedLinqInstantFirstTurnGeneration({
+      claim,
+      request: REQUEST,
+    });
+    const completion = await completeHostedLinqInstantFirstTurn({
+      generation,
+      inboundMessageId: "inbound_message_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "phone_lookup_123",
+        value: "+15551234567",
+      },
+      prisma,
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    });
+
+    const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(requestBody).toMatchObject({
+      max_output_tokens: 1_200,
+      reasoning: { effort: "high" },
+      service_tier: "priority",
+    });
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
+      .toHaveBeenNthCalledWith(1, expect.objectContaining({
+        sourceRef: REQUEST.eventId,
+        status: "attempted",
+      }));
+    expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ message: reply }),
+    );
+    expect(mocks.prepareHostedMailboxEnvelopeAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          message: expect.objectContaining({
+            linqMessage: expect.objectContaining({
+              parts: [{ type: "text", value: reply }],
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(mocks.hostedMailboxItemUpdateMany).toHaveBeenCalledWith({
+      data: { consumedAt: new Date("2026-08-22T21:00:01.000Z") },
+      where: expect.objectContaining({
+        id: { in: ["mailbox_inbound", "mailbox_outbound"] },
+      }),
+    });
+    expect(completion).toEqual({
+      kind: "accepted",
+      wakeHandoff: {
+        ...WAKE_HANDOFF,
+        mailboxItemId: "mailbox_outbound",
+        wakeMailboxCheckpoint: {
+          lane: "conversation",
+          laneSeq: "2",
+        },
+      },
     });
   });
 

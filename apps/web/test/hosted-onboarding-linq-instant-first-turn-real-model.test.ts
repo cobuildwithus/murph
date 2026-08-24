@@ -50,7 +50,7 @@ describeRealModel("hosted Linq instant first-turn real-model semantics", () => {
     const openAi = new OpenAI({ apiKey, maxRetries: 0 });
     const response = await openAi.responses.create(
       buildHostedLinqInstantFirstTurnOpenAiBody({ text }),
-      { maxRetries: 0, timeout: 15_000 },
+      { maxRetries: 0, timeout: 18_000 },
     );
     expect(response.status).toBe("completed");
     const parsed: unknown = JSON.parse(response.output_text);
@@ -72,5 +72,5 @@ describeRealModel("hosted Linq instant first-turn real-model semantics", () => {
     expect(message.length).toBeLessThanOrEqual(600);
     expect(message).not.toMatch(/https?:\/\//iu);
     expect(message).not.toMatch(/\b(?:luna|model|prompt|container|routing)\b/iu);
-  }, 20_000);
+  }, 25_000);
 });
