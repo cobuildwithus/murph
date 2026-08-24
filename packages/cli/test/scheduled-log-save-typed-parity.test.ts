@@ -1078,6 +1078,46 @@ test("scheduled-log save and import return bounded field recovery without echoin
       /PRIVATE_TYPED_(?:WORKOUT|EXERCISE)_SENTINEL/u,
     );
 
+    const invalidQualifierKey = "PRIVATE QUALIFIER KEY SENTINEL";
+    const invalidQualifierValue = "PRIVATE_QUALIFIER_VALUE_SENTINEL";
+    const typedQualifier = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "Invalid qualifier recovery",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "15 6 * * 3",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "72.5",
+      "--measurement-unit",
+      "kg",
+      "--measurement-qualifier",
+      `${invalidQualifierKey}=${invalidQualifierValue}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(typedQualifier.exitCode, 1);
+    assert.equal(typedQualifier.envelope.ok, false);
+    assert.equal(typedQualifier.envelope.error.code, "invalid_option");
+    assert.equal(typedQualifier.envelope.error.stage, "validation");
+    const typedQualifierField = typedQualifier.envelope.error.fieldErrors?.[0]?.path;
+    assert.equal(typedQualifierField, "measurementQualifier");
+    assert.equal(
+      typeof typedQualifierField === "string" &&
+        typedQualifierField in saveSchema.options.properties,
+      true,
+    );
+    assert.doesNotMatch(
+      JSON.stringify(typedQualifier.envelope),
+      new RegExp(`${invalidQualifierKey}|${invalidQualifierValue}`, "u"),
+    );
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidWrites);
+
     const payloadPath = path.join(parentRoot, "invalid-scheduled-log.json");
     await writeFile(payloadPath, JSON.stringify({
       title: "PRIVATE_IMPORTED_PAYLOAD_SENTINEL",
@@ -1144,6 +1184,45 @@ test("scheduled-log save and import return bounded field recovery without echoin
     assert.doesNotMatch(
       JSON.stringify(importedWorkout.envelope),
       /PRIVATE_IMPORTED_(?:WORKOUT|EXERCISE)_SENTINEL/u,
+    );
+
+    const qualifierPayloadPath = path.join(
+      parentRoot,
+      "invalid-scheduled-qualifier.json",
+    );
+    await writeFile(qualifierPayloadPath, JSON.stringify({
+      title: "Invalid imported qualifier",
+      schedule: { kind: "cron", expression: "15 6 * * 3" },
+      action: {
+        kind: "measurement.add",
+        measurements: [{
+          metric: "weight",
+          value: 72.5,
+          unit: "kg",
+          qualifiers: {
+            [invalidQualifierKey]: invalidQualifierValue,
+          },
+        }],
+      },
+    }), "utf8");
+    const importedQualifier = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "import-json",
+      "--input",
+      `@${qualifierPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(importedQualifier.exitCode, 1);
+    assert.equal(importedQualifier.envelope.ok, false);
+    assert.equal(importedQualifier.envelope.error.code, "invalid_payload");
+    assert.equal(
+      importedQualifier.envelope.error.fieldErrors?.[0]?.path,
+      "action.measurements.0.qualifiers.<field>",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(importedQualifier.envelope),
+      new RegExp(`${invalidQualifierKey}|${invalidQualifierValue}`, "u"),
     );
 
     const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");

@@ -888,13 +888,14 @@ function typedActionIssueOptionPath(path: readonly PropertyKey[]): string {
     case "protocolId":
       return "protocolId";
     case "measurements":
+      if (path.includes("qualifiers")) {
+        return "measurementQualifier";
+      }
       switch (path.at(-1)) {
         case "value":
           return "measurementValue";
         case "unit":
           return "measurementUnit";
-        case "qualifiers":
-          return "measurementQualifier";
         case "note":
           return "measurementNote";
         default:

@@ -146,7 +146,8 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // and static-startup budgets remain unchanged because error projection is lazy.
 // The reviewed scheduled-log recovery graph measured 9,479,676 B in the public
 // Linux bundle lane; entry and static-startup topology remain unchanged.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_479_676;
+// Nested qualifier recovery adds 11 B to that existing lazy CLI graph.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_479_687;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
