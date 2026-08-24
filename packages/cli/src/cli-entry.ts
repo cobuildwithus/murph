@@ -4,6 +4,7 @@ import type { Cli, Formatter } from 'incur'
 
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node/sqlite-warning-filter'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { VaultCliErrorProjection } from '@murphai/operator-config/vault-cli-error-projection'
 import { getVaultCliPackageVersion } from './vault-cli-package.js'
 import { VAULT_CLI_SKILL_HASH } from './vault-cli-skill-hash.generated.js'
 import {
@@ -13,7 +14,6 @@ import {
   type CliInvocationPlan,
   type VaultCliProgramName,
 } from './vault-cli-routing.js'
-import type { VaultCliErrorProjection } from './vault-cli-error-projection.js'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -371,7 +371,9 @@ export async function renderMurphCliEntrypointError(
   argv: readonly string[],
   options: { human?: boolean | undefined } = {},
 ): Promise<RenderedMurphCliError> {
-  const { projectVaultCliError } = await import('./vault-cli-error-projection.js')
+  const { projectVaultCliError } = await import(
+    '@murphai/operator-config/vault-cli-error-projection'
+  )
   const projected = projectVaultCliError(error)
   const explicitFormat = findExplicitOutputFormat(argv)
   const human = options.human ?? process.stdout.isTTY === true
@@ -386,20 +388,26 @@ export async function renderMurphCliEntrypointError(
 
   const format = explicitFormat ?? 'toon'
   const { Formatter: runtimeFormatter } = await import('incur')
+  const errorBody = {
+    code: projected.code,
+    message: projected.message,
+    retryable: projected.retryable,
+    ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
+    ...(projected.hint ? { hint: projected.hint } : {}),
+    ...(projected.stage ? { stage: projected.stage } : {}),
+  }
+  const outputBody = argv.includes('--full-output')
+    ? {
+        ok: false,
+        error: errorBody,
+        meta: {
+          command: 'invocation',
+          duration: '0ms',
+        },
+      }
+    : errorBody
   const output = runtimeFormatter.format(
-    {
-      ok: false,
-      error: {
-        code: projected.code,
-        message: projected.message,
-        retryable: projected.retryable,
-        ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
-      },
-      meta: {
-        command: 'invocation',
-        duration: '0ms',
-      },
-    },
+    outputBody,
     format,
   )
 
@@ -416,6 +424,9 @@ function formatProjectedCliErrorForHuman(
   const prefix = error.code === 'UNKNOWN' ? 'Error' : `Error (${error.code})`
   const lines = [`${prefix}: ${error.message}`]
 
+  if (error.stage) {
+    lines.push(`Stage: ${error.stage}`)
+  }
   if (error.fieldErrors) {
     lines.push(
       ...error.fieldErrors.map(
@@ -423,6 +434,10 @@ function formatProjectedCliErrorForHuman(
       ),
     )
   }
+  if (error.hint) {
+    lines.push(`Hint: ${error.hint}`)
+  }
+
   return lines.join('\n')
 }
 

@@ -718,10 +718,9 @@ function assertWearableDateRangeOrdered(value: {
     {
       retryable: false,
       issues: [{
-        path: 'to',
-        code: 'date_range_reversed',
+        path: ['to'],
+        code: 'custom',
         message: '--to must be on or after --from.',
-        expected: 'A calendar date equal to or later than --from.',
       }],
     },
   )
