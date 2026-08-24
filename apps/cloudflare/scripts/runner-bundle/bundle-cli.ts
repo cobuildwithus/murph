@@ -144,8 +144,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
-// Knowledge, memory, and Exa recovery metadata add 14,465 B to the lazy CLI graph.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_482_113;
+// Knowledge, memory, and Exa recovery metadata measure 9,482,512 B on public
+// Linux after the reviewed path/privacy and Exa body-read remediation.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_482_512;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
