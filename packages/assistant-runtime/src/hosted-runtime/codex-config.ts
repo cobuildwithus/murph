@@ -645,10 +645,9 @@ export function buildHostedCodexConfigToml(input: {
     "",
     "# This table owns enablement and the proactive per-turn mode/tool hints.",
     "# A CLI boolean override would replace the table and silently drop them.",
-    // Keep per-spawn model overrides hidden until V2 activity emits authoritative
-    // effective child-model evidence before Murph writes immutable usage.
     "[features.multi_agent_v2]",
     "enabled = true",
+    "expose_spawn_agent_model_overrides = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${tomlString(HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT)}`,

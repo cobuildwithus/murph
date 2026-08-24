@@ -322,6 +322,7 @@ test("hosted Codex runtime config writes OpenAI Responses config without secret 
   assert.ok(config.includes([
     "[features.multi_agent_v2]",
     "enabled = true",
+    "expose_spawn_agent_model_overrides = true",
     "# V2 counts the root in this limit: four means root plus three children.",
     "max_concurrent_threads_per_session = 4",
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -1921,6 +1922,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       "# A CLI boolean override would replace the table and silently drop them.",
       "[features.multi_agent_v2]",
       "enabled = true",
+      "expose_spawn_agent_model_overrides = true",
       "# V2 counts the root in this limit: four means root plus three children.",
       "max_concurrent_threads_per_session = 4",
       `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -1996,7 +1998,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.match(config, /^memories = false$/mu);
   assert.match(config, /^\[features\.multi_agent_v2\]$/mu);
   assert.match(config, /^enabled = true$/mu);
-  assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
+  assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^agent_max_threads/mu);
   assert.ok(config.includes(
     `usage_hint_text = ${JSON.stringify(EXPECTED_MULTI_AGENT_USAGE_HINT)}`,
@@ -2022,7 +2024,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   assert.match(config, /break provider prefix caching/u);
 });
 
-test("hosted Codex config promotes permitted leaf delegation without cross-model routing", () => {
+test("hosted Codex config promotes permitted leaf delegation with native per-spawn model selection", () => {
   const config = buildHostedCodexConfigToml({
     model: "gpt-5.6-terra",
     provider: {
@@ -2044,10 +2046,11 @@ test("hosted Codex config promotes permitted leaf delegation without cross-model
   assert.ok(config.includes(
     "Complete only the self-contained assignment and stop.",
   ));
-  assert.doesNotMatch(config, /^expose_spawn_agent_model_overrides/mu);
+  assert.match(config, /^expose_spawn_agent_model_overrides = true$/mu);
   assert.doesNotMatch(config, /^default_subagent_model/mu);
   assert.doesNotMatch(config, /^default_subagent_reasoning_effort/mu);
   assert.doesNotMatch(config, /gpt-5\.6-luna/u);
+  assert.doesNotMatch(config, /gpt-5\.6-sol/u);
 });
 
 test("hosted Codex runtime exposes a stable package-owned assistant skill root", async () => {
