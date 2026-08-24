@@ -105,7 +105,7 @@ export async function estimateMapboxRoute(
       } catch (error) {
         if (
           !(error instanceof VaultCliError) ||
-          error.repair?.stage !== 'terrain-elevation'
+          !error.code.startsWith('route_mapbox_')
         ) {
           throw error
         }

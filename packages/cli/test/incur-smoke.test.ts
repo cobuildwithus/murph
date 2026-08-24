@@ -5,10 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli, z } from 'incur'
 import { initializeVault } from '@murphai/core'
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   captureCommandDescriptions,
@@ -538,12 +535,7 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
         'bridge preserved the command error',
         {
           exitCode: 7,
-          retryable: true,
-        },
-        createVaultCliRepair({
-          stage: 'validation',
-          hint: 'Correct the weekly schedule and retry.',
-          fields: [
+          issues: [
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
@@ -551,7 +543,8 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
               expected: 'IANA time zone',
             },
           ],
-        }),
+          retryable: true,
+        },
       )
     },
   })
@@ -562,11 +555,6 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
   assert.equal(result.envelope.error?.code, 'BRIDGE_SMOKE')
   assert.equal(result.envelope.error?.message, 'bridge preserved the command error')
   assert.equal(result.envelope.error?.retryable, true)
-  assert.equal(result.envelope.error?.stage, 'validation')
-  assert.equal(
-    result.envelope.error?.hint,
-    'Correct the weekly schedule and retry.',
-  )
   assert.deepEqual(result.envelope.error?.fieldErrors, [
     {
       code: 'invalid_value',

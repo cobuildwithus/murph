@@ -5,35 +5,21 @@ import {
   MAX_MAPBOX_TIMEOUT_MS,
 } from './mapbox-route-contracts.js'
 
-export type MapboxRequestStage =
-  | 'address-resolution'
-  | 'destination-geocoding'
-  | 'destination-search'
-  | 'directions'
-  | 'origin-geocoding'
-  | 'origin-search'
-  | 'terrain-elevation'
-  | 'waypoint-geocoding'
-  | 'waypoint-search'
-
 export async function fetchMapboxJson<T>(input: {
   allowNotFound: true
   fetchImpl: typeof fetch
-  stage: MapboxRequestStage
   timeoutMs: number
   url: URL
 }): Promise<T | null>
 export async function fetchMapboxJson<T>(input: {
   allowNotFound?: false | undefined
   fetchImpl: typeof fetch
-  stage: MapboxRequestStage
   timeoutMs: number
   url: URL
 }): Promise<T>
 export async function fetchMapboxJson<T>(input: {
   allowNotFound?: boolean
   fetchImpl: typeof fetch
-  stage: MapboxRequestStage
   timeoutMs: number
   url: URL
 }): Promise<T | null> {
@@ -47,7 +33,7 @@ export async function fetchMapboxJson<T>(input: {
       signal: AbortSignal.timeout(input.timeoutMs),
     })
   } catch (error) {
-    throw createMapboxTransportError(error, input.stage)
+    throw createMapboxTransportError(error)
   }
 
   if (input.allowNotFound && response.status === 404) {
@@ -55,18 +41,17 @@ export async function fetchMapboxJson<T>(input: {
   }
 
   if (!response.ok) {
-    throw createMapboxHttpError(response.status, input.stage)
+    throw createMapboxHttpError(response.status)
   }
 
   try {
     return (await response.json()) as T
   } catch {
-    throw createMapboxResponseInvalidError(input.stage, response.status)
+    throw createMapboxResponseInvalidError(response.status)
   }
 }
 
 export function createMapboxResponseInvalidError(
-  stage: MapboxRequestStage,
   status?: number,
 ): VaultCliError {
   return new VaultCliError(
@@ -75,10 +60,6 @@ export function createMapboxResponseInvalidError(
     {
       retryable: true,
       ...(status === undefined ? {} : { status }),
-    },
-    {
-      stage,
-      hint: 'Retry the command. If the response remains invalid, treat Mapbox as temporarily unavailable.',
     },
   )
 }
@@ -105,7 +86,6 @@ export function resolveMapboxTimeoutMs(env: NodeJS.ProcessEnv): number {
 
 function createMapboxTransportError(
   error: unknown,
-  stage: MapboxRequestStage,
 ): VaultCliError {
   const timedOut =
     error instanceof Error &&
@@ -120,28 +100,17 @@ function createMapboxTransportError(
       retryable: true,
       ...(timedOut ? { timedOut: true } : {}),
     },
-    {
-      stage,
-      hint: timedOut
-        ? 'Retry the command after a short delay.'
-        : 'Check network availability, then retry the command.',
-    },
   )
 }
 
 function createMapboxHttpError(
   status: number,
-  stage: MapboxRequestStage,
 ): VaultCliError {
   if (status === 401 || status === 403) {
     return new VaultCliError(
       'route_mapbox_auth_invalid',
       'Mapbox rejected the runtime credential.',
       { retryable: false, status },
-      {
-        stage,
-        hint: 'Check the Mapbox runtime credential before retrying.',
-      },
     )
   }
 
@@ -150,10 +119,6 @@ function createMapboxHttpError(
       'route_mapbox_timeout',
       'The Mapbox request timed out.',
       { retryable: true, status, timedOut: true },
-      {
-        stage,
-        hint: 'Retry the command after a short delay.',
-      },
     )
   }
 
@@ -162,10 +127,6 @@ function createMapboxHttpError(
       'route_mapbox_rate_limited',
       'Mapbox rate-limited the request.',
       { retryable: true, status },
-      {
-        stage,
-        hint: 'Retry the command after a delay.',
-      },
     )
   }
 
@@ -174,10 +135,6 @@ function createMapboxHttpError(
       'route_mapbox_unavailable',
       'Mapbox is temporarily unavailable.',
       { retryable: true, status },
-      {
-        stage,
-        hint: 'Retry the command after a short delay.',
-      },
     )
   }
 
@@ -185,9 +142,5 @@ function createMapboxHttpError(
     'route_mapbox_request_rejected',
     'Mapbox rejected the request.',
     { retryable: false, status },
-    {
-      stage,
-      hint: 'Check the route inputs before retrying.',
-    },
   )
 }

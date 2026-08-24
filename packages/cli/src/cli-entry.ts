@@ -394,8 +394,6 @@ export async function renderMurphCliEntrypointError(
         message: projected.message,
         retryable: projected.retryable,
         ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
-        ...(projected.hint ? { hint: projected.hint } : {}),
-        ...(projected.stage ? { stage: projected.stage } : {}),
       },
       meta: {
         command: 'invocation',
@@ -418,9 +416,6 @@ function formatProjectedCliErrorForHuman(
   const prefix = error.code === 'UNKNOWN' ? 'Error' : `Error (${error.code})`
   const lines = [`${prefix}: ${error.message}`]
 
-  if (error.stage) {
-    lines.push(`Stage: ${error.stage}`)
-  }
   if (error.fieldErrors) {
     lines.push(
       ...error.fieldErrors.map(
@@ -428,10 +423,6 @@ function formatProjectedCliErrorForHuman(
       ),
     )
   }
-  if (error.hint) {
-    lines.push(`Hint: ${error.hint}`)
-  }
-
   return lines.join('\n')
 }
 

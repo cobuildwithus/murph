@@ -215,7 +215,6 @@ async function queryElevationAtPoint(input: {
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    stage: 'terrain-elevation',
   })
 
   if (!payload) {
@@ -226,13 +225,13 @@ async function queryElevationAtPoint(input: {
     typeof payload !== 'object' ||
     (payload.features !== undefined && !Array.isArray(payload.features))
   ) {
-    throw createMapboxResponseInvalidError('terrain-elevation')
+    throw createMapboxResponseInvalidError()
   }
 
   const elevations = (payload.features ?? [])
     .map((feature) => {
       if (!feature || typeof feature !== 'object') {
-        throw createMapboxResponseInvalidError('terrain-elevation')
+        throw createMapboxResponseInvalidError()
       }
       return parseElevationValue(feature.properties?.ele)
     })

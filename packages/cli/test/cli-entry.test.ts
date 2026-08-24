@@ -6,10 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
 
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from "@murphai/operator-config/vault-cli-errors";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
   installSqliteExperimentalWarningFilter,
@@ -180,11 +177,7 @@ test("renderMurphCliEntrypointError classifies human failures without raw detail
   assert.equal(rendered.machineReadable, false);
   assert.equal(
     rendered.output,
-    [
-      "Error: Config validation failed.",
-      "Stage: command",
-      "Hint: Check the command inputs and runtime status before retrying.",
-    ].join("\n"),
+    "Error: The command failed without a safe recoverable detail.",
   );
 });
 
@@ -194,18 +187,16 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
     new VaultCliError(
       "invalid_payload",
       "Schedule failed validation.",
-      { issues: [privateValue], retryable: false },
-      createVaultCliRepair({
-        stage: "validation",
-        hint: "Use a valid IANA time zone.",
-        fields: [
+      {
+        issues: [
           {
             path: ["schedule", "timeZone"],
             code: "invalid_value",
             message: "Use an IANA time-zone identifier.",
           },
         ],
-      }),
+        retryable: false,
+      },
     ),
     ["--vault", "first", "--vault", "second", "--full-output", "--format", "json"],
     { human: true },
@@ -217,16 +208,12 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
     error?: {
       code?: string;
       fieldErrors?: Array<{ path?: string }>;
-      hint?: string;
-      stage?: string;
     };
     meta?: { command?: string };
     ok?: boolean;
   };
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error?.code, "invalid_payload");
-  assert.equal(envelope.error?.stage, "validation");
-  assert.equal(envelope.error?.hint, "Use a valid IANA time zone.");
   assert.equal(envelope.error?.fieldErrors?.[0]?.path, "schedule.timeZone");
   assert.equal(envelope.meta?.command, "invocation");
   assert.equal(rendered.output.includes(privateValue), false);
@@ -245,7 +232,6 @@ test("renderMurphCliEntrypointError defaults non-interactive failures to machine
 
   assert.equal(rendered.machineReadable, true);
   assert.match(rendered.output, /permission_denied/u);
-  assert.match(rendered.output, /filesystem/u);
   assert.doesNotMatch(rendered.output, /private\/vault/u);
 });
 

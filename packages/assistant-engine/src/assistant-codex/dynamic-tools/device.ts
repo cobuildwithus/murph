@@ -1,8 +1,5 @@
 import * as z from '@murphai/contracts/zod-runtime'
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import type {
   AssistantHostedDeviceTool,
@@ -96,13 +93,12 @@ export async function executeDeviceDynamicTool(input: {
     if (response.action !== input.request.request.action) {
       return deviceTextResult(
         false,
-        serializeDeviceToolError({
-          code: 'device_response_invalid',
-          message: 'The device operation returned an unexpected result.',
-          retryable: true,
-          stage: deviceToolStage(input.request.request.action),
-          hint: 'Retry the device operation. If it repeats, treat device management as temporarily unavailable.',
-        }),
+        serializeDeviceToolError(
+          projectUnclassifiedDeviceToolFailure(
+            input.request.request.action,
+            false,
+          ),
+        ),
       )
     }
 
@@ -125,7 +121,11 @@ export async function executeDeviceDynamicTool(input: {
     return deviceTextResult(
       false,
       serializeDeviceToolError(
-        projectDeviceToolError(error, input.request.request.action),
+        projectDeviceToolError(
+          error,
+          input.request.request.action,
+          input.abortSignal?.aborted === true,
+        ),
       ),
     )
   }
@@ -142,8 +142,13 @@ interface DeviceToolErrorProjection {
 function projectDeviceToolError(
   error: unknown,
   action: AssistantHostedDeviceToolRequest['action'],
+  callerSignalAborted: boolean,
 ): DeviceToolErrorProjection {
   const stage = deviceToolStage(action)
+  if (callerSignalAborted) {
+    return projectUnclassifiedDeviceToolFailure(action, true)
+  }
+
   if (error instanceof VaultCliError) {
     switch (error.code) {
       case 'device_connect_provider_unavailable':
@@ -188,6 +193,7 @@ function projectDeviceToolError(
           }
         case 'RECONCILE_WAKE_NOT_ACCEPTED':
           return projectKnownHostedRetryableDeviceError({
+            action,
             code: hostedError.code,
             message: 'Device reconciliation could not be queued right now.',
             retryable: hostedError.retryable,
@@ -201,6 +207,7 @@ function projectDeviceToolError(
       switch (hostedError.code) {
         case 'HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE':
           return projectKnownHostedRetryableDeviceError({
+            action,
             code: hostedError.code,
             message: 'Device connection links are temporarily unavailable.',
             retryable: hostedError.retryable,
@@ -243,10 +250,11 @@ function projectDeviceToolError(
     }
   }
 
-  return genericDeviceToolFailure(stage)
+  return projectUnclassifiedDeviceToolFailure(action, false)
 }
 
 function projectKnownHostedRetryableDeviceError(input: {
+  action: AssistantHostedDeviceToolRequest['action']
   code: string
   message: string
   retryable: boolean
@@ -254,7 +262,7 @@ function projectKnownHostedRetryableDeviceError(input: {
   stage: string
 }): DeviceToolErrorProjection {
   if (!input.retryable) {
-    return genericDeviceToolFailure(input.stage, input.code)
+    return projectUnclassifiedDeviceToolFailure(input.action, false)
   }
 
   return {
@@ -266,16 +274,35 @@ function projectKnownHostedRetryableDeviceError(input: {
   }
 }
 
-function genericDeviceToolFailure(
-  stage: string,
-  code = 'device_operation_unavailable',
+function projectUnclassifiedDeviceToolFailure(
+  action: AssistantHostedDeviceToolRequest['action'],
+  callerSignalAborted: boolean,
 ): DeviceToolErrorProjection {
+  const stage = deviceToolStage(action)
+  if (callerSignalAborted) {
+    return {
+      code: 'device_operation_cancelled',
+      message: 'The device operation was cancelled.',
+      retryable: false,
+      stage,
+      hint: 'Do not retry unless the member asks to continue.',
+    }
+  }
+  if (action === 'list_accounts') {
+    return {
+      code: 'device_operation_unavailable',
+      message: 'The device operation could not be completed.',
+      retryable: true,
+      stage,
+      hint: 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.',
+    }
+  }
   return {
-    code,
-    message: 'The device operation could not be completed.',
+    code: 'device_operation_outcome_unknown',
+    message: 'The device operation completion could not be confirmed.',
     retryable: false,
     stage,
-    hint: 'Do not retry the same device operation unchanged.',
+    hint: `Run list_accounts and inspect the current account state before deciding whether to retry ${action}.`,
   }
 }
 
@@ -329,17 +356,13 @@ function deviceToolStage(
 function serializeDeviceToolError(
   projection: DeviceToolErrorProjection,
 ): string {
-  const repair = createVaultCliRepair({
-    hint: projection.hint,
-    stage: projection.stage,
-  })
   return JSON.stringify({
     error: {
       code: projection.code,
+      hint: projection.hint,
       message: projection.message,
       retryable: projection.retryable,
-      ...(repair.hint ? { hint: repair.hint } : {}),
-      ...(repair.stage ? { stage: repair.stage } : {}),
+      stage: projection.stage,
     },
   })
 }

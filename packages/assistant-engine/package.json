@@ -91,6 +91,10 @@
       "types": "./dist/codex-lifecycle.d.ts",
       "default": "./dist/codex-lifecycle.js"
     },
+    "./device-dynamic-tool": {
+      "types": "./dist/device-dynamic-tool.d.ts",
+      "default": "./dist/device-dynamic-tool.js"
+    },
     "./knowledge": {
       "types": "./dist/knowledge.d.ts",
       "default": "./dist/knowledge.js"

@@ -18,7 +18,6 @@ import {
 import {
   createMapboxResponseInvalidError,
   fetchMapboxJson,
-  type MapboxRequestStage,
 } from './mapbox-route-client.js'
 
 const coordinateLiteralPattern =
@@ -130,14 +129,10 @@ async function resolveTextRoutePoint(
       'route_point_unresolved',
       `Mapbox could not resolve the ${input.role}.`,
       { retryable: false },
-      {
-        stage: `${input.role}-lookup`,
-        hint: 'Make the location more specific or use longitude,latitude coordinates.',
-      },
     )
   }
 
-  throw createMapboxResponseInvalidError(routePointStage(input.role, 'search'))
+  throw createMapboxResponseInvalidError()
 }
 
 function buildCoordinatePoint(
@@ -188,20 +183,18 @@ async function geocodeRoutePoint(
     url.searchParams.set('language', input.language)
   }
 
-  const stage = routePointStage(input.role, 'geocoding')
   const payload = await fetchMapboxJson<MapboxGeocodingResponse>({
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    stage,
   })
-  const feature = readFirstMapboxFeature(payload, stage)
+  const feature = readFirstMapboxFeature(payload)
 
   if (!feature) {
     throw new MapboxRoutePointLookupMissError(`Mapbox could not geocode the ${input.role}.`)
   }
 
-  return buildResolvedFeaturePoint(feature, input, 'geocoded-query', stage)
+  return buildResolvedFeaturePoint(feature, input, 'geocoded-query')
 }
 
 async function searchBoxRoutePoint(
@@ -230,14 +223,12 @@ async function searchBoxRoutePoint(
     )
   }
 
-  const stage = routePointStage(input.role, 'search')
   const payload = await fetchMapboxJson<MapboxSearchBoxResponse>({
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    stage,
   })
-  const feature = readFirstMapboxFeature(payload, stage)
+  const feature = readFirstMapboxFeature(payload)
 
   if (!feature) {
     throw new MapboxRoutePointLookupMissError(
@@ -245,24 +236,23 @@ async function searchBoxRoutePoint(
     )
   }
 
-  return buildResolvedFeaturePoint(feature, input, 'search-box-query', stage)
+  return buildResolvedFeaturePoint(feature, input, 'search-box-query')
 }
 
 function readFirstMapboxFeature(
   payload: MapboxGeocodingResponse | MapboxSearchBoxResponse,
-  stage: MapboxRequestStage,
 ): MapboxLocationFeature | null {
   if (
     !payload ||
     typeof payload !== 'object' ||
     (payload.features !== undefined && !Array.isArray(payload.features))
   ) {
-    throw createMapboxResponseInvalidError(stage)
+    throw createMapboxResponseInvalidError()
   }
 
   const feature = payload.features?.[0]
   if (feature !== undefined && (!feature || typeof feature !== 'object')) {
-    throw createMapboxResponseInvalidError(stage)
+    throw createMapboxResponseInvalidError()
   }
 
   return feature ?? null
@@ -272,11 +262,10 @@ function buildResolvedFeaturePoint(
   feature: MapboxLocationFeature,
   input: RoutePointLookupOptions,
   source: Extract<MapboxRoutePointSource, 'geocoded-query' | 'search-box-query'>,
-  stage: MapboxRequestStage,
 ): ResolvedRoutePoint {
   const featureCoordinates = readFeatureCoordinates(feature)
   if (!featureCoordinates) {
-    throw createMapboxResponseInvalidError(stage)
+    throw createMapboxResponseInvalidError()
   }
 
   const routablePoint = selectRoutablePoint(feature, input.profile)
@@ -298,13 +287,6 @@ function buildResolvedFeaturePoint(
     matchType,
     routablePointName: normalizeNullableString(routablePoint?.name) ?? null,
   }
-}
-
-function routePointStage(
-  role: MapboxRoutePointRole,
-  lookup: 'geocoding' | 'search',
-): MapboxRequestStage {
-  return `${role}-${lookup}`
 }
 
 function readFeatureCoordinates(

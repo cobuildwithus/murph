@@ -17,6 +17,7 @@ import * as assistantState from '../src/assistant-state.ts'
 import * as assistantStatus from '../src/assistant-status.ts'
 import * as assistantStore from '../src/assistant-store.ts'
 import * as codexLifecycle from '../src/codex-lifecycle.ts'
+import * as deviceDynamicTool from '../src/device-dynamic-tool.ts'
 import * as knowledge from '../src/knowledge.ts'
 
 const wrapperCases = [
@@ -158,6 +159,15 @@ const wrapperCases = [
     codexLifecycle,
     [
       'stopWarmCodexAppServer',
+    ],
+  ],
+  [
+    'device-dynamic-tool',
+    deviceDynamicTool,
+    [
+      'executeDeviceDynamicTool',
+      'MURPH_DEVICE_TOOL',
+      'readDeviceDynamicToolRequest',
     ],
   ],
   [

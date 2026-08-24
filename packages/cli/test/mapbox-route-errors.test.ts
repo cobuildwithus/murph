@@ -56,8 +56,8 @@ describe('Mapbox final error envelopes', () => {
 
       assert.equal(result.envelope.error.code, testCase.code)
       assert.equal(result.envelope.error.retryable, testCase.retryable)
-      assert.equal(result.envelope.error.stage, 'directions')
-      assert.equal(typeof result.envelope.error.hint, 'string')
+      assert.equal(result.envelope.error.stage, undefined)
+      assert.equal(result.envelope.error.hint, undefined)
       const rendered = JSON.stringify(result.envelope)
       assert.equal(rendered.includes(providerBody), false)
       assert.equal(rendered.includes(accessToken), false)
@@ -83,7 +83,7 @@ describe('Mapbox final error envelopes', () => {
 
     assert.equal(result.envelope.error.code, 'route_mapbox_unavailable')
     assert.equal(result.envelope.error.retryable, true)
-    assert.equal(result.envelope.error.stage, 'directions')
+    assert.equal(result.envelope.error.stage, undefined)
     assert.equal(JSON.stringify(result.envelope).includes(rawCause), false)
   })
 
@@ -105,7 +105,7 @@ describe('Mapbox final error envelopes', () => {
 
     assert.equal(result.envelope.error.code, 'route_mapbox_timeout')
     assert.equal(result.envelope.error.retryable, true)
-    assert.equal(result.envelope.error.stage, 'directions')
+    assert.equal(result.envelope.error.stage, undefined)
     assert.equal(JSON.stringify(result.envelope).includes('private-timeout-detail'), false)
   })
 
@@ -130,7 +130,7 @@ describe('Mapbox final error envelopes', () => {
 
     assert.equal(result.envelope.error.code, 'route_mapbox_response_invalid')
     assert.equal(result.envelope.error.retryable, true)
-    assert.equal(result.envelope.error.stage, 'directions')
+    assert.equal(result.envelope.error.stage, undefined)
     assert.equal(JSON.stringify(result.envelope).includes('{not-json'), false)
   })
 })

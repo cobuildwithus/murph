@@ -215,7 +215,7 @@ describe('hosted device dynamic tool recovery', () => {
     })
   }
 
-  it('keeps unknown hosted failures generic even when they claim retryability', async () => {
+  it('requires state inspection after an unknown reconcile outcome', async () => {
     const privateCode = 'PRIVATE_HOSTED_DEVICE_FAILURE'
     const result = await executeDeviceFailure(
       createHostedWebControlPlaneResponseError({
@@ -228,9 +228,9 @@ describe('hosted device dynamic tool recovery', () => {
 
     const { parsed, text } = readToolError(result)
     expect(parsed.error).toEqual({
-      code: 'device_operation_unavailable',
-      hint: 'Do not retry the same device operation unchanged.',
-      message: 'The device operation could not be completed.',
+      code: 'device_operation_outcome_unknown',
+      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry reconcile.',
+      message: 'The device operation completion could not be confirmed.',
       retryable: false,
       stage: 'device-reconcile',
     })
@@ -238,7 +238,7 @@ describe('hosted device dynamic tool recovery', () => {
     expect(text).not.toContain(PRIVATE_HOSTED_DEVICE_SENTINEL)
   })
 
-  it('keeps malformed hosted failure shapes generic and non-retryable', async () => {
+  it('requires state inspection after a malformed reconcile failure', async () => {
     const result = await executeDeviceFailure(
       createHostedWebControlPlaneResponseError({
         code: 'RECONCILE_WAKE_NOT_ACCEPTED',
@@ -251,9 +251,9 @@ describe('hosted device dynamic tool recovery', () => {
 
     const { parsed, text } = readToolError(result)
     expect(parsed.error).toEqual({
-      code: 'device_operation_unavailable',
-      hint: 'Do not retry the same device operation unchanged.',
-      message: 'The device operation could not be completed.',
+      code: 'device_operation_outcome_unknown',
+      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry reconcile.',
+      message: 'The device operation completion could not be confirmed.',
       retryable: false,
       stage: 'device-reconcile',
     })
@@ -270,9 +270,9 @@ describe('hosted device dynamic tool recovery', () => {
     )
 
     expect(readToolError(result).parsed.error).toEqual({
-      code: 'RECONCILE_WAKE_NOT_ACCEPTED',
-      hint: 'Do not retry the same device operation unchanged.',
-      message: 'The device operation could not be completed.',
+      code: 'device_operation_outcome_unknown',
+      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry reconcile.',
+      message: 'The device operation completion could not be confirmed.',
       retryable: false,
       stage: 'device-reconcile',
     })
@@ -289,16 +289,16 @@ describe('hosted device dynamic tool recovery', () => {
     )
 
     expect(readToolError(result).parsed.error).toEqual({
-      code: 'device_operation_unavailable',
-      hint: 'Do not retry the same device operation unchanged.',
-      message: 'The device operation could not be completed.',
+      code: 'device_operation_outcome_unknown',
+      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry connect.',
+      message: 'The device operation completion could not be confirmed.',
       retryable: false,
       stage: 'device-connect',
     })
   })
 
-  it('keeps unknown failures generic and non-echoing', async () => {
-    const privateDetail = 'Authorization: Bearer private-device-token'
+  it('allows an unknown non-cancellation list failure to be retried safely', async () => {
+    const privateDetail = 'access_token=<REDACTED>'
     const result = await executeDeviceDynamicTool({
       deviceTool: {
         request: vi.fn(async () => {
@@ -314,12 +314,65 @@ describe('hosted device dynamic tool recovery', () => {
     const { parsed, text } = readToolError(result)
     expect(parsed.error).toEqual({
       code: 'device_operation_unavailable',
-      hint: 'Do not retry the same device operation unchanged.',
+      hint: 'Retry list_accounts. If it repeats, treat device management as temporarily unavailable.',
       message: 'The device operation could not be completed.',
+      retryable: true,
+      stage: 'device-list-accounts',
+    })
+    expect(text).not.toContain(privateDetail)
+  })
+
+  it('keeps caller cancellation distinct from a recoverable list failure', async () => {
+    const abortController = new AbortController()
+    const privateDetail = 'private caller cancellation reason'
+    const result = await executeDeviceDynamicTool({
+      abortSignal: abortController.signal,
+      deviceTool: {
+        request: vi.fn(async () => {
+          abortController.abort(new DOMException(privateDetail, 'AbortError'))
+          throw abortController.signal.reason
+        }),
+      },
+      request: {
+        kind: 'device',
+        request: { action: 'list_accounts' },
+      },
+    })
+
+    const { parsed, text } = readToolError(result)
+    expect(parsed.error).toEqual({
+      code: 'device_operation_cancelled',
+      hint: 'Do not retry unless the member asks to continue.',
+      message: 'The device operation was cancelled.',
       retryable: false,
       stage: 'device-list-accounts',
     })
     expect(text).not.toContain(privateDetail)
+  })
+
+  it('requires state inspection after an unexpected reconcile response', async () => {
+    const result = await executeDeviceDynamicTool({
+      deviceTool: {
+        request: vi.fn(async () => ({
+          accounts: [],
+          action: 'list_accounts' as const,
+          provider: null,
+          sourceProvider: null,
+        })),
+      },
+      request: {
+        kind: 'device',
+        request: { accountId: 'synthetic-account', action: 'reconcile' },
+      },
+    })
+
+    expect(readToolError(result).parsed.error).toEqual({
+      code: 'device_operation_outcome_unknown',
+      hint: 'Run list_accounts and inspect the current account state before deciding whether to retry reconcile.',
+      message: 'The device operation completion could not be confirmed.',
+      retryable: false,
+      stage: 'device-reconcile',
+    })
   })
 
   it('tells the model how to narrow an oversized account list', async () => {

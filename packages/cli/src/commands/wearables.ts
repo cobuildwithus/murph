@@ -715,11 +715,9 @@ function assertWearableDateRangeOrdered(value: {
   throw new VaultCliError(
     'invalid_option',
     'The wearable date range is invalid.',
-    { retryable: false },
     {
-      stage: 'wearable-date-validation',
-      hint: 'Set --to to the same date as --from or a later date.',
-      fields: [{
+      retryable: false,
+      issues: [{
         path: 'to',
         code: 'date_range_reversed',
         message: '--to must be on or after --from.',

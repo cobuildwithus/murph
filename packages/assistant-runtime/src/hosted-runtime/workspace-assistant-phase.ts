@@ -189,6 +189,7 @@ import type {
 import type {
   HostedRuntimePlatform,
   HostedRuntimeDeviceSyncMessagingReturnTarget,
+  HostedRuntimeDeviceSyncPort,
 } from "./platform.ts";
 import type {
   HostedAssistantDeliveryOutcome,
@@ -9203,19 +9204,55 @@ function buildHostedAssistantCronStatusOptions(
   };
 }
 
-type HostedAssistantDeviceTool = NonNullable<
-  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
->;
-
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
-}): HostedAssistantDeviceTool | undefined {
+}): NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"] | undefined {
   const deviceSyncPort = input.input.runtime.platform.deviceSyncPort ?? null;
   if (!deviceSyncPort) {
     return undefined;
   }
 
+  const messagingReturnTarget = input.input.deviceSyncMessagingReturnTarget ?? null;
+  return createHostedAssistantDeviceTool({
+    deviceConnectProviders: input.deviceConnectProviders,
+    deviceSyncPort,
+    messagingReturnTarget,
+    async observeConnect(observation) {
+      await writeHostedDeviceConnectRuntimeLog({
+        deviceConnectProviders: input.deviceConnectProviders,
+        ...(observation.status === "failed" ? { error: observation.error } : {}),
+        ...(observation.status === "issued"
+          ? { expiresAtPresent: observation.expiresAtPresent }
+          : {}),
+        input: input.input,
+        issueLinkAvailable: true,
+        messagingReturnTarget,
+        provider: observation.provider,
+        stage: "request",
+        status: observation.status,
+      });
+    },
+  });
+}
+
+export type HostedAssistantDeviceConnectObservation =
+  | { provider: string; status: "requested" }
+  | {
+      expiresAtPresent: boolean;
+      provider: string;
+      status: "issued";
+    }
+  | { error: unknown; provider: string; status: "failed" };
+
+export function createHostedAssistantDeviceTool(input: {
+  deviceConnectProviders: readonly { label: string; provider: string }[];
+  deviceSyncPort: HostedRuntimeDeviceSyncPort;
+  messagingReturnTarget?: HostedRuntimeDeviceSyncMessagingReturnTarget | null;
+  observeConnect?: (
+    observation: HostedAssistantDeviceConnectObservation,
+  ) => Promise<void> | void;
+}): NonNullable<NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]> {
   return {
     async request(request, context) {
       context?.signal?.throwIfAborted();
@@ -9223,7 +9260,7 @@ function resolveHostedWorkspaceDeviceTool(input: {
         const provider = normalizeAssistantRouteString(request.provider);
         const sourceProvider = normalizeAssistantRouteString(request.sourceProvider);
         const snapshot = await fetchCompleteHostedDeviceSyncRuntimeSnapshot({
-          deviceSyncPort,
+          deviceSyncPort: input.deviceSyncPort,
           includeCredentialMaterial: false,
           ...(provider ? { provider } : {}),
           signal: context?.signal ?? null,
@@ -9245,13 +9282,13 @@ function resolveHostedWorkspaceDeviceTool(input: {
       }
 
       if (request.action === "reconcile") {
-        if (!deviceSyncPort.reconcileAccount) {
+        if (!input.deviceSyncPort.reconcileAccount) {
           throw new VaultCliError(
             "device_reconcile_unavailable",
             "Device account reconciliation is not available right now.",
           );
         }
-        const result = await deviceSyncPort.reconcileAccount({
+        const result = await input.deviceSyncPort.reconcileAccount({
           connectionId: request.accountId,
           signal: context?.signal ?? null,
         });
@@ -9267,47 +9304,22 @@ function resolveHostedWorkspaceDeviceTool(input: {
         configuredProviders: input.deviceConnectProviders,
         requestedProvider: request.provider,
       });
-      const messagingReturnTarget = input.input.deviceSyncMessagingReturnTarget ?? null;
-      await writeHostedDeviceConnectRuntimeLog({
-        deviceConnectProviders: input.deviceConnectProviders,
-        input: input.input,
-        issueLinkAvailable: true,
-        messagingReturnTarget,
-        provider,
-        stage: "request",
-        status: "requested",
-      });
-
+      await input.observeConnect?.({ provider, status: "requested" });
       try {
-        const result = await deviceSyncPort.createConnectLink({
+        const result = await input.deviceSyncPort.createConnectLink({
           connectTarget: provider,
-          ...(messagingReturnTarget ? { messagingReturnTarget } : {}),
+          ...(input.messagingReturnTarget
+            ? { messagingReturnTarget: input.messagingReturnTarget }
+            : {}),
         });
-        await writeHostedDeviceConnectRuntimeLog({
-          deviceConnectProviders: input.deviceConnectProviders,
+        await input.observeConnect?.({
           expiresAtPresent: Boolean(result.expiresAt),
-          input: input.input,
-          issueLinkAvailable: true,
-          messagingReturnTarget,
           provider: result.provider,
-          stage: "request",
           status: "issued",
         });
-        return {
-          action: request.action,
-          link: result,
-        };
+        return { action: request.action, link: result };
       } catch (error) {
-        await writeHostedDeviceConnectRuntimeLog({
-          deviceConnectProviders: input.deviceConnectProviders,
-          error,
-          input: input.input,
-          issueLinkAvailable: true,
-          messagingReturnTarget,
-          provider,
-          stage: "request",
-          status: "failed",
-        });
+        await input.observeConnect?.({ error, provider, status: "failed" });
         throw error;
       }
     },

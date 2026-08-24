@@ -262,11 +262,10 @@ export async function resolveMapboxAddress(
     fetchImpl: dependencies.fetchImpl ?? fetch,
     timeoutMs: resolveMapboxTimeoutMs(env),
     url,
-    stage: 'address-resolution',
   })
   const parsedPayload = providerAddressResponseSchema.safeParse(rawPayload)
   if (!parsedPayload.success) {
-    throw createMapboxResponseInvalidError('address-resolution')
+    throw createMapboxResponseInvalidError()
   }
 
   const explicitMailingHints = readExplicitMailingHints(input.query)

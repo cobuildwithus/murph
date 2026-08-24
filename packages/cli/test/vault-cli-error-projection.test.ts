@@ -1,13 +1,10 @@
 import assert from 'node:assert/strict'
 
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import { projectVaultCliError } from '../src/vault-cli-error-projection.js'
 
-test('projects only the explicit VaultCliError repair contract', () => {
+test('projects bounded field errors only from safe VaultCliError context issues', () => {
   const submittedValue = 'private-submitted-value'
   const providerBody = 'private-provider-response'
   const projection = projectVaultCliError(
@@ -16,25 +13,20 @@ test('projects only the explicit VaultCliError repair contract', () => {
       'Schedule failed validation.',
       {
         retryable: false,
-        issues: [{ message: submittedValue }],
-        providerBody,
-      },
-      createVaultCliRepair({
-        stage: 'validation',
-        hint: 'Use a valid IANA time zone.',
-        fields: [
+        issues: [
           {
             path: ['schedule', 'timeZone'],
             code: 'invalid_value',
             message: 'Use an IANA time-zone identifier.',
           },
         ],
-      }),
+        providerBody,
+        submittedValue,
+      },
     ),
   )
 
   assert.equal(projection.code, 'invalid_payload')
-  assert.equal(projection.stage, 'validation')
   assert.equal(projection.retryable, false)
   assert.deepEqual(projection.fieldErrors, [
     {
@@ -49,6 +41,30 @@ test('projects only the explicit VaultCliError repair contract', () => {
   assert.equal(JSON.stringify(projection).includes(providerBody), false)
 })
 
+test('bounds and sanitizes context issues before projecting field errors', () => {
+  const privatePath = '/private/member-input/time-zone'
+  const privateCredential = 'access_token=<REDACTED>'
+  const projection = projectVaultCliError(
+    new VaultCliError('invalid_payload', 'Payload is invalid.', {
+      issues: Array.from({ length: 14 }, (_, index) => ({
+        code: index === 0 ? 'invalid_value' : 'invalid_type',
+        expected: 'string',
+        message: index === 0 ? privateCredential : 'Use a valid value.',
+        path: index === 0 ? privatePath : ['items', index],
+      })),
+    }),
+  )
+
+  assert.equal(projection.fieldErrors?.length, 12)
+  assert.equal(projection.fieldErrors?.[0]?.path, '<field>')
+  assert.equal(
+    projection.fieldErrors?.[0]?.message,
+    'Value is not one of the allowed options.',
+  )
+  assert.equal(JSON.stringify(projection).includes(privatePath), false)
+  assert.equal(JSON.stringify(projection).includes(privateCredential), false)
+})
+
 test('classifies filesystem errors without returning the absolute path or cause', () => {
   const privatePath = '/private/workspace/member-vault/config.json'
   const projection = projectVaultCliError(
@@ -59,7 +75,6 @@ test('classifies filesystem errors without returning the absolute path or cause'
   )
 
   assert.equal(projection.code, 'permission_denied')
-  assert.equal(projection.stage, 'filesystem')
   assert.equal(projection.retryable, false)
   assert.equal(JSON.stringify(projection).includes(privatePath), false)
   assert.equal(JSON.stringify(projection).includes('permission denied, open'), false)
@@ -84,23 +99,25 @@ test('classifies escaped validation issues without echoing raw issue messages', 
   assert.equal(JSON.stringify(projection).includes(privateValue), false)
 })
 
-test('redacts unexpected exception paths while retaining bounded repair text', () => {
+test('returns a stable generic message for unexpected exceptions', () => {
   const privatePath = '/private/workspace/member-vault/data.json'
   const projection = projectVaultCliError(
     new Error(`Unexpected parser failure in ${privatePath}`),
   )
 
   assert.equal(projection.code, 'UNKNOWN')
-  assert.equal(projection.stage, 'command')
   assert.equal(projection.retryable, false)
   assert.equal(JSON.stringify(projection).includes(privatePath), false)
-  assert.match(projection.message, /Unexpected parser failure in <PATH>/u)
+  assert.equal(
+    projection.message,
+    'The command failed without a safe recoverable detail.',
+  )
 })
 
 test('does not return provider-shaped or credential-bearing unknown messages', () => {
   for (const message of [
     '{"error":{"message":"private-provider-response"}}',
-    'Authorization: Bearer private-token',
+    'access_token=<REDACTED>',
   ]) {
     const projection = projectVaultCliError(new Error(message))
 

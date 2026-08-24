@@ -1119,9 +1119,7 @@ describe('estimateMapboxRoute', () => {
     ).rejects.toMatchObject({
       code: 'route_point_unresolved',
       message: 'Mapbox could not resolve the origin.',
-      repair: {
-        stage: 'origin-lookup',
-      },
+      context: { retryable: false },
     })
 
     expect(requests).toEqual([
@@ -1194,9 +1192,7 @@ describe('estimateMapboxRoute', () => {
     ).rejects.toMatchObject({
       code: 'route_mapbox_response_invalid',
       message: 'Mapbox returned an invalid response.',
-      repair: {
-        stage: 'directions',
-      },
+      context: { retryable: true },
     })
   })
 
@@ -1240,9 +1236,7 @@ describe('estimateMapboxRoute', () => {
     ).rejects.toMatchObject({
       code: 'route_mapbox_response_invalid',
       message: 'Mapbox returned an invalid response.',
-      repair: {
-        stage: 'directions',
-      },
+      context: { retryable: true },
     })
   })
 })

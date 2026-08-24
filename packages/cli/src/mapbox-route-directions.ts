@@ -76,12 +76,11 @@ export async function requestDirections(input: {
       fetchImpl: input.fetchImpl,
       timeoutMs: input.timeoutMs,
       url,
-      stage: 'directions',
     }),
   )
 
   if (!parsedPayload.success) {
-    throw createMapboxResponseInvalidError('directions')
+    throw createMapboxResponseInvalidError()
   }
 
   const payload: MapboxDirectionsResponse = parsedPayload.data
@@ -103,10 +102,6 @@ function createNoRouteError(): VaultCliError {
     'route_no_path',
     'Mapbox did not return a route for these points.',
     { retryable: false },
-    {
-      stage: 'directions',
-      hint: 'Make the origin or destination more specific, use longitude,latitude coordinates, or try another routing profile.',
-    },
   )
 }
 
