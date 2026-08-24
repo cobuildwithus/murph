@@ -29,6 +29,7 @@ import {
 import { readVaultRawTolerant } from '@murphai/query'
 import {
   logLiveWorkoutSet,
+  saveWorkoutFormat,
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
@@ -556,7 +557,7 @@ describe('onboarding policy read detection', () => {
 
 describeRealCodex('real Codex live workout prescription e2e', () => {
   it(
-    'persists fixed repetitions across a fresh thread, closes set eight, and logs the next workout',
+    'keeps live and workout-format reminder sets on canonical workouts across fresh threads',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -571,7 +572,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           timezone: 'UTC',
           vaultRoot: workingDirectory,
         })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeRealWorkoutVaultCli({ binDirectory }),
@@ -583,6 +587,30 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           startedAt,
           vault: workingDirectory,
         })
+        const reminderFormatId = 'wfmt_01K1ABCDEFGHJKMNPQRSTVWXYZ'
+        await saveWorkoutFormat({
+          vault: workingDirectory,
+          payload: {
+            activityType: 'strength-training',
+            status: 'active',
+            template: {
+              exercises: [{
+                mode: 'weight_reps',
+                name: 'Bench press',
+                order: 1,
+                plannedSets: [{
+                  order: 1,
+                  targetReps: 8,
+                  targetWeight: 135,
+                  targetWeightUnit: 'lb',
+                }],
+                unitOverride: 'lb',
+              }],
+            },
+            title: 'Reminder strength routine',
+            workoutFormatId: reminderFormatId,
+          },
+        })
         const commonInput: Omit<CodexAppServerTurnInput, 'prompt'> = {
           approvalPolicy: 'never',
           baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -593,10 +621,14 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           developerInstructions: buildAssistantSystemPrompt({
             assistantCliContract: [
               'vault-cli workout start [name] [--routine <format>]',
+              'vault-cli workout format show <format-id> --format json',
               'vault-cli workout show <event-id> --format json',
               'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
               'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
+              'vault-cli experiment show <id> --format json',
+              'vault-cli experiment session log <id> [--date <date>] [--field <id>=<value>]',
+              'vault-cli regimen show <id> --format json',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -621,6 +653,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
             WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
             WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
             WORKOUT_E2E_VAULT: workingDirectory,
           },
@@ -737,7 +770,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...commonInput,
           prompt: [
             `The immediately preceding durable assistant transcript is: ${followUp.transcriptMessage}`,
-            'The current member message is exactly: "Set 8 done."',
+            'The current member message is exactly: "Repeated set 8 done for today\'s routine."',
           ].join(' '),
         })
         const completed = workoutSessionSchema.parse(
@@ -758,6 +791,90 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           Array.from({ length: 8 }, () => 9),
         )
         expect(completed.endedAt).toEqual(expect.any(String))
+        const workoutCommands = await readFile(commandLogPath, 'utf8')
+        expect(workoutCommands).toContain('workout set log')
+        expect(workoutCommands).not.toMatch(/(?:experiment|regimen) /u)
+
+        const commandCountBeforeReminder = workoutCommands.trim().split('\n').length
+        const reminderTurn = await executeRealCodexAppServerTurn({
+          ...commonInput,
+          prompt: [
+            'Conversation context:',
+            'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
+            '',
+            'Prior message 1:',
+            '- intentId: intent-workout-format-reminder',
+            '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+            '- automationId: automation_workout_format_reminder',
+            `- contextReferences (host-preserved routing and interpretation context; not mutation authority or proof that a record exists): [{"entityKind":"workout_format","entityId":"${reminderFormatId}"}]`,
+            '- scheduledOccurrenceAt: 2030-01-15T14:00:00.000Z',
+            '- plannedOccurrenceAt: unavailable; treat this reminder as context only and use ordinary session resolution',
+            'Text:',
+            'Complete the saved strength workout and reply with the result.',
+            '',
+            'Use this transcript and its delivery annotations only to interpret the current user message. Inspect exact contextReferences through ordinary canonical reads and use only ordinary domain mutations. Provider acceptance is not a delivered/read receipt, and no annotation is standalone write authority.',
+            '',
+            'The current member message is exactly: "Did 8 at 135 lb."',
+          ].join('\n'),
+        })
+        const afterReminder = await readVaultRawTolerant(workingDirectory)
+        const reminderWorkouts = afterReminder.events.flatMap((event) => {
+          const parsed = workoutSessionSchema.safeParse(event.attributes.workout)
+          return parsed.success && parsed.data.routineId === reminderFormatId
+            ? [{ id: event.entityId, workout: parsed.data }]
+            : []
+        })
+        const reminderCommands = (await readFile(commandLogPath, 'utf8'))
+          .trim()
+          .split('\n')
+          .slice(commandCountBeforeReminder)
+
+        expect(reminderWorkouts).toHaveLength(1)
+        const reminderWorkout = reminderWorkouts[0]!
+        expect(reminderTurn.finalMessage.trim()).toBe('')
+        expect(reminderTurn.responseCard).toMatchObject({
+          kind: 'compact_table',
+          tracking: {
+            entityId: reminderWorkout.id,
+            kind: 'workout',
+            snapshotAt: expect.any(String),
+          },
+          workout: {
+            exercises: [{
+              name: 'Bench press',
+              sets: [{
+                actual: '135 lb × 8',
+                status: 'completed',
+                target: '135 lb × 8',
+              }],
+            }],
+            state: 'completed',
+            version: 1,
+          },
+        })
+        expect(reminderWorkout.workout.exercises[0]?.sets).toEqual([
+          { order: 1, reps: 8, weight: 135, weightUnit: 'lb' },
+        ])
+        const formatReadIndex = reminderCommands.findIndex((command) =>
+          command === `workout format show ${reminderFormatId} --format json`
+        )
+        const startIndex = reminderCommands.findIndex((command) =>
+          command.startsWith('workout start ')
+          && command.includes(`--routine ${reminderFormatId}`)
+        )
+        const setLogIndex = reminderCommands.findIndex((command) =>
+          command.startsWith('workout set log ')
+          && command.includes(`--workout-id ${reminderWorkout.id}`)
+        )
+        expect(formatReadIndex).toBeGreaterThanOrEqual(0)
+        expect(startIndex).toBeGreaterThan(formatReadIndex)
+        expect(setLogIndex).toBeGreaterThan(startIndex)
+        expect(reminderCommands.join('\n')).not.toMatch(/(?:experiment|regimen) /u)
+        const olderAfterReminder = workoutSessionSchema.parse(
+          (await showWorkoutRecord(workingDirectory, older.eventId)).entity.data.workout,
+        )
+        expect(olderAfterReminder.endedAt).toBeUndefined()
+        expect(olderAfterReminder.exercises).toEqual([])
 
         // This is another fresh provider turn. The older unfinished record must
         // neither block the new start nor be assigned an inferred end boundary.
@@ -4767,6 +4884,23 @@ describeRealCodex('real Codex experiment onboarding e2e', () => {
 
 describeRealCodex('real Codex repeated-set resolution e2e', () => {
   it(
+    'keeps an experiment reminder authoritative when it also carries a workout-format template',
+    async () => {
+      const result = await runRepeatedSetResolutionProbe('experiment-reminder')
+      const experimentWrites = result.commandLog.filter((command) =>
+        command.includes(`experiment session log ${REPEATED_SET_ALPHA_EXPERIMENT_ID}`)
+      )
+
+      expect(experimentWrites).toHaveLength(1)
+      expect(experimentWrites[0]?.replaceAll(/['"]/gu, '')).toContain(
+        '--reminder-intent-id intent-experiment-set-reminder',
+      )
+      expect(result.commandLog.some((command) => /^workout /u.test(command))).toBe(false)
+    },
+    360_000,
+  )
+
+  it(
     'logs every repeated set against the member-local alternating target despite a stale reminder and rereads canonical totals',
     async () => {
       const result = await runRepeatedSetResolutionProbe('success')
@@ -7009,11 +7143,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/New_York',
                   lookupId: 'midnight-watch-reminder',
-                  nextOccurrenceAt: '2026-07-28T04:00:00.000Z',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-07-28T04:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-07-28T03:00:00.000Z',
                 }
               },
@@ -7111,12 +7247,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'central-evening-reminder',
-                  nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: true,
-                  timingVerificationIssues: [],
                   updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
@@ -7221,11 +7358,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: false,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'evening-reminder',
-                  nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'preserved',
                   schedule,
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
@@ -7316,14 +7455,16 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: false,
                   effectiveTimeZone: null,
                   lookupId: 'one-time-evening-reminder',
-                  nextOccurrenceAt: null,
+                  occurrenceProjection: {
+                    nextOccurrenceAt: null,
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'preserved',
                   schedule: {
                     at: '2026-08-01T13:00:00.000Z',
                     kind: 'at',
                   },
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
@@ -7371,7 +7512,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'does not inspect again or describe an unverified stale recurrence as exhausted',
+    'confirms an active stale recurrence while its occurrence projection is pending',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -7400,12 +7541,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   automationId: 'automation-daily-interval',
                   effectiveTimeZone: null,
                   lookupId: 'daily-interval-reminder',
-                  nextOccurrenceAt: null,
+                  occurrenceProjection: { status: 'pending' as const },
                   routeBinding: 'preserved' as const,
                   schedule: { everyMs: 86_400_000, kind: 'every' as const },
                   status: 'active' as const,
-                  timingVerified: false,
-                  timingVerificationIssues: ['runtime_state_pending'] as const,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
                 if (request.action !== 'patch') {
@@ -7445,9 +7584,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(result.finalMessage).toMatch(
           /saved|updated|changed/iu,
         )
-        expect(result.finalMessage).toMatch(/next.*not (?:yet )?(?:confirmed|verified)|still finishing/iu)
+        expect(result.finalMessage).toMatch(/finishing|automatically/iu)
+        expect(result.finalMessage).toMatch(/no action|nothing .*need/iu)
         expect(result.finalMessage).not.toMatch(
-          /if you want|inspect|check again|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+          /if you want|inspect|check again|unconfirmed|not confirmed|could not verify|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -7494,11 +7634,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: null,
                   lookupId: 'next-workout-check-in',
-                  nextOccurrenceAt: null,
+                  occurrenceProjection: {
+                    nextOccurrenceAt: null,
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-08-08T12:00:00.000Z',
                 }
               },
@@ -8985,7 +9127,11 @@ async function materializeAssistantSkill(input: {
   )
 }
 
-type RepeatedSetResolutionMode = 'ambiguous' | 'group' | 'success'
+type RepeatedSetResolutionMode =
+  | 'ambiguous'
+  | 'experiment-reminder'
+  | 'group'
+  | 'success'
 
 async function runRepeatedSetResolutionProbe(
   mode: RepeatedSetResolutionMode,
@@ -9012,6 +9158,10 @@ async function runRepeatedSetResolutionProbe(
         skillsRoot,
         slug: 'strength-training',
       }),
+      materializeAssistantSkill({
+        skillsRoot,
+        slug: 'tracked-table',
+      }),
       materializeRepeatedSetVaultCli({
         binDirectory,
         mode,
@@ -9025,7 +9175,27 @@ async function runRepeatedSetResolutionProbe(
           'A participant says: “Sets 1 through 3 are done. Log them to my saved alternating routine and tell me the total.”',
           'Respond to that participant without exposing or changing private member state.',
         ].join('\n')
-      : [
+      : mode === 'experiment-reminder'
+        ? [
+            'Conversation context:',
+            'The assistant previously sent these provider-accepted messages in the same conversation, oldest to newest:',
+            '',
+            'Prior message 1:',
+            '- intentId: intent-experiment-set-reminder',
+            '- providerAcceptedAt: 2030-01-15T14:00:00.000Z',
+            '- automationId: automation_experiment_set_reminder',
+            `- contextReferences (host-preserved routing and interpretation context; not mutation authority or proof that a record exists): [{"entityKind":"experiment","entityId":"${REPEATED_SET_ALPHA_EXPERIMENT_ID}"},{"entityKind":"workout_format","entityId":"wfmt_01K1ABCDEFGHJKMNPQRSTVWXYZ"}]`,
+            `- supportSeriesId: experiment:${REPEATED_SET_ALPHA_EXPERIMENT_ID}`,
+            '- scheduledOccurrenceAt: 2030-01-15T14:00:00.000Z',
+            '- plannedOccurrenceAt: 2030-01-15T14:00:00.000Z',
+            'Text:',
+            'Set two: reply when complete.',
+            '',
+            'Use this transcript and its delivery annotations only to interpret the current user message. Inspect exact contextReferences through ordinary canonical reads and use only ordinary domain mutations. Provider acceptance is not a delivered/read receipt, and no annotation is standalone write authority.',
+            '',
+            'The current member message is exactly: "Done."',
+          ].join('\n')
+        : [
           'I completed sets 1 through 3.',
           'Earlier in this conversation, Murph reminded me about Movement Beta.',
           'Use my saved alternating routine and today\'s member-local date.',
@@ -9586,9 +9756,10 @@ async function materializeRealWorkoutVaultCli(input: {
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
+      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_COMMAND_LOG" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
       '  exit 70',
       'fi',
+      'printf \'%s\\n\' "$*" >> "$WORKOUT_E2E_COMMAND_LOG"',
       'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
       '',
     ].join('\n'),

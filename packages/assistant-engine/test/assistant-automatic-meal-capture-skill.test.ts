@@ -65,21 +65,10 @@ describe('assistant automatic meal capture skill', () => {
 
   it('teaches setup, background limits, import proof, and calorie-aware enrichment', async () => {
     const skillsRoot = resolveAssistantSkillsRoot()
-    const [skill, cardSafety] = await Promise.all([
-      readFile(
-        path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
-        'utf8',
-      ),
-      readFile(
-        path.join(
-          skillsRoot,
-          'nutrition-strategy',
-          'references',
-          'daily-nutrition-card-safety.md',
-        ),
-        'utf8',
-      ),
-    ])
+    const skill = await readFile(
+      path.join(skillsRoot, 'automatic-meal-capture', 'SKILL.md'),
+      'utf8',
+    )
 
     expect(skill).toMatch(/^---\nname: automatic-meal-capture\n/)
     expect(skill).toContain('iOS 26.1 or later')
@@ -150,27 +139,13 @@ describe('assistant automatic meal capture skill', () => {
       'This active-target authority read is separate from any all-status Goal lookup used to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactSkill).toContain(
-      'as the complete safety gate before deriving or presenting numeric values, any Goal write, totals, or a card.',
+      'apply the concise known-context numeric-suitability rule in the `murph.attach_response_card` prompt',
     )
     expect(compactSkill).toContain(
-      'When that gate suppresses numeric output or any required safety read is incomplete, unavailable, or unreadable, keep the ordinary compact closeout, perform no Goal or measurement mutation, ask no question, and attach no card.',
+      'Do not run a universal medical history or measurement checklist.',
     )
-    expect(compactSkill).not.toContain('`vault-cli memory show --format json`')
-    expect(compactSkill).not.toContain(
-      '`vault-cli condition list --status active --limit 200 --format json`',
-    )
-    expect(compactSkill).not.toContain(
-      '`vault-cli regimen list --status active --limit 200 --format json`',
-    )
-    expect(compactSkill).not.toContain('`vault-cli show <same-id> --format json`')
-    expect(compactSkill).not.toContain(
-      '`vault-cli event list --kind procedure --limit 200 --format json`',
-    )
-    expect(compactSkill).not.toContain(
-      '`vault-cli event list --kind encounter --limit 200 --format json`',
-    )
-    expect(compactSkill).not.toContain(
-      '`vault-cli measurement entry list --metric pregnancy-test',
+    expect(compactSkill).toContain(
+      'When known context suppresses numeric output or suitability remains unresolved, keep the ordinary compact closeout',
     )
     expect(compactSkill).toContain(
       'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
@@ -223,9 +198,7 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSkill).toContain(
       'If fewer than five applicable targets remain, ask no question and use ordinary closeout text.',
     )
-    expect(skill).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
-    )
+    expect(skill).not.toContain('daily-nutrition-card-safety.md')
     expect(compactSkill).toContain(
       'does the first eligible managed closeout have one proposal-only exception',
     )
@@ -265,72 +238,6 @@ describe('assistant automatic meal capture skill', () => {
     expect(compactSkill).toContain(
       'When the run covers exactly one local date, the canonical read includes a calorie total',
     )
-    const compactSafety = compact(cardSafety)
-    expect(compactSafety).toContain(
-      'before every `daily_nutrition` attachment',
-    )
-    expect(compactSafety).toContain('under-fueling or RED-S concern')
-    expect(compactSafety).toContain('known underweight')
-    expect(compactSafety).toContain('frailty, or malnutrition risk')
-    expect(compactSafety).toContain(
-      'its first eligible managed closeout may use already-known responsible inputs to create and explain one paused proposal',
-    )
-    expect(compactSafety).toContain(
-      'Every later scheduled occurrence remains card-time-only and may not create, change, or automatically repeat a numeric proposal.',
-    )
-    expect(compactSafety).toContain(
-      '`vault-cli measurement entry list --metric bmi --metric height --metric weight --metric body-weight --from <45-days-before-today> --to <today> --limit 200 --format json`',
-    )
-    expect(compactSafety).toContain(
-      '`vault-cli measurement entry list --metric pregnancy-test --from <300-days-before-today> --to <today> --limit 200 --format json`',
-    )
-    expect(compactSafety).toContain(
-      '`vault-cli event list --kind test --from <300-days-before-today> --to <today> --limit 200 --format json`',
-    )
-    expect(compactSafety).toContain(
-      'Otherwise run `vault-cli event show <event-id> --format json` for every returned test',
-    )
-    expect(compactSafety).toContain(
-      'Treat a test event as explicit positive pregnancy evidence only when all of these are true: its result status is not `pending`;',
-    )
-    expect(compactSafety).toContain(
-      'It takes precedence over negative evidence in the same window, including a later negative from either pregnancy-evidence owner',
-    )
-    expect(compactSafety).toContain(
-      'Canonical `resultStatus` classifies the result rather than the source report\'s lifecycle, so `unknown` does not prove that a test is unfinished and may qualify only when the same strict test identity and explicit textual result rules pass.',
-    )
-    expect(compactSafety).toContain(
-      '`pending` is unfinished and never qualifies, even if preliminary text says positive.',
-    )
-    expect(compactSafety).toContain(
-      'Do not infer pregnancy from a numeric hCG value, reference range, `abnormal` or `unknown` status/flag alone, test title, or non-result note alone.',
-    )
-    expect(compactSafety).toContain(
-      '`vault-cli memory show --format json`',
-    )
-    expect(compactSafety).toContain(
-      'A usable adult BMI below 18.5 suppresses numeric goals, every Goal write or activation, and the card.',
-    )
-    expect(compactSafety).toContain(
-      'Do not combine height and weight from different events or dates',
-    )
-    expect(compactSafety).toContain(
-      'Never ask a scheduled occurrence for these measurements and never mutate measurement records during this check.',
-    )
-    expect(compactSafety).toContain('below 1,200 kcal/day')
-    expect(compactSafety).toContain('active resolved target at card time')
-    expect(compactSafety).toContain(
-      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the historical `daily-calories` / `calories` member of the complete stable `daily-*` nutrition target set, in `kcal`.',
-    )
-    expect(compactSafety).toContain(
-      'A one-sided threshold, non-identical range, or calorie target in any other unit makes the point-target card bundle incompatible.',
-    )
-    expect(compactSafety).toContain(
-      'a calorie threshold whose satisfying range includes intake below 1,200 cannot authorize numeric self-directed card feedback.',
-    )
-    expect(compactSafety).toContain('pregnancy or breastfeeding')
-    expect(compactSafety).toContain('glucose-lowering medication')
-    expect(compactSafety).toContain('kidney disease')
     expect(skill).toContain('`murph.attach_response_card`')
     expect(skill).toContain(
       '`card: { kind: "daily_nutrition", version: 2, localDate: <the single',
@@ -361,20 +268,6 @@ describe('assistant automatic meal capture skill', () => {
     expect(
       compactSkill.indexOf('vault-cli meal totals --from <date> --to'),
     ).toBeLessThan(attachCardIndex)
-    expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
-      .toBeLessThan(attachCardIndex)
-    expect(
-      compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
-    ).toBeLessThan(
-      compactSkill.indexOf('daily-nutrition-card-safety.md'),
-    )
-    expect(
-      compactSkill.indexOf(
-        'vault-cli goal list --status active --limit 200 --format json',
-      ),
-    ).toBeLessThan(compactSkill.indexOf('daily-nutrition-card-safety.md'))
-    expect(compactSkill.indexOf('daily-nutrition-card-safety.md'))
-      .toBeLessThan(attachCardIndex)
     expect(skill).toContain('a delivery prerequisite, not a second automation opt-in')
     expect(skill).toContain('`--nutrition-source label`')
     expect(skill).toContain('`--nutrition-source database`')

@@ -7,7 +7,7 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
-- run inbox media retention during existing idle checkpoint maintenance so old raw inbox image/audio/video bytes expire without a separate scheduler
+- run inbox media retention during existing idle checkpoint maintenance so raw inbox image/audio bytes expire at their ordinary deadline, while unprotected hosted video bytes expire immediately and stay outside every new snapshot without a separate scheduler
 - run bounded post-device-sync dense raw retention through the core dense-prune primitive, logging only counts, byte totals, and tombstone totals
 - build the encrypted hosted browser-vault replica from generic canonical query sources plus schema-valid saved experiment outcomes referenced by canonical experiment frontmatter; referenced outcome bytes participate in source freshness, while invalid, escaping, missing, or mismatched references are omitted fail-closed
 - own the canonical hosted runtime launch spec: semantic env split,
@@ -32,7 +32,7 @@ Current responsibilities:
   compaction, and forces the dirty checkpoint and fresh invocation without
   consuming the input
 - expose invocation-scoped automation and device authority only through narrow typed tools on the active root turn, never through Codex App Server or descendant shell env; the runtime supplies existing domain ports directly, canonical automation records remain owned by the already-bound vault, route writes use the trusted current destination rather than model-supplied locators, and the automation tool remains unavailable to scheduled turns and descendants
-- keep automation timing verification explicit and operation-local: time-based responses include typed, content-free verification issues; the existing hosted tool owner performs one bounded read-only readback after an unverified write; failure and recovery diagnostics reuse the existing nonblocking assistant automation-detail log path without model mediation, retries, new persistence, or a second scheduler owner
+- keep automation occurrence projection explicit and operation-local: responses distinguish resolved timing, healthy in-flight scheduler work, and unavailable projection; only unavailable projection receives one bounded read-only readback and typed content-free diagnostics through the existing nonblocking assistant automation-detail log path, without model mediation, retries, new persistence, or a second scheduler owner
 - enroll every activated member in one finite hosted onboarding follow-up independently of optional welcome delivery: activation persists canonical onboarding start once and carries any available direct route separately from the welcome, immediate route-bearing activation performs the canonical idempotent upsert, and route-less Telegram activation remains silent until ordinary managed reconciliation sees a later direct route; delayed creation preserves the activation-anchored window, transient failures reuse the activation mailbox or existing bounded managed-setup retry ladder, and completed, expired, group, or archived follow-ups stay closed; the exact current seed, PR 1203 one-shot, older recurring fingerprint, or bounded original legacy seed is reconciled without granting execution authority to editable metadata; reconciliation preserves the signup-selected daily minute or derives it from an exact one-shot's stored occurrence, and conversion durably binds that occurrence before exposing the daily schedule; the notification gets one opportunity on each of the next three local days in a stable per-member window from 1:30 PM through 2:29 PM, reserves at least 30 minutes for execution before delivery authority closes at 3:00 PM on the third day, checks canonical onboarding state before provider entry, tool execution, delivery, commit, and queued external transport without mutating it, consumes each daily opportunity after either one reply-oriented continuation or a skip, and emits metadata-only seed, reconciliation, state-source, decision, delivery, and run-outcome diagnostics
 - export sanitized pending assistant-runtime issue records through the injected host platform after commit instead of persisting raw hosted diagnostics in the worker
 - expose the method-based `HostedRuntimePlatform` seam that hosted apps inject at runtime
@@ -86,7 +86,11 @@ group-routed email remains intentionally raw-free. Attachment-bearing non-email
 input makes one best-effort inbox projection attempt while the decoded wake is
 still in memory so raw attachment paths remain inspectable and audio/video
 transcription jobs can drain before prompt construction when parser output is
-available. Normal foreground work may defer intermediate hosted workspace
+available. Ordinary video bytes remain warm-container-only: accepted input may
+protect them locally while active, but snapshot planning excludes their
+validated canonical paths and idle maintenance deletes them atomically as soon
+as protection ends. Explicit canonical durable raw references remain outside
+this transient policy. Normal foreground work may defer intermediate hosted workspace
 checkpoints before Codex admission or reply delivery. While dirty, the exact
 assistant wake projected by the current foreground phase may run once when due
 before the idle floor without publishing a snapshot. Otherwise the invocation

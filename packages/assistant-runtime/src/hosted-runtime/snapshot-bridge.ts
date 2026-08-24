@@ -24,6 +24,9 @@ import {
   type HostedWorkspaceSnapshotSizeDiagnostics,
 } from "@murphai/runtime-state/node";
 import {
+  listTransientInboxVideoStoredPaths,
+} from "@murphai/inboxd/retention";
+import {
   compactHostedUnresolvedAssistantInputIds,
 } from "./pending-input-index.ts";
 import {
@@ -548,9 +551,16 @@ async function createHostedWorkspaceV2Snapshot(
     const encrypted = await runHostedWorkspaceSnapshotMeasuredStep({
       key: "snapshotArchiveBuildElapsedMs",
       run: async () => {
+        const transientInboxVideoStoredPaths =
+          await listTransientInboxVideoStoredPaths({
+            signal: input.signal,
+            vaultRoot: input.vaultRoot,
+          });
+        assertHostedWorkspaceSnapshotConstructionLive(input.signal);
         const archivePlan = await collectHostedWorkspaceSnapshotArchivePlan({
           codexHomeSnapshotHashSecret: input.snapshotDiagnosticsHashSecret,
           durableRoot,
+          excludedVaultPaths: transientInboxVideoStoredPaths,
           extraFiles: legacySnapshotExtraFiles,
           operatorHomeRoot,
           signal: input.signal,

@@ -16343,14 +16343,16 @@ describe('assistant codex runtime', () => {
         created: false,
         effectiveTimeZone: 'America/New_York',
         lookupId: 'hidden',
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
           localTime: '09:00',
         },
         status: 'paused' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
