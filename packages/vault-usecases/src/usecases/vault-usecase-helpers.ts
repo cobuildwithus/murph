@@ -1,6 +1,9 @@
 import path from 'node:path'
 
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  VaultCliError,
+  type VaultCliRepairInput,
+} from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
@@ -230,6 +233,7 @@ interface VaultErrorMapping {
   code: string
   message?: string
   details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
+  repair?: VaultCliRepairInput
 }
 
 const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
@@ -262,9 +266,40 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
 const vaultMetadataVaultErrorMappings: Record<string, VaultErrorMapping> = {
   VAULT_INVALID_METADATA: {
     code: 'invalid_metadata',
+    message: 'Vault metadata is invalid.',
+    repair: {
+      stage: 'validation',
+      hint: 'Run vault validate and repair or restore the vault metadata before retrying.',
+      fields: [{
+        path: ['vault', 'metadata'],
+        code: 'invalid_metadata',
+        message: 'The vault metadata must match the supported schema.',
+      }],
+    },
   },
   VAULT_UNSUPPORTED_FORMAT: {
     code: 'unsupported_format',
+    message: 'Vault format is not supported by this CLI version.',
+    repair: {
+      stage: 'validation',
+      hint: 'Use a compatible CLI version or the supported vault migration path.',
+    },
+  },
+}
+
+const vaultInitializationVaultErrorMappings: Record<string, VaultErrorMapping> = {
+  VAULT_ALREADY_EXISTS: {
+    code: 'already_exists',
+    message: 'Vault is already initialized.',
+    repair: {
+      stage: 'mutation',
+      hint: 'Use vault show for the existing vault or choose a different vault root.',
+      fields: [{
+        path: 'vault',
+        code: 'already_exists',
+        message: 'Choose an uninitialized vault root.',
+      }],
+    },
   },
 }
 
@@ -290,6 +325,7 @@ export function toVaultCliError(
       ...error.details,
       ...mappedDetails,
     },
+    mapping?.repair,
   )
 }
 
@@ -299,6 +335,10 @@ export function toEventUpsertVaultCliError(error: unknown) {
 
 export function toVaultMetadataCliError(error: unknown) {
   return toVaultCliError(error, vaultMetadataVaultErrorMappings)
+}
+
+export function toVaultInitializationCliError(error: unknown) {
+  return toVaultCliError(error, vaultInitializationVaultErrorMappings)
 }
 
 function toVaultRelativePathError(relativePath: string, error: unknown) {

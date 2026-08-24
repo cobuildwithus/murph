@@ -893,7 +893,11 @@ describe('hosted domain dynamic tools', () => {
     const request = readToolRequest('automation', {
       action: 'save',
       instructions: 'Ask how the weekly check-in went.',
-      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      schedule: {
+        kind: 'cron',
+        expression: '0 19 * * 0',
+        timeZone: 'America/New_York',
+      },
       supportKind: 'check_in',
       title: 'Weekly check-in',
     })

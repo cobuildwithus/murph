@@ -36,7 +36,10 @@ import {
 import {
   withBaseOptions,
 } from "@murphai/operator-config/command-helpers";
-import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  VaultCliError,
+  type VaultCliRepairInput,
+} from "@murphai/operator-config/vault-cli-errors";
 import {
   loadJsonInputObject,
   normalizeRepeatableFlagOption,
@@ -44,6 +47,7 @@ import {
 } from "@murphai/vault-usecases";
 import {
   pathSchema,
+  timeZoneSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   patchAutomation,
@@ -66,11 +70,13 @@ interface AutomationScheduleOptions {
   scheduleEveryMs?: number;
   scheduleKind?: AutomationTimeScheduleKind;
   scheduleLocalTime?: string;
+  scheduleTimeZone?: string;
   triggerAt?: string;
   triggerCron?: string;
   triggerEveryMs?: number;
   triggerKind?: AutomationScheduleKind;
   triggerLocalTime?: string;
+  triggerTimeZone?: string;
 }
 
 interface AutomationLifecycleOptions {
@@ -192,8 +198,54 @@ function automationListItem(
   return item;
 }
 
-function invalidAutomationOption(message: string): never {
-  throw new VaultCliError("invalid_option", message);
+function invalidAutomationOption(
+  message: string,
+  repair?: VaultCliRepairInput,
+): never {
+  throw new VaultCliError("invalid_option", message, undefined, repair);
+}
+
+interface AutomationValidationIssue {
+  code: string;
+  message: string;
+  path: readonly PropertyKey[];
+}
+
+interface AutomationSchema<T> {
+  safeParse(value: unknown):
+    | { data: T; success: true }
+    | { error: { issues: readonly AutomationValidationIssue[] }; success: false };
+}
+
+function parseAutomationValue<T>(
+  schema: AutomationSchema<T>,
+  value: unknown,
+  input: {
+    code: string;
+    hint: string;
+    message: string;
+    pathPrefix?: readonly PropertyKey[];
+  },
+): T {
+  const parsed = schema.safeParse(value);
+  if (parsed.success) {
+    return parsed.data;
+  }
+
+  throw new VaultCliError(
+    input.code,
+    input.message,
+    undefined,
+    {
+      fields: parsed.error.issues.map((issue) => ({
+        path: [...(input.pathPrefix ?? []), ...issue.path],
+        code: issue.code,
+        message: issue.message,
+      })),
+      hint: input.hint,
+      stage: "validation",
+    },
+  );
 }
 
 function requireStringOption(
@@ -222,11 +274,58 @@ function resolveAutomationTriggerKind(options: AutomationScheduleOptions): Autom
   );
 }
 
+function resolveAutomationTimeZone(
+  options: AutomationScheduleOptions,
+  kind: AutomationScheduleKind,
+): string | undefined {
+  if (
+    options.triggerTimeZone !== undefined &&
+    options.scheduleTimeZone !== undefined &&
+    options.triggerTimeZone !== options.scheduleTimeZone
+  ) {
+    return invalidAutomationOption(
+      "--trigger-time-zone and --schedule-time-zone must match when both are provided.",
+      {
+        fields: [
+          {
+            path: ["schedule", "timeZone"],
+            code: "conflicting_options",
+            message: "Use one matching IANA timezone for the schedule.",
+          },
+        ],
+        hint: "Use --trigger-time-zone; --schedule-time-zone remains a legacy alias.",
+        stage: "validation",
+      },
+    );
+  }
+
+  const timeZone = options.triggerTimeZone ?? options.scheduleTimeZone;
+  if (timeZone !== undefined && kind !== "cron" && kind !== "dailyLocal") {
+    return invalidAutomationOption(
+      "A schedule timezone can only be used with cron or dailyLocal triggers.",
+      {
+        fields: [
+          {
+            path: ["schedule", "timeZone"],
+            code: "invalid_combination",
+            message: "Remove the timezone or use a cron or dailyLocal trigger.",
+          },
+        ],
+        hint: "Recurring wall-clock schedules may set --trigger-time-zone to an IANA timezone.",
+        stage: "validation",
+      },
+    );
+  }
+
+  return timeZone;
+}
+
 function buildAutomationScheduleFromOptions(
   options: AutomationScheduleOptions,
   defaults: { now: string },
 ): AutomationSchedule {
   const kind = resolveAutomationTriggerKind(options);
+  const timeZone = resolveAutomationTimeZone(options, kind);
   if (kind !== "deviceActivity" && (options.deviceSource || options.activityKind)) {
     return invalidAutomationOption(
       "--device-source and --activity-kind can only be used with --trigger-kind=deviceActivity.",
@@ -235,31 +334,58 @@ function buildAutomationScheduleFromOptions(
 
   switch (kind) {
     case "at":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "at",
         at: requireStringOption(options.triggerAt ?? options.scheduleAt, "trigger-at"),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid.",
+        hint: "Correct the schedule fields and retry.",
+        pathPrefix: ["schedule"],
       });
     case "every":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "every",
         everyMs: requireNumberOption(options.triggerEveryMs ?? options.scheduleEveryMs, "trigger-every-ms"),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid.",
+        hint: "Correct the schedule fields and retry.",
+        pathPrefix: ["schedule"],
       });
     case "cron":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "cron",
         expression: requireStringOption(options.triggerCron ?? options.scheduleCron, "trigger-cron"),
+        ...(timeZone === undefined ? {} : { timeZone }),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid.",
+        hint: "Use a five-field cron expression and, when needed, a valid IANA timezone.",
+        pathPrefix: ["schedule"],
       });
     case "dailyLocal":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "dailyLocal",
         localTime: requireStringOption(options.triggerLocalTime ?? options.scheduleLocalTime, "trigger-local-time"),
+        ...(timeZone === undefined ? {} : { timeZone }),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid.",
+        hint: "Use a 24-hour local time and, when needed, a valid IANA timezone.",
+        pathPrefix: ["schedule"],
       });
     case "deviceActivity":
-      return automationScheduleSchema.parse({
+      return parseAutomationValue(automationScheduleSchema, {
         kind: "deviceActivity",
         after: defaults.now,
         ...(options.deviceSource ? { source: options.deviceSource } : {}),
         ...(options.activityKind ? { activityKind: normalizeDeviceActivityKindOption(options.activityKind) } : {}),
+      }, {
+        code: "invalid_schedule",
+        message: "Automation schedule is invalid.",
+        hint: "Correct the device activity trigger fields and retry.",
+        pathPrefix: ["schedule"],
       });
   }
 }
@@ -303,8 +429,15 @@ function buildAutomationRouteFromOptions(
     participantId: normalizeAutomationRouteOption(input.participantId),
     threadId: normalizeAutomationRouteOption(input.threadId),
   });
-  return automationRouteSchema.parse(
+  return parseAutomationValue(
+    automationRouteSchema,
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, null),
+    {
+      code: "invalid_route",
+      message: "Automation delivery route is invalid.",
+      hint: "Correct the route fields and retry.",
+      pathPrefix: ["route"],
+    },
   );
 }
 
@@ -320,10 +453,22 @@ function automationStatusIsActive(status: AutomationScaffoldPayload["status"] | 
 }
 
 function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute {
-  return automationRouteSchema.parse(
+  return parseAutomationValue(
+    automationRouteSchema,
     stripPrivateAssistantRoutePlaceholders(
-      automationRouteSchema.parse(route),
+      parseAutomationValue(automationRouteSchema, route, {
+        code: "invalid_route",
+        message: "Automation delivery route is invalid.",
+        hint: "Correct the route fields and retry.",
+        pathPrefix: ["route"],
+      }),
     ),
+    {
+      code: "invalid_route",
+      message: "Automation delivery route is invalid.",
+      hint: "Correct the route fields and retry.",
+      pathPrefix: ["route"],
+    },
   );
 }
 
@@ -340,10 +485,15 @@ function buildAutomationAssistantTargetOverrideFromOptions(
   const model = normalizeAutomationRouteOption(input.assistantTargetOverrideModel);
   const modelProvider = normalizeAutomationRouteOption(input.assistantTargetOverrideModelProvider);
   const reasoningEffort = normalizeAutomationRouteOption(input.assistantTargetOverrideReasoningEffort);
-  const target = automationAssistantTargetOverrideSchema.parse({
+  const target = parseAutomationValue(automationAssistantTargetOverrideSchema, {
     ...(model ? { model } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
+  }, {
+    code: "invalid_assistant_target_override",
+    message: "Automation assistant target override is invalid.",
+    hint: "Correct the model, provider, or reasoning effort and retry.",
+    pathPrefix: ["assistantTargetOverride"],
   });
 
   return Object.keys(target).length > 0 ? target : undefined;
@@ -368,9 +518,14 @@ function buildAutomationAssistantTargetOverridePatchFromOptions(
     return undefined;
   }
 
-  return automationAssistantTargetOverrideSchema.parse({
+  return parseAutomationValue(automationAssistantTargetOverrideSchema, {
     ...(input.existingAssistantTargetOverride ?? {}),
     ...target,
+  }, {
+    code: "invalid_assistant_target_override",
+    message: "Automation assistant target override is invalid.",
+    hint: "Correct the model, provider, or reasoning effort and retry.",
+    pathPrefix: ["assistantTargetOverride"],
   });
 }
 
@@ -604,6 +759,9 @@ const automationSharedOptionSchemas = {
     .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
     .optional()
     .describe("Required HH:MM local time when --trigger-kind=dailyLocal."),
+  triggerTimeZone: timeZoneSchema
+    .optional()
+    .describe("Optional IANA timezone for cron or dailyLocal wall-clock fields."),
   deviceSource: z.enum(["whoop", "whoop_v2"]).optional().describe("Optional device activity source filter."),
   activityKind: z
     .string()
@@ -633,6 +791,9 @@ const automationSharedOptionSchemas = {
     .regex(dailyLocalTimePattern, "Expected a 24-hour HH:MM time.")
     .optional()
     .describe("Required HH:MM local time when --schedule-kind=dailyLocal."),
+  scheduleTimeZone: timeZoneSchema
+    .optional()
+    .describe("Legacy alias for --trigger-time-zone."),
   channel: z.string().min(1).optional().describe("Optional outbound route channel."),
   deliveryTarget: z
     .string()
@@ -772,7 +933,7 @@ export function registerAutomationCommands(cli: Cli.Cli) {
       if (automationStatusIsActive(context.options.status)) {
         assertAutomationRouteCanDeliver(route);
       }
-      const input: AutomationScaffoldPayload = automationScaffoldPayloadSchema.parse({
+      const input: AutomationScaffoldPayload = parseAutomationValue(automationScaffoldPayloadSchema, {
         activeUntil: buildAutomationActiveUntilPatch({
           activeUntil: context.options.activeUntil,
           clearActiveUntil: context.options.clearActiveUntil,
@@ -799,11 +960,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           scheduleEveryMs: context.options.scheduleEveryMs,
           scheduleKind: context.options.scheduleKind,
           scheduleLocalTime: context.options.scheduleLocalTime,
+          scheduleTimeZone: context.options.scheduleTimeZone,
           triggerAt: context.options.triggerAt,
           triggerCron: context.options.triggerCron,
           triggerEveryMs: context.options.triggerEveryMs,
           triggerKind: context.options.triggerKind,
           triggerLocalTime: context.options.triggerLocalTime,
+          triggerTimeZone: context.options.triggerTimeZone,
         }, { now }),
         slug: context.options.slug,
         status: context.options.status,
@@ -814,6 +977,11 @@ export function registerAutomationCommands(cli: Cli.Cli) {
           tags: context.options.tags,
         }),
         title: context.args.title,
+      }, {
+        code: "invalid_automation_payload",
+        message: "Automation definition is invalid.",
+        hint: "Correct the reported automation fields and retry.",
+        pathPrefix: ["payload"],
       });
       const result = await upsertAutomation({
         ...input,
@@ -880,11 +1048,13 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         scheduleEveryMs: context.options.scheduleEveryMs,
         scheduleKind: context.options.scheduleKind,
         scheduleLocalTime: context.options.scheduleLocalTime,
+        scheduleTimeZone: context.options.scheduleTimeZone,
         triggerAt: context.options.triggerAt,
         triggerCron: context.options.triggerCron,
         triggerEveryMs: context.options.triggerEveryMs,
         triggerKind: context.options.triggerKind,
         triggerLocalTime: context.options.triggerLocalTime,
+        triggerTimeZone: context.options.triggerTimeZone,
       };
       const route = hasDefinedAutomationOption(routeOptions)
         ? buildAutomationRouteFromOptions(routeOptions)
@@ -1114,11 +1284,18 @@ export function registerAutomationCommands(cli: Cli.Cli) {
     }),
     output: automationSaveResultSchema,
     async run(context) {
-      const input = automationScaffoldPayloadSchema.parse(
+      const input = parseAutomationValue(
+        automationScaffoldPayloadSchema,
         await loadJsonInputObject(
           context.options.input,
           "automation payload",
         ),
+        {
+          code: "invalid_automation_payload",
+          message: "Automation import payload is invalid.",
+          hint: "Correct the reported payload fields and retry the import.",
+          pathPrefix: ["payload"],
+        },
       );
       assertNoRawAutomationSupportSeriesTags(input.tags);
       const route = normalizeAutomationRouteFieldsForSave(input.route);

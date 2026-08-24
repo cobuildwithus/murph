@@ -35,6 +35,7 @@ import type {
 } from './assistant/cron.js'
 import type { AssistantOutboxDispatchMode } from './assistant/outbox.js'
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 export {
   resolveAssistantDaemonClientConfig,
@@ -84,7 +85,7 @@ export async function maybeSendAssistantMessageViaDaemon(
     method: 'POST',
     body: serializeAssistantMessageInput(input),
   })
-  return assistantAskResultSchema.parse(payload)
+  return parseAssistantDaemonSchema(assistantAskResultSchema, payload)
 }
 
 export async function maybeOpenAssistantConversationViaDaemon(
@@ -201,7 +202,7 @@ export async function maybeGetAssistantStatusViaDaemon(
       method: 'GET',
     },
   )
-  return assistantStatusResultSchema.parse(payload)
+  return parseAssistantDaemonSchema(assistantStatusResultSchema, payload)
 }
 
 export async function maybeListAssistantSessionsViaDaemon(
@@ -313,7 +314,7 @@ export async function maybeGetAssistantCronJobViaDaemon(
       method: 'GET',
     },
   )
-  return assistantCronJobSchema.parse(payload)
+  return parseAssistantDaemonSchema(assistantCronJobSchema, payload)
 }
 
 export async function maybeGetAssistantCronTargetViaDaemon(
@@ -339,7 +340,7 @@ export async function maybeGetAssistantCronTargetViaDaemon(
       method: 'GET',
     },
   )
-  return assistantCronTargetSnapshotSchema.parse(payload)
+  return parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, payload)
 }
 
 export async function maybeSetAssistantCronTargetViaDaemon(
@@ -481,7 +482,7 @@ export async function maybeRunAssistantAutomationViaDaemon(
       vault: input.vault,
     },
   })
-  return assistantRunResultSchema.parse(payload)
+  return parseAssistantDaemonSchema(assistantRunResultSchema, payload)
 }
 
 export async function maybeProcessDueAssistantCronViaDaemon(
@@ -525,7 +526,15 @@ async function assistantDaemonFetchJson(
 ): Promise<unknown> {
   const config = resolveAssistantDaemonClientConfig(input.env ?? process.env)
   if (!config) {
-    throw new Error('Assistant daemon client is not configured.')
+    throw new VaultCliError(
+      'assistant_daemon_unavailable',
+      'Assistant daemon client is not configured.',
+      { retryable: false },
+      {
+        stage: 'configuration',
+        hint: 'Configure or start the local assistant daemon before retrying.',
+      },
+    )
   }
 
   const headers = new Headers({
@@ -542,44 +551,92 @@ async function assistantDaemonFetchJson(
       headers,
       body: input.body === undefined ? undefined : JSON.stringify(input.body),
     })
-  } catch (error) {
-    throw new Error(
-      `Assistant daemon request failed before receiving a response for ${assistantDaemonRouteLabel(routePath)}.`,
-      { cause: error },
-    )
+  } catch {
+    throw buildAssistantDaemonTransportError(routePath)
   }
 
-  const text = await response.text()
-  const parsedPayload = parseAssistantDaemonJsonPayload(text)
+  let text: string
+  try {
+    text = await response.text()
+  } catch {
+    throw buildAssistantDaemonTransportError(routePath)
+  }
   if (!response.ok) {
-    throw buildAssistantDaemonHttpError(
-      parsedPayload.ok ? parsedPayload.value : parseAssistantDaemonTextPayload(text),
-      response.status,
-    )
+    throw buildAssistantDaemonHttpError(response.status)
   }
 
+  const parsedPayload = parseAssistantDaemonJsonPayload(text)
   if (!parsedPayload.ok) {
-    throw new Error(
-      `Assistant daemon returned an invalid JSON response for ${assistantDaemonRouteLabel(routePath)}.`,
-      { cause: parsedPayload.error },
-    )
+    throw buildAssistantDaemonResponseError()
   }
 
   return parsedPayload.value
 }
 
-function buildAssistantDaemonHttpError(payload: unknown, status: number): Error {
-  const message =
-    readAssistantDaemonPayloadStringField(payload, 'error') ??
-    (typeof payload === 'string' && payload.length > 0 ? payload : null) ??
-    `Assistant daemon request failed with HTTP ${status}.`
-  const error = new Error(message) as Error & { code?: string; status?: number }
-  const code = readAssistantDaemonPayloadStringField(payload, 'code')
-  if (code) {
-    error.code = code
+function buildAssistantDaemonTransportError(routePath: string): VaultCliError {
+  return new VaultCliError(
+    'assistant_daemon_unavailable',
+    `Assistant daemon request did not complete for ${assistantDaemonRouteLabel(routePath)}.`,
+    { retryable: true },
+    {
+      stage: 'transport',
+      hint: 'Check that the local assistant daemon is running, then retry.',
+    },
+  )
+}
+
+function buildAssistantDaemonHttpError(status: number): VaultCliError {
+  if (status === 401 || status === 403) {
+    return new VaultCliError(
+      'assistant_daemon_auth_failed',
+      'Assistant daemon authentication was rejected.',
+      { retryable: false },
+      {
+        stage: 'authorization',
+        hint: 'Restart the client and daemon with matching local credentials before retrying.',
+      },
+    )
   }
-  error.status = status
-  return error
+
+  const retryable = status === 408 || status === 425 || status === 429 || status >= 500
+  return new VaultCliError(
+    'assistant_daemon_http_failed',
+    `Assistant daemon request failed with HTTP ${status}.`,
+    { retryable },
+    {
+      stage: 'response',
+      hint: retryable
+        ? 'Retry after checking the local assistant daemon status.'
+        : 'Check that the client and local assistant daemon versions match.',
+    },
+  )
+}
+
+function buildAssistantDaemonResponseError(): VaultCliError {
+  return new VaultCliError(
+    'assistant_daemon_response_invalid',
+    'Assistant daemon returned an invalid response.',
+    { retryable: false },
+    {
+      stage: 'response',
+      hint: 'Restart or update the local assistant daemon before retrying.',
+    },
+  )
+}
+
+interface AssistantDaemonSchema<T> {
+  safeParse(value: unknown): { data: T; success: true } | { success: false }
+}
+
+function parseAssistantDaemonSchema<T>(
+  schema: AssistantDaemonSchema<T>,
+  payload: unknown,
+): T {
+  const parsed = schema.safeParse(payload)
+  if (!parsed.success) {
+    throw buildAssistantDaemonResponseError()
+  }
+  return parsed.data
 }
 
 function serializeAssistantMessageInput(
@@ -633,12 +690,12 @@ function parseAssistantDaemonOpenConversationPayload(
   payload: unknown,
 ): AssistantDaemonOpenConversationResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid conversation payload.')
+    throw buildAssistantDaemonResponseError()
   }
 
   const record = payload as Record<string, unknown>
   if (typeof record.created !== 'boolean') {
-    throw new Error('Assistant daemon conversation payload was missing the created flag.')
+    throw buildAssistantDaemonResponseError()
   }
 
   return {
@@ -649,22 +706,28 @@ function parseAssistantDaemonOpenConversationPayload(
 
 function parseAssistantSessionListPayload(payload: unknown): AssistantSession[] {
   if (!Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid session list payload.')
+    throw buildAssistantDaemonResponseError()
   }
-  return assistantSessionShowResultSchema.shape.session.array().parse(payload)
+  return parseAssistantDaemonSchema(
+    assistantSessionShowResultSchema.shape.session.array(),
+    payload,
+  )
 }
 
 function parseAssistantSessionOutputPayload(payload: unknown): AssistantSession {
-  return assistantSessionShowResultSchema.shape.session.parse(payload)
+  return parseAssistantDaemonSchema(
+    assistantSessionShowResultSchema.shape.session,
+    payload,
+  )
 }
 
 function parseAssistantOutboxIntentListPayload(
   payload: unknown,
 ): AssistantOutboxIntent[] {
   if (!Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid outbox intent list payload.')
+    throw buildAssistantDaemonResponseError()
   }
-  return payload.map((entry) => assistantOutboxIntentSchema.parse(entry))
+  return parseAssistantDaemonSchema(assistantOutboxIntentSchema.array(), payload)
 }
 
 function parseAssistantNullableOutboxIntentPayload(
@@ -673,7 +736,7 @@ function parseAssistantNullableOutboxIntentPayload(
   if (payload === null) {
     return null
   }
-  return assistantOutboxIntentSchema.parse(payload)
+  return parseAssistantDaemonSchema(assistantOutboxIntentSchema, payload)
 }
 
 function parseAssistantOutboxDrainPayload(payload: unknown): {
@@ -683,7 +746,7 @@ function parseAssistantOutboxDrainPayload(payload: unknown): {
   sent: number
 } {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid outbox drain payload.')
+    throw buildAssistantDaemonResponseError()
   }
 
   const record = payload as Record<string, unknown>
@@ -699,13 +762,13 @@ function parseAssistantCronStatusPayload(
   payload: unknown,
 ): AssistantCronStatusSnapshot {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid cron status payload.')
+    throw buildAssistantDaemonResponseError()
   }
 
   const record = payload as Record<string, unknown>
   const nextRunAt = record.nextRunAt
   if (nextRunAt !== null && nextRunAt !== undefined && typeof nextRunAt !== 'string') {
-    throw new Error('Assistant daemon payload field nextRunAt was invalid.')
+    throw buildAssistantDaemonResponseError()
   }
 
   return {
@@ -721,29 +784,29 @@ function parseAssistantCronJobListPayload(
   payload: unknown,
 ): AssistantCronJob[] {
   if (!Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid cron job list payload.')
+    throw buildAssistantDaemonResponseError()
   }
-  return payload.map((entry) => assistantCronJobSchema.parse(entry))
+  return parseAssistantDaemonSchema(assistantCronJobSchema.array(), payload)
 }
 
 function parseAssistantCronRunsPayload(
   payload: unknown,
 ): { jobId: string; runs: AssistantCronRunRecord[] } {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid cron runs payload.')
+    throw buildAssistantDaemonResponseError()
   }
 
   const record = payload as Record<string, unknown>
   if (typeof record.jobId !== 'string' || record.jobId.length === 0) {
-    throw new Error('Assistant daemon payload field jobId was invalid.')
+    throw buildAssistantDaemonResponseError()
   }
   if (!Array.isArray(record.runs)) {
-    throw new Error('Assistant daemon payload field runs was invalid.')
+    throw buildAssistantDaemonResponseError()
   }
 
   return {
     jobId: record.jobId,
-    runs: record.runs.map((entry) => assistantCronRunRecordSchema.parse(entry)),
+    runs: parseAssistantDaemonSchema(assistantCronRunRecordSchema.array(), record.runs),
   }
 }
 
@@ -751,14 +814,14 @@ function parseAssistantCronTargetMutationPayload(
   payload: unknown,
 ): AssistantCronTargetMutationResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid cron target payload.')
+    throw buildAssistantDaemonResponseError()
   }
 
   const record = payload as Record<string, unknown>
   return {
-    job: assistantCronJobSchema.parse(record.job),
-    beforeTarget: assistantCronTargetSnapshotSchema.parse(record.beforeTarget),
-    afterTarget: assistantCronTargetSnapshotSchema.parse(record.afterTarget),
+    job: parseAssistantDaemonSchema(assistantCronJobSchema, record.job),
+    beforeTarget: parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, record.beforeTarget),
+    afterTarget: parseAssistantDaemonSchema(assistantCronTargetSnapshotSchema, record.afterTarget),
     changed: parseAssistantBooleanField(record.changed, 'changed'),
     continuityReset: parseAssistantBooleanField(
       record.continuityReset,
@@ -772,7 +835,7 @@ function parseAssistantCronProcessDuePayload(
   payload: unknown,
 ): AssistantCronProcessDueResult {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new Error('Assistant daemon returned an invalid cron process payload.')
+    throw buildAssistantDaemonResponseError()
   }
 
   const record = payload as Record<string, unknown>
@@ -785,14 +848,16 @@ function parseAssistantCronProcessDuePayload(
 
 function parseAssistantCountField(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new Error(`Assistant daemon payload field ${field} was invalid.`)
+    void field
+    throw buildAssistantDaemonResponseError()
   }
   return value
 }
 
 function parseAssistantBooleanField(value: unknown, field: string): boolean {
   if (typeof value !== 'boolean') {
-    throw new Error(`Assistant daemon payload field ${field} was invalid.`)
+    void field
+    throw buildAssistantDaemonResponseError()
   }
   return value
 }
@@ -819,22 +884,6 @@ function parseAssistantDaemonJsonPayload(text: string):
       error,
     }
   }
-}
-
-function parseAssistantDaemonTextPayload(text: string): string | null {
-  const trimmed = text.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function readAssistantDaemonPayloadStringField(
-  payload: unknown,
-  key: string,
-): string | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null
-  }
-  const value = (payload as Record<string, unknown>)[key]
-  return typeof value === 'string' && value.length > 0 ? value : null
 }
 
 function buildAssistantDaemonRoutePath(

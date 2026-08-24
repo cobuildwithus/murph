@@ -11,8 +11,25 @@ import {
   VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
 } from '@murphai/operator-config/vault-cli-contracts'
+import { projectVaultCliError } from '../vault-cli-error-projection.js'
 
 const batchCommandOptionSchema = z.string().min(1)
+
+const batchCommandErrorSchema = z.object({
+  code: z.string().min(1).optional(),
+  message: z.string().min(1),
+  retryable: z.boolean().optional(),
+  hint: z.string().min(1).optional(),
+  stage: z.string().min(1).optional(),
+  fieldErrors: z.array(z.object({
+    code: z.string().min(1).optional(),
+    expected: z.string().optional(),
+    message: z.string().min(1),
+    missing: z.boolean().optional(),
+    path: z.string().min(1),
+    received: z.string().optional(),
+  })).optional(),
+})
 
 const batchCommandResultSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -27,9 +44,7 @@ const batchCommandResultSchema = z.object({
   ),
   stdout: z.string(),
   data: z.unknown().optional(),
-  error: z.object({
-    message: z.string().min(1),
-  }).optional(),
+  error: batchCommandErrorSchema.optional(),
 })
 
 export const batchRunResultSchema = z.object({
@@ -193,6 +208,7 @@ async function runBatchCommand(input: {
     }
   } catch (error) {
     const output = stdout.join('')
+    const childError = parseChildCommandError(output) ?? projectVaultCliError(error)
     return {
       index: input.index,
       argv,
@@ -201,13 +217,23 @@ async function runBatchCommand(input: {
       outputBytes: Buffer.byteLength(output, 'utf8'),
       outputChars: output.length,
       stdout: output,
-      error: {
-        message: error instanceof Error ? error.message : 'Batch command failed.',
-      },
+      error: childError,
     }
   } finally {
     process.exitCode = previousExitCode
   }
+}
+
+function parseChildCommandError(stdout: string): z.output<typeof batchCommandErrorSchema> | null {
+  const parsedOutput = parseJsonOutput(stdout)
+  if (!parsedOutput.ok || !parsedOutput.data || typeof parsedOutput.data !== 'object') {
+    return null
+  }
+
+  const record = parsedOutput.data as Record<string, unknown>
+  const candidate = record.error ?? record
+  const parsedError = batchCommandErrorSchema.safeParse(candidate)
+  return parsedError.success ? parsedError.data : null
 }
 
 function elapsedMs(startedAt: number): number {

@@ -91,6 +91,8 @@ type AssistantDynamicContextPromptBuilder = (input: {
 
 const SAFE_ATTACHMENT_EVIDENCE_ERROR_CODE_PATTERN =
   /^[A-Za-z0-9_.:-]{1,96}$/u
+const SAFE_ASSISTANT_RUN_FAILURE_CODE_PATTERN = /^[A-Za-z0-9_.:-]{1,96}$/u
+const ASSISTANT_RUN_FAILURE_MESSAGE_MAX_LENGTH = 320
 const HOSTED_DEFERRED_CRON_CATCHUP_WAKE_DELAY_MS = 10_000
 export interface RunAssistantAutomationInput {
   applyCanonicalWrites?: boolean
@@ -129,6 +131,60 @@ export interface RunAssistantAutomationPassInput
   scanNumber?: number
 }
 
+function projectAssistantRunFailure(event: AssistantRunEvent): {
+  code: string
+  message: string
+  phase: 'capture' | 'daemon' | 'reply'
+  retryable: boolean
+} | null {
+  const phase = event.type === 'capture.failed'
+    ? 'capture'
+    : event.type === 'input.reply-failed'
+      ? 'reply'
+      : event.type === 'daemon.failed'
+        ? 'daemon'
+        : null
+  if (phase === null) {
+    return null
+  }
+
+  const fallbackCode = phase === 'capture'
+    ? 'capture_failed'
+    : phase === 'reply'
+      ? 'reply_failed'
+      : 'daemon_failed'
+  const code = event.errorCode?.trim()
+  const safeMessage = event.safeErrorMessage?.trim() || event.safeDetails?.trim()
+
+  return {
+    phase,
+    code: code && SAFE_ASSISTANT_RUN_FAILURE_CODE_PATTERN.test(code)
+      ? code
+      : fallbackCode,
+    retryable: event.failureContext?.retryable === true,
+    message: normalizeAssistantRunFailureMessage(
+      safeMessage,
+      phase === 'capture'
+        ? 'A capture could not be processed.'
+        : phase === 'reply'
+          ? 'An assistant reply could not be completed.'
+          : 'The assistant daemon stopped unexpectedly.',
+    ),
+  }
+}
+
+function normalizeAssistantRunFailureMessage(
+  value: string | undefined,
+  fallback: string,
+): string {
+  const normalized = value
+    ?.replace(/[\u0000-\u001F\u007F]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  const selected = normalized && normalized.length > 0 ? normalized : fallback
+  return Array.from(selected).slice(0, ASSISTANT_RUN_FAILURE_MESSAGE_MAX_LENGTH).join('')
+}
+
 export async function runAssistantAutomation(
   input: RunAssistantAutomationInput,
 ) {
@@ -142,6 +198,19 @@ export async function runAssistantAutomation(
   const wakeController = createAssistantAutomationWakeController()
   let scans = 0
   let lastError: string | null = null
+  let lastFailure: {
+    code: string
+    message: string
+    phase: 'capture' | 'daemon' | 'reply'
+    retryable: boolean
+  } | null = null
+  const onEvent = (event: AssistantRunEvent): void => {
+    const failure = projectAssistantRunFailure(event)
+    if (failure) {
+      lastFailure = failure
+    }
+    input.onEvent?.(event)
+  }
   const daemonStarted = input.startDaemon ?? true
 
   if (!daemonStarted && !input.once) {
@@ -185,7 +254,7 @@ export async function runAssistantAutomation(
               stageImportedCaptureAssistantInputEvent({
                 capture: event.capture,
                 executionContext: input.executionContext,
-                onEvent: input.onEvent,
+                onEvent,
                 persisted: event.persisted,
                 vault: input.vault,
               }).then(() => {
@@ -200,7 +269,7 @@ export async function runAssistantAutomation(
               }).catch((error) => {
                 const detail = formatStructuredErrorMessage(error)
                 lastError = detail
-                input.onEvent?.({
+                onEvent({
                   type: 'daemon.failed',
                   details: detail,
                 })
@@ -221,11 +290,11 @@ export async function runAssistantAutomation(
                 captureIds: event.parser?.captureIds ?? [],
                 executionContext: input.executionContext,
                 inboxServices,
-                onEvent: input.onEvent,
+                onEvent,
                 requestId: input.requestId ?? null,
                 vault: input.vault,
               }).catch((error) => {
-                input.onEvent?.({
+                onEvent({
                   type: 'input.reply-progress',
                   details: 'nonblocking attachment evidence refresh failed',
                   errorCode: readSafeAttachmentEvidenceErrorCode(error),
@@ -245,7 +314,7 @@ export async function runAssistantAutomation(
       .catch((error) => {
         const detail = formatStructuredErrorMessage(error)
         lastError = detail
-        input.onEvent?.({
+        onEvent({
           type: 'daemon.failed',
           details: detail,
         })
@@ -268,6 +337,7 @@ export async function runAssistantAutomation(
       const passResult = await runAssistantAutomationPass({
         ...input,
         inboxServices,
+        onEvent,
         scanNumber: scans,
         signal: controller.signal,
       })
@@ -342,6 +412,7 @@ export async function runAssistantAutomation(
       replySkipped: aggregateReplies.skipped,
       replyFailed: aggregateReplies.failed,
       lastError,
+      lastFailure,
     })
   } catch (error) {
     lastError = errorMessage(error)

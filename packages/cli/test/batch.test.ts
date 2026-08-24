@@ -353,7 +353,7 @@ test('batch captures executed child command failures and continues by default', 
       '--vault',
       vault,
       '--command',
-      '["not-a-real-command"]',
+      '["init"]',
       '--command',
       '["memory","show"]',
       '--format',
@@ -364,7 +364,12 @@ test('batch captures executed child command failures and continues by default', 
       failed: number
       commands: Array<{
         error?: {
+          code?: string
+          fieldErrors?: Array<{ path: string }>
+          hint?: string
           message: string
+          retryable?: boolean
+          stage?: string
         }
         ok: boolean
         stdout: string
@@ -374,7 +379,26 @@ test('batch captures executed child command failures and continues by default', 
     assert.equal(result.count, 2)
     assert.equal(result.failed, 1)
     assert.deepEqual(result.commands.map((command) => command.ok), [false, true])
-    assert.equal(typeof result.commands[0]?.error?.message, 'string')
+    assert.deepEqual(result.commands[0]?.error, {
+      code: 'already_exists',
+      fieldErrors: [
+        {
+          code: 'already_exists',
+          expected: '',
+          message: 'Choose an uninitialized vault root.',
+          path: 'vault',
+          received: 'invalid',
+        },
+      ],
+      hint: 'Use vault show for the existing vault or choose a different vault root.',
+      message: 'Vault is already initialized.',
+      retryable: false,
+      stage: 'mutation',
+    })
+    assert.equal(
+      result.commands[0]?.error?.message.includes('exited with status'),
+      false,
+    )
     assert.equal(typeof result.commands[0]?.stdout, 'string')
   } finally {
     await rm(parent, {

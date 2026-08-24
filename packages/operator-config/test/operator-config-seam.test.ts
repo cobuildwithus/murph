@@ -30,6 +30,7 @@ import {
   createHostedAssistantConfig,
   createHostedAssistantProfile,
 } from '../src/assistant/hosted-config.ts'
+import { VaultCliError } from '../src/vault-cli-errors.ts'
 
 const tempDirectories = new Set<string>()
 const originalCwd = process.cwd()
@@ -165,6 +166,48 @@ test('operator config persists defaults, hosted config, and invalid hosted paylo
     'utf8',
   )
   assert.equal(await readOperatorConfig(homeDirectory), null)
+})
+
+test('malformed operator config fails model and self-target mutations without overwrite', async () => {
+  const homeDirectory = await createTempHome('operator-config-malformed-mutation-')
+  const configPath = resolveOperatorConfigPath(homeDirectory)
+  const malformed = '{"private-marker":"must-remain",'
+  await mkdir(path.dirname(configPath), { recursive: true })
+  await writeFile(configPath, malformed, 'utf8')
+
+  const assertMalformedConfigError = (error: unknown): true => {
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'operator_config_invalid')
+    assert.equal(error.context?.retryable, false)
+    assert.equal(error.repair?.stage, 'configuration')
+    assert.equal(JSON.stringify(error).includes('private-marker'), false)
+    return true
+  }
+
+  await assert.rejects(
+    () => saveAssistantOperatorDefaultsPatch({ identityId: 'new-identity' }, homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformed)
+
+  await assert.rejects(
+    () => saveAssistantSelfDeliveryTarget({
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'new-target',
+      identityId: null,
+      participantId: null,
+      threadId: null,
+    }, homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformed)
+
+  await assert.rejects(
+    () => listAssistantSelfDeliveryTargets(homeDirectory),
+    assertMalformedConfigError,
+  )
+  assert.equal(await readFile(configPath, 'utf8'), malformed)
 })
 
 test('operator config resolves default vaults without owning command argv mutation', async () => {

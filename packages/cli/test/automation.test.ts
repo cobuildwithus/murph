@@ -16,6 +16,7 @@ import {
   createAutomationScaffoldPayload,
   registerAutomationCommands,
 } from "../src/commands/automation.js";
+import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
 
 const LEGACY_ROUTE_CHANNEL_ENV_NAME = [
@@ -310,6 +311,8 @@ test("automation save and edit schemas expose typed fields while automation impo
     "scheduleEveryMs",
     "scheduleCron",
     "scheduleLocalTime",
+    "scheduleTimeZone",
+    "triggerTimeZone",
     "channel",
     "deliveryTarget",
     "identityId",
@@ -359,6 +362,152 @@ test("automation save and edit schemas expose typed fields while automation impo
   assert.equal("includeBody" in listSchema.options.properties, false);
   assert.equal("supportSeriesId" in listSchema.options.properties, true);
   assert.equal("cursor" in listSchema.options.properties, true);
+});
+
+test("automation save persists a weekly wall-clock cron with an explicit timezone", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-weekly-wall-clock-",
+  );
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+
+    const saved = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Sunday status pulse",
+      "--slug",
+      "sunday-status-pulse",
+      "--instructions",
+      "Collect a short weekly status update.",
+      "--support-kind",
+      "check_in",
+      "--trigger-kind",
+      "cron",
+      "--trigger-cron",
+      "0 19 * * 0",
+      "--trigger-time-zone",
+      "America/New_York",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "group-thread",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+
+    const shown = await runInProcessJsonCli<{
+      automation: {
+        schedule: unknown;
+        supportKind: string | null;
+      } | null;
+    }>(cli, [
+      "automation",
+      "show",
+      "sunday-status-pulse",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.envelope.ok, true);
+    assert.deepEqual(shown.envelope.data?.automation?.schedule, {
+      kind: "cron",
+      expression: "0 19 * * 0",
+      timeZone: "America/New_York",
+    });
+    assert.equal(shown.envelope.data?.automation?.supportKind, "check_in");
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
+});
+
+test("automation internal validation returns field-specific non-echoing repair envelopes", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-automation-validation-envelope-",
+  );
+  const importPath = path.join(parentRoot, "invalid-automation.json");
+
+  try {
+    const cli = Cli.create("vault-cli", {
+      description: "automation test cli",
+      version: "0.0.0-test",
+    });
+    cli.use(incurErrorBridge);
+    registerAutomationCommands(cli);
+
+    const invalidSchedule = await runInProcessJsonCli(cli, [
+      "automation",
+      "save",
+      "Invalid weekly schedule",
+      "--instructions",
+      "Never echo private-schedule-input.",
+      "--status",
+      "paused",
+      "--trigger-kind",
+      "cron",
+      "--trigger-cron",
+      "0 19 * *",
+      "--channel",
+      "linq",
+      "--delivery-target",
+      "validation-thread",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidSchedule.exitCode, 1);
+    assert.equal(invalidSchedule.envelope.ok, false);
+    if (!invalidSchedule.envelope.ok) {
+      assert.equal(invalidSchedule.envelope.error.code, "invalid_schedule");
+      assert.equal(invalidSchedule.envelope.error.retryable, false);
+      assert.equal(invalidSchedule.envelope.error.stage, "validation");
+      assert.match(invalidSchedule.envelope.error.hint ?? "", /five-field cron/u);
+      assert.equal(
+        invalidSchedule.envelope.error.fieldErrors?.[0]?.path,
+        "schedule.expression",
+      );
+      assert.equal(
+        JSON.stringify(invalidSchedule.envelope).includes("private-schedule-input"),
+        false,
+      );
+    }
+
+    await writeFile(importPath, JSON.stringify({
+      ...createAutomationScaffoldPayload(),
+      instructions: "Never echo private-import-input.",
+      status: "not-a-status",
+    }));
+    const invalidImport = await runInProcessJsonCli(cli, [
+      "automation",
+      "import-json",
+      "--input",
+      `@${importPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(invalidImport.exitCode, 1);
+    assert.equal(invalidImport.envelope.ok, false);
+    if (!invalidImport.envelope.ok) {
+      assert.equal(invalidImport.envelope.error.code, "invalid_automation_payload");
+      assert.equal(invalidImport.envelope.error.retryable, false);
+      assert.equal(invalidImport.envelope.error.stage, "validation");
+      assert.equal(
+        invalidImport.envelope.error.fieldErrors?.[0]?.path,
+        "payload.status",
+      );
+      assert.equal(
+        JSON.stringify(invalidImport.envelope).includes("private-import-input"),
+        false,
+      );
+    }
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true });
+  }
 });
 
 test("automation save and edit preserve exact canonical context references", async () => {
@@ -1441,7 +1590,7 @@ test("automation support-series CLI pages exact matches and reconciles idempoten
       equalOneShotBound.envelope.ok
         ? ""
         : equalOneShotBound.envelope.error.message ?? "",
-      /activeUntil must be after schedule\.at/u,
+      /Automation definition is invalid/u,
     );
 
     const manualSeriesId = "experiment:exp_manual";

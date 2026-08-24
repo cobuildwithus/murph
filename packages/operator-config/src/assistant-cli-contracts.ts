@@ -1401,7 +1401,20 @@ const assistantOnboardingResumeContextSurfaceOkSchema = z
 const assistantOnboardingResumeContextSurfaceErrorSchema = z
   .object({
     status: z.literal('error'),
+    code: z.string().min(1).max(80),
     message: z.string().min(1),
+    retryable: z.boolean(),
+    hint: z.string().min(1).max(320).optional(),
+  })
+  .strict()
+
+const assistantOnboardingResumeContextSurfaceUnavailableSchema = z
+  .object({
+    status: z.literal('unavailable'),
+    code: z.string().min(1).max(80),
+    message: z.string().min(1),
+    retryable: z.literal(false),
+    hint: z.string().min(1).max(320).optional(),
   })
   .strict()
 
@@ -1409,6 +1422,7 @@ export const assistantOnboardingResumeContextSurfaceSchema =
   z.discriminatedUnion('status', [
     assistantOnboardingResumeContextSurfaceOkSchema,
     assistantOnboardingResumeContextSurfaceErrorSchema,
+    assistantOnboardingResumeContextSurfaceUnavailableSchema,
   ])
 
 export const assistantOnboardingResumeContextMemorySchema =
@@ -1424,6 +1438,7 @@ export const assistantOnboardingResumeContextMemorySchema =
       })
       .strict(),
     assistantOnboardingResumeContextSurfaceErrorSchema,
+    assistantOnboardingResumeContextSurfaceUnavailableSchema,
   ])
 
 export const assistantOnboardingResumeContextResultSchema = z
@@ -1840,6 +1855,15 @@ export const assistantRunResultSchema = z.object({
   replySkipped: z.number().int().nonnegative(),
   replyFailed: z.number().int().nonnegative(),
   lastError: z.string().nullable(),
+  lastFailure: z
+    .object({
+      phase: z.enum(['capture', 'reply', 'daemon']),
+      code: z.string().min(1).max(96),
+      retryable: z.boolean(),
+      message: z.string().min(1).max(320),
+    })
+    .nullable()
+    .default(null),
 })
 
 export const assistantStopResultSchema = z.object({
