@@ -130,7 +130,7 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=${expectedPhase}\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${preset} --dry-run\n`,
+      `pr=42\nphase=${expectedPhase}\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${preset} --dry-run\n`,
     )
     expect(result.stdout).toContain(
       `ReviewGPT PR attachment preflight passed for 42 at ${harness.head}.`,
@@ -143,7 +143,7 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status, result.stderr).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh simplify --dry-run\n',
+      'pr=\nphase=\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m simplify --dry-run\n',
     )
   })
 
@@ -187,8 +187,6 @@ describe('ReviewGPT PR context guard', () => {
   it.each([
     ['--idle-draft-timeout', '30m'],
     ['--idleDraftTimeout', '30m'],
-    ['--minimum-marked-response-time', '5m'],
-    ['--minimumMarkedResponseTime', '5m'],
   ])('keeps PR context guarded when %s precedes the preset', (option, value) => {
     const harness = createHarness()
     const result = runHarness(harness, [
@@ -200,8 +198,27 @@ describe('ReviewGPT PR context guard', () => {
 
     expect(result.status).toBe(0)
     expect(readFileSync(harness.capturePath, 'utf8')).toBe(
-      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh ${option} ${value} completion-specialists --dry-run\n`,
+      `pr=42\nphase=preliminary\nargs=exec cobuild-review-gpt --config scripts/review-gpt.config.sh --minimum-marked-response-time 5m ${option} ${value} completion-specialists --dry-run\n`,
     )
+  })
+
+  it.each([
+    ['--minimum-marked-response-time', '5m'],
+    ['--minimumMarkedResponseTime', '5m'],
+  ])('rejects repository trust-floor overrides when %s precedes the preset', (option, value) => {
+    const harness = createHarness()
+    const result = runHarness(harness, [
+      option,
+      value,
+      'completion-specialists',
+      '--dry-run',
+    ])
+
+    expect(result.status).toBe(64)
+    expect(result.stderr).toContain(
+      "Murph's repository ReviewGPT policy cannot be overridden",
+    )
+    expect(() => readFileSync(harness.capturePath, 'utf8')).toThrow()
   })
 
   it('counts the accepted camelCase promptFile spelling in the specialist budget', () => {

@@ -260,13 +260,13 @@ export async function executeCodexAssistantTurnAttempt(
     materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts ?? null,
     model: providerConfig.target.model ?? undefined,
     modelProvider: providerConfig.target.modelProvider ?? undefined,
+    onAdditionalUsage: input.onAdditionalUsage ?? null,
     onFinishWithoutReplyAccepted: input.onFinishWithoutReplyAccepted ?? null,
     onFinishWithoutReplyRecorded: input.onFinishWithoutReplyRecorded ?? null,
     onboardingFirstReadCompletionTransitionAvailable:
       input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
     threadConfig: input.codexThreadConfig ?? null,
-    usageOperationId: input.activeTurnId ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
         ? () => input.activeTurnSteering?.closeInputAdmission()
