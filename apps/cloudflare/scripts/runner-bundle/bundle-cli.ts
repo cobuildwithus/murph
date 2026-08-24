@@ -144,7 +144,8 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_467_648;
+// Clinical and health-record recovery metadata add 8,497 B to the lazy CLI graph.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_476_145;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
