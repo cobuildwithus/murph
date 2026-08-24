@@ -28,6 +28,25 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('assembles the CLI error-recovery rule exactly once', () => {
+    const layers = buildAssistantSystemPromptLayers(baseConversationInput)
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+
+    expect(
+      prompt.match(/For CLI errors, use `fieldErrors` and `hint`/gu) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).toContain('`stage` names the failure point')
+    expect(prompt).toContain(
+      'Repeat an unchanged call only when `retryable` is true',
+    )
+    expect(prompt).toContain('never infer or echo omitted details')
+  })
+
   it('uses hosted direct current time without treating group time as personal', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,
