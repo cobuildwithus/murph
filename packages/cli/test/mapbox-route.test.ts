@@ -774,60 +774,78 @@ describe('estimateMapboxRoute', () => {
     ])
   })
 
-  it('preserves a successful route when the optional elevation provider fails', async () => {
-    const providerBody = 'private-terrain-provider-response'
-    const fetchImpl: typeof fetch = async (input) => {
-      const url = toUrl(input)
+  for (const testCase of [
+    {
+      expectedWarning:
+        'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; retry later or omit --elevation.',
+      status: 503,
+    },
+    {
+      expectedWarning:
+        'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; resolve the Mapbox credential or request prerequisite before trying elevation again, or omit --elevation.',
+      status: 401,
+    },
+    {
+      expectedWarning:
+        'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; resolve the Mapbox credential or request prerequisite before trying elevation again, or omit --elevation.',
+      status: 422,
+    },
+  ] as const) {
+    it(`preserves a successful route when optional elevation returns HTTP ${testCase.status}`, async () => {
+      const providerBody = 'private-terrain-provider-response'
+      const fetchImpl: typeof fetch = async (input) => {
+        const url = toUrl(input)
 
-      if (url.pathname.startsWith('/directions/v5/mapbox/walking/')) {
-        return jsonResponse({
-          code: 'Ok',
-          routes: [
-            {
-              distance: 1800,
-              duration: 1200,
-              geometry: {
-                type: 'LineString',
-                coordinates: [
-                  [0, 0],
-                  [0.01, 0],
-                ],
+        if (url.pathname.startsWith('/directions/v5/mapbox/walking/')) {
+          return jsonResponse({
+            code: 'Ok',
+            routes: [
+              {
+                distance: 1800,
+                duration: 1200,
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [
+                    [0, 0],
+                    [0.01, 0],
+                  ],
+                },
               },
-            },
-          ],
-        })
+            ],
+          })
+        }
+
+        if (url.pathname.startsWith('/v4/mapbox.mapbox-terrain-v2/tilequery/')) {
+          return jsonResponse({ message: providerBody }, testCase.status)
+        }
+
+        throw new Error(`Unexpected request: ${url}`)
       }
 
-      if (url.pathname.startsWith('/v4/mapbox.mapbox-terrain-v2/tilequery/')) {
-        return jsonResponse({ message: providerBody }, 503)
-      }
+      const result = await estimateMapboxRoute({
+        origin: '0,0',
+        destination: '0.01,0',
+        includeElevation: true,
+        maxElevationSamples: 2,
+      }, {
+        env: {
+          MAPBOX_ACCESS_TOKEN: 'test-token',
+        },
+        fetchImpl,
+      })
 
-      throw new Error(`Unexpected request: ${url}`)
-    }
-
-    const result = await estimateMapboxRoute({
-      origin: '0,0',
-      destination: '0.01,0',
-      includeElevation: true,
-      maxElevationSamples: 2,
-    }, {
-      env: {
-        MAPBOX_ACCESS_TOKEN: 'test-token',
-      },
-      fetchImpl,
+      expect(result.summary).toMatchObject({
+        distanceMeters: 1800,
+        durationSeconds: 1200,
+      })
+      expect(result.elevation).toBeNull()
+      expect(result.warnings).toEqual([
+        testCase.expectedWarning,
+        'Elevation is approximate and based on sampled contour queries against Mapbox Terrain rather than a full-resolution trail profile.',
+      ])
+      expect(JSON.stringify(result)).not.toContain(providerBody)
     })
-
-    expect(result.summary).toMatchObject({
-      distanceMeters: 1800,
-      durationSeconds: 1200,
-    })
-    expect(result.elevation).toBeNull()
-    expect(result.warnings).toEqual([
-      'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; retry later or omit --elevation.',
-      'Elevation is approximate and based on sampled contour queries against Mapbox Terrain rather than a full-resolution trail profile.',
-    ])
-    expect(JSON.stringify(result)).not.toContain(providerBody)
-  })
+  }
 
   it('uses Search Box for free-text POI queries even outside the walking profile', async () => {
     const requests: URL[] = []

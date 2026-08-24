@@ -112,7 +112,9 @@ export async function estimateMapboxRoute(
 
         elevationLookupFailed = true
         warnings.push(
-          'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; retry later or omit --elevation.',
+          error.context?.retryable === true
+            ? 'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; retry later or omit --elevation.'
+            : 'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; resolve the Mapbox credential or request prerequisite before trying elevation again, or omit --elevation.',
         )
       }
 
