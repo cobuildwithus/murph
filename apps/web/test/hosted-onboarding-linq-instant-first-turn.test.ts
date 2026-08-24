@@ -440,7 +440,6 @@ describe("hosted Linq instant first turn", () => {
     const body = JSON.parse(String(requestInit.body));
     expect(body).toMatchObject({
       input: [{ content: REQUEST.text, role: "user" }],
-      max_output_tokens: 1_200,
       model: "gpt-5.6-luna",
       reasoning: { effort: "high" },
       service_tier: "priority",
@@ -453,6 +452,7 @@ describe("hosted Linq instant first turn", () => {
         verbosity: "low",
       },
     });
+    expect(body).not.toHaveProperty("max_output_tokens");
     expect(body.instructions).toContain("cannot see account history");
     expect(body.instructions).toContain("Return kind \"welcome\"");
     expect(body.instructions).not.toContain("Luna");
@@ -509,10 +509,10 @@ describe("hosted Linq instant first turn", () => {
 
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0][1].body));
     expect(requestBody).toMatchObject({
-      max_output_tokens: 1_200,
       reasoning: { effort: "high" },
       service_tier: "priority",
     });
+    expect(requestBody).not.toHaveProperty("max_output_tokens");
     expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
       .toHaveBeenNthCalledWith(1, expect.objectContaining({
         sourceRef: REQUEST.eventId,

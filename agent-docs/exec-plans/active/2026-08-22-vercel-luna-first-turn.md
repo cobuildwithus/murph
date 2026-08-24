@@ -113,8 +113,9 @@ was delivered.
   Workspace boundaries and the provider, logging, crypto, and Temporal guards
   pass.
 - The production request-shape test proves the high-reasoning, priority,
-  tool-free request, expanded reasoning budget, and strict welcome-or-answer
-  schema; direct generation keeps one 18-second hard deadline. The real-model
+  tool-free request with no explicit output-token budget and the strict
+  welcome-or-answer schema; direct generation keeps one 18-second hard
+  deadline. The real-model
   matrix is intentionally opt-in and
   skipped locally because no provider credential is configured; it has no Linq
   call or destination.

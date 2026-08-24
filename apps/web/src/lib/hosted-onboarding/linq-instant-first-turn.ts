@@ -685,7 +685,6 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
       role: "user",
     }],
     instructions: HOSTED_LINQ_INSTANT_FIRST_TURN_INSTRUCTIONS,
-    max_output_tokens: 1_200,
     model: HOSTED_LINQ_INSTANT_FIRST_TURN_MODEL,
     reasoning: { effort: "high" },
     service_tier: "priority",
