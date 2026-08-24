@@ -1806,10 +1806,7 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
-      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes.',
-    )
-    expect(prompt).toContain(
-      'Live workout/card: read strength-training and tracked-table, including on a short follow-up in a conversation about a live workout.',
+      'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
@@ -3303,7 +3300,7 @@ describe('assistant conversation scope', () => {
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
     )
     expect(prompt).toContain(
-      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `timingVerificationIssues`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
+      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `effectiveTimeZone`, and `occurrenceProjection`.',
     )
     for (const scheduleExample of [
       '`{"kind":"every","everyMs":3600000}`',
@@ -3337,22 +3334,43 @@ describe('assistant conversation scope', () => {
       'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
     )
     expect(prompt).toContain(
-      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+      '`occurrenceProjection.status: resolved` with a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
     )
     expect(prompt).toContain(
       'do not invent a time or offer timing recovery',
     )
     expect(prompt).toContain(
-      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
+      'For time-based schedules, confirm an exact next occurrence only when `occurrenceProjection.status: resolved`',
     )
     expect(prompt).toContain(
-      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
+      'a resolved null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
     )
     expect(prompt).toContain(
-      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+      'For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'A save or patch result already includes its host-owned read-only timing readback',
+      'When `occurrenceProjection.status: pending`, confirm that the write succeeded and report the returned schedule and status',
+    )
+    expect(prompt).toContain(
+      'For an active recurring `every`, `cron`, or `dailyLocal` schedule, say it remains active',
+    )
+    expect(prompt).toContain(
+      'make clear that no member action is needed',
+    )
+    expect(prompt).toContain(
+      'For an active one-shot `at` schedule, say the saved edit may not affect the occurrence already in progress',
+    )
+    expect(prompt).toContain(
+      'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
+    )
+    expect(prompt).toContain(
+      'offer to reschedule if its requested time passes without delivery',
+    )
+    expect(prompt).toContain(
+      'When `occurrenceProjection.status: unavailable`, confirm that the write succeeded',
+    )
+    expect(prompt).toContain(
+      'A save or patch result already includes its host-owned readback',
     )
     expect(prompt).toContain(
       'follow the tool contract and never issue a second inspection or recovery write.',

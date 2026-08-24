@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Purpose
 
@@ -26,6 +26,13 @@ specialist results and final `FINDINGS` results retain the evidence-backed
 finding-disposition pause. This boundary is specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/operations/pr-reviewgpt-loop.md`.
+
+Required Temporal compatibility tolerates only the bounded `404` visibility
+window for the exact private run id returned by an accepted dispatch. It never
+searches for or guesses a run, and every later polling, identity, reader, and
+attestation failure remains fail-closed. This boundary and its focused proof
+are specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/testing-ci-map.md`.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
