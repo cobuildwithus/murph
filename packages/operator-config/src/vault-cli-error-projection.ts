@@ -1,8 +1,16 @@
 import { redactSensitivePathSegments } from './text/shared.js'
 import {
+  createVaultCliRepair,
   VaultCliError,
+  type VaultCliRepair,
   type VaultCliRepairField,
+  type VaultCliRepairFieldInput,
 } from './vault-cli-errors.js'
+
+const ZOD_ISSUE_CODE_PATTERN =
+  /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u
+const ZOD_EXPECTED_PATTERN =
+  /^(?:array|boolean|null|number|object|string|undefined)$/u
 
 export interface VaultCliProjectedFieldError {
   code?: string | undefined
@@ -25,13 +33,25 @@ export interface VaultCliErrorProjection {
 
 /**
  * Projects domain and unexpected failures into the privacy-safe CLI envelope.
- *
- * Rich repair details come only from the explicit {@link VaultCliError.repair}
- * allowlist. Arbitrary error context is never inspected for field guidance.
+ * Explicit repair guidance wins; otherwise only established Zod issue fields
+ * can become value-free repair guidance.
  */
 export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
+  const inferredRepair =
+    error instanceof VaultCliError
+      ? error.repair
+        ? undefined
+        : createValidationRepair(error.context)
+      : isUnknownRecord(error) && error.name === 'ZodError'
+        ? createValidationRepair(error)
+        : undefined
   const cliError =
-    error instanceof VaultCliError ? error : classifyUnhandledCliError(error)
+    error instanceof VaultCliError
+      ? error
+      : inferredRepair
+        ? new VaultCliError('invalid_payload', 'Input failed validation.')
+        : classifyUnhandledCliError(error)
+  const repair = cliError.repair ?? inferredRepair
   const retryable =
     typeof cliError.context?.retryable === 'boolean'
       ? cliError.context.retryable
@@ -42,7 +62,7 @@ export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
     cliError.context.exitCode > 0
       ? cliError.context.exitCode
       : undefined
-  const fieldErrors = cliError.repair?.fields.map(toProjectedFieldError)
+  const fieldErrors = repair?.fields.map(toProjectedFieldError)
 
   return {
     code: cliError.code,
@@ -50,10 +70,10 @@ export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
     retryable,
     ...(exitCode === undefined ? {} : { exitCode }),
     ...(fieldErrors && fieldErrors.length > 0 ? { fieldErrors } : {}),
-    ...(cliError.repair?.hint
-      ? { hint: redactSensitivePathSegments(cliError.repair.hint) }
+    ...(repair?.hint
+      ? { hint: redactSensitivePathSegments(repair.hint) }
       : {}),
-    ...(cliError.repair?.stage ? { stage: cliError.repair.stage } : {}),
+    ...(repair?.stage ? { stage: repair.stage } : {}),
   }
 }
 
@@ -68,6 +88,50 @@ function toProjectedFieldError(
     received: field.missing === true ? 'missing' : 'invalid',
     message: redactSensitivePathSegments(field.message),
   }
+}
+
+function createValidationRepair(details: unknown): VaultCliRepair | undefined {
+  if (!isUnknownRecord(details) || !Array.isArray(details.issues)) {
+    return undefined
+  }
+
+  const fields = details.issues.flatMap(
+    (issue): VaultCliRepairFieldInput[] => {
+      if (
+        !isUnknownRecord(issue) ||
+        typeof issue.code !== 'string' ||
+        !ZOD_ISSUE_CODE_PATTERN.test(issue.code) ||
+        !Array.isArray(issue.path) ||
+        !issue.path.every(isZodPathSegment)
+      ) {
+        return []
+      }
+
+      const expected =
+        typeof issue.expected === 'string' &&
+        ZOD_EXPECTED_PATTERN.test(issue.expected)
+          ? issue.expected
+          : undefined
+      return [{
+        path: issue.path,
+        code: issue.code,
+        message: 'This field is invalid.',
+        ...(expected ? { expected } : {}),
+      }]
+    },
+  )
+
+  return fields.length > 0
+    ? createVaultCliRepair({ fields, stage: 'validation' })
+    : undefined
+}
+
+function isZodPathSegment(value: unknown): value is PropertyKey {
+  return (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'symbol'
+  )
 }
 
 function classifyUnhandledCliError(error: unknown): VaultCliError {
@@ -158,9 +222,13 @@ function safeUnhandledErrorMessage(error: unknown): string {
 }
 
 function readErrorCode(error: unknown): string | null {
-  if (!error || typeof error !== 'object' || !('code' in error)) {
+  if (!isUnknownRecord(error)) {
     return null
   }
 
   return typeof error.code === 'string' ? error.code : null
+}
+
+function isUnknownRecord(value: unknown): value is Record<PropertyKey, unknown> {
+  return typeof value === 'object' && value !== null
 }

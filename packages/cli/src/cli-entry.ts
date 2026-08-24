@@ -388,22 +388,27 @@ export async function renderMurphCliEntrypointError(
 
   const format = explicitFormat ?? 'toon'
   const { Formatter: runtimeFormatter } = await import('incur')
+  const errorBody = {
+    code: projected.code,
+    message: projected.message,
+    retryable: projected.retryable,
+    ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
+    ...(projected.hint ? { hint: projected.hint } : {}),
+    ...(projected.stage ? { stage: projected.stage } : {}),
+  }
+  const outputBody =
+    argv.includes('--full-output') && (format === 'json' || format === 'toon')
+    ? {
+        ok: false,
+        error: errorBody,
+        meta: {
+          command: 'invocation',
+          duration: '0ms',
+        },
+      }
+    : errorBody
   const output = runtimeFormatter.format(
-    {
-      ok: false,
-      error: {
-        code: projected.code,
-        message: projected.message,
-        retryable: projected.retryable,
-        ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
-        ...(projected.hint ? { hint: projected.hint } : {}),
-        ...(projected.stage ? { stage: projected.stage } : {}),
-      },
-      meta: {
-        command: 'invocation',
-        duration: '0ms',
-      },
-    },
+    outputBody,
     format,
   )
 

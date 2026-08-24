@@ -35,14 +35,6 @@ describe('createVaultCliRepair', () => {
     })
   })
 
-  test('does not inspect ordinary error context as repair guidance', () => {
-    const error = new VaultCliError('invalid_payload', 'Payload is invalid.', {
-      issues: [{ path: ['secret'], message: 'submitted-private-value' }],
-    })
-
-    expect(error.repair).toBeUndefined()
-  })
-
   test('normalizes repair input at the error boundary', () => {
     const error = new VaultCliError('invalid_payload', 'Payload is invalid.', undefined, {
       fields: Array.from({ length: 14 }, (_, index) => ({
@@ -58,7 +50,7 @@ describe('createVaultCliRepair', () => {
 })
 
 describe('projectVaultCliError', () => {
-  test('projects only the explicit VaultCliError repair contract', () => {
+  test('projects Zod-like VaultCliError details without raw issue text', () => {
     const submittedValue = 'private-submitted-value'
     const providerBody = 'private-provider-response'
     const projection = projectVaultCliError(
@@ -67,19 +59,22 @@ describe('projectVaultCliError', () => {
         'Schedule failed validation.',
         {
           retryable: false,
-          issues: [{ message: submittedValue }],
-          providerBody,
-        },
-        {
-          stage: 'validation',
-          hint: 'Use a valid IANA time zone.',
-          fields: [
+          issues: [
             {
-              path: ['schedule', 'timeZone'],
-              code: 'invalid_value',
-              message: 'Use an IANA time-zone identifier.',
+              code: 'too_small',
+              path: ['exercises', 0, 'sets'],
+              message: `Missing set details for ${submittedValue}.`,
+            },
+            {
+              code: 'custom',
+              expected: 'string/../../private',
+              path: ['results', 'private submitted path'],
+              message: providerBody,
+              received: submittedValue,
+              submitted: providerBody,
             },
           ],
+          providerBody,
         },
       ),
     )
@@ -90,16 +85,132 @@ describe('projectVaultCliError', () => {
       retryable: false,
       fieldErrors: [
         {
-          code: 'invalid_value',
-          path: 'schedule.timeZone',
+          code: 'too_small',
+          path: 'exercises.0.sets',
           expected: '',
           received: 'invalid',
-          message: 'Use an IANA time-zone identifier.',
+          message: 'This field is invalid.',
+        },
+        {
+          code: 'custom',
+          path: 'results.<field>',
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
         },
       ],
     })
     expect(JSON.stringify(projection)).not.toContain(submittedValue)
     expect(JSON.stringify(projection)).not.toContain(providerBody)
+  })
+
+  test('prefers explicit repair guidance over inferred Zod issue guidance', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError(
+        'invalid_payload',
+        'Payload is invalid.',
+        {
+          issues: [{
+            code: 'invalid_type',
+            expected: 'number',
+            path: ['inferred'],
+            message: 'private inferred issue',
+          }],
+        },
+        {
+          stage: 'owner-validation',
+          hint: 'Use the documented owner field.',
+          fields: [{
+            code: 'owner_rule',
+            path: ['explicit'],
+            message: 'Use the supported value.',
+          }],
+        },
+      ),
+    )
+
+    expect(projection).toMatchObject({
+      stage: 'owner-validation',
+      hint: 'Use the documented owner field.',
+      fieldErrors: [{
+        code: 'owner_rule',
+        path: 'explicit',
+        message: 'Use the supported value.',
+      }],
+    })
+    expect(JSON.stringify(projection)).not.toContain('inferred')
+    expect(JSON.stringify(projection)).not.toContain('private inferred issue')
+  })
+
+  test('caps validation details with one omitted-count field', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        issues: Array.from({ length: 14 }, (_, index) => ({
+          code: 'invalid_type',
+          expected: 'string',
+          path: ['items', index, 'name'],
+          message: `private raw issue ${index}`,
+        })),
+      }),
+    )
+
+    expect(projection.fieldErrors).toHaveLength(13)
+    expect(projection.fieldErrors?.at(0)).toMatchObject({
+      code: 'invalid_type',
+      expected: 'string',
+      message: 'This field is invalid.',
+      path: 'items.0.name',
+    })
+    expect(projection.fieldErrors?.at(-1)).toEqual({
+      path: '$',
+      code: 'issues_omitted',
+      expected: '',
+      received: 'invalid',
+      message: '2 additional validation issues were omitted.',
+    })
+    expect(JSON.stringify(projection)).not.toContain('private raw issue')
+  })
+
+  test('does not inspect non-Zod issue context as field guidance', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        issues: [{ message: 'private-submitted-value' }],
+      }),
+    )
+
+    expect(projection.fieldErrors).toBeUndefined()
+    expect(JSON.stringify(projection)).not.toContain('private-submitted-value')
+  })
+
+  test('classifies raw Zod-like errors through the same validation mapper', () => {
+    const projection = projectVaultCliError({
+      name: 'ZodError',
+      issues: [
+        {
+          code: 'invalid_value',
+          expected: 'number',
+          path: ['schedule', 'timeZone'],
+          message: 'private invalid value',
+        },
+      ],
+    })
+
+    expect(projection).toMatchObject({
+      code: 'invalid_payload',
+      message: 'Input failed validation.',
+      retryable: false,
+      stage: 'validation',
+      fieldErrors: [
+        {
+          code: 'invalid_value',
+          expected: 'number',
+          message: 'This field is invalid.',
+          path: 'schedule.timeZone',
+          received: 'invalid',
+        },
+      ],
+    })
+    expect(JSON.stringify(projection)).not.toContain('private invalid value')
   })
 
   test.each([
