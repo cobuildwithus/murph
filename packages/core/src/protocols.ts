@@ -41,7 +41,6 @@ const PROTOCOL_SYSTEM_FIELDS = new Set([
   "title",
 ]);
 const MAX_PROTOCOL_VALIDATION_FIELDS = 12;
-const SAFE_PROTOCOL_FIELD_SEGMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/u;
 
 type ProtocolValidationSource = "submitted_candidate" | "stored_vault_state";
 
@@ -167,31 +166,10 @@ function protocolValidationFields(
     const code = protocolValidationCode(issue.code);
 
     if (code === "unrecognized_keys") {
-      const keys = Array.isArray(issue.keys) ? issue.keys : [];
-      const requiresParentFallback = keys.length === 0
-        || keys.some((key) =>
-          typeof key !== "string"
-          || !SAFE_PROTOCOL_FIELD_SEGMENT_PATTERN.test(key)
-        );
-
-      if (requiresParentFallback) {
-        fields.push({
-          path: protocolValidationPath(issue.path),
-          code,
-        });
-      }
-
-      for (const key of keys) {
-        if (
-          typeof key === "string"
-          && SAFE_PROTOCOL_FIELD_SEGMENT_PATTERN.test(key)
-        ) {
-          fields.push({
-            path: [...protocolValidationPath(issue.path), key],
-            code,
-          });
-        }
-      }
+      fields.push({
+        path: protocolValidationPath(issue.path),
+        code,
+      });
     } else {
       fields.push({
         path: protocolValidationPath(issue.path),

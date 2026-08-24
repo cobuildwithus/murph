@@ -19,6 +19,26 @@ async function makeTempDirectory(name: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${name}-`));
 }
 
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const snapshot: Array<[string, string]> = [];
+
+  async function visit(directory: string, relativeDirectory: string): Promise<void> {
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const relativePath = path.posix.join(relativeDirectory, entry.name);
+      const absolutePath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath);
+      } else {
+        snapshot.push([relativePath, (await fs.readFile(absolutePath)).toString("base64")]);
+      }
+    }
+  }
+
+  await visit(vaultRoot, "");
+  return snapshot.sort(([left], [right]) => left.localeCompare(right));
+}
+
 function validProtocolFrontmatterPatch() {
   return {
     commonsProtocolRef: {
@@ -313,6 +333,44 @@ test("protocol candidate validation exposes bounded field metadata", async () =>
   );
 });
 
+test("protocol candidate unknown keys collapse to the parent without writes", async () => {
+  const vaultRoot = await makeTempDirectory("murph-protocol-candidate-unknown-key");
+  await initializeVault({ vaultRoot });
+  const before = await snapshotVaultFiles(vaultRoot);
+  const privateKey = "PrivateField123";
+  const privateValue = "PrivateValue456";
+
+  await assert.rejects(
+    () =>
+      upsertProtocol({
+        vaultRoot,
+        slug: "unknown-key-candidate",
+        title: "Unknown Key Candidate",
+        frontmatter: {
+          ...validProtocolFrontmatterPatch(),
+          [privateKey]: privateValue,
+        },
+      }),
+    (error) => {
+      if (!(error instanceof VaultError) || error.code !== "VAULT_INVALID_PROTOCOL") {
+        return false;
+      }
+
+      assert.equal(error.details.validationSource, "submitted_candidate");
+      assert.deepEqual(error.details.fields, [{
+        path: [],
+        code: "unrecognized_keys",
+      }]);
+      const serialized = JSON.stringify(error.details);
+      assert.equal(serialized.includes(privateKey), false);
+      assert.equal(serialized.includes(privateValue), false);
+      return true;
+    },
+  );
+
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before);
+});
+
 test("protocol reads reject non-canonical frontmatter", async () => {
   const vaultRoot = await makeTempDirectory("murph-protocol-strict");
   await initializeVault({ vaultRoot });
@@ -361,18 +419,14 @@ test("protocol reads reject non-canonical frontmatter", async () => {
       assert.equal(error.details.validationSource, "stored_vault_state");
       const fields = error.details.fields;
       assert.ok(Array.isArray(fields));
-      assert.equal(fields.length, 12);
-      assert.deepEqual(fields.slice(0, 2), [
-        {
-          path: [],
-          code: "unrecognized_keys",
-        },
-        {
-          path: ["unexpectedField"],
-          code: "unrecognized_keys",
-        },
-      ]);
-      assert.doesNotMatch(JSON.stringify(error.details), /private field|should-also-fail/u);
+      assert.deepEqual(fields, [{
+        path: [],
+        code: "unrecognized_keys",
+      }]);
+      assert.doesNotMatch(
+        JSON.stringify(error.details),
+        /unexpectedField|extraField|private field|should-(?:also-)?fail/u,
+      );
       return true;
     },
   );
