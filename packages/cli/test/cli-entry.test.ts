@@ -6,10 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
 
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from "@murphai/operator-config/vault-cli-errors";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
   installSqliteExperimentalWarningFilter,
@@ -194,18 +191,16 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
     new VaultCliError(
       "invalid_payload",
       "Schedule failed validation.",
-      { issues: [privateValue], retryable: false },
-      createVaultCliRepair({
-        stage: "validation",
-        hint: "Use a valid IANA time zone.",
-        fields: [
+      {
+        issues: [
           {
             path: ["schedule", "timeZone"],
             code: "invalid_value",
-            message: "Use an IANA time-zone identifier.",
+            message: privateValue,
           },
         ],
-      }),
+        retryable: false,
+      },
     ),
     ["--vault", "first", "--vault", "second", "--full-output", "--format", "json"],
     { human: true },
@@ -226,7 +221,10 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
   assert.equal(envelope.ok, false);
   assert.equal(envelope.error?.code, "invalid_payload");
   assert.equal(envelope.error?.stage, "validation");
-  assert.equal(envelope.error?.hint, "Use a valid IANA time zone.");
+  assert.equal(
+    envelope.error?.hint,
+    "Correct the invalid fields, then rerun the command.",
+  );
   assert.equal(envelope.error?.fieldErrors?.[0]?.path, "schedule.timeZone");
   assert.equal(envelope.meta?.command, "invocation");
   assert.equal(rendered.output.includes(privateValue), false);

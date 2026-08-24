@@ -69,10 +69,6 @@ export async function fetchExaResearchScoutCandidates(
       'research_exa_token_missing',
       'Exa research scout is not configured. Set EXA_API_KEY in the runtime environment before using research scout.',
       { retryable: false },
-      {
-        stage: 'configuration',
-        hint: 'Configure EXA_API_KEY before retrying the research request.',
-      },
     )
   }
 
@@ -111,10 +107,6 @@ export async function fetchExaResearchScoutBatchCandidates(
       'research_exa_token_missing',
       'Exa research scout is not configured. Set EXA_API_KEY in the runtime environment before using research scout.',
       { retryable: false },
-      {
-        stage: 'configuration',
-        hint: 'Configure EXA_API_KEY before retrying the research request.',
-      },
     )
   }
 
@@ -382,10 +374,6 @@ function createExaResearchScoutRequestError(input: {
       timedOut: input.timedOut === true,
       transportErrorName: input.transportErrorName,
     },
-    {
-      stage: input.failureStage,
-      hint: classification.hint,
-    },
   )
 }
 
@@ -396,14 +384,12 @@ function classifyExaResearchScoutFailure(input: {
   timedOut?: boolean
 }): {
   code: string
-  hint: string
   message: string
   retryable: boolean
 } {
   if (input.abortedByCaller === true) {
     return {
       code: 'research_exa_aborted',
-      hint: 'Retry only if the caller still needs the research result.',
       message: 'Exa research scout request was aborted.',
       retryable: false,
     }
@@ -411,7 +397,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.timedOut === true) {
     return {
       code: 'research_exa_timeout',
-      hint: 'Retry the research request later.',
       message: 'Exa research scout request timed out.',
       retryable: true,
     }
@@ -419,7 +404,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.status === 401 || input.status === 403) {
     return {
       code: 'research_exa_auth_failed',
-      hint: 'Check the configured EXA_API_KEY before retrying.',
       message: 'Exa rejected the research scout credentials.',
       retryable: false,
     }
@@ -427,7 +411,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.status === 429) {
     return {
       code: 'research_exa_rate_limited',
-      hint: 'Retry the research request after the provider rate limit resets.',
       message: 'Exa rate-limited the research scout request.',
       retryable: true,
     }
@@ -435,7 +418,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.status === 408 || (input.status !== undefined && input.status >= 500)) {
     return {
       code: 'research_exa_unavailable',
-      hint: 'Retry the research request later.',
       message: 'Exa research scout is temporarily unavailable.',
       retryable: true,
     }
@@ -443,7 +425,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.failureStage === 'response_json' || input.failureStage === 'response_shape') {
     return {
       code: 'research_exa_invalid_response',
-      hint: 'Do not retry unchanged; check the Exa integration or provider status.',
       message: 'Exa returned an invalid research scout response.',
       retryable: false,
     }
@@ -451,7 +432,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.failureStage === 'response_body') {
     return {
       code: 'research_exa_unavailable',
-      hint: 'Retry the research request later.',
       message: 'Exa research scout response could not be read.',
       retryable: true,
     }
@@ -459,7 +439,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.status !== undefined && input.status >= 400) {
     return {
       code: 'research_exa_request_rejected',
-      hint: 'Check the research request and provider configuration before retrying.',
       message: 'Exa rejected the research scout request.',
       retryable: false,
     }
@@ -467,7 +446,6 @@ function classifyExaResearchScoutFailure(input: {
   if (input.failureStage === 'request') {
     return {
       code: 'research_exa_unavailable',
-      hint: 'Retry the research request later.',
       message: 'Exa research scout is temporarily unavailable.',
       retryable: true,
     }
@@ -475,14 +453,12 @@ function classifyExaResearchScoutFailure(input: {
   if (input.failureStage === 'request_shape') {
     return {
       code: 'research_exa_request_invalid',
-      hint: 'Do not retry unchanged; check the Exa integration request contract.',
       message: 'Exa research scout request could not be constructed.',
       retryable: false,
     }
   }
   return {
     code: 'research_exa_request_failed',
-    hint: 'Check the Exa integration status before retrying.',
     message: 'Exa research scout request failed.',
     retryable: false,
   }

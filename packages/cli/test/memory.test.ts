@@ -467,7 +467,6 @@ test("memory update refuses missing record ids through the registered CLI", asyn
   assert.equal(updated.envelope.ok, false);
   assert.equal(updated.envelope.error.code, "memory_not_found");
   assert.equal(updated.envelope.error.retryable, false);
-  assert.equal(updated.envelope.error.stage, "memory_lookup");
   assert.equal(updated.envelope.error.message, "The requested canonical memory record does not exist.");
   assert.doesNotMatch(JSON.stringify(updated.envelope), /mem_missing|Should fail/u);
 });
@@ -503,12 +502,11 @@ test("memory upsert exposes a terminal inspect-first envelope after an ambiguous
   }
   assert.equal(result.envelope.error.code, "memory_persistence_invalid");
   assert.equal(result.envelope.error.retryable, false);
-  assert.equal(result.envelope.error.stage, "memory_read_after_write");
   assert.equal(
-    result.envelope.error.hint,
-    "Inspect canonical memory before deciding whether another write is necessary.",
+    result.envelope.error.message,
+    "The canonical memory write completed but could not be verified. Inspect canonical memory before deciding whether another write is necessary.",
   );
-  assert.doesNotMatch(result.envelope.error.hint ?? "", /retry|rerun|try again/iu);
+  assert.doesNotMatch(result.envelope.error.message ?? "", /retry|rerun|try again/iu);
   assert.equal(memoryPersistenceFault.upsertCalls, 1);
   const persisted = await readMemoryDocumentFromCore(vaultRoot);
   assert.equal(
@@ -589,7 +587,6 @@ test("memory parse failures expose a safe repair location without echoing canoni
   }
   assert.equal(result.envelope.error.code, "memory_document_invalid");
   assert.equal(result.envelope.error.retryable, false);
-  assert.equal(result.envelope.error.stage, "memory_read");
   assert.match(
     result.envelope.error.message ?? "",
     new RegExp(`bank/memory\\.md:${invalidLine}`, "u"),

@@ -1,60 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
-import {
-  createVaultCliRepair,
-  describeVaultCliFailure,
-  VaultCliError,
-} from '../src/vault-cli-errors.ts'
-
-describe('createVaultCliRepair', () => {
-  test('bounds and normalizes the explicit model-facing repair contract', () => {
-    const repair = createVaultCliRepair({
-      stage: 'validation',
-      hint: ` Remove the unsupported field. ${'x'.repeat(400)} `,
-      fields: Array.from({ length: 14 }, (_, index) => ({
-        path: ['items', index, index === 0 ? 'private value' : 'name'],
-        code: index === 0 ? 'invalid type with spaces' : 'invalid_type',
-        message: ` Invalid field ${index}. `,
-        expected: 'string',
-      })),
-    })
-
-    expect(repair.stage).toBe('validation')
-    expect(repair.hint?.length).toBeLessThanOrEqual(320)
-    expect(repair.fields).toHaveLength(13)
-    expect(repair.fields[0]).toEqual({
-      path: 'items.0.<field>',
-      message: 'Invalid field 0.',
-      expected: 'string',
-    })
-    expect(repair.fields.at(-1)).toEqual({
-      path: '$',
-      code: 'issues_omitted',
-      message: '2 additional validation issues were omitted.',
-    })
-  })
-
-  test('does not inspect ordinary error context as repair guidance', () => {
-    const error = new VaultCliError('invalid_payload', 'Payload is invalid.', {
-      issues: [{ path: ['secret'], message: 'submitted-private-value' }],
-    })
-
-    expect(error.repair).toBeUndefined()
-  })
-
-  test('normalizes repair input at the error boundary', () => {
-    const error = new VaultCliError('invalid_payload', 'Payload is invalid.', undefined, {
-      fields: Array.from({ length: 14 }, (_, index) => ({
-        path: index === 0 ? 'private submitted path' : ['items', index],
-        message: ` Invalid field ${index}. `,
-      })),
-    })
-
-    expect(error.repair?.fields).toHaveLength(13)
-    expect(error.repair?.fields[0]?.path).toBe('<field>')
-    expect(error.repair?.fields.at(-1)?.code).toBe('issues_omitted')
-  })
-})
+import { describeVaultCliFailure, VaultCliError } from '../src/vault-cli-errors.ts'
 
 describe('describeVaultCliFailure', () => {
   test('names the HTTP status a provider rejected the request with', () => {

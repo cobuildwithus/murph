@@ -1,7 +1,6 @@
 import { loadRuntimeModule } from "../runtime-import.js"
 import { createRuntimeUnavailableError } from "../runtime-errors.js"
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors"
-import { wrapQueryRuntimeErrors } from "../query-error-mapping.js"
 import {
   healthCoreRuntimeMethodNames,
   healthCoreServiceMethodNames,
@@ -166,7 +165,7 @@ export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
           throw new TypeError("Query runtime package did not match the expected module shape.")
         }
 
-        return wrapQueryRuntimeErrors(queryModule)
+        return queryModule
       } catch (error) {
         queryRuntimePromise = null
         throw createRuntimeUnavailableError("query-backed vault-cli services", error)

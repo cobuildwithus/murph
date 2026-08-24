@@ -669,30 +669,9 @@ async function findCurrentHealthCommonsProtocol(
   const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
     '@murphai/health-commons/runtime',
   )
-  try {
-    return runtime
-      .getGeneratedHealthCommonsProtocolRunSpecReader()
-      .findByLookup(reference.key)
-  } catch (error) {
-    if (!runtime.isHealthCommonsProtocolArtifactError(error)) {
-      throw error
-    }
-    const unavailable = error.category === 'unavailable'
-    throw new VaultCliError(
-      unavailable
-        ? 'commons_protocol_artifact_unavailable'
-        : 'commons_protocol_artifact_invalid',
-      unavailable
-        ? 'Health Commons protocol artifacts are unavailable.'
-        : 'Health Commons protocol artifacts are invalid.',
-      { retryable: false },
-      {
-        stage: error.artifact,
-        hint:
-          'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
-      },
-    )
-  }
+  return runtime
+    .getGeneratedHealthCommonsProtocolRunSpecReader()
+    .findByLookup(reference.key)
 }
 
 function assertHealthCommonsProtocolSafetyAllowsActivation(input: {

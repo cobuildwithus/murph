@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { VAULT_LAYOUT } from "@murphai/contracts";
+import { initializeVault } from "@murphai/core";
+import { createIntegratedVaultServices } from "@murphai/vault-usecases";
 import { Cli } from "incur";
 import { afterEach, test } from "vitest";
 
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { registerSearchCommands } from "../src/commands/search.js";
+import { registerScheduledLogCommands } from "../src/commands/scheduled-log.js";
+import { registerVaultCommands } from "../src/commands/vault.js";
 import {
   createTempVaultContext,
   runInProcessJsonCli,
@@ -33,11 +37,8 @@ test("query source failures identify a safe vault-relative line without echoing 
   );
   const sourcePath = path.join(vaultRoot, relativePath);
   await mkdir(path.dirname(sourcePath), { recursive: true });
-  await writeFile(
-    sourcePath,
-    "\nprivate-query-source-marker {not-json}\n",
-    "utf8",
-  );
+  const malformedSource = "\nprivate-query-source-marker {not-json}\n";
+  await writeFile(sourcePath, malformedSource, "utf8");
 
   const cli = Cli.create("vault-cli", {
     description: "query source recovery test cli",
@@ -66,4 +67,108 @@ test("query source failures identify a safe vault-relative line without echoing 
     JSON.stringify(result.envelope),
     new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
   );
+  assert.equal(await readFile(sourcePath, "utf8"), malformedSource);
+});
+
+test("service-backed Query failures preserve terminal unsupported-format recovery without writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-query-source-unsupported-service-",
+  );
+  cleanupPaths.push(parentRoot);
+  await initializeVault({ vaultRoot });
+
+  const metadataPath = path.join(vaultRoot, VAULT_LAYOUT.metadata);
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8")) as Record<string, unknown>;
+  metadata.formatVersion = 999_999;
+  metadata.title = "private-unsupported-format-marker";
+  const unsupportedSource = `${JSON.stringify(metadata, null, 2)}\n`;
+  await writeFile(metadataPath, unsupportedSource, "utf8");
+
+  const cli = Cli.create("vault-cli", {
+    description: "query source recovery service test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+  registerVaultCommands(cli, createIntegratedVaultServices());
+
+  const result = await runInProcessJsonCli(cli, [
+    "vault",
+    "stats",
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.envelope.ok, false);
+  if (result.envelope.ok) {
+    throw new Error("Expected unsupported canonical vault format to fail.");
+  }
+  assert.deepEqual(result.envelope.error, {
+    code: "unsupported_format",
+    message: "Canonical vault source vault.json uses an unsupported format.",
+    retryable: false,
+    hint:
+      "Use a compatible Murph runtime or a supported Murph migration path, then rerun the command. Do not edit vault.json manually.",
+    stage: "query_source",
+  });
+  assert.doesNotMatch(JSON.stringify(result.envelope), /private-unsupported-format-marker/u);
+  assert.doesNotMatch(
+    JSON.stringify(result.envelope),
+    new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+  );
+  assert.equal(await readFile(metadataPath, "utf8"), unsupportedSource);
+});
+
+test("direct Query imports project malformed Markdown recovery without writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-query-source-markdown-direct-",
+  );
+  cleanupPaths.push(parentRoot);
+  await initializeVault({ vaultRoot });
+
+  const relativePath = path.posix.join(
+    VAULT_LAYOUT.scheduledLogsDirectory,
+    "invalid.md",
+  );
+  const sourcePath = path.join(vaultRoot, relativePath);
+  await mkdir(path.dirname(sourcePath), { recursive: true });
+  const malformedSource = `---
+title: Private title
+private-markdown-source-marker
+---
+
+Private body.
+`;
+  await writeFile(sourcePath, malformedSource, "utf8");
+
+  const cli = Cli.create("vault-cli", {
+    description: "query source recovery direct test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+  registerScheduledLogCommands(cli);
+
+  const result = await runInProcessJsonCli(cli, [
+    "scheduled-log",
+    "list",
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.envelope.ok, false);
+  if (result.envelope.ok) {
+    throw new Error("Expected malformed canonical Markdown to fail.");
+  }
+  assert.deepEqual(result.envelope.error, {
+    code: "query_source_invalid",
+    message: `Canonical vault source ${relativePath} could not be read.`,
+    retryable: false,
+    hint: `Repair ${relativePath}, then rerun the command. Vault validation can identify additional source issues.`,
+    stage: "query_source",
+  });
+  assert.doesNotMatch(JSON.stringify(result.envelope), /private-markdown-source-marker|Private title|Private body/u);
+  assert.doesNotMatch(
+    JSON.stringify(result.envelope),
+    new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+  );
+  assert.equal(await readFile(sourcePath, "utf8"), malformedSource);
 });

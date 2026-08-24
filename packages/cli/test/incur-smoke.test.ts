@@ -5,10 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli, z } from 'incur'
 import { initializeVault } from '@murphai/core'
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   captureCommandDescriptions,
@@ -539,19 +536,15 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
         {
           exitCode: 7,
           retryable: true,
-        },
-        createVaultCliRepair({
-          stage: 'validation',
-          hint: 'Correct the weekly schedule and retry.',
-          fields: [
+          issues: [
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
-              message: 'Use a valid IANA time zone.',
+              message: 'private invalid time zone value',
               expected: 'IANA time zone',
             },
           ],
-        }),
+        },
       )
     },
   })
@@ -565,7 +558,7 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
   assert.equal(result.envelope.error?.stage, 'validation')
   assert.equal(
     result.envelope.error?.hint,
-    'Correct the weekly schedule and retry.',
+    'Correct the invalid fields, then rerun the command.',
   )
   assert.deepEqual(result.envelope.error?.fieldErrors, [
     {
@@ -573,7 +566,7 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
       path: 'schedule.timeZone',
       expected: 'IANA time zone',
       received: 'invalid',
-      message: 'Use a valid IANA time zone.',
+      message: 'Value is not one of the allowed options.',
     },
   ])
   assert.equal(result.exitCode, 7)

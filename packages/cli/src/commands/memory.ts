@@ -209,17 +209,16 @@ async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<T
       throw new VaultCliError(
         "memory_document_invalid",
         `Canonical memory document ${location} could not be read.`,
-        { retryable: false, issue, sourcePath, ...(lineNumber ? { lineNumber } : {}) },
         {
-          stage: "memory_read",
-          hint: `Repair ${location}, then rerun the command.`,
+          retryable: false,
+          issue,
+          sourcePath,
+          ...(lineNumber ? { lineNumber } : {}),
           ...(field
             ? {
-                fields: [{
-                  path: field,
+                issues: [{
+                  path: [field],
                   code: issue,
-                  message: "This canonical memory field is invalid or missing.",
-                  missing: issue === "record_metadata_missing",
                 }],
               }
             : {}),
@@ -231,21 +230,13 @@ async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<T
         "memory_not_found",
         "The requested canonical memory record does not exist.",
         { retryable: false },
-        {
-          stage: "memory_lookup",
-          hint: "List or show canonical memory first, then retry with an existing record id.",
-        },
       );
     }
     if (error instanceof MemoryPersistenceError) {
       throw new VaultCliError(
         "memory_persistence_invalid",
-        "The canonical memory write could not be verified after it completed.",
+        "The canonical memory write completed but could not be verified. Inspect canonical memory before deciding whether another write is necessary.",
         { retryable: false, operation: error.operation },
-        {
-          stage: "memory_read_after_write",
-          hint: "Inspect canonical memory before deciding whether another write is necessary.",
-        },
       );
     }
     throw error;

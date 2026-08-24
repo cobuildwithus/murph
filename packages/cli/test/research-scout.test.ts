@@ -563,10 +563,9 @@ describe('research scout', () => {
     }
     expect(result.envelope.error).toMatchObject({
       code: 'research_exa_rate_limited',
+      message: 'Exa rate-limited the research scout request.',
       retryable: true,
-      stage: 'response',
     })
-    expect(result.envelope.error.hint).toMatch(/rate limit resets/u)
     expect(JSON.stringify(result.envelope)).not.toMatch(/private-provider-body-and-token/u)
   })
 
@@ -662,10 +661,9 @@ describe('research scout', () => {
     }
     expect(result.envelope.error).toMatchObject({
       code: 'research_exa_unavailable',
+      message: 'Exa research scout response could not be read.',
       retryable: true,
-      stage: 'response_body',
     })
-    expect(result.envelope.error.hint).toMatch(/Retry the research request later/u)
     expect(JSON.stringify(result.envelope)).not.toMatch(
       /private-response-body-transport-marker/u,
     )
