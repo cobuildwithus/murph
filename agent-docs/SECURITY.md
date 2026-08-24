@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-20
+Last verified: 2026-08-23
 
 ## Local Frog autofix authority
 
@@ -608,7 +608,16 @@ Last verified: 2026-08-20
   snapshots with the current accepted-input scope. Open the resolved file
   without following the final symlink, read only the exact snapshotted size,
   probe EOF, verify its SHA-256 digest and supported container signature, and
-  fail closed on unavailable materialization or drift. The tool
+  fail closed on unavailable materialization or drift. Ordinary hosted inbox
+  videos are warm-container-only material: derive their normalized paths from
+  validated canonical capture records, fail snapshot construction closed if
+  those records cannot be classified safely, and exclude the paths from every
+  new encrypted workspace snapshot even while pending input still protects the
+  local file. Once unprotected, use the existing atomic inbox-retention write
+  with a zero-length video window. Retention failure may remain nonblocking for
+  replies only because snapshot exclusion is the independent persistence
+  boundary. An explicit canonical event raw reference is the sole durable-save
+  exception and keeps its separately authorized lifecycle. The tool
   pins Gemini 3.7 Flash, 1 FPS, low thinking, one call, no retry, a 14 MiB raw
   cap, a 90-second timeout, and a bounded response. The Worker must revalidate
   the exact request and use manual redirects before replacing the runner

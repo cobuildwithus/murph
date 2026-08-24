@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-16
+Last verified: 2026-08-23
 
 ## Decision
 
@@ -2901,8 +2901,16 @@ marker, or second persistence owner is introduced.
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
-cache/tmp, rebuildable projections, and assistant JSONL event logs. The one
-derived-cache exception is the exact query SQLite triplet
+cache/tmp, rebuildable projections, and assistant JSONL event logs. The
+private-media-specific exclusion is ordinary inbound hosted video: snapshot planning
+reads validated canonical inbox-capture records and excludes every normalized
+video path that has not been promoted through an explicit canonical event raw
+reference. Pending accepted input may protect the local file for active work,
+but never makes it portable; invalid capture metadata fails snapshot planning
+closed. Idle maintenance separately gives unprotected video a zero-length
+retention window, preserving descriptors and parser derivatives while the
+canonical retention transaction appends the tombstone and deletes the bytes.
+The one derived-cache exception is the exact query SQLite triplet
 `.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
 canonical rescan after a cold restore, while normal source-manifest validation
 still discards and rebuilds stale copies. New archives use the POSIX PAX format

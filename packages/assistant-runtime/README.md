@@ -7,7 +7,7 @@ This package exists so hosted runtimes such as `apps/cloudflare` do not need to 
 Current responsibilities:
 
 - run bounded hosted workspace invocations for assistant, inbox, and device-sync work behind an explicit runtime context object
-- run inbox media retention during existing idle checkpoint maintenance so old raw inbox image/audio/video bytes expire without a separate scheduler
+- run inbox media retention during existing idle checkpoint maintenance so raw inbox image/audio bytes expire at their ordinary deadline, while unprotected hosted video bytes expire immediately and stay outside every new snapshot without a separate scheduler
 - run bounded post-device-sync dense raw retention through the core dense-prune primitive, logging only counts, byte totals, and tombstone totals
 - build the encrypted hosted browser-vault replica from generic canonical query sources plus schema-valid saved experiment outcomes referenced by canonical experiment frontmatter; referenced outcome bytes participate in source freshness, while invalid, escaping, missing, or mismatched references are omitted fail-closed
 - own the canonical hosted runtime launch spec: semantic env split,
@@ -86,7 +86,11 @@ group-routed email remains intentionally raw-free. Attachment-bearing non-email
 input makes one best-effort inbox projection attempt while the decoded wake is
 still in memory so raw attachment paths remain inspectable and audio/video
 transcription jobs can drain before prompt construction when parser output is
-available. Normal foreground work may defer intermediate hosted workspace
+available. Ordinary video bytes remain warm-container-only: accepted input may
+protect them locally while active, but snapshot planning excludes their
+validated canonical paths and idle maintenance deletes them atomically as soon
+as protection ends. Explicit canonical durable raw references remain outside
+this transient policy. Normal foreground work may defer intermediate hosted workspace
 checkpoints before Codex admission or reply delivery. While dirty, the exact
 assistant wake projected by the current foreground phase may run once when due
 before the idle floor without publishing a snapshot. Otherwise the invocation

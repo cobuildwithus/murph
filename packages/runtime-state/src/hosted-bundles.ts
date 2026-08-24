@@ -1890,6 +1890,7 @@ function measureHostedAssistantRuntimeHotStateBundle(bundle: Uint8Array): {
 export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
   codexHomeSnapshotHashSecret?: string | null;
   durableRoot: string;
+  excludedVaultPaths?: readonly string[];
   extraFiles?: readonly HostedWorkspaceSnapshotArchiveExtraPath[];
   operatorHomeRoot?: string | null;
   signal?: AbortSignal | null;
@@ -1904,6 +1905,9 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
 
   const entries: HostedWorkspaceSnapshotArchiveEntry[] = [];
   let codexHomeSnapshotDiagnostics: HostedCodexHomeSnapshotDiagnostics | null = null;
+  const excludedVaultPaths = createHostedWorkspaceSnapshotExcludedPathSet(
+    input.excludedVaultPaths ?? [],
+  );
   const explicitVaultFiles = createHostedWorkspaceSnapshotExtraFileSet({
     entries: input.extraFiles ?? [],
     root: "vault",
@@ -1916,6 +1920,7 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
   await collectHostedWorkspaceRootArchiveEntries({
     durableRoot,
     entries,
+    excludedRelativePaths: excludedVaultPaths,
     explicitRelativePaths: explicitVaultFiles,
     includeRelativePath: (relativePath) =>
       shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath),
@@ -1995,6 +2000,20 @@ export async function collectHostedWorkspaceSnapshotArchivePlan(input: {
   };
 }
 
+function createHostedWorkspaceSnapshotExcludedPathSet(
+  paths: readonly string[],
+): Set<string> {
+  const excluded = new Set<string>();
+  for (const candidate of paths) {
+    const relativePath = normalizeWorkspaceSnapshotRelativePath(candidate);
+    assertHostedWorkspaceSnapshotRelativePathSafe(relativePath);
+    if (relativePath.length > 0) {
+      excluded.add(relativePath);
+    }
+  }
+  return excluded;
+}
+
 function createHostedWorkspaceSnapshotExtraFileSet(input: {
   entries: readonly HostedWorkspaceSnapshotArchiveExtraPath[];
   root: "operator-home" | "vault";
@@ -2017,6 +2036,7 @@ function createHostedWorkspaceSnapshotExtraFileSet(input: {
 async function collectHostedWorkspaceRootArchiveEntries(input: {
   durableRoot: string;
   entries: HostedWorkspaceSnapshotArchiveEntry[];
+  excludedRelativePaths?: ReadonlySet<string>;
   explicitRelativePaths?: ReadonlySet<string>;
   includeRelativePath(relativePath: string): boolean;
   root: "operator-home" | "vault";
@@ -2037,6 +2057,7 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
   }
 
   const explicitRelativePaths = input.explicitRelativePaths ?? new Set<string>();
+  const excludedRelativePaths = input.excludedRelativePaths ?? new Set<string>();
 
   function hasExplicitDescendant(relativePath: string): boolean {
     return [...explicitRelativePaths].some((explicitPath) =>
@@ -2054,6 +2075,9 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
       path.relative(rootPath, currentPath).split(path.sep).join(path.posix.sep),
     );
     assertHostedWorkspaceSnapshotRelativePathSafe(relativePath);
+    if (hasHostedWorkspaceSnapshotExcludedPath(relativePath, excludedRelativePaths)) {
+      return;
+    }
     const policyIncluded = relativePath.length > 0 && input.includeRelativePath(relativePath);
     const explicitIncluded = explicitRelativePaths.has(relativePath);
     const explicitDescendant = hasExplicitDescendant(relativePath);
@@ -2135,6 +2159,24 @@ async function collectHostedWorkspaceRootArchiveEntries(input: {
     }
     throw error;
   }
+}
+
+function hasHostedWorkspaceSnapshotExcludedPath(
+  relativePath: string,
+  excludedRelativePaths: ReadonlySet<string>,
+): boolean {
+  let candidate = relativePath;
+  while (candidate.length > 0 && candidate !== ".") {
+    if (excludedRelativePaths.has(candidate)) {
+      return true;
+    }
+    const parent = path.posix.dirname(candidate);
+    if (parent === candidate) {
+      break;
+    }
+    candidate = parent;
+  }
+  return false;
 }
 
 function assertHostedWorkspaceSnapshotArchivePlanLive(
