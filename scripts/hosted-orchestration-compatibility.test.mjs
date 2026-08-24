@@ -70,10 +70,11 @@ function privateRun(overrides = {}) {
     conclusion: "success",
     event: "workflow_dispatch",
     head_repository: { full_name: TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY },
+    head_branch: PRIVATE_REF,
     head_sha: PRIVATE_SHA,
     id: RUN_ID,
     name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
-    path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${PRIVATE_REF}`,
+    path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
     repository: { full_name: TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY },
     run_attempt: 1,
     status: "completed",
@@ -394,8 +395,9 @@ test("private run proof binds repository, workflow, tag SHA, event, and first at
   }), { complete: true, conclusion: "success" });
   for (const overrides of [
     { event: "push" },
+    { head_branch: "main" },
     { head_sha: PUBLIC_SHA },
-    { path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH },
+    { path: `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${PRIVATE_REF}` },
     { run_attempt: 2 },
     { repository: { full_name: "other/private" } },
   ]) {
