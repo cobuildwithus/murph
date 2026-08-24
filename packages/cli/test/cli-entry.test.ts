@@ -6,14 +6,17 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, test, vi } from "vitest";
 
-import { formatStructuredErrorMessage } from "@murphai/operator-config/text/shared";
-import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  createVaultCliRepair,
+  VaultCliError,
+} from "@murphai/operator-config/vault-cli-errors";
 import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
   formatMurphCliError,
   installSqliteExperimentalWarningFilter,
   isBrokenPipeError,
   loadCliEnvFiles,
+  renderMurphCliEntrypointError,
   resolveBrokenPipeExitCode,
   runMurphCliEntrypoint,
   runMurphCliAction,
@@ -162,7 +165,7 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("formatMurphCliError reuses the shared structured formatter", () => {
+test("formatMurphCliError classifies unknown failures without returning raw detail", () => {
   const error = Object.assign(new Error("Config validation failed."), {
     code: "CONFIG_INVALID",
     details: {
@@ -173,16 +176,75 @@ test("formatMurphCliError reuses the shared structured formatter", () => {
     },
   });
 
-  assert.equal(formatMurphCliError(error), formatStructuredErrorMessage(error));
   assert.equal(
     formatMurphCliError(error),
     [
-      "Config validation failed.",
-      "details:",
-      '- $.paths.vaultRoot: Invalid input: expected "vault"',
-      '- Invalid JSON in "<HOME_DIR>/vault/config.json".',
+      "Error: Config validation failed.",
+      "Stage: command",
+      "Hint: Check the command inputs and runtime status before retrying.",
     ].join("\n"),
   );
+});
+
+test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
+  const privateValue = "private-schedule-value";
+  const rendered = await renderMurphCliEntrypointError(
+    new VaultCliError(
+      "invalid_payload",
+      "Schedule failed validation.",
+      { issues: [privateValue], retryable: false },
+      createVaultCliRepair({
+        stage: "validation",
+        hint: "Use a valid IANA time zone.",
+        fields: [
+          {
+            path: ["schedule", "timeZone"],
+            code: "invalid_value",
+            message: "Use an IANA time-zone identifier.",
+          },
+        ],
+      }),
+    ),
+    ["--vault", "first", "--vault", "second", "--full-output", "--format", "json"],
+    { human: true },
+  );
+
+  assert.equal(rendered.machineReadable, true);
+  assert.equal(rendered.exitCode, 1);
+  const envelope = JSON.parse(rendered.output) as {
+    error?: {
+      code?: string;
+      fieldErrors?: Array<{ path?: string }>;
+      hint?: string;
+      stage?: string;
+    };
+    meta?: { command?: string };
+    ok?: boolean;
+  };
+  assert.equal(envelope.ok, false);
+  assert.equal(envelope.error?.code, "invalid_payload");
+  assert.equal(envelope.error?.stage, "validation");
+  assert.equal(envelope.error?.hint, "Use a valid IANA time zone.");
+  assert.equal(envelope.error?.fieldErrors?.[0]?.path, "schedule.timeZone");
+  assert.equal(envelope.meta?.command, "invocation");
+  assert.equal(rendered.output.includes(privateValue), false);
+  assert.equal(rendered.output.includes("first"), false);
+  assert.equal(rendered.output.includes("second"), false);
+});
+
+test("renderMurphCliEntrypointError defaults non-interactive failures to machine TOON", async () => {
+  const rendered = await renderMurphCliEntrypointError(
+    Object.assign(new Error("permission denied at /private/vault/config.json"), {
+      code: "EACCES",
+    }),
+    [],
+    { human: false },
+  );
+
+  assert.equal(rendered.machineReadable, true);
+  assert.match(rendered.output, /permission_denied/u);
+  assert.match(rendered.output, /filesystem/u);
+  assert.doesNotMatch(rendered.output, /private\/vault/u);
 });
 
 test("isBrokenPipeError recognizes stdout pipe closure failures", () => {

@@ -55,7 +55,7 @@ overrides:
 
 patchedDependencies:
   incur@0.4.5:
-    hash: d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e
+    hash: 78d10f89216bf182b4bd42fd9b9d52b2df406322235df1c113b9680ce52edfd7
     path: patches/incur@0.4.5.patch
   ink@6.8.0:
     hash: 9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5
@@ -417,7 +417,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+        version: 0.4.5(patch_hash=78d10f89216bf182b4bd42fd9b9d52b2df406322235df1c113b9680ce52edfd7)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -665,7 +665,7 @@ importers:
         version: 1.42.0
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+        version: 0.4.5(patch_hash=78d10f89216bf182b4bd42fd9b9d52b2df406322235df1c113b9680ce52edfd7)
       indent-string:
         specifier: ^5.0.0
         version: 5.0.0
@@ -1053,7 +1053,7 @@ importers:
         version: link:../vault-usecases
       incur:
         specifier: 0.4.5
-        version: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+        version: 0.4.5(patch_hash=78d10f89216bf182b4bd42fd9b9d52b2df406322235df1c113b9680ce52edfd7)
       ink:
         specifier: ^6.8.0
         version: 6.8.0(patch_hash=9468a35ce015f9997dc145d60250ad871c9a4850568abf9cb771548d765ce2e5)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.6)(utf-8-validate@6.0.6)
@@ -10837,7 +10837,7 @@ snapshots:
   '@cobuild/review-gpt@0.5.136(@cfworker/json-schema@4.1.1)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.17
-      incur: 0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e)
+      incur: 0.4.5(patch_hash=78d10f89216bf182b4bd42fd9b9d52b2df406322235df1c113b9680ce52edfd7)
       repomix: 1.16.0(@cfworker/json-schema@4.1.1)(typescript@7.0.2)
     transitivePeerDependencies:
       - '@cfworker/json-schema'
@@ -18236,7 +18236,7 @@ snapshots:
       yaml: 2.9.0
       zod: 4.4.3
 
-  incur@0.4.5(patch_hash=d02ac1808a7524a97aaea12822966726a31acaf4c5b5064d56ca03730c790b5e):
+  incur@0.4.5(patch_hash=78d10f89216bf182b4bd42fd9b9d52b2df406322235df1c113b9680ce52edfd7):
     dependencies:
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/server': 2.0.0-alpha.2(@cfworker/json-schema@4.1.1)
