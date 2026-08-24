@@ -255,7 +255,6 @@ test('executeCodexAppServerTurn runs the JSON-RPC lifecycle and returns streamed
             approvalPolicy: 'never',
             cwd: expectedWorkingDirectory,
             dynamicTools,
-            experimentalRawEvents: true,
             model: 'gpt-5',
             sandbox: 'workspace-write',
             serviceName: 'murph',

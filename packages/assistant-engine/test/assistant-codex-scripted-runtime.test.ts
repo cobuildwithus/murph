@@ -3364,89 +3364,6 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it('meters one synchronous child through the real pinned app-server', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario({
-      multiAgentV2: true,
-    })
-    const rootPrompt = 'METER_ONE_SYNCHRONOUS_CHILD'
-    const childResult = 'SYNCHRONOUS_CHILD_COMPLETE'
-    scenario.stub.queue(
-      {
-        functionCall: {
-          arguments: {
-            fork_turns: 'none',
-            message: `Return exactly ${childResult}.`,
-            task_name: 'exact_usage_child',
-          },
-          name: 'spawn_agent',
-          namespace: 'collaboration',
-        },
-        requestIncludes: [rootPrompt],
-      },
-      {
-        completionLabel: childResult,
-        requestIncludes: [
-          'Message Type: NEW_TASK',
-          'exact_usage_child',
-        ],
-        text: childResult,
-        usageInputTokens: 37,
-      },
-      {
-        functionCall: {
-          arguments: {},
-          name: 'wait_agent',
-          namespace: 'collaboration',
-        },
-        requestExcludes: ['Message Type: NEW_TASK'],
-        requestIncludes: [rootPrompt],
-      },
-      {
-        requestExcludes: ['Message Type: NEW_TASK'],
-        requestIncludes: [rootPrompt],
-        text: 'ROOT_COMPLETED_AFTER_CHILD',
-      },
-    )
-
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      baseInstructions: 'Use the scripted collaboration tools and return the final result.',
-      prompt: rootPrompt,
-    })
-
-    expect(result.finalMessage).toBe('ROOT_COMPLETED_AFTER_CHILD')
-    expect(result.additionalUsages).toMatchObject([{
-      provider: 'codex-cli',
-      providerRequestOrdinal: 1,
-      usage: {
-        inputTokens: 37,
-        outputTokens: 7,
-        providerMetadataJson: {
-          reasoningEffort: 'low',
-          requestedServiceTier: null,
-        },
-        providerName: SCRIPTED_MODEL_PROVIDER,
-        providerRequestId: expect.stringMatching(/^resp_scripted_/u),
-        reasoningTokens: 0,
-        requestedModel: SCRIPTED_MODEL,
-        servedModel: SCRIPTED_MODEL,
-        totalTokens: 44,
-        usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
-      },
-    }])
-    expect(result.additionalUsages).toHaveLength(1)
-    expect(
-      result.jsonEvents
-        .map((event) => readString(readRecord(event)?.method))
-        .filter((method): method is string => method !== null),
-    ).not.toEqual(expect.arrayContaining([
-      'rawResponseItem/completed',
-      'rawResponse/completed',
-    ]))
-  })
-
   it.each(['direct', 'group'] as const)(
     'carries a delayed V2 child completion into a later %s root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
@@ -3458,22 +3375,6 @@ text(result.output);
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
       const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
       const laterPrompt = `USE_LATE_CHILD_${scopeLabel}`
-      const originAssistantInputId = conversationScope === 'direct'
-        ? `ain_${'9'.repeat(32)}`
-        : `ain_${'a'.repeat(32)}`
-      const usageOperationId = `turn-meter-delayed-${conversationScope}`
-      const recordDetachedUsage = vi.fn()
-      const hostedToolContext: AssistantHostedToolContext = {
-        computerToolsAvailable: false,
-        currentAssistantInputId: () => originAssistantInputId,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        recordDetachedUsage,
-        sendVaultFile: async () => {
-          throw new Error('Vault-file sending is unavailable for this turn.')
-        },
-        vaultFileSendAvailable: false,
-      }
       scenario.stub.queue(
         {
           functionCall: {
@@ -3495,7 +3396,6 @@ text(result.output);
             `late_child_${conversationScope}`,
           ],
           text: childResult,
-          usageInputTokens: 53,
         },
         {
           requestExcludes: ['Message Type: FINAL_ANSWER'],
@@ -3508,14 +3408,11 @@ text(result.output);
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
         groupConversation: conversationScope === 'group',
-        hostedToolContext,
         prompt: firstPrompt,
-        usageOperationId,
       })
 
       expect(first.finalMessage).toBe(`ROOT_REPLIED_WITHOUT_WAIT_${scopeLabel}`)
       expect(first.sessionId).toEqual(expect.any(String))
-      expect(first.additionalUsages).toEqual([])
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).not.toContain(childResult)
@@ -3530,40 +3427,7 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
-      const usageDeadline = Date.now() + 5_000
-      while (
-        recordDetachedUsage.mock.calls.length === 0
-        && Date.now() < usageDeadline
-      ) {
-        await delay(20)
-      }
-      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
-      const recordedUsage = recordDetachedUsage.mock.calls[0]?.[0]
-      expect(recordedUsage).toMatchObject({
-        operationId: usageOperationId,
-        originAssistantInputId,
-        usageDraft: {
-          provider: 'codex-cli',
-          providerRequestOrdinal: 1,
-          usage: expect.objectContaining({
-            inputTokens: 53,
-            outputTokens: 7,
-            providerMetadataJson: {
-              reasoningEffort: 'low',
-              requestedServiceTier: null,
-            },
-            providerName: SCRIPTED_MODEL_PROVIDER,
-            providerRequestId: expect.stringMatching(/^resp_scripted_/u),
-            reasoningTokens: 0,
-            requestedModel: SCRIPTED_MODEL,
-            servedModel: SCRIPTED_MODEL,
-            totalTokens: 60,
-            usageExtractionSourcePath:
-              'subagent.rawResponse.completed.usage',
-          }),
-        },
-      })
-      expect(recordedUsage?.effectiveEnv).toEqual(expect.any(Object))
+      await delay(100)
 
       scenario.stub.queue({
         requestIncludes: [
@@ -3575,16 +3439,12 @@ text(result.output);
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         groupConversation: conversationScope === 'group',
-        hostedToolContext,
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
-        usageOperationId: `turn-later-${conversationScope}`,
       })
 
       expect(later.finalMessage).toBe(`INCORPORATED_${childResult}`)
       expect(later.threadId).toBe(first.threadId)
-      expect(later.additionalUsages).toEqual([])
-      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )

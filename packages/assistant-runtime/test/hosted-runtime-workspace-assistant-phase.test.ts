@@ -1555,6 +1555,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -1580,6 +1581,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "checkpoint",
       "record:turn_direct_usage.attempt-1",
     ]);
+  });
+
+  it("propagates deferred usage completion to hosted recorder callers", async () => {
+    let releaseDeferredUsage: () => void = () => undefined;
+    const deferredUsage = new Promise<void>((resolve) => {
+      releaseDeferredUsage = resolve;
+    });
+    let markDeferredUsageStarted: () => void = () => undefined;
+    const deferredUsageStarted = new Promise<void>((resolve) => {
+      markDeferredUsageStarted = resolve;
+    });
+    const laneFinished = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      laneFinished();
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const phase = runHostedWorkspaceAssistantPhase(createPhaseInput({
+      recordDeferredUsage: () => {
+        markDeferredUsageStarted();
+        return deferredUsage;
+      },
+      runtimeUsageRecordPort: {
+        async recordUsage() {
+          throw new Error("The assistant phase must not write usage directly.");
+        },
+      },
+    }));
+
+    await deferredUsageStarted;
+    expect(laneFinished).not.toHaveBeenCalled();
+
+    releaseDeferredUsage();
+    await phase;
+    expect(laneFinished).toHaveBeenCalledOnce();
   });
 
   it("forwards exact accepted input IDs for deferred route resolution", async () => {
@@ -1644,6 +1688,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       recordDeferredUsage: (_record, providerRequestAcceptedInputIds) => {
         deferredAcceptedInputIds.push(providerRequestAcceptedInputIds);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: {
         async recordUsage(record) {
@@ -1737,6 +1782,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:00:00.000Z",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -1817,6 +1863,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -1876,6 +1923,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -15582,6 +15630,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:03:00.000Z",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     });

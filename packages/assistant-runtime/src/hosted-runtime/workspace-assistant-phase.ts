@@ -2009,13 +2009,11 @@ export async function runHostedWorkspaceAssistantPhase(
   const recordDeferredUsage = (
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ): Promise<void> => {
+  ): Promise<void> =>
     input.recordDeferredUsage?.(
       record,
       providerRequestAcceptedInputIds,
-    );
-    return Promise.resolve();
-  };
+    ) ?? Promise.resolve();
   const usageRecorder =
     input.runtime.platform.usageRecordPort && input.recordDeferredUsage
       ? { recordUsage: recordDeferredUsage }

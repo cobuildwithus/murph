@@ -105,11 +105,23 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint, and Temporal retires the pointer only when that
-frontier reaches its lane sequence. Workspace-version movement may bypass
-same-version no-progress backoff, but cannot prove that the pointed system item
-was handled. The frontier is optional during additive deployment skew; absence
-retains the pointer and its ordinary retry owner.
+redacted workspace checkpoint. Temporal applies three distinct retirement
+rules: a handled-through frontier that reaches the pointer lane sequence retires
+it as completed; an explicit `systemMailboxFrontier: null` retires only
+Temporal's noncanonical pointer projection because the current facts admit no
+live system frontier; and an omitted frontier retains the pointer during
+additive deployment skew. Explicit-null retirement never marks the mailbox item
+handled or deletes Web-owned durable mailbox state. Inactive facts can therefore
+retire retry ownership without reading or consuming retained work, which Web
+re-reads after reactivation. Every owner that restores runtime access appends a
+deterministic `runtime.maintenance-requested` item in the same transaction as
+the access change. Direct billing recovery, won or reinstated disputes, Family
+billing restoration for its bounded active roster, and established-member
+Family invite acceptance all signal that exact pointer after commit. The signal
+is a latency hint: the existing bounded mailbox-handoff sweep owns recovery, and
+Stripe receipts retain their exact pointers for replay.
+Workspace-version movement may bypass same-version no-progress backoff, but
+cannot prove that the pointed system item was handled.
 
 Web/runtime status is durable truth when no runner owns execution. Cloudflare's
 write fence is the active ownership truth while a run is in flight.
@@ -378,9 +390,12 @@ The per-user workflow reads source-less reconciliation facts from web:
 Facts do not contain run/idle decisions, raw mailbox kinds, producer
 source/reason, raw mailbox payloads, workspace redacted status, signed usage
 decisions, or direct wake flags. The frontier classification exposes only
-whether the first retained system item is bounded model-free work or remains
-default-owned. Temporal interprets the facts mechanically: fresh mailbox signals may
-ensure processing directly; carried pointers and timers re-read facts;
+whether the first retained system item is bounded model-free work, remains
+default-owned, or is not admitted by the current facts. Inactive access uses
+the explicit not-admitted value without reading mailbox rows; Temporal may
+retire its pointer projection while Web retains durable mailbox truth for a
+future reactivation. Temporal interprets the facts mechanically: fresh mailbox
+signals may ensure processing directly; carried pointers and timers re-read facts;
 conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
 wake selects `inbox_media_retention` processing when foreground/default work is
