@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,7 +14,7 @@ import {
 } from "../src/commands/clinical-imports.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import type { CliEnvelope } from "./cli-test-helpers.js";
-import { requireData } from "./cli-test-helpers.js";
+import { requireData, runCli } from "./cli-test-helpers.js";
 
 const cleanupPaths: string[] = [];
 
@@ -181,6 +181,33 @@ test("clinical typed date options return native field-specific envelopes", async
     assert.equal(JSON.stringify(result).includes(privateDate), false);
   }
 });
+
+test("built CLI rejects impossible assertion dates before writing", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-calendar-"));
+  cleanupPaths.push(vaultRoot);
+  const impossibleDate = "2026-02-30";
+  await runCli(["init", "--vault", vaultRoot]);
+
+  const result = await runCli([
+    "assertion",
+    "save",
+    "--assertion",
+    "denial_asserted",
+    "--asserted-on",
+    impossibleDate,
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "VALIDATION_ERROR");
+  assert.equal(result.error?.fieldErrors?.[0]?.path, "assertedOn");
+  assert.equal(JSON.stringify(result).includes(impossibleDate), false);
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, "ledger/events/2026/2026-02.jsonl")),
+    { code: "ENOENT" },
+  );
+}, 120_000);
 
 test("clinical import validation returns bounded repair fields without payload values", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-invalid-"));

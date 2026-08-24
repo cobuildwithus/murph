@@ -15,12 +15,23 @@ const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/
 
-function flattenValidationIssues(issues: readonly ZodIssue[]): ZodIssue[] {
-  return issues.flatMap((issue) =>
-    issue.code === 'invalid_union'
-      ? issue.errors.flatMap((branch) => flattenValidationIssues(branch))
-      : [issue],
+interface ValidationRepairField {
+  path: PropertyKey[]
+  code: string
+  message: string
+  expected?: string | undefined
+  missing?: boolean | undefined
+}
+
+function validationIssueCost(issue: ZodIssue): number {
+  if (issue.code !== 'invalid_union') {
+    return 1
+  }
+
+  const branchCosts = issue.errors.map((branch) =>
+    branch.reduce((sum, branchIssue) => sum + validationIssueCost(branchIssue), 0),
   )
+  return branchCosts.length > 0 ? Math.min(...branchCosts) : 1
 }
 
 function validationIssueExpected(issue: ZodIssue): string | undefined {
@@ -58,7 +69,7 @@ function validationIssueMessage(issue: ZodIssue): string {
     case 'invalid_value':
       return 'Use one of the allowed values.'
     case 'unrecognized_keys':
-      return 'Remove fields that are not defined by this payload schema.'
+      return 'Remove fields that are not defined by this schema.'
     case 'invalid_format':
       return 'Use the required field format.'
     case 'too_small':
@@ -70,23 +81,118 @@ function validationIssueMessage(issue: ZodIssue): string {
   }
 }
 
+function longestCommonPath(paths: readonly (readonly PropertyKey[])[]): PropertyKey[] {
+  const [firstPath, ...otherPaths] = paths
+  if (!firstPath) {
+    return []
+  }
+
+  let length = firstPath.length
+  for (const path of otherPaths) {
+    length = Math.min(length, path.length)
+    for (let index = 0; index < length; index += 1) {
+      if (path[index] !== firstPath[index]) {
+        length = index
+        break
+      }
+    }
+  }
+
+  return firstPath.slice(0, length)
+}
+
+function boundedExpectedAlternatives(values: readonly string[]): string | undefined {
+  const uniqueValues = [...new Set(values)]
+  const expected = uniqueValues.join(' | ')
+  return uniqueValues.length > 1 && expected.length <= 160 ? expected : undefined
+}
+
+function collapseUnionAlternatives(
+  branchFields: readonly ValidationRepairField[][],
+): ValidationRepairField | undefined {
+  if (branchFields.length < 2 || branchFields.some((fields) => fields.length !== 1)) {
+    return undefined
+  }
+
+  const fields = branchFields.map((branch) => branch[0]).filter(Boolean)
+  if (fields.length !== branchFields.length) {
+    return undefined
+  }
+
+  const commonPath = longestCommonPath(fields.map((field) => field.path))
+  const fieldAlternatives = fields.flatMap((field): string[] => {
+    const suffix = field.path.slice(commonPath.length)
+    return suffix.length === 1 && typeof suffix[0] === 'string' ? [suffix[0]] : []
+  })
+  const expectedFields = boundedExpectedAlternatives(fieldAlternatives)
+  if (expectedFields && fieldAlternatives.length === fields.length) {
+    return {
+      path: commonPath,
+      code: 'invalid_union',
+      message: 'Provide one of the alternative fields.',
+      expected: expectedFields,
+      missing: true,
+    }
+  }
+
+  if (fields.every((field) => field.path.join('.') === fields[0]?.path.join('.'))) {
+    const expectedTypes = boundedExpectedAlternatives(
+      fields.flatMap((field) => field.expected ? [field.expected] : []),
+    )
+    if (expectedTypes) {
+      return {
+        path: fields[0]?.path ?? [],
+        code: 'invalid_union',
+        message: 'Use one of the allowed alternatives.',
+        expected: expectedTypes,
+      }
+    }
+  }
+
+  return undefined
+}
+
+function validationFieldsFromIssues(
+  issues: readonly ZodIssue[],
+  pathPrefix: readonly PropertyKey[],
+): ValidationRepairField[] {
+  return issues.flatMap((issue): ValidationRepairField[] => {
+    if (issue.code !== 'invalid_union') {
+      return [{
+        path: [...pathPrefix, ...issue.path],
+        code: issue.code,
+        message: validationIssueMessage(issue),
+        expected: validationIssueExpected(issue),
+        missing:
+          issue.code === 'invalid_type' &&
+          'input' in issue &&
+          issue.input === undefined,
+      }]
+    }
+
+    const unionPath = [...pathPrefix, ...issue.path]
+    const branchCosts = issue.errors.map((branch) =>
+      branch.reduce((sum, branchIssue) => sum + validationIssueCost(branchIssue), 0),
+    )
+    const minimumCost = branchCosts.length > 0 ? Math.min(...branchCosts) : 0
+    const bestBranches = issue.errors.filter((_, index) => branchCosts[index] === minimumCost)
+    const branchFields = bestBranches.map((branch) =>
+      validationFieldsFromIssues(branch, unionPath),
+    )
+    const alternatives = collapseUnionAlternatives(branchFields)
+    return alternatives ? [alternatives] : (branchFields[0] ?? [])
+  })
+}
+
 export function validationRepairFromZodIssues(
   issues: readonly ZodIssue[],
   hint: string,
+  pathPrefix: readonly PropertyKey[] = [],
 ): VaultCliRepairInput {
   return {
     stage: 'validation',
     hint,
-    fields: flattenValidationIssues(issues).map((issue) => ({
-      path: issue.path,
-      code: issue.code,
-      message: validationIssueMessage(issue),
-      expected: validationIssueExpected(issue),
-      missing:
-        issue.code === 'invalid_type' &&
-        'input' in issue &&
-        issue.input === undefined,
-    })),
+    fields: validationFieldsFromIssues(issues, pathPrefix),
   }
 }
 

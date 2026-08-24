@@ -9,7 +9,6 @@ import {
   type BloodTestResultRecord,
   type JsonObject,
 } from "@murphai/contracts";
-import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import {
   isoTimestampSchema,
@@ -25,6 +24,7 @@ import {
   normalizeRepeatableFlagOption,
   type VaultServices,
 } from "@murphai/vault-usecases";
+import { validationRepairFromZodIssues } from "@murphai/vault-usecases/helpers";
 import { Cli, z } from "incur";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
@@ -71,46 +71,6 @@ const rawVaultPathSchema = z
     (value) => value.split("/").every((segment) => segment !== "." && segment !== ".."),
     "raw/... paths cannot contain . or .. segments.",
   );
-
-function flattenBloodTestOptionIssues(issues: readonly ZodIssue[]): ZodIssue[] {
-  return issues.flatMap((issue) =>
-    issue.code === "invalid_union"
-      ? issue.errors.flatMap((branch) => flattenBloodTestOptionIssues(branch))
-      : [issue],
-  );
-}
-
-function bloodTestOptionValidationRepair(
-  optionName: "link" | "result",
-  issues: readonly ZodIssue[],
-): VaultCliRepairInput {
-  return {
-    stage: "validation",
-    hint: `Correct --${optionName} and retry the blood-test save command.`,
-    fields: flattenBloodTestOptionIssues(issues).map((issue) => ({
-      path: [optionName, ...issue.path],
-      code: issue.code,
-      message:
-        issue.code === "invalid_type"
-          ? "Use the expected value type."
-          : issue.code === "invalid_value"
-            ? "Use one of the allowed values."
-            : issue.code === "unrecognized_keys"
-              ? "Remove fields that are not defined for this option."
-              : "Correct this field to match the option schema.",
-      expected:
-        "expected" in issue &&
-        typeof issue.expected === "string" &&
-        /^[A-Za-z0-9_.| -]{1,80}$/u.test(issue.expected)
-          ? issue.expected
-          : undefined,
-      missing:
-        issue.code === "invalid_type" &&
-        "input" in issue &&
-        issue.input === undefined,
-    })),
-  };
-}
 
 function bloodTestOptionRepair(input: {
   optionName: "link" | "result";
@@ -290,7 +250,11 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
       "invalid_option",
       "Invalid --result blood-test analyte payload.",
       undefined,
-      bloodTestOptionValidationRepair("result", parsed.error.issues),
+      validationRepairFromZodIssues(
+        parsed.error.issues,
+        "Correct --result and retry the blood-test save command.",
+        ["result"],
+      ),
     );
   }
 
@@ -368,7 +332,11 @@ function parseBloodTestLink(spec: string): BloodTestLink {
       "invalid_option",
       "Invalid --link payload.",
       undefined,
-      bloodTestOptionValidationRepair("link", parsed.error.issues),
+      validationRepairFromZodIssues(
+        parsed.error.issues,
+        "Correct --link and retry the blood-test save command.",
+        ["link"],
+      ),
     );
   }
 

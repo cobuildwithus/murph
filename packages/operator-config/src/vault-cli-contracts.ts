@@ -22,8 +22,7 @@ export const isoTimestampSchema = z
   .describe('Timestamp in ISO 8601 format with an explicit UTC offset.')
 
 export const localDateSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/u, 'Expected a calendar date in YYYY-MM-DD form.')
+  .iso.date()
   .describe('Calendar date in YYYY-MM-DD form.')
 
 export const occurredAtOptionSchema = z

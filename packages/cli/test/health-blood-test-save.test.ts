@@ -16,6 +16,7 @@ import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
   requireData,
+  runCli,
   runInProcessJsonCli,
 } from "./cli-test-helpers.js";
 
@@ -1204,6 +1205,91 @@ test("blood-test save reports invalid link fields without echoing submitted valu
     });
   }
 });
+
+test("built CLI reports blood-test result alternatives and enum choices without writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-repair-alternatives-",
+  );
+  const cases = [
+    {
+      privateValue: "private-missing-result-marker",
+      result: { analyte: "private-missing-result-marker" },
+      path: "result",
+      code: "invalid_union",
+      expected: "value | textValue",
+    },
+    {
+      privateValue: "private-empty-range-marker",
+      result: {
+        analyte: "private-empty-range-marker",
+        value: 45,
+        referenceRange: {},
+      },
+      path: "result.referenceRange",
+      code: "invalid_union",
+      expected: "low | high | text",
+    },
+    {
+      privateValue: "private-invalid-flag",
+      result: {
+        analyte: "Synthetic analyte",
+        value: 45,
+        flag: "private-invalid-flag",
+      },
+      path: "result.flag",
+      code: "invalid_value",
+      expected: "low | normal | high | abnormal | critical | unknown",
+    },
+  ];
+
+  try {
+    await runCli(["init", "--vault", vaultRoot]);
+
+    for (const entry of cases) {
+      const result = await runCli([
+        "blood-test",
+        "save",
+        "Synthetic repair panel",
+        "--occurred-at",
+        "2026-03-12T13:00:00.000Z",
+        "--test-name",
+        "synthetic_repair_panel",
+        "--result",
+        JSON.stringify(entry.result),
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.ok, false, entry.path);
+      assert.equal(result.error?.code, "invalid_option", entry.path);
+      assert.equal(result.error?.stage, "validation", entry.path);
+      assert.deepEqual(result.error?.fieldErrors, [
+        {
+          path: entry.path,
+          code: entry.code,
+          message:
+            entry.code === "invalid_union"
+              ? "Provide one of the alternative fields."
+              : "Use one of the allowed values.",
+          expected: entry.expected,
+          ...(entry.code === "invalid_union" ? { missing: true } : {}),
+          received: entry.code === "invalid_union" ? "missing" : "invalid",
+        },
+      ]);
+      assert.equal(JSON.stringify(result).includes(entry.privateValue), false, entry.path);
+      assert.equal(
+        await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+        false,
+        entry.path,
+      );
+    }
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+}, 120_000);
 
 test("blood-test save rejects JSON result arrays with repeat-result guidance", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
