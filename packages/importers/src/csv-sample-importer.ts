@@ -28,6 +28,11 @@ export type {
   CsvSampleImportWriteResult,
   PreparedCsvSampleImportPayload,
 } from "./csv-sample-import-planner.ts";
+export { CsvSampleImportError } from "./csv-sample-import-planner.ts";
+export type {
+  CsvSampleImportRepair,
+  CsvSampleImportRepairField,
+} from "./csv-sample-import-planner.ts";
 export type {
   SampleSeriesInputRecord,
   SampleSeriesSummaryInput,

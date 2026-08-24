@@ -183,6 +183,109 @@ test('recipe and samples examples surface branchy command fields in help and LLM
   assert.match(samplesImportJsonLlms, /sourcePath\/importConfig provenance/u)
 })
 
+test.sequential('samples import-json returns indexed repair fields without partial writes or value echo', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-repair-'))
+  const samplesPayloadPath = path.join(vaultRoot, 'samples-repair.json')
+
+  try {
+    await runSliceCli(['init', '--vault', vaultRoot])
+
+    const mixedMemberSentinel = 'private-mixed-member'
+    await writeFile(
+      samplesPayloadPath,
+      JSON.stringify({
+        stream: 'heart_rate',
+        unit: 'bpm',
+        samples: [
+          { recordedAt: '2026-03-12T08:00:00.000Z', value: 61 },
+          mixedMemberSentinel,
+        ],
+      }),
+      'utf8',
+    )
+
+    const mixedMembers = await runSliceCli([
+      'samples',
+      'import-json',
+      '--input',
+      `@${samplesPayloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(mixedMembers.ok, false)
+    assert.equal(mixedMembers.error.code, 'invalid_payload')
+    assert.equal(mixedMembers.error.stage, 'validation')
+    assert.equal(mixedMembers.error.fieldErrors?.[0]?.path, 'samples.1')
+    assert.equal(mixedMembers.error.fieldErrors?.[0]?.expected, 'object')
+    assert.equal(JSON.stringify(mixedMembers).includes(mixedMemberSentinel), false)
+
+    const afterMixedMembers = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(afterMixedMembers.ok, true)
+    assert.equal(requireData(afterMixedMembers).count, 0)
+
+    const invalidValueSentinel = 'private-invalid-value'
+    await writeFile(
+      samplesPayloadPath,
+      JSON.stringify({
+        stream: 'heart_rate',
+        unit: 'bpm',
+        samples: [
+          { recordedAt: '2026-03-12T08:00:00.000Z', value: 61 },
+          {
+            recordedAt: '2026-03-12T08:01:00.000Z',
+            value: invalidValueSentinel,
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    const invalidField = await runSliceCli([
+      'samples',
+      'import-json',
+      '--input',
+      `@${samplesPayloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(invalidField.ok, false)
+    assert.equal(invalidField.error.code, 'invalid_payload')
+    assert.equal(invalidField.error.stage, 'validation')
+    assert.deepEqual(invalidField.error.fieldErrors, [
+      {
+        code: 'invalid_number',
+        path: 'samples.1.value',
+        expected: 'non-negative integer',
+        received: 'invalid',
+        message: 'value must be a non-negative integer.',
+      },
+    ])
+    assert.equal(JSON.stringify(invalidField).includes(invalidValueSentinel), false)
+
+    const afterInvalidField = await runSliceCli<{ count: number }>([
+      'samples',
+      'list',
+      '--stream',
+      'heart_rate',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(afterInvalidField.ok, true)
+    assert.equal(requireData(afterInvalidField).count, 0)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test('provider, food, recipe, and event edit/delete schemas expose shared record mutation options', async () => {
   const providerEditSchema = JSON.parse(
     await runSliceCliRaw(['provider', 'edit', '--schema']),

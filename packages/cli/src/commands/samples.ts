@@ -46,7 +46,7 @@ const sampleIdSchema = z
 
 const batchIdSchema = z
   .string()
-  .regex(/^xfm_[0-9A-Za-z]+$/u, 'Expected a transform batch id in xfm_* form.')
+  .min(1, 'Expected a non-empty batch id returned by samples batch list.')
 
 const batchSourceFileNameSchema = z
   .string()
@@ -695,6 +695,7 @@ export function registerSamplesCommands(
         const csvOptions = buildCsvImportOptions(options)
         return importCsvSamplesWithArtifacts({
           ...csvOptions,
+          commandName: 'samples import-csv',
           file: args.file,
           vault: options.vault,
         })
@@ -775,6 +776,7 @@ export function registerSamplesCommands(
         const csvOptions = buildCsvImportOptions(options)
         return samplesCsvProfileResultSchema.parse(await profileCsvSampleFileWithArtifacts({
           ...csvOptions,
+          commandName: 'samples csv profile',
           file: args.file,
           gapSeconds: options.gapSeconds,
           includeSummary: options.includeSummary,
@@ -841,6 +843,7 @@ export function registerSamplesCommands(
         const csvOptions = buildCsvImportOptions(options)
         return importCsvSamplesWithArtifacts({
           ...csvOptions,
+          commandName: 'samples csv import',
           file: args.file,
           vault: options.vault,
         })
@@ -946,13 +949,13 @@ export function registerSamplesCommands(
   })
 
   const batch = Cli.create('batch', {
-    description: 'Sample import-batch inspection commands for xfm_* ids.',
+    description: 'Sample import-batch inspection commands for ids returned by batch list.',
   })
 
   batch.command('show', {
     description: 'Show one imported sample batch by transform id.',
     args: z.object({
-      id: batchIdSchema.describe('Transform batch id such as xfm_<ULID>.'),
+      id: batchIdSchema.describe('Exact batch id returned by samples batch list.'),
     }),
     options: withBaseOptions(),
     output: sampleBatchShowResultSchema,

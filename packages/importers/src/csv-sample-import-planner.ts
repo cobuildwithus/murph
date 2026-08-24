@@ -51,6 +51,32 @@ export interface CsvSampleImportSkipReasonCount {
   reason: string;
 }
 
+export interface CsvSampleImportRepairField {
+  path: string | readonly PropertyKey[];
+  code: string;
+  message: string;
+  expected?: string;
+  missing?: boolean;
+}
+
+export interface CsvSampleImportRepair {
+  fields: readonly CsvSampleImportRepairField[];
+  hint?: string;
+  stage: "validation";
+}
+
+export class CsvSampleImportError extends Error {
+  readonly code: string;
+  readonly repair: CsvSampleImportRepair;
+
+  constructor(code: string, message: string, repair: CsvSampleImportRepair) {
+    super(message);
+    this.name = "CsvSampleImportError";
+    this.code = code;
+    this.repair = repair;
+  }
+}
+
 export interface PreparedCsvSampleImportPayload extends Omit<SampleImportPayload, "samples"> {
   samples: SampleImportRecord[];
 }
@@ -373,7 +399,20 @@ export async function prepareCsvSampleImport(
   const imports = collectors.map((collector) => finalizeImportCollector(collector));
 
   if (imports.every((entry) => entry.importedCount === 0)) {
-    throw new Error("sample CSV did not contain any importable sample rows");
+    throw new CsvSampleImportError(
+      "no_importable_rows",
+      "Sample CSV did not contain any importable sample rows.",
+      {
+        stage: "validation",
+        fields: imports.map((entry, index) => ({
+          path: ["imports", index, "samples"],
+          code: "no_importable_rows",
+          message: `${entry.stream} skipped ${formatSkipReasonCounts(entry.skipReasons)}.`,
+          expected: "at least one row with a parseable timestamp and numeric value",
+        })),
+        hint: "Correct the timestamp or value cells identified by the skip counts, then retry.",
+      },
+    );
   }
 
   return stripUndefined({
@@ -687,7 +726,13 @@ function resolvePlannedImports(
   }
 
   if (groups.size === 0) {
-    throw new Error("sample CSV does not contain a recognizable sample value column");
+    throw createCsvInferenceError({
+      code: "value_column_inference_failed",
+      field: "valueColumn",
+      message: "No recognizable sample value column was inferred.",
+      expected: `one of the CSV headers: ${formatCsvHeaderNames(header)}`,
+      hint: "Retry with --value-column set to an exact header name and --stream set to its sample stream.",
+    });
   }
 
   for (const [stream, columns] of groups) {
@@ -744,7 +789,13 @@ function resolveTimestampColumnName(header: readonly string[], requestedColumn: 
     );
   }
 
-  throw new Error("sample CSV is missing a recognizable timestamp column");
+  throw createCsvInferenceError({
+    code: "timestamp_column_inference_failed",
+    field: "tsColumn",
+    message: "No recognizable timestamp column was inferred.",
+    expected: `one of the CSV headers: ${formatCsvHeaderNames(header)}`,
+    hint: "Retry with --ts-column set to the exact timestamp header name.",
+  });
 }
 
 function resolveValueColumnName(
@@ -887,6 +938,64 @@ function resolveSkipReason(recordedAt: string | undefined, value: number | undef
   ].filter((entry): entry is string => entry !== null);
 
   return reasons.join("; ");
+}
+
+function createCsvInferenceError(input: {
+  code: string;
+  field: "tsColumn" | "valueColumn";
+  message: string;
+  expected: string;
+  hint: string;
+}): CsvSampleImportError {
+  return new CsvSampleImportError(
+    input.code,
+    "Sample CSV column inference failed.",
+    {
+      stage: "validation",
+      fields: [
+        {
+          path: input.field,
+          code: input.code,
+          message: input.message,
+          expected: input.expected,
+        },
+      ],
+      hint: input.hint,
+    },
+  );
+}
+
+function formatCsvHeaderNames(header: readonly string[]): string {
+  const visibleHeaders = header
+    .slice(0, 8)
+    .map((entry) => JSON.stringify(truncateDiagnosticText(entry, 48)));
+  const omittedCount = Math.max(0, header.length - visibleHeaders.length);
+
+  return omittedCount === 0
+    ? visibleHeaders.join(", ")
+    : `${visibleHeaders.join(", ")} (+${omittedCount} more)`;
+}
+
+function formatSkipReasonCounts(
+  skipReasons: readonly CsvSampleImportSkipReasonCount[],
+): string {
+  const visibleReasons = skipReasons
+    .slice(0, 4)
+    .map((entry) => `${entry.reason}=${entry.count}`);
+  const omittedCount = Math.max(0, skipReasons.length - visibleReasons.length);
+
+  return omittedCount === 0
+    ? visibleReasons.join(", ")
+    : `${visibleReasons.join(", ")} (+${omittedCount} more reasons)`;
+}
+
+function truncateDiagnosticText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  const codePoints = Array.from(normalized);
+
+  return codePoints.length <= maxLength
+    ? normalized
+    : `${codePoints.slice(0, maxLength - 1).join("")}…`;
 }
 
 function normalizeOptionalNumber(value: unknown, stream: SampleStream): number | undefined {

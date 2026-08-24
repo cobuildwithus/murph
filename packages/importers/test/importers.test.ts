@@ -8,6 +8,7 @@ import * as coreRuntime from "@murphai/core";
 import {
   addMeal,
   createSamplePresetRegistry,
+  CsvSampleImportError,
   importCsvSamples,
   importDocument,
   parseDelimitedRows,
@@ -446,6 +447,51 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
         { corePort },
       ),
     /unterminated quoted field/,
+  );
+});
+
+test("sample CSV repair errors expose bounded schema guidance without cell values", async () => {
+  const invalidRowsPath = await createTempFile(
+    "invalid-sample-rows.csv",
+    "timestamp,bpm\nprivate-timestamp-cell,private-value-cell\n",
+  );
+  const inferencePath = await createTempFile(
+    "sample-inference.csv",
+    "custom_time,custom_metric\nprivate-cell,private-cell\n",
+  );
+  const { corePort } = createCorePortSpy();
+
+  await assert.rejects(
+    () => importCsvSamples({ filePath: invalidRowsPath }, { corePort }),
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.equal(error.code, "no_importable_rows");
+      assert.deepEqual(error.repair.fields[0], {
+        path: ["imports", 0, "samples"],
+        code: "no_importable_rows",
+        message: "heart_rate skipped unparseable timestamp; non-numeric value=1.",
+        expected: "at least one row with a parseable timestamp and numeric value",
+      });
+      assert.equal(JSON.stringify(error).includes("private-timestamp-cell"), false);
+      assert.equal(JSON.stringify(error).includes("private-value-cell"), false);
+      return true;
+    },
+  );
+
+  await assert.rejects(
+    () => prepareCsvSampleImport({ filePath: inferencePath }),
+    (error) => {
+      assert.ok(error instanceof CsvSampleImportError);
+      assert.equal(error.code, "timestamp_column_inference_failed");
+      assert.equal(error.repair.fields[0]?.path, "tsColumn");
+      assert.match(
+        error.repair.fields[0]?.expected ?? "",
+        /"custom_time", "custom_metric"/u,
+      );
+      assert.match(error.repair.hint ?? "", /--ts-column/u);
+      assert.equal(JSON.stringify(error).includes("private-cell"), false);
+      return true;
+    },
   );
 });
 

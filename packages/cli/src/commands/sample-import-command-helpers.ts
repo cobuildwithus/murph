@@ -2,6 +2,15 @@ import {
   createRuntimeUnavailableError,
   loadRuntimeModule,
 } from '@murphai/vault-usecases/runtime'
+import {
+  VaultCliError,
+  type VaultCliRepairFieldInput,
+} from '@murphai/operator-config/vault-cli-errors'
+
+type CsvSampleCommandName =
+  | 'samples import-csv'
+  | 'samples csv import'
+  | 'samples csv profile'
 
 interface ImportCsvSamplesRuntimeInput {
   delimiter?: string
@@ -62,6 +71,7 @@ interface ImportersRuntimeModule {
 }
 
 export interface ImportCsvSamplesOptions {
+  commandName?: CsvSampleCommandName
   delimiter?: string
   file: string
   gapSeconds?: number
@@ -82,19 +92,25 @@ export interface ImportCsvSamplesOptions {
 let importersRuntimePromise: Promise<ImportersRuntimeModule> | null = null
 
 export async function importCsvSamples(options: ImportCsvSamplesOptions) {
-  const importers = await loadImportersRuntime()
+  const commandName = options.commandName ?? 'samples import-csv'
+  const importers = await loadImportersRuntimeForCommand(commandName)
   const runtimeInput = createImportCsvSamplesRuntimeInput(options)
   const runtime = importers.createImporters()
 
   if (!runtime || typeof runtime.importCsvSamples !== 'function') {
     importersRuntimePromise = null
     throw createRuntimeUnavailableError(
-      'samples import-csv',
+      commandName,
       new TypeError('Importer runtime package did not match the expected module shape.'),
     )
   }
 
-  const result = await runtime.importCsvSamples(runtimeInput)
+  let result
+  try {
+    result = await runtime.importCsvSamples(runtimeInput)
+  } catch (error) {
+    throw toCsvSampleCliError(error)
+  }
 
   return {
     vault: options.vault,
@@ -140,7 +156,8 @@ export async function profileCsvSampleFile(
   summaries?: unknown
   vault: string
 }> {
-  const importers = await loadImportersRuntime()
+  const commandName = options.commandName ?? 'samples csv profile'
+  const importers = await loadImportersRuntimeForCommand(commandName)
   const runtimeInput = createImportCsvSamplesRuntimeInput(options)
   const runtime = importers.createImporters()
 
@@ -152,7 +169,12 @@ export async function profileCsvSampleFile(
     )
   }
 
-  const result = await runtime.profileCsvSampleFile(runtimeInput)
+  let result
+  try {
+    result = await runtime.profileCsvSampleFile(runtimeInput)
+  } catch (error) {
+    throw toCsvSampleCliError(error)
+  }
 
   return {
     vault: options.vault,
@@ -195,9 +217,94 @@ async function loadImportersRuntime(): Promise<ImportersRuntimeModule> {
       return runtime
     } catch (error) {
       importersRuntimePromise = null
-      throw createRuntimeUnavailableError('samples import-csv', error)
+      throw error
     }
   })()
 
   return importersRuntimePromise
+}
+
+async function loadImportersRuntimeForCommand(
+  commandName: CsvSampleCommandName,
+): Promise<ImportersRuntimeModule> {
+  try {
+    return await loadImportersRuntime()
+  } catch (error) {
+    throw createRuntimeUnavailableError(commandName, error)
+  }
+}
+
+const CSV_SAMPLE_REPAIR_CODES = new Set([
+  'no_importable_rows',
+  'timestamp_column_inference_failed',
+  'value_column_inference_failed',
+])
+
+function toCsvSampleCliError(error: unknown): unknown {
+  if (!isRecord(error) || error.name !== 'CsvSampleImportError') {
+    return error
+  }
+
+  const code = error.code
+  const repair = error.repair
+  if (
+    typeof code !== 'string'
+    || !CSV_SAMPLE_REPAIR_CODES.has(code)
+    || !isRecord(repair)
+    || !Array.isArray(repair.fields)
+  ) {
+    return error
+  }
+
+  const fields = repair.fields
+    .map(toCsvSampleRepairField)
+    .filter((field): field is VaultCliRepairFieldInput => field !== null)
+  if (fields.length === 0) {
+    return error
+  }
+
+  const hint = typeof repair.hint === 'string' ? repair.hint : undefined
+  return new VaultCliError(
+    'invalid_payload',
+    code === 'no_importable_rows'
+      ? 'Sample CSV did not contain any importable rows.'
+      : 'Sample CSV column inference failed.',
+    undefined,
+    {
+      stage: 'validation',
+      fields,
+      hint,
+    },
+  )
+}
+
+function toCsvSampleRepairField(value: unknown): VaultCliRepairFieldInput | null {
+  if (
+    !isRecord(value)
+    || typeof value.code !== 'string'
+    || typeof value.message !== 'string'
+    || !isRepairPath(value.path)
+  ) {
+    return null
+  }
+
+  return {
+    path: value.path,
+    code: value.code,
+    message: value.message,
+    ...(typeof value.expected === 'string' ? { expected: value.expected } : {}),
+    ...(value.missing === true ? { missing: true } : {}),
+  }
+}
+
+function isRepairPath(value: unknown): value is string | readonly PropertyKey[] {
+  return typeof value === 'string'
+    || (
+      Array.isArray(value)
+      && value.every((segment) => typeof segment === 'string' || typeof segment === 'number')
+    )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

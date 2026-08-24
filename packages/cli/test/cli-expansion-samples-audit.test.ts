@@ -102,6 +102,142 @@ test('samples csv profile and summarize schemas expose composable profiling opti
   assert.deepEqual(summarizeSchema.options.required, ['vault', 'stream'])
 })
 
+test.sequential('sample CSV failures expose bounded repair flags and counts without raw cell echo', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-repair-'))
+  const invalidRowsPath = path.join(vaultRoot, 'invalid-rows.csv')
+  const timestampInferencePath = path.join(vaultRoot, 'timestamp-inference.csv')
+  const valueInferencePath = path.join(vaultRoot, 'value-inference.csv')
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const timestampCellSentinel = 'private-timestamp-cell'
+    const valueCellSentinel = 'private-value-cell'
+    await writeFile(
+      invalidRowsPath,
+      `timestamp,bpm\n${timestampCellSentinel},${valueCellSentinel}\n`,
+      'utf8',
+    )
+
+    const invalidRows = await runSliceCli([
+      'samples',
+      'import-csv',
+      invalidRowsPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(invalidRows.ok, false)
+    assert.equal(invalidRows.error.code, 'invalid_payload')
+    assert.equal(invalidRows.error.stage, 'validation')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.path, 'imports.0.samples')
+    assert.match(
+      invalidRows.error.fieldErrors?.[0]?.message ?? '',
+      /heart_rate skipped unparseable timestamp; non-numeric value=1/u,
+    )
+    assert.equal(JSON.stringify(invalidRows).includes(timestampCellSentinel), false)
+    assert.equal(JSON.stringify(invalidRows).includes(valueCellSentinel), false)
+
+    await writeFile(
+      timestampInferencePath,
+      'custom_time,bpm\nprivate-cell,62\n',
+      'utf8',
+    )
+    const timestampInference = await runSliceCli([
+      'samples',
+      'csv',
+      'profile',
+      timestampInferencePath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(timestampInference.ok, false)
+    assert.equal(timestampInference.meta.command, 'samples csv profile')
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.path, 'tsColumn')
+    assert.match(
+      timestampInference.error.fieldErrors?.[0]?.expected ?? '',
+      /"custom_time", "bpm"/u,
+    )
+    assert.match(timestampInference.error.hint ?? '', /--ts-column/u)
+    assert.equal(JSON.stringify(timestampInference).includes('private-cell'), false)
+
+    await writeFile(
+      valueInferencePath,
+      'timestamp,mystery_metric\n2026-03-12T08:00:00Z,private-cell\n',
+      'utf8',
+    )
+    const valueInference = await runSliceCli([
+      'samples',
+      'csv',
+      'import',
+      valueInferencePath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(valueInference.ok, false)
+    assert.equal(valueInference.meta.command, 'samples csv import')
+    assert.equal(valueInference.error.fieldErrors?.[0]?.path, 'valueColumn')
+    assert.match(
+      valueInference.error.fieldErrors?.[0]?.expected ?? '',
+      /"timestamp", "mystery_metric"/u,
+    )
+    assert.match(valueInference.error.hint ?? '', /--value-column/u)
+    assert.match(valueInference.error.hint ?? '', /--stream/u)
+    assert.equal(JSON.stringify(valueInference).includes('private-cell'), false)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('samples batch show accepts every exact id emitted by batch list', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-batch-roundtrip-'))
+  const manifestDirectory = path.join(
+    vaultRoot,
+    'raw/samples/heart-rate/import_alpha',
+  )
+
+  try {
+    await mkdir(manifestDirectory, { recursive: true })
+    await writeFile(
+      path.join(manifestDirectory, 'manifest.json'),
+      JSON.stringify({
+        importId: 'import_alpha',
+        importedAt: '2026-04-05T08:00:00.000Z',
+        provenance: { importedCount: 2 },
+      }),
+      'utf8',
+    )
+
+    const listed = await runSliceCli<{
+      items: Array<{ batchId: string }>
+    }>([
+      'samples',
+      'batch',
+      'list',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(listed.ok, true)
+    const listedId = requireData(listed).items[0]?.batchId
+    assert.equal(listedId, 'import_alpha')
+
+    const shown = await runSliceCli<{ batchId: string }>([
+      'samples',
+      'batch',
+      'show',
+      listedId as string,
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(shown.ok, true)
+    assert.equal(requireData(shown).batchId, listedId)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('samples add records typed manual samples and validates stream-specific fields', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-samples-add-'))
 
