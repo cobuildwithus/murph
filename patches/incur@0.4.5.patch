@@ -21,17 +21,21 @@ index 5c8cfeccb7595a4129d882cb8a1b94776b3d151b..19bc6fa45f8687911430140b32fdbe17
  type CtaBlock<commands extends CommandsMap = Commands> = {
      /** Commands to suggest. */
 diff --git a/dist/Cli.js b/dist/Cli.js
-index c18290af933acfd770e040d8ded4108bfbf97855..d2f86d19a898010fc4e38854b88d303f45aaf7f1 100644
+index c18290af933acfd770e040d8ded4108bfbf97855..ee96b78b1c811fedc48a1b53c9e75facf734333d 100644
 --- a/dist/Cli.js
 +++ b/dist/Cli.js
-@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises';
+@@ -2,10 +2,9 @@ import * as fs from 'node:fs/promises';
  import * as os from 'node:os';
  import * as path from 'node:path';
  import { estimateTokenCount, sliceByTokens } from 'tokenx';
 -import { parse as yamlParse } from 'yaml';
  import { z } from 'zod';
  import * as Completions from './Completions.js';
- import { IncurError, ParseError, ValidationError } from './Errors.js';
+-import { IncurError, ParseError, ValidationError } from './Errors.js';
++import { IncurError, ParseError, toErrorEnvelope, ValidationError } from './Errors.js';
+ import * as Fetch from './Fetch.js';
+ import * as Filter from './Filter.js';
+ import * as Formatter from './Formatter.js';
 @@ -14,6 +13,7 @@ import { builtinCommands, findBuiltin, findBuiltinSubcommand, shells, } from './
  import * as Command from './internal/command.js';
  import { isRecord, suggest, toKebab } from './internal/helpers.js';
@@ -52,55 +56,47 @@ index c18290af933acfd770e040d8ded4108bfbf97855..d2f86d19a898010fc4e38854b88d303f
                      const command = process.env.npm_config_user_agent || process.env.npm_execpath
                          ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
                          : `${displayName} skills add`;
-@@ -974,6 +973,16 @@ async function serveImpl(name, commands, argv, options = {}) {
-                 error: {
-                     code: error instanceof IncurError ? error.code : 'UNKNOWN',
-                     message: error instanceof Error ? error.message : String(error),
-+                    ...(error instanceof IncurError
-+                        ? {
-+                            retryable: error.retryable,
-+                            ...(error.hint ? { hint: error.hint } : undefined),
-+                            ...(error.stage ? { stage: error.stage } : undefined),
-+                            ...(error.fieldErrors.length > 0
-+                                ? { fieldErrors: error.fieldErrors }
-+                                : undefined),
-+                        }
-+                        : undefined),
-                 },
+@@ -971,10 +970,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         catch (error) {
+             write({
+                 ok: false,
+-                error: {
+-                    code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                },
++                error: toErrorEnvelope(error),
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              });
-@@ -1008,6 +1017,16 @@ async function serveImpl(name, commands, argv, options = {}) {
-                 error: {
-                     code: error instanceof IncurError ? error.code : 'UNKNOWN',
-                     message: error instanceof Error ? error.message : String(error),
-+                    ...(error instanceof IncurError
-+                        ? {
-+                            retryable: error.retryable,
-+                            ...(error.hint ? { hint: error.hint } : undefined),
-+                            ...(error.stage ? { stage: error.stage } : undefined),
-+                            ...(error.fieldErrors.length > 0
-+                                ? { fieldErrors: error.fieldErrors }
-+                                : undefined),
-+                        }
-+                        : undefined),
-                 },
+             exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
+@@ -1005,10 +1001,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         catch (error) {
+             write({
+                 ok: false,
+-                error: {
+-                    code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                },
++                error: toErrorEnvelope(error),
                  meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
              });
-@@ -1076,11 +1095,13 @@ async function serveImpl(name, commands, argv, options = {}) {
+             exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1);
+@@ -1074,14 +1067,7 @@ async function serveImpl(name, commands, argv, options = {}) {
+         }
+         write({
              ok: false,
-             error: {
-                 code: result.error.code,
-+                ...(result.error.hint ? { hint: result.error.hint } : undefined),
-                 message: result.error.message,
-                 ...(result.error.retryable !== undefined
-                     ? { retryable: result.error.retryable }
-                     : undefined),
-                 ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
-+                ...(result.error.stage ? { stage: result.error.stage } : undefined),
-             },
+-            error: {
+-                code: result.error.code,
+-                message: result.error.message,
+-                ...(result.error.retryable !== undefined
+-                    ? { retryable: result.error.retryable }
+-                    : undefined),
+-                ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
+-            },
++            error: result.error,
              meta: {
                  command: path,
-@@ -1151,7 +1172,7 @@ async function fetchImpl(name, commands, req, options = {}) {
+                 duration,
+@@ -1151,7 +1137,7 @@ async function fetchImpl(name, commands, req, options = {}) {
              const files = Skill.split(name, cmds, 1, groups);
              const skills = files.map((f) => {
                  const fmMatch = f.content.match(/^---\n([\s\S]*?)\n---/);
@@ -109,21 +105,22 @@ index c18290af933acfd770e040d8ded4108bfbf97855..d2f86d19a898010fc4e38854b88d303f
                  return {
                      name: f.dir || name,
                      description: meta.description ?? '',
-@@ -1306,10 +1327,13 @@ async function executeCommand(path, command, rest, inputOptions, start, options)
+@@ -1304,13 +1290,7 @@ async function executeCommand(path, command, rest, inputOptions, start, options)
+         const cta = formatCtaBlock(options.name ?? path, result.cta);
+         return jsonResponse({
              ok: false,
-             error: {
-                 code: result.error.code,
-+                ...(result.error.hint ? { hint: result.error.hint } : undefined),
-                 message: result.error.message,
-                 ...(result.error.retryable !== undefined
-                     ? { retryable: result.error.retryable }
-                     : undefined),
-+                ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
-+                ...(result.error.stage ? { stage: result.error.stage } : undefined),
-             },
+-            error: {
+-                code: result.error.code,
+-                message: result.error.message,
+-                ...(result.error.retryable !== undefined
+-                    ? { retryable: result.error.retryable }
+-                    : undefined),
+-            },
++                error: result.error,
              meta: {
                  command: path,
-@@ -1752,6 +1776,14 @@ export const toRootDefinition = new WeakMap();
+                 duration,
+@@ -1752,6 +1732,14 @@ export const toRootDefinition = new WeakMap();
  export const toRootOptions = new WeakMap();
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap();
@@ -138,42 +135,32 @@ index c18290af933acfd770e040d8ded4108bfbf97855..d2f86d19a898010fc4e38854b88d303f
  /** @internal Maps CLI instances to their output policy. */
  const toOutputPolicy = new WeakMap();
  /** @internal Maps root CLI instances to their command aliases. */
-@@ -1870,6 +1902,16 @@ async function handleStreaming(generator, ctx) {
-                     error: {
-                         code: error instanceof IncurError ? error.code : 'UNKNOWN',
-                         message: error instanceof Error ? error.message : String(error),
-+                        ...(error instanceof IncurError
-+                            ? {
-+                                retryable: error.retryable,
-+                                ...(error.hint ? { hint: error.hint } : undefined),
-+                                ...(error.stage ? { stage: error.stage } : undefined),
-+                                ...(error.fieldErrors.length > 0
-+                                    ? { fieldErrors: error.fieldErrors }
-+                                    : undefined),
-+                            }
-+                            : undefined),
-                     },
+@@ -1867,10 +1855,7 @@ async function handleStreaming(generator, ctx) {
+                 ctx.writeln(JSON.stringify({
+                     type: 'error',
+                     ok: false,
+-                    error: {
+-                        code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                        message: error instanceof Error ? error.message : String(error),
+-                    },
++                    error: toErrorEnvelope(error),
                  }));
              else
-@@ -1948,6 +1990,16 @@ async function handleStreaming(generator, ctx) {
-                 error: {
-                     code: error instanceof IncurError ? error.code : 'UNKNOWN',
-                     message: error instanceof Error ? error.message : String(error),
-+                    ...(error instanceof IncurError
-+                        ? {
-+                            retryable: error.retryable,
-+                            ...(error.hint ? { hint: error.hint } : undefined),
-+                            ...(error.stage ? { stage: error.stage } : undefined),
-+                            ...(error.fieldErrors.length > 0
-+                                ? { fieldErrors: error.fieldErrors }
-+                                : undefined),
-+                        }
-+                        : undefined),
-                 },
+                 ctx.writeln(formatHumanError({
+@@ -1945,10 +1930,7 @@ async function handleStreaming(generator, ctx) {
+         catch (error) {
+             ctx.write({
+                 ok: false,
+-                error: {
+-                    code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                    message: error instanceof Error ? error.message : String(error),
+-                },
++                error: toErrorEnvelope(error),
                  meta: {
                      command: ctx.path,
+                     duration: `${Math.round(performance.now() - ctx.start)}ms`,
 diff --git a/dist/Errors.d.ts b/dist/Errors.d.ts
-index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..da00ab6afbab36b3492ac6ef141a1799824ac78f 100644
+index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..0dc92225045df710484d513caed74c19b89dbf6b 100644
 --- a/dist/Errors.d.ts
 +++ b/dist/Errors.d.ts
 @@ -27,6 +27,10 @@ export declare class IncurError extends BaseError {
@@ -198,8 +185,24 @@ index 4e08c9bf0df51b013ad57cfbfd8c27f08c0143b7..da00ab6afbab36b3492ac6ef141a1799
          /** Whether the operation can be retried. Defaults to `false`. */
          retryable?: boolean | undefined;
          /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -50,6 +58,15 @@ export declare namespace IncurError {
+         cause?: Error | undefined;
+     };
+ }
++/** Converts a thrown value to the shared machine error-envelope shape. */
++export declare function toErrorEnvelope(error: unknown): {
++    code: string;
++    message: string;
++    retryable?: boolean | undefined;
++    hint?: string | undefined;
++    stage?: string | undefined;
++    fieldErrors?: FieldError[] | undefined;
++};
+ /** A field-level validation error detail. */
+ export type FieldError = {
+     /** The Zod issue code. */
 diff --git a/dist/Errors.js b/dist/Errors.js
-index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..be1ae57fc112170e83eead3cbc349789f29d28d0 100644
+index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..5a8ecfd912ad37243e783e1d3e32bc267403da23 100644
 --- a/dist/Errors.js
 +++ b/dist/Errors.js
 @@ -28,6 +28,10 @@ export class IncurError extends BaseError {
@@ -213,7 +216,7 @@ index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..be1ae57fc112170e83eead3cbc349789
      /** Whether the operation can be retried. */
      retryable;
      /** Process exit code. When set, `serve()` uses this instead of `1`. */
-@@ -36,6 +40,8 @@ export class IncurError extends BaseError {
+@@ -36,10 +40,29 @@ export class IncurError extends BaseError {
          super(options.message, options.cause ? { cause: options.cause } : undefined);
          this.code = options.code;
          this.hint = options.hint;
@@ -222,6 +225,27 @@ index a1cbe8c082db54ab086f62ed8ffba8c05b8d0d1c..be1ae57fc112170e83eead3cbc349789
          this.retryable = options.retryable ?? false;
          this.exitCode = options.exitCode;
      }
+ }
++/** Converts a thrown value to the shared machine error-envelope shape. */
++export function toErrorEnvelope(error) {
++    if (!(error instanceof IncurError)) {
++        return {
++            code: 'UNKNOWN',
++            message: error instanceof Error ? error.message : String(error),
++        };
++    }
++    return {
++        code: error.code,
++        message: error.message,
++        retryable: error.retryable,
++        ...(error.hint ? { hint: error.hint } : undefined),
++        ...(error.stage ? { stage: error.stage } : undefined),
++        ...(error.fieldErrors.length > 0 ? { fieldErrors: error.fieldErrors } : undefined),
++    };
++}
+ /** Validation error with per-field error details. */
+ export class ValidationError extends BaseError {
+     name = 'Incur.ValidationError';
 diff --git a/dist/Formatter.js b/dist/Formatter.js
 index 82bc6e25713eb8578dd566c5b7bfcc2b956f6092..ad2b5ac2e589fc8b89748ae998ecde242050ce90 100644
 --- a/dist/Formatter.js
@@ -340,7 +364,7 @@ index da674f5f5c9dc32c44be7657069ed421d35a8561..6a3b923353d094e20715894529cba31a
          return {};
      return meta;
 diff --git a/dist/internal/command.d.ts b/dist/internal/command.d.ts
-index 248c149b25360bb6b5486c269bb9e6ac7f967673..b0665507117ec5651a0206f9c8b8515ca4388701 100644
+index 248c149b25360bb6b5486c269bb9e6ac7f967673..f10cb1679d291beb0673bc97436815caa68c9d0c 100644
 --- a/dist/internal/command.d.ts
 +++ b/dist/internal/command.d.ts
 @@ -56,8 +56,10 @@ export declare namespace execute {
@@ -355,27 +379,29 @@ index 248c149b25360bb6b5486c269bb9e6ac7f967673..b0665507117ec5651a0206f9c8b8515c
          };
          cta?: CtaBlock | undefined;
 diff --git a/dist/internal/command.js b/dist/internal/command.js
-index 76a46f4b5ea61073a6c9461076e54c6109772dbc..d9ad19da2767bb562c6cf6ebc609fa09c8262618 100644
+index 76a46f4b5ea61073a6c9461076e54c6109772dbc..5fe176a4554cfeac01e69c9623d9162be4b9388a 100644
 --- a/dist/internal/command.js
 +++ b/dist/internal/command.js
-@@ -178,7 +178,16 @@ export async function execute(command, options) {
-             error: {
-                 code: error instanceof IncurError ? error.code : 'UNKNOWN',
-                 message: error instanceof Error ? error.message : String(error),
+@@ -1,5 +1,5 @@
+ import { z } from 'zod';
+-import { IncurError, ValidationError } from '../Errors.js';
++import { IncurError, toErrorEnvelope, ValidationError } from '../Errors.js';
+ import * as Parser from '../Parser.js';
+ /** @internal Sentinel symbol for `ok()` and `error()` return values. */
+ const sentinel = Symbol.for('incur.sentinel');
+@@ -175,11 +175,7 @@ export async function execute(command, options) {
+             };
+         return {
+             ok: false,
+-            error: {
+-                code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-                message: error instanceof Error ? error.message : String(error),
 -                ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
-+                ...(error instanceof IncurError
-+                    ? {
-+                        retryable: error.retryable,
-+                        ...(error.hint ? { hint: error.hint } : undefined),
-+                        ...(error.stage ? { stage: error.stage } : undefined),
-+                        ...(error.fieldErrors.length > 0
-+                            ? { fieldErrors: error.fieldErrors }
-+                            : undefined),
-+                    }
-+                    : undefined),
-             },
+-            },
++            error: toErrorEnvelope(error),
              ...(error instanceof IncurError && error.exitCode !== undefined
                  ? { exitCode: error.exitCode }
+                 : undefined),
 diff --git a/dist/internal/yaml.js b/dist/internal/yaml.js
 new file mode 100644
 index 0000000000000000000000000000000000000000..f560943e367c346c5bee654c0a50e4b6f4c75fc2
@@ -391,10 +417,10 @@ index 0000000000000000000000000000000000000000..f560943e367c346c5bee654c0a50e4b6
 +    return cached;
 +}
 diff --git a/src/Cli.ts b/src/Cli.ts
-index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042c6658432 100644
+index 4f5c851900cf26665959fd107f42c2d00fef40e1..f1113918ad45fd7c9bdf886dc34a3dea7b988b87 100644
 --- a/src/Cli.ts
 +++ b/src/Cli.ts
-@@ -2,7 +2,6 @@ import * as fs from 'node:fs/promises'
+@@ -2,12 +2,11 @@ import * as fs from 'node:fs/promises'
  import * as os from 'node:os'
  import * as path from 'node:path'
  import { estimateTokenCount, sliceByTokens } from 'tokenx'
@@ -403,6 +429,12 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042
 -
 +
  import * as Completions from './Completions.js'
+ import type { FieldError } from './Errors.js'
+-import { IncurError, ParseError, ValidationError } from './Errors.js'
++import { IncurError, ParseError, toErrorEnvelope, ValidationError } from './Errors.js'
+ import * as Fetch from './Fetch.js'
+ import * as Filter from './Filter.js'
+ import * as Formatter from './Formatter.js'
 @@ -24,6 +23,7 @@ import * as Command from './internal/command.js'
  import { isRecord, suggest, toKebab } from './internal/helpers.js'
  import { detectRunner } from './internal/pm.js'
@@ -433,55 +465,48 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042
            const command =
              process.env.npm_config_user_agent || process.env.npm_execpath
                ? `${detectRunner()} ${SyncMcp.detectPackageSpecifier(name)} skills add`
-@@ -1374,6 +1376,16 @@ async function serveImpl(
-         error: {
-           code: error instanceof IncurError ? error.code : 'UNKNOWN',
-           message: error instanceof Error ? error.message : String(error),
-+          ...(error instanceof IncurError
-+            ? {
-+                retryable: error.retryable,
-+                ...(error.hint ? { hint: error.hint } : undefined),
-+                ...(error.stage ? { stage: error.stage } : undefined),
-+                ...(error.fieldErrors.length > 0
-+                  ? { fieldErrors: error.fieldErrors }
-+                  : undefined),
-+              }
-+            : undefined),
-         },
+@@ -1371,10 +1373,7 @@ async function serveImpl(
+     } catch (error) {
+       write({
+         ok: false,
+-        error: {
+-          code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-          message: error instanceof Error ? error.message : String(error),
+-        },
++        error: toErrorEnvelope(error),
          meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
        })
-@@ -1415,6 +1427,16 @@ async function serveImpl(
-         error: {
-           code: error instanceof IncurError ? error.code : 'UNKNOWN',
-           message: error instanceof Error ? error.message : String(error),
-+          ...(error instanceof IncurError
-+            ? {
-+                retryable: error.retryable,
-+                ...(error.hint ? { hint: error.hint } : undefined),
-+                ...(error.stage ? { stage: error.stage } : undefined),
-+                ...(error.fieldErrors.length > 0
-+                  ? { fieldErrors: error.fieldErrors }
-+                  : undefined),
-+              }
-+            : undefined),
-         },
+       exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
+@@ -1412,10 +1411,7 @@ async function serveImpl(
+     } catch (error) {
+       write({
+         ok: false,
+-        error: {
+-          code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-          message: error instanceof Error ? error.message : String(error),
+-        },
++        error: toErrorEnvelope(error),
          meta: { command: path, duration: `${Math.round(performance.now() - start)}ms` },
        })
-@@ -1497,11 +1519,13 @@ async function serveImpl(
+       exit(error instanceof IncurError ? (error.exitCode ?? 1) : 1)
+@@ -1495,14 +1491,7 @@ async function serveImpl(
+-
++
+     write({
        ok: false,
-       error: {
-         code: result.error.code,
-+        ...(result.error.hint ? { hint: result.error.hint } : undefined),
-         message: result.error.message,
-         ...(result.error.retryable !== undefined
-           ? { retryable: result.error.retryable }
-           : undefined),
-         ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
-+        ...(result.error.stage ? { stage: result.error.stage } : undefined),
-       },
+-      error: {
+-        code: result.error.code,
+-        message: result.error.message,
+-        ...(result.error.retryable !== undefined
+-          ? { retryable: result.error.retryable }
+-          : undefined),
+-        ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
+-      },
++      error: result.error,
        meta: {
          command: path,
-@@ -1631,7 +1655,7 @@ async function fetchImpl(
+         duration,
+@@ -1631,7 +1620,7 @@ async function fetchImpl(
        const files = Skill.split(name, cmds, 1, groups)
        const skills = files.map((f) => {
          const fmMatch = f.content.match(/^---\n([\s\S]*?)\n---/)
@@ -490,21 +515,22 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042
          return {
            name: f.dir || name,
            description: meta.description ?? '',
-@@ -1824,10 +1848,13 @@ async function executeCommand(
+@@ -1822,13 +1811,7 @@ async function executeCommand(
+     return jsonResponse(
+       {
          ok: false,
-         error: {
-           code: result.error.code,
-+          ...(result.error.hint ? { hint: result.error.hint } : undefined),
-           message: result.error.message,
-           ...(result.error.retryable !== undefined
-             ? { retryable: result.error.retryable }
-             : undefined),
-+          ...(result.error.fieldErrors ? { fieldErrors: result.error.fieldErrors } : undefined),
-+          ...(result.error.stage ? { stage: result.error.stage } : undefined),
-         },
+-        error: {
+-          code: result.error.code,
+-          message: result.error.message,
+-          ...(result.error.retryable !== undefined
+-            ? { retryable: result.error.retryable }
+-            : undefined),
+-        },
++        error: result.error,
          meta: {
            command: path,
-@@ -2047,6 +2074,7 @@ declare namespace serveImpl {
+           duration,
+@@ -2047,6 +2030,7 @@ declare namespace serveImpl {
        | {
            cwd?: string | undefined
            depth?: number | undefined
@@ -512,7 +538,7 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042
            include?: string[] | undefined
            suggestions?: string[] | undefined
          }
-@@ -2445,6 +2473,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
+@@ -2445,6 +2429,14 @@ export const toRootOptions = new WeakMap<Cli, z.ZodObject<any>>()
  /** @internal Maps CLI instances to whether config file loading is enabled. */
  export const toConfigEnabled = new WeakMap<Cli, boolean>()
 -
@@ -529,41 +555,31 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042
  const toOutputPolicy = new WeakMap<Cli, OutputPolicy>()
 -
 +
-@@ -2621,6 +2657,16 @@ async function handleStreaming(
-             error: {
-               code: error instanceof IncurError ? error.code : 'UNKNOWN',
-               message: error instanceof Error ? error.message : String(error),
-+              ...(error instanceof IncurError
-+                ? {
-+                    retryable: error.retryable,
-+                    ...(error.hint ? { hint: error.hint } : undefined),
-+                    ...(error.stage ? { stage: error.stage } : undefined),
-+                    ...(error.fieldErrors.length > 0
-+                      ? { fieldErrors: error.fieldErrors }
-+                      : undefined),
-+                  }
-+                : undefined),
-             },
+@@ -2618,10 +2610,7 @@ async function handleStreaming(
+           JSON.stringify({
+             type: 'error',
+             ok: false,
+-            error: {
+-              code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-              message: error instanceof Error ? error.message : String(error),
+-            },
++            error: toErrorEnvelope(error),
            }),
          )
-@@ -2704,6 +2750,16 @@ async function handleStreaming(
-         error: {
-           code: error instanceof IncurError ? error.code : 'UNKNOWN',
-           message: error instanceof Error ? error.message : String(error),
-+          ...(error instanceof IncurError
-+            ? {
-+                retryable: error.retryable,
-+                ...(error.hint ? { hint: error.hint } : undefined),
-+                ...(error.stage ? { stage: error.stage } : undefined),
-+                ...(error.fieldErrors.length > 0
-+                  ? { fieldErrors: error.fieldErrors }
-+                  : undefined),
-+              }
-+            : undefined),
-         },
+       else
+@@ -2701,10 +2690,7 @@ async function handleStreaming(
+     } catch (error) {
+       ctx.write({
+         ok: false,
+-        error: {
+-          code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-          message: error instanceof Error ? error.message : String(error),
+-        },
++        error: toErrorEnvelope(error),
          meta: {
            command: ctx.path,
-@@ -2981,10 +3037,14 @@ type Output = OneOf<
+           duration: `${Math.round(performance.now() - ctx.start)}ms`,
+@@ -2981,10 +2967,14 @@ type Output = OneOf<
          code: string
          /** Per-field validation errors. */
          fieldErrors?: FieldError[] | undefined
@@ -579,7 +595,7 @@ index 4f5c851900cf26665959fd107f42c2d00fef40e1..caf22247c658b385c993b75236c3b042
        /** Request metadata. */
        meta: Output.Meta
 diff --git a/src/Errors.ts b/src/Errors.ts
-index 84b0b997a1ccdd02f4a847ee7135805583476224..185bb6406fb8e01280e47e2ea42c0389426baec7 100644
+index 84b0b997a1ccdd02f4a847ee7135805583476224..65ab0010f5fa99b9b797b164e57b1e1951fdc01a 100644
 --- a/src/Errors.ts
 +++ b/src/Errors.ts
 @@ -39,6 +39,10 @@ export class IncurError extends BaseError {
@@ -613,6 +629,40 @@ index 84b0b997a1ccdd02f4a847ee7135805583476224..185bb6406fb8e01280e47e2ea42c0389
      /** Whether the operation can be retried. Defaults to `false`. */
      retryable?: boolean | undefined
      /** Process exit code. When set, `serve()` uses this instead of `1`. */
+@@ -71,6 +81,32 @@ export declare namespace IncurError {
+   }
+ }
+-
++
++/** Converts a thrown value to the shared machine error-envelope shape. */
++export function toErrorEnvelope(error: unknown): {
++  code: string
++  message: string
++  retryable?: boolean | undefined
++  hint?: string | undefined
++  stage?: string | undefined
++  fieldErrors?: FieldError[] | undefined
++} {
++  if (!(error instanceof IncurError)) {
++    return {
++      code: 'UNKNOWN',
++      message: error instanceof Error ? error.message : String(error),
++    }
++  }
++
++  return {
++    code: error.code,
++    message: error.message,
++    retryable: error.retryable,
++    ...(error.hint ? { hint: error.hint } : undefined),
++    ...(error.stage ? { stage: error.stage } : undefined),
++    ...(error.fieldErrors.length > 0 ? { fieldErrors: error.fieldErrors } : undefined),
++  }
++}
++
+ /** A field-level validation error detail. */
+ export type FieldError = {
+   /** The Zod issue code. */
 diff --git a/src/Formatter.ts b/src/Formatter.ts
 index 21bfbddd541595b2f87ac37484725f6fee6dee00..6c56694eeedde8dbae70568c80b5f227c0f080d6 100644
 --- a/src/Formatter.ts
@@ -748,28 +798,34 @@ index ea5c8553d4ab8a872991f918e7ac4e6b6bce149d..49983a683b8560a7c75366995518bd33
    return meta as { description?: string | undefined; name?: string | undefined }
  }
 diff --git a/src/internal/command.ts b/src/internal/command.ts
-index 3dc0c6f03c07026f0ab99fabbcc467f338aa01db..d79d6e5e7b5b28b52a3283b9bc75e84001c180ae 100644
+index 3dc0c6f03c07026f0ab99fabbcc467f338aa01db..204de47f5829c183774e687feb4ffb35bd2d2988 100644
 --- a/src/internal/command.ts
 +++ b/src/internal/command.ts
-@@ -241,7 +241,16 @@ export async function execute(command: any, options: execute.Options): Promise<e
-       error: {
-         code: error instanceof IncurError ? error.code : 'UNKNOWN',
-         message: error instanceof Error ? error.message : String(error),
+@@ -1,7 +1,7 @@
+ import { z } from 'zod'
+-
++
+ import type { FieldError } from '../Errors.js'
+-import { IncurError, ValidationError } from '../Errors.js'
++import { IncurError, toErrorEnvelope, ValidationError } from '../Errors.js'
+ import type { Context as MiddlewareContext, Handler as MiddlewareHandler } from '../middleware.js'
+ import * as Parser from '../Parser.js'
+-
++
+@@ -238,11 +238,7 @@ export async function execute(command: any, options: execute.Options): Promise<e
+       }
+     return {
+       ok: false,
+-      error: {
+-        code: error instanceof IncurError ? error.code : 'UNKNOWN',
+-        message: error instanceof Error ? error.message : String(error),
 -        ...(error instanceof IncurError ? { retryable: error.retryable } : undefined),
-+        ...(error instanceof IncurError
-+          ? {
-+              retryable: error.retryable,
-+              ...(error.hint ? { hint: error.hint } : undefined),
-+              ...(error.stage ? { stage: error.stage } : undefined),
-+              ...(error.fieldErrors.length > 0
-+                ? { fieldErrors: error.fieldErrors }
-+                : undefined),
-+            }
-+          : undefined),
-       },
+-      },
++      error: toErrorEnvelope(error),
        ...(error instanceof IncurError && error.exitCode !== undefined
          ? { exitCode: error.exitCode }
-@@ -313,8 +322,10 @@ export declare namespace execute {
+         : undefined),
+@@ -313,8 +309,10 @@ export declare namespace execute {
          ok: false
          error: {
            code: string

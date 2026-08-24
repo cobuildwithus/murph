@@ -12,7 +12,6 @@ import {
 } from "@murphai/operator-config/vault-cli-errors";
 import { getVaultCliPackageVersion } from "../src/vault-cli-package.ts";
 import {
-  formatMurphCliError,
   installSqliteExperimentalWarningFilter,
   isBrokenPipeError,
   loadCliEnvFiles,
@@ -165,7 +164,7 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("formatMurphCliError classifies unknown failures without returning raw detail", () => {
+test("renderMurphCliEntrypointError classifies human failures without raw detail", async () => {
   const error = Object.assign(new Error("Config validation failed."), {
     code: "CONFIG_INVALID",
     details: {
@@ -176,8 +175,11 @@ test("formatMurphCliError classifies unknown failures without returning raw deta
     },
   });
 
+  const rendered = await renderMurphCliEntrypointError(error, [], { human: true });
+
+  assert.equal(rendered.machineReadable, false);
   assert.equal(
-    formatMurphCliError(error),
+    rendered.output,
     [
       "Error: Config validation failed.",
       "Stage: command",

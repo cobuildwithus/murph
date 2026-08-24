@@ -13,10 +13,7 @@ import {
   type CliInvocationPlan,
   type VaultCliProgramName,
 } from './vault-cli-routing.js'
-import {
-  projectVaultCliError,
-  type VaultCliErrorProjection,
-} from './vault-cli-error-projection.js'
+import type { VaultCliErrorProjection } from './vault-cli-error-projection.js'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -363,10 +360,6 @@ async function servePlannedVaultCliInvocation(input: {
   await cli.serve(input.argv, input.serveOptions)
 }
 
-export function formatMurphCliError(error: unknown): string {
-  return formatProjectedCliErrorForHuman(projectVaultCliError(error))
-}
-
 export interface RenderedMurphCliError {
   exitCode: number
   machineReadable: boolean
@@ -378,6 +371,7 @@ export async function renderMurphCliEntrypointError(
   argv: readonly string[],
   options: { human?: boolean | undefined } = {},
 ): Promise<RenderedMurphCliError> {
+  const { projectVaultCliError } = await import('./vault-cli-error-projection.js')
   const projected = projectVaultCliError(error)
   const explicitFormat = findExplicitOutputFormat(argv)
   const human = options.human ?? process.stdout.isTTY === true
