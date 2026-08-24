@@ -390,6 +390,7 @@ function createAssistantRunAutomationResult(
     replySkipped: 0,
     replyFailed: 0,
     lastError: null,
+    lastFailure: null,
   }
 }
 
