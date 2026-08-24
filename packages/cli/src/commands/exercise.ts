@@ -41,7 +41,7 @@ function getExerciseCatalogReader(
       undefined,
       {
         stage: 'exercise_catalog',
-        hint: 'Reinstall or rebuild the Murph CLI package, then retry.',
+        hint: 'Use only a simple conservative movement description without catalog details; if that is unsafe or insufficient, stop.',
       },
     )
   }

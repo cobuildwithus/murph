@@ -7,6 +7,7 @@ import {
   executableScheduleIntentSchema,
   formatScheduleIntentIssues,
   scheduledLogActionSchema,
+  scheduledLogFrontmatterSchema,
   scheduledLogStatusValues,
   type ExecutableScheduleIntent,
   type ExternalRef,
@@ -265,39 +266,54 @@ function buildScheduledLogMarkdown(record: ScheduledLogRecord): string {
   return stringifyFrontmatterDocument({ attributes: buildScheduledLogFrontmatter(record), body: record.body });
 }
 
+function invalidScheduledLogRegistry(): VaultError {
+  return new VaultError(
+    "VAULT_INVALID_SCHEDULED_LOG",
+    "Scheduled log registry document is invalid.",
+  );
+}
+
 function parseScheduledLogRecord(attributes: FrontmatterObject, relativePath: string, markdown: string): ScheduledLogRecord {
-  if (attributes.schemaVersion !== SCHEDULED_LOG_SCHEMA_VERSION || attributes.docType !== SCHEDULED_LOG_DOC_TYPE) {
-    throw new VaultError("VAULT_INVALID_SCHEDULED_LOG", "Scheduled log registry document has an unexpected shape.");
+  let parsedDocument;
+  try {
+    parsedDocument = parseFrontmatterDocument(markdown);
+  } catch {
+    throw invalidScheduledLogRegistry();
   }
-  const parsedDocument = parseFrontmatterDocument(markdown);
+
+  const parsedFrontmatter = scheduledLogFrontmatterSchema.safeParse(attributes);
+  if (!parsedFrontmatter.success) {
+    throw invalidScheduledLogRegistry();
+  }
+
+  const frontmatter = parsedFrontmatter.data;
   return {
-    schemaVersion: SCHEDULED_LOG_SCHEMA_VERSION,
-    docType: SCHEDULED_LOG_DOC_TYPE,
-    scheduledLogId: requireString(attributes.scheduledLogId, "scheduledLogId", 64),
-    slug: normalizeSlug(attributes.slug, "slug"),
-    title: normalizeScheduledLogTitle(attributes.title),
-    status: normalizeScheduledLogStatus(attributes.status),
-    summary: normalizeScheduledLogSummary(attributes.summary),
-    schedule: normalizeScheduleIntent(attributes.schedule),
-    action: normalizeScheduledLogAction(attributes.action),
-    tags: normalizeScheduledLogTags(attributes.tags),
-    createdAt: requireString(attributes.createdAt, "createdAt", 64),
-    updatedAt: requireString(attributes.updatedAt, "updatedAt", 64),
-    body: normalizeScheduledLogBody(parsedDocument.body),
+    ...frontmatter,
+    summary: frontmatter.summary ?? null,
+    tags: [...new Set(frontmatter.tags ?? [])].sort((left, right) => left.localeCompare(right)),
+    body: parsedDocument.body.replace(/\s+$/u, ""),
     relativePath,
     markdown,
   };
 }
 
 async function loadScheduledLogRecords(vaultRoot: string): Promise<ScheduledLogRecord[]> {
-  const records = await loadMarkdownRegistryDocuments({
-    vaultRoot,
-    directory: SCHEDULED_LOGS_DIRECTORY,
-    recordFromParts: parseScheduledLogRecord,
-    isExpectedRecord: (record) => record.docType === SCHEDULED_LOG_DOC_TYPE && record.schemaVersion === SCHEDULED_LOG_SCHEMA_VERSION,
-    invalidCode: "VAULT_INVALID_SCHEDULED_LOG",
-    invalidMessage: "Scheduled log registry document has an unexpected shape.",
-  });
+  let records: ScheduledLogRecord[];
+  try {
+    records = await loadMarkdownRegistryDocuments({
+      vaultRoot,
+      directory: SCHEDULED_LOGS_DIRECTORY,
+      recordFromParts: parseScheduledLogRecord,
+      isExpectedRecord: (record) => record.docType === SCHEDULED_LOG_DOC_TYPE && record.schemaVersion === SCHEDULED_LOG_SCHEMA_VERSION,
+      invalidCode: "VAULT_INVALID_SCHEDULED_LOG",
+      invalidMessage: "Scheduled log registry document is invalid.",
+    });
+  } catch (error) {
+    if (error instanceof VaultError && error.code === "VAULT_INVALID_FRONTMATTER") {
+      throw invalidScheduledLogRegistry();
+    }
+    throw error;
+  }
   return records.sort((left, right) =>
     left.title.localeCompare(right.title) || left.slug.localeCompare(right.slug) || left.scheduledLogId.localeCompare(right.scheduledLogId),
   );

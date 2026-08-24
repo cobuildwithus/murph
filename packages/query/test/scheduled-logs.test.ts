@@ -130,6 +130,7 @@ test("scheduled log queries list, read, filter, and show records across schedule
         "scheduledLogId: slog_01JX8T4QY2M5ZBV64ZP4N1DRB4",
         "slug: supplements",
         "title: Supplements",
+        "status: active",
         "schedule:",
         "  kind: every",
         "  everyMs: 43200000",
@@ -242,6 +243,50 @@ test("scheduled log queries reject malformed registry documents", async () => {
       () => listScheduledLogs(vaultRoot),
       isInvalidScheduledLogQueryError,
     );
+
+    const canonicalDocument = [
+      "---",
+      "schemaVersion: murph.frontmatter.scheduled-log.v1",
+      "docType: scheduled_log",
+      "scheduledLogId: slog_01JX8T5QY2M5ZBV64ZP4N1DRB5",
+      "slug: canonical-check",
+      "title: Canonical check",
+      "status: active",
+      "schedule:",
+      "  kind: dailyLocal",
+      "  localTime: 07:00",
+      "action:",
+      "  kind: intervention_session.add",
+      "  title: Canonical check",
+      "  interventionType: sauna",
+      "tags:",
+      "  - valid-tag",
+      "createdAt: 2026-04-22T07:00:00.000Z",
+      "updatedAt: 2026-04-22T07:00:00.000Z",
+      "---",
+    ].join("\n");
+
+    for (const [name, document] of [
+      ["uppercase-tag", canonicalDocument.replace("valid-tag", "UppercaseTag")],
+      [
+        "invalid-id",
+        canonicalDocument.replace(
+          "slog_01JX8T5QY2M5ZBV64ZP4N1DRB5",
+          "invalid-scheduled-log-id",
+        ),
+      ],
+    ] as const) {
+      await writeVaultFile(
+        vaultRoot,
+        "bank/scheduled-logs/bad-shape.md",
+        document,
+      );
+      await assert.rejects(
+        () => listScheduledLogs(vaultRoot),
+        isInvalidScheduledLogQueryError,
+        name,
+      );
+    }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

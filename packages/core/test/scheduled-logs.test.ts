@@ -698,7 +698,7 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     (error: unknown) =>
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
-      error.message === "Scheduled log registry document has an unexpected shape.",
+      error.message === "Scheduled log registry document is invalid.",
   );
 
   const badScheduleVault = await makeTempDirectory("murph-scheduled-logs-bad-schedule");
@@ -729,8 +729,8 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     () => listScheduledLogs({ vaultRoot: badScheduleVault }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_INVALID_INPUT" &&
-      error.message === "schedule.kind must match a supported scheduled-log schedule.",
+      error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+      error.message === "Scheduled log registry document is invalid.",
   );
 
   await fs.rm(path.join(badScheduleVault, "bank/scheduled-logs/bad-schedule.md"), {
@@ -762,7 +762,62 @@ test("scheduled logs reject malformed previews and broken registry documents", a
     () => listScheduledLogs({ vaultRoot: badScheduleVault }),
     (error: unknown) =>
       error instanceof VaultError &&
-      error.code === "VAULT_INVALID_INPUT" &&
-      error.message === "schedule must be an object.",
+      error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+      error.message === "Scheduled log registry document is invalid.",
   );
+
+  await fs.rm(path.join(badScheduleVault, "bank/scheduled-logs/non-object-schedule.md"), {
+    force: true,
+  });
+
+  const canonicalDocument = [
+    "---",
+    "schemaVersion: murph.frontmatter.scheduled-log.v1",
+    "docType: scheduled_log",
+    "scheduledLogId: slog_01JX8VCQY2M5ZBV64ZP4N1DRBC",
+    "slug: canonical-check",
+    "title: Canonical check",
+    "status: active",
+    "schedule:",
+    "  kind: dailyLocal",
+    "  localTime: 07:00",
+    "action:",
+    "  kind: intervention_session.add",
+    "  title: Canonical check",
+    "  interventionType: sauna",
+    "tags:",
+    "  - valid-tag",
+    "createdAt: 2026-04-22T07:00:00.000Z",
+    "updatedAt: 2026-04-22T07:00:00.000Z",
+    "---",
+  ].join("\n");
+
+  for (const [name, document] of [
+    ["uppercase-tag", canonicalDocument.replace("valid-tag", "UppercaseTag")],
+    [
+      "invalid-id",
+      canonicalDocument.replace(
+        "slog_01JX8VCQY2M5ZBV64ZP4N1DRBC",
+        "invalid-scheduled-log-id",
+      ),
+    ],
+    ["malformed-frontmatter", "---\nschemaVersion: [unterminated\n---\n"],
+  ] as const) {
+    const relativePath = `bank/scheduled-logs/${name}.md`;
+    await writeVaultFile(badScheduleVault, relativePath, document);
+
+    await assert.rejects(
+      () => listScheduledLogs({ vaultRoot: badScheduleVault }),
+      (error: unknown) =>
+        error instanceof VaultError &&
+        error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+        error.message === "Scheduled log registry document is invalid.",
+      name,
+    );
+    assert.equal(
+      await fs.readFile(path.join(badScheduleVault, relativePath), "utf8"),
+      document,
+    );
+    await fs.rm(path.join(badScheduleVault, relativePath), { force: true });
+  }
 });

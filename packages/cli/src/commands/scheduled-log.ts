@@ -146,21 +146,28 @@ function toScheduledLogListItem(
   };
 }
 
-function invalidScheduledLogOption(message: string): never {
+function invalidScheduledLogOption(
+  message: string,
+  paths: readonly string[],
+): never {
   throw new VaultCliError(
     "invalid_option",
     message,
     undefined,
     {
-      fields: [{
-        path: "$",
+      fields: paths.map((path) => ({
+        path,
         code: "invalid_option",
-        message: "Scheduled-log options are incompatible or incomplete.",
-      }],
+        message: "This scheduled-log option is incompatible or incomplete.",
+      })),
       hint: "Correct the listed scheduled-log fields and retry.",
       stage: "validation",
     },
   );
+}
+
+function invalidScheduledLogOptionFor(path: string) {
+  return (message: string): never => invalidScheduledLogOption(message, [path]);
 }
 
 function scheduledLogValidationMessage(issue: {
@@ -186,14 +193,28 @@ function scheduledLogValidationMessage(issue: {
   }
 }
 
-function requireStringOption(value: string | undefined, optionName: string): string {
+function requireStringOption(
+  value: string | undefined,
+  optionName: string,
+  path: string,
+): string {
   if (typeof value === "string" && value.length > 0) return value;
-  return invalidScheduledLogOption(`--${optionName} is required for this scheduled-log save mode.`);
+  return invalidScheduledLogOption(
+    `--${optionName} is required for this scheduled-log save mode.`,
+    [path],
+  );
 }
 
-function requireNumberOption(value: number | undefined, optionName: string): number {
+function requireNumberOption(
+  value: number | undefined,
+  optionName: string,
+  path: string,
+): number {
   if (typeof value === "number" && Number.isFinite(value)) return value;
-  return invalidScheduledLogOption(`--${optionName} is required for this scheduled-log save mode.`);
+  return invalidScheduledLogOption(
+    `--${optionName} is required for this scheduled-log save mode.`,
+    [path],
+  );
 }
 
 function parseQualifierValue(rawValue: string): string | number | boolean {
@@ -233,6 +254,7 @@ function parseMeasurementNoteEntries(
     ) {
       invalidScheduledLogOption(
         "Each --measurement-note entry must use N:note form when multiple measurements are provided.",
+        ["measurementNote"],
       );
     }
     notes.set(oneBasedIndex - 1, note);
@@ -274,6 +296,7 @@ function parseMeasurementQualifierEntries(
     ) {
       invalidScheduledLogOption(
         "Each --measurement-qualifier entry must use key=value form for one measurement or N:key=value form for multiple measurements.",
+        ["measurementQualifier"],
       );
     }
 
@@ -281,6 +304,7 @@ function parseMeasurementQualifierEntries(
     if (!targetQualifiers) {
       invalidScheduledLogOption(
         "Each --measurement-qualifier entry must use key=value form for one measurement or N:key=value form for multiple measurements.",
+        ["measurementQualifier"],
       );
     }
     targetQualifiers[key] = parseQualifierValue(rawValue);
@@ -298,29 +322,56 @@ function buildScheduleIntentFromOptions(options: {
 }): ExecutableScheduleIntent {
   switch (options.scheduleKind) {
     case "at":
-      return parseScheduledLogScheduleIntent({
-        kind: "at",
-        at: requireStringOption(options.scheduleAt, "schedule-at"),
-      });
+      return parseScheduledLogScheduleIntent(
+        {
+          kind: "at",
+          at: requireStringOption(options.scheduleAt, "schedule-at", "scheduleAt"),
+        },
+        "scheduleAt",
+      );
     case "every":
-      return parseScheduledLogScheduleIntent({
-        kind: "every",
-        everyMs: requireNumberOption(options.scheduleEveryMs, "schedule-every-ms"),
-      });
+      return parseScheduledLogScheduleIntent(
+        {
+          kind: "every",
+          everyMs: requireNumberOption(
+            options.scheduleEveryMs,
+            "schedule-every-ms",
+            "scheduleEveryMs",
+          ),
+        },
+        "scheduleEveryMs",
+      );
     case "cron":
-      return parseScheduledLogScheduleIntent({
-        kind: "cron",
-        expression: requireStringOption(options.scheduleCron, "schedule-cron"),
-      });
+      return parseScheduledLogScheduleIntent(
+        {
+          kind: "cron",
+          expression: requireStringOption(
+            options.scheduleCron,
+            "schedule-cron",
+            "scheduleCron",
+          ),
+        },
+        "scheduleCron",
+      );
     case "dailyLocal":
-      return parseScheduledLogScheduleIntent({
-        kind: "dailyLocal",
-        localTime: requireStringOption(options.scheduleLocalTime, "schedule-local-time"),
-      });
+      return parseScheduledLogScheduleIntent(
+        {
+          kind: "dailyLocal",
+          localTime: requireStringOption(
+            options.scheduleLocalTime,
+            "schedule-local-time",
+            "scheduleLocalTime",
+          ),
+        },
+        "scheduleLocalTime",
+      );
   }
 }
 
-function parseScheduledLogScheduleIntent(value: unknown): ExecutableScheduleIntent {
+function parseScheduledLogScheduleIntent(
+  value: unknown,
+  path: string,
+): ExecutableScheduleIntent {
   const parsed = executableScheduleIntentSchema.safeParse(value);
   if (!parsed.success) {
     const message =
@@ -332,7 +383,7 @@ function parseScheduledLogScheduleIntent(value: unknown): ExecutableScheduleInte
       undefined,
       {
         fields: parsed.error.issues.map((issue) => ({
-          path: ["schedule", ...issue.path],
+          path,
           code: issue.code,
           message: scheduledLogValidationMessage(issue),
         })),
@@ -370,6 +421,7 @@ function buildMealNutritionFromOptions(options: {
   if (hasProvenance && options.nutritionSource === undefined) {
     invalidScheduledLogOption(
       "--nutrition-source is required when nutrition provenance fields are provided.",
+      ["nutritionSource"],
     );
   }
 
@@ -400,12 +452,14 @@ function buildMeasurementsFromOptions(options: {
   if (!metrics || !units || !values || count === 0) {
     invalidScheduledLogOption(
       "measurement.add scheduled logs require repeated --measurement-metric, --measurement-value, and --measurement-unit fields.",
+      ["measurementMetric", "measurementValue", "measurementUnit"],
     );
   }
 
   if (values.length !== count || units.length !== count) {
     invalidScheduledLogOption(
       "Repeated --measurement-metric, --measurement-value, and --measurement-unit fields must have the same count.",
+      ["measurementMetric", "measurementValue", "measurementUnit"],
     );
   }
 
@@ -494,21 +548,25 @@ const workoutSetFieldKeys = [
   "addedWeightKg",
 ] as const;
 
+const invalidWorkoutMediaOption = invalidScheduledLogOptionFor("workoutMedia");
+const invalidWorkoutExerciseOption = invalidScheduledLogOptionFor("workoutExercise");
+const invalidWorkoutSetOption = invalidScheduledLogOptionFor("workoutSet");
+
 function parseWorkoutMediaEntry(entry: string): Record<string, unknown> {
-  const fields = parseCompactFields(entry, "workout-media", invalidScheduledLogOption);
+  const fields = parseCompactFields(entry, "workout-media", invalidWorkoutMediaOption);
   rejectUnsupportedCompactFields(
     fields,
     "workout-media",
     workoutMediaFieldKeys,
-    invalidScheduledLogOption,
+    invalidWorkoutMediaOption,
   );
   return {
-    kind: requireCompactString(fields, "kind", "workout-media", invalidScheduledLogOption),
+    kind: requireCompactString(fields, "kind", "workout-media", invalidWorkoutMediaOption),
     relativePath: requireCompactString(
       fields,
       "relativePath",
       "workout-media",
-      invalidScheduledLogOption,
+      invalidWorkoutMediaOption,
     ),
     ...(fields.has("mediaType") ? { mediaType: fields.get("mediaType") } : {}),
     ...(fields.has("caption") ? { caption: fields.get("caption") } : {}),
@@ -516,20 +574,25 @@ function parseWorkoutMediaEntry(entry: string): Record<string, unknown> {
 }
 
 function parseWorkoutExerciseEntry(entry: string): WorkoutExerciseDraft {
-  const fields = parseCompactFields(entry, "workout-exercise", invalidScheduledLogOption);
+  const fields = parseCompactFields(entry, "workout-exercise", invalidWorkoutExerciseOption);
   rejectUnsupportedCompactFields(
     fields,
     "workout-exercise",
     workoutExerciseFieldKeys,
-    invalidScheduledLogOption,
+    invalidWorkoutExerciseOption,
   );
   return {
-    name: requireCompactString(fields, "name", "workout-exercise", invalidScheduledLogOption),
+    name: requireCompactString(
+      fields,
+      "name",
+      "workout-exercise",
+      invalidWorkoutExerciseOption,
+    ),
     order: requireCompactInteger(
       fields,
       "order",
       "workout-exercise",
-      invalidScheduledLogOption,
+      invalidWorkoutExerciseOption,
     ),
     sets: [],
     ...(fields.has("sourceExerciseId")
@@ -546,21 +609,21 @@ function parseWorkoutSetEntry(entry: string): {
   exerciseOrder: number;
   set: Record<string, unknown>;
 } {
-  const fields = parseCompactFields(entry, "workout-set", invalidScheduledLogOption);
+  const fields = parseCompactFields(entry, "workout-set", invalidWorkoutSetOption);
   rejectUnsupportedCompactFields(
     fields,
     "workout-set",
     workoutSetFieldKeys,
-    invalidScheduledLogOption,
+    invalidWorkoutSetOption,
   );
   const exerciseOrder = requireCompactInteger(
     fields,
     "exercise",
     "workout-set",
-    invalidScheduledLogOption,
+    invalidWorkoutSetOption,
   );
   const set: Record<string, unknown> = {
-    order: requireCompactInteger(fields, "order", "workout-set", invalidScheduledLogOption),
+    order: requireCompactInteger(fields, "order", "workout-set", invalidWorkoutSetOption),
   };
 
   for (const key of [
@@ -582,7 +645,7 @@ function parseWorkoutSetEntry(entry: string): {
     "assistanceKg",
     "addedWeightKg",
   ]) {
-    const value = compactNumber(fields, key, "workout-set", invalidScheduledLogOption);
+    const value = compactNumber(fields, key, "workout-set", invalidWorkoutSetOption);
     if (value !== undefined) {
       set[key] = value;
     }
@@ -631,6 +694,7 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
     if (exercisesByOrder.has(exercise.order)) {
       invalidScheduledLogOption(
         `Duplicate --workout-exercise order ${exercise.order}.`,
+        ["workoutExercise"],
       );
     }
     exercisesByOrder.set(exercise.order, exercise);
@@ -642,6 +706,7 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
     if (!exercise) {
       invalidScheduledLogOption(
         `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
+        ["workoutSet"],
       );
     }
     exercise.sets.push(set);
@@ -659,7 +724,7 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
       undefined,
       {
         fields: parsed.error.issues.map((issue) => ({
-          path: ["action", "workout", ...issue.path],
+          path: workoutIssueOptionPath(issue.path),
           code: issue.code,
           message: scheduledLogValidationMessage(issue),
         })),
@@ -670,6 +735,31 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
   }
 
   return parsed.data;
+}
+
+function workoutIssueOptionPath(path: readonly PropertyKey[]): string {
+  switch (path[0]) {
+    case "sourceApp":
+      return "workoutSourceApp";
+    case "sourceWorkoutId":
+      return "workoutSourceWorkoutId";
+    case "startedAt":
+      return "workoutStartedAt";
+    case "endedAt":
+      return "workoutEndedAt";
+    case "routineId":
+      return "workoutRoutineId";
+    case "routineName":
+      return "workoutRoutineName";
+    case "sessionNote":
+      return "workoutSessionNote";
+    case "media":
+      return "workoutMedia";
+    case "exercises":
+      return path.includes("sets") ? "workoutSet" : "workoutExercise";
+    default:
+      return "workoutExercise";
+  }
 }
 
 interface ScheduledLogActionOptions {
@@ -746,22 +836,33 @@ const measurementActionOptionKeys = [
   "measurementValue",
 ] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
 
+export const scheduledLogActionOptionKeysByKind = {
+  "meal.add": mealActionOptionKeys,
+  "activity_session.add": activityActionOptionKeys,
+  "intervention_session.add": interventionActionOptionKeys,
+  "measurement.add": measurementActionOptionKeys,
+} as const;
+
 const actionSpecificOptionKeys = [
-  ...mealActionOptionKeys,
-  ...activityActionOptionKeys,
-  ...interventionActionOptionKeys,
-  ...measurementActionOptionKeys,
+  ...scheduledLogActionOptionKeysByKind["meal.add"],
+  ...scheduledLogActionOptionKeysByKind["activity_session.add"],
+  ...scheduledLogActionOptionKeysByKind["intervention_session.add"],
+  ...scheduledLogActionOptionKeysByKind["measurement.add"],
 ] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
 
 const allowedActionOptionKeys = {
-  "meal.add": new Set<keyof ScheduledLogActionOptions>(mealActionOptionKeys),
+  "meal.add": new Set<keyof ScheduledLogActionOptions>(
+    scheduledLogActionOptionKeysByKind["meal.add"],
+  ),
   "activity_session.add": new Set<keyof ScheduledLogActionOptions>(
-    activityActionOptionKeys,
+    scheduledLogActionOptionKeysByKind["activity_session.add"],
   ),
   "intervention_session.add": new Set<keyof ScheduledLogActionOptions>(
-    interventionActionOptionKeys,
+    scheduledLogActionOptionKeysByKind["intervention_session.add"],
   ),
-  "measurement.add": new Set<keyof ScheduledLogActionOptions>(measurementActionOptionKeys),
+  "measurement.add": new Set<keyof ScheduledLogActionOptions>(
+    scheduledLogActionOptionKeysByKind["measurement.add"],
+  ),
 } satisfies Record<
   ScheduledLogActionOptions["actionKind"],
   ReadonlySet<keyof ScheduledLogActionOptions>
@@ -794,6 +895,69 @@ function rejectIncompatibleScheduledLogActionOptions(
   );
 }
 
+function typedActionIssueOptionPath(path: readonly PropertyKey[]): string {
+  switch (path[0]) {
+    case "foodId":
+      return "foodId";
+    case "ingredients":
+      return "ingredient";
+    case "note":
+      return "actionNote";
+    case "tags":
+      return "actionTag";
+    case "title":
+      return "actionTitle";
+    case "activityType":
+      return "activityType";
+    case "durationMinutes":
+      return "durationMinutes";
+    case "distanceKm":
+      return "distanceKm";
+    case "interventionType":
+      return "interventionType";
+    case "protocolId":
+      return "protocolId";
+    case "measurements":
+      switch (path.at(-1)) {
+        case "value":
+          return "measurementValue";
+        case "unit":
+          return "measurementUnit";
+        case "qualifiers":
+          return "measurementQualifier";
+        case "note":
+          return "measurementNote";
+        default:
+          return "measurementMetric";
+      }
+    case "workout":
+      return workoutIssueOptionPath(path.slice(1));
+    case "nutrition":
+      switch (path.at(-1)) {
+        case "calories":
+          return "nutritionCalories";
+        case "proteinGrams":
+          return "nutritionProteinGrams";
+        case "carbsGrams":
+          return "nutritionCarbsGrams";
+        case "fatGrams":
+          return "nutritionFatGrams";
+        case "fiberGrams":
+          return "nutritionFiberGrams";
+        case "source":
+          return "nutritionSource";
+        case "confidence":
+          return "nutritionConfidence";
+        case "sourceDetail":
+          return "nutritionSourceDetail";
+        default:
+          return "nutritionSource";
+      }
+    default:
+      return "actionKind";
+  }
+}
+
 function parseScheduledLogAction(value: unknown): ScheduledLogAction {
   const parsed = scheduledLogActionSchema.safeParse(value);
   if (!parsed.success) {
@@ -803,7 +967,7 @@ function parseScheduledLogAction(value: unknown): ScheduledLogAction {
       undefined,
       {
         fields: parsed.error.issues.map((issue) => ({
-          path: ["action", ...issue.path],
+          path: typedActionIssueOptionPath(issue.path),
           code: issue.code,
           message: scheduledLogValidationMessage(issue),
         })),
@@ -818,6 +982,7 @@ function parseScheduledLogAction(value: unknown): ScheduledLogAction {
 function parseScheduledLogPayload(
   value: unknown,
   code: "invalid_option" | "invalid_payload",
+  surface: "typed_save" | "import_json",
 ): ScheduledLogScaffoldPayload {
   const parsed = scheduledLogScaffoldPayloadSchema.safeParse(value);
   if (!parsed.success) {
@@ -827,7 +992,7 @@ function parseScheduledLogPayload(
       undefined,
       {
         fields: parsed.error.issues.map((issue) => ({
-          path: issue.path,
+          path: scheduledLogPayloadIssuePath(issue.path, surface),
           code: issue.code,
           message: scheduledLogValidationMessage(issue),
         })),
@@ -837,6 +1002,39 @@ function parseScheduledLogPayload(
     );
   }
   return parsed.data;
+}
+
+function scheduledLogPayloadIssuePath(
+  path: readonly PropertyKey[],
+  surface: "typed_save" | "import_json",
+): string | readonly PropertyKey[] {
+  if (surface === "import_json") {
+    return path;
+  }
+
+  switch (path[0]) {
+    case "scheduledLogId":
+      return "id";
+    case "tags":
+      return "tag";
+    case "action":
+      return typedActionIssueOptionPath(path.slice(1));
+    case "schedule":
+      switch (path[1]) {
+        case "at":
+          return "scheduleAt";
+        case "everyMs":
+          return "scheduleEveryMs";
+        case "expression":
+          return "scheduleCron";
+        case "localTime":
+          return "scheduleLocalTime";
+        default:
+          return "scheduleKind";
+      }
+    default:
+      return typeof path[0] === "string" ? path[0] : path;
+  }
 }
 
 interface ScheduledLogVaultError extends Error {
@@ -852,7 +1050,10 @@ function isScheduledLogVaultError(error: unknown): error is ScheduledLogVaultErr
   );
 }
 
-function toScheduledLogCliError(error: unknown): unknown {
+function toScheduledLogCliError(
+  error: unknown,
+  options: { conflictIdPath?: "id" | "scheduledLogId" } = {},
+): unknown {
   if (error instanceof VaultCliError || !isScheduledLogVaultError(error)) {
     return error;
   }
@@ -883,7 +1084,7 @@ function toScheduledLogCliError(error: unknown): unknown {
         {
           fields: [
             {
-              path: "scheduledLogId",
+              path: options.conflictIdPath ?? "scheduledLogId",
               code: "conflict",
               message: "This id conflicts with the selected slug.",
             },
@@ -903,14 +1104,7 @@ function toScheduledLogCliError(error: unknown): unknown {
         "A scheduled-log registry document is invalid.",
         undefined,
         {
-          fields: [
-            {
-              path: "registry",
-              code: "invalid_document",
-              message: "A stored scheduled-log document failed canonical validation.",
-            },
-          ],
-          hint: "Repair or restore the invalid scheduled-log document, then retry.",
+          hint: "Stop. Do not retry, edit registry files, or write scheduled logs; report that stored registry data needs operator repair.",
           stage: "registry",
         },
       );
@@ -920,14 +1114,7 @@ function toScheduledLogCliError(error: unknown): unknown {
         "Scheduled-log data failed canonical validation.",
         undefined,
         {
-          fields: [
-            {
-              path: "$",
-              code: "contract_invalid",
-              message: "The scheduled-log data does not satisfy the canonical contract.",
-            },
-          ],
-          hint: "Correct the scheduled-log fields and retry.",
+          hint: "Review the scheduled-log inputs against the command schema before retrying.",
           stage: "validation",
         },
       );
@@ -938,11 +1125,12 @@ function toScheduledLogCliError(error: unknown): unknown {
 
 async function runScheduledLogOperation<TResult>(
   operation: () => Promise<TResult>,
+  options: { conflictIdPath?: "id" | "scheduledLogId" } = {},
 ): Promise<TResult> {
   try {
     return await operation();
   } catch (error) {
-    throw toScheduledLogCliError(error);
+    throw toScheduledLogCliError(error, options);
   }
 }
 
@@ -971,9 +1159,17 @@ function buildScheduledLogActionFromOptions(
       return parseScheduledLogAction({
         kind: "activity_session.add",
         ...commonFields,
-        title: requireStringOption(options.actionTitle, "action-title"),
-        activityType: requireStringOption(options.activityType, "activity-type"),
-        durationMinutes: requireNumberOption(options.durationMinutes, "duration-minutes"),
+        title: requireStringOption(options.actionTitle, "action-title", "actionTitle"),
+        activityType: requireStringOption(
+          options.activityType,
+          "activity-type",
+          "activityType",
+        ),
+        durationMinutes: requireNumberOption(
+          options.durationMinutes,
+          "duration-minutes",
+          "durationMinutes",
+        ),
         ...(options.distanceKm !== undefined ? { distanceKm: options.distanceKm } : {}),
         ...(options.actionNote ? { note: options.actionNote } : {}),
         ...(workout ? { workout } : {}),
@@ -982,8 +1178,12 @@ function buildScheduledLogActionFromOptions(
       return parseScheduledLogAction({
         kind: "intervention_session.add",
         ...commonFields,
-        title: requireStringOption(options.actionTitle, "action-title"),
-        interventionType: requireStringOption(options.interventionType, "intervention-type"),
+        title: requireStringOption(options.actionTitle, "action-title", "actionTitle"),
+        interventionType: requireStringOption(
+          options.interventionType,
+          "intervention-type",
+          "interventionType",
+        ),
         ...(options.durationMinutes !== undefined
           ? { durationMinutes: options.durationMinutes }
           : {}),
@@ -1291,12 +1491,14 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
           ),
         },
         "invalid_option",
+        "typed_save",
       );
       const result = await runScheduledLogOperation(() =>
         upsertScheduledLog({
           ...input,
           vaultRoot: context.options.vault,
-        })
+        }),
+        { conflictIdPath: "id" },
       );
 
       return {
@@ -1379,12 +1581,17 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         context.options.input,
         "scheduled-log payload",
       );
-      const input = parseScheduledLogPayload(rawInput, "invalid_payload");
+      const input = parseScheduledLogPayload(
+        rawInput,
+        "invalid_payload",
+        "import_json",
+      );
       const result = await runScheduledLogOperation(() =>
         upsertScheduledLog({
           ...input,
           vaultRoot: context.options.vault,
-        })
+        }),
+        { conflictIdPath: "scheduledLogId" },
       );
 
       return {
