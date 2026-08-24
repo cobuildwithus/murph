@@ -1160,7 +1160,7 @@ test('codex home selection covers explicit home validation, unreadable current h
   }
 })
 
-test('incur error bridge maps VaultCliError metadata and preserves typed defaults', async () => {
+test('incur error bridge maps rich VaultCliError metadata and preserves typed defaults', async () => {
   const middlewareContext: Parameters<typeof incurErrorBridge>[0] = {
     agent: false,
     command: 'setup',
@@ -1182,11 +1182,23 @@ test('incur error bridge maps VaultCliError metadata and preserves typed default
       incurErrorBridge(
         middlewareContext,
         async () => {
-          throw new VaultCliError('setup_bridge', 'bridge failure', {
-            retryable: true,
-            exitCode: 7,
-            ignored: 'value',
-          })
+          throw new VaultCliError(
+            'setup_bridge',
+            'bridge failure',
+            {
+              retryable: true,
+              exitCode: 7,
+              ignored: 'value',
+              issues: [
+                {
+                  path: ['assistant', 'provider'],
+                  code: 'invalid_value',
+                  expected: 'string',
+                  message: 'private raw validation message',
+                },
+              ],
+            },
+          )
         },
       ),
     (error: unknown) =>
@@ -1194,7 +1206,10 @@ test('incur error bridge maps VaultCliError metadata and preserves typed default
       error.code === 'setup_bridge' &&
       error.message === 'bridge failure' &&
       error.retryable === true &&
-      error.exitCode === 7,
+      error.exitCode === 7 &&
+      error.stage === 'validation' &&
+      error.hint === undefined &&
+      error.fieldErrors[0]?.path === 'assistant.provider',
   )
 
   await assert.rejects(
@@ -1214,6 +1229,22 @@ test('incur error bridge maps VaultCliError metadata and preserves typed default
       error.retryable === false &&
       error.exitCode === undefined,
   )
+
+  for (const nativeError of [
+    new Errors.ParseError({ message: 'Unknown option.' }),
+    new Errors.ValidationError({
+      message: 'Invalid arguments.',
+      fieldErrors: [],
+    }),
+  ]) {
+    await assert.rejects(
+      async () =>
+        incurErrorBridge(middlewareContext, async () => {
+          throw nativeError
+        }),
+      (error: unknown) => error === nativeError,
+    )
+  }
 })
 
 test('createSetupServices reuses deterministic linux toolchain inputs and writes setup state safely', async () => {
