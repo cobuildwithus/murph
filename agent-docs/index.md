@@ -512,6 +512,17 @@ Member-owned device-provider application authority, including the shared
 webhook admission fence for app-bound connections, is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
 
+Daily nutrition cards use one prompt-owned known-context suitability rule and
+one compact safety question before new numeric targets when needed. Routine
+cards do not run a universal clinical-history or measurement preflight, and a
+health-context fact constrains only the target or advice it materially affects.
+Stale or incomplete context snapshots likewise direct only the canonical read
+needed for a concrete concern or an owning workflow's explicit contract. The
+Goal, totals, card-validation, and delivery owners remain unchanged. This
+contract is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/operations/imessage-deliverability.md`.
+
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
