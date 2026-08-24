@@ -1,8 +1,8 @@
 # Simplify nutrition card prompt safety
 
-Status: active
+Status: completed
 Created: 2026-08-23
-Updated: 2026-08-23
+Updated: 2026-08-24
 
 ## Goal
 
@@ -82,3 +82,18 @@ Updated: 2026-08-23
 - Expected outcomes: no prompt requires the deleted universal history scan;
   known-context suppression, Goal authority, totals, and card validation remain
   covered and all required checks pass.
+
+## Verification results
+
+- 135 focused prompt, context-snapshot, skill, and response-card tests passed.
+- Assistant-engine typecheck passed.
+- The focused real App Server response-card boundary passed.
+- Changelog schema/generator tests and agent-docs drift passed.
+- The preliminary specialist review found an incomplete compact question, a
+  conflicting generic context-snapshot fanout, and a proof gap. The first two
+  were fixed. Deterministic assembled-prompt coverage was added for the third;
+  a large real-model safety matrix was rejected as disproportionate and brittle.
+- Parent final review found no surviving production reference to the deleted
+  checklist or universal condition, allergy, regimen, measurement, or history
+  fanout. Product UX verdict: Ready.
+Completed: 2026-08-24
