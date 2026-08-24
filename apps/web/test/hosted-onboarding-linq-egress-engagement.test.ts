@@ -78,9 +78,6 @@ import {
   createHostedLinqDeliveryIdempotencyLookupKey,
   createHostedLinqDeliverySourceRefLookupKey,
 } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
-import {
-  buildHostedSourceDeliveryStallNoticeKey,
-} from "@/src/lib/device-sync/source-delivery-stall-episode";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
@@ -1706,79 +1703,6 @@ describe("hosted Linq egress authority", () => {
       .not.toHaveBeenCalled();
   });
 
-  it.each([
-    { expectedStatus: 200, recovered: false },
-    { expectedStatus: 409, recovered: true },
-  ])(
-    "revalidates a queued wearable silence episode at provider entry (recovered=$recovered)",
-    async ({ expectedStatus, recovered }) => {
-      const sourceId = "dcs_abcdefghijklmnop";
-      const originalLastDataAt = "2026-08-01T00:00:00.000Z";
-      const notificationKey = buildHostedSourceDeliveryStallNoticeKey({
-        connectionId: "connection-1",
-        lastDataAt: originalLastDataAt,
-        lifecycleEpoch: 1,
-        sourceId,
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
-      });
-      const prisma = createPrismaStub({ homeChatId: "chat-home" });
-      prisma.$queryRaw.mockResolvedValue([{ id: sourceId }]);
-      prisma.deviceConnectionSource.findUnique.mockResolvedValue({
-        connection: { status: "active", userId: "member-1" },
-        connectionId: "connection-1",
-        id: sourceId,
-        lastDataAt: new Date(
-          recovered ? new Date().toISOString() : originalLastDataAt,
-        ),
-        lifecycleEpoch: 1,
-        sourceInstanceKey: "junction:garmin",
-        sourceProviderSlug: "garmin",
-        status: "connected",
-      });
-      mockPersistedLinqInbound({
-        chatId: "chat-home",
-        dedupeKey: "linq-event-wearable-recovery",
-        mailboxItemId: "mailbox-wearable-recovery",
-        messageId: "linq-message-wearable-recovery",
-        occurredAt: new Date().toISOString(),
-        prisma,
-        threadIsDirect: true,
-      });
-      mocks.getPrisma.mockReturnValue(prisma);
-
-      const response = await postHostedLinqEgressEngagement(
-        new Request("https://internal.example.test/engagement", {
-          body: JSON.stringify({
-            authorityCheckOnly: false,
-            idempotencyKey: notificationKey,
-            target: "chat-home",
-            targetKind: "thread",
-          }),
-          headers: { "content-type": "application/json" },
-          method: "POST",
-        }),
-      );
-
-      expect(response.status).toBe(expectedStatus);
-      if (recovered) {
-        await expect(response.json()).resolves.toMatchObject({
-          error: {
-            code: "HOSTED_DEVICE_DELIVERY_STALL_EPISODE_SUPERSEDED",
-            retryable: false,
-          },
-        });
-        expect(prisma.hostedLinqDelivery.createMany).not.toHaveBeenCalled();
-      } else {
-        await expect(response.json()).resolves.toMatchObject({
-          ok: true,
-          providerDispatchClaimed: true,
-        });
-        expect(prisma.hostedLinqDelivery.createMany).toHaveBeenCalledOnce();
-      }
-    },
-  );
-
   it("uses the persisted direct-route line when chat attribution and sender are absent", async () => {
     const homeLinePhone = "+15550100009";
     const homeLineLookupKey = createRequiredPhoneLookupKey(homeLinePhone);
@@ -1967,10 +1891,6 @@ function createPrismaStub(input: {
   const defaultLineLookupKey = createRequiredPhoneLookupKey(defaultLinePhone);
   const prisma = {
     $executeRaw: vi.fn().mockResolvedValue(1),
-    $queryRaw: vi.fn().mockResolvedValue([]),
-    deviceConnectionSource: {
-      findUnique: vi.fn().mockResolvedValue(null),
-    },
     hostedMember: {
       findUnique: vi.fn().mockResolvedValue(input.activeMemberAccess === false
         ? null

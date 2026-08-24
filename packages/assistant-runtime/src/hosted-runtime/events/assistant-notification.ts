@@ -48,6 +48,8 @@ type AssistantNotificationInput = Parameters<typeof sendAssistantNotification>[0
 
 const HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX =
   "assistant.notification.requested:";
+const HOSTED_RETIRED_SOURCE_DELIVERY_STALL_NOTIFICATION_PREFIX =
+  "assistant.notification.requested:device-delivery-stalled:v1:";
 const HOSTED_USAGE_REFERRAL_NOTIFICATION_KEY_PREFIX =
   "usage-referral-reward:";
 
@@ -59,7 +61,9 @@ type HostedAssistantNotificationSystemMailboxPreparation =
   | {
       kind: "terminal_no_send";
       outcome: HostedMailboxOutcome;
-      reason: "external_route_authority_stale";
+      reason:
+        | "external_route_authority_stale"
+        | "retired_source_delivery_stall";
     };
 
 export type HostedLegacyUsageReferralAuthorityClassification =
@@ -86,6 +90,36 @@ export async function prepareHostedAssistantNotificationSystemMailboxWake(
     wake: HostedExecutionAssistantNotificationRequestedWake;
   },
 ): Promise<HostedAssistantNotificationSystemMailboxPreparation> {
+  if (
+    input.mailboxDedupeKey.startsWith(
+      HOSTED_RETIRED_SOURCE_DELIVERY_STALL_NOTIFICATION_PREFIX,
+    )
+  ) {
+    return {
+      kind: "terminal_no_send",
+      outcome: createNoopMailboxEffect({
+        conversationMetrics: null,
+        deliveryIntentIds: [],
+        mailboxLane: "assistant-notification",
+        redactedLogEntries: [
+          emitHostedAssistantNotificationLifecycleLog({
+            extraDetails: {
+              eventCode:
+                "assistant.notification.retired_source_delivery_stall_terminal_no_send",
+              terminalDisposition: "retired_source_delivery_stall",
+            },
+            level: "info",
+            message:
+              "Hosted retired source-delivery notification ended without delivery.",
+            phase: "wake.running",
+            wake: input.wake,
+          }),
+        ],
+      }),
+      reason: "retired_source_delivery_stall",
+    };
+  }
+
   const authority = readLegacyHostedUsageReferralDirectLinqAuthority(input);
   if (!authority) {
     return {

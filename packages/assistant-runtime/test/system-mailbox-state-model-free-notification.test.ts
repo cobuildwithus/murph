@@ -9,10 +9,10 @@ type PendingItem = Parameters<typeof isHostedSystemMailboxModelFreeExactNotifica
 function exactNotification(input: {
   dedupeKey?: string;
   deliveryDedupeToken?: string;
-  deliveryIdempotencyKey?: string;
   laneSeq: string;
 }): PendingItem {
-  const deliveryDedupeToken = input.deliveryDedupeToken ?? "group-join:membership";
+  const deliveryDedupeToken =
+    input.deliveryDedupeToken ?? "group-join:membership";
   const mailboxDedupeKey = input.dedupeKey
     ?? `assistant.notification.requested:${deliveryDedupeToken}`;
   return {
@@ -25,8 +25,7 @@ function exactNotification(input: {
       notification: {
         deliveryDedupeToken,
         deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey:
-          input.deliveryIdempotencyKey ?? deliveryDedupeToken,
+        deliveryIdempotencyKey: deliveryDedupeToken,
         responsePolicy: { kind: "require_send_exact_text", text: "Confirmation" },
       },
     },
@@ -60,17 +59,14 @@ describe("blocked model-free exact notification frontier", () => {
     expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later] }).pending).toEqual([later]);
   });
 
-  it("admits a canonical exact wearable delivery-stall notice", () => {
+  it("admits a queued retired delivery-stall notification for terminal draining", () => {
     const notification = exactNotification({
-      deliveryDedupeToken: "device-delivery-stalled:v1:abc123",
+      deliveryDedupeToken:
+        "device-delivery-stalled:v1:legacy-episode",
       laneSeq: "1",
     });
-    expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification)).toBe(true);
-    expect(isHostedSystemMailboxModelFreeExactNotificationItem(exactNotification({
-      deliveryDedupeToken: "device-delivery-stalled:v1:abc123",
-      deliveryIdempotencyKey: "device-delivery-stalled:v1:different",
-      laneSeq: "1",
-    }))).toBe(false);
+    expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification))
+      .toBe(true);
   });
 
   it("does not overtake a generic notification at the durable frontier", () => {

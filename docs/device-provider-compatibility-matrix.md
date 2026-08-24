@@ -1,6 +1,6 @@
 # Device Provider Compatibility Matrix
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Purpose
 
@@ -94,19 +94,10 @@ only: it never changes source status, gates ingestion, or triggers
 recovery, and a failure to evaluate or report must not fail the sync pass. A
 source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.
-
-Member recovery checks are a separate, opt-in field on that same provider
-policy. Garmin currently admits one direct Linq check after 72 hours without a
-delivery, only for an active member with a recent inbound and an established
-direct thread. The existing mailbox dedupe key is scoped to source lifecycle
-and `last_data_at`, so repeated stale passes preserve one message per silence
-episode; a later delivery naturally creates a new episode. Materialization
-rechecks canonical source, connection, access, engagement, and route state
-after the sync transaction. The same episode key carries its opaque source-row
-locator to the existing Linq provider-entry transaction, which locks and
-rebuilds the current episode before claiming dispatch; a resumed, replaced, or
-disconnected source therefore ends as a terminal no-send. No recovery message
-is sent. Providers without an explicit recovery-check policy remain unchanged.
+This freshness evidence is operational only and never authorizes a direct
+member message: silence cannot distinguish a provider outage from intentional
+or occasional wear. Member-facing reconnect help requires an explicit
+reauthorization-required account or source error instead.
 
 Recovering a dead push carrier cannot be done by pulling, because there is
 nothing to pull and a data refresh cannot make the provider push again. The only

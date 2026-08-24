@@ -1373,7 +1373,9 @@ describe('applyMurphManagedAutomations', () => {
     expect(digestRecord?.instructions).toContain('still remember ten seconds after reading')
     expect(digestRecord?.instructions).toContain('New data or a decline alone is not substance')
     expect(digestRecord?.instructions).toContain('no connected device accounts, no live wearable, no recent manual logs')
-    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
+    expect(digestRecord?.instructions).toContain('Missing or stale data alone never authorizes outreach')
+    expect(digestRecord?.instructions).toContain('If the explicit reconnect-required branch applies, it wins over suppression')
+    expect(digestRecord?.instructions).not.toContain('sources show no new data for roughly a week')
     expect(digestRecord?.instructions).toContain('what was probably noise')
     expect(digestRecord?.instructions).toContain(
       'An official weather alert alone never clears the proactive send bar',
@@ -2178,7 +2180,7 @@ describe('applyMurphManagedAutomations', () => {
     ])
     expect(digestRecord?.tags).not.toContain(ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG)
     expect(digestRecord?.instructions).toContain('On this scheduled weekly run')
-    expect(digestRecord?.instructions).toContain('If the reconnect branch applies, it wins over suppression')
+    expect(digestRecord?.instructions).toContain('If the explicit reconnect-required branch applies, it wins over suppression')
     expect(digestRecord?.instructions).not.toContain('OLD weekly digest instructions')
   })
 

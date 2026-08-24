@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "quiet-wearables-stay-quiet",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Quiet wearables stay quiet",
+    "summary": "Murph no longer treats an intentionally quiet connected wearable as a reason to ask you to troubleshoot or reconnect.",
+    "details": "Reconnect help is reserved for connections that explicitly report an authorization problem; missing wearable data still suppresses unsupported digest claims.",
+    "relevanceTags": ["assistant", "devices", "reliability"],
+    "sourcePullRequests": []
+  }
+}

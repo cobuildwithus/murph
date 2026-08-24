@@ -21,9 +21,9 @@ describe("model-free system mailbox notification identity", () => {
     })).toBe(false);
   });
 
-  it("admits only a versioned wearable delivery-stall notification identity", () => {
+  it("admits the retired delivery-stall namespace for terminal no-send draining", () => {
     expect(isHostedSystemMailboxModelFreeNotification({
-      dedupeKey: "assistant.notification.requested:device-delivery-stalled:v1:abc123",
+      dedupeKey: "assistant.notification.requested:device-delivery-stalled:v1:legacy-episode",
       kind: "assistant.notification.requested",
     })).toBe(true);
     expect(isHostedSystemMailboxModelFreeNotification({

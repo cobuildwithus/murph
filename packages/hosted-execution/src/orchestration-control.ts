@@ -81,6 +81,8 @@ export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
 
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
   [
+    // Retained only so already-queued notifications reach the runtime's
+    // terminal no-send tombstone without requiring model access.
     "assistant.notification.requested:device-delivery-stalled:v1:",
     "assistant.notification.requested:group-join:",
   ] as const;

@@ -336,9 +336,6 @@
       "@murphai/device-syncd/public-provider-descriptors": [
         "../../packages/device-syncd/src/public-provider-descriptors.ts"
       ],
-      "@murphai/device-syncd/source-staleness": [
-        "../../packages/device-syncd/src/source-staleness.ts"
-      ],
       "@murphai/device-syncd/types": [
         "../../packages/device-syncd/src/types.ts"
       ]

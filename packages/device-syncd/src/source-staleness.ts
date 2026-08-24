@@ -37,13 +37,6 @@ export interface PushPrimarySourcePolicy {
    * threshold: a connect that never streams is a total outage for that member.
    */
   neverDeliveredHours: number;
-  /** Optional member-facing recovery prompt for evidence-backed providers. */
-  recoveryNotice?: {
-    companionAppName: string;
-    deviceDisplayName: string;
-    providerDisplayName: string;
-    silentHours: number;
-  };
 }
 
 const HOUR_MS = 60 * 60_000;
@@ -54,16 +47,7 @@ const HOUR_MS = 60 * 60_000;
  * send it, and that service silently stops for individual users.
  */
 const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy> = new Map([
-  ["garmin", {
-    silentHours: 36,
-    neverDeliveredHours: 6,
-    recoveryNotice: {
-      companionAppName: "Garmin Connect",
-      deviceDisplayName: "Garmin device",
-      providerDisplayName: "Garmin",
-      silentHours: 72,
-    },
-  }],
+  ["garmin", { silentHours: 36, neverDeliveredHours: 6 }],
 ]);
 
 export type PushPrimarySourceStalenessReason = "never_delivered" | "stopped_delivering";
@@ -98,30 +82,6 @@ export function readPushPrimarySourcePolicy(
 
 export function isPushPrimarySourceProvider(sourceProviderSlug: string): boolean {
   return readPushPrimarySourcePolicy(sourceProviderSlug) !== null;
-}
-
-export function readPushPrimarySourceRecoveryNoticePolicy(
-  sourceProviderSlug: string,
-): NonNullable<PushPrimarySourcePolicy["recoveryNotice"]> | null {
-  return readPushPrimarySourcePolicy(sourceProviderSlug)?.recoveryNotice ?? null;
-}
-
-export function isPushPrimarySourceRecoveryNoticeEligible(input: {
-  lastDataAt: string | null;
-  now: string;
-  sourceProviderSlug: string;
-  status: string;
-}): boolean {
-  if (input.status !== "connected" || input.lastDataAt === null) {
-    return false;
-  }
-  const policy = readPushPrimarySourceRecoveryNoticePolicy(input.sourceProviderSlug);
-  const now = parseTimestamp(input.now);
-  const lastDataAt = parseTimestamp(input.lastDataAt);
-  return policy !== null
-    && now !== null
-    && lastDataAt !== null
-    && now - lastDataAt >= policy.silentHours * HOUR_MS;
 }
 
 function parseTimestamp(value: string): number | null {

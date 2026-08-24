@@ -25,7 +25,6 @@ const USER_FACING_MESSAGE_TEMPLATE_KEYS = [
   "linq.invite_signup",
   "linq.daily_quota",
   "linq.home_redirect",
-  "linq.device_delivery_stalled",
   "linq.ai_usage.billing_inactive",
   "linq.ai_usage.starter_limit_reached",
   "linq.ai_usage.edge_limit_reached",
@@ -50,11 +49,6 @@ export interface UserFacingMessageContextByKey {
   }
   "linq.home_redirect": {
     homeRecipientPhone: string
-  }
-  "linq.device_delivery_stalled": {
-    companionAppName: string
-    deviceDisplayName: string
-    providerDisplayName: string
   }
   "linq.ai_usage.billing_inactive": {
     homeUrl: string
@@ -590,28 +584,6 @@ Sound good?`,
 {homeRecipientPhone}`,
     `Resend your last message on the number where I answer you:
 {homeRecipientPhone}`,
-  ],
-  "linq.device_delivery_stalled": [
-    `I haven't seen recent {providerDisplayName} data come through. Want to open {companionAppName} and check that your {deviceDisplayName} is charged and syncing?`,
-    `Recent {providerDisplayName} data hasn't reached me. Could you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
-    `It looks like {providerDisplayName} data has been quiet for a while. When you have a moment, can you open {companionAppName} and check the {deviceDisplayName} is charged and syncing?`,
-    `I haven't received new {providerDisplayName} data lately. Would you mind opening {companionAppName} and checking your {deviceDisplayName}'s charge and sync?`,
-    `Your recent {providerDisplayName} data isn't coming through. Can you open {companionAppName} and confirm the {deviceDisplayName} is charged and syncing?`,
-    `I may be missing your latest {providerDisplayName} data. Could you check {companionAppName} and make sure the {deviceDisplayName} has charge and is syncing?`,
-    `No recent {providerDisplayName} data has come through on my side. Want to open {companionAppName} and check the {deviceDisplayName}'s charge and sync?`,
-    `Your {providerDisplayName} data has been unusually quiet. Could you open {companionAppName} and check that the {deviceDisplayName} is charged and syncing?`,
-    `I haven't picked up fresh {providerDisplayName} data recently. Can you take a quick look in {companionAppName} and make sure the {deviceDisplayName} is charged and syncing?`,
-    `Recent data from {providerDisplayName} seems to have stopped coming through. Would you check {companionAppName} and confirm the {deviceDisplayName} is charged and syncing?`,
-    `I'm not seeing your latest {providerDisplayName} data. Could you open {companionAppName} and see whether the {deviceDisplayName} is charged and syncing?`,
-    `It has been a while since new {providerDisplayName} data reached me. Want to check {companionAppName} and make sure the {deviceDisplayName} is charged and syncing?`,
-    `Fresh {providerDisplayName} data hasn't come through lately. Can you open {companionAppName} and check the {deviceDisplayName}'s battery and sync?`,
-    `I haven't seen an update from {providerDisplayName} in a bit. Could you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
-    `Your latest {providerDisplayName} data may not be making it through. Would you check {companionAppName} and the {deviceDisplayName}'s charge and sync?`,
-    `I seem to be missing recent {providerDisplayName} data. Can you take a look in {companionAppName} and confirm the {deviceDisplayName} is charged and syncing?`,
-    `New {providerDisplayName} data has been quiet on my end. Could you open {companionAppName} and check that your {deviceDisplayName} has charge and is syncing?`,
-    `I haven't received a recent update from {providerDisplayName}. Want to check {companionAppName} and make sure the {deviceDisplayName} is charged and syncing?`,
-    `Your recent {providerDisplayName} readings aren't reaching me right now. Could you open {companionAppName} and check the {deviceDisplayName}'s charge and sync?`,
-    `It looks like I may be missing new {providerDisplayName} data. Can you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
   ],
   "linq.ai_usage.billing_inactive": [
     `Your Murph plan isn't active right now. You can sort that out here:

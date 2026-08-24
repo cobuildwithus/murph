@@ -563,6 +563,85 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
+  it("terminally drains a queued retired source-delivery notification without sending", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-retired-source-delivery-",
+    );
+    const deliveryToken =
+      "device-delivery-stalled:v1:legacy-episode";
+    const eventId =
+      `assistant.notification.requested:${deliveryToken}`;
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "member_123",
+      notification: {
+        deliveryDedupeToken: deliveryToken,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: deliveryToken,
+        instructions: "Retired notification instructions.",
+        responsePolicy: {
+          kind: "require_send_exact_text",
+          text: "Retired notification text.",
+        },
+        route: {
+          actorId: "linq-participant",
+          channel: "linq",
+          delivery: {
+            kind: "explicit",
+            target: "linq-retired-target",
+          },
+          identityId: "direct-identity",
+          threadId: "direct-thread",
+          threadIsDirect: true,
+        },
+      },
+      occurredAt: FIXED_NOW,
+    });
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: eventId,
+          id: "mailbox_retired_source_delivery",
+          laneSeq: "7",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+
+      const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => FIXED_NOW,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      });
+
+      expect(prepared).toMatchObject({
+        itemId: "mailbox_retired_source_delivery",
+        metrics: {
+          deliveryIntentIds: [],
+          mailboxLane: "assistant-notification",
+          redactedLogEntries: [
+            expect.objectContaining({
+              redacted: expect.objectContaining({
+                eventCode:
+                  "assistant.notification.retired_source_delivery_stall_terminal_no_send",
+                terminalDisposition: "retired_source_delivery_stall",
+              }),
+            }),
+          ],
+        },
+        status: "processed",
+      });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending)
+        .toEqual([]);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
   const legacyUsageReferralLookalikes: Array<{
     contextMemberId?: string;
     expectedClassification: Exclude<

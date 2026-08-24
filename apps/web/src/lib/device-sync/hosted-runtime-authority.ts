@@ -66,11 +66,6 @@ import {
 } from "./internal-runtime";
 import { buildStoredTokenBundle } from "./agent-session-token-bundle";
 import {
-  resolveHostedSourceDeliveryStallNoticeCandidate,
-  scheduleHostedSourceDeliveryStallNotices,
-  type HostedSourceDeliveryStallNoticeCandidate,
-} from "./source-delivery-stall-notice";
-import {
   hostedConnectionRecordArgs,
   hostedRuntimeRedactedConnectionRecordArgs,
   expandCanonicalHostedSourceProviderSlugFilter,
@@ -373,13 +368,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     userId: input.trustedUserId,
   });
   const updates: HostedExecutionDeviceSyncRuntimeApplyEntry[] = [];
-  const noticeCandidates: HostedSourceDeliveryStallNoticeCandidate[] = [];
 
   // Assistant-runtime maintenance owns per-attempt job failure telemetry. Web
   // applies only the resulting canonical connection state.
   for (const update of parsed.updates) {
     const preparedConnection = preparedConnections.get(update.connectionId) ?? null;
-    const appliedResult = await controlPlane.store.withConnectionMutationLock(
+    const applied = await controlPlane.store.withConnectionMutationLock(
       update.connectionId,
       async (tx) => {
         const record = await tx.deviceConnection.findFirst({
@@ -392,15 +386,12 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
         if (!record || !preparedConnection) {
           return {
-            applied: {
-              connection: null,
-              connectionId: update.connectionId,
-              status: "missing",
-              tokenUpdate: "missing",
-              writeUpdate: "missing",
-            } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry,
-            noticeCandidates: [] as HostedSourceDeliveryStallNoticeCandidate[],
-          };
+            connection: null,
+            connectionId: update.connectionId,
+            status: "missing",
+            tokenUpdate: "missing",
+            writeUpdate: "missing",
+          } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
         }
 
         const secretAuthorityCurrent = isHostedRuntimeApplySecretAuthorityCurrent(
@@ -696,88 +687,32 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
         }
 
         return {
-          applied: {
-            connection: buildHostedRuntimeConnectionSnapshot(
-              writtenRecord ?? record,
-              null,
-              durableExternalAccountId,
-              [],
-              {
-                forceReauthorizationRequired:
-                  !providerApplicationBindingCurrent,
-                includeCredentialMaterial: false,
-              },
-            ).connection,
-            connectionId: update.connectionId,
-            status: "updated",
-            tokenUpdate,
-            writeUpdate,
-          } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry,
-          noticeCandidates: resolveHostedRuntimeSourceDeliveryStallNoticeCandidates({
-            connectionId: update.connectionId,
-            currentSources: sources,
-            now: appliedAt,
-            sourceUpdates: sourceUpdates.toApply,
-          }),
-        };
+          connection: buildHostedRuntimeConnectionSnapshot(
+            writtenRecord ?? record,
+            null,
+            durableExternalAccountId,
+            [],
+            {
+              forceReauthorizationRequired:
+                !providerApplicationBindingCurrent,
+              includeCredentialMaterial: false,
+            },
+          ).connection,
+          connectionId: update.connectionId,
+          status: "updated",
+          tokenUpdate,
+          writeUpdate,
+        } satisfies HostedExecutionDeviceSyncRuntimeApplyEntry;
       },
     );
-    updates.push(appliedResult.applied);
-    noticeCandidates.push(...appliedResult.noticeCandidates);
+    updates.push(applied);
   }
-  scheduleHostedSourceDeliveryStallNotices({
-    candidates: noticeCandidates,
-    now: appliedAt,
-    userId: input.trustedUserId,
-  });
 
   return {
     appliedAt,
     updates,
     userId: input.trustedUserId,
   };
-}
-
-function resolveHostedRuntimeSourceDeliveryStallNoticeCandidates(input: {
-  connectionId: string;
-  currentSources: readonly HostedDeviceConnectionSource[];
-  now: string;
-  sourceUpdates: readonly HostedRuntimeConnectionSourceWrite[];
-}): HostedSourceDeliveryStallNoticeCandidate[] {
-  const updatesByKey = new Map(
-    input.sourceUpdates.map((source) => [source.sourceInstanceKey, source]),
-  );
-  const sourceKeys = new Set([
-    ...input.currentSources.map((source) => source.sourceInstanceKey),
-    ...input.sourceUpdates.map((source) => source.sourceInstanceKey),
-  ]);
-  const currentByKey = new Map(
-    input.currentSources.map((source) => [source.sourceInstanceKey, source]),
-  );
-  const candidates: HostedSourceDeliveryStallNoticeCandidate[] = [];
-  for (const sourceInstanceKey of sourceKeys) {
-    const current = currentByKey.get(sourceInstanceKey);
-    const update = updatesByKey.get(sourceInstanceKey);
-    if (!current && !update) {
-      continue;
-    }
-    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate({
-      connectionId: input.connectionId,
-      lastDataAt: update && Object.prototype.hasOwnProperty.call(update, "lastDataAt")
-        ? update.lastDataAt ?? null
-        : current?.lastDataAt ?? null,
-      lifecycleEpoch: update?.lifecycleEpoch ?? current?.lifecycleEpoch ?? null,
-      now: input.now,
-      sourceId: current?.id ?? "",
-      sourceInstanceKey,
-      sourceProviderSlug: update?.sourceProviderSlug ?? current?.sourceProviderSlug ?? "",
-      status: update?.status ?? current?.status ?? "disconnected",
-    });
-    if (candidate) {
-      candidates.push(candidate);
-    }
-  }
-  return candidates;
 }
 
 async function prepareHostedRuntimeApplyConnections(input: {
