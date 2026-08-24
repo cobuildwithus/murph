@@ -645,15 +645,11 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
         {
           exitCode: 7,
           retryable: true,
-        },
-        {
-          stage: 'validation',
-          hint: 'Correct the weekly schedule and retry.',
-          fields: [
+          issues: [
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
-              expected: 'IANA time zone',
+              expected: 'string',
               message: 'Use a valid IANA time zone.',
             },
           ],
@@ -669,23 +665,20 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
   assert.equal(result.envelope.error?.message, 'bridge preserved the command error')
   assert.equal(result.envelope.error?.retryable, true)
   assert.equal(result.envelope.error?.stage, 'validation')
-  assert.equal(
-    result.envelope.error?.hint,
-    'Correct the weekly schedule and retry.',
-  )
+  assert.equal(result.envelope.error?.hint, undefined)
   assert.deepEqual(result.envelope.error?.fieldErrors, [
     {
       code: 'invalid_value',
       path: 'schedule.timeZone',
-      expected: 'IANA time zone',
+      expected: 'string',
       received: 'invalid',
-      message: 'Use a valid IANA time zone.',
+      message: 'This field is invalid.',
     },
   ])
   assert.equal(result.exitCode, 7)
 })
 
-test('Cli.fetch returns rich repair fields without arbitrary error context', async () => {
+test('Cli.fetch returns safe validation fields without arbitrary error context', async () => {
   const cli = Cli.create('bridge-fetch-smoke', {
     description: 'bridge fetch smoke test',
     version: '0.0.0-test',
@@ -700,15 +693,11 @@ test('Cli.fetch returns rich repair fields without arbitrary error context', asy
         {
           ignored: 'private-submitted-value',
           retryable: false,
-        },
-        {
-          stage: 'validation',
-          hint: 'Correct the weekly schedule and retry.',
-          fields: [
+          issues: [
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
-              expected: 'IANA time zone',
+              expected: 'string',
               message: 'Use a valid IANA time zone.',
             },
           ],
@@ -725,17 +714,14 @@ test('Cli.fetch returns rich repair fields without arbitrary error context', asy
   assert.equal(envelope.error.code, 'BRIDGE_FETCH_SMOKE')
   assert.equal(envelope.error.retryable, false)
   assert.equal(envelope.error.stage, 'validation')
-  assert.equal(
-    envelope.error.hint,
-    'Correct the weekly schedule and retry.',
-  )
+  assert.equal(envelope.error.hint, undefined)
   assert.deepEqual(envelope.error.fieldErrors, [
     {
       code: 'invalid_value',
       path: 'schedule.timeZone',
-      expected: 'IANA time zone',
+      expected: 'string',
       received: 'invalid',
-      message: 'Use a valid IANA time zone.',
+      message: 'This field is invalid.',
     },
   ])
   assert.equal(JSON.stringify(envelope).includes('private-submitted-value'), false)

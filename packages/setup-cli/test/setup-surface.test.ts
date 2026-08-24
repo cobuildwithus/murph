@@ -64,16 +64,12 @@ async function runJsonCli(args: string[]): Promise<{
         {
           exitCode: 9,
           retryable: true,
-        },
-        {
-          stage: 'validation',
-          hint: 'Correct the setup option and retry.',
-          fields: [
+          issues: [
             {
               path: ['assistant', 'provider'],
               code: 'invalid_value',
-              message: 'Use a supported assistant provider.',
-              expected: 'supported provider',
+              message: 'private raw validation message',
+              expected: 'string',
             },
           ],
         },
@@ -196,17 +192,14 @@ test('VaultCliError remains a typed incur envelope through the setup bridge', as
   )
   assert.equal(result.envelope.error?.retryable, true)
   assert.equal(result.envelope.error?.stage, 'validation')
-  assert.equal(
-    result.envelope.error?.hint,
-    'Correct the setup option and retry.',
-  )
+  assert.equal(result.envelope.error?.hint, undefined)
   assert.deepEqual(result.envelope.error?.fieldErrors, [
     {
       code: 'invalid_value',
       path: 'assistant.provider',
-      expected: 'supported provider',
+      expected: 'string',
       received: 'invalid',
-      message: 'Use a supported assistant provider.',
+      message: 'This field is invalid.',
     },
   ])
   assert.equal(result.exitCode, 9)

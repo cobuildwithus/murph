@@ -1189,14 +1189,12 @@ test('incur error bridge maps rich VaultCliError metadata and preserves typed de
               retryable: true,
               exitCode: 7,
               ignored: 'value',
-            },
-            {
-              stage: 'validation',
-              hint: 'Correct the setup option and retry.',
-              fields: [
+              issues: [
                 {
                   path: ['assistant', 'provider'],
-                  message: 'Use a supported assistant provider.',
+                  code: 'invalid_value',
+                  expected: 'string',
+                  message: 'private raw validation message',
                 },
               ],
             },
@@ -1210,7 +1208,7 @@ test('incur error bridge maps rich VaultCliError metadata and preserves typed de
       error.retryable === true &&
       error.exitCode === 7 &&
       error.stage === 'validation' &&
-      error.hint === 'Correct the setup option and retry.' &&
+      error.hint === undefined &&
       error.fieldErrors[0]?.path === 'assistant.provider',
   )
 

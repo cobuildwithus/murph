@@ -87,7 +87,7 @@ export function buildAssistantCliGuidanceText(
   return [
     `\`${access.rawCommand}\` is the canonical Murph CLI. \`${access.setupCommand}\` is the setup entrypoint and also exposes the same top-level \`chat\` and \`run\` aliases after setup.`,
     'Use the matching local CLI command directly, prefer `--format json` for machine-readable output, and do not run recursive assistant or delivery commands such as `assistant chat`, `assistant ask`, `assistant run`, `assistant deliver`, `chat`, or `run` from inside an assistant turn.',
-    'When a CLI error includes `fieldErrors`, use them as value-free field repair guidance; `hint` is the next safe action and `stage` identifies where the failure occurred. `retryable` governs only repeating the unchanged call: `true` permits it; `false` still permits a corrected call or a call after the named prerequisite is resolved; otherwise stop. Never infer or echo details omitted from the error envelope.',
+    'For CLI errors, use `fieldErrors` and `hint` to correct the call; `stage` names the failure point. Repeat an unchanged call only when `retryable` is true, and never infer or echo omitted details.',
   ].join('\n\n')
 }
 

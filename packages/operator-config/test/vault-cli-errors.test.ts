@@ -1,55 +1,25 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  createVaultCliRepair,
   describeVaultCliFailure,
   VaultCliError,
 } from '../src/vault-cli-errors.ts'
 import { projectVaultCliError } from '../src/vault-cli-error-projection.ts'
 
-describe('createVaultCliRepair', () => {
-  test('bounds and normalizes the explicit model-facing repair contract', () => {
-    const repair = createVaultCliRepair({
-      stage: 'validation',
-      hint: ` Remove the unsupported field. ${'x'.repeat(400)} `,
-      fields: Array.from({ length: 14 }, (_, index) => ({
-        path: ['items', index, index === 0 ? 'private value' : 'name'],
-        code: index === 0 ? 'invalid type with spaces' : 'invalid_type',
-        message: ` Invalid field ${index}. `,
-        expected: 'string',
-      })),
-    })
-
-    expect(repair.stage).toBe('validation')
-    expect(repair.hint?.length).toBeLessThanOrEqual(320)
-    expect(repair.fields).toHaveLength(13)
-    expect(repair.fields[0]).toEqual({
-      path: 'items.0.<field>',
-      message: 'Invalid field 0.',
-      expected: 'string',
-    })
-    expect(repair.fields.at(-1)).toEqual({
-      path: '$',
-      code: 'issues_omitted',
-      message: '2 additional validation issues were omitted.',
-    })
-  })
-
-  test('normalizes repair input at the error boundary', () => {
-    const error = new VaultCliError('invalid_payload', 'Payload is invalid.', undefined, {
-      fields: Array.from({ length: 14 }, (_, index) => ({
-        path: index === 0 ? 'private submitted path' : ['items', index],
-        message: ` Invalid field ${index}. `,
-      })),
-    })
-
-    expect(error.repair?.fields).toHaveLength(13)
-    expect(error.repair?.fields[0]?.path).toBe('<field>')
-    expect(error.repair?.fields.at(-1)?.code).toBe('issues_omitted')
-  })
-})
-
 describe('projectVaultCliError', () => {
+  test('keeps context as the sole VaultCliError metadata channel', () => {
+    const context = { retryable: true }
+    const error = new VaultCliError('temporary_failure', 'Retry later.', context)
+
+    expect(error.context).toBe(context)
+    expect(Object.hasOwn(error, 'repair')).toBe(false)
+    expect(projectVaultCliError(error)).toEqual({
+      code: 'temporary_failure',
+      message: 'Retry later.',
+      retryable: true,
+    })
+  })
+
   test('projects Zod-like VaultCliError details without raw issue text', () => {
     const submittedValue = 'private-submitted-value'
     const providerBody = 'private-provider-response'
@@ -104,7 +74,7 @@ describe('projectVaultCliError', () => {
     expect(JSON.stringify(projection)).not.toContain(providerBody)
   })
 
-  test('prefers explicit repair guidance over inferred Zod issue guidance', () => {
+  test('ignores repair-shaped arbitrary context beside established Zod issues', () => {
     const projection = projectVaultCliError(
       new VaultCliError(
         'invalid_payload',
@@ -116,29 +86,30 @@ describe('projectVaultCliError', () => {
             path: ['inferred'],
             message: 'private inferred issue',
           }],
-        },
-        {
-          stage: 'owner-validation',
-          hint: 'Use the documented owner field.',
-          fields: [{
-            code: 'owner_rule',
-            path: ['explicit'],
-            message: 'Use the supported value.',
-          }],
+          repair: {
+            stage: 'owner-validation',
+            hint: 'private owner hint',
+            fields: [{
+              code: 'owner_rule',
+              path: ['explicit'],
+              message: 'private owner message',
+            }],
+          },
         },
       ),
     )
 
     expect(projection).toMatchObject({
-      stage: 'owner-validation',
-      hint: 'Use the documented owner field.',
+      stage: 'validation',
       fieldErrors: [{
-        code: 'owner_rule',
-        path: 'explicit',
-        message: 'Use the supported value.',
+        code: 'invalid_type',
+        path: 'inferred',
+        message: 'This field is invalid.',
       }],
     })
-    expect(JSON.stringify(projection)).not.toContain('inferred')
+    expect(projection.hint).toBeUndefined()
+    expect(JSON.stringify(projection)).not.toContain('explicit')
+    expect(JSON.stringify(projection)).not.toContain('private owner')
     expect(JSON.stringify(projection)).not.toContain('private inferred issue')
   })
 
