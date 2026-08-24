@@ -2,7 +2,10 @@
 
 Date audited: 2026-08-23
 
-Status: complete static audit with focused synthetic and test proof
+Last routing update: 2026-08-24
+
+Status: complete audit with focused synthetic and test proof; implementation
+candidates are open and still gated
 
 ## Executive summary
 
@@ -14,9 +17,11 @@ sees messages such as `Food payload is invalid.` or `Invalid workout session
 fields.` even though the failing paths already exist in memory.
 
 This is primarily a **model-facing error-envelope problem**, not a request to log
-more private data. The first implementation should establish one bounded,
-value-free repair-detail contract and carry it through the final machine JSON.
-Durable logs should remain much smaller and contain only safe categories.
+more private data. The primary implementation surface is one bounded,
+value-free repair-detail contract carried through the final machine JSON so the
+model can correct its call. Increasing durable log verbosity alone would not
+make the model recover. Durable logs should remain much smaller and contain
+only safe categories.
 
 Two other cross-cutting problems deserve immediate attention:
 
@@ -38,12 +43,42 @@ merged on 2026-08-10, fixed preservation of explicit recurring time zones. The
 reported schedule shape—weekly cron plus `America/New_York`—is therefore valid
 on the audited head.
 
-That does not close the error-quality bug. Internal automation schedule, route,
-override, save, and import parsers still run after Incur's argument parser; a
-failure there can become `UNKNOWN` with raw Zod text instead of a field-specific
-error. No open PR was identified as a broad Vault CLI model-recovery fix during
-this audit. The original hosted-group production call was not replayed, so this
-document does not claim that exact historical route is operationally closed.
+The reproduced hosted-group rejection was not caused by that cron or time-zone
+shape. The submitted payload set `supportKind: "check_in"` without the required
+paired `supportSeriesId`. Those fields opt into plan-owned support and must be
+provided together; an ordinary group check-in should omit both. The hosted
+tool's field-pair refinement and description state that relationship at
+`packages/assistant-engine/src/assistant-codex/dynamic-tools/automation.ts:207-225`
+and `:428-441`.
+
+That identifies the rejected field relationship but does not close the
+error-quality bug: the model received generic invalid arguments instead of the
+field-specific repair already available to the hosted validator. Internal
+automation schedule, route, override, save, and import parsers can likewise
+lose actionable detail after Incur's argument parser. The original production
+call was not replayed, so this document does not claim an operational rollout.
+
+## Implementation routing and status
+
+As of 2026-08-24, the shared foundation and all nine implementation packages
+below are **open candidate PRs**. They are not merged fixes, production proof, or
+completed review evidence. PRs 2204 through 2212 are stacked on PR 2202 and
+remain gated by their required review, CI, merge, and deployment paths. This
+table routes audit findings to proposed owners; the findings remain open until
+the applicable stack lands and its gates succeed.
+
+| Candidate PR | Audit package routed there |
+| --- | --- |
+| [#2202](https://github.com/cobuildwithus/murph/pull/2202) | Shared envelope/privacy/transport foundation: VCE-001 through VCE-003. |
+| [#2204](https://github.com/cobuildwithus/murph/pull/2204) | Activity and measurement: workout/scheduled-log portions of VCE-004, exercise artifact handling from VCE-017, scheduled-log portions of VCE-018 and VCE-019; silent incompatible scheduled-log flags; date-only measurement time-zone correctness. |
+| [#2205](https://github.com/cobuildwithus/murph/pull/2205) | Nutrition and regimens: food/recipe/protocol repair producers under VCE-001 and VCE-016, nutrition JSON input handling under VCE-011, and label-provider taxonomy under VCE-014. |
+| [#2206](https://github.com/cobuildwithus/murph/pull/2206) | Samples: VCE-011 and VCE-012; silent filtering of invalid JSON array members; batch list-to-show ID mismatch. |
+| [#2207](https://github.com/cobuildwithus/murph/pull/2207) | Experiments, Habitat, and Murph Age: their portions of VCE-004, VCE-009, and VCE-017; silent invalid Age evidence shapes. |
+| [#2208](https://github.com/cobuildwithus/murph/pull/2208) | Knowledge and reads: VCE-010, research/Exa portions of VCE-014, Commons artifact portions of VCE-017, and memory portion of VCE-019. |
+| [#2209](https://github.com/cobuildwithus/murph/pull/2209) | Clinical and health: clinical producers under VCE-001, VCE-004, and VCE-011; strict immunization import/payload discovery; validated health-list statuses. |
+| [#2210](https://github.com/cobuildwithus/murph/pull/2210) | Events and documents: event repair producers under VCE-001, document/intake input handling under VCE-011, journal/intake/export portions of VCE-016, and export I/O classification under VCE-018. |
+| [#2211](https://github.com/cobuildwithus/murph/pull/2211) | Devices, routes, and wearables: VCE-013 and VCE-015; wearable metric/date silent-success cases; optional route-elevation degradation. |
+| [#2212](https://github.com/cobuildwithus/murph/pull/2212) | Core and assistant runtime: automation portion of VCE-004, VCE-005 through VCE-008, core portions of VCE-009 and VCE-018, and malformed operator-config mutation cases for `model` and assistant self-target commands. It also carries a candidate regression for the valid weekly cron/time-zone shape and the paired support fields. |
 
 ## Scope and confidence
 
@@ -170,7 +205,7 @@ corrupt-state failures are different paths.
 | VCE-009 | `init`; `vault repair*`; `habitat save/show/list/coverage`; `intake project`; experiment start conflict | Known core domain errors bypass existing mappers and become `UNKNOWN`, sometimes with a readable message but no stable action class. | Map at the use-case/CLI boundary to `already_exists`, `conflict`, `not_found`, `invalid_payload`, or `contract_invalid`, with the relevant inspect/edit/validate command. |
 | VCE-010 | Root `show/list`; family shows/lists; `search query`; `timeline`; `query projection rebuild`; all `memory` leaves | Malformed metadata, Markdown, JSONL, or the canonical memory document becomes `UNKNOWN`, often without a vault-relative source and line; a broad read can be blocked by one record. | Query-owned parse errors with a safe vault-relative path and line, then typed CLI mapping and a truthful validate/repair action. |
 | VCE-011 | `document import`; `intake import`; all JSON-file imports including samples and nutrition/regimen families | Missing file, directory, permission denial, parse failure, and empty stdin collapse to generic read/JSON messages because safe cause/hint context is dropped. | Classify safe filesystem and JSON-location facts, name the input option, and expose the existing stdin repair hint; never return an absolute path or payload. |
-| VCE-012 | `samples import-json`; `samples import-csv`; `samples csv import/profile` | Array indices disappear; all-invalid CSVs discard computed skip reasons; inference failures hide the headers and override flags. | Preserve bounded `samples[N].field` paths, skip-reason counts, available header names, and exact `--ts-column`/`--value-column`/`--stream` repair flags without raw cells. |
+| VCE-012 | `samples import-json`; `samples import-csv`; `samples csv import/profile` | Array indices disappear; all-invalid CSVs discard computed skip reasons; inference failures do not provide value-free corrective flag guidance. CSV header names are submitted data and must not be echoed. | Preserve bounded `samples[N].field` paths and skip-reason counts. For CSV inference, return fixed guidance naming only `--delimiter`, `--ts-column`, `--value-column`, and `--stream`; never serialize discovered header names or raw cells. |
 | VCE-013 | `route resolve-address`; `route estimate` | Mapbox transport/auth/rate/no-route/invalid-response failures are plain `UNKNOWN`; optional elevation failure discards an otherwise valid route. | Typed phase/status buckets with correct retryability; degrade optional elevation to `null` plus a warning or say to retry without `--elevation`. |
 | VCE-014 | `research scout/scout-batch`; food and supplement label searches | Exa and label-provider auth, 429, 5xx, timeout, malformed 2xx, and other failures are generic or incorrectly non-retryable despite safe status/stage already being known. | Status-bucketed codes, bounded safe messages, correct retryability, and no provider response body. |
 | VCE-015 | Hosted device actions for provider list/connect/account list/reconcile | A wrapper replaces every upstream typed failure with `device operation is unavailable`; oversized lists only say `device result is too large`. | Allowlist safe code/message/retryability from known errors; for oversized results name provider/source filters. Keep generic fallback for unknowns. |
@@ -257,6 +292,11 @@ first.
 
 Model-facing output and durable logging have different purposes.
 
+The primary recovery surface is the structured machine error returned to the
+model. Durable logging is secondary operational evidence and cannot substitute
+for a repair envelope the caller can see. Adding raw error context to either
+surface would make the system less safe, not more recoverable.
+
 The model-facing error may contain:
 
 - command leaf and stable error code;
@@ -322,6 +362,8 @@ is appropriate only if descriptors are intentionally made exhaustive.
 - No production hosted-group automation save was executed.
 - Provider and operating-system branches were selectively simulated rather
   than exhaustively fault-injected.
-- This report recommends work packages; it does not implement the fixes.
+- Candidate implementations are routed above, but every listed PR remains open
+  and gated; this audit does not claim that any fix is merged, deployed, or
+  production-proven.
 - Command behavior can overlap rows. Counts in the coverage table are command
   inventory counts, not unique-defect counts.
