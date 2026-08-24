@@ -18,9 +18,6 @@ import {
   fetchCompleteHostedDeviceSyncRuntimeSnapshot as fetchCompleteHostedDeviceSyncRuntimeSnapshotPublic,
 } from "@murphai/assistant-runtime/hosted-device-sync-status";
 import {
-  createHostedAssistantDeviceTool as createHostedAssistantDeviceToolPublic,
-} from "@murphai/assistant-runtime/hosted-device-tool";
-import {
   createHostedWorkspaceInvocationLease as createHostedWorkspaceInvocationLeasePublic,
   runHostedWorkspaceInvocation as runHostedWorkspaceInvocationPublic,
 } from "@murphai/assistant-runtime/hosted-invocation";
@@ -58,9 +55,6 @@ import {
   buildHostedDeviceSyncStatusPrompt as buildHostedDeviceSyncStatusPromptDirect,
   fetchCompleteHostedDeviceSyncRuntimeSnapshot as fetchCompleteHostedDeviceSyncRuntimeSnapshotDirect,
 } from "../src/hosted-device-sync-status.ts";
-import {
-  createHostedAssistantDeviceTool as createHostedAssistantDeviceToolDirect,
-} from "../src/hosted-device-tool.ts";
 import {
   checkpointHostedRuntimeBridgeWebWorkspace as checkpointHostedRuntimeBridgeWebWorkspaceSource,
 } from "../src/hosted-runtime/checkpoint-bridge.ts";
@@ -102,7 +96,6 @@ const expectedAssistantRuntimePublicExportKeys = [
   "./hosted-assistant-bootstrap",
   "./hosted-checkpoint-bridge",
   "./hosted-device-sync-status",
-  "./hosted-device-tool",
   "./hosted-email",
   "./hosted-invocation",
   "./hosted-invocation-testkit",
@@ -262,13 +255,6 @@ test("hosted-device-sync-status subpath stays wired to the existing status owner
   assert.equal(
     fetchCompleteHostedDeviceSyncRuntimeSnapshotPublic,
     fetchCompleteHostedDeviceSyncRuntimeSnapshotDirect,
-  );
-});
-
-test("hosted-device-tool subpath stays wired to the hosted resolver owner", () => {
-  assert.equal(
-    createHostedAssistantDeviceToolPublic,
-    createHostedAssistantDeviceToolDirect,
   );
 });
 

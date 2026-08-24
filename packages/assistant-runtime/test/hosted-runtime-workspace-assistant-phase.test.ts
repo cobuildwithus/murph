@@ -314,6 +314,9 @@ type RuntimeSubscriptionToolPort = NonNullable<
 type RuntimeDeviceSyncConnectLinkRequest = Parameters<
   RuntimeDeviceSyncPort["createConnectLink"]
 >[0];
+type AssembledHostedDeviceTool = NonNullable<
+  NonNullable<AssistantExecutionContext["hosted"]>["deviceTool"]
+>;
 type HostedPendingAssistantInputModule =
   typeof import("../src/hosted-runtime/pending-assistant-input.ts");
 type HostedSystemMailboxModule =
@@ -373,6 +376,80 @@ function createNoDirtyRuntimeDeviceSyncPortMethods(): Pick<
       };
     },
   };
+}
+
+function createHostedDeviceResponseFailure(input: {
+  code: string;
+  retryable: boolean;
+  status: number;
+}): object {
+  return {
+    code: input.code,
+    context: {
+      requestId: "private-device-control-plane-detail",
+      retryable: input.retryable,
+      status: input.status,
+      statusCode: input.status,
+    },
+    detail: "private-device-control-plane-detail",
+    forwardedFromWeb: true,
+    message: "private-device-control-plane-detail",
+    name: "HostedWebControlPlaneResponseError",
+    requestId: "private-device-control-plane-detail",
+    retryable: input.retryable,
+    status: input.status,
+    statusCode: input.status,
+  };
+}
+
+async function captureAssembledHostedDeviceTool(input: {
+  deviceSyncPort: RuntimeDeviceSyncPort;
+  logRequests: HostedRuntimeLogRequest[];
+}): Promise<AssembledHostedDeviceTool> {
+  await runHostedWorkspaceAssistantPhase(createPhaseInput({
+    logRequests: input.logRequests,
+    resolvedDeviceSync: {
+      providerConfigs: {
+        whoop: {
+          clientId: "synthetic-whoop-client",
+          clientSecret: "synthetic-whoop-secret",
+        },
+      },
+      publicBaseUrl: "https://device-sync.example.test",
+      secret: "synthetic-device-sync-secret",
+    },
+    runtimeDeviceSyncPort: input.deviceSyncPort,
+  }));
+
+  const deviceTool = mocks.hydrateHostedExecutionDefaultTarget.mock.calls[0]?.[0]
+    ?.hosted?.deviceTool;
+  if (!deviceTool) {
+    throw new Error("Expected the hosted workspace phase to assemble its device tool.");
+  }
+  return deviceTool;
+}
+
+function requestAssembledHostedDeviceTool(input: {
+  action: "connect" | "list_accounts" | "reconcile";
+  deviceTool: AssembledHostedDeviceTool;
+  signal: AbortSignal;
+}): Promise<unknown> {
+  if (input.action === "connect") {
+    return input.deviceTool.request(
+      { action: input.action, provider: "whoop" },
+      { signal: input.signal },
+    );
+  }
+  if (input.action === "reconcile") {
+    return input.deviceTool.request(
+      { accountId: "synthetic-account", action: input.action },
+      { signal: input.signal },
+    );
+  }
+  return input.deviceTool.request(
+    { action: input.action },
+    { signal: input.signal },
+  );
 }
 
 async function resolveHostedPendingAssistantInputWakeAtWithRealImplementation(
@@ -8833,6 +8910,131 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(JSON.stringify(await deviceTool.request({ action: "list_accounts" })))
       .not.toContain("not-for-assistant");
   });
+
+  for (const testCase of [
+    {
+      action: "list_accounts",
+      failure: new DOMException("private-device-control-plane-detail", "TimeoutError"),
+      label: "list timeout",
+    },
+    {
+      action: "list_accounts",
+      failure: new TypeError("fetch failed: private-device-control-plane-detail"),
+      label: "list network failure",
+    },
+    {
+      action: "list_accounts",
+      failure: new TypeError("invalid response: private-device-control-plane-detail"),
+      label: "invalid list response",
+    },
+    {
+      action: "reconcile",
+      failure: createHostedDeviceResponseFailure({
+        code: "ACCOUNT_DISCONNECTED",
+        retryable: false,
+        status: 409,
+      }),
+      label: "known terminal reconcile response",
+    },
+    {
+      action: "reconcile",
+      failure: createHostedDeviceResponseFailure({
+        code: "RECONCILE_WAKE_NOT_ACCEPTED",
+        retryable: true,
+        status: 503,
+      }),
+      label: "known transient reconcile response",
+    },
+    {
+      action: "connect",
+      failure: createHostedDeviceResponseFailure({
+        code: "RECONCILE_WAKE_NOT_ACCEPTED",
+        retryable: true,
+        status: 503,
+      }),
+      label: "action-mismatched connect response",
+    },
+    {
+      action: "connect",
+      failure: new TypeError("connect outcome unknown: private-device-control-plane-detail"),
+      label: "ambiguous connect transport",
+    },
+    {
+      action: "reconcile",
+      failure: new TypeError("reconcile outcome unknown: private-device-control-plane-detail"),
+      label: "ambiguous reconcile transport",
+    },
+    {
+      abortAfterRequest: true,
+      action: "list_accounts",
+      failure: new DOMException("private-device-control-plane-detail", "AbortError"),
+      label: "caller cancellation",
+    },
+  ] as const) {
+    it(`assembles the production device port for ${testCase.label}`, async () => {
+      const logRequests: HostedRuntimeLogRequest[] = [];
+      let markRequestStarted: (() => void) | undefined;
+      const requestStarted = new Promise<void>((resolve) => {
+        markRequestStarted = resolve;
+      });
+      let requestCount = 0;
+      let forwardedSignal: AbortSignal | null | undefined;
+      const failRequest = async (signal?: AbortSignal | null): Promise<never> => {
+        requestCount += 1;
+        forwardedSignal = signal;
+        markRequestStarted?.();
+        if ("abortAfterRequest" in testCase) {
+          return await new Promise<never>((_resolve, reject) => {
+            const rejectForAbort = () => reject(signal?.reason);
+            if (signal?.aborted) {
+              rejectForAbort();
+              return;
+            }
+            signal?.addEventListener("abort", rejectForAbort, { once: true });
+          });
+        }
+        throw testCase.failure;
+      };
+      const deviceSyncPort = {
+        ...createNoDirtyRuntimeDeviceSyncPortMethods(),
+        async applyUpdates() {
+          throw new Error("Device recovery composition should not apply updates.");
+        },
+        async createConnectLink() {
+          return await failRequest();
+        },
+        async fetchSnapshot(request) {
+          return await failRequest(request?.signal);
+        },
+        async reconcileAccount(request) {
+          return await failRequest(request.signal);
+        },
+      } satisfies RuntimeDeviceSyncPort;
+      const deviceTool = await captureAssembledHostedDeviceTool({
+        deviceSyncPort,
+        logRequests,
+      });
+      const abortController = new AbortController();
+      const execution = requestAssembledHostedDeviceTool({
+        action: testCase.action,
+        deviceTool,
+        signal: abortController.signal,
+      });
+      if ("abortAfterRequest" in testCase) {
+        await requestStarted;
+        abortController.abort(testCase.failure);
+      }
+
+      await expect(execution).rejects.toBe(testCase.failure);
+      expect(requestCount).toBe(1);
+      if (testCase.action !== "connect") {
+        expect(forwardedSignal).toBe(abortController.signal);
+      }
+      expect(JSON.stringify(logRequests)).not.toContain(
+        "private-device-control-plane-detail",
+      );
+    });
+  }
 
   it("exposes the existing Clinical Records link method to the hosted assistant context", async () => {
     const createConnectLink = vi.fn<

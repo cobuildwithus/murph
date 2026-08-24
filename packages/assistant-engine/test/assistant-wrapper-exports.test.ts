@@ -17,7 +17,6 @@ import * as assistantState from '../src/assistant-state.ts'
 import * as assistantStatus from '../src/assistant-status.ts'
 import * as assistantStore from '../src/assistant-store.ts'
 import * as codexLifecycle from '../src/codex-lifecycle.ts'
-import * as deviceDynamicTool from '../src/device-dynamic-tool.ts'
 import * as knowledge from '../src/knowledge.ts'
 
 const wrapperCases = [
@@ -162,15 +161,6 @@ const wrapperCases = [
     ],
   ],
   [
-    'device-dynamic-tool',
-    deviceDynamicTool,
-    [
-      'executeDeviceDynamicTool',
-      'MURPH_DEVICE_TOOL',
-      'readDeviceDynamicToolRequest',
-    ],
-  ],
-  [
     'knowledge',
     knowledge,
     [
@@ -225,6 +215,7 @@ describe('assistant-engine wrapper exports', () => {
     ).filter((exportKey) => exportKey.startsWith('./assistant/'))
 
     expect(implementationShapedAssistantExports).toEqual([])
+    expect(packageManifest.exports?.['./device-dynamic-tool']).toBeUndefined()
   })
 
   it('keeps raw provider execution and catalog internals off the public facades', async () => {
