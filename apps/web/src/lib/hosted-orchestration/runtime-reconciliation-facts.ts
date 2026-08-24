@@ -161,7 +161,12 @@ export async function readHostedRuntimeReconciliationFacts(
       retryAt: projectedWorkspace
         ? readHostedRuntimeFutureTimestamp(projectedWorkspace.inboxMediaRetentionWakeAt, now)
         : null,
-      workspace: projectedWorkspace,
+      workspace: projectedWorkspace
+        ? {
+            ...projectedWorkspace,
+            systemMailboxFrontier: null,
+          }
+        : null,
     });
     emitHostedRuntimeReconciliationFacts({
       facts,
