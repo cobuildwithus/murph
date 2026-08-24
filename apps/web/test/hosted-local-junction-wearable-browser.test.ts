@@ -49,6 +49,7 @@ import {
   closeHostedLocalJunctionBrowserSessionForTest,
   completeExternalJunctionAuthorizationForTest,
   completeHostedLocalJunctionAuthorizationForTest,
+  disconnectHostedLocalJunctionAccountForTest,
   openHostedLocalJunctionBrowserSessionForTest,
   readHostedLocalJunctionBrowserConfigForTest,
   sanitizeHostedLocalJunctionBrowserFailureForTest,
@@ -1334,6 +1335,73 @@ describe("hosted-local Junction wearable browser authorization", () => {
       CI: undefined,
       MURPH_E2E_PROVIDER_HEADLESS: "1",
     }).manualAuthorizationAllowed).toBe(false);
+  });
+
+  it("waits for the reloaded connect page before disconnecting", async () => {
+    const events: string[] = [];
+    const dialog = {
+      getByRole: vi.fn((role: string) => role === "heading"
+        ? {
+          waitFor: vi.fn(async () => {
+            events.push("dialog");
+          }),
+        }
+        : {
+          click: vi.fn(async () => {
+            events.push("confirm");
+          }),
+        }),
+    };
+    const connectedHeading = {
+      locator: vi.fn(() => ({
+        locator: vi.fn(() => ({
+          waitFor: vi.fn(async () => {
+            events.push("idle");
+          }),
+        })),
+      })),
+    };
+    const page = {
+      getByRole: vi.fn((role: string) => {
+        if (role === "dialog") return dialog;
+        if (role === "heading") return connectedHeading;
+        return {
+          click: vi.fn(async () => {
+            events.push("trigger");
+          }),
+        };
+      }),
+      getByText: vi.fn(() => ({
+        waitFor: vi.fn(async () => {
+          events.push("notice");
+        }),
+      })),
+      waitForLoadState: vi.fn(async (state: string) => {
+        expect(state).toBe("load");
+        events.push("load");
+      }),
+    };
+
+    await disconnectHostedLocalJunctionAccountForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+    );
+
+    expect(page.waitForLoadState).toHaveBeenCalledWith("load", {
+      timeout: 30_000,
+    });
+    expect(events).toEqual([
+      "load",
+      "trigger",
+      "dialog",
+      "confirm",
+      "notice",
+      "idle",
+    ]);
   });
 
   it("requires a password for Garmin", () => {
