@@ -1,6 +1,5 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
 import { after } from "next/server";
 import type { PrismaClient } from "@prisma/client";
 import {
@@ -24,54 +23,16 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shar
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
+import {
+  buildHostedSourceDeliveryStallNoticeKey,
+  type HostedSourceDeliveryStallNoticeCandidate,
+} from "./source-delivery-stall-episode";
 
-const NOTICE_IDENTITY_VERSION = "v1";
-
-export interface HostedSourceDeliveryStallNoticeCandidate {
-  connectionId: string;
-  lastDataAt: string;
-  lifecycleEpoch: number | null;
-  sourceInstanceKey: string;
-  sourceProviderSlug: string;
-}
-
-export function resolveHostedSourceDeliveryStallNoticeCandidate(input: {
-  connectionId: string;
-  lastDataAt: string | null;
-  lifecycleEpoch: number | null;
-  now: string;
-  sourceInstanceKey: string;
-  sourceProviderSlug: string;
-  status: "connected" | "disconnected" | "error" | "unavailable";
-}): HostedSourceDeliveryStallNoticeCandidate | null {
-  if (!isPushPrimarySourceRecoveryNoticeEligible(input) || input.lastDataAt === null) {
-    return null;
-  }
-  return {
-    connectionId: input.connectionId,
-    lastDataAt: input.lastDataAt,
-    lifecycleEpoch: input.lifecycleEpoch,
-    sourceInstanceKey: input.sourceInstanceKey,
-    sourceProviderSlug: input.sourceProviderSlug,
-  };
-}
-
-export function buildHostedSourceDeliveryStallNoticeKey(
-  candidate: HostedSourceDeliveryStallNoticeCandidate,
-): string {
-  const digest = createHash("sha256")
-    .update(JSON.stringify({
-      connectionId: candidate.connectionId,
-      lastDataAt: candidate.lastDataAt,
-      lifecycleEpoch: candidate.lifecycleEpoch,
-      sourceInstanceKey: candidate.sourceInstanceKey,
-      sourceProviderSlug: candidate.sourceProviderSlug,
-      version: NOTICE_IDENTITY_VERSION,
-    }))
-    .digest("hex")
-    .slice(0, 32);
-  return `device-delivery-stalled:${NOTICE_IDENTITY_VERSION}:${digest}`;
-}
+export {
+  buildHostedSourceDeliveryStallNoticeKey,
+  resolveHostedSourceDeliveryStallNoticeCandidate,
+  type HostedSourceDeliveryStallNoticeCandidate,
+} from "./source-delivery-stall-episode";
 
 export function scheduleHostedSourceDeliveryStallNotices(input: {
   candidates: readonly HostedSourceDeliveryStallNoticeCandidate[];
@@ -119,8 +80,7 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
     prisma,
     userId: input.userId,
   });
-  if (existing) {
-    await signalHostedSourceDeliveryStallNoticeBestEffort({ item: existing, prisma });
+  if (existing && existing.consumedAt !== null) {
     return;
   }
   const appended = await runWithPreparedHostedMailboxItemAppendCrypto({

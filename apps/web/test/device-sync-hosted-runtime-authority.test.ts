@@ -281,6 +281,7 @@ function buildConnectionSource(
     lastErrorMessage: string | null;
     lastSeenAt: string | null;
     resourceAvailabilitySummary: Record<string, unknown>;
+    id: string;
     sourceInstanceKey: string;
     sourceProviderSlug: string;
     status: "connected" | "disconnected" | "error" | "unavailable";
@@ -290,6 +291,7 @@ function buildConnectionSource(
     connectionId: "conn_123",
     displayName: "WHOOP",
     firstSeenAt: "2026-04-06T09:00:00.000Z",
+    id: "dcs_abcdefghijklmnop",
     lifecycleEpoch: 1,
     lastDataAt: null,
     lastErrorCode: null,
@@ -1120,6 +1122,77 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       "conn_first",
       "conn_second",
     ]);
+  });
+
+  it("hands an established eligible source to the existing notice scheduler", async () => {
+    createAuthorityHarness({
+      connectionSources: [{
+        displayName: "Garmin",
+        id: "dcs_abcdefghijklmnop",
+        lastDataAt: "2026-08-01T00:00:00.000Z",
+        sourceInstanceKey: "junction:garmin",
+        sourceProviderSlug: "garmin",
+      }],
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{ connectionId: "conn_123" }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(mocks.scheduleHostedSourceDeliveryStallNotices).toHaveBeenCalledWith({
+      candidates: [{
+        connectionId: "conn_123",
+        lastDataAt: "2026-08-01T00:00:00.000Z",
+        lifecycleEpoch: 1,
+        sourceId: "dcs_abcdefghijklmnop",
+        sourceInstanceKey: "junction:garmin",
+        sourceProviderSlug: "garmin",
+      }],
+      now: expect.any(String),
+      userId: "user_123",
+    });
+  });
+
+  it("hands no candidate to the scheduler after source delivery resumes", async () => {
+    createAuthorityHarness({
+      connectionSources: [{
+        displayName: "Garmin",
+        id: "dcs_abcdefghijklmnop",
+        lastDataAt: new Date().toISOString(),
+        sourceInstanceKey: "junction:garmin",
+        sourceProviderSlug: "garmin",
+      }],
+    });
+    const { applyHostedDeviceSyncRuntimeResult } = await import(
+      "@/src/lib/device-sync/hosted-runtime-authority"
+    );
+
+    await applyHostedDeviceSyncRuntimeResult({
+      request: new Request("https://example.test/device-sync/runtime/apply", {
+        body: JSON.stringify({
+          updates: [{ connectionId: "conn_123" }],
+          userId: "user_123",
+        }),
+        method: "POST",
+      }),
+      trustedUserId: "user_123",
+    });
+
+    expect(mocks.scheduleHostedSourceDeliveryStallNotices).toHaveBeenCalledWith({
+      candidates: [],
+      now: expect.any(String),
+      userId: "user_123",
+    });
   });
 
   it("bounds an N=100 no-op apply to one set read and 100 serial transactions", async () => {
@@ -3986,6 +4059,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       connectionId: record.id,
       displayName: `Source ${index + 1}`,
       firstSeenAt: "2026-04-06T09:00:00.000Z",
+      id: `dcs_source_${index + 1}`,
       lifecycleEpoch: 1,
       lastDataAt: null,
       lastErrorCode: null,

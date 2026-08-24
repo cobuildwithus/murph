@@ -43,13 +43,14 @@ future evidence-backed additions.
 ## Product UX journeys
 
 - Eligible Garmin member: receives one short message saying recent Garmin data
-  has not come through, suggesting Garmin Connect and watch charge/sync checks,
+  has not come through, suggesting Garmin Connect and device charge/sync checks,
   with one low-pressure question and no link.
 - Quiet but ineligible member: receives nothing when access is inactive, no
   recent inbound exists, no established direct thread exists, or egress blocks.
 - Repeated stale passes: preserve one frozen message and one delivery identity.
 - Recovered source: receives no success message; a later distinct stall may
-  create one new episode notice.
+  create one new episode notice. A queued check is revalidated and suppressed
+  at provider entry if data resumes before delivery.
 - Other wearable provider: unchanged until its transport semantics and observed
   false-positive rate justify an explicit policy entry and copy.
 

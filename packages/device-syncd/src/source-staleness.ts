@@ -59,7 +59,7 @@ const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy>
     neverDeliveredHours: 6,
     recoveryNotice: {
       companionAppName: "Garmin Connect",
-      deviceDisplayName: "watch",
+      deviceDisplayName: "Garmin device",
       providerDisplayName: "Garmin",
       silentHours: 72,
     },

@@ -65,7 +65,7 @@ const TEST_CONTEXT_BY_KEY = {
   },
   "linq.device_delivery_stalled": {
     companionAppName: "Garmin Connect",
-    deviceDisplayName: "watch",
+    deviceDisplayName: "Garmin device",
     providerDisplayName: "Garmin",
   },
   "linq.ai_usage.starter_limit_reached": {
@@ -171,6 +171,7 @@ describe("user-facing message variants", () => {
       expect(text).toMatch(/sync/iu);
       expect(text).toMatch(/\?$/u);
       expect(text).not.toMatch(/https?:\/\//iu);
+      expect(text).not.toMatch(/\b(?:watch|usually|often)\b/iu);
     }
   });
 

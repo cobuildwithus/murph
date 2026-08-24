@@ -102,8 +102,11 @@ direct thread. The existing mailbox dedupe key is scoped to source lifecycle
 and `last_data_at`, so repeated stale passes preserve one message per silence
 episode; a later delivery naturally creates a new episode. Materialization
 rechecks canonical source, connection, access, engagement, and route state
-after the sync transaction. No recovery message is sent. Providers without an
-explicit recovery-check policy remain unchanged.
+after the sync transaction. The same episode key carries its opaque source-row
+locator to the existing Linq provider-entry transaction, which locks and
+rebuilds the current episode before claiming dispatch; a resumed, replaced, or
+disconnected source therefore ends as a terminal no-send. No recovery message
+is sent. Providers without an explicit recovery-check policy remain unchanged.
 
 Recovering a dead push carrier cannot be done by pulling, because there is
 nothing to pull and a data refresh cannot make the provider push again. The only

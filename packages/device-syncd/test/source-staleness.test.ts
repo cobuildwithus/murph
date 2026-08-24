@@ -103,7 +103,7 @@ test("push-primary staleness ignores pull-capable sources and non-connected rows
 test("Garmin recovery notices start after 72 hours of established delivery silence", () => {
   assert.deepEqual(readPushPrimarySourceRecoveryNoticePolicy("GARMIN"), {
     companionAppName: "Garmin Connect",
-    deviceDisplayName: "watch",
+    deviceDisplayName: "Garmin device",
     providerDisplayName: "Garmin",
     silentHours: 72,
   });

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   hasHostedLinqInboundWithinDays: vi.fn(),
   hasHostedRuntimeActiveAccess: vi.fn(),
+  findDeviceConnectionSource: vi.fn(),
   readHostedMailboxItemByDedupeKey: vi.fn(),
   resolveHostedAssistantNotificationDestination: vi.fn(),
   runWithPreparedHostedMailboxItemAppendCrypto: vi.fn(),
@@ -44,6 +45,7 @@ const BASE_INPUT = {
   lastDataAt: "2026-08-20T00:00:00.000Z",
   lifecycleEpoch: 4,
   now: "2026-08-23T00:00:00.000Z",
+  sourceId: "dcs_abcdefghijklmnop",
   sourceInstanceKey: "source-1",
   sourceProviderSlug: "garmin",
   status: "connected" as const,
@@ -75,6 +77,7 @@ beforeEach(() => {
   const tx = {
     deviceConnectionSource: {
       findUnique: vi.fn().mockResolvedValue({
+        id: BASE_INPUT.sourceId,
         connection: { status: "active", userId: "member-1" },
         lastDataAt: new Date(BASE_INPUT.lastDataAt),
         lifecycleEpoch: BASE_INPUT.lifecycleEpoch,
@@ -83,10 +86,19 @@ beforeEach(() => {
       }),
     },
   };
+  tx.deviceConnectionSource.findUnique = mocks.findDeviceConnectionSource;
   mocks.getPrisma.mockReturnValue({
     $transaction: vi.fn((run: (client: typeof tx) => Promise<unknown>) => run(tx)),
   });
   mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+  mocks.findDeviceConnectionSource.mockResolvedValue({
+    connection: { status: "active", userId: "member-1" },
+    id: BASE_INPUT.sourceId,
+    lastDataAt: new Date(BASE_INPUT.lastDataAt),
+    lifecycleEpoch: BASE_INPUT.lifecycleEpoch,
+    sourceProviderSlug: BASE_INPUT.sourceProviderSlug,
+    status: BASE_INPUT.status,
+  });
   mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
   mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(true);
   mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue(
@@ -108,6 +120,7 @@ describe("hosted source delivery-stall notice identity", () => {
       connectionId: "connection-1",
       lastDataAt: "2026-08-20T00:00:00.000Z",
       lifecycleEpoch: 4,
+      sourceId: "dcs_abcdefghijklmnop",
       sourceInstanceKey: "source-1",
       sourceProviderSlug: "garmin",
     });
@@ -160,10 +173,14 @@ describe("hosted source delivery-stall notice materialization", () => {
 
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
     const appendInput = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0];
+    const notificationKey = buildHostedSourceDeliveryStallNoticeKey(candidate);
     expect(appendInput?.envelope).toMatchObject({
+      eventId: `assistant.notification.requested:${notificationKey}`,
       kind: "assistant.notification.requested",
       notification: {
+        deliveryDedupeToken: notificationKey,
         deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: notificationKey,
         responsePolicy: {
           kind: "require_send_exact_text",
           text: expect.stringMatching(/Garmin Connect/u),
@@ -184,7 +201,7 @@ describe("hosted source delivery-stall notice materialization", () => {
     });
   });
 
-  it("re-signals an existing live episode without appending another notice", async () => {
+  it("revalidates and re-signals an existing live episode without inserting another notice", async () => {
     const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
     expect(candidate).not.toBeNull();
     if (!candidate) {
@@ -198,8 +215,8 @@ describe("hosted source delivery-stall notice materialization", () => {
       userId: "member-1",
     });
 
-    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
-    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).toHaveBeenCalledOnce();
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
   });
 
@@ -210,6 +227,47 @@ describe("hosted source delivery-stall notice materialization", () => {
       return;
     }
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(false);
+
+    await materializeHostedSourceDeliveryStallNotice({
+      candidate,
+      now: BASE_INPUT.now,
+      userId: "member-1",
+    });
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "recent Linq activity is absent",
+      prepare: () => mocks.hasHostedLinqInboundWithinDays.mockResolvedValue(false),
+    },
+    {
+      name: "the current route is not a direct member thread",
+      prepare: () => mocks.resolveHostedAssistantNotificationDestination.mockResolvedValue({
+        ...DIRECT_LINQ_DESTINATION,
+        conversationShape: "group",
+      }),
+    },
+    {
+      name: "the source received data after candidate selection",
+      prepare: () => mocks.findDeviceConnectionSource.mockResolvedValue({
+        connection: { status: "active", userId: "member-1" },
+        id: BASE_INPUT.sourceId,
+        lastDataAt: new Date("2026-08-22T23:00:00.000Z"),
+        lifecycleEpoch: BASE_INPUT.lifecycleEpoch,
+        sourceProviderSlug: BASE_INPUT.sourceProviderSlug,
+        status: BASE_INPUT.status,
+      }),
+    },
+  ])("suppresses the notice when $name", async ({ prepare }) => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    expect(candidate).not.toBeNull();
+    if (!candidate) {
+      return;
+    }
+    prepare();
 
     await materializeHostedSourceDeliveryStallNotice({
       candidate,

@@ -768,6 +768,7 @@ function resolveHostedRuntimeSourceDeliveryStallNoticeCandidates(input: {
         : current?.lastDataAt ?? null,
       lifecycleEpoch: update?.lifecycleEpoch ?? current?.lifecycleEpoch ?? null,
       now: input.now,
+      sourceId: current?.id ?? "",
       sourceInstanceKey,
       sourceProviderSlug: update?.sourceProviderSlug ?? current?.sourceProviderSlug ?? "",
       status: update?.status ?? current?.status ?? "disconnected",

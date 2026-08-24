@@ -592,7 +592,7 @@ Sound good?`,
 {homeRecipientPhone}`,
   ],
   "linq.device_delivery_stalled": [
-    `I haven't seen recent {providerDisplayName} data come through. Opening {companionAppName} and checking that your {deviceDisplayName} is charged and syncing usually gets it moving again. Want to give that a try?`,
+    `I haven't seen recent {providerDisplayName} data come through. Want to open {companionAppName} and check that your {deviceDisplayName} is charged and syncing?`,
     `Recent {providerDisplayName} data hasn't reached me. Could you open {companionAppName} and make sure your {deviceDisplayName} is charged and syncing?`,
     `It looks like {providerDisplayName} data has been quiet for a while. When you have a moment, can you open {companionAppName} and check the {deviceDisplayName} is charged and syncing?`,
     `I haven't received new {providerDisplayName} data lately. Would you mind opening {companionAppName} and checking your {deviceDisplayName}'s charge and sync?`,
