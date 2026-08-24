@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, readdir, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { Cli } from 'incur'
@@ -15,6 +15,7 @@ import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   createTempVaultContext,
   requireData,
+  runCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 
@@ -114,6 +115,20 @@ function requireSavedPath(result: SupplementSaveResult): string {
   }
 
   return result.path
+}
+
+async function listRegimenMarkdownPaths(vaultRoot: string): Promise<string[]> {
+  try {
+    const entries = await readdir(path.join(vaultRoot, 'bank/regimens'), {
+      recursive: true,
+    })
+    return entries.filter((entry) => entry.endsWith('.md')).sort()
+  } catch (error) {
+    if (error instanceof Error && Reflect.get(error, 'code') === 'ENOENT') {
+      return []
+    }
+    throw error
+  }
 }
 
 test('supplement save schema exposes typed top-level dose fields and repeatable ingredients', async () => {
@@ -619,7 +634,7 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
       assert.match(malformed.envelope.error.message ?? '', /valid JSON object/u)
     }
 
-    const schemaInvalid = await runInProcessJsonCli<SupplementSaveResult>(cli, [
+    const schemaInvalid = await runCli([
       'supplement',
       'save',
       'Vitamin D3',
@@ -630,16 +645,22 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
       '--vault',
       vaultRoot,
     ])
-    assert.equal(schemaInvalid.exitCode, 1)
-    assert.equal(schemaInvalid.envelope.ok, false)
-    if (!schemaInvalid.envelope.ok) {
-      const serialized = JSON.stringify(schemaInvalid.envelope)
+    assert.equal(schemaInvalid.ok, false)
+    if (!schemaInvalid.ok) {
+      const serialized = JSON.stringify(schemaInvalid)
       assert.equal(serialized.includes('Do Not Echo Label'), false)
       assert.equal(serialized.includes('mcg XYZ'), false)
-      assert.match(schemaInvalid.envelope.error.message ?? '', /--ingredient #2 failed validation/u)
-      assert.match(schemaInvalid.envelope.error.message ?? '', /unit/u)
-      assert.match(schemaInvalid.envelope.error.message ?? '', /compact units such as "mcg"/u)
-      assert.match(schemaInvalid.envelope.error.message ?? '', /qualifiers such as "DFE" in note/u)
+      assert.match(schemaInvalid.error.message ?? '', /--ingredient #2 failed validation/u)
+      assert.match(schemaInvalid.error.message ?? '', /unit/u)
+      assert.match(schemaInvalid.error.message ?? '', /compact units such as "mcg"/u)
+      assert.match(schemaInvalid.error.message ?? '', /qualifiers such as "DFE" in note/u)
+      assert.deepEqual(schemaInvalid.error.fieldErrors?.[0], {
+        code: 'invalid_format',
+        expected: '',
+        message: 'This field is invalid.',
+        path: 'unit',
+        received: 'invalid',
+      })
     }
 
     const missingCompound = await runInProcessJsonCli<SupplementSaveResult>(cli, [
@@ -664,7 +685,15 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
         missingCompound.envelope.error.message ?? '',
         /Expected fields: compound, label, amount, unit, active, note/u,
       )
+      assert.deepEqual(missingCompound.envelope.error.fieldErrors?.[0], {
+        code: 'invalid_type',
+        expected: 'string',
+        message: 'This field is invalid.',
+        path: 'compound',
+        received: 'invalid',
+      })
     }
+    assert.deepEqual(await listRegimenMarkdownPaths(vaultRoot), [])
   } finally {
     await rm(parentRoot, {
       force: true,

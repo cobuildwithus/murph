@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assertionImportPayloadSchema,
   assertionSavePayloadSchema,
+  importVitalsRecord,
   importSocialHistoryRecord,
   saveAssertionPayload,
   scaffoldAssertionImportPayload,
@@ -105,6 +106,55 @@ describe("clinical import usecases", () => {
         },
       ],
     }).success).toBe(false);
+  });
+
+  it("rejects private vitals qualifier keys before loading a write runtime", async () => {
+    const privateQualifierKey = "private-qualifier-key-sentinel";
+    const privateQualifierValue = "private-qualifier-value-sentinel";
+    const { inputFile, vaultRoot } = await writePayload({
+      occurredAt: "2026-06-17T14:00:00.000Z",
+      source: "import",
+      title: "Synthetic vitals",
+      measurements: [{
+        metric: "heart-rate",
+        value: 72,
+        unit: "bpm",
+        qualifiers: {
+          [privateQualifierKey]: [privateQualifierValue],
+        },
+      }],
+      externalRef: {
+        system: "synthetic-source",
+        resourceType: "vitals",
+        resourceId: "synthetic-vitals",
+      },
+    });
+
+    let thrown: unknown;
+    try {
+      await importVitalsRecord({
+        vault: vaultRoot,
+        inputFile: `@${inputFile}`,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toMatchObject({
+      code: "invalid_payload",
+      context: {
+        issues: [{
+          code: "invalid_union",
+          path: ["measurements", 0, "qualifiers"],
+        }],
+      },
+      name: "VaultCliError",
+    });
+    expect(JSON.stringify(thrown)).not.toContain(privateQualifierKey);
+    expect(JSON.stringify(thrown)).not.toContain(privateQualifierValue);
+    expect(mocks.appendHistoryEvent).not.toHaveBeenCalled();
+    expect(mocks.upsertEvent).not.toHaveBeenCalled();
+    expect(mocks.importEventBatch).not.toHaveBeenCalled();
   });
 
   it("saves expanded clinical assertions with bounded evidence refs", async () => {

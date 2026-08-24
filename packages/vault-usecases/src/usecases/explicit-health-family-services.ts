@@ -3,11 +3,11 @@ import {
   conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
   immunizationImportPayloadSchema,
-  safeParseContract,
   supplementIngredientPayloadSchema,
   type JsonObject,
   type RegimenUpsertPayload,
 } from "@murphai/contracts";
+import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
   CommandContext,
@@ -443,20 +443,28 @@ function validateSupplementSaveInput(input: {
 
 function formatSupplementIngredientValidationMessage(
   index: number,
-  errors: readonly string[],
+  issues: readonly ZodIssue[],
+  value: unknown,
 ): string {
-  const entries = errors.map(readContractValidationErrorEntry);
+  const valueRecord =
+    value !== null && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
   const missingFields = [
     ...new Set(
-      entries
-        .filter((entry) => entry.path !== "$")
-        .filter((entry) => /received undefined/u.test(entry.message))
-        .map((entry) => entry.path),
+      issues.flatMap((issue) => {
+        const field = issue.path.length === 1 && typeof issue.path[0] === "string"
+          ? issue.path[0]
+          : null;
+        return field && valueRecord && !Object.prototype.hasOwnProperty.call(valueRecord, field)
+          ? [field]
+          : [];
+      }),
     ),
   ];
   const paths = [
     ...new Set(
-      entries.map((entry) => entry.path),
+      issues.map((issue) => formatSupplementIngredientValidationPath(issue.path)),
     ),
   ];
   const expectedFields = "Expected fields: compound, label, amount, unit, active, note.";
@@ -471,6 +479,14 @@ function formatSupplementIngredientValidationMessage(
   }
 
   return `--ingredient #${index} failed validation${fieldSummary}.${unitHint}`;
+}
+
+function formatSupplementIngredientValidationPath(path: readonly PropertyKey[]): string {
+  if (path.length === 0) {
+    return "$";
+  }
+
+  return path.map(String).join(".");
 }
 
 function normalizeSupplementLabelUnitAlias(unit: string): string {
@@ -563,21 +579,6 @@ function normalizeSupplementIngredientValue(value: unknown): unknown {
   };
 }
 
-function readContractValidationErrorEntry(error: string): {
-  message: string;
-  path: string;
-} {
-  const separatorIndex = error.indexOf(":");
-  const rawPath = separatorIndex === -1 ? "$" : error.slice(0, separatorIndex);
-  const rawMessage = separatorIndex === -1 ? error : error.slice(separatorIndex + 1);
-  const normalizedPath = rawPath.replace(/^\$\./u, "") || "$";
-
-  return {
-    message: rawMessage.trim(),
-    path: normalizedPath,
-  };
-}
-
 function parseSupplementIngredient(spec: string, index: number): SupplementIngredientRecord {
   const trimmed = spec.trim();
 
@@ -606,11 +607,13 @@ function parseSupplementIngredient(spec: string, index: number): SupplementIngre
   }
 
   value = normalizeSupplementIngredientValue(value);
-  const result = safeParseContract(supplementIngredientPayloadSchema, value);
+  const result = supplementIngredientPayloadSchema.safeParse(value);
   if (!result.success) {
-    throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors), {
-      issues: result.errors,
-    });
+    throw new VaultCliError(
+      "invalid_option",
+      formatSupplementIngredientValidationMessage(index, result.error.issues, value),
+      { issues: result.error.issues },
+    );
   }
 
   return result.data;

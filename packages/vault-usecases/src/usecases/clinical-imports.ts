@@ -275,11 +275,12 @@ function parsePayload<TPayload>(
   schema: z.ZodType<TPayload>,
   value: unknown,
   label: string,
+  mapIssue: (issue: z.ZodIssue) => unknown = (issue) => issue,
 ): TPayload {
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
     throw new VaultCliError('invalid_payload', `${label} payload is invalid.`, {
-      issues: parsed.error.issues,
+      issues: parsed.error.issues.map(mapIssue),
     })
   }
 
@@ -290,8 +291,32 @@ async function loadPayload<TPayload>(
   inputFile: string,
   schema: z.ZodType<TPayload>,
   label: string,
+  mapIssue?: (issue: z.ZodIssue) => unknown,
 ): Promise<TPayload> {
-  return parsePayload(schema, await loadJsonInputObject(inputFile, `${label} payload`), label)
+  return parsePayload(
+    schema,
+    await loadJsonInputObject(inputFile, `${label} payload`),
+    label,
+    mapIssue,
+  )
+}
+
+function sanitizeVitalsValidationIssue(issue: z.ZodIssue) {
+  const qualifierIndex = issue.path.indexOf('qualifiers')
+  const path =
+    qualifierIndex < 0
+      ? [...issue.path]
+      : issue.path.slice(0, qualifierIndex + 1)
+  const expected =
+    'expected' in issue && typeof issue.expected === 'string'
+      ? issue.expected
+      : undefined
+
+  return {
+    code: issue.code,
+    path,
+    ...(expected === undefined ? {} : { expected }),
+  }
 }
 
 function toHistoryResult(vault: string, result: AppendHistoryEventResult): ClinicalImportResult {
@@ -644,7 +669,12 @@ export async function saveVitalsPayload(input: {
 }
 
 export async function importVitalsRecord(input: ClinicalImportInput): Promise<ClinicalImportResult> {
-  const payload = await loadPayload(input.inputFile, vitalsImportPayloadSchema, 'vitals')
+  const payload = await loadPayload(
+    input.inputFile,
+    vitalsImportPayloadSchema,
+    'vitals',
+    sanitizeVitalsValidationIssue,
+  )
   return importSingleClinicalEventPayload({
     vault: input.vault,
     payload: buildVitalsEventPayload(payload),

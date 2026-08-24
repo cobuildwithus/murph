@@ -265,6 +265,68 @@ test("clinical import validation returns bounded repair fields without payload v
   assert.equal(JSON.stringify(result).includes(privateValue), false);
 });
 
+test("built vitals import truncates private qualifier keys before any write", async () => {
+  const parentRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-vitals-private-"));
+  cleanupPaths.push(parentRoot);
+  const vaultRoot = path.join(parentRoot, "vault");
+  const inputFile = path.join(parentRoot, "vitals.json");
+  const privateQualifierKey = "private-qualifier-key-sentinel";
+  const privateQualifierValue = "private-qualifier-value-sentinel";
+
+  await runCli(["init", "--vault", vaultRoot]);
+  await writeFile(inputFile, `${JSON.stringify({
+    occurredAt: "2026-06-17T14:00:00.000Z",
+    source: "import",
+    title: "Synthetic vitals",
+    measurements: [{
+      metric: "heart-rate",
+      value: 72,
+      unit: "bpm",
+      qualifiers: {
+        [privateQualifierKey]: [privateQualifierValue],
+      },
+    }],
+    externalRef: {
+      system: "synthetic-source",
+      resourceType: "vitals",
+      resourceId: "synthetic-vitals",
+    },
+  })}\n`, "utf8");
+
+  const result = await runCli([
+    "vitals",
+    "import-json",
+    "--vault",
+    vaultRoot,
+    "--input",
+    `@${inputFile}`,
+  ]);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error?.code, "invalid_payload");
+  assert.equal(result.error?.stage, "validation");
+  assert.equal(
+    result.error?.fieldErrors?.some(
+      (field) =>
+        field.path === "measurements.0.qualifiers" &&
+        field.code === "invalid_union",
+    ),
+    true,
+    JSON.stringify(result),
+  );
+  const envelope = JSON.stringify(result);
+  assert.equal(envelope.includes(privateQualifierKey), false);
+  assert.equal(envelope.includes(privateQualifierValue), false);
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, "ledger/events/2026/2026-06.jsonl")),
+    { code: "ENOENT" },
+  );
+  await assert.rejects(
+    () => stat(path.join(vaultRoot, "system/audit/2026-06.jsonl")),
+    { code: "ENOENT" },
+  );
+}, 120_000);
+
 test("social-history import-json retries return a schema-valid no-op result", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-social-history-"));
   cleanupPaths.push(vaultRoot);
