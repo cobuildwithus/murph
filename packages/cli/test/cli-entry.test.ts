@@ -187,20 +187,53 @@ test("renderMurphCliEntrypointError classifies human failures without raw detail
 
 test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
   const privateValue = "private-schedule-value";
-  const rendered = await renderMurphCliEntrypointError(
-    new VaultCliError(
-      "invalid_payload",
-      "Schedule failed validation.",
-      {
-        issues: [{
-          path: ["schedule", "timeZone"],
+  const error = new VaultCliError(
+    "invalid_payload",
+    "Schedule failed validation.",
+    {
+      issues: [
+        {
           code: "invalid_value",
+          expected: "IANA time zone",
+          path: ["schedule", "timeZone"],
           message: privateValue,
-        }],
-        retryable: false,
-        stage: "validation",
-      },
-    ),
+        },
+      ],
+      retryable: false,
+    },
+  );
+
+  for (const jsonArgs of [
+    ["--vault", "first", "--vault", "second", "--format", "json"],
+    ["--vault", "first", "--vault", "second", "--json"],
+  ]) {
+    const rendered = await renderMurphCliEntrypointError(
+      error,
+      jsonArgs,
+      { human: true },
+    );
+
+    assert.equal(rendered.machineReadable, true);
+    assert.equal(rendered.exitCode, 1);
+    const directError = JSON.parse(rendered.output) as {
+      code?: string;
+      error?: unknown;
+      fieldErrors?: Array<{ path?: string }>;
+      hint?: string;
+      stage?: string;
+    };
+    assert.equal(directError.code, "invalid_payload");
+    assert.equal(directError.error, undefined);
+    assert.equal(directError.stage, "validation");
+    assert.equal(directError.hint, undefined);
+    assert.equal(directError.fieldErrors?.[0]?.path, "schedule.timeZone");
+    assert.equal(rendered.output.includes(privateValue), false);
+    assert.equal(rendered.output.includes("first"), false);
+    assert.equal(rendered.output.includes("second"), false);
+  }
+
+  const rendered = await renderMurphCliEntrypointError(
+    error,
     ["--vault", "first", "--vault", "second", "--full-output", "--format", "json"],
     { human: true },
   );
@@ -226,6 +259,49 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
   assert.equal(rendered.output.includes(privateValue), false);
   assert.equal(rendered.output.includes("first"), false);
   assert.equal(rendered.output.includes("second"), false);
+});
+
+test("renderMurphCliEntrypointError wraps every formatter with full-output", async () => {
+  const error = new VaultCliError(
+    "invalid_option",
+    "Pass vault only once.",
+  );
+
+  const plain = await renderMurphCliEntrypointError(
+    new VaultCliError(
+      error.code,
+      error.message,
+    ),
+    ["--vault", "one", "--vault", "two", "--format", "json"],
+    { human: true },
+  );
+
+  const direct = JSON.parse(plain.output) as { code?: string; error?: unknown };
+  assert.equal(direct.code, "invalid_option");
+  assert.equal(direct.error, undefined);
+
+  const full = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "one", "--vault", "two", "--full-output", "--format", "json"],
+    { human: true },
+  );
+  const fullEnvelope = JSON.parse(full.output) as {
+    code?: string;
+    error?: { code?: string };
+    ok?: boolean;
+  };
+  assert.equal(fullEnvelope.ok, false);
+  assert.equal(fullEnvelope.code, undefined);
+  assert.equal(fullEnvelope.error?.code, "invalid_option");
+
+  const yaml = await renderMurphCliEntrypointError(
+    error,
+    ["--vault", "one", "--vault", "two", "--full-output", "--format", "yaml"],
+    { human: true },
+  );
+  assert.match(yaml.output, /^ok:\s+false$/mu);
+  assert.match(yaml.output, /^error:/mu);
+  assert.match(yaml.output, /^\s+code:\s+invalid_option$/mu);
 });
 
 test("renderMurphCliEntrypointError defaults non-interactive failures to machine TOON", async () => {

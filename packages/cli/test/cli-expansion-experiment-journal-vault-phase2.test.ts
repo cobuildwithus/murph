@@ -523,7 +523,7 @@ test.sequential('experiment start maps option parses to bounded factual fields',
         assert.fail('expected invalid experiment start option to fail')
       }
       assert.equal(result.error.code, 'invalid_option')
-      assert.equal(result.error.stage, 'option_validation')
+      assert.equal(result.error.stage, 'validation')
       assert.equal(
         result.error.fieldErrors?.some((field) => field.path === expectedPath),
         true,
@@ -580,7 +580,7 @@ test.sequential('experiment start maps canonical plan conflicts without echoing 
       assert.fail('expected changed canonical plan data to conflict')
     }
     assert.equal(conflict.error.code, 'conflict')
-    assert.equal(conflict.error.stage, 'write')
+    assert.equal(conflict.error.stage, 'validation')
     assert.equal(conflict.error.fieldErrors?.[0]?.path, 'experiment.slug')
     assert.equal(conflict.error.retryable, false)
     assert.equal(conflict.error.hint, undefined)
