@@ -1202,7 +1202,15 @@ Last verified: 2026-08-20
   existing final-state guard preserves ambiguous encrypted obligations. The
   request retains every source part type in order, so
   multiple text parts remain multipart even when their bounded classifier text
-  is joined. An exact replay cannot reopen a skipped instant reply or a failed
+  is joined. The classifier keeps its 2,000-character bound, but instant reply
+  eligibility also requires the normalized source text to be complete at that
+  bound; a longer supported text remains on the ordinary runtime path with its
+  full mailbox value. At runtime Linq provider entry, Web propagates the already
+  validated source event and, under the existing chat lock, reopens that exact
+  instant delivery row. An unresolved row defers runtime dispatch, a
+  provider-correlated row terminates the stale runtime reply as already
+  answered, and only an absent, skipped, or definitive failed-without-payload
+  row permits the runtime provider claim. An exact replay cannot reopen a skipped instant reply or a failed
   instant reply whose encrypted payload was cleared; only an ambiguous failure
   with retained payload may resume the exact prior body. This template-specific
   rule does not change signup or notice retries.

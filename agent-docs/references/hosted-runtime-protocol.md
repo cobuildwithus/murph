@@ -1543,9 +1543,14 @@ claim. Once planning converges, only an exact model-approved active direct wake
 keeps that claim for Web delivery. Every completed non-instant plan marks the
 same row skipped before its fallback side effect. A caught planning failure
 also skips an attempted claim before rethrowing; provider-started or encrypted
-ambiguous states remain final to that skip operation. An unavailable result
-leaves the original conversation checkpoint unchanged. The eligibility request
-keeps source-part cardinality, so only one actual text part can use this path. A
+  ambiguous states remain final to that skip operation. An unavailable result
+  leaves the original conversation checkpoint unchanged. The eligibility request
+  keeps source-part cardinality, so only one actual text part can use this path,
+  and records whether the normalized source exceeded the classifier's bound so
+  a partial representation cannot become a user-facing reply. A definite
+  pre-provider route-read or projection failure confirms the attempted row was
+  skipped before fallback; an unconfirmed skip stays retryable and suppresses
+  the activation wake. A
 skipped row or failed row with no encrypted payload remains terminal on exact
 webhook replay; a failed row with retained payload may recover only that exact
 body. An accepted result instead
@@ -1557,8 +1562,14 @@ the handoff. Web awaits that conversation-mailbox Temporal signal; only then
 may the ordinary Linq direct ensure start and own readiness plus all runtime
 authority. The runtime imports both consumed rows as context with null reply
 targets, so the first exchange is available to later normal turns without
-answering the original inbound again. A different message or group transition
-waits while this exact delivery obligation remains unresolved. An ambiguous provider outcome starts no
+  answering the original inbound again. A different message or group transition
+  waits while this exact delivery obligation remains unresolved. Runtime Linq
+  provider entry carries the already validated mailbox event identity to the
+  existing chat-locked Web egress transaction and resolves that exact instant
+  row before claiming its own provider effect. Attempted, provider-started, or
+  encrypted failed rows defer; accepted or delivered rows end the stale runtime
+  send as already answered; absent, skipped, and definitive failed-without-payload
+  rows allow the ordinary runtime path. An ambiguous provider outcome starts no
 runtime wake and retains the exact encrypted reply for same-event recovery. The
 shell hint does not read the persisted
 container state; it delegates the already-running check and concurrent-start

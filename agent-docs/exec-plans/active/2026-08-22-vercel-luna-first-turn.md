@@ -80,28 +80,26 @@ was delivered.
 
 ## Verification
 
-- Focused Web owner tests pass 360 cases covering strict Murph output, canonical welcome,
-  plain-text eligibility, durable pre-generation ownership, accepted continuity,
-  centralized fallback terminalization, failed-planning claim release,
-  actual multipart cardinality, atomic rollback, encrypted-body replay,
-  ambiguous send suppression, terminal exact replay, and definitive fallback.
-  Webhook idempotency and Linq transport pass another 109
-  cases. A credential-gated seven-case real-model semantic matrix
+- Six focused Web suites pass 479 cases covering strict Murph output, canonical
+  welcome, complete plain-text eligibility, durable pre-generation ownership,
+  accepted continuity, exact-event runtime egress authority, centralized and
+  confirmed fallback terminalization, failed-planning claim release, actual
+  multipart cardinality, atomic rollback, encrypted-body replay, ambiguous send
+  suppression, terminal exact replay, and definitive fallback. Webhook
+  idempotency and Linq transport pass another 109 cases. A credential-gated
+  seven-case real-model semantic matrix
   exercises greetings, capabilities, concrete health questions, missing
   personal context, requested actions, and urgent safety guidance without a
   live Linq destination.
-- The full focused Linq dispatch file passes 206 tests, including parallel
+- The full focused Linq dispatch file passes 209 tests, including parallel
   generation/prewarm, outbound-checkpoint wake, activation continuation, and
-  ambiguous-delivery wake suppression.
-- Delivery-store tests pass 140 cases, including exact attempted-to-provider
-  advancement, terminal skipped/definitive fallback, encrypted ambiguous
-  recovery, and conflicting chat ownership; webhook idempotency and Linq
-  transport pass 109 cases.
+  ambiguous-delivery wake suppression, exact-bound completeness, and full
+  supported-text mailbox retention.
 - Web typecheck, changed-file ESLint, Prisma validation, `git diff --check`, the
   expand-only migration guard, and the reviewed migration/schema snapshots
   pass. The payload migration now contains only nullable columns, its member
   foreign key, and its index.
-- `pnpm test:diff` exits 0. Its Web lane passes 850 files and 11,031 tests,
+- `pnpm test:diff` exits 0. Its Web lane passes 850 files and 11,048 tests,
   changed-app typecheck, lint with no errors, dev smoke, and production build.
   The workspace boundary step still reports two unrelated pre-existing Junction
   test-import diagnostics outside this PR.
@@ -116,11 +114,32 @@ was delivered.
 
 ## State
 
-Active. Round 4 remediation and candidate verification are complete. The
+Active. Round 5 remediation and candidate verification are complete. The
 design reuses the existing delivery ledger as the only provider outbox, stores
 the exact pending body encrypted for ambiguous recovery, and represents the
 completed exchange as two ordinary consumed conversation rows. ReviewGPT,
 exact-head gates, and completion remain.
+
+## ReviewGPT round 5 disposition
+
+Both round 5 findings were accepted. First, request-local activation-wake
+suppression could not protect the independent runtime Linq sender. The existing
+egress assertion now carries the already validated inbound event id to the
+chat-locked provider-entry transaction. That transaction resolves the exact
+`instant_first_turn_v1` row immediately before the runtime provider fence:
+unresolved ownership defers, accepted or delivered evidence ends the stale
+runtime send as already answered, and only an absent or terminal fallback row
+allows runtime dispatch. A definite route-read or projection failure after
+generation must also confirm the existing attempted row was skipped before
+fallback; an unconfirmed skip retains Web ownership and suppresses the wake.
+
+Second, the reply model reused the classifier's silent 2,000-character prefix
+as if it were the complete message. The existing normalization boundary now
+reports one transient completeness bit. Classification keeps the same bounded
+input, but Web reply eligibility requires a complete normalized value, so a
+longer supported one-part message follows the ordinary runtime path with its
+full mailbox text. These corrections add no persisted field, API, owner, queue,
+service, dependency, lease, or reconciliation loop.
 
 ## ReviewGPT round 4 disposition
 

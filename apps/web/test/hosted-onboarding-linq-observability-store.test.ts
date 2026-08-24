@@ -27,6 +27,7 @@ import {
   recordHostedLinqDeliveryAttemptTx,
   recordHostedLinqRuntimeProviderDispatchFenceTx,
   recordHostedLinqRuntimeDeliveryOutcomeTx,
+  resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx,
   resolveHostedLinqInviteSignupDispatchEffectIdTx,
 } from "@/src/lib/hosted-onboarding/linq-delivery-store";
 import {
@@ -1452,6 +1453,128 @@ describe("hosted Linq observability stores", () => {
         ],
       }),
     });
+  });
+
+  it.each([
+    {
+      expected: "defer",
+      label: "attempted Web ownership",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "attempted",
+      },
+    },
+    {
+      expected: "defer",
+      label: "ambiguous encrypted Web ownership",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "LINQ_SEND_FAILED",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: "sealed-reply",
+        payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+    {
+      expected: "already_answered",
+      label: "accepted Web delivery",
+      row: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: "hbidx:linq-message:accepted",
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "accepted",
+      },
+    },
+    {
+      expected: "available",
+      label: "skipped Web fallback",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: null,
+        failureCode: null,
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: new Date("2026-03-26T12:00:01.000Z"),
+        status: "skipped",
+      },
+    },
+    {
+      expected: "available",
+      label: "definitive failed Web fallback",
+      row: {
+        acceptedAt: null,
+        deliveredAt: null,
+        failedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failureCode: "LINQ_REJECTED",
+        lastReceiptAt: null,
+        messageLookupKey: null,
+        payloadCiphertext: null,
+        payloadSchema: null,
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+  ] as const)("returns $expected for $label", async ({ expected, row }) => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(row);
+
+    await expect(
+      resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+        eventId: "evt_exact_first_turn",
+        linqChatId: "chat_123",
+        prisma: fixture.prisma as never,
+      }),
+    ).resolves.toBe(expected);
+
+    expect(fixture.hostedLinqDeliveryFindFirst).toHaveBeenCalledWith({
+      select: expect.objectContaining({
+        payloadCiphertext: true,
+        status: true,
+      }),
+      where: {
+        linqChatLookupKey: {
+          in: createHostedLinqChatLookupKeyReadCandidates("chat_123"),
+        },
+        sourceRef: createHostedLinqDeliverySourceRefLookupKey(
+          "evt_exact_first_turn",
+        ),
+        template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+      },
+    });
+  });
+
+  it("leaves an inbound with no exact Web delivery available to the runtime", async () => {
+    const fixture = createObservabilityPrismaFixture();
+
+    await expect(
+      resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+        eventId: "evt_next_inbound",
+        linqChatId: "chat_123",
+        prisma: fixture.prisma as never,
+      }),
+    ).resolves.toBe("available");
   });
 
   it("advances only the exact owned pre-provider attempt before sending", async () => {

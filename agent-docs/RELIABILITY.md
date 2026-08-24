@@ -792,6 +792,12 @@ Last verified: 2026-08-20
   provider-started, failed-with-payload, and completed rows untouched. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
+  A definite route-read or route-projection failure after generation confirms
+  that same attempted row was skipped before allowing ordinary-runtime
+  fallback; if the skip cannot be confirmed, Web retains ownership and the
+  activation wake stays suppressed. The bounded classifier prefix is eligible
+  for a Web reply only when it represents the complete normalized source text;
+  longer one-part text keeps its ordinary full-mailbox runtime path.
   A reply claim extends the existing `HostedLinqDelivery` row with the exact
   encrypted body in the same short database transaction that claims provider
   dispatch. Linq receives the stable event-derived idempotency key. An
@@ -812,7 +818,13 @@ Last verified: 2026-08-20
   unresolved first-turn obligation, and the exact route, direct audience,
   active access, and unconsumed inbound are revalidated before send and
   finalization. Generation timeout, unavailable configuration, unsafe output,
-  or an ineligible multipart message leaves the existing inbound runtime path unchanged. This adds no
+  an incomplete bounded text representation, or an ineligible multipart
+  message leaves the existing inbound runtime path unchanged. Immediately
+  before runtime Linq provider dispatch, the existing egress route reopens the
+  validated source event's exact instant-delivery row under its existing chat
+  lock: unresolved ownership defers, accepted or delivered evidence ends the
+  stale runtime reply, and terminal fallback or absence permits the ordinary
+  runtime claim. This adds no
   second queue, transcript store, workflow kind, or runtime state owner; all
   database work remains exact-event and single-row rather than collection
   fanout.

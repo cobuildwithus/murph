@@ -728,6 +728,73 @@ export async function recordHostedLinqRuntimeProviderDispatchFenceTx(input: {
   });
 }
 
+export type HostedLinqInstantFirstTurnRuntimeEgressDisposition =
+  | "already_answered"
+  | "available"
+  | "defer";
+
+export function isHostedLinqInstantFirstTurnFallbackTerminal(input: {
+  failedAt: Date | null;
+  payloadCiphertext: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  status: string;
+}): boolean {
+  return input.skippedAt !== null
+    || input.status === "skipped"
+    || (
+      (input.failedAt !== null || input.status === "failed")
+      && input.payloadCiphertext === null
+      && input.payloadSchema === null
+    );
+}
+
+export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx(
+  input: {
+    eventId: string;
+    linqChatId: string;
+    prisma: HostedLinqDeliveryClient;
+  },
+): Promise<HostedLinqInstantFirstTurnRuntimeEgressDisposition> {
+  const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(
+    input.linqChatId,
+  );
+  const sourceRef = createHostedLinqDeliverySourceRefLookupKey(input.eventId);
+  if (linqChatLookupKeys.length === 0 || !sourceRef) {
+    return "defer";
+  }
+
+  const delivery = await input.prisma.hostedLinqDelivery.findFirst({
+    select: {
+      acceptedAt: true,
+      deliveredAt: true,
+      failedAt: true,
+      failureCode: true,
+      lastReceiptAt: true,
+      messageLookupKey: true,
+      payloadCiphertext: true,
+      payloadSchema: true,
+      skippedAt: true,
+      status: true,
+    },
+    where: {
+      linqChatLookupKey: { in: linqChatLookupKeys },
+      sourceRef,
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    },
+  });
+  if (!delivery) {
+    return "available";
+  }
+  if (isHostedLinqDeliveryProviderCorrelated(delivery)) {
+    return "already_answered";
+  }
+  if (isHostedLinqInstantFirstTurnFallbackTerminal(delivery)) {
+    return "available";
+  }
+  return "defer";
+}
+
 export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
   linqChatId: string;
   prisma: HostedLinqDeliveryClient;

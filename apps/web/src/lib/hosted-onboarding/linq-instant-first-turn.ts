@@ -37,6 +37,7 @@ import {
   claimHostedLinqDeliveryProviderDispatchTx,
   hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+  isHostedLinqInstantFirstTurnFallbackTerminal,
   markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx,
   markHostedLinqDeliverySkippedTx,
@@ -138,6 +139,7 @@ export function isHostedLinqInstantFirstTurnRequestEligible(
     && request.service === "imessage"
     && request.partTypes.length === 1
     && request.partTypes[0] === "text"
+    && !request.textWasTruncated
     && Boolean(request.text?.trim());
 }
 
@@ -251,7 +253,7 @@ export async function abandonHostedLinqInstantFirstTurn(input: {
       chatId: input.linqChatId,
       tx,
     });
-    await markHostedLinqDeliverySkippedTx({
+    const delivery = await markHostedLinqDeliverySkippedTx({
       idempotencyKey: buildHostedLinqInstantFirstTurnIdempotencyKey(
         input.eventId,
       ),
@@ -263,6 +265,21 @@ export async function abandonHostedLinqInstantFirstTurn(input: {
       targetKind: "thread",
       template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
     });
+    const terminal = await tx.hostedLinqDelivery.findUnique({
+      select: {
+        failedAt: true,
+        payloadCiphertext: true,
+        payloadSchema: true,
+        skippedAt: true,
+        status: true,
+      },
+      where: { id: delivery.id },
+    });
+    if (!terminal || !isHostedLinqInstantFirstTurnFallbackTerminal(terminal)) {
+      throw buildHostedLinqInstantFirstTurnRetryError(
+        "fallback-terminalization-unconfirmed",
+      );
+    }
   });
 }
 
@@ -287,13 +304,12 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     });
   }
   if (input.generation.kind === "unavailable") {
-    await abandonHostedLinqInstantFirstTurn({
+    return await abandonHostedLinqInstantFirstTurnForFallback({
       eventId: input.wakeHandoff.eventId,
       linqChatId: chatId,
       prisma,
       reason: "generation-unavailable",
     });
-    return { kind: "fallback" };
   }
 
   let message: string;
@@ -349,22 +365,39 @@ export async function completeHostedLinqInstantFirstTurn(input: {
         userId: input.wakeHandoff.userId,
       });
     } catch {
-      await abandonHostedLinqInstantFirstTurn({
+      return await abandonHostedLinqInstantFirstTurnForFallback({
         eventId: input.wakeHandoff.eventId,
         linqChatId: chatId,
         prisma,
         reason: "payload-seal-unavailable",
       });
-      return { kind: "fallback" };
     }
   }
-  const routingRecord = await readHostedMemberRoutingRecord({
-    memberId: input.wakeHandoff.userId,
-    prisma,
-  });
-  const routingState = routingRecord
-    ? await projectHostedMemberRoutingState(routingRecord, prisma)
-    : null;
+  let routingRecord: Awaited<ReturnType<typeof readHostedMemberRoutingRecord>>;
+  let routingState: Awaited<ReturnType<typeof projectHostedMemberRoutingState>>
+    | null;
+  try {
+    routingRecord = await readHostedMemberRoutingRecord({
+      memberId: input.wakeHandoff.userId,
+      prisma,
+    });
+    routingState = routingRecord
+      ? await projectHostedMemberRoutingState(routingRecord, prisma)
+      : null;
+  } catch (error) {
+    if (resumed) {
+      throw buildHostedLinqInstantFirstTurnRetryError(
+        "direct-route-unconfirmed",
+        error,
+      );
+    }
+    return await abandonHostedLinqInstantFirstTurnForFallback({
+      eventId: input.wakeHandoff.eventId,
+      linqChatId: chatId,
+      prisma,
+      reason: "direct-route-unavailable",
+    });
+  }
   const directRoute = resolveHostedMemberDirectRoute(routingState);
   if (
     directRoute?.channel !== "linq"
@@ -375,13 +408,12 @@ export async function completeHostedLinqInstantFirstTurn(input: {
         "direct-route-changed",
       );
     }
-    await abandonHostedLinqInstantFirstTurn({
+    return await abandonHostedLinqInstantFirstTurnForFallback({
       eventId: input.wakeHandoff.eventId,
       linqChatId: chatId,
       prisma,
       reason: "direct-route-changed",
     });
-    return { kind: "fallback" };
   }
   let claim: Awaited<ReturnType<
     typeof claimHostedLinqDeliveryProviderDispatchTx
@@ -453,13 +485,12 @@ export async function completeHostedLinqInstantFirstTurn(input: {
       && isHostedOnboardingError(error)
       && error.code === "HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH"
     ) {
-      await abandonHostedLinqInstantFirstTurn({
+      return await abandonHostedLinqInstantFirstTurnForFallback({
         eventId: input.wakeHandoff.eventId,
         linqChatId: chatId,
         prisma,
         reason: "direct-route-changed",
       });
-      return { kind: "fallback" };
     }
     throw buildHostedLinqInstantFirstTurnRetryError(
       "delivery-claim-unconfirmed",
@@ -1147,6 +1178,29 @@ function buildHostedLinqInstantFirstTurnRetryError(
       "The instant first reply is still reconciling; retry the same webhook before running the hosted assistant.",
     retryable: true,
   });
+}
+
+async function abandonHostedLinqInstantFirstTurnForFallback(input: {
+  eventId: string;
+  linqChatId: string;
+  prisma: PrismaClient;
+  reason: string;
+}): Promise<HostedLinqInstantFirstTurnCompletion> {
+  try {
+    await abandonHostedLinqInstantFirstTurn(input);
+  } catch (error) {
+    if (
+      isHostedOnboardingError(error)
+      && error.code === "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY"
+    ) {
+      throw error;
+    }
+    throw buildHostedLinqInstantFirstTurnRetryError(
+      "fallback-terminalization-unconfirmed",
+      error,
+    );
+  }
+  return { kind: "fallback" };
 }
 
 function buildHostedLinqInstantFirstTurnIdempotencyKey(eventId: string): string {

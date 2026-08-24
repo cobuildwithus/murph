@@ -1877,6 +1877,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
               partTypes: ["text"],
               service: "sms",
               text: "hello",
+              textWasTruncated: false,
             },
             response: {
               ignored: true,
@@ -1971,6 +1972,7 @@ describe("hosted Linq mailbox payload root prewarm", () => {
               partTypes: [],
               service: "sms",
               text: null,
+              textWasTruncated: false,
             },
             response: {
               ignored: true,

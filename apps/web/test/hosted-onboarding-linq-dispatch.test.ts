@@ -39,7 +39,10 @@ import {
 import { ingestHostedLinqProviderEventTx } from "@/src/lib/hosted-onboarding/linq-provider-event-store";
 import { parseHostedLinqProviderEvent } from "@/src/lib/hosted-onboarding/linq-provider-events";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
-import { resolveHostedLinqFirstContactContentDisposition } from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
+import {
+  resolveHostedLinqFirstContactContentDisposition,
+  resolveHostedOnboardingLinqMessageContext,
+} from "@/src/lib/hosted-onboarding/webhook-provider-linq-shared";
 
 type HostedRuntimeAiAccessDecisionReader =
   typeof import("@/src/lib/hosted-onboarding/member-access").readHostedRuntimeAiAccessDecision;
@@ -650,6 +653,7 @@ vi.mock("@/src/lib/hosted-onboarding/logging", async () => {
 
 import { handleHostedOnboardingLinqWebhook as handleHostedOnboardingLinqWebhookImpl } from "@/src/lib/hosted-onboarding/webhook-service";
 import { HOSTED_LINQ_DAILY_TEXT_LIMIT } from "@/src/lib/hosted-onboarding/linq-daily-state";
+import { buildHostedLinqFirstContactAdmissionRequest } from "@/src/lib/hosted-onboarding/webhook-provider-linq";
 
 type MockedFunction = ReturnType<typeof vi.fn>;
 type HostedOnboardingLinqWebhookInput = Parameters<typeof handleHostedOnboardingLinqWebhookImpl>[0];
@@ -1257,6 +1261,37 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(reply.trim().length).toBeGreaterThan(
       "https://join.example.test/join/code_first_text".length,
     );
+  });
+
+  it.each([
+    { expectedTruncated: false, label: "exactly bounded text", suffix: "" },
+    { expectedTruncated: false, label: "trailing whitespace", suffix: "   " },
+    { expectedTruncated: true, label: "meaningful text past the bound", suffix: "y" },
+  ])("distinguishes complete $label from a truncated admission prefix", ({
+    expectedTruncated,
+    suffix,
+  }) => {
+    const event = requireHostedLinqMessageReceivedEvent(
+      parseHostedLinqWebhookEvent(buildHostedLinqWebhookBody({
+        data: {
+          parts: [{ type: "text", value: `${"x".repeat(2_000)}${suffix}` }],
+        },
+        service: "iMessage",
+      })),
+    );
+    const context = resolveHostedOnboardingLinqMessageContext(event);
+    if (!context.participantContact) {
+      throw new Error("Expected a participant contact for the direct message.");
+    }
+
+    expect(buildHostedLinqFirstContactAdmissionRequest({
+      context,
+      event,
+      participantContact: context.participantContact,
+    })).toMatchObject({
+      text: "x".repeat(2_000),
+      textWasTruncated: expectedTruncated,
+    });
   });
 
   it("acknowledges Linq typing before resolving the best-effort shell prewarm", async () => {
@@ -2089,6 +2124,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   );
 
   it("keeps active-member iMessage ingress direct when canonical classification is direct", async () => {
+    const supportedLongText = `${"Context ".repeat(290)}Final question?`;
     mocks.getHostedLinqChatSummary.mockResolvedValueOnce({
       handles: [],
       isGroup: false,
@@ -2121,6 +2157,9 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       prisma,
       rawBody: buildHostedLinqWebhookBody({
         chatIsGroup: false,
+        data: {
+          parts: [{ type: "text", value: supportedLongText }],
+        },
         service: "iMessage",
       }),
       signature: null,
@@ -2144,6 +2183,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         envelope: expect.objectContaining({
           message: expect.objectContaining({
             linqMessage: expect.objectContaining({
+              parts: [{ type: "text", value: supportedLongText }],
               service: "iMessage",
               threadIsDirect: true,
             }),
@@ -8180,6 +8220,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       request: expect.objectContaining({
         eventId,
         text: "Hey Murph",
+        textWasTruncated: false,
       }),
     });
     expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
@@ -9912,6 +9953,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     const admissionRequest = mocks.classifyHostedLinqFirstContactAdmission
       .mock.calls[0]?.[0]?.request;
     expect(admissionRequest?.text).toHaveLength(2_000);
+    expect(admissionRequest?.textWasTruncated).toBe(true);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",
@@ -10222,6 +10264,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         partTypes: ["text"],
         service: "imessage",
         text: boundedRejectedMessageText,
+        textWasTruncated: true,
       }),
       signal: undefined,
     });

@@ -97,6 +97,19 @@ vi.mock("@/src/lib/hosted-onboarding/linq-delivery-store", () => ({
   hasConflictingHostedLinqInstantFirstTurnForChatTx:
     mocks.hasConflictingHostedLinqInstantFirstTurnForChatTx,
   HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE: "instant_first_turn_v1",
+  isHostedLinqInstantFirstTurnFallbackTerminal: (input: {
+    failedAt: Date | null;
+    payloadCiphertext: string | null;
+    payloadSchema: string | null;
+    skippedAt: Date | null;
+    status: string;
+  }) => input.skippedAt !== null
+    || input.status === "skipped"
+    || (
+      (input.failedAt !== null || input.status === "failed")
+      && input.payloadCiphertext === null
+      && input.payloadSchema === null
+    ),
   markHostedLinqDeliveryAcceptedTx: mocks.markHostedLinqDeliveryAcceptedTx,
   markHostedLinqDeliverySendFailedTx:
     mocks.markHostedLinqDeliverySendFailedTx,
@@ -126,6 +139,7 @@ const REQUEST = {
   partTypes: ["text"],
   service: "imessage" as const,
   text: "Hey Murph, what can you do?",
+  textWasTruncated: false,
 };
 
 const WAKE_HANDOFF = {
@@ -225,7 +239,11 @@ describe("hosted Linq instant first turn", () => {
     );
     mocks.hostedMemberRoutingRecordsEqual.mockReturnValue(true);
     mocks.hostedLinqDeliveryFindUnique.mockResolvedValue({
+      failedAt: null,
       payloadCiphertext: null,
+      payloadSchema: null,
+      skippedAt: new Date("2026-08-22T21:00:00.000Z"),
+      status: "skipped",
     });
     mocks.recordHostedAiUsageRecords.mockResolvedValue({ recordedIds: [] });
     mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValue({
@@ -260,7 +278,9 @@ describe("hosted Linq instant first turn", () => {
       restoreOnboardingLink: null,
     });
     mocks.markHostedLinqDeliverySendFailedTx.mockResolvedValue(null);
-    mocks.markHostedLinqDeliverySkippedTx.mockResolvedValue(null);
+    mocks.markHostedLinqDeliverySkippedTx.mockResolvedValue({
+      id: "delivery_123",
+    });
     mocks.appendPreparedHostedMailboxEnvelopeTx.mockResolvedValue({
       mailboxItemId: "mailbox_outbound",
     });
@@ -281,6 +301,7 @@ describe("hosted Linq instant first turn", () => {
       { ...REQUEST, service: "sms" as const },
       { ...REQUEST, participantContactKind: "email" as const },
       { ...REQUEST, text: "   " },
+      { ...REQUEST, textWasTruncated: true },
     ]) {
       expect(isHostedLinqInstantFirstTurnRequestEligible(request)).toBe(false);
     }
@@ -306,6 +327,33 @@ describe("hosted Linq instant first turn", () => {
         status: "attempted",
       }),
     );
+  });
+
+  it("does not claim or generate from a truncated classifier representation", async () => {
+    const prisma = createPrisma();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const request = {
+      ...REQUEST,
+      text: "x".repeat(2_000),
+      textWasTruncated: true,
+    };
+
+    const claim = await claimHostedLinqInstantFirstTurn({
+      linqChatId: "chat_123",
+      prisma,
+      request,
+    });
+
+    expect(claim).toEqual({ kind: "unavailable" });
+    await expect(startHostedLinqInstantFirstTurnGeneration({
+      claim,
+      request,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
+      .not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("terminalizes a speculative claim under the same chat lock", async () => {
@@ -484,6 +532,124 @@ describe("hosted Linq instant first turn", () => {
         },
       },
     });
+  });
+
+  it("terminalizes a generated reply when direct-route projection fails", async () => {
+    mocks.projectHostedMemberRoutingState.mockRejectedValueOnce(
+      new Error("Synthetic route projection failure."),
+    );
+
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation: {
+        kind: "reply",
+        message: "Hey! What would you like help with?",
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
+      },
+      inboundMessageId: "inbound_message_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "phone_lookup_123",
+        value: "+15551234567",
+      },
+      prisma: createPrisma(),
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    })).resolves.toEqual({ kind: "fallback" });
+
+    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "direct-route-unavailable",
+        sourceRef: REQUEST.eventId,
+      }),
+    );
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("retains Web ownership when pre-provider terminalization is unconfirmed", async () => {
+    mocks.readHostedMemberRoutingRecord.mockRejectedValueOnce(
+      new Error("Synthetic route read failure."),
+    );
+    mocks.markHostedLinqDeliverySkippedTx.mockRejectedValueOnce(
+      new Error("Synthetic terminalization failure."),
+    );
+
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation: {
+        kind: "reply",
+        message: "Hey! What would you like help with?",
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
+      },
+      inboundMessageId: "inbound_message_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "phone_lookup_123",
+        value: "+15551234567",
+      },
+      prisma: createPrisma(),
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+      details: { reason: "fallback-terminalization-unconfirmed" },
+      retryable: true,
+    });
+
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("retains Web ownership when the skip writer preserves provider entry", async () => {
+    mocks.readHostedMemberRoutingRecord.mockRejectedValueOnce(
+      new Error("Synthetic route read failure."),
+    );
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      failedAt: null,
+      payloadCiphertext: "sealed:Exact prior reply",
+      payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+      skippedAt: null,
+      status: "provider_dispatch_started",
+    });
+
+    await expect(completeHostedLinqInstantFirstTurn({
+      generation: {
+        kind: "reply",
+        message: "Hey! What would you like help with?",
+        usage: {
+          requestedModel: "gpt-5.6-luna",
+          response: buildUsageResponse(),
+        },
+      },
+      inboundMessageId: "inbound_message_123",
+      participantContact: {
+        kind: "phone",
+        lookupKey: "phone_lookup_123",
+        value: "+15551234567",
+      },
+      prisma: createPrisma(),
+      recipientPhoneNumber: "+15550000000",
+      service: "iMessage",
+      wakeHandoff: WAKE_HANDOFF,
+    })).rejects.toMatchObject({
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_RETRY",
+      details: { reason: "fallback-terminalization-unconfirmed" },
+      retryable: true,
+    });
+
+    expect(mocks.markHostedLinqDeliverySkippedTx).toHaveBeenCalledOnce();
+    expect(mocks.claimHostedLinqDeliveryProviderDispatchTx)
+      .not.toHaveBeenCalled();
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
 
   it("falls back only after a failed provider milestone clears the pending body", async () => {
