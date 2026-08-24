@@ -74,6 +74,30 @@ describe('projectVaultCliError', () => {
     expect(JSON.stringify(projection)).not.toContain(providerBody)
   })
 
+  test('preserves only a bounded factual stage from known error context', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_option', 'Option failed validation.', {
+        issues: [{ code: 'invalid_value', path: ['expectedDirection', 0] }],
+        retryable: false,
+        stage: 'option_validation',
+      }),
+    )
+
+    expect(projection).toMatchObject({
+      code: 'invalid_option',
+      retryable: false,
+      stage: 'option_validation',
+    })
+    expect(
+      projectVaultCliError(
+        new VaultCliError('invalid_payload', 'Payload is invalid.', {
+          issues: [{ code: 'invalid_type', path: ['value'] }],
+          stage: 'validation with private detail',
+        }),
+      ).stage,
+    ).toBe('validation')
+  })
+
   test('ignores repair-shaped arbitrary context beside established Zod issues', () => {
     const projection = projectVaultCliError(
       new VaultCliError(

@@ -2263,14 +2263,12 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
     throw new VaultCliError(
       'invalid_payload',
       'Murph Age aggregate evidence input must be a receipt object, an array, or a supported wrapper object.',
-      undefined,
       {
-        fields: [{
-          path: '$',
+        issues: [{
+          path: [],
           code: 'invalid_type',
-          message: 'Use a JSON object or array for aggregate evidence input.',
         }],
-        hint: 'Pass one receipt object, an array of receipts, or a wrapper containing a receipt array.',
+        retryable: false,
         stage: 'validation',
       },
     )
@@ -2290,14 +2288,12 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
       throw new VaultCliError(
         'invalid_payload',
         'Murph Age aggregate evidence wrapper fields must contain arrays.',
-        undefined,
         {
-          fields: [{
-            path: wrapper,
+          issues: [{
+            path: [wrapper],
             code: 'invalid_type',
-            message: 'This wrapper field must contain an array of receipt objects.',
           }],
-          hint: 'Replace the wrapper field with an array, or pass one receipt object without a wrapper.',
+          retryable: false,
           stage: 'validation',
         },
       )

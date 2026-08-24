@@ -317,16 +317,15 @@ test("progress-card capture deletion reports a terminal conflict without exposin
 
     assert.ok(captured instanceof VaultCliError);
     assert.equal(captured.code, "progress_card_capture_conflict");
-    assert.equal(captured.repair?.stage, "conflict");
-    assert.equal(
-      captured.repair?.hint,
-      "Do not retry this progress card. Continue the final review without the card attachment.",
-    );
+    assert.equal(captured.context?.stage, "conflict");
+    assert.equal(captured.context?.retryable, false);
+    assert.equal(captured.context?.hint, undefined);
     const encoded = JSON.stringify({
       code: captured.code,
+      context: captured.context,
       message: captured.message,
-      repair: captured.repair,
     });
+    assert.equal(encoded.includes("final review"), false);
     for (const forbidden of [experimentId, media.ref, vaultRoot]) {
       assert.equal(encoded.includes(forbidden), false, forbidden);
     }
@@ -359,17 +358,15 @@ test("progress-card persistence reports a stable integrity stage without exposin
 
     assert.ok(captured instanceof VaultCliError);
     assert.equal(captured.code, "progress_card_integrity_failed");
-    assert.equal(captured.repair?.stage, "integrity");
-    assert.doesNotMatch(captured.repair?.hint ?? "", /repair-experiment-media/u);
-    assert.equal(
-      captured.repair?.hint,
-      "Do not retry this progress card. Continue the final review without the card attachment.",
-    );
+    assert.equal(captured.context?.stage, "integrity");
+    assert.equal(captured.context?.retryable, false);
+    assert.equal(captured.context?.hint, undefined);
     const encoded = JSON.stringify({
       code: captured.code,
+      context: captured.context,
       message: captured.message,
-      repair: captured.repair,
     });
+    assert.equal(encoded.includes("final review"), false);
     for (const forbidden of [privateMarker, media.ref, vaultRoot]) {
       assert.equal(encoded.includes(forbidden), false, forbidden);
     }

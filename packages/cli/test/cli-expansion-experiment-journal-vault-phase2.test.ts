@@ -472,7 +472,7 @@ test.sequential('custom experiment start explains the required primary outcome b
   }
 })
 
-test.sequential('experiment start maps option parses to bounded repair fields', async () => {
+test.sequential('experiment start maps option parses to bounded factual fields', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-experiment-option-repair-'))
   const privateDirection = 'private-direction-marker'
   const privateOutcomeKey = 'private-primary-marker'
@@ -528,7 +528,8 @@ test.sequential('experiment start maps option parses to bounded repair fields', 
         result.error.fieldErrors?.some((field) => field.path === expectedPath),
         true,
       )
-      assert.match(result.error.hint ?? '', /repair|retry/u)
+      assert.equal(result.error.retryable, false)
+      assert.equal(result.error.hint, undefined)
       assert.equal(JSON.stringify(result).includes(privateValue), false)
       assert.equal(JSON.stringify(result).includes(vaultRoot), false)
     }
@@ -581,7 +582,8 @@ test.sequential('experiment start maps canonical plan conflicts without echoing 
     assert.equal(conflict.error.code, 'conflict')
     assert.equal(conflict.error.stage, 'write')
     assert.equal(conflict.error.fieldErrors?.[0]?.path, 'experiment.slug')
-    assert.match(conflict.error.hint ?? '', /experiment show|experiment edit/u)
+    assert.equal(conflict.error.retryable, false)
+    assert.equal(conflict.error.hint, undefined)
     const encoded = JSON.stringify(conflict)
     for (const forbidden of [slug, changedTitle, vaultRoot]) {
       assert.equal(encoded.includes(forbidden), false, forbidden)

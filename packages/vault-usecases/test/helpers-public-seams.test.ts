@@ -711,15 +711,18 @@ describe("helper barrel exports", () => {
           code: "conflict",
           message: "Experiment plan data conflicts.",
           preserveDetails: false,
-          repair: { stage: "write" },
+          details: { retryable: false, stage: "write" },
         },
       },
     );
     expect(redactedMapping).toEqual(
       expect.objectContaining({
         code: "conflict",
-        context: { vaultCode: "VAULT_EXPERIMENT_CONFLICT" },
-        repair: expect.objectContaining({ stage: "write" }),
+        context: {
+          retryable: false,
+          stage: "write",
+          vaultCode: "VAULT_EXPERIMENT_CONFLICT",
+        },
       }),
     );
 

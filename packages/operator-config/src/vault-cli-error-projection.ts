@@ -1,5 +1,5 @@
-import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { redactSensitivePathSegments } from './text/shared.js'
+import { VaultCliError } from './vault-cli-errors.js'
 
 const MAX_VALIDATION_FIELDS = 12
 const MAX_VALIDATION_PATH_LENGTH = 160
@@ -7,6 +7,7 @@ const ZOD_ISSUE_CODE_PATTERN =
   /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u
 const ZOD_EXPECTED_PATTERN =
   /^(?:array|boolean|null|number|object|string|undefined)$/u
+const ERROR_STAGE_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/u
 
 export interface VaultCliProjectedFieldError {
   code?: string | undefined
@@ -68,14 +69,23 @@ function projectKnownVaultCliError(
       ? error.context.exitCode
       : undefined
   const fieldErrors = createValidationFieldErrors(error.context)
+  const contextStage = readSafeErrorStage(error.context?.stage)
+  const stage = contextStage ?? (fieldErrors ? 'validation' : undefined)
 
   return {
     code: error.code,
     message: redactSensitivePathSegments(error.message),
     retryable,
     ...(exitCode === undefined ? {} : { exitCode }),
-    ...(fieldErrors ? { fieldErrors, stage: 'validation' } : {}),
+    ...(fieldErrors ? { fieldErrors } : {}),
+    ...(stage ? { stage } : {}),
   }
+}
+
+function readSafeErrorStage(value: unknown): string | undefined {
+  return typeof value === 'string' && ERROR_STAGE_PATTERN.test(value)
+    ? value
+    : undefined
 }
 
 function createValidationFieldErrors(

@@ -13,7 +13,7 @@ import {
   type CliInvocationPlan,
   type VaultCliProgramName,
 } from './vault-cli-routing.js'
-import type { VaultCliErrorProjection } from './vault-cli-error-projection.js'
+import type { VaultCliErrorProjection } from '@murphai/operator-config/vault-cli-error-projection'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -371,7 +371,9 @@ export async function renderMurphCliEntrypointError(
   argv: readonly string[],
   options: { human?: boolean | undefined } = {},
 ): Promise<RenderedMurphCliError> {
-  const { projectVaultCliError } = await import('./vault-cli-error-projection.js')
+  const { projectVaultCliError } = await import(
+    '@murphai/operator-config/vault-cli-error-projection'
+  )
   const projected = projectVaultCliError(error)
   const explicitFormat = findExplicitOutputFormat(argv)
   const human = options.human ?? process.stdout.isTTY === true
@@ -386,22 +388,26 @@ export async function renderMurphCliEntrypointError(
 
   const format = explicitFormat ?? 'toon'
   const { Formatter: runtimeFormatter } = await import('incur')
+  const errorBody = {
+    code: projected.code,
+    message: projected.message,
+    retryable: projected.retryable,
+    ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
+    ...(projected.hint ? { hint: projected.hint } : {}),
+    ...(projected.stage ? { stage: projected.stage } : {}),
+  }
+  const outputBody = argv.includes('--full-output')
+    ? {
+        ok: false,
+        error: errorBody,
+        meta: {
+          command: 'invocation',
+          duration: '0ms',
+        },
+      }
+    : errorBody
   const output = runtimeFormatter.format(
-    {
-      ok: false,
-      error: {
-        code: projected.code,
-        message: projected.message,
-        retryable: projected.retryable,
-        ...(projected.fieldErrors ? { fieldErrors: projected.fieldErrors } : {}),
-        ...(projected.hint ? { hint: projected.hint } : {}),
-        ...(projected.stage ? { stage: projected.stage } : {}),
-      },
-      meta: {
-        command: 'invocation',
-        duration: '0ms',
-      },
-    },
+    outputBody,
     format,
   )
 

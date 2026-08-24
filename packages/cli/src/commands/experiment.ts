@@ -408,15 +408,12 @@ function normalizeExpectedDirectionEntries(
       throw new VaultCliError(
         'invalid_option',
         '--expected-direction entries must use biomarker:key=direction form.',
-        undefined,
         {
-          fields: [{
+          issues: [{
             path: ['expectedDirection', index],
             code: 'invalid_format',
-            message: 'Use biomarker:key=direction form.',
-            expected: 'biomarker:key=increase|decrease|stabilize',
           }],
-          hint: 'Repair the listed --expected-direction entry and retry experiment start.',
+          retryable: false,
           stage: 'option_validation',
         },
       )
@@ -429,15 +426,12 @@ function normalizeExpectedDirectionEntries(
       throw new VaultCliError(
         'invalid_option',
         '--expected-direction uses an unsupported direction.',
-        undefined,
         {
-          fields: [{
+          issues: [{
             path: ['expectedDirection', index],
             code: 'invalid_value',
-            message: 'Direction must be increase, decrease, or stabilize.',
-            expected: 'increase|decrease|stabilize',
           }],
-          hint: 'Repair the listed --expected-direction entry and retry experiment start.',
+          retryable: false,
           stage: 'option_validation',
         },
       )
@@ -700,20 +694,13 @@ function parseExperimentPrimaryOutcomeOptions(
   throw new VaultCliError(
     'invalid_option',
     'Primary outcome options failed validation.',
-    undefined,
     {
-      fields: parsed.error.issues.map((issue) => ({
-        path: PRIMARY_OUTCOME_OPTION_BY_PATH[issue.path.join('.')]
-          ?? 'primaryOutcome',
+      issues: parsed.error.issues.map((issue) => ({
+        path: [PRIMARY_OUTCOME_OPTION_BY_PATH[issue.path.join('.')]
+          ?? 'primaryOutcome'],
         code: issue.code,
-        message: issue.path[0] === 'key'
-          ? 'Use a stable Health Commons outcome key.'
-          : 'This primary outcome option has an invalid value.',
-        ...(issue.path[0] === 'key'
-          ? { expected: 'biomarker:<outcome-slug>' }
-          : {}),
       })),
-      hint: 'Repair the listed --primary-outcome option and retry experiment start.',
+      retryable: false,
       stage: 'option_validation',
     },
   )

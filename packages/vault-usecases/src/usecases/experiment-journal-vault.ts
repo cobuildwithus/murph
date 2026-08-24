@@ -1236,13 +1236,12 @@ export async function startExperimentFromPlanRecord(input: StartExperimentFromPl
         code: 'conflict',
         message: 'An experiment with this slug already exists with different plan data.',
         preserveDetails: false,
-        repair: {
-          fields: [{
-            path: 'experiment.slug',
-            code: 'conflict',
-            message: 'Choose a different slug or inspect the existing experiment before editing it.',
+        details: {
+          issues: [{
+            path: ['experiment', 'slug'],
+            code: 'custom',
           }],
-          hint: 'Run experiment show for the existing experiment, then use experiment edit or choose a different slug.',
+          retryable: false,
           stage: 'write',
         },
       },

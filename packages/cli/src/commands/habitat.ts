@@ -275,20 +275,23 @@ function unknownHabitatAspectError(): VaultCliError {
   return new VaultCliError(
     'contract_invalid',
     'The habitat aspect is not present in the catalog.',
-    undefined,
     {
-      fields: [{
-        path: 'aspect',
+      issues: [{
+        path: ['aspect'],
         code: 'invalid_value',
-        message: 'Choose an aspect id from the habitat catalog.',
       }],
-      hint: 'Run habitat catalog to list supported aspect ids.',
+      retryable: false,
       stage: 'validation',
     },
   )
 }
 
-function mapHabitatCoreError(error: unknown): unknown {
+type HabitatCoreOperation = 'read' | 'save'
+
+function mapHabitatCoreError(
+  error: unknown,
+  operation: HabitatCoreOperation,
+): unknown {
   if (!isVaultError(error)) {
     return error
   }
@@ -297,31 +300,42 @@ function mapHabitatCoreError(error: unknown): unknown {
     return new VaultCliError(
       'not_found',
       'The requested habitat aspect was not found.',
-      undefined,
       {
-        fields: [{
-          path: 'lookup',
-          code: 'not_found',
-          message: 'No habitat record matched this lookup.',
+        issues: [{
+          path: ['lookup'],
+          code: 'custom',
         }],
-        hint: 'Run habitat list to find saved habitat aspects, or habitat save to create one.',
+        retryable: false,
         stage: 'read',
       },
     )
   }
 
   if (error.code === 'HABITAT_FRONTMATTER_INVALID') {
+    if (operation === 'save') {
+      return new VaultCliError(
+        'contract_invalid',
+        'Submitted habitat input was rejected by the habitat privacy or validation boundary.',
+        {
+          issues: [{
+            path: ['indicator'],
+            code: 'invalid_value',
+          }],
+          retryable: false,
+          stage: 'validation',
+        },
+      )
+    }
+
     return new VaultCliError(
       'contract_invalid',
       'A saved habitat record has invalid frontmatter.',
-      undefined,
       {
-        fields: [{
-          path: '$',
-          code: 'contract_invalid',
-          message: 'The saved habitat record does not match the habitat contract.',
+        issues: [{
+          path: [],
+          code: 'custom',
         }],
-        hint: 'Run validate for this vault to inspect the malformed record before retrying.',
+        retryable: false,
         stage: 'read',
       },
     )
@@ -330,11 +344,14 @@ function mapHabitatCoreError(error: unknown): unknown {
   return error
 }
 
-async function runHabitatCore<T>(operation: () => Promise<T>): Promise<T> {
+async function runHabitatCore<T>(
+  operation: HabitatCoreOperation,
+  run: () => Promise<T>,
+): Promise<T> {
   try {
-    return await operation()
+    return await run()
   } catch (error) {
-    throw mapHabitatCoreError(error)
+    throw mapHabitatCoreError(error, operation)
   }
 }
 
@@ -378,6 +395,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
       }
 
       const result = await runHabitatCore(
+        'save',
         () => upsertHabitatAspect({
           vaultRoot: options.vault,
           aspect: args.aspect,
@@ -413,6 +431,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     async run({ args, options }) {
       const lookup = args.lookup.trim()
       const record = await runHabitatCore(
+        'read',
         () => readHabitatAspect(
           lookup.startsWith('hab_')
             ? { vaultRoot: options.vault, habitatId: lookup }
@@ -436,6 +455,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     output: habitatListResultSchema,
     async run({ options }) {
       const records = (await runHabitatCore(
+        'read',
         () => listHabitatAspects(options.vault),
       )).filter(
         (record) => !options.domain || record.domain === options.domain,
@@ -465,6 +485,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     output: habitatCoverageResultSchema,
     async run({ options }) {
       const records = await runHabitatCore(
+        'read',
         () => listHabitatAspects(options.vault),
       )
       const coverage = computeHabitatCoverage(

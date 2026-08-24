@@ -944,7 +944,7 @@ test('age evidence reports malformed JSON without echoing receipt text', async (
   }
 })
 
-test('age evidence rejects invalid top-level and wrapper shapes with repair fields', async () => {
+test('age evidence rejects invalid top-level and wrapper shapes with factual fields', async () => {
   const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-evidence-shape-'))
   const scalarPath = path.join(payloadRoot, 'scalar.json')
   const wrapperPath = path.join(payloadRoot, 'wrapper.json')
@@ -976,7 +976,8 @@ test('age evidence rejects invalid top-level and wrapper shapes with repair fiel
       }
       assert.equal(result.envelope.error.code, 'invalid_payload')
       assert.equal(result.envelope.error.stage, 'validation')
-      assert.match(result.envelope.error.hint ?? '', /array|receipt object/u)
+      assert.equal(result.envelope.error.retryable, false)
+      assert.equal(result.envelope.error.hint, undefined)
       assert.equal((result.envelope.error.fieldErrors?.length ?? 0) > 0, true)
       const encoded = JSON.stringify(result.envelope)
       for (const forbidden of [privateMarker, payloadRoot, scalarPath, wrapperPath]) {
@@ -1027,7 +1028,7 @@ test('age submitted-data commands use shared bounded validation projection witho
         {
           code: 'invalid_format',
           expected: '',
-          message: 'Value failed validation.',
+          message: 'This field is invalid.',
           path: 'asOf',
           received: 'invalid',
         },
@@ -1079,7 +1080,7 @@ test('age submitted-data commands classify unsupported fields without echoing va
         {
           code: 'unrecognized_keys',
           expected: '',
-          message: 'Field is not supported.',
+          message: 'This field is invalid.',
           path: '$',
           received: 'invalid',
         },
