@@ -73,7 +73,7 @@ export async function readLiveWorkoutCardEditor(input: {
     workoutId: input.workoutId,
   }, { requireOpen: true })
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   return buildLiveWorkoutCardEditor({
     presentation: input.presentation,
     workout,
@@ -133,7 +133,7 @@ async function applyLiveWorkoutMemberActionWithLockHeld(
     if (!isOpenLiveWorkout(workout)) {
       return { reason: 'workout_changed', status: 'rejected' }
     }
-    assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+    assertTargetableLiveWorkout(workout)
     acceptedAt = normalizeWorkoutTimestamp(input.acceptedAt, 'acceptedAt')
   } catch {
     return { reason: 'workout_changed', status: 'rejected' }
@@ -625,10 +625,7 @@ export async function startLiveWorkout(input: StartLiveWorkoutInput) {
       startedAt,
       sessionNote: note,
     })
-    assertTargetableLiveWorkout(
-      workout,
-      `Workout routine "${routineTitle}"`,
-    )
+    assertTargetableLiveWorkout(workout)
 
     return addStructuredWorkoutRecord({
       vault: input.vault,
@@ -685,7 +682,7 @@ async function addLiveWorkoutExerciseWithLockHeld(
 ) {
   const shown = await resolveLiveWorkout(input, { requireOpen: true })
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const exercises = structuredClone(workout.exercises)
   const order = input.order
   const setCount = input.setCount ?? 1
@@ -774,7 +771,7 @@ async function setLiveWorkoutExerciseRepsWithLockHeld(
 
   const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!
@@ -813,7 +810,7 @@ async function logLiveWorkoutSetWithLockHeld(
   const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const beforeExercises = structuredClone(workout.exercises)
   const exercises = structuredClone(beforeExercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
@@ -915,7 +912,7 @@ async function clearLiveWorkoutSetWithLockHeld(
   const setOrder = requireLiveWorkoutSetOrder(input.setOrder)
   const shown = await resolveLiveWorkout(input)
   const workout = parseShownWorkout(shown)
-  assertTargetableLiveWorkout(workout, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(workout)
   const exercises = structuredClone(workout.exercises)
   const exerciseIndex = resolveExerciseIndex(exercises, input)
   const exercise = exercises[exerciseIndex]!

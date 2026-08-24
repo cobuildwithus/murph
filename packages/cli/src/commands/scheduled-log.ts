@@ -9,7 +9,6 @@ import {
   scheduledLogActionSchema,
   scheduledLogScaffoldPayloadSchema,
   scheduledLogStatusValues,
-  workoutSessionSchema,
   type ExecutableScheduleIntent,
   type MeasurementEntry,
   type MealNutrition,
@@ -48,6 +47,10 @@ import {
   requireCompactInteger,
   requireCompactString,
 } from "./compact-field-spec.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
+import {
+  buildWorkoutFromParsedOptions,
+} from "./workout-typed-options.js";
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const scheduledLogActionKindValues = [
   "meal.add",
@@ -153,10 +156,10 @@ function invalidScheduledLogOption(
     "invalid_option",
     message,
     {
-      issues: paths.map((path) => ({
-        path: [path],
-        code: "custom",
-      })),
+      issues: paths.map((path) =>
+        publicValidationIssue({ code: "custom" }, [path])
+      ),
+      stage: "validation",
     },
   );
 }
@@ -353,10 +356,10 @@ function parseScheduledLogScheduleIntent(
       "invalid_option",
       message,
       {
-        issues: parsed.error.issues.map((issue) => ({
-          path: [path],
-          code: issue.code,
-        })),
+        issues: parsed.error.issues.map((issue) =>
+          publicValidationIssue(issue, [path])
+        ),
+        stage: "validation",
       },
     );
   }
@@ -484,39 +487,14 @@ const workoutOptionKeys = [
   "workoutSet",
 ] as const satisfies ReadonlyArray<keyof WorkoutOptions>;
 
-function workoutTypedIssuePath(path: readonly PropertyKey[]): string {
-  switch (path[0]) {
-    case "sourceApp":
-      return "workoutSourceApp";
-    case "sourceWorkoutId":
-      return "workoutSourceWorkoutId";
-    case "startedAt":
-      return "workoutStartedAt";
-    case "endedAt":
-      return "workoutEndedAt";
-    case "routineId":
-      return "workoutRoutineId";
-    case "routineName":
-      return "workoutRoutineName";
-    case "sessionNote":
-      return "workoutSessionNote";
-    case "media":
-      return "workoutMedia";
-    case "exercises":
-      return path.includes("sets") ? "workoutSet" : "workoutExercise";
-    default:
-      return "workoutExercise";
-  }
-}
-
-const workoutMediaFieldKeys = [
+const workoutMediaFieldKeys = new Set([
   "kind",
   "relativePath",
   "mediaType",
   "caption",
-] as const;
+]);
 
-const workoutExerciseFieldKeys = [
+const workoutExerciseFieldKeys = new Set([
   "order",
   "name",
   "sourceExerciseId",
@@ -524,9 +502,9 @@ const workoutExerciseFieldKeys = [
   "mode",
   "unitOverride",
   "note",
-] as const;
+]);
 
-const workoutSetFieldKeys = [
+const workoutSetFieldKeys = new Set([
   "exercise",
   "order",
   "type",
@@ -539,7 +517,12 @@ const workoutSetFieldKeys = [
   "bodyweightKg",
   "assistanceKg",
   "addedWeightKg",
-] as const;
+]);
+const workoutPublicFields = {
+  media: workoutMediaFieldKeys,
+  exercise: workoutExerciseFieldKeys,
+  set: workoutSetFieldKeys,
+};
 
 const invalidWorkoutMediaOption = invalidScheduledLogOptionFor("workoutMedia");
 const invalidWorkoutExerciseOption = invalidScheduledLogOptionFor("workoutExercise");
@@ -659,71 +642,23 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
     return undefined;
   }
 
-  const workout: Record<string, unknown> = {
-    exercises: [],
-  };
-
-  if (options.workoutSourceApp !== undefined) workout.sourceApp = options.workoutSourceApp;
-  if (options.workoutSourceWorkoutId !== undefined) {
-    workout.sourceWorkoutId = options.workoutSourceWorkoutId;
-  }
-  if (options.workoutStartedAt !== undefined) workout.startedAt = options.workoutStartedAt;
-  if (options.workoutEndedAt !== undefined) workout.endedAt = options.workoutEndedAt;
-  if (options.workoutRoutineId !== undefined) workout.routineId = options.workoutRoutineId;
-  if (options.workoutRoutineName !== undefined) workout.routineName = options.workoutRoutineName;
-  if (options.workoutSessionNote !== undefined) workout.sessionNote = options.workoutSessionNote;
-
   const mediaEntries = normalizeRepeatableFlagOption(options.workoutMedia, "workout-media");
-  if (mediaEntries) {
-    workout.media = mediaEntries.map(parseWorkoutMediaEntry);
-  }
-
-  const exercisesByOrder = new Map<number, WorkoutExerciseDraft>();
   const exerciseEntries = normalizeRepeatableFlagOption(
     options.workoutExercise,
     "workout-exercise",
   );
-  for (const exercise of exerciseEntries?.map(parseWorkoutExerciseEntry) ?? []) {
-    if (exercisesByOrder.has(exercise.order)) {
-      invalidScheduledLogOption(
-        `Duplicate --workout-exercise order ${exercise.order}.`,
-        ["workoutExercise"],
-      );
-    }
-    exercisesByOrder.set(exercise.order, exercise);
-  }
-
   const setEntries = normalizeRepeatableFlagOption(options.workoutSet, "workout-set");
-  for (const { exerciseOrder, set } of setEntries?.map(parseWorkoutSetEntry) ?? []) {
-    const exercise = exercisesByOrder.get(exerciseOrder);
-    if (!exercise) {
-      invalidScheduledLogOption(
-        `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
-        ["workoutSet"],
-      );
-    }
-    exercise.sets.push(set);
-  }
 
-  workout.exercises = [...exercisesByOrder.values()].sort(
-    (left, right) => left.order - right.order,
-  );
-
-  const parsed = workoutSessionSchema.safeParse(workout);
-  if (!parsed.success) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Invalid workout template fields.",
-      {
-        issues: parsed.error.issues.map((issue) => ({
-          path: [workoutTypedIssuePath(issue.path)],
-          code: issue.code,
-        })),
-      },
-    );
-  }
-
-  return parsed.data;
+  return buildWorkoutFromParsedOptions({
+    scalarOptions: options,
+    media: mediaEntries?.map(parseWorkoutMediaEntry),
+    exercises: exerciseEntries?.map(parseWorkoutExerciseEntry),
+    sets: setEntries?.map(parseWorkoutSetEntry),
+    publicFields: workoutPublicFields,
+    validationMessage: "Invalid workout template fields.",
+    invalidExerciseOption: invalidWorkoutExerciseOption,
+    invalidSetOption: invalidWorkoutSetOption,
+  });
 }
 
 interface ScheduledLogActionOptions {
@@ -847,10 +782,10 @@ function rejectIncompatibleScheduledLogActionOptions(
     "invalid_option",
     "Some action fields are incompatible with the selected scheduled-log action kind.",
     {
-      issues: incompatible.map((key) => ({
-        path: [key],
-        code: "custom",
-      })),
+      issues: incompatible.map((key) =>
+        publicValidationIssue({ code: "custom" }, [key])
+      ),
+      stage: "validation",
     },
   );
 }
@@ -892,7 +827,7 @@ function typedActionIssueOptionPath(path: readonly PropertyKey[]): string {
           return "measurementMetric";
       }
     case "workout":
-      return workoutTypedIssuePath(path.slice(1));
+      return path.includes("sets") ? "workoutSet" : "workoutExercise";
     case "nutrition":
       switch (path.at(-1)) {
         case "calories":
@@ -926,10 +861,10 @@ function parseScheduledLogAction(value: unknown): ScheduledLogAction {
       "invalid_option",
       "Invalid scheduled-log action fields.",
       {
-        issues: parsed.error.issues.map((issue) => ({
-          path: [typedActionIssueOptionPath(issue.path)],
-          code: issue.code,
-        })),
+        issues: parsed.error.issues.map((issue) =>
+          publicValidationIssue(issue, [typedActionIssueOptionPath(issue.path)])
+        ),
+        stage: "validation",
       },
     );
   }
@@ -947,10 +882,13 @@ function parseScheduledLogPayload(
       code,
       "Invalid scheduled-log payload fields.",
       {
-        issues: parsed.error.issues.map((issue) => ({
-          path: scheduledLogPayloadIssuePath(issue.path, surface),
-          code: issue.code,
-        })),
+        issues: parsed.error.issues.flatMap((issue) => {
+          const publicPath = scheduledLogPayloadIssuePath(issue.path, surface);
+          return publicPath === undefined
+            ? []
+            : [publicValidationIssue(issue, publicPath)];
+        }),
+        stage: "validation",
       },
     );
   }
@@ -960,7 +898,7 @@ function parseScheduledLogPayload(
 function scheduledLogPayloadIssuePath(
   path: readonly PropertyKey[],
   surface: "typed_save" | "import_json",
-): readonly PropertyKey[] {
+): readonly (string | number)[] | undefined {
   if (surface === "import_json") {
     if (
       path[0] === "action" &&
@@ -968,9 +906,9 @@ function scheduledLogPayloadIssuePath(
       typeof path[2] === "number" &&
       path[3] === "qualifiers"
     ) {
-      return safeScheduledLogIssuePath(path.slice(0, 4));
+      return ["action", "measurements", path[2], "qualifiers"];
     }
-    return safeScheduledLogIssuePath(path);
+    return scheduledLogImportIssuePath(path);
   }
 
   switch (path[0]) {
@@ -993,32 +931,109 @@ function scheduledLogPayloadIssuePath(
         default:
           return ["scheduleKind"];
       }
+    case "slug":
+    case "title":
+    case "status":
+    case "summary":
+    case "body":
+      return [path[0]];
     default:
-      return typeof path[0] === "string"
-        ? safeScheduledLogIssuePath([path[0]])
-        : safeScheduledLogIssuePath(path);
+      return undefined;
   }
 }
 
-function safeScheduledLogIssuePath(
+const scheduledLogImportPublicPathSegments = new Set([
+  "scheduledLogId",
+  "slug",
+  "title",
+  "status",
+  "summary",
+  "schedule",
+  "action",
+  "tags",
+  "body",
+  "kind",
+  "at",
+  "everyMs",
+  "expression",
+  "localTime",
+  "foodId",
+  "note",
+  "ingredients",
+  "nutrition",
+  "totals",
+  "provenance",
+  "calories",
+  "proteinGrams",
+  "carbsGrams",
+  "fatGrams",
+  "fiberGrams",
+  "source",
+  "confidence",
+  "sourceDetail",
+  "activityType",
+  "durationMinutes",
+  "distanceKm",
+  "workout",
+  "interventionType",
+  "protocolId",
+  "measurements",
+  "metric",
+  "value",
+  "unit",
+  "qualifiers",
+  "sourceApp",
+  "sourceWorkoutId",
+  "startedAt",
+  "endedAt",
+  "routineId",
+  "routineName",
+  "sessionNote",
+  "media",
+  "exercises",
+  "sets",
+  "order",
+  "name",
+  "sourceExerciseId",
+  "groupId",
+  "mode",
+  "unitOverride",
+  "type",
+  "reps",
+  "weight",
+  "weightUnit",
+  "durationSeconds",
+  "distanceMeters",
+  "rpe",
+  "bodyweightKg",
+  "assistanceKg",
+  "addedWeightKg",
+  "relativePath",
+  "mediaType",
+  "caption",
+]);
+
+function scheduledLogImportIssuePath(
   path: readonly PropertyKey[],
-): readonly PropertyKey[] {
-  return path.map((segment) => {
+): readonly (string | number)[] | undefined {
+  if (path.length === 0) return undefined;
+  const publicPath: Array<string | number> = [];
+  for (const segment of path) {
     if (typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0) {
-      return segment;
+      publicPath.push(segment);
+      continue;
     }
-    if (
-      typeof segment === "string" &&
-      /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(segment)
-    ) {
-      return segment;
+    if (typeof segment === "string" && scheduledLogImportPublicPathSegments.has(segment)) {
+      publicPath.push(segment);
+      continue;
     }
-    return "<field>";
-  });
+    return undefined;
+  }
+  return publicPath;
 }
 
 interface ScheduledLogValidationIssue {
-  code?: string;
+  code: string;
   path: readonly PropertyKey[];
 }
 
@@ -1053,17 +1068,16 @@ function readScheduledLogValidationIssues(
       !issue ||
       typeof issue !== "object" ||
       !("path" in issue) ||
-      !Array.isArray(issue.path)
+      !Array.isArray(issue.path) ||
+      !("code" in issue) ||
+      typeof issue.code !== "string"
     ) {
       return [];
     }
 
-    const code = "code" in issue && typeof issue.code === "string"
-      ? issue.code
-      : undefined;
     return [{
-      path: safeScheduledLogIssuePath(issue.path),
-      ...(code ? { code } : {}),
+      path: issue.path,
+      code: issue.code,
     }];
   });
 }
@@ -1105,21 +1119,23 @@ function toScheduledLogCliError(
           "Invalid scheduled-log payload fields.",
           issues.length > 0
             ? {
-                issues: issues.map((issue) => ({
-                  ...issue,
-                  path: scheduledLogPayloadIssuePath(
+                issues: issues.flatMap((issue) => {
+                  const publicPath = scheduledLogPayloadIssuePath(
                     issue.path,
                     inputSurface,
-                  ),
-                })),
+                  );
+                  return publicPath === undefined
+                    ? []
+                    : [publicValidationIssue(issue, publicPath)];
+                }),
+                stage: "validation",
               }
-            : undefined,
+            : { stage: "validation" },
         );
       }
       return new VaultCliError(
         "contract_invalid",
         "Scheduled-log data failed canonical validation; correct the submitted inputs before retrying.",
-        issues.length > 0 ? { issues } : undefined,
       );
     }
     default:

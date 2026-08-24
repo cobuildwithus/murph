@@ -241,9 +241,7 @@ function invalidPayload(message: string) {
 function parseEncounterPayloadInput(payload: unknown): ParsedEncounterBundlePayload {
   const result = encounterBundlePayloadSchema.safeParse(payload)
   if (!result.success) {
-    throw new VaultCliError('invalid_payload', 'encounter payload failed validation.', {
-      issues: result.error.issues.map((issue) => issue.message),
-    })
+    throw new VaultCliError('invalid_payload', 'encounter payload failed validation.')
   }
 
   return result.data

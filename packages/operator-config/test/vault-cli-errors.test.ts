@@ -33,18 +33,21 @@ describe('projectVaultCliError', () => {
             {
               code: 'too_small',
               path: ['exercises', 0, 'sets'],
+              publicPath: ['workoutSet'],
               message: `Missing set details for ${submittedValue}.`,
             },
             {
               code: 'custom',
               expected: 'string/../../private',
               path: ['results', 'private submitted path'],
+              publicPath: ['result'],
               message: providerBody,
               received: submittedValue,
               submitted: providerBody,
             },
           ],
           providerBody,
+          stage: 'validation',
         },
       ),
     )
@@ -56,14 +59,14 @@ describe('projectVaultCliError', () => {
       fieldErrors: [
         {
           code: 'too_small',
-          path: 'exercises.0.sets',
+          path: 'workoutSet',
           expected: '',
           received: 'invalid',
           message: 'This field is invalid.',
         },
         {
           code: 'custom',
-          path: 'results.<field>',
+          path: 'result',
           expected: '',
           received: 'invalid',
           message: 'This field is invalid.',
@@ -83,7 +86,8 @@ describe('projectVaultCliError', () => {
           issues: [{
             code: 'invalid_type',
             expected: 'number',
-            path: ['inferred'],
+            path: ['private-dynamic-key'],
+            publicPath: ['explicit'],
             message: 'private inferred issue',
           }],
           repair: {
@@ -95,20 +99,21 @@ describe('projectVaultCliError', () => {
               message: 'private owner message',
             }],
           },
+          stage: 'write',
         },
       ),
     )
 
     expect(projection).toMatchObject({
-      stage: 'validation',
+      stage: 'write',
       fieldErrors: [{
         code: 'invalid_type',
-        path: 'inferred',
+        path: 'explicit',
         message: 'This field is invalid.',
       }],
     })
     expect(projection.hint).toBeUndefined()
-    expect(JSON.stringify(projection)).not.toContain('explicit')
+    expect(JSON.stringify(projection)).not.toContain('private-dynamic-key')
     expect(JSON.stringify(projection)).not.toContain('private owner')
     expect(JSON.stringify(projection)).not.toContain('private inferred issue')
   })
@@ -120,6 +125,7 @@ describe('projectVaultCliError', () => {
           code: 'invalid_type',
           expected: 'string',
           path: ['items', index, 'name'],
+          publicPath: ['items', index, 'name'],
           message: `private raw issue ${index}`,
         })),
       }),
@@ -153,7 +159,7 @@ describe('projectVaultCliError', () => {
     expect(JSON.stringify(projection)).not.toContain('private-submitted-value')
   })
 
-  test('classifies raw Zod-like errors through the same validation mapper', () => {
+  test('classifies raw Zod-like errors without projecting unowned paths', () => {
     const projection = projectVaultCliError({
       name: 'ZodError',
       issues: [
@@ -166,34 +172,90 @@ describe('projectVaultCliError', () => {
       ],
     })
 
-    expect(projection).toMatchObject({
+    expect(projection).toEqual({
       code: 'invalid_payload',
       message: 'Input failed validation.',
       retryable: false,
       stage: 'validation',
-      fieldErrors: [
-        {
-          code: 'invalid_value',
-          expected: 'number',
-          message: 'This field is invalid.',
-          path: 'schedule.timeZone',
-          received: 'invalid',
-        },
-      ],
     })
+    expect(projection.fieldErrors).toBeUndefined()
     expect(JSON.stringify(projection)).not.toContain('private invalid value')
+    expect(JSON.stringify(projection)).not.toContain('schedule')
+  })
+
+  test('ignores raw paths and rejects malformed public paths', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        issues: [
+          { code: 'invalid_type', path: ['rawOnly'] },
+          {
+            code: 'invalid_type',
+            path: ['private'],
+            publicPath: ['unsafe submitted key'],
+          },
+          {
+            code: 'invalid_type',
+            path: ['private'],
+            publicPath: ['safeOption', 2],
+          },
+        ],
+      }),
+    )
+
+    expect(projection.fieldErrors).toEqual([{
+      code: 'invalid_type',
+      path: 'safeOption.2',
+      expected: '',
+      received: 'invalid',
+      message: 'This field is invalid.',
+    }])
+    expect(projection.stage).toBeUndefined()
+    expect(JSON.stringify(projection)).not.toContain('rawOnly')
+    expect(JSON.stringify(projection)).not.toContain('unsafe submitted key')
   })
 
   test.each([
-    ['EACCES', 'permission_denied'],
-    ['EPERM', 'permission_denied'],
-    ['ENOENT', 'not_found'],
-    ['EISDIR', 'invalid_path'],
-    ['ENOTDIR', 'invalid_path'],
-    ['ENOSPC', 'storage_unavailable'],
+    'authorization',
+    'configuration',
+    'conflict',
+    'filesystem',
+    'integrity',
+    'persistence',
+    'read',
+    'render',
+    'response',
+    'transport',
+    'validation',
+    'write',
+  ])('preserves the fixed known-error stage %s', (stage) => {
+    expect(
+      projectVaultCliError(
+        new VaultCliError('safe_failure', 'Safe failure.', { stage }),
+      ),
+    ).toMatchObject({ stage })
+  })
+
+  test('drops arbitrary known-error stages', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('safe_failure', 'Safe failure.', {
+        stage: 'private-owner-phase',
+      }),
+    )
+
+    expect(projection.stage).toBeUndefined()
+    expect(JSON.stringify(projection)).not.toContain('private-owner-phase')
+  })
+
+  test.each([
+    ['EACCES', 'permission_denied', 'Check the file permissions before retrying.'],
+    ['EPERM', 'permission_denied', 'Check the file permissions before retrying.'],
+    ['ENOENT', 'not_found', 'Check the input path and retry the command.'],
+    ['EISDIR', 'invalid_path', 'Check whether the option expects a file or a directory.'],
+    ['ENOTDIR', 'invalid_path', 'Check whether the option expects a file or a directory.'],
+    ['ENOSPC', 'storage_unavailable', 'Free storage space before retrying.'],
   ] as const)(
-    'classifies %s without returning paths or causes',
-    (nodeCode, expectedCode) => {
+    'classifies %s with a concrete prerequisite but no unchanged retry',
+    (nodeCode, expectedCode, expectedHint) => {
       const privatePath = '/private/workspace/member-vault/config.json'
       const projection = projectVaultCliError(
         Object.assign(
@@ -207,6 +269,7 @@ describe('projectVaultCliError', () => {
 
       expect(projection).toMatchObject({
         code: expectedCode,
+        hint: expectedHint,
         stage: 'filesystem',
         retryable: false,
       })
@@ -231,6 +294,7 @@ describe('projectVaultCliError', () => {
         retryable: false,
         stage: 'command',
       })
+      expect(projection.hint).toBeUndefined()
       expect(JSON.stringify(projection)).not.toContain(submittedValue)
       expect(JSON.stringify(projection)).not.toContain(providerBody)
       expect(JSON.stringify(projection)).not.toContain('<REDACTED_TOKEN>')

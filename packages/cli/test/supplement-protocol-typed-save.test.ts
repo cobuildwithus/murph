@@ -389,6 +389,12 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(collidingGeneratedMedicationHistoryResult.exitCode, 1)
     assert.equal(collidingGeneratedMedicationHistoryResult.envelope.ok, false)
     if (!collidingGeneratedMedicationHistoryResult.envelope.ok) {
+      assert.equal(collidingGeneratedMedicationHistoryResult.envelope.error.code, 'conflict')
+      assert.equal(collidingGeneratedMedicationHistoryResult.envelope.error.stage, 'conflict')
+      assert.equal(
+        collidingGeneratedMedicationHistoryResult.envelope.error.fieldErrors?.[0]?.path,
+        'slug',
+      )
       assert.match(
         collidingGeneratedMedicationHistoryResult.envelope.error.message ?? '',
         /regimen slug already exists/u,
@@ -457,6 +463,12 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(collidingExplicitSlugMedicationHistoryResult.exitCode, 1)
     assert.equal(collidingExplicitSlugMedicationHistoryResult.envelope.ok, false)
     if (!collidingExplicitSlugMedicationHistoryResult.envelope.ok) {
+      assert.equal(collidingExplicitSlugMedicationHistoryResult.envelope.error.code, 'conflict')
+      assert.equal(collidingExplicitSlugMedicationHistoryResult.envelope.error.stage, 'conflict')
+      assert.equal(
+        collidingExplicitSlugMedicationHistoryResult.envelope.error.fieldErrors?.[0]?.path,
+        'slug',
+      )
       assert.match(
         collidingExplicitSlugMedicationHistoryResult.envelope.error.message ?? '',
         /regimen slug already exists/u,
@@ -608,10 +620,20 @@ test('typed save commands write supplement and regimen records without JSON payl
     assert.equal(collidingExplicitIdMedicationHistoryResult.exitCode, 1)
     assert.equal(collidingExplicitIdMedicationHistoryResult.envelope.ok, false)
     if (!collidingExplicitIdMedicationHistoryResult.envelope.ok) {
-      assert.match(
-        collidingExplicitIdMedicationHistoryResult.envelope.error.message ?? '',
-        /regimenId and slug resolve to different regimen records/u,
+      const serialized = JSON.stringify(
+        collidingExplicitIdMedicationHistoryResult.envelope.error,
       )
+      assert.equal(collidingExplicitIdMedicationHistoryResult.envelope.error.code, 'conflict')
+      assert.equal(
+        collidingExplicitIdMedicationHistoryResult.envelope.error.message,
+        'Regimen selectors conflict. Use one regimen id or slug.',
+      )
+      assert.equal(collidingExplicitIdMedicationHistoryResult.envelope.error.stage, 'conflict')
+      assert.equal(
+        collidingExplicitIdMedicationHistoryResult.envelope.error.fieldErrors,
+        undefined,
+      )
+      assert.doesNotMatch(serialized, /regimenId|azithromycin|250|R5S7C/u)
     }
 
     const explicitIdMedicationHistoryMarkdown = await readFile(

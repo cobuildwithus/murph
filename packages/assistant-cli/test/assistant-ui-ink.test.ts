@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { beforeEach, test, vi } from 'vitest'
 
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const inkUiMocks = vi.hoisted(() => ({
   captureAssistantInkThemeBaseline: vi.fn(),
@@ -378,7 +379,11 @@ test('runAssistantChatWithInk rejects when no interactive input is available or 
           initialPrompt: null,
           vault: '/tmp/vault',
         } as never),
-      /requires interactive terminal input/u,
+      (error) =>
+        error instanceof VaultCliError &&
+        error.code === 'interactive_input_unavailable' &&
+        error.context?.stage === 'configuration' &&
+        /requires interactive terminal input/u.test(error.message),
     )
   } finally {
     openSyncSpy.mockRestore()

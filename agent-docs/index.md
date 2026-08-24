@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Purpose
 
@@ -26,6 +26,13 @@ specialist results and final `FINDINGS` results retain the evidence-backed
 finding-disposition pause. This boundary is specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/operations/pr-reviewgpt-loop.md`.
+
+Required Temporal compatibility tolerates only the bounded `404` visibility
+window for the exact private run id returned by an accepted dispatch. It never
+searches for or guesses a run, and every later polling, identity, reader, and
+attestation failure remains fail-closed. This boundary and its focused proof
+are specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/testing-ci-map.md`.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
@@ -505,6 +512,17 @@ Member-owned device-provider application authority, including the shared
 webhook admission fence for app-bound connections, is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
 
+Daily nutrition cards use one prompt-owned known-context suitability rule and
+one compact safety question before new numeric targets when needed. Routine
+cards do not run a universal clinical-history or measurement preflight, and a
+health-context fact constrains only the target or advice it materially affects.
+Stale or incomplete context snapshots likewise direct only the canonical read
+needed for a concrete concern or an owning workflow's explicit contract. The
+Goal, totals, card-validation, and delivery owners remain unchanged. This
+contract is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/operations/imessage-deliverability.md`.
+
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
@@ -609,7 +627,7 @@ webhook admission fence for app-bound connections, is jointly specified by
 | `agent-docs/research/murph-age-autoresearch.md` | Murph Age autoresearch operating rules, including the ReviewGPT-vs-Codex role split, transition gates, and source/privacy boundaries. | Murph Age research workflow | High | 2026-05-09 |
 | `agent-docs/operations/agent-workflow-routing.md` | Workflow router and compact agent work contract for task classes, proportional Product UX planning and walkthrough routing, action authority, evidence/tool use, focused local PR proof with exact-head CI ownership, user-visible ReviewGPT disposition pauses with a narrow behavior-preserving Complexity Collapse exception, review gates, commit paths, worktree isolation, and safe retirement. | Agent workflow routing | High | 2026-08-23 |
 | `agent-docs/operations/product-ux.md` | Single owner for proportional Product UX planning, post-code walkthroughs, and preliminary review across affected people, minimum current requirements, current writer/consumer gates, complete journeys, risk-based evidence, and parent-owned finding dispositions. | Product UX workflow | High | 2026-08-21 |
-| `agent-docs/operations/native-android-hosted-e2e.md` | Protected native Android hosted E2E ownership, exact Web/Android source binding, the single shared hosted-native PR credential and identity lifecycle environment, refreshable repository-scoped GitHub App credentials, receipted and unreceipted dispatch fencing, production-canary isolation, privacy boundary, rollout order, and physical-device proof gap. | Native Android verification operations | High | 2026-08-21 |
+| `agent-docs/operations/native-android-hosted-e2e.md` | Protected native Android hosted E2E ownership, exact Web/Android source binding, the single shared hosted-native PR credential and identity lifecycle environment, cross-platform Privy client identifier contract, refreshable repository-scoped GitHub App credentials, receipted and unreceipted dispatch fencing, production-canary isolation, privacy boundary, rollout order, and physical-device proof gap. | Native Android verification operations | High | 2026-08-21 |
 | `agent-docs/operations/verification-and-runtime.md` | Verification ownership by delivery path, including focused local proof, immutable exact-base/exact-candidate docs-drift CI comparisons, deliberate near-merge Ready admission with authenticated-agent `gh pr ready` ownership, event-time-ready draft-reset receipts with base-repository-filtered exact workflow-run head resolution for same-repository and fork feature/default-branch PRs, broad exact-head CI for PRs, the protected-main headed-Kernel Garmin Junction canary with unattended route-bound fail-closed two-step consent automation, manual-path preservation, one-shot selection and confirmation submissions, content-free stalled-confirmation action, checkbox, and frame counts, a current-route recheck after asynchronous surface sampling, and a post-reload page-load boundary before disconnect cleanup, fail-closed tag-release matrices with exact-head packing, native iOS and Android hosted E2E statuses whose explicit real-journey passes are production-shaped proof, the shared infrastructure-only exact-head retry owner, namespace-only cleanup inside a disposable shared Junction sandbox, claim-based rendered evidence, canonical command and executor semantics, runtime proof boundaries, and package/app testing surfaces. | Verification policy | High | 2026-08-23 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Point-in-time production catalog at its exact audited base covering interactive transactions and explicit locks, starvation classifications, retained-lock evidence policy, replacement patterns, PR ordering, and privacy-safe observability. | Database critical-section reliability | High | 2026-08-09 |
 | `agent-docs/operations/typescript-verification-performance.md` | TypeScript 7 worker budgets, optional local canonical verification with explicit Crabbox-on-Blacksmith escalation and an exclusive heavyweight lane, focused PR proof, direct-default acceptance, scoped diff and repo-tools caps, incremental CI state, editor/watch guidance, and benchmark method. | Verification performance policy | Medium | 2026-07-29 |

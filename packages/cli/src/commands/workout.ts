@@ -6,7 +6,6 @@ import {
   type WorkoutSession,
   workoutFormatUpsertPayloadSchema,
   workoutImportPayloadSchema,
-  workoutSessionSchema,
 } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
@@ -81,6 +80,10 @@ import {
 } from './compact-field-spec.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { registerWorkoutLiveCommands } from './workout-live.js'
+import {
+  buildWorkoutFromParsedOptions,
+} from './workout-typed-options.js'
+import { publicValidationIssue } from './public-validation-issue.js'
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const workoutListLimitOptionSchema = z
   .number()
@@ -128,35 +131,6 @@ const workoutAddSessionOptionKeys = [
   'workoutSet',
 ] as const satisfies ReadonlyArray<keyof WorkoutAddTypedOptions>
 
-type WorkoutTypedIssuePath = (typeof workoutAddSessionOptionKeys)[number]
-
-function workoutTypedIssuePath(
-  path: readonly PropertyKey[],
-): WorkoutTypedIssuePath {
-  switch (path[0]) {
-    case 'sourceApp':
-      return 'workoutSourceApp'
-    case 'sourceWorkoutId':
-      return 'workoutSourceWorkoutId'
-    case 'startedAt':
-      return 'workoutStartedAt'
-    case 'endedAt':
-      return 'workoutEndedAt'
-    case 'routineId':
-      return 'workoutRoutineId'
-    case 'routineName':
-      return 'workoutRoutineName'
-    case 'sessionNote':
-      return 'workoutSessionNote'
-    case 'media':
-      return 'workoutMedia'
-    case 'exercises':
-      return path.includes('sets') ? 'workoutSet' : 'workoutExercise'
-    default:
-      return 'workoutExercise'
-  }
-}
-
 const workoutAddMediaFields = new Set([
   'kind',
   'relativePath',
@@ -189,7 +163,11 @@ const workoutAddSetFields = new Set([
   'assistanceKg',
   'addedWeightKg',
 ])
-
+const workoutAddPublicFields = {
+  media: workoutAddMediaFields,
+  exercise: workoutAddExerciseFields,
+  set: workoutAddSetFields,
+}
 const workoutAddMediaFieldList = [...workoutAddMediaFields].join(', ')
 const workoutAddExerciseFieldList = [...workoutAddExerciseFields].join(', ')
 const workoutAddSetFieldList = [...workoutAddSetFields].join(', ')
@@ -216,16 +194,14 @@ const workoutImportPayloadExample = {
 
 function invalidWorkoutAddOption(
   message: string,
-  path: WorkoutTypedIssuePath | 'note',
+  path: (typeof workoutAddSessionOptionKeys)[number] | 'note',
 ): never {
   throw new VaultCliError(
     'invalid_option',
     message,
     {
-      issues: [{
-        path: [path],
-        code: 'custom',
-      }],
+      issues: [publicValidationIssue({ code: 'custom' }, [path])],
+      stage: 'validation',
     },
   )
 }
@@ -373,67 +349,23 @@ function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutS
     return undefined
   }
 
-  const workout: Record<string, unknown> = {
-    exercises: [],
-  }
-
-  if (options.workoutSourceApp !== undefined) workout.sourceApp = options.workoutSourceApp
-  if (options.workoutSourceWorkoutId !== undefined) {
-    workout.sourceWorkoutId = options.workoutSourceWorkoutId
-  }
-  if (options.workoutStartedAt !== undefined) workout.startedAt = options.workoutStartedAt
-  if (options.workoutEndedAt !== undefined) workout.endedAt = options.workoutEndedAt
-  if (options.workoutRoutineId !== undefined) workout.routineId = options.workoutRoutineId
-  if (options.workoutRoutineName !== undefined) workout.routineName = options.workoutRoutineName
-  if (options.workoutSessionNote !== undefined) workout.sessionNote = options.workoutSessionNote
-
   const mediaEntries = normalizeRepeatableFlagOption(options.workoutMedia, 'workout-media')
-  if (mediaEntries) {
-    workout.media = mediaEntries.map(parseWorkoutAddMediaEntry)
-  }
-
-  const exercisesByOrder = new Map<number, WorkoutAddExerciseDraft>()
   const exerciseEntries = normalizeRepeatableFlagOption(
     options.workoutExercise,
     'workout-exercise',
   )
-  for (const exercise of exerciseEntries?.map(parseWorkoutAddExerciseEntry) ?? []) {
-    if (exercisesByOrder.has(exercise.order)) {
-      invalidWorkoutExerciseOption(`Duplicate --workout-exercise order ${exercise.order}.`)
-    }
-    exercisesByOrder.set(exercise.order, exercise)
-  }
-
   const setEntries = normalizeRepeatableFlagOption(options.workoutSet, 'workout-set')
-  for (const { exerciseOrder, set } of setEntries?.map(parseWorkoutAddSetEntry) ?? []) {
-    const exercise = exercisesByOrder.get(exerciseOrder)
-    if (!exercise) {
-      invalidWorkoutSetOption(
-        `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
-      )
-    }
-    exercise.sets.push(set)
-  }
 
-  workout.exercises = [...exercisesByOrder.values()].sort(
-    (left, right) => left.order - right.order,
-  )
-
-  const parsed = workoutSessionSchema.safeParse(workout)
-  if (!parsed.success) {
-    throw new VaultCliError(
-      'invalid_option',
-      'Invalid workout session fields.',
-      {
-        issues: parsed.error.issues.map((issue) => ({
-          path: [workoutTypedIssuePath(issue.path)],
-          code: issue.code,
-        })),
-      },
-    )
-  }
-
-  return parsed.data
+  return buildWorkoutFromParsedOptions({
+    scalarOptions: options,
+    media: mediaEntries?.map(parseWorkoutAddMediaEntry),
+    exercises: exerciseEntries?.map(parseWorkoutAddExerciseEntry),
+    sets: setEntries?.map(parseWorkoutAddSetEntry),
+    publicFields: workoutAddPublicFields,
+    validationMessage: 'Invalid workout session fields.',
+    invalidExerciseOption: invalidWorkoutExerciseOption,
+    invalidSetOption: invalidWorkoutSetOption,
+  })
 }
 
 function hasWorkoutExerciseReplacementOptions(options: Pick<WorkoutAddTypedOptions, 'workoutExercise' | 'workoutSet'>): boolean {

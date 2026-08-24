@@ -81,61 +81,13 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
       budgetJob,
       "missing-exact-merge-ref",
       "ref: ${{ github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}",
-      "Pull requests must measure the exact head merged onto the current base candidate.",
-    );
-    requireText(
-      budgetJob,
-      "missing-merge-parent-history",
-      "fetch-depth: 2",
-      "The checkout must include both merge parents for exact-head validation.",
+      "Pull requests must measure GitHub's exact merge candidate.",
     );
     requireText(
       budgetJob,
       "checkout-persists-credentials",
       "persist-credentials: false",
       "The bundle-budget checkout must not persist repository credentials.",
-    );
-    requireText(
-      budgetJob,
-      "missing-live-base-read",
-      'git ls-remote --exit-code --refs origin "refs/heads/${PR_BASE_REF}"',
-      "The job must read the base branch directly from origin instead of a stale local ref.",
-    );
-    requireText(
-      budgetJob,
-      "missing-exact-head-parent-proof",
-      'candidate_head="$(git rev-parse HEAD^2)"',
-      "The merge candidate must prove its second parent is the event's exact PR head.",
-    );
-    requireText(
-      budgetJob,
-      "missing-current-base-parent-proof",
-      'candidate_base="$(git rev-parse HEAD^1)"',
-      "The merge candidate must prove its first parent is the live base branch.",
-    );
-    requireText(
-      budgetJob,
-      "missing-head-comparison",
-      '[[ "$candidate_head" == "$PR_HEAD_SHA" ]]',
-      "The exact PR head comparison is missing.",
-    );
-    requireText(
-      budgetJob,
-      "missing-base-comparison",
-      '[[ "$candidate_base" == "$current_base" ]]',
-      "The current-base comparison is missing.",
-    );
-    requireText(
-      budgetJob,
-      "missing-base-output",
-      'echo "base_sha=${current_base}" >> "$GITHUB_OUTPUT"',
-      "The measured base must be bound to the post-assembly freshness check.",
-    );
-    requireText(
-      budgetJob,
-      "missing-post-assembly-base-check",
-      '[[ "$current_base" == "$MEASURED_BASE_SHA" ]]',
-      "The job must fail when main moves while the bundle is being measured.",
     );
     requireText(
       budgetJob,

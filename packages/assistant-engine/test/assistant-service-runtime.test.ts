@@ -709,6 +709,62 @@ describe("assistant usage recording seam", () => {
     );
   });
 
+  it("waits for additional usage recording to finish", async () => {
+    let finishRecording: () => void = () => undefined;
+    const recording = new Promise<void>((resolve) => {
+      finishRecording = resolve;
+    });
+    const recordUsage = vi.fn(() => recording);
+
+    let finished = false;
+    const result = recordAdditionalAssistantUsageEvents({
+      additionalUsages: [
+        {
+          occurredAt: "2026-04-08T10:00:04.000Z",
+          provider: "codex-cli",
+          providerRequestOrdinal: 1,
+          providerRequestOutcome: "succeeded",
+          usage: {
+            apiKeyEnv: null,
+            baseUrl: null,
+            cacheWriteTokens: null,
+            cachedInputTokens: null,
+            inputTokens: 3,
+            outputTokens: 2,
+            providerMetadataJson: null,
+            providerName: null,
+            providerRequestId: null,
+            rawUsageJson: null,
+            reasoningTokens: null,
+            requestedModel: null,
+            servedModel: null,
+            totalTokens: 5,
+          },
+        },
+      ],
+      effectiveEnv: {},
+      executionContext: {
+        hosted: {
+          memberId: "member-42",
+          usageRecorder: { recordUsage },
+          userEnvKeys: [],
+        },
+      },
+      providerResult: createProviderResult(),
+      turnId: "turn-additional-latency",
+    }).then(() => {
+      finished = true;
+    });
+
+    expect(recordUsage).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(finished).toBe(false);
+
+    finishRecording();
+    await result;
+    expect(finished).toBe(true);
+  });
+
   it("uses Codex provider options without legacy credential headers for fallback hosted usage attribution", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-08T10:02:00.000Z"));
