@@ -269,16 +269,13 @@ describe("health registry family seams", () => {
       context: {
         validationSource: "submitted_candidate",
         vaultCode: "VAULT_INVALID_PROTOCOL",
-      },
-      repair: {
-        stage: "validation",
-        fields: [{
-          path: "effectiveSpec",
+        issues: [{
+          path: ["effectiveSpec"],
           code: "invalid_type",
-          message: "Value does not match the required type.",
         }],
       },
     });
+    expect(error).not.toHaveProperty("repair");
     expect(JSON.stringify(error)).not.toMatch(/PrivateProtocolSpecSentinel/u);
   });
 
@@ -314,15 +311,8 @@ describe("health registry family seams", () => {
         validationSource: "stored_vault_state",
         vaultCode: "VAULT_INVALID_PROTOCOL",
       },
-      repair: {
-        stage: "vault_state",
-        fields: [],
-      },
     });
-    expect(error).toHaveProperty(
-      "repair.hint",
-      "Repair or restore the stored protocol record before retrying the command.",
-    );
+    expect(error).not.toHaveProperty("repair");
     expect(JSON.stringify(error)).not.toMatch(/PrivateStoredValueSentinel/u);
   });
 

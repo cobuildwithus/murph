@@ -582,10 +582,6 @@ function createLabelsTransportError<TSource extends string>(
       transportErrorName,
       transportErrorCode,
     },
-    {
-      stage: 'provider',
-      hint: 'Retry the label search because no successful provider response was received.',
-    },
   )
 }
 
@@ -614,10 +610,6 @@ function createLabelsResponseBodyTransportError<TSource extends string>(
       transportErrorName,
       transportErrorCode,
     },
-    {
-      stage: 'response_body',
-      hint: 'Retry the label search because the successful provider response body could not be read.',
-    },
   )
 }
 
@@ -636,16 +628,11 @@ function createLabelsHttpError<TSource extends string>(
       status,
       ...(failure.timedOut === true ? { timedOut: true } : {}),
     },
-    {
-      stage: 'provider',
-      hint: failure.hint,
-    },
   )
 }
 
 interface LabelsHttpFailure {
   codeSuffix: string
-  hint: string
   message: string
   retryable: boolean
   timedOut?: true
@@ -658,7 +645,6 @@ function classifyLabelsHttpFailure(
   if (status === 401 || status === 403) {
     return {
       codeSuffix: 'auth_failed',
-      hint: 'Do not retry until hosted data API authorization is restored.',
       message: `${searchDescription} authorization was rejected by the hosted data API.`,
       retryable: false,
     }
@@ -667,7 +653,6 @@ function classifyLabelsHttpFailure(
   if (status === 429) {
     return {
       codeSuffix: 'rate_limited',
-      hint: 'Retry the label search after a short delay.',
       message: `${searchDescription} was rate limited by the hosted data API.`,
       retryable: true,
     }
@@ -676,7 +661,6 @@ function classifyLabelsHttpFailure(
   if (status === 408) {
     return {
       codeSuffix: 'request_timed_out',
-      hint: 'Retry the label search because the provider did not finish the request.',
       message: `${searchDescription} request timed out at the hosted data API.`,
       retryable: true,
       timedOut: true,
@@ -686,7 +670,6 @@ function classifyLabelsHttpFailure(
   if (status >= 500 && status <= 599) {
     return {
       codeSuffix: 'service_unavailable',
-      hint: 'Retry the label search after a short delay.',
       message: `${searchDescription} is temporarily unavailable.`,
       retryable: true,
     }
@@ -694,7 +677,6 @@ function classifyLabelsHttpFailure(
 
   return {
     codeSuffix: 'response_failed',
-    hint: 'Check the label-search inputs before retrying.',
     message: `${searchDescription} request was rejected by the hosted data API (HTTP ${status}).`,
     retryable: false,
   }
@@ -713,10 +695,6 @@ function createLabelsInvalidResponseError<TSource extends string>(
       retryable: false,
       status,
       validationErrorName: readSafeErrorName(error),
-    },
-    {
-      stage: 'response_validation',
-      hint: 'Do not retry the same request unchanged; report the provider response-contract failure.',
     },
   )
 }

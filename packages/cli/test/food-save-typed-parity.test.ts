@@ -505,8 +505,8 @@ test('food label provider classification survives the final machine envelope wit
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, 'food_labels_api_rate_limited')
       assert.equal(result.envelope.error.retryable, true)
-      assert.equal(result.envelope.error.stage, 'provider')
-      assert.match(result.envelope.error.hint ?? '', /short delay/u)
+      assert.equal(result.envelope.error.stage, undefined)
+      assert.equal(result.envelope.error.hint, undefined)
     }
     const serialized = JSON.stringify(result.envelope)
     assert.doesNotMatch(
@@ -542,8 +542,8 @@ test('food label response-body transport recovery survives the final machine env
     if (!result.envelope.ok) {
       assert.equal(result.envelope.error.code, 'food_labels_api_response_body_failed')
       assert.equal(result.envelope.error.retryable, true)
-      assert.equal(result.envelope.error.stage, 'response_body')
-      assert.match(result.envelope.error.hint ?? '', /response body could not be read/u)
+      assert.equal(result.envelope.error.stage, undefined)
+      assert.equal(result.envelope.error.hint, undefined)
     }
     assert.doesNotMatch(
       JSON.stringify(result.envelope),
@@ -575,7 +575,7 @@ test('food save validation exposes a repair field without echoing the submitted 
     assert.equal(result.envelope.error.retryable, false)
     assert.equal(result.envelope.error.stage, 'validation')
     assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
-    assert.match(result.envelope.error.hint ?? '', /food options/u)
+    assert.equal(result.envelope.error.hint, undefined)
   }
   assert.doesNotMatch(JSON.stringify(result.envelope), /Private Food Title|PrivateTagSentinel/u)
 })
@@ -607,7 +607,7 @@ test('food import-json validation preserves nested repair fields without payload
       assert.equal(result.envelope.error.code, 'contract_invalid')
       assert.equal(result.envelope.error.stage, 'validation')
       assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
-      assert.match(result.envelope.error.hint ?? '', /food fields/u)
+      assert.equal(result.envelope.error.hint, undefined)
     }
     const serialized = JSON.stringify(result.envelope)
     assert.doesNotMatch(serialized, /Private Imported Food|PrivateImportedTag/u)

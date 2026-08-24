@@ -21,7 +21,6 @@ import {
 } from './shared.js'
 import {
   compactObject,
-  toValidationRepairFields,
   toVaultCliError,
 } from './vault-usecase-helpers.js'
 
@@ -173,11 +172,8 @@ export function parseFoodPayload(value: unknown): FoodPayload {
     throw new VaultCliError(
       'contract_invalid',
       'Food payload is invalid.',
-      undefined,
       {
-        stage: 'validation',
-        hint: 'Correct the listed food fields and retry the command.',
-        fields: toValidationRepairFields(result.error.issues),
+        issues: result.error.issues,
       },
     )
   }

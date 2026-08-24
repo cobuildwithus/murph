@@ -7,10 +7,7 @@ import {
   type JsonObject,
   type RegimenUpsertPayload,
 } from "@murphai/contracts";
-import {
-  VaultCliError,
-  type VaultCliRepairFieldInput,
-} from "@murphai/operator-config/vault-cli-errors";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type {
   CommandContext,
   EntityLookupInput,
@@ -64,10 +61,7 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
-import {
-  toValidationRepairFields,
-  toVaultCliError,
-} from "./vault-usecase-helpers.js";
+import { toVaultCliError } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -152,11 +146,11 @@ function isPrivateProtocolVaultError(error: unknown): error is PrivateProtocolVa
     && typeof error.code === "string";
 }
 
-function protocolRepairFields(
+function protocolValidationIssues(
   details: Record<string, unknown> | undefined,
-): VaultCliRepairFieldInput[] {
+): Array<{ code: unknown; path: unknown[] }> {
   const fields = Array.isArray(details?.fields) ? details.fields : [];
-  const issues = fields.flatMap((field) => {
+  return fields.flatMap((field) => {
     if (typeof field !== "object" || field === null || Array.isArray(field)) {
       return [];
     }
@@ -170,8 +164,6 @@ function protocolRepairFields(
       code: "code" in field ? field.code : undefined,
     }];
   });
-
-  return toValidationRepairFields(issues);
 }
 
 function toPrivateProtocolVaultCliError(error: unknown): unknown {
@@ -190,10 +182,6 @@ function toPrivateProtocolVaultCliError(error: unknown): unknown {
             ? "stored_vault_state"
             : "unknown",
         },
-        {
-          stage: "vault_state",
-          hint: "Repair or restore the stored protocol record before retrying the command.",
-        },
       );
     }
 
@@ -203,11 +191,7 @@ function toPrivateProtocolVaultCliError(error: unknown): unknown {
       {
         vaultCode: error.code,
         validationSource: "submitted_candidate",
-      },
-      {
-        stage: "validation",
-        hint: "Correct the listed protocol fields and retry the command.",
-        fields: protocolRepairFields(error.details),
+        issues: protocolValidationIssues(error.details),
       },
     );
   }
@@ -217,10 +201,6 @@ function toPrivateProtocolVaultCliError(error: unknown): unknown {
       "contract_invalid",
       error.message,
       { vaultCode: error.code },
-      {
-        stage: "validation",
-        hint: "Correct the protocol identifiers or frontmatter and retry the command.",
-      },
     );
   }
 

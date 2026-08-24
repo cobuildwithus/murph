@@ -670,12 +670,11 @@ describe('searchFoodLabels', () => {
       assert.equal(error.context?.retryable, retryable)
       assert.equal(error.context?.status, status)
       assert.equal(error.context?.timedOut, status === 408 ? true : undefined)
-      assert.equal(error.repair?.stage, 'provider')
+      assert.equal('repair' in error, false)
       assert.doesNotMatch(
         JSON.stringify({
           context: error.context,
           message: error.message,
-          repair: error.repair,
         }),
         /private-provider-body|private-food-query/u,
       )
@@ -700,9 +699,9 @@ describe('searchFoodLabels', () => {
     assert.equal(error.context?.retryable, true)
     assert.equal(error.context?.transportErrorName, 'TypeError')
     assert.equal(error.context?.transportErrorCode, 'UND_ERR_CONNECT_TIMEOUT')
-    assert.equal(error.repair?.stage, 'provider')
+    assert.equal('repair' in error, false)
     assert.doesNotMatch(
-      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      JSON.stringify({ context: error.context, message: error.message }),
       /private network cause|private-network-query/u,
     )
   })
@@ -724,7 +723,7 @@ describe('searchFoodLabels', () => {
     assert.equal(error.context?.retryable, true)
     assert.equal(error.context?.timedOut, true)
     assert.equal(error.context?.transportErrorName, 'TimeoutError')
-    assert.equal(error.repair?.stage, 'provider')
+    assert.equal('repair' in error, false)
     assert.doesNotMatch(error.message, /private timeout cause|private-timeout-query/u)
   })
 
@@ -750,9 +749,9 @@ describe('searchFoodLabels', () => {
     assert.equal(error.context?.timedOut, true)
     assert.equal(error.context?.transportErrorName, 'AbortError')
     assert.equal(error.context?.transportErrorCode, 'ABORT_ERR')
-    assert.equal(error.repair?.stage, 'response_body')
+    assert.equal('repair' in error, false)
     assert.doesNotMatch(
-      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      JSON.stringify({ context: error.context, message: error.message }),
       /private response body timeout|private-response-body-query/u,
     )
   })
@@ -777,9 +776,9 @@ describe('searchFoodLabels', () => {
     assert.equal(error.context?.failureStage, 'response_validation')
     assert.equal(error.context?.retryable, false)
     assert.equal(error.context?.validationErrorName, 'SyntaxError')
-    assert.equal(error.repair?.stage, 'response_validation')
+    assert.equal('repair' in error, false)
     assert.doesNotMatch(
-      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      JSON.stringify({ context: error.context, message: error.message }),
       /private-malformed-json-sentinel|private-malformed-json-query/u,
     )
   })
@@ -1023,9 +1022,9 @@ describe('searchFoodLabelsBatch', () => {
     assert.equal(error.context?.timedOut, false)
     assert.equal(error.context?.transportErrorName, 'TypeError')
     assert.equal(error.context?.transportErrorCode, 'UND_ERR_SOCKET')
-    assert.equal(error.repair?.stage, 'response_body')
+    assert.equal('repair' in error, false)
     assert.doesNotMatch(
-      JSON.stringify({ context: error.context, message: error.message, repair: error.repair }),
+      JSON.stringify({ context: error.context, message: error.message }),
       /private batch body failure|private-batch-query/u,
     )
   })

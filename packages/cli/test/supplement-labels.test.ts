@@ -425,12 +425,11 @@ describe('searchSupplementLabels', () => {
     assert.equal(error.context?.retryable, false)
     assert.equal(error.context?.status, 200)
     assert.equal(error.context?.validationErrorName, 'ZodError')
-    assert.equal(error.repair?.stage, 'response_validation')
+    assert.equal('repair' in error, false)
     assert.doesNotMatch(
       JSON.stringify({
         context: error.context,
         message: error.message,
-        repair: error.repair,
       }),
       /private-malformed-provider-body|private-supplement-query/u,
     )

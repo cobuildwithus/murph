@@ -416,7 +416,7 @@ test('recipe import and edit validation expose repair fields without payload ech
       assert.equal(importResult.envelope.error.code, 'contract_invalid')
       assert.equal(importResult.envelope.error.stage, 'validation')
       assert.equal(importResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
-      assert.match(importResult.envelope.error.hint ?? '', /recipe fields/u)
+      assert.equal(importResult.envelope.error.hint, undefined)
     }
     const serializedImport = JSON.stringify(importResult.envelope)
     assert.doesNotMatch(

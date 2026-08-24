@@ -154,6 +154,11 @@
       "import": "./dist/vault-cli-errors.js",
       "default": "./dist/vault-cli-errors.js"
     },
+    "./vault-cli-error-projection": {
+      "types": "./dist/vault-cli-error-projection.d.ts",
+      "import": "./dist/vault-cli-error-projection.js",
+      "default": "./dist/vault-cli-error-projection.js"
+    },
     "./assistant/delivery-failure": {
       "types": "./dist/assistant/delivery-failure.d.ts",
       "import": "./dist/assistant/delivery-failure.js",

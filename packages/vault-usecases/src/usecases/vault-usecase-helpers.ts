@@ -1,9 +1,6 @@
 import path from 'node:path'
 
-import {
-  VaultCliError,
-  type VaultCliRepairFieldInput,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
@@ -13,7 +10,6 @@ import {
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/
-const SAFE_REPAIR_FIELD_SEGMENT_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/u
 
 interface VaultPathRuntime {
   resolveVaultPathOnDisk(inputVaultRoot: string, relativePath: string): Promise<{
@@ -198,75 +194,6 @@ export function compactObject<TRecord extends Record<string, unknown>>(record: T
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => value !== undefined),
   ) as TRecord
-}
-
-export function toValidationRepairFields(
-  issues: readonly {
-    code?: unknown
-    keys?: unknown
-    path: readonly PropertyKey[]
-  }[],
-): VaultCliRepairFieldInput[] {
-  return issues.flatMap((issue) => {
-    const code = typeof issue.code === 'string' ? issue.code : 'invalid_value'
-
-    if (code !== 'unrecognized_keys') {
-      return [{
-        path: issue.path,
-        code,
-        message: validationRepairMessage(code),
-      }]
-    }
-
-    const keys = Array.isArray(issue.keys) ? issue.keys : []
-    const fields: VaultCliRepairFieldInput[] = []
-    const requiresParentFallback = keys.length === 0
-      || keys.some((key) =>
-        typeof key !== 'string'
-        || !SAFE_REPAIR_FIELD_SEGMENT_PATTERN.test(key)
-      )
-
-    if (requiresParentFallback) {
-      fields.push({
-        path: issue.path,
-        code,
-        message: 'One or more fields under this path are not supported.',
-      })
-    }
-
-    for (const key of keys) {
-      if (
-        typeof key === 'string'
-        && SAFE_REPAIR_FIELD_SEGMENT_PATTERN.test(key)
-      ) {
-        fields.push({
-          path: [...issue.path, key],
-          code,
-          message: validationRepairMessage(code),
-        })
-      }
-    }
-
-    return fields
-  })
-}
-
-function validationRepairMessage(code: unknown): string {
-  switch (code) {
-    case 'invalid_type':
-      return 'Value does not match the required type.'
-    case 'too_big':
-      return 'Value exceeds the allowed maximum.'
-    case 'too_small':
-      return 'Value is below the allowed minimum.'
-    case 'invalid_value':
-    case 'invalid_enum_value':
-      return 'Value is not one of the allowed options.'
-    case 'unrecognized_keys':
-      return 'Field is not supported.'
-    default:
-      return 'Value failed validation.'
-  }
 }
 
 export async function resolveVaultRelativePath(

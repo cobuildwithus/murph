@@ -500,7 +500,7 @@ test("protocol import maps core validation issues into a bounded repair envelope
         ),
         true,
       );
-      assert.match(result.envelope.error.hint ?? "", /protocol fields/u);
+      assert.equal(result.envelope.error.hint, undefined);
     }
 
     const serialized = JSON.stringify(result.envelope);
@@ -634,13 +634,9 @@ test("protocol import preserves fixed input constraints without leaking submitte
         assert.equal(result.envelope.error.code, "contract_invalid", testCase.name);
         assert.equal(result.envelope.error.message, testCase.expectedMessage, testCase.name);
         assert.equal(result.envelope.error.retryable, false, testCase.name);
-        assert.equal(result.envelope.error.stage, "validation", testCase.name);
+        assert.equal(result.envelope.error.stage, undefined, testCase.name);
         assert.equal(result.envelope.error.fieldErrors, undefined, testCase.name);
-        assert.equal(
-          result.envelope.error.hint,
-          "Correct the protocol identifiers or frontmatter and retry the command.",
-          testCase.name,
-        );
+        assert.equal(result.envelope.error.hint, undefined, testCase.name);
       }
 
       const serialized = JSON.stringify(result.envelope);

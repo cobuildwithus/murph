@@ -12,10 +12,7 @@ import {
 import { Cli, z } from 'incur'
 
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
-import {
-  VaultCliError,
-  type VaultCliRepairFieldInput,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   isoTimestampSchema,
   listItemSchema,
@@ -106,18 +103,6 @@ function repeatedTextOptionSchema(description: string, max = 160) {
 
 function nonnegativeNumberOptionSchema(description: string) {
   return z.number().nonnegative().optional().describe(description)
-}
-
-function toFoodValidationRepairFields(
-  issues: readonly { code?: unknown; path: readonly PropertyKey[] }[],
-): VaultCliRepairFieldInput[] {
-  return issues.map((issue) => ({
-    path: issue.path,
-    code: typeof issue.code === 'string' ? issue.code : 'invalid_value',
-    message: issue.code === 'unrecognized_keys'
-      ? 'Field is not supported.'
-      : 'Value failed food validation.',
-  }))
 }
 
 export interface FoodSavePayloadInput {
@@ -268,11 +253,8 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodSavePaylo
     throw new VaultCliError(
       'contract_invalid',
       'Food save options are invalid.',
-      undefined,
       {
-        stage: 'validation',
-        hint: 'Correct the listed food options and retry the command.',
-        fields: toFoodValidationRepairFields(parsed.error.issues),
+        issues: parsed.error.issues,
       },
     )
   }
