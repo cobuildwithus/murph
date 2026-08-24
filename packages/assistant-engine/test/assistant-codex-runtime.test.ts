@@ -18611,7 +18611,7 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
-    it('reports cumulative child usage when the child terminates after the parent reply', async () => {
+    it('holds the workspace boundary for child usage reported after the parent reply', async () => {
       const workingDirectory = await createTempDir(
         'assistant-codex-subagent-terminal-usage-work-',
       )
@@ -18620,6 +18620,7 @@ describe('assistant codex event shaping', () => {
       )
       const spawnedChildren: MockChildProcess[] = []
       const releaseChildUsage = createDeferred<void>()
+      const releaseUsageRecording = createDeferred<void>()
       const reportedUsage = createDeferred<
         Parameters<NonNullable<CodexAppServerTurnInput['onAdditionalUsage']>>[0]
       >()
@@ -18732,7 +18733,10 @@ describe('assistant codex event shaping', () => {
         env: { PATH: '/custom/bin' },
         model: 'gpt-5.6-sol',
         modelProvider: 'openai',
-        onAdditionalUsage: (usage) => reportedUsage.resolve(usage),
+        onAdditionalUsage: async (usage) => {
+          reportedUsage.resolve(usage)
+          await releaseUsageRecording.promise
+        },
         prompt: 'spawn a metered child',
         reasoningEffort: 'medium',
         resumeSessionId: 'thread-subagent-terminal-parent',
@@ -18779,6 +18783,21 @@ describe('assistant codex event shaping', () => {
           asRecord(message.params).threadId === 'thread-subagent-terminal-child'
         ),
       ).toHaveLength(1)
+
+      let boundaryFinished = false
+      const boundary = waitForWarmCodexBackgroundWork().then(() => {
+        boundaryFinished = true
+      })
+      await Promise.resolve()
+      expect(boundaryFinished).toBe(false)
+
+      releaseUsageRecording.resolve(undefined)
+      const child = requireMockChildProcess(spawnedChildren[0] ?? null)
+      const terminalScan = await respondToBackgroundTerminals(child, 1)
+      expect(asRecord(terminalScan.params).threadId)
+        .toBe('thread-subagent-terminal-parent')
+      await expect(boundary).resolves.toBeUndefined()
+      expect(boundaryFinished).toBe(true)
     })
 
     it('drops child usage when effective metadata is incomplete without retrying or inheriting the parent', async () => {
