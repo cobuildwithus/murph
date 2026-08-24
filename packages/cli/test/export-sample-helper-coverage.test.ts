@@ -106,7 +106,8 @@ test('stored export pack helpers tolerate a missing exports root and enforce man
         (error as { repair?: unknown }).repair,
         {
           stage: 'manifest_validation',
-          hint: 'Restore or recreate the mismatched export pack before retrying.',
+          hint:
+            'The CLI cannot repair this stored export pack manifest. Create a new pack with export pack create.',
           fields: [{
             path: 'packId',
             code: 'mismatch',

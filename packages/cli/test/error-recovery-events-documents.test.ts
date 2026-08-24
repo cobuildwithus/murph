@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -25,6 +25,33 @@ function assertDoesNotEcho(result: CliEnvelope, values: readonly string[]) {
   const serialized = JSON.stringify(result)
   for (const value of values) {
     assert.equal(serialized.includes(value), false, `error envelope echoed ${value}`)
+  }
+}
+
+async function importAssessmentManifestFixture(vaultRoot: string, key: string) {
+  const sourceValue = `private-assessment-source-${key}`
+  const sourcePath = path.join(vaultRoot, `private-assessment-${key}.json`)
+  await writeFile(sourcePath, JSON.stringify({ sourceValue }), 'utf8')
+
+  const imported = await runCli<{
+    assessmentId: string
+    manifestFile: string
+    rawFile: string
+  }>([
+    'intake',
+    'import',
+    sourcePath,
+    '--title',
+    `Assessment ${key}`,
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(imported.ok, true, JSON.stringify(imported))
+
+  return {
+    ...requireData(imported),
+    sourcePath,
+    sourceValue,
   }
 }
 
@@ -233,6 +260,150 @@ test.sequential('built CLI returns field repair for intake title and lookup fail
   }
 })
 
+test.sequential('built CLI keeps intake manifest stored-state failures terminal and private', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-manifest-repair-'))
+  const missingAssessmentId = 'asmt_private_missing_manifest_record'
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const missingRecord = await runCli([
+      'intake',
+      'manifest',
+      missingAssessmentId,
+      '--vault',
+      vaultRoot,
+    ])
+    const missingRecordError = requireError(missingRecord)
+
+    assert.equal(missingRecordError.code, 'not_found')
+    assert.equal(missingRecordError.retryable, false)
+    assert.equal(missingRecordError.stage, 'lookup')
+    assert.match(missingRecordError.hint ?? '', /intake list/u)
+    assert.equal(missingRecordError.fieldErrors?.[0]?.path, 'id')
+    assertDoesNotEcho(missingRecord, [missingAssessmentId, vaultRoot])
+
+    const missingManifestFixture = await importAssessmentManifestFixture(
+      vaultRoot,
+      'missing-manifest',
+    )
+    const missingRawDirectory = path.posix.dirname(missingManifestFixture.rawFile)
+    const missingRawDirectoryPath = path.join(
+      vaultRoot,
+      missingRawDirectory,
+    )
+    await rm(missingRawDirectoryPath, { recursive: true })
+
+    const missingManifest = await runCli([
+      'intake',
+      'manifest',
+      missingManifestFixture.assessmentId,
+      '--vault',
+      vaultRoot,
+    ])
+    const missingManifestError = requireError(missingManifest)
+
+    assert.equal(missingManifestError.code, 'manifest_missing')
+    assert.equal(missingManifestError.retryable, false)
+    assert.equal(missingManifestError.stage, 'manifest_read')
+    assert.match(missingManifestError.hint ?? '', /cannot reconstruct or repair/u)
+    assert.doesNotMatch(missingManifestError.hint ?? '', /restore|recreate/iu)
+    assertDoesNotEcho(missingManifest, [
+      missingManifestFixture.assessmentId,
+      missingManifestFixture.manifestFile,
+      missingManifestFixture.rawFile,
+      missingManifestFixture.sourcePath,
+      missingManifestFixture.sourceValue,
+      missingRawDirectory,
+      missingRawDirectoryPath,
+      vaultRoot,
+    ])
+
+    const invalidJsonFixture = await importAssessmentManifestFixture(
+      vaultRoot,
+      'invalid-json',
+    )
+    const invalidJsonManifestPath = path.join(vaultRoot, invalidJsonFixture.manifestFile)
+    const invalidJsonValue = 'private-invalid-json-manifest-value'
+    await writeFile(invalidJsonManifestPath, `{"${invalidJsonValue}"`, 'utf8')
+
+    const invalidJson = await runCli([
+      'intake',
+      'manifest',
+      invalidJsonFixture.assessmentId,
+      '--vault',
+      vaultRoot,
+    ])
+    const invalidJsonError = requireError(invalidJson)
+
+    assert.equal(invalidJsonError.code, 'manifest_invalid')
+    assert.equal(invalidJsonError.retryable, false)
+    assert.equal(invalidJsonError.stage, 'manifest_parse')
+    assert.match(invalidJsonError.hint ?? '', /cannot repair/u)
+    assert.doesNotMatch(invalidJsonError.hint ?? '', /restore|recreate/iu)
+    assert.equal(invalidJsonError.fieldErrors?.[0]?.path, '$')
+    assertDoesNotEcho(invalidJson, [
+      invalidJsonFixture.assessmentId,
+      invalidJsonFixture.manifestFile,
+      invalidJsonFixture.rawFile,
+      invalidJsonFixture.sourcePath,
+      invalidJsonFixture.sourceValue,
+      invalidJsonManifestPath,
+      invalidJsonValue,
+      vaultRoot,
+    ])
+
+    const invalidSchemaFixture = await importAssessmentManifestFixture(
+      vaultRoot,
+      'invalid-schema',
+    )
+    const invalidSchemaManifestPath = path.join(
+      vaultRoot,
+      invalidSchemaFixture.manifestFile,
+    )
+    const invalidSchemaValue = 'private-invalid-schema-manifest-value'
+    const invalidRawDirectory = 'private/raw/assessment/directory'
+    await writeFile(
+      invalidSchemaManifestPath,
+      JSON.stringify({
+        importId: invalidSchemaFixture.assessmentId,
+        rawDirectory: invalidRawDirectory,
+        source: invalidSchemaValue,
+      }),
+      'utf8',
+    )
+
+    const invalidSchema = await runCli([
+      'intake',
+      'manifest',
+      invalidSchemaFixture.assessmentId,
+      '--vault',
+      vaultRoot,
+    ])
+    const invalidSchemaError = requireError(invalidSchema)
+
+    assert.equal(invalidSchemaError.code, 'manifest_invalid')
+    assert.equal(invalidSchemaError.retryable, false)
+    assert.equal(invalidSchemaError.stage, 'manifest_validation')
+    assert.match(invalidSchemaError.hint ?? '', /cannot repair/u)
+    assert.doesNotMatch(invalidSchemaError.hint ?? '', /restore|recreate/iu)
+    assert.equal((invalidSchemaError.fieldErrors?.length ?? 0) > 0, true)
+    assertDoesNotEcho(invalidSchema, [
+      invalidSchemaFixture.assessmentId,
+      invalidSchemaFixture.manifestFile,
+      invalidSchemaFixture.rawFile,
+      invalidSchemaFixture.sourcePath,
+      invalidSchemaFixture.sourceValue,
+      invalidSchemaManifestPath,
+      invalidSchemaValue,
+      invalidRawDirectory,
+      vaultRoot,
+    ])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
 test.sequential('built CLI rejects invalid journal ids and streams before mutation', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-journal-repair-'))
   const privateEventId = 'private-event-id'
@@ -279,11 +450,45 @@ test.sequential('built CLI classifies malformed manifests and export output fail
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-repair-'))
   const privatePackId = 'private-pack-id'
   const privateManifestValue = 'private-manifest-value'
+  const invalidJsonPackId = 'private-invalid-json-pack-id'
+  const invalidJsonManifestValue = 'private-export-invalid-json-value'
+  const mismatchedManifestPackId = 'private-mismatched-manifest-pack-id'
   const blockingFile = path.join(vaultRoot, 'private-output-blocker')
   const blockedOutput = path.join(blockingFile, 'private-output')
 
   try {
     await initializeVault({ vaultRoot })
+    await mkdir(path.join(vaultRoot, 'exports', 'packs', invalidJsonPackId), {
+      recursive: true,
+    })
+    await writeFile(
+      path.join(vaultRoot, 'exports', 'packs', invalidJsonPackId, 'manifest.json'),
+      `{"${invalidJsonManifestValue}"`,
+      'utf8',
+    )
+
+    const invalidJsonManifest = await runCli([
+      'export',
+      'pack',
+      'show',
+      invalidJsonPackId,
+      '--vault',
+      vaultRoot,
+    ])
+    const invalidJsonManifestError = requireError(invalidJsonManifest)
+
+    assert.equal(invalidJsonManifestError.code, 'manifest_invalid')
+    assert.equal(invalidJsonManifestError.retryable, false)
+    assert.equal(invalidJsonManifestError.stage, 'manifest_parse')
+    assert.match(invalidJsonManifestError.hint ?? '', /export pack create/u)
+    assert.doesNotMatch(invalidJsonManifestError.hint ?? '', /restore|recreate/iu)
+    assert.equal(invalidJsonManifestError.fieldErrors?.[0]?.path, '$')
+    assertDoesNotEcho(invalidJsonManifest, [
+      invalidJsonPackId,
+      invalidJsonManifestValue,
+      vaultRoot,
+    ])
+
     await mkdir(path.join(vaultRoot, 'exports', 'packs', privatePackId), {
       recursive: true,
     })
@@ -309,6 +514,8 @@ test.sequential('built CLI classifies malformed manifests and export output fail
     assert.equal(malformedError.code, 'manifest_invalid')
     assert.equal(malformedError.retryable, false)
     assert.equal(malformedError.stage, 'manifest_validation')
+    assert.match(malformedError.hint ?? '', /export pack create/u)
+    assert.doesNotMatch(malformedError.hint ?? '', /restore|recreate/iu)
     assert.equal((malformedError.fieldErrors?.length ?? 0) > 0, true)
     assertDoesNotEcho(malformed, [privatePackId, privateManifestValue, vaultRoot])
 
@@ -324,6 +531,50 @@ test.sequential('built CLI classifies malformed manifests and export output fail
       vaultRoot,
     ])
     assert.equal(created.ok, true, JSON.stringify(created))
+
+    const createdPackId = requireData(created).packId
+    const createdManifestPath = path.join(
+      vaultRoot,
+      'exports',
+      'packs',
+      createdPackId,
+      'manifest.json',
+    )
+    const createdManifestContents = await readFile(createdManifestPath, 'utf8')
+    const createdManifest = JSON.parse(createdManifestContents) as Record<string, unknown>
+    await writeFile(
+      createdManifestPath,
+      JSON.stringify({
+        ...createdManifest,
+        packId: mismatchedManifestPackId,
+      }),
+      'utf8',
+    )
+
+    const mismatched = await runCli([
+      'export',
+      'pack',
+      'show',
+      createdPackId,
+      '--vault',
+      vaultRoot,
+    ])
+    const mismatchedError = requireError(mismatched)
+
+    assert.equal(mismatchedError.code, 'manifest_invalid')
+    assert.equal(mismatchedError.retryable, false)
+    assert.equal(mismatchedError.stage, 'manifest_validation')
+    assert.match(mismatchedError.hint ?? '', /export pack create/u)
+    assert.doesNotMatch(mismatchedError.hint ?? '', /restore|recreate/iu)
+    assert.equal(mismatchedError.fieldErrors?.[0]?.path, 'packId')
+    assertDoesNotEcho(mismatched, [
+      createdPackId,
+      createdManifestPath,
+      mismatchedManifestPackId,
+      vaultRoot,
+    ])
+
+    await writeFile(createdManifestPath, createdManifestContents, 'utf8')
     await writeFile(blockingFile, 'not a directory', 'utf8')
 
     const unwritable = await runCli([
