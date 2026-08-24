@@ -203,6 +203,68 @@ test("habitat save rejects precise submitted locations without a write or value 
   }
 });
 
+test("habitat save reports stored corruption before repairing already-valid input", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-habitat-",
+  );
+  const privateMarker = "private-existing-habitat-marker";
+  const submittedLocation = "Boston";
+
+  try {
+    await initializeVault({ vaultRoot });
+    const habitatRoot = path.join(vaultRoot, "bank", "habitat");
+    await mkdir(habitatRoot, { recursive: true });
+    await writeFile(
+      path.join(habitatRoot, "sleep-environment.md"),
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.habitat.v1",
+        "docType: habitat",
+        `privateMarker: ${privateMarker}`,
+        "---",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await runInProcessJsonCli(createHabitatCli(), [
+      "habitat",
+      "save",
+      "home-location",
+      "--indicator",
+      `location=${submittedLocation}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.envelope.ok, false);
+    if (result.envelope.ok) {
+      assert.fail("expected existing habitat corruption to block the valid save");
+    }
+    assert.equal(result.envelope.error.code, "contract_invalid");
+    assert.equal(result.envelope.error.retryable, false);
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "$");
+    assert.equal(result.envelope.error.hint, undefined);
+    assert.match(result.envelope.error.message ?? "", /saved habitat record/u);
+    assert.doesNotMatch(result.envelope.error.message ?? "", /submitted habitat input/u);
+    await assert.rejects(
+      () => readFile(path.join(habitatRoot, "home-location.md")),
+      (error: unknown) =>
+        error instanceof Error && "code" in error && error.code === "ENOENT",
+    );
+    const encoded = JSON.stringify(result.envelope);
+    for (const forbidden of [
+      privateMarker,
+      submittedLocation,
+      "sleep-environment.md",
+      vaultRoot,
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
 test("habitat reads classify invalid saved frontmatter as terminal without exposing record data", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-cli-habitat-");
   const privateMarker = "private-habitat-frontmatter-marker";

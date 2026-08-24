@@ -286,12 +286,7 @@ function unknownHabitatAspectError(): VaultCliError {
   )
 }
 
-type HabitatCoreOperation = 'read' | 'save'
-
-function mapHabitatCoreError(
-  error: unknown,
-  operation: HabitatCoreOperation,
-): unknown {
+function mapHabitatCoreError(error: unknown): unknown {
   if (!isVaultError(error)) {
     return error
   }
@@ -312,7 +307,10 @@ function mapHabitatCoreError(
   }
 
   if (error.code === 'HABITAT_FRONTMATTER_INVALID') {
-    if (operation === 'save') {
+    if (
+      typeof error.details.indicatorId === 'string' &&
+      error.details.indicatorId.trim().length > 0
+    ) {
       return new VaultCliError(
         'contract_invalid',
         'Submitted habitat input was rejected by the habitat privacy or validation boundary.',
@@ -327,16 +325,30 @@ function mapHabitatCoreError(
       )
     }
 
+    if (
+      typeof error.details.relativePath === 'string' &&
+      error.details.relativePath.trim().length > 0
+    ) {
+      return new VaultCliError(
+        'contract_invalid',
+        'A saved habitat record has invalid frontmatter.',
+        {
+          issues: [{
+            path: [],
+            code: 'custom',
+          }],
+          retryable: false,
+          stage: 'read',
+        },
+      )
+    }
+
     return new VaultCliError(
       'contract_invalid',
-      'A saved habitat record has invalid frontmatter.',
+      'Habitat data failed validation without a safely classifiable source.',
       {
-        issues: [{
-          path: [],
-          code: 'custom',
-        }],
         retryable: false,
-        stage: 'read',
+        stage: 'validation',
       },
     )
   }
@@ -344,14 +356,11 @@ function mapHabitatCoreError(
   return error
 }
 
-async function runHabitatCore<T>(
-  operation: HabitatCoreOperation,
-  run: () => Promise<T>,
-): Promise<T> {
+async function runHabitatCore<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
-    throw mapHabitatCoreError(error, operation)
+    throw mapHabitatCoreError(error)
   }
 }
 
@@ -394,9 +403,8 @@ export function registerHabitatCommands(cli: Cli.Cli) {
         throw unknownHabitatAspectError()
       }
 
-      const result = await runHabitatCore(
-        'save',
-        () => upsertHabitatAspect({
+      const result = await runHabitatCore(() =>
+        upsertHabitatAspect({
           vaultRoot: options.vault,
           aspect: args.aspect,
           indicators: parseIndicatorAssignments(args.aspect, options.indicator),
@@ -407,7 +415,7 @@ export function registerHabitatCommands(cli: Cli.Cli) {
           recordedAt: options.recordedAt ?? new Date().toISOString().slice(0, 10),
           note: options.note,
           body: options.body,
-        }),
+        })
       )
 
       return {
@@ -430,13 +438,12 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     output: habitatShowResultSchema,
     async run({ args, options }) {
       const lookup = args.lookup.trim()
-      const record = await runHabitatCore(
-        'read',
-        () => readHabitatAspect(
+      const record = await runHabitatCore(() =>
+        readHabitatAspect(
           lookup.startsWith('hab_')
             ? { vaultRoot: options.vault, habitatId: lookup }
             : { vaultRoot: options.vault, slug: lookup },
-        ),
+        )
       )
 
       return {
@@ -454,9 +461,8 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatListResultSchema,
     async run({ options }) {
-      const records = (await runHabitatCore(
-        'read',
-        () => listHabitatAspects(options.vault),
+      const records = (await runHabitatCore(() =>
+        listHabitatAspects(options.vault)
       )).filter(
         (record) => !options.domain || record.domain === options.domain,
       )
@@ -484,9 +490,8 @@ export function registerHabitatCommands(cli: Cli.Cli) {
     }),
     output: habitatCoverageResultSchema,
     async run({ options }) {
-      const records = await runHabitatCore(
-        'read',
-        () => listHabitatAspects(options.vault),
+      const records = await runHabitatCore(() =>
+        listHabitatAspects(options.vault)
       )
       const coverage = computeHabitatCoverage(
         records.map((record) => ({
