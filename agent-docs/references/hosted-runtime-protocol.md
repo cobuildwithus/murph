@@ -1569,8 +1569,11 @@ targets, so the first exchange is available to later normal turns without
   row before claiming its own provider effect. Attempted, provider-started, or
   encrypted failed rows defer; accepted or delivered rows end the stale runtime
   send as already answered; absent, skipped, and definitive failed-without-payload
-  rows allow the ordinary runtime path. An ambiguous provider outcome starts no
-runtime wake and retains the exact encrypted reply for same-event recovery. The
+  rows allow the ordinary runtime path. Already-answered terminally supersedes
+  the stale runtime outbox intent without a retry, failure input, or recovery
+  wake while retaining the exact reason for diagnostics. An ambiguous provider
+  outcome starts no runtime wake and retains the exact encrypted reply for
+  same-event recovery. The
 shell hint does not read the persisted
 container state; it delegates the already-running check and concurrent-start
 coalescing to Cloudflare's `Container.start()`. Concurrent shell hints coalesce.

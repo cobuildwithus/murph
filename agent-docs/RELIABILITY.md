@@ -824,7 +824,9 @@ Last verified: 2026-08-20
   validated source event's exact instant-delivery row under its existing chat
   lock: unresolved ownership defers, accepted or delivered evidence ends the
   stale runtime reply, and terminal fallback or absence permits the ordinary
-  runtime claim. This adds no
+  runtime claim. The already-answered result terminally supersedes the stale
+  runtime outbox intent: it is neither retried nor recorded as a failed send,
+  and it schedules no failure-recovery input or wake. This adds no
   second queue, transcript store, workflow kind, or runtime state owner; all
   database work remains exact-event and single-row rather than collection
   fanout.

@@ -40,6 +40,61 @@ afterEach(async () => {
   await Promise.all(cleanupTasks.splice(0).map((cleanup) => cleanup()));
 });
 
+it("terminally supersedes a stale runtime reply after Web answered the exact first turn", async () => {
+  const fixture = await createHostedLinqAttachmentFixture({
+    imageCount: 0,
+    key: "web-first-turn-already-answered",
+    target: "linq_chat_web_first_turn_already_answered",
+  });
+  const alreadyAnswered = Object.assign(
+    new Error("Web already answered the exact inbound"),
+    {
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      deliveryMayHaveSucceeded: false as const,
+      retryable: false as const,
+    },
+  );
+  const assertLinqRecentInboundEngagement = vi.fn(async () => {
+    throw alreadyAnswered;
+  });
+  const providerFetch = vi.fn<typeof fetch>();
+  const publicInternetFetch = vi.fn<typeof fetch>();
+
+  const outcomes = await drainHostedPreparedAssistantDeliveries({
+    ...buildHostedLinqDrainInput({
+      fixture,
+      providerFetch,
+      publicInternetFetch,
+    }),
+    effectsPort: createHostedRuntimeEffectsPortStub({
+      assertLinqRecentInboundEngagement,
+    }),
+  });
+
+  expect(outcomes).toEqual([
+    expect.objectContaining({
+      deliveryErrorCode: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+      deliveryStatus: "failed_ambiguous",
+      effectId: fixture.intent.intentId,
+      retryable: false,
+    }),
+  ]);
+  expect(assertLinqRecentInboundEngagement).toHaveBeenCalledTimes(1);
+  expect(providerFetch).not.toHaveBeenCalled();
+  expect(publicInternetFetch).not.toHaveBeenCalled();
+  await expect(readAssistantOutboxIntent(
+    fixture.vaultRoot,
+    fixture.intent.intentId,
+  )).resolves.toMatchObject({
+    deliveryConfirmationPending: false,
+    lastError: {
+      code: "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+    },
+    nextAttemptAt: null,
+    status: "abandoned",
+  });
+});
+
 it("freezes an accepted reaction's exact-consume set across callback retry and replay", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-06T20:00:00.000Z"));

@@ -10677,6 +10677,60 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     },
   );
 
+  it("does not stage a failure input or recovery wake for a Web-superseded first turn", async () => {
+    const vaultRoot = await mkdtemp(path.join(
+      tmpdir(),
+      "murph-outbox-web-first-turn-superseded-",
+    ));
+    try {
+      const now = "2026-04-27T00:00:00.000Z";
+      const effect = {
+        ...createDeliveryEffect(),
+        deliveryPhase: "background_retry" as const,
+        effectId: "intent_web_first_turn_superseded",
+        fingerprint: "fingerprint_web_first_turn_superseded",
+        payload: {
+          ...createDeliveryEffect().payload,
+          channel: "linq" as const,
+          idempotencyKey:
+            "assistant-outbox:intent_web_first_turn_superseded",
+        },
+      };
+      mocks.collectHostedAssistantDeliverySideEffects.mockResolvedValueOnce([
+        effect,
+      ]);
+      mocks.drainHostedPreparedAssistantDeliveries.mockResolvedValueOnce([{
+        ...createFailedDeliveryOutcome({
+          deliveryErrorCode:
+            "HOSTED_LINQ_INSTANT_FIRST_TURN_ALREADY_ANSWERED",
+          effectId: effect.effectId,
+        }),
+        deliveryStatus: "failed_ambiguous" as const,
+        effectFingerprint: effect.fingerprint,
+        retryable: false,
+      }]);
+
+      const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
+        now: () => now,
+        vaultRoot,
+        workspace: createDueAssistantWorkspace(),
+      }));
+      const postCheckpoint = await result.afterCheckpoint?.();
+
+      expect(postCheckpoint).toEqual(expect.objectContaining({
+        redactedStatus: expect.objectContaining({
+          hostedOutboxTerminalFailureInputsStaged: 0,
+        }),
+      }));
+      expect(postCheckpoint?.nextWakeAt).toBeNull();
+      await expect(readExistingHostedPendingAssistantInputIds({
+        vaultRoot,
+      })).resolves.toEqual([]);
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
   it("does not carry device-sync next-wake reasons from the assistant automation lane", async () => {
     const nextWakeAt = new Date(Date.now() + 60_000).toISOString();
     mocks.runHostedAssistantAutomationLane.mockResolvedValueOnce({

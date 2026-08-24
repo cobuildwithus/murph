@@ -1210,7 +1210,10 @@ Last verified: 2026-08-20
   instant delivery row. An unresolved row defers runtime dispatch, a
   provider-correlated row terminates the stale runtime reply as already
   answered, and only an absent, skipped, or definitive failed-without-payload
-  row permits the runtime provider claim. An exact replay cannot reopen a skipped instant reply or a failed
+  row permits the runtime provider claim. The already-answered result preserves
+  its exact reason while terminally superseding the stale runtime outbox intent,
+  without a retry, failure-recovery input, or recovery wake. An exact replay
+  cannot reopen a skipped instant reply or a failed
   instant reply whose encrypted payload was cleared; only an ambiguous failure
   with retained payload may resume the exact prior body. This template-specific
   rule does not change signup or notice retries.

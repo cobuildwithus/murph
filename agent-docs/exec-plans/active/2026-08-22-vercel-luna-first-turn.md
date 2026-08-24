@@ -114,7 +114,7 @@ was delivered.
 
 ## State
 
-Active. Round 5 remediation and candidate verification are complete. The
+Active. Round 6 remediation and focused verification are complete. The
 design reuses the existing delivery ledger as the only provider outbox, stores
 the exact pending body encrypted for ambiguous recovery, and represents the
 completed exchange as two ordinary consumed conversation rows. ReviewGPT,
@@ -140,6 +140,17 @@ input, but Web reply eligibility requires a complete normalized value, so a
 longer supported one-part message follows the ordinary runtime path with its
 full mailbox text. These corrections add no persisted field, API, owner, queue,
 service, dependency, lease, or reconciliation loop.
+
+## ReviewGPT round 6 disposition
+
+The finding was accepted. The exact already-answered egress result prevented a
+second provider send, but the stale runtime outbox intent was still recorded as
+a terminal delivery failure. That false failure could stage a system input and
+wake another assistant pass. The existing outbox authority-supersession branch
+now also owns this Linq result: it preserves the exact diagnostic code, marks
+the stale intent terminal without retry, and produces no failure input or
+recovery wake. This reuses the current outbox state machine and adds no state,
+owner, queue, service, dependency, or special recovery path.
 
 ## ReviewGPT round 4 disposition
 
