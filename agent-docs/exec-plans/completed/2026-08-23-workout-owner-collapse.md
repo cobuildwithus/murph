@@ -1,6 +1,6 @@
 # Collapse strength set logging to one canonical owner
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -102,3 +102,4 @@ instead of adding another selector, state record, or reconciliation path.
 - Changelog: added a priority-3 reliability item. No visual is needed because
   this narrow routing correction is explained more clearly in two sentences
   and introduces no new interaction or presentation.
+Completed: 2026-08-23
