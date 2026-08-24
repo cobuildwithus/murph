@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "reminders-reuse-archived-names",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Reminders can reuse familiar names",
+    "summary": "Creating a reminder now works when an older reminder with the same name is no longer active.",
+    "details": "Murph keeps the older reminder intact and saves the new request as a separate schedule.",
+    "relevanceTags": ["reminders", "reliability"],
+    "sourcePullRequests": [2216]
+  }
+}
