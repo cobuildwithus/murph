@@ -60,6 +60,7 @@ import {
 } from './return-contact-kind.js'
 import { createAssistantGroupEmailOutboxTool } from './group-email-outbox.js'
 import type { AssistantConversationScope } from './conversation-policy.js'
+import type { AnalyzeVideoAttachmentAuthority } from '../assistant-codex/analyze-video-tool.js'
 
 export interface AssistantHostedDeliveryContext {
   conversationId: string | null
@@ -163,6 +164,7 @@ export interface AssistantHostedToolContext {
     reasoningEffort: string | null
   }
   currentHostedMailboxItemIds(): readonly string[]
+  currentAnalyzeVideoAttachmentAuthorities?(): readonly AnalyzeVideoAttachmentAuthority[]
   currentHostedImageCompletionEffectScope?():
     AssistantHostedImageCompletionEffectScope | null
   verifyGeneratedImageDelivery?(input: {
@@ -213,6 +215,7 @@ export function createAssistantHostedToolContext(input: {
   beforeToolExecution?: (deliveryContextOrdinal: number) => Promise<void>
   getConversationScope?: () => AssistantConversationScope
   getDeliveryContext?: () => AssistantHostedToolDeliveryContext
+  getAnalyzeVideoAttachmentAuthorities?: () => readonly AnalyzeVideoAttachmentAuthority[]
   getUserActionAcceptedInputIds?: () => readonly string[]
   getProductFeedbackAcceptedInputIds?: () => readonly string[]
   messageInput: AssistantMessageInput
@@ -536,6 +539,13 @@ export function createAssistantHostedToolContext(input: {
       const deliveryContext = readDeliveryContext()
       return deliveryContext.messageInput.hostedDeliveryIdempotency
         ?.inboundMailboxItemIds ?? []
+    },
+    currentAnalyzeVideoAttachmentAuthorities: () => {
+      const userActionScope = readCurrentUserActionScope()
+      if (userActionScope === null) return []
+      const acceptedInputIds = new Set(userActionScope.acceptedInputIds)
+      return (input.getAnalyzeVideoAttachmentAuthorities?.() ?? [])
+        .filter((authority) => acceptedInputIds.has(authority.messageRef))
     },
     currentHostedImageCompletionEffectScope:
       readCurrentHostedImageCompletionEffectScope,

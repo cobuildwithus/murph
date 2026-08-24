@@ -32,9 +32,9 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
 
   requireText(
     source,
-    "missing-unfiltered-pull-request-trigger",
-    "on:\n  pull_request:\n  push:\n    branches:\n      - main\n",
-    "The host-support workflow must run for every pull request and main push.",
+    "missing-ready-only-pull-request-trigger",
+    "on:\n  pull_request:\n    types: [opened, reopened, ready_for_review]\n  push:\n    branches:\n      - main\n",
+    "The host-support workflow must run for ready pull request candidates and main pushes.",
   );
   if (source.includes("pull_request_target")) {
     issues.push({

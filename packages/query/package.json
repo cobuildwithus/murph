@@ -67,6 +67,11 @@
       "import": "./dist/id-families.js",
       "default": "./dist/id-families.js"
     },
+    "./query-visibility": {
+      "types": "./dist/query-visibility.d.ts",
+      "import": "./dist/query-visibility.js",
+      "default": "./dist/query-visibility.js"
+    },
     "./murph-age": {
       "types": "./dist/murph-age.d.ts",
       "import": "./dist/murph-age.js",

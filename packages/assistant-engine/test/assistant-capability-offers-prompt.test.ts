@@ -145,7 +145,7 @@ describe('assistant capability-offers prompt contract', () => {
       HOSTED_GROUPS_HEADER,
     )
 
-    expect(section).toContain('`murph.group action="read_shared" audience="group_email"`')
+    expect(section).toContain('`murph.group_data action="read_shared" audience="group_email"`')
     expect(section).toContain('Preparation returns only currently authorized address-free facts')
     expect(section).not.toContain('`vault-cli group weekly')
     expect(section).toContain('Send revalidates recipients and grants')
@@ -153,7 +153,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(section).toContain('never exposes recipient addresses to the model')
     expect(section).toContain('Email sharing requires `group-email.v0`')
     expect(section).not.toContain('proactively call `action="post_join_offer"` once')
-    expect(section).toContain('`action="read_shared"` as the only hosted path')
+    expect(section).toContain('`murph.group_data action="read_shared"` as the only hosted path')
     expect(section).toContain('resolves live authority lazily after the tool call')
     expect(section).not.toContain('explicit current visibility of a consented shared metric')
     expect(section).not.toContain('call exact-scope `read_shared` once first')
@@ -216,7 +216,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain('possible group cue')
     expect(directSection).toContain('club, team, community, or shared challenge')
     expect(directSection).toContain(
-      '`murph.group action="list_memberships"` is available',
+      '`murph.group_membership action="list_memberships"` is available',
     )
     expect(directSection).toContain('last-resort disambiguation check')
     expect(directSection).toContain(
@@ -225,7 +225,7 @@ describe('assistant capability-offers prompt contract', () => {
     expect(directSection).toContain(
       'name-like reference only when one exact normalized visible label matches',
     )
-    expect(directSection).toContain('use `action="ask"`')
+    expect(directSection).toContain('use `murph.group_consult action="ask"`')
     expect(directSection).toContain('With no memberships')
     expect(directSection).toContain('paste-or-screenshot fallback')
     expect(directSection).toContain('distinct nonblank visible labels')

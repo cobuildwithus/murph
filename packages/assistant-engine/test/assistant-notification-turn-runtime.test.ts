@@ -1019,6 +1019,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: 'Fixed welcome text',
         createdAt: expect.any(String),
       },
@@ -1253,6 +1254,7 @@ test('sendAssistantNotificationLocal rejects deferred immediate exact-text deliv
     [
       {
         kind: 'assistant',
+        standaloneAssistantContext: true,
         text: 'Fixed welcome text',
         createdAt: expect.any(String),
       },
@@ -2410,6 +2412,7 @@ test('sendAssistantNotificationLocal isolates detached provider results without 
   )
   expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
     expect.objectContaining({
+      assistantTranscriptStandaloneContext: true,
       providerResumeStateAction: 'persist-from-provider-turn',
     }),
   )
@@ -3442,6 +3445,56 @@ test.each(['linq', 'telegram', 'email'] as const)(
   },
 )
 
+test('sendAssistantNotificationLocal keeps a scheduled workout decision structured and delivers only its text', async () => {
+  const decision = JSON.stringify({
+    kind: 'send_message',
+    privateSummary: 'Prepared the exact workout check-in.',
+    text: 'How did the next set go?',
+  })
+  const providerResult = createProviderResult({
+    providerAuthoredResponse: decision,
+    response: decision,
+    transcriptResponse: decision,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-scheduled-workout-check-in',
+    })
+
+  const result = await sendAssistantNotificationLocal({
+    channel: 'linq',
+    deliveryTarget: 'direct-workout-check-in',
+    instructions: 'Ask how the next set in the exact workout went.',
+    scheduledInvocationAuthority: {
+      automationId: 'scheduled-workout-check-in',
+      occurrenceAt: '2026-08-09T19:45:00.000-04:00',
+    },
+    threadIsDirect: true,
+    vault: '/vaults/scheduled-workout-check-in',
+  })
+
+  expect(result).toMatchObject({
+    decision: {
+      kind: 'send_message',
+      privateSummary: 'Prepared the exact workout check-in.',
+      text: 'How did the next set go?',
+    },
+    response: 'How did the next set go?',
+  })
+  expect(deliverMessage).toHaveBeenCalledWith(expect.objectContaining({
+    message: 'How did the next set go?',
+  }))
+  expect(mocks.persistAssistantTurnAndSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      assistantTranscriptText: 'How did the next set go?',
+    }),
+  )
+  expect(JSON.stringify(deliverMessage.mock.calls)).not.toMatch(
+    /privateSummary|Murph workout follow-up|evt_/u,
+  )
+})
+
 test.each(
   (['linq', 'telegram', 'email'] as const).flatMap((channel) => [
     { channel, responsePolicy: undefined },
@@ -3631,6 +3684,41 @@ test.each(['linq', 'telegram', 'email'] as const)(
     expect(deliverMessage).not.toHaveBeenCalled()
   },
 )
+
+test('sendAssistantNotificationLocal maps context handoff to a conversation-shaped output-only turn', async () => {
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Share the bounded context in the room.',
+      text: 'Sunny just pulled 405. Huge day.',
+    }),
+  })
+  const { mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-context-handoff',
+    })
+
+  await sendAssistantNotificationLocal({
+    executionContext: { hosted: null },
+    instructions: 'Use the bounded handoff context in this group.',
+    notificationPromptProfile: 'context-handoff',
+    responsePolicy: { kind: 'require_send' },
+    threadIsDirect: false,
+    vault: '/vaults/context-handoff',
+  })
+
+  expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledWith(
+    expect.objectContaining({
+      profile: {
+        nativeResumePolicy: 'disabled',
+        promptProfile: 'conversation',
+        threadScope: 'isolated-thread',
+        toolProfile: 'output-only-turn',
+      },
+    }),
+  )
+})
 
 test.each([
   {

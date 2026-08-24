@@ -21,6 +21,7 @@ import {
 import {
   JUNCTION_ECG_VOLTAGE_FEATURE_SCHEMA,
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
+  JunctionWorkoutStreamTimestampCardinalityError,
   buildJunctionBoundedFeatureIdentity,
   buildJunctionDailyTimeseriesAggregateResourceId,
   canNormalizeJunctionSleepCycleRecordToCompactStages,
@@ -238,6 +239,7 @@ interface JunctionFullJobTimeseriesContinuation {
   timeseriesResourceCursor: string;
   timeseriesWindowHours: 1 | 24;
   workoutStreamCursor: string | null;
+  workoutStreamEmptySeen: boolean;
 }
 
 interface JunctionFullJobTimeseriesResourceCursor {
@@ -246,12 +248,23 @@ interface JunctionFullJobTimeseriesResourceCursor {
 }
 
 interface JunctionWorkoutStreamImportResult extends JunctionTimeseriesImportResult {
+  emptyTimestampArraySeen: boolean;
   madeProgress: boolean;
   workoutStreamCursor: string | null;
 }
 
 interface JunctionDailyTimeseriesImportResult extends JunctionTimeseriesImportResult {
+  emptyWorkoutStreamReplayWindow?: {
+    windowEnd: string;
+    windowStart: string;
+  };
   workoutStreamCursor: string | null;
+  workoutStreamEmptySeen: boolean;
+}
+
+interface JunctionWorkoutStreamFeatureFetchResult {
+  emptyTimestampArray: boolean;
+  feature: unknown | undefined;
 }
 
 const JUNCTION_WORKOUT_STREAM_PROGRESS_VERSION = 1;
@@ -663,6 +676,7 @@ const EMPTY_HISTORICAL_BACKFILL_RETRY_DELAYS_MS = Object.freeze([
   6 * 60 * 60_000,
   24 * 60 * 60_000,
 ] as const);
+const JUNCTION_WORKOUT_STREAM_EMPTY_REPLAY_DELAY_MS = 24 * 60 * 60_000;
 const JUNCTION_HISTORICAL_UNRESOLVED_PROVIDER_RECORD_IDENTITIES_VERSION = 1;
 const JUNCTION_BLOOD_PRESSURE_PROVIDER_RECORD_IDENTITY_PATTERN =
   /^blood-pressure-[0-9a-f]{16}$/u;
@@ -1028,15 +1042,21 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    const statuses = (await client.listUserProviders(userId))
+    const providerStatuses = (await client.listUserProviders(userId))
       .filter((provider) => (
         canonicalizeJunctionProviderSlug(provider.origin.sourceProviderSlug)
         ?? canonicalizeJunctionProviderSlug(provider.slug)
       ) === targetProviderSlug)
-      .map((provider) => mapJunctionSourceStatus(provider.status));
-    if (statuses.includes("connected")) {
+      .map((provider) => provider.status.trim().toLowerCase());
+    // Connection authority is the provider row's literal status. The broader
+    // projection mapper also accepts lifecycle/resource aliases such as `available`.
+    if (
+      providerStatuses.length > 0
+      && providerStatuses.every((status) => status === "connected")
+    ) {
       return true;
     }
+    const statuses = providerStatuses.map(mapJunctionSourceStatus);
     if (statuses.length === 0 || statuses.every((status) => status === "disconnected")) {
       return false;
     }
@@ -1940,6 +1960,7 @@ export function createJunctionDeviceSyncProvider(
           timeseriesWindowHours: 24,
           window,
           workoutStreamCursor: null,
+          workoutStreamEmptySeen: false,
         })
       : null;
     if (timeseriesContinuation || temporalContinuationJobs.length > 0) {
@@ -3066,6 +3087,7 @@ export function createJunctionDeviceSyncProvider(
             effectiveResource,
             sourceProviderSlug,
             completedWorkoutStreamIdentities,
+            job.payload.workoutStreamEmptySeen === true,
           );
           const result = withJunctionSkippedResourceMetadata(
             context,
@@ -3078,11 +3100,18 @@ export function createJunctionDeviceSyncProvider(
                   workoutStreamCursor: effectiveResource === "workout_stream"
                     ? dailyImport.workoutStreamCursor
                     : undefined,
+                  workoutStreamEmptySeen: dailyImport.workoutStreamEmptySeen,
                 })
               : { nextReconcileAt: clampWebhookJobNextReconcileAt(context) },
             skippedOptionalResources,
           );
-          return result;
+          return withJunctionWorkoutStreamEmptyReplay({
+            job,
+            now: context.now,
+            replayWindow: dailyImport.emptyWorkoutStreamReplayWindow,
+            result,
+            sourceProviderSlug,
+          });
         }
         if (
           !extendedHistoricalBackfill
@@ -4626,6 +4655,7 @@ export function createJunctionDeviceSyncProvider(
     resource: string,
     sourceProviderSlug?: string | null,
     completedWorkoutStreamIdentities: ReadonlySet<string> = new Set(),
+    workoutStreamEmptySeen = false,
   ): Promise<JunctionDailyTimeseriesImportResult> {
     let resumeWorkoutStreamIdentities = new Set(completedWorkoutStreamIdentities);
     let madeProgress = false;
@@ -4639,6 +4669,7 @@ export function createJunctionDeviceSyncProvider(
         if (madeProgress) {
           return {
             workoutStreamCursor,
+            workoutStreamEmptySeen,
             yieldedAt: window.windowStart,
           };
         }
@@ -4655,13 +4686,27 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
           windowEnd: window.windowEnd,
           windowStart: window.windowStart,
+          workoutStreamEmptySeen,
         });
         workoutStreamCursor = workoutImport.workoutStreamCursor;
+        workoutStreamEmptySeen = workoutImport.emptyTimestampArraySeen;
         madeProgress ||= workoutImport.madeProgress;
         if (workoutImport.yieldedAt) {
           return {
             workoutStreamCursor,
+            workoutStreamEmptySeen,
             yieldedAt: workoutImport.yieldedAt,
+          };
+        }
+        if (workoutStreamEmptySeen) {
+          return {
+            emptyWorkoutStreamReplayWindow: {
+              windowEnd: window.windowEnd,
+              windowStart: window.windowStart,
+            },
+            workoutStreamCursor: null,
+            workoutStreamEmptySeen: false,
+            yieldedAt: window.windowEnd,
           };
         }
         madeProgress = true;
@@ -4682,6 +4727,7 @@ export function createJunctionDeviceSyncProvider(
             if (madeProgress) {
               return {
                 workoutStreamCursor,
+                workoutStreamEmptySeen: false,
                 yieldedAt: window.windowStart,
               };
             }
@@ -4704,6 +4750,7 @@ export function createJunctionDeviceSyncProvider(
     }
     return {
       workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
       yieldedAt: null,
     };
   }
@@ -4760,7 +4807,10 @@ export function createJunctionDeviceSyncProvider(
         && policy?.normalizationMode !== "hourly_or_session_feature")
       || (!resourceCursor.restartFromWindowStart
         && resource !== "workout_stream"
-        && job.payload.workoutStreamCursor !== undefined)
+        && (
+          job.payload.workoutStreamCursor !== undefined
+          || job.payload.workoutStreamEmptySeen !== undefined
+        ))
     ) {
       throw invalidJunctionTimeseriesResourceProgress();
     }
@@ -4770,6 +4820,9 @@ export function createJunctionDeviceSyncProvider(
       Date.parse(window.windowEnd),
     )).toISOString();
     let workoutStreamCursor: string | null = null;
+    let workoutStreamReplayWindow:
+      | { windowEnd: string; windowStart: string }
+      | undefined;
 
     if (resource === "workout_stream") {
       try {
@@ -4783,6 +4836,7 @@ export function createJunctionDeviceSyncProvider(
           sourceProviders,
           windowEnd: executionWindowEnd,
           windowStart: timeseriesCursor,
+          workoutStreamEmptySeen: job.payload.workoutStreamEmptySeen === true,
         });
         historicalProviderRecordsSeen ||=
           sourceProviderSlug !== null
@@ -4804,10 +4858,17 @@ export function createJunctionDeviceSyncProvider(
               timeseriesResourceCursor: resource,
               timeseriesWindowHours,
               workoutStreamCursor,
+              workoutStreamEmptySeen: workoutImport.emptyTimestampArraySeen,
             },
             window,
           });
         }
+        workoutStreamReplayWindow = workoutImport.emptyTimestampArraySeen
+          ? {
+              windowEnd: executionWindowEnd,
+              windowStart: timeseriesCursor,
+            }
+          : undefined;
       } catch (error) {
         if (error instanceof JunctionTimeseriesProgressError) {
           historicalProviderRecordsSeen ||=
@@ -4834,6 +4895,7 @@ export function createJunctionDeviceSyncProvider(
               timeseriesResourceCursor: resource,
               timeseriesWindowHours,
               workoutStreamCursor: error.workoutStreamCursor,
+              workoutStreamEmptySeen: error.workoutStreamEmptySeen,
             },
             window,
           });
@@ -4890,6 +4952,7 @@ export function createJunctionDeviceSyncProvider(
               timeseriesResourceCursor: resource,
               timeseriesWindowHours: 1,
               workoutStreamCursor: null,
+              workoutStreamEmptySeen: false,
             },
             window,
           });
@@ -4903,6 +4966,7 @@ export function createJunctionDeviceSyncProvider(
       historicalProviderRecordsSeen,
       historicalRecordsSeen,
       job,
+      replayWindow: workoutStreamReplayWindow,
       skippedOptionalResources,
       sourceProviders,
       continuation: resolveNextFullJobTimeseriesContinuation({
@@ -5088,6 +5152,7 @@ export function createJunctionDeviceSyncProvider(
     sourceProviders: readonly JunctionProviderConnection[];
     windowEnd: string;
     windowStart: string;
+    workoutStreamEmptySeen?: boolean;
   }): Promise<JunctionWorkoutStreamImportResult> {
     const policy = resolveJunctionTimeseriesResourcePolicy("workout_stream");
     const maxWorkouts = policy?.maxRecordsPerWindow;
@@ -5100,10 +5165,12 @@ export function createJunctionDeviceSyncProvider(
     let historicalProviderRecordsSeen = false;
     let historicalRecordsSeen = false;
     let madeProgress = false;
+    let workoutStreamEmptySeen = input.workoutStreamEmptySeen === true;
     const carryTerminalProgressOrThrow = (error: unknown): JunctionWorkoutStreamImportResult => {
       if (isJunctionJobSignalAbort(error, input.context.signal)) {
         if (input.allowImmediateYield || madeProgress) {
           return {
+            emptyTimestampArraySeen: workoutStreamEmptySeen,
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
             madeProgress,
@@ -5123,6 +5190,7 @@ export function createJunctionDeviceSyncProvider(
           {
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
+            workoutStreamEmptySeen,
           },
         );
       }
@@ -5161,6 +5229,7 @@ export function createJunctionDeviceSyncProvider(
       if (input.context.shouldYield?.()) {
         if (input.allowImmediateYield || madeProgress) {
           return {
+            emptyTimestampArraySeen: workoutStreamEmptySeen,
             historicalProviderRecordsSeen,
             historicalRecordsSeen,
             madeProgress,
@@ -5173,9 +5242,9 @@ export function createJunctionDeviceSyncProvider(
         input.context.throwIfAborted?.();
       }
 
-      let feature: unknown;
+      let fetchedFeature: JunctionWorkoutStreamFeatureFetchResult;
       try {
-        feature = await fetchJunctionWorkoutStreamFeature(
+        fetchedFeature = await fetchJunctionWorkoutStreamFeature(
           client,
           candidate,
           maxSamples,
@@ -5214,8 +5283,22 @@ export function createJunctionDeviceSyncProvider(
         continue;
       }
 
+      const feature = fetchedFeature.feature;
+      if (fetchedFeature.emptyTimestampArray) {
+        input.context.logger.warn?.("Deferring Junction workout with an empty stream.", {
+          errorCode: "JUNCTION_WORKOUT_STREAM_EMPTY",
+          provider: "junction",
+          resource: "workout_stream",
+          resourceCategory: "timeseries",
+        });
+        completedIdentities.add(candidate.identity);
+        madeProgress = true;
+        workoutStreamEmptySeen = true;
+        continue;
+      }
+
       if (feature === undefined) {
-        input.context.logger.warn?.("Skipping Junction workout with unaligned metric cardinality.", {
+        input.context.logger.warn?.("Skipping Junction workout without an importable stream feature.", {
           errorCode: "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
           provider: "junction",
           resource: "workout_stream",
@@ -5265,6 +5348,7 @@ export function createJunctionDeviceSyncProvider(
     }
 
     return {
+      emptyTimestampArraySeen: workoutStreamEmptySeen,
       historicalProviderRecordsSeen,
       historicalRecordsSeen,
       madeProgress,
@@ -5417,6 +5501,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     workoutStreamCursor?: string | null;
+    workoutStreamEmptySeen?: boolean;
     windowEnd: string;
     windowStart: string;
   }): ProviderJobResult {
@@ -5545,6 +5630,10 @@ export function createJunctionDeviceSyncProvider(
     historicalProviderRecordsSeen: boolean;
     historicalRecordsSeen: boolean;
     job: DeviceSyncJobRecord;
+    replayWindow?: {
+      windowEnd: string;
+      windowStart: string;
+    };
     skippedOptionalResources: JunctionSkippedOptionalResource[];
     sourceProviders: readonly JunctionProviderConnection[];
     window: { windowEnd: string; windowStart: string };
@@ -5593,18 +5682,26 @@ export function createJunctionDeviceSyncProvider(
       });
     }
 
-    return withJunctionSkippedResourceMetadata(
-      input.context,
-      {
-        ...(scheduledJob ? { scheduledJobs: [scheduledJob] } : {}),
-        nextReconcileAt: resolveJunctionNextReconcileAt(
-          input.context.account,
-          input.context.now,
-          addMilliseconds(input.context.now, reconcileIntervalMs),
-        ),
-      },
-      input.skippedOptionalResources,
-    );
+    return withJunctionWorkoutStreamEmptyReplay({
+      job: input.job,
+      now: input.context.now,
+      replayWindow: input.replayWindow,
+      result: withJunctionSkippedResourceMetadata(
+        input.context,
+        {
+          ...(scheduledJob ? { scheduledJobs: [scheduledJob] } : {}),
+          nextReconcileAt: resolveJunctionNextReconcileAt(
+            input.context.account,
+            input.context.now,
+            addMilliseconds(input.context.now, reconcileIntervalMs),
+          ),
+        },
+        input.skippedOptionalResources,
+      ),
+      sourceProviderSlug: normalizeProviderSlug(
+        input.job.payload.sourceProviderSlug,
+      ),
+    });
   }
 
   function buildFullJobTimeseriesContinuationJob(input: {
@@ -5617,6 +5714,7 @@ export function createJunctionDeviceSyncProvider(
     timeseriesWindowHours: 1 | 24;
     window: { windowEnd: string; windowStart: string };
     workoutStreamCursor: string | null;
+    workoutStreamEmptySeen: boolean;
   }): DeviceSyncJobInput | null {
     if (input.job.kind !== "backfill" && input.job.kind !== "reconcile") {
       return null;
@@ -5677,6 +5775,9 @@ export function createJunctionDeviceSyncProvider(
         ...(input.workoutStreamCursor
           ? { workoutStreamCursor: input.workoutStreamCursor }
           : {}),
+        ...(input.workoutStreamEmptySeen
+          ? { workoutStreamEmptySeen: true }
+          : {}),
       },
       priority: input.job.priority,
       windowEnd: input.window.windowEnd,
@@ -5692,6 +5793,7 @@ export function createJunctionDeviceSyncProvider(
     historicalUnresolvedProviderRecordCount?: number;
     job: DeviceSyncJobRecord;
     workoutStreamCursor?: string | null;
+    workoutStreamEmptySeen?: boolean;
     windowEnd: string;
     windowStart: string;
   }): DeviceSyncJobInput | null {
@@ -5731,6 +5833,9 @@ export function createJunctionDeviceSyncProvider(
       windowEnd: input.windowEnd,
       windowStart: input.windowStart,
       workoutStreamCursor: input.workoutStreamCursor || undefined,
+      workoutStreamEmptySeen: input.workoutStreamEmptySeen === true
+        ? true
+        : undefined,
     });
     return {
       kind: "resource",
@@ -5894,7 +5999,7 @@ async function fetchJunctionTimeseriesWindow(
     );
     const features: unknown[] = [];
     for (const candidate of candidates) {
-      const feature = await fetchJunctionWorkoutStreamFeature(
+      const { feature } = await fetchJunctionWorkoutStreamFeature(
         junctionClient,
         candidate,
         maxSamples,
@@ -5963,17 +6068,33 @@ async function fetchJunctionWorkoutStreamFeature(
   maxSamples: number,
   signal: AbortSignal | null,
   collectionWorkLimit?: JunctionCollectionWorkLimit,
-): Promise<unknown | undefined> {
+): Promise<JunctionWorkoutStreamFeatureFetchResult> {
   const stream = await junctionClient.getWorkoutStream({
     collectionWorkLimit,
     signal,
     workoutId: candidate.workoutId,
   });
-  return reduceJunctionWorkoutStreamPayload({
-    maxSamples,
-    stream,
-    summary: candidate.summary,
-  });
+  try {
+    return {
+      emptyTimestampArray: false,
+      feature: reduceJunctionWorkoutStreamPayload({
+        maxSamples,
+        stream,
+        summary: candidate.summary,
+      }),
+    };
+  } catch (error) {
+    if (
+      error instanceof JunctionWorkoutStreamTimestampCardinalityError
+      && error.diagnostic.kind === "empty"
+    ) {
+      return {
+        emptyTimestampArray: true,
+        feature: undefined,
+      };
+    }
+    throw error;
+  }
 }
 
 function withJunctionSourceProviderFallback(
@@ -9059,6 +9180,7 @@ function resolveNextFullJobTimeseriesContinuation(input: {
       timeseriesResourceCursor: input.resource,
       timeseriesWindowHours: input.timeseriesWindowHours,
       workoutStreamCursor: null,
+      workoutStreamEmptySeen: false,
     };
   }
 
@@ -9069,6 +9191,7 @@ function resolveNextFullJobTimeseriesContinuation(input: {
         timeseriesResourceCursor: nextResource,
         timeseriesWindowHours: 24,
         workoutStreamCursor: null,
+        workoutStreamEmptySeen: false,
       }
     : null;
 }
@@ -10358,6 +10481,76 @@ function buildExactWindowJob<Kind extends "backfill" | "reconcile">(input: {
     priority: input.priority,
     ...(input.availableAt ? { availableAt: input.availableAt } : {}),
     dedupeKey: sha256Text(JSON.stringify(dedupeIdentity)),
+  };
+}
+
+function withJunctionWorkoutStreamEmptyReplay(input: {
+  job: DeviceSyncJobRecord;
+  now: string;
+  replayWindow?: {
+    windowEnd: string;
+    windowStart: string;
+  };
+  result: ProviderJobResult;
+  sourceProviderSlug?: string | null;
+}): ProviderJobResult {
+  if (
+    !input.replayWindow
+    || (
+      input.job.kind === "resource"
+      && input.job.payload.workoutStreamEmptyReplay === true
+    )
+  ) {
+    return input.result;
+  }
+
+  const replayJob = buildJunctionWorkoutStreamEmptyReplayJob({
+    availableAt: addMilliseconds(
+      input.now,
+      JUNCTION_WORKOUT_STREAM_EMPTY_REPLAY_DELAY_MS,
+    ),
+    sourceProviderSlug: input.sourceProviderSlug,
+    windowEnd: input.replayWindow.windowEnd,
+    windowStart: input.replayWindow.windowStart,
+  });
+  return {
+    ...input.result,
+    scheduledJobs: [
+      ...(input.result.scheduledJobs ?? []),
+      replayJob,
+    ],
+  };
+}
+
+function buildJunctionWorkoutStreamEmptyReplayJob(input: {
+  availableAt: string;
+  sourceProviderSlug?: string | null;
+  windowEnd: string;
+  windowStart: string;
+}): DeviceSyncJobInput {
+  const sourceProviderSlug = canonicalizeJunctionProviderSlug(
+    input.sourceProviderSlug,
+  );
+  const payload = {
+    resource: "workout_stream",
+    resourceCategory: "timeseries",
+    ...(sourceProviderSlug ? { sourceProviderSlug } : {}),
+    windowEnd: input.windowEnd,
+    windowStart: input.windowStart,
+    workoutStreamEmptyReplay: true,
+  } satisfies JunctionDeviceSyncJobPayloads["resource"];
+  return {
+    availableAt: input.availableAt,
+    dedupeKey: sha256Text(JSON.stringify([
+      "junction",
+      "workout-stream-empty-replay",
+      input.windowStart,
+      input.windowEnd,
+      sourceProviderSlug,
+    ])),
+    kind: "resource",
+    payload,
+    priority: JUNCTION_HISTORICAL_BACKFILL_RETRY_PRIORITY,
   };
 }
 

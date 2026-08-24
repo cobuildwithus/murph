@@ -28,6 +28,7 @@ import {
   HOSTED_PRODUCT_SUPPORT_ESCALATION_PREFIX,
   isHostedProductSupportEscalationFeedback,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
@@ -265,9 +266,6 @@ import {
   type PhysicalNoteDynamicToolRequest,
 } from './dynamic-tools/physical-notes.js'
 import {
-  buildResponseCardValidationFeedback,
-} from './response-card-validation-feedback.js'
-import {
   executeGenerateSongDynamicTool,
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
@@ -278,11 +276,21 @@ import {
   MURPH_ASK_GROK_TOOL,
   parseAskGrokArguments,
 } from './dynamic-tools/ask-grok.js'
+import {
+  executeAnalyzeVideoDynamicTool,
+  MURPH_ANALYZE_VIDEO_TOOL,
+  parseAnalyzeVideoArguments,
+} from './dynamic-tools/analyze-video.js'
 import type {
   AskGrokToolArgs,
   AskGrokToolRuntime,
   AskGrokTurnState,
 } from './ask-grok-tool.js'
+import type {
+  AnalyzeVideoToolArgs,
+  AnalyzeVideoToolRuntime,
+  AnalyzeVideoTurnState,
+} from './analyze-video-tool.js'
 export * from './dynamic-tool-catalog.js'
 import {
   asRecord,
@@ -303,7 +311,9 @@ import {
   MURPH_FAMILY_PLAN_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_NAME,
+  MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME,
   MURPH_IMESSAGE_CONTACT_TOOL,
   MURPH_PERSONALIZATION_TOOL,
   MURPH_PLAN_USAGE_TOOL,
@@ -460,6 +470,28 @@ const groupVaultShareProjectionScopeSchema = z.unknown().transform((value, conte
   return scope
 })
 
+const groupLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) =>
+      Array.from(value).length
+      <= HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+    { message: 'groupLabel exceeds the Unicode code-point limit' },
+  )
+
+const groupHandoffContextSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    (value) =>
+      Array.from(value).length
+      <= HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
+    { message: 'context exceeds the Unicode code-point limit' },
+  )
+
 const groupQuestionSchema = z
   .string()
   .trim()
@@ -486,18 +518,15 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
   z
     .object({
       action: z.literal('ask'),
-      groupLabel: z
-        .string()
-        .trim()
-        .min(1)
-        .refine(
-          (value) =>
-            Array.from(value).length
-            <= HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
-          { message: 'groupLabel exceeds the Unicode code-point limit' },
-        )
-        .optional(),
+      groupLabel: groupLabelSchema.optional(),
       question: groupQuestionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      action: z.literal('handoff'),
+      context: groupHandoffContextSchema,
+      groupLabel: groupLabelSchema.optional(),
     })
     .strict(),
   z
@@ -757,6 +786,11 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
     })
     .strict(),
 ])
+
+type GroupArguments = z.infer<typeof groupArgumentsSchema>
+
+type GroupToolFamilyName = keyof typeof MURPH_GROUP_TOOL_FAMILY_ACTIONS
+type GroupParserToolName = typeof MURPH_GROUP_TOOL_NAME | GroupToolFamilyName
 
 const sendVaultFileArgumentsSchema = z
   .object({
@@ -1068,6 +1102,12 @@ export interface MurphDynamicToolExecutionResult {
   finalActionPatch?: MurphDynamicToolFinalActionPatch
   reactionPatch?: MurphDynamicToolReactionPatch
   replyTargetPatch?: MurphDynamicToolReplyTargetPatch
+  /**
+   * Trusted runtime-owned text that must be delivered when the model supplies
+   * no response text or card. Analyze-video uses this for the best completed
+   * tool outcome so successful observations cannot disappear behind no-reply.
+   */
+  requiredFinalResponseFallback?: string
   requiredVaultFileApprovalUrl?: string
   responseMediaPatch?: MurphDynamicToolResponseMediaPatch
   responseCardPatch?: { card: AssistantResponseCard }
@@ -1119,6 +1159,7 @@ type MurphGroupToolRequest =
       {
         action:
           | 'ask'
+          | 'handoff'
           | 'ask_current_sender'
           | 'record_current_sender_daily_metric'
           | 'ask_member'
@@ -1146,6 +1187,11 @@ type MurphGroupToolRequest =
       action: 'ask'
       groupLabel?: string
       question: string
+    }
+  | {
+      action: 'handoff'
+      context: string
+      groupLabel?: string
     }
   | {
       action: 'ask_current_sender'
@@ -1247,6 +1293,10 @@ export type MurphDynamicToolRequest =
       args: GenerateSongToolArgs
     }
   | {
+      kind: 'analyze-video'
+      args: AnalyzeVideoToolArgs
+    }
+  | {
       kind: 'ask-grok'
       args: AskGrokToolArgs
     }
@@ -1297,6 +1347,10 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'invalid-generate-song-arguments'
+      validationDigest: SafeToolCallValidationDigest
+    }
+  | {
+      kind: 'invalid-analyze-video-arguments'
       validationDigest: SafeToolCallValidationDigest
     }
   | {
@@ -1715,6 +1769,20 @@ export function readMurphDynamicToolRequest(
         args: parsed.args,
       }
     }
+    case MURPH_ANALYZE_VIDEO_TOOL.name: {
+      const parsed = parseAnalyzeVideoArguments(request.arguments)
+      if (!parsed.ok) {
+        return {
+          kind: 'invalid-analyze-video-arguments',
+          validationDigest: parsed.validationDigest,
+        }
+      }
+
+      return {
+        kind: 'analyze-video',
+        args: parsed.args,
+      }
+    }
     case MURPH_ASK_GROK_TOOL.name: {
       const parsed = parseAskGrokArguments(request.arguments)
       if (!parsed.ok) {
@@ -1837,8 +1905,14 @@ export function readMurphDynamicToolRequest(
         request: parsed.request,
       }
     }
-    case MURPH_GROUP_TOOL.name: {
-      const parsed = parseGroupArguments(request.arguments)
+    case MURPH_GROUP_TOOL_NAME:
+    case 'group_consult':
+    case 'group_data':
+    case 'group_membership':
+    case 'group_usage':
+    case 'group_chat':
+    case 'group_email': {
+      const parsed = parseGroupArguments(request.arguments, request.tool)
       if (!parsed.ok) {
         return {
           kind: 'invalid-group-arguments',
@@ -2067,6 +2141,8 @@ export async function executeMurphDynamicToolRequest(input: {
   vaultRoot?: string | null
   voiceMemoPhaseTimingRecorder?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
+  analyzeVideoTurnState?: AnalyzeVideoTurnState | null
   askGrokRuntime?: AskGrokToolRuntime | null
   askGrokTurnState?: AskGrokTurnState | null
   generateSongTurnState?: GenerateSongTurnState | null
@@ -2092,6 +2168,17 @@ export async function executeMurphDynamicToolRequest(input: {
     return toolTextResult(
       false,
       'computer tools are unavailable without hosted computer-use transport',
+    )
+  }
+  if (
+    'validationDigest' in input.request
+    && input.request.kind !== 'invalid-automation-arguments'
+  ) {
+    return invalidDynamicToolArgumentsResult(
+      input.request.kind === 'invalid-progress-arguments'
+        ? 'invalid_progress_update_arguments'
+        : input.request.kind.replaceAll('-', '_'),
+      input.request.validationDigest,
     )
   }
 
@@ -2134,62 +2221,6 @@ export async function executeMurphDynamicToolRequest(input: {
           )
       }
     }
-    case 'invalid-device-arguments':
-      return toolTextResult(false, 'invalid device arguments')
-    case 'invalid-labs-arguments':
-      return toolTextResult(false, 'invalid labs arguments')
-    case 'invalid-pending-vault-files-arguments':
-      return toolTextResult(false, 'invalid pending vault-file arguments')
-    case 'invalid-group-room-model-arguments':
-      return toolTextResult(false, 'invalid group room-model arguments')
-    case 'invalid-member-memory-arguments':
-      return toolTextResult(false, 'invalid member-memory arguments')
-    case 'invalid-connected-apps-arguments':
-      return toolTextResult(false, 'invalid connected-app arguments')
-    case 'invalid-assistant-style-arguments':
-      return toolTextResult(false, 'invalid assistant style arguments')
-    case 'invalid-generate-image-arguments':
-      return toolTextResult(false, 'invalid image generation arguments')
-    case 'invalid-computer-arguments':
-      return toolTextResult(false, 'invalid computer tool arguments')
-    case 'invalid-generate-voice-memo-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_generate_voice_memo_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-generate-song-arguments':
-      return toolTextResult(false, 'invalid song generation arguments')
-    case 'invalid-ask-grok-arguments':
-      return toolTextResult(false, 'invalid ask_grok arguments')
-    case 'invalid-progress-arguments':
-      return toolTextResult(false, 'invalid progress update arguments')
-    case 'invalid-reaction-arguments':
-      return toolTextResult(false, 'invalid reaction arguments')
-    case 'invalid-reply-target-arguments':
-      return toolTextResult(false, 'invalid reply target arguments')
-    case 'invalid-product-feedback-arguments':
-      return toolTextResult(false, 'invalid product feedback arguments')
-    case 'invalid-family-plan-arguments':
-      return toolTextResult(false, 'invalid family plan arguments')
-    case 'invalid-personalization-arguments':
-      return toolTextResult(false, 'invalid personalization arguments')
-    case 'invalid-plan-usage-arguments':
-      return toolTextResult(false, 'invalid plan usage arguments')
-    case 'invalid-imessage-contact-arguments':
-      return toolTextResult(false, 'invalid iMessage contact arguments')
-    case 'invalid-subscription-arguments':
-      return toolTextResult(false, 'invalid subscription arguments')
-    case 'invalid-assistant-configuration-arguments':
-      return toolTextResult(false, 'invalid assistant configuration arguments')
-    case 'invalid-group-arguments':
-      return toolTextResult(false, 'invalid group arguments')
-    case 'invalid-finish-without-reply-arguments':
-      return toolTextResult(false, 'invalid no-reply arguments')
-    case 'invalid-response-card-arguments':
-      return toolTextResult(
-        false,
-        buildResponseCardValidationFeedback(input.request.validationDigest),
-      )
     case 'response-card-envelope-too-large':
       if (input.privateDirectResponseCardAllowed !== true) {
         return toolTextResult(
@@ -2213,19 +2244,6 @@ export async function executeMurphDynamicToolRequest(input: {
         ),
         responseCardTextFallbackPatch: { card: input.request.card },
       }
-    case 'invalid-response-media-arguments':
-      return invalidDynamicToolArgumentsResult(
-        'invalid_response_media_arguments',
-        input.request.validationDigest,
-      )
-    case 'invalid-send-vault-file-arguments':
-      return toolTextResult(false, 'invalid vault file arguments')
-    case 'invalid-phone-call-arguments':
-      return toolTextResult(false, 'invalid phone-call arguments')
-    case 'invalid-physical-note-arguments':
-      return toolTextResult(false, 'invalid physical-note arguments')
-    case 'invalid-clinical-records-connect-link-arguments':
-      return toolTextResult(false, 'invalid Clinical Records connect-link arguments')
     case 'unsupported-dynamic-tool':
       return toolTextResult(false, 'unsupported dynamic tool')
     case 'attach-group-challenge-response-card':
@@ -2526,6 +2544,121 @@ export async function executeMurphDynamicToolRequest(input: {
         return replyRequiredResult(
           false,
           'secure vault-file approval could not be prepared',
+        )
+      }
+    }
+    case 'resolve-physical-note': {
+      const hostedToolContext = input.hostedToolContext ?? null
+      const resolvePhysicalNote = hostedToolContext?.physicalNotes?.resolve
+      const userActionScope =
+        hostedToolContext?.currentUserActionScope?.() ?? null
+      const explicitOriginCandidate = userActionScope
+        ? resolvePhysicalNoteExplicitOriginInputId({
+            acceptedInputIds: userActionScope.acceptedInputIds,
+            conversationScope: userActionScope.conversationScope,
+            messageRef: input.request.messageRef,
+          })
+        : null
+      const originAssistantInputId = explicitOriginCandidate && userActionScope
+        ? await authorizeDynamicToolEffectOrigin({
+            authorizer: input.authorizeAcceptedMessageTarget ?? null,
+            conversationScope: userActionScope.conversationScope,
+            deliveryContextOrdinal: input.deliveryContextOrdinal ?? null,
+            messageRef: explicitOriginCandidate,
+          })
+        : null
+      if (!resolvePhysicalNote || !originAssistantInputId) {
+        return toolTextResult(
+          false,
+          'physical-note recovery requires the exact current authorizing Message ref and hosted recovery transport',
+        )
+      }
+
+      try {
+        const result = await resolvePhysicalNote({
+          originAssistantInputId,
+          ...(input.request.targetMessageRef
+            ? {
+                targetKind: input.request.targetKind,
+                targetOriginAssistantInputId: input.request.targetMessageRef,
+              }
+            : {}),
+        }, {
+          signal: input.abortSignal ?? null,
+        })
+        switch (result.status) {
+          case 'accepted':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              result.remainingUnresolved
+                ? `${physicalNoteRecoveryAcceptedCopy(result.settledUsageCostUsdMicros)} A different unresolved submission remains and needs another explicit recovery request.`
+                : physicalNoteRecoveryAcceptedCopy(
+                    result.settledUsageCostUsdMicros,
+                  ),
+              result.remainingUnresolved,
+              null,
+              result.settledUsageCostUsdMicros,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'clear':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              result.remainingUnresolved
+                ? 'The checked earlier submission was cleared. A different unresolved submission remains and needs another explicit recovery request. This recovery sent nothing.'
+                : 'The checked earlier submission was cleared. No unresolved physical-note submission remains. This recovery sent nothing; a future note needs a separate request.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'pending':
+            return physicalNoteRecoveryToolResult(
+              true,
+              result.status,
+              'The earlier outcome is still unconfirmed and cannot be safely cleared. No automatic retry or follow-up is running; this recovery sent nothing.',
+              result.remainingUnresolved,
+              result.retryAfter,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'permission_denied':
+            return physicalNoteRecoveryToolResult(
+              false,
+              result.status,
+              'The earlier submission was not changed because recovery is not available to the current participant.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+          case 'unavailable':
+            return physicalNoteRecoveryToolResult(
+              false,
+              result.status,
+              'Physical-note recovery is currently unavailable. The earlier submission was not cleared; nothing new was sent and no automatic retry is running.',
+              result.remainingUnresolved,
+              null,
+              null,
+              input.request.targetMessageRef ?? null,
+              input.request.targetKind ?? null,
+            )
+        }
+      } catch {
+        return physicalNoteRecoveryToolResult(
+          false,
+          'unavailable',
+          'The recovery response was lost, so the earlier submission\'s final state is unconfirmed. Do not claim it cleared or was accepted. Nothing new was sent and no automatic retry is running.',
+          null,
+          null,
+          null,
+          input.request.targetMessageRef ?? null,
+          input.request.targetKind ?? null,
         )
       }
     }
@@ -3311,6 +3444,29 @@ export async function executeMurphDynamicToolRequest(input: {
         recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
         turnState: input.generateSongTurnState ?? null,
         voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+      })
+    }
+    case 'analyze-video': {
+      const userActionScope =
+        input.hostedToolContext?.currentUserActionScope?.() ?? null
+      if (userActionScope?.conversationScope !== 'direct') {
+        return toolTextResult(
+          false,
+          'video analysis requires a verified private direct conversation',
+        )
+      }
+      return await executeAnalyzeVideoDynamicTool({
+        abortSignal: input.abortSignal ?? null,
+        acceptedInputIds: userActionScope.acceptedInputIds,
+        attachmentAuthorities:
+          input.hostedToolContext
+            ?.currentAnalyzeVideoAttachmentAuthorities?.() ?? null,
+        args: input.request.args,
+        materializeWorkspaceArtifacts:
+          input.materializeWorkspaceArtifacts ?? null,
+        runtime: input.analyzeVideoRuntime ?? null,
+        turnState: input.analyzeVideoTurnState ?? null,
+        vaultRoot: input.vaultRoot ?? null,
       })
     }
     case 'ask-grok': {
@@ -4846,6 +5002,30 @@ async function executeGroupTool(input: {
       originAssistantInputId,
       originSessionId: userActionScope.originSessionId,
       question: input.request.question,
+    }
+  } else if (input.request.action === 'handoff') {
+    const userActionScope =
+      input.hostedToolContext?.currentUserActionScope?.() ?? null
+    if (userActionScope?.conversationScope !== 'direct') {
+      return toolTextResult(
+        false,
+        'group handoff requires a fresh user request in a personal direct conversation',
+      )
+    }
+    const originAssistantInputId = userActionScope.acceptedInputIds.at(-1) ?? null
+    if (!originAssistantInputId) {
+      return toolTextResult(
+        false,
+        'group handoff requires fresh user-sourced input for this turn',
+      )
+    }
+    request = {
+      action: 'handoff',
+      context: input.request.context,
+      ...(input.request.groupLabel === undefined
+        ? {}
+        : { groupLabel: input.request.groupLabel }),
+      originAssistantInputId,
     }
   } else if (input.request.action === 'ask_current_sender') {
     const userActionScope =
@@ -6513,6 +6693,39 @@ function toolTextResult(
   }
 }
 
+function physicalNoteRecoveryToolResult(
+  success: boolean,
+  status: 'accepted' | 'clear' | 'pending' | 'permission_denied' | 'unavailable',
+  note: string,
+  remainingUnresolved: boolean | null,
+  retryAfter: string | null = null,
+  settledUsageCostUsdMicros: string | null = null,
+  targetMessageRef: string | null = null,
+  targetKind: 'recovery' | 'send' | null = null,
+): MurphDynamicToolExecutionResult {
+  return toolTextResult(
+    success,
+    JSON.stringify({
+      note,
+      remainingUnresolved,
+      retryAfter,
+      settledUsageCostUsdMicros,
+      status,
+      ...(targetMessageRef ? { targetMessageRef } : {}),
+      ...(targetKind ? { targetKind } : {}),
+    }),
+  )
+}
+
+function physicalNoteRecoveryAcceptedCopy(
+  settledUsageCostUsdMicros: string | null,
+): string {
+  const usage = settledUsageCostUsdMicros === null
+    ? ''
+    : ` The earlier accepted note used ${settledUsageCostUsdMicros} USD micros of Murph time. Recovery itself added no separate fee.`
+  return `The earlier note was accepted for printing, not delivered, and cannot be treated as canceled.${usage} This recovery sent nothing new.`
+}
+
 function invalidDynamicToolArgumentsResult(
   error: string,
   validationDigest: SafeToolCallValidationDigest,
@@ -6869,27 +7082,40 @@ function parseAssistantConfigurationArguments(
 
 function parseGroupArguments(
   value: unknown,
+  toolName: GroupParserToolName,
 ):
   | {
       request: MurphGroupToolRequest
       ok: true
     }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
-  const parsed = groupArgumentsSchema.safeParse(value)
+  const qualifiedToolName = `murph.${toolName}`
+  const parser = toolName === MURPH_GROUP_TOOL_NAME
+    ? groupArgumentsSchema
+    : groupArgumentsSchema.refine((request) => {
+        const acceptedActions: readonly GroupArguments['action'][] =
+          MURPH_GROUP_TOOL_FAMILY_ACTIONS[toolName]
+        return acceptedActions.includes(request.action)
+      }, {
+        message: 'Action is not accepted by this group tool family.',
+        path: ['action'],
+      })
+  const parsed = parser.safeParse(value)
   if (!parsed.success) {
     return {
       ok: false,
       validationDigest: buildDynamicToolValidationDigest({
         error: parsed.error,
         rawInput: value,
-        schemaName: 'murph.group.input',
-        schemaRootKeys: ['action', 'message_ref'],
-        toolName: 'murph.group',
+        schemaName: `${qualifiedToolName}.input`,
+        schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+        toolName: qualifiedToolName,
       }),
     }
   }
   if (
     parsed.data.action === 'ask'
+    || parsed.data.action === 'handoff'
     || parsed.data.action === 'ask_member'
     || parsed.data.action === 'post_disclosure_request'
     || parsed.data.action === 'revoke_disclosure_grant'
@@ -7003,13 +7229,14 @@ function parseGroupArguments(
               {
                 code: z.ZodIssueCode.custom,
                 message: 'set_chat_avatar with avatarSource="generate" requires prompt',
+                params: { murphExpectedShape: 'generated_avatar_prompt' },
                 path: ['prompt'],
               },
             ]),
             rawInput: value,
-            schemaName: 'murph.group.input',
-            schemaRootKeys: ['action'],
-            toolName: 'murph.group',
+            schemaName: `${qualifiedToolName}.input`,
+            schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+            toolName: qualifiedToolName,
           }),
         }
       }
@@ -7039,13 +7266,14 @@ function parseGroupArguments(
             {
               code: z.ZodIssueCode.custom,
               message: 'set_chat_avatar with avatarSource="image_ref" requires imageRef',
+              params: { murphExpectedShape: 'existing_avatar_image_ref' },
               path: ['imageRef'],
             },
           ]),
           rawInput: value,
-          schemaName: 'murph.group.input',
-          schemaRootKeys: ['action'],
-          toolName: 'murph.group',
+          schemaName: `${qualifiedToolName}.input`,
+          schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+          toolName: qualifiedToolName,
         }),
       }
     }
@@ -7113,7 +7341,23 @@ function parseGroupArguments(
       },
     }
   }
-  return { ok: true, request: { action: 'read_current' } }
+  if (parsed.data.action === 'read_current') {
+    return { ok: true, request: { action: 'read_current' } }
+  }
+  return {
+    ok: false,
+    validationDigest: buildDynamicToolValidationDigest({
+      error: new z.ZodError([{
+        code: z.ZodIssueCode.custom,
+        message: 'Group action has no explicit normalization path.',
+        path: ['action'],
+      }]),
+      rawInput: value,
+      schemaName: `${qualifiedToolName}.input`,
+      schemaRootKeys: MURPH_GROUP_TOOL_ROOT_KEYS_BY_NAME[toolName],
+      toolName: qualifiedToolName,
+    }),
+  }
 }
 
 function readCurrentSenderToolDecision(action:

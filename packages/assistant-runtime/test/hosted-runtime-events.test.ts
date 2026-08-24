@@ -21,8 +21,9 @@ const mocks = vi.hoisted(() => ({
   hydrateHostedExecutionDefaultTarget: vi.fn(async (value) => value),
   initializeAssistantGroupRoomModel: vi.fn(),
   prepareHostedWakeContext: vi.fn(),
+  seedMurphOnboardingFollowupFromStartedOnboarding: vi.fn(),
   sendAssistantNotification: vi.fn(),
-  upsertAssistantCronAutomation: vi.fn(),
+  startAssistantOnboarding: vi.fn(),
 }));
 
 vi.mock("../src/hosted-runtime/context.ts", () => ({
@@ -39,8 +40,10 @@ vi.mock("@murphai/assistant-engine", async () => {
     ...actual,
     initializeAssistantGroupRoomModel:
       mocks.initializeAssistantGroupRoomModel,
+    seedMurphOnboardingFollowupFromStartedOnboarding:
+      mocks.seedMurphOnboardingFollowupFromStartedOnboarding,
     sendAssistantNotification: mocks.sendAssistantNotification,
-    upsertAssistantCronAutomation: mocks.upsertAssistantCronAutomation,
+    startAssistantOnboarding: mocks.startAssistantOnboarding,
   };
 });
 
@@ -126,6 +129,16 @@ function createQueuedNotificationResult(intentId = "intent_notification") {
   };
 }
 
+function createReadyOnboardingFollowupSeedResult(nextRunAt: string) {
+  return {
+    job: {
+      enabled: true,
+      state: { nextRunAt },
+    },
+    kind: "ready" as const,
+  };
+}
+
 beforeEach(() => {
   mocks.initializeAssistantGroupRoomModel.mockResolvedValue({
     kind: "initialized",
@@ -135,6 +148,10 @@ beforeEach(() => {
       kind: "present",
       status: "active",
     },
+  });
+  mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockReset();
+  mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockResolvedValue({
+    kind: "preserved-closed",
   });
   mocks.sendAssistantNotification.mockResolvedValue(createQueuedNotificationResult());
 });
@@ -1693,8 +1710,7 @@ describe("executeHostedMailboxEvent", () => {
     expect(JSON.stringify(entry?.redacted)).not.toContain("raw-thread-id");
   });
 
-  it("sends signup assistant notifications and returns the seeded follow-up wake", async () => {
-    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
+  it("sends legacy signup assistant notifications without owning follow-up setup", async () => {
     const bootstrapResult = {
       assistantConfigStatus: "saved",
       assistantConfigured: true,
@@ -1748,17 +1764,6 @@ describe("executeHostedMailboxEvent", () => {
       });
       return createQueuedNotificationResult();
     });
-    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
-      enabled: true,
-      schedule: {
-        kind: "dailyLocal",
-        localTime: "13:30",
-      },
-      state: {
-        nextRunAt: seededNextWakeAt,
-      },
-    });
-
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification",
       memberId: "member_123",
@@ -1850,124 +1855,7 @@ describe("executeHostedMailboxEvent", () => {
       turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith({
-      firstOccurrenceActiveDayCount: 3,
-      firstOccurrenceActiveUntilLocalTime: "15:00",
-      firstOccurrencePolicy: "after-current-local-day",
-      instructions: expect.stringContaining(
-        "vault-cli assistant onboarding resume-context --format json",
-      ),
-      route: {
-        channel: "linq",
-        deliverySource: null,
-        deliveryTarget: "thread_123",
-        identityId: "hid_linq_identity_123",
-        participantId: null,
-        threadId: null,
-        threadIsDirect: true,
-      },
-      schedule: {
-        kind: "dailyLocal",
-        localTime: expect.stringMatching(/^(?:13:[3-5]\d|14:[0-2]\d)$/u),
-      },
-      slug: "finish-onboarding-followup",
-      summary: "One daily opportunity for three days to continue unfinished Murph onboarding.",
-      tags: [
-        "assistant",
-        "scheduled",
-        "murph-managed",
-        "onboarding",
-        "murph-managed:onboarding-followup",
-      ],
-      title: "Finite Murph onboarding follow-up",
-      vault: "/tmp/assistant-runtime-events",
-    });
-    const seedInput = mocks.upsertAssistantCronAutomation.mock.calls.at(0)?.[0];
-    const scheduledContinuationScenarios = [
-      {
-        clause: "If `onboarding.status` is `completed`, return skip.",
-        state: "completed",
-      },
-      {
-        clause:
-          "This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state.",
-        state: "overall decline",
-      },
-      {
-        clause:
-          "If that step is only a reflection or parking transition, combine it with the next skill-approved question when the skill permits; otherwise return skip.",
-        state: "reflection-only next step",
-      },
-      {
-        clause:
-          "Follow the onboarding skill’s finite three-day recovery rule exactly.",
-        state: "latest question unanswered",
-      },
-      {
-        clause:
-          "Before sending, triple-check the snapshot and recent messages for an answer, skip, defer, decline, or a newer topic that should win.",
-        state: "checkpoint answered or category skipped",
-      },
-      {
-        clause:
-          "Honor requested timing and return skip after an explicit decline, a request not to follow up, or whenever the reopening question would not be timely or useful.",
-        state: "deferred until later",
-      },
-      {
-        clause:
-          "It must contain exactly one easy, reply-oriented question; otherwise return an ordinary skip.",
-        state: "eligible continuation",
-      },
-    ] as const;
-    for (const scenario of scheduledContinuationScenarios) {
-      expect(
-        seedInput?.instructions,
-        `scheduled onboarding state: ${scenario.state}`,
-      ).toContain(scenario.clause);
-    }
-    expect(seedInput?.instructions).toContain(
-      "The managed-automation owner archives this follow-up deterministically.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Goal: use this finite three-day window to make at most one low-pressure daily attempt to continue unfinished Murph onboarding and get a reply.",
-    );
-    expect(seedInput?.instructions).toContain("Success criteria:");
-    expect(seedInput?.instructions).toContain(
-      "$MURPH_ASSISTANT_SKILLS_ROOT/murph-onboarding/SKILL.md",
-    );
-    expect(seedInput?.instructions).toContain(
-      "The skill is the single owner of conversation order, checkpoint meaning, persistence, and completion; do not create a second state machine in this automation.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "This background occurrence must never run the onboarding completion command or otherwise mutate onboarding state.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Only a later foreground user reply may advance or complete onboarding.",
-    );
-    expect(seedInput?.instructions).not.toContain(
-      "If a promised follow-through or next step in the member's agreed support loop is due, do that first.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Otherwise use exactly the next unresolved step from the onboarding skill, including aspiration capture, explicit parking, foundation questions, contextual return, and its targeted-read rules for omitted, truncated, or errored evidence.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "This automation never owns a promised check-in, reminder, or proactive support action.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Those use the canonical plan and dedicated automation required by `behavior-followthrough`, which owns timing, due evaluation, delivery, retry, and skip behavior.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "Output: send at most one brief, natural, low-pressure in-chat continuation.",
-    );
-    expect(seedInput?.instructions).toContain(
-      "The user's reply will be handled by the next normal Murph onboarding turn",
-    );
-    expect(seedInput?.instructions).toContain("available recent user messages");
-    expect(seedInput?.instructions).toContain(
-      "one brief, skill-compatible question gives the member an easy way to reply and continue",
-    );
-    expect(seedInput?.instructions).not.toContain("The six checkpoints are");
-    expect(seedInput?.instructions).toContain("return skip");
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -2022,22 +1910,6 @@ describe("executeHostedMailboxEvent", () => {
       expect.objectContaining({
         component: "runtime",
         details: expect.objectContaining({
-          eventCode: "assistant.onboarding_followup_seeded",
-          onboardingFollowupEnabled: true,
-          onboardingFollowupNextRunAt: seededNextWakeAt,
-          onboardingFollowupOpportunityDays: 3,
-          onboardingFollowupScheduleKind: "dailyLocal",
-        }),
-        message: "Hosted onboarding follow-up automation seeded.",
-        phase: "wake.running",
-        wake,
-      }),
-    );
-    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenNthCalledWith(
-      5,
-      expect.objectContaining({
-        component: "runtime",
-        details: expect.objectContaining({
           notificationRouteChannel: "linq",
           notificationRouteDeliveryKind: "thread",
         }),
@@ -2051,8 +1923,7 @@ describe("executeHostedMailboxEvent", () => {
       conversationMetrics: null,
       deliveryIntentIds: ["intent_notification"],
       mailboxLane: "assistant-notification",
-      nextWakeAt: seededNextWakeAt,
-      nextWakeReason: "assistant",
+      nextWakeAt: null,
       postCheckpointRecord: null,
       redactedLogEntries: [
         {
@@ -2109,20 +1980,6 @@ describe("executeHostedMailboxEvent", () => {
           component: "runtime",
           eventId: "evt_notification",
           level: "info",
-          message: "Hosted onboarding follow-up automation seeded.",
-          phase: "wake.running",
-          redacted: expect.objectContaining({
-            eventCode: "assistant.onboarding_followup_seeded",
-            onboardingFollowupEnabled: true,
-            onboardingFollowupNextRunAt: seededNextWakeAt,
-            onboardingFollowupOpportunityDays: 3,
-            onboardingFollowupScheduleKind: "dailyLocal",
-          }),
-        },
-        {
-          component: "runtime",
-          eventId: "evt_notification",
-          level: "info",
           message: "Hosted assistant notification finished.",
           phase: "wake.running",
           redacted: expect.objectContaining({
@@ -2143,6 +2000,159 @@ describe("executeHostedMailboxEvent", () => {
         },
       ],
     });
+  });
+
+  it("maps a closed group context handoff into one output-only group notification", async () => {
+    const eventId =
+      `assistant.notification.requested:group-context-handoff:${"a".repeat(64)}`;
+    const externalThreadRouteAuthority = {
+      accountLookupKey: "linq-account-key",
+      channel: "linq" as const,
+      containerMemberId: "group-runtime-member",
+      threadId: "linq-group-chat",
+    };
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        externalThreadRouteAuthority,
+        groupContextHandoff: {
+          membershipId: "membership-generation-one",
+          originAssistantInputId: `ain_${"b".repeat(32)}`,
+        },
+        instructions: "Use the bounded handoff context in this group.",
+        notificationPromptProfile: "context-handoff",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-08-21T03:00:00.000Z",
+    });
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext: {
+        hosted: {
+          memberId: "group-runtime-member",
+          userEnvKeys: [],
+        },
+      },
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_group_context_handoff",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        notificationPromptProfile: "context-handoff",
+        outboxExternalThreadRouteAuthority: externalThreadRouteAuthority,
+        responsePolicy: { kind: "require_send" },
+        threadIsDirect: false,
+      }),
+    );
+  });
+
+  it.each([
+    [
+      "missing proof",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          groupContextHandoff: undefined,
+        },
+      }),
+    ],
+    [
+      "direct route",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          route: {
+            ...wake.notification.route,
+            threadIsDirect: true,
+          },
+        },
+      }),
+    ],
+    [
+      "mismatched route authority",
+      (wake: ReturnType<typeof buildHostedExecutionAssistantNotificationRequestedWake>) => ({
+        ...wake,
+        notification: {
+          ...wake.notification,
+          externalThreadRouteAuthority: {
+            ...wake.notification.externalThreadRouteAuthority!,
+            threadId: "other-thread",
+          },
+        },
+      }),
+    ],
+  ])("rejects a context handoff with %s", async (_case, mutate) => {
+    const eventId =
+      `assistant.notification.requested:group-context-handoff:${"c".repeat(64)}`;
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId,
+      memberId: "group-runtime-member",
+      notification: {
+        deliveryDedupeToken: eventId,
+        deliveryDispatchMode: "queue-only",
+        deliveryIdempotencyKey: eventId,
+        externalThreadRouteAuthority: {
+          accountLookupKey: "linq-account-key",
+          channel: "linq",
+          containerMemberId: "group-runtime-member",
+          threadId: "linq-group-chat",
+        },
+        groupContextHandoff: {
+          membershipId: "membership-generation-one",
+          originAssistantInputId: `ain_${"d".repeat(32)}`,
+        },
+        instructions: "Use the bounded handoff context in this group.",
+        notificationPromptProfile: "context-handoff",
+        responsePolicy: { kind: "require_send" },
+        route: {
+          actorId: null,
+          channel: "linq",
+          delivery: {
+            kind: "thread",
+            target: "linq-group-chat",
+          },
+          identityId: "group-identity",
+          threadId: "group-thread",
+          threadIsDirect: false,
+        },
+      },
+      occurredAt: "2026-08-21T03:00:00.000Z",
+    });
+
+    await expect(executeHostedMailboxEvent({
+      wake: mutate(wake) as never,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    })).rejects.toThrow(
+      "Hosted group context handoff notification proof is invalid.",
+    );
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
   });
 
   it("maps private Assistant Ask completion proof into exact notification delivery authority", async () => {
@@ -2417,7 +2427,7 @@ describe("executeHostedMailboxEvent", () => {
     );
   });
 
-  it("initializes explicit group room setup before accepting activation replay", async () => {
+  it("initializes group room setup without starting personal onboarding", async () => {
     const roomContext = "## Explicit setup\n\nKeep this room low-key.";
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:linq-group:member_123:evt_room_setup",
@@ -2428,6 +2438,7 @@ describe("executeHostedMailboxEvent", () => {
         telegram: false,
       },
       memberId: "member_123",
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
     });
@@ -2445,6 +2456,10 @@ describe("executeHostedMailboxEvent", () => {
       body: roomContext,
       vaultRoot: "/tmp/assistant-runtime-events",
     });
+    expect(mocks.startAssistantOnboarding).not.toHaveBeenCalled();
+    expect(
+      mocks.seedMurphOnboardingFollowupFromStartedOnboarding,
+    ).not.toHaveBeenCalled();
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
@@ -2458,6 +2473,35 @@ describe("executeHostedMailboxEvent", () => {
       ],
     });
     expect(JSON.stringify(result.redactedLogEntries)).not.toContain(roomContext);
+  });
+
+  it("keeps legacy activation wakes without enrollment intent enrolled", async () => {
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:legacy:member_123:evt_activation",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      occurredAt: "2026-07-29T18:01:00.000Z",
+      signupWelcome: null,
+    });
+    delete wake.onboardingFollowupEnrollment;
+
+    await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      sourceMailboxItemId: "hmi_legacy_activation_123",
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.startAssistantOnboarding).toHaveBeenCalledExactlyOnceWith({
+      startedAt: wake.occurredAt,
+      vault: "/tmp/assistant-runtime-events",
+    });
   });
 
   it("keeps activation retryable without logging room setup when initialization is unavailable", async () => {
@@ -2474,6 +2518,7 @@ describe("executeHostedMailboxEvent", () => {
         telegram: false,
       },
       memberId: "member_123",
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
     });
@@ -2499,16 +2544,17 @@ describe("executeHostedMailboxEvent", () => {
     expect(
       JSON.stringify(mocks.emitHostedExecutionStructuredLog.mock.calls),
     ).not.toContain(roomContext);
+    expect(mocks.startAssistantOnboarding).not.toHaveBeenCalled();
+    expect(
+      mocks.seedMurphOnboardingFollowupFromStartedOnboarding,
+    ).not.toHaveBeenCalled();
   });
 
   it("delivers embedded member activation signup welcomes and seeds onboarding follow-up", async () => {
     const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
-    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
-      enabled: true,
-      state: {
-        nextRunAt: seededNextWakeAt,
-      },
-    });
+    mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockResolvedValueOnce(
+      createReadyOnboardingFollowupSeedResult(seededNextWakeAt),
+    );
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:stripe:member_123:evt_123",
       memberChannels: {
@@ -2583,7 +2629,7 @@ describe("executeHostedMailboxEvent", () => {
       turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith(
       expect.objectContaining({
         route: {
           channel: "linq",
@@ -2594,7 +2640,8 @@ describe("executeHostedMailboxEvent", () => {
           threadId: null,
           threadIsDirect: true,
         },
-        slug: "finish-onboarding-followup",
+        stableKey: "member_123",
+        vault: "/tmp/assistant-runtime-events",
       }),
     );
     expect(result).toMatchObject({
@@ -2604,7 +2651,66 @@ describe("executeHostedMailboxEvent", () => {
     });
   });
 
-  it("terminally suppresses embedded Telegram signup welcomes", async () => {
+  it("seeds onboarding follow-up for Linq instant-start without sending a welcome", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
+    mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockResolvedValueOnce(
+      createReadyOnboardingFollowupSeedResult(seededNextWakeAt),
+    );
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "member.activated:linq:member_123:evt_instant_start",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
+      memberId: "member_123",
+      onboardingFollowupRoute: {
+        actorId: "hid_linq_actor_123",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "thread_123",
+        },
+        identityId: "hid_linq_identity_123",
+        threadId: "hid_linq_thread_123",
+        threadIsDirect: true,
+      },
+      occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: null,
+    });
+
+    const result = await executeHostedMailboxEvent({
+      wake,
+      executionContext,
+      runtime: createRuntime(),
+      runtimeEnv: {},
+      vaultRoot: "/tmp/assistant-runtime-events",
+    });
+
+    expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith(
+      expect.objectContaining({
+        route: expect.objectContaining({
+          channel: "linq",
+          deliveryTarget: "thread_123",
+          threadIsDirect: true,
+        }),
+        stableKey: "member_123",
+        vault: "/tmp/assistant-runtime-events",
+      }),
+    );
+    expect(result).toMatchObject({
+      mailboxLane: "member-activated",
+      nextWakeAt: seededNextWakeAt,
+      nextWakeReason: "assistant",
+    });
+  });
+
+  it("seeds onboarding follow-up while suppressing embedded Telegram signup welcomes", async () => {
+    const seededNextWakeAt = "2026-04-09T17:30:00.000Z";
+    mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockResolvedValueOnce(
+      createReadyOnboardingFollowupSeedResult(seededNextWakeAt),
+    );
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:stripe:member_123:evt_telegram_welcome",
       memberChannels: {
@@ -2639,9 +2745,23 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledOnce();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith({
+      route: {
+        channel: "telegram",
+        deliverySource: null,
+        deliveryTarget: "telegram_thread_123",
+        identityId: null,
+        participantId: null,
+        threadId: "hid_telegram_thread_123",
+        threadIsDirect: true,
+      },
+      stableKey: "member_123",
+      vault: "/tmp/assistant-runtime-events",
+    });
     expect(result).toMatchObject({
       mailboxLane: "member-activated",
+      nextWakeAt: seededNextWakeAt,
       redactedLogEntries: expect.arrayContaining([
         expect.objectContaining({
           redacted: expect.objectContaining({
@@ -2665,12 +2785,9 @@ describe("executeHostedMailboxEvent", () => {
         sessionId: "session_notification_skip",
       },
     });
-    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
-      enabled: true,
-      state: {
-        nextRunAt: seededNextWakeAt,
-      },
-    });
+    mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockResolvedValueOnce(
+      createReadyOnboardingFollowupSeedResult(seededNextWakeAt),
+    );
     const wake = buildHostedExecutionMemberActivatedWake({
       eventId: "member.activated:stripe:member_123:evt_skip",
       memberChannels: {
@@ -2706,9 +2823,10 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledWith(
       expect.objectContaining({
-        slug: "finish-onboarding-followup",
+        stableKey: "member_123",
+        vault: "/tmp/assistant-runtime-events",
       }),
     );
     expect(result).toMatchObject({
@@ -2822,7 +2940,7 @@ describe("executeHostedMailboxEvent", () => {
       turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
   });
 
   it("terminally suppresses legacy Telegram signup welcome notifications", async () => {
@@ -2864,7 +2982,7 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
     expect(result).toMatchObject({
       mailboxLane: "assistant-notification",
       redactedLogEntries: expect.arrayContaining([
@@ -2968,10 +3086,10 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).not.toHaveBeenCalled();
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
   });
 
-  it("still seeds Linq onboarding follow-up when the signup welcome is superseded by prior first contact", async () => {
+  it("keeps legacy signup-welcome notifications out of automation ownership", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_welcome_skip_result",
       memberId: "member_123",
@@ -3010,13 +3128,6 @@ describe("executeHostedMailboxEvent", () => {
         sessionId: "session_notification_skip",
       },
     });
-    mocks.upsertAssistantCronAutomation.mockResolvedValueOnce({
-      enabled: true,
-      state: {
-        nextRunAt: "2026-04-09T17:30:00.000Z",
-      },
-    });
-
     await executeHostedMailboxEvent({
       wake,
       executionContext,
@@ -3026,71 +3137,45 @@ describe("executeHostedMailboxEvent", () => {
     });
 
     expect(mocks.sendAssistantNotification).toHaveBeenCalledOnce();
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        slug: "finish-onboarding-followup",
-      }),
-    );
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
   });
 
-  it("keeps signup welcome delivery successful when onboarding follow-up seeding fails", async () => {
-    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
-      eventId: "evt_notification_seed_failure",
+  it("retries activation when onboarding follow-up persistence fails", async () => {
+    const wake = buildHostedExecutionMemberActivatedWake({
+      eventId: "evt_activation_seed_failure",
+      memberChannels: {
+        email: false,
+        linq: true,
+        telegram: false,
+      },
       memberId: "member_123",
-      notification: {
-        deliveryDedupeToken: "signup-welcome:member_123",
-        deliveryIdempotencyKey: "signup-welcome:member_123",
-        firstContact: {
-          markSeenOnDeliveryAccepted: true,
+      onboardingFollowupRoute: {
+        actorId: "hid_linq_actor_123",
+        channel: "linq",
+        delivery: {
+          kind: "thread",
+          target: "thread_123",
         },
-        instructions: "Send exactly the signup welcome.",
-        responsePolicy: {
-          kind: "require_send_exact_text",
-          text: "Welcome to Murph.",
-        },
-        route: {
-          actorId: "hid_linq_actor_123",
-          channel: "linq",
-          delivery: {
-            kind: "thread",
-            target: "thread_123",
-          },
-          identityId: "hid_linq_identity_123",
-          threadId: "hid_linq_thread_123",
-          threadIsDirect: true,
-        },
+        identityId: "hid_linq_identity_123",
+        threadId: "hid_linq_thread_123",
+        threadIsDirect: true,
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
+      signupWelcome: null,
     });
-    mocks.upsertAssistantCronAutomation.mockRejectedValueOnce(
+    mocks.seedMurphOnboardingFollowupFromStartedOnboarding.mockRejectedValueOnce(
       new Error("automation store unavailable"),
     );
 
-    const result = await executeHostedMailboxEvent({
+    await expect(executeHostedMailboxEvent({
       wake,
       executionContext,
       runtime: createRuntime(),
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
-    });
+    })).rejects.toThrow("automation store unavailable");
 
-    expect(result).toMatchObject({
-      conversationMetrics: null,
-      mailboxLane: "assistant-notification",
-    });
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledTimes(1);
-    expect(result.redactedLogEntries).toContainEqual(
-      expect.objectContaining({
-        eventId: "evt_notification_seed_failure",
-        level: "warn",
-        message: "Hosted onboarding follow-up automation seed failed.",
-        redacted: expect.objectContaining({
-          eventCode: "assistant.onboarding_followup_seed_failed",
-          notificationRouteChannel: "linq",
-          notificationRouteDeliveryKind: "thread",
-        }),
-      }),
-    );
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).toHaveBeenCalledTimes(1);
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runtime",
@@ -3199,7 +3284,7 @@ describe("executeHostedMailboxEvent", () => {
         wake,
       }),
     );
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
   });
 
   it("fails canonical signup welcome notification errors so the mailbox can retry", async () => {
@@ -3242,7 +3327,7 @@ describe("executeHostedMailboxEvent", () => {
       runtimeEnv: {},
       vaultRoot: "/tmp/assistant-runtime-events",
     })).rejects.toThrow("signup welcome delivery failed");
-    expect(mocks.upsertAssistantCronAutomation).not.toHaveBeenCalled();
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
   });
 
   it("skips failed allow-send-or-skip notifications instead of blocking ingress progress", async () => {
@@ -3451,26 +3536,10 @@ describe("executeHostedMailboxEvent", () => {
       turnTrigger: "manual-deliver",
       vault: "/tmp/assistant-runtime-events",
     });
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        route: {
-          channel: "linq",
-          deliverySource: {
-            fromPhoneNumber: "+15550001111",
-            kind: "linq",
-          },
-          deliveryTarget: null,
-          identityId: "hid_linq_identity_participant",
-          participantId: "+15550002222",
-          threadId: null,
-          threadIsDirect: true,
-        },
-        slug: "finish-onboarding-followup",
-      }),
-    );
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
   });
 
-  it("logs a seed failure when target validation rejects Linq participant routes without delivery source", async () => {
+  it("leaves automation validation out of legacy participant notifications", async () => {
     const wake = buildHostedExecutionAssistantNotificationRequestedWake({
       eventId: "evt_notification_linq_participant_no_source",
       memberId: "member_123",
@@ -3499,18 +3568,6 @@ describe("executeHostedMailboxEvent", () => {
       },
       occurredAt: "2026-04-08T00:00:00.000Z",
     });
-    // Deliverability is enforced by upsertAssistantCronAutomation's target
-    // validation in assistant-engine (covered there); the runtime only
-    // catches the rejection and logs the seed failure.
-    mocks.upsertAssistantCronAutomation.mockRejectedValueOnce(
-      Object.assign(
-        new Error(
-          "iMessage assistant cron jobs require an explicit delivery target or a participant target with a Linq delivery source.",
-        ),
-        { code: "ASSISTANT_CRON_DELIVERY_REQUIRED" },
-      ),
-    );
-
     const result = await executeHostedMailboxEvent({
       wake,
       executionContext,
@@ -3531,19 +3588,9 @@ describe("executeHostedMailboxEvent", () => {
         bindingDeliveryTarget: "+15550002222",
       }),
     );
-    expect(mocks.upsertAssistantCronAutomation).toHaveBeenCalledWith(
+    expect(mocks.seedMurphOnboardingFollowupFromStartedOnboarding).not.toHaveBeenCalled();
+    expect(result.redactedLogEntries).not.toContainEqual(
       expect.objectContaining({
-        route: expect.objectContaining({
-          channel: "linq",
-          deliverySource: null,
-          deliveryTarget: null,
-          participantId: "+15550002222",
-        }),
-      }),
-    );
-    expect(result.redactedLogEntries).toContainEqual(
-      expect.objectContaining({
-        level: "warn",
         message: "Hosted onboarding follow-up automation seed failed.",
       }),
     );

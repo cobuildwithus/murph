@@ -72,6 +72,9 @@ import {
 } from "@/src/components/legal/hosted-legal-consent-card";
 import { HOSTED_PHONE_COUNTRY_OPTIONS } from "@/src/components/hosted-onboarding/hosted-phone-country-options";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
+import { PublicTrustPageContent } from "@/src/components/public/public-trust-page";
+import { ABOUT_MURPH_CONTENT } from "@/src/lib/public-trust-pages";
+import { MURPH_CONTACT_EMAIL } from "@/src/lib/murph-contact-routing";
 import { AuthButton } from "@/src/components/ui/auth-button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { Button, buttonVariants } from "@/src/components/ui/button";
@@ -647,6 +650,20 @@ export function ComponentsContent() {
 
         <Separator />
 
+        <div data-design-component="public-trust-page" id="public-trust-page">
+          <Section title="Public trust page">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+              Production About-page content and responsive editorial hierarchy.
+              The Contact page uses the same component with support-specific copy.
+            </p>
+            <div className="overflow-hidden border border-[#c4a882]/35">
+              <PublicTrustPageContent content={ABOUT_MURPH_CONTENT} />
+            </div>
+          </Section>
+        </div>
+
+        <Separator />
+
         <Section title="Dashboard primary navigation">
           <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
             Production dashboard destinations in their standard visual hierarchy.
@@ -1007,19 +1024,27 @@ export function ComponentsContent() {
             </p>
             <div className="grid gap-4">
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "processing" }}
+                state={{ baselineValues: "{}", status: "processing" }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ status: "refreshing" }}
+                state={{
+                  factsAdded: 3,
+                  factsChanged: true,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: true, status: "updated" }}
-                onCheckAgain={() => {}}
-              />
-              <EnvironmentVoiceRefreshNotice
-                state={{ factsChanged: false, status: "updated" }}
+                state={{
+                  factsAdded: 0,
+                  factsChanged: false,
+                  remainingDetails: 4,
+                  remainingTopics: 2,
+                  status: "updated",
+                }}
                 onCheckAgain={() => {}}
               />
               <EnvironmentVoiceRefreshNotice
@@ -1711,7 +1736,7 @@ export function ComponentsContent() {
             >
               <GroupSponsorshipManagementCard
                 endpoint={`${DESIGN_SIGNED_GROUP_FUNDING_ENDPOINT}/sponsorship`}
-                initialSelectedMonthlyCapMinor={2_000}
+                initialSelectedMonthlyCapMinor={5_000}
                 management={{
                   authorizationId: "hgsa_design_component",
                   chargedThisPeriodMinor: 500,
@@ -1932,7 +1957,7 @@ export function ComponentsContent() {
                   </span>
                 </div>
                 <HostedEmailMurphContactDialog
-                  murphEmailAddress="murph@mail.withmurph.ai"
+                  murphEmailAddress={MURPH_CONTACT_EMAIL}
                   userEmailAddress={variant.userEmail}
                 />
               </div>

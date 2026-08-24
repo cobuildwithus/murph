@@ -1686,11 +1686,9 @@ export class DeviceSyncPublicIngress {
           sourceProviderSlug: webhookSourceProviderSlug,
         });
         if (
-          source
-          && (
-            source.status !== "connected"
-            || isDeviceSyncSourceDisconnectFenced(source)
-          )
+          !source
+          || source.status !== "connected"
+          || isDeviceSyncSourceDisconnectFenced(source)
         ) {
           const sourceObservation = await this.hooks.onConnectionSourceObserved?.({
             account,
@@ -1722,6 +1720,7 @@ export class DeviceSyncPublicIngress {
           if (
             account.status === "active"
             && !isDeviceSyncConnectionSetupPending(account)
+            && source
             && (
               !sourceObservation
               || !("sourceAdmissionCommitted" in sourceObservation)

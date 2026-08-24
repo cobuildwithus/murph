@@ -1524,6 +1524,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -1549,6 +1550,49 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       "checkpoint",
       "record:turn_direct_usage.attempt-1",
     ]);
+  });
+
+  it("propagates deferred usage completion to hosted recorder callers", async () => {
+    let releaseDeferredUsage: () => void = () => undefined;
+    const deferredUsage = new Promise<void>((resolve) => {
+      releaseDeferredUsage = resolve;
+    });
+    let markDeferredUsageStarted: () => void = () => undefined;
+    const deferredUsageStarted = new Promise<void>((resolve) => {
+      markDeferredUsageStarted = resolve;
+    });
+    const laneFinished = vi.fn();
+    mocks.runHostedAssistantAutomationLane.mockImplementationOnce(async (laneInput) => {
+      await laneInput.executionContext.hosted?.usageRecorder?.recordUsage(
+        createAssistantUsageRecord(),
+      );
+      laneFinished();
+      return {
+        assistantAutomationCurrentTurnDeliveryIntentIds: [],
+        assistantAutomationProgressed: false,
+        nextWakeAt: null,
+        redactedLogEntries: [],
+      };
+    });
+
+    const phase = runHostedWorkspaceAssistantPhase(createPhaseInput({
+      recordDeferredUsage: () => {
+        markDeferredUsageStarted();
+        return deferredUsage;
+      },
+      runtimeUsageRecordPort: {
+        async recordUsage() {
+          throw new Error("The assistant phase must not write usage directly.");
+        },
+      },
+    }));
+
+    await deferredUsageStarted;
+    expect(laneFinished).not.toHaveBeenCalled();
+
+    releaseDeferredUsage();
+    await phase;
+    expect(laneFinished).toHaveBeenCalledOnce();
   });
 
   it("forwards exact accepted input IDs for deferred route resolution", async () => {
@@ -1613,6 +1657,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       },
       recordDeferredUsage: (_record, providerRequestAcceptedInputIds) => {
         deferredAcceptedInputIds.push(providerRequestAcceptedInputIds);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: {
         async recordUsage(record) {
@@ -1706,6 +1751,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:00:00.000Z",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -1786,6 +1832,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const result = await runHostedWorkspaceAssistantPhase(createPhaseInput({
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -1845,6 +1892,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       logRequests,
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     }));
@@ -2187,6 +2235,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           workspaceVersion: "8",
         },
         skipDirtyPendingFetch: false,
+        timeoutMs: 90_000,
       }),
     );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(
@@ -5163,6 +5212,25 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       if (!laneInput?.executionContext || !operationScope) {
         throw new Error("Expected hosted automation operation scope.");
       }
+
+      const emailHandoffResult = await operationScope.runAutoReplyGroup({
+        executionContext: laneInput.executionContext,
+        inputIds: [emailInputId],
+        operation: async (executionContext) =>
+          executionContext.hosted?.groupTool?.request({
+            action: "handoff",
+            context: "Email cannot hand off private context.",
+            originAssistantInputId: emailInputId,
+          }),
+        turnEnvironment: null,
+      });
+      expect(emailHandoffResult).toEqual({
+        action: "handoff",
+        result: {
+          status: "unavailable",
+          unavailableReason: "authenticated_sender_required",
+        },
+      });
 
       const emailResult = await operationScope.runAutoReplyGroup({
         executionContext: laneInput.executionContext,
@@ -15443,6 +15511,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       now: () => "2026-04-27T00:03:00.000Z",
       recordDeferredUsage: (record) => {
         deferredUsageRecords.push(record);
+        return Promise.resolve();
       },
       runtimeUsageRecordPort: usageRecordPort,
     });
@@ -15455,6 +15524,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           allowedMailboxDedupeKeyPrefixes: [
             "assistant.notification.requested:phone-call-result:",
             "assistant.notification.requested:usage-referral-reward:",
+            "assistant.notification.requested:group-context-handoff:",
             "aask_done_",
             "aask_private_",
           ],
@@ -20585,6 +20655,7 @@ function createGroupRoomModelInitializationSystemMailboxItem() {
         linq: true,
         telegram: false,
       },
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
       userId: "member_synthetic_phase",

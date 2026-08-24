@@ -120,6 +120,7 @@ describe("hosted retention cleanup", () => {
     const now = new Date("2026-04-25T12:00:00.000Z");
     const countsByStatement = new Map<string, number>([
       ['DELETE FROM "hosted_connected_app_connect_intent"', 1],
+      ['DELETE FROM "hosted_email_public_bootstrap_attempt"', 2],
       ['DELETE FROM "hosted_sensitive_action_challenge"', 2],
       ['DELETE FROM "device_connect_intent"', 3],
       ['DELETE FROM "device_oauth_session"', 4],
@@ -131,6 +132,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_group_current_sender_clarification"', 3],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['UPDATE "hosted_linq_provider_event"', 5],
+      ['UPDATE "hosted_member"', 3],
     ]);
     const executeRaw = vi.fn(async (strings: TemplateStringsArray) => {
       const sql = strings.join("?");
@@ -180,11 +182,13 @@ describe("hosted retention cleanup", () => {
       expiredDeviceConnectIntentsDeleted: 3,
       expiredDeviceOauthSessionsDeleted: 4,
       expiredDeviceWebhookTracesDeleted: 4,
+      expiredEmailPublicBootstrapAttemptsDeleted: 2,
       expiredGroupCurrentSenderClarificationsDeleted: 3,
       expiredIngressLatencyTracesDeleted: 1,
       expiredMailboxContentRetired: 7,
       expiredMailboxTombstonesDeleted: 3,
       expiredSensitiveActionChallengesDeleted: 2,
+      expiredSignupNotificationContextsRetired: 3,
       inboxMediaRetentionRuntimeSignalFailures: 1,
       inboxMediaRetentionRuntimeSignalsSent: 1,
       oldRuntimeLogsDeleted: 0,
@@ -197,6 +201,28 @@ describe("hosted retention cleanup", () => {
       accountDeletionCleanupMocks.drainHostedAccountDeletionCleanupBatch
         .mock.invocationCallOrder[0],
     ).toBeLessThan(executeRaw.mock.invocationCallOrder[0]!);
+
+    const signupContextRetentionCall = findRetentionCall(
+      executeRaw,
+      'UPDATE "hosted_member" AS member',
+    );
+    const signupContextRetentionSql = sqlOf(signupContextRetentionCall);
+    expect(signupContextRetentionSql).toContain(
+      '"signup_notification_context_expires_at" ASC NULLS FIRST',
+    );
+    expect(signupContextRetentionSql).toContain(
+      '"signup_notification_context_expires_at" IS NULL',
+    );
+    expect(signupContextRetentionSql).toContain(
+      "FOR UPDATE OF member SKIP LOCKED",
+    );
+    expect(signupContextRetentionSql).toContain(
+      '"signup_notification_context_encrypted" = NULL',
+    );
+    expect(signupContextRetentionCall.slice(1)).toEqual([
+      now,
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
 
     const mailboxDeleteSql = String(queryRaw.mock.calls[0]?.[0].join("?"));
     expect(mailboxDeleteSql).toContain('UPDATE "hosted_mailbox_item"');
@@ -227,7 +253,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(14);
+    expect(executeRaw).toHaveBeenCalledTimes(16);
 
     const deviceOauthCall = findRetentionCall(
       executeRaw,
@@ -426,6 +452,16 @@ describe("hosted retention cleanup", () => {
       ]);
     }
 
+    const emailBootstrapCall = findRetentionCall(
+      executeRaw,
+      'DELETE FROM "hosted_email_public_bootstrap_attempt"',
+    );
+    expect(sqlOf(emailBootstrapCall)).toContain('attempt."expires_at" <= ?');
+    expect(emailBootstrapCall.slice(1)).toEqual([
+      now,
+      HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
+    ]);
+
     const clinicalOauthCall = findRetentionCall(
       executeRaw,
       'DELETE FROM "clinical_record_oauth_session"',
@@ -533,9 +569,10 @@ describe("hosted retention cleanup", () => {
     expect(traceBatches).toBe(HOSTED_RETENTION_MAX_BATCHES);
   });
 
-  it("caps aggregate short-lived control-artifact work across all six owners", async () => {
+  it("caps aggregate short-lived control-artifact work across all seven owners", async () => {
     const controlFragments = [
       'DELETE FROM "hosted_connected_app_connect_intent"',
+      'DELETE FROM "hosted_email_public_bootstrap_attempt"',
       'DELETE FROM "hosted_sensitive_action_challenge"',
       'DELETE FROM "device_connect_intent"',
       'DELETE FROM "device_oauth_session"',
@@ -561,6 +598,7 @@ describe("hosted retention cleanup", () => {
       clinicalConnect: result.expiredClinicalRecordConnectIntentsDeleted,
       clinicalOauth: result.expiredClinicalRecordOauthSessionsDeleted,
       connectedApp: result.expiredConnectedAppConnectIntentsDeleted,
+      emailBootstrap: result.expiredEmailPublicBootstrapAttemptsDeleted,
       deviceConnect: result.expiredDeviceConnectIntentsDeleted,
       deviceOauth: result.expiredDeviceOauthSessionsDeleted,
       sensitiveAction: result.expiredSensitiveActionChallengesDeleted,
@@ -568,6 +606,7 @@ describe("hosted retention cleanup", () => {
       clinicalConnect: perOwnerCeiling,
       clinicalOauth: perOwnerCeiling,
       connectedApp: perOwnerCeiling,
+      emailBootstrap: perOwnerCeiling,
       deviceConnect: perOwnerCeiling,
       deviceOauth: perOwnerCeiling,
       sensitiveAction: perOwnerCeiling,
@@ -581,7 +620,7 @@ describe("hosted retention cleanup", () => {
     );
     expect(
       controlCalls.length * HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
-    ).toBe(3_000);
+    ).toBe(3_500);
   });
 
   it("runs retention categories one at a time", async () => {
@@ -672,11 +711,13 @@ describe("hosted retention cleanup", () => {
         expiredDeviceConnectIntentsDeleted: 1,
         expiredDeviceOauthSessionsDeleted: 1,
         expiredDeviceWebhookTracesDeleted: 1,
+        expiredEmailPublicBootstrapAttemptsDeleted: 1,
         expiredGroupCurrentSenderClarificationsDeleted: 1,
         expiredIngressLatencyTracesDeleted: 1,
         expiredMailboxContentRetired: 1,
         expiredMailboxTombstonesDeleted: 0,
         expiredSensitiveActionChallengesDeleted: 1,
+        expiredSignupNotificationContextsRetired: 1,
         inboxMediaRetentionRuntimeSignalFailures: 1,
         inboxMediaRetentionRuntimeSignalsSent: 0,
         oldRuntimeLogsDeleted: 0,

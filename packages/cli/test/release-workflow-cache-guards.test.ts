@@ -98,7 +98,9 @@ describe('GitHub Actions cache trust-boundary guards', () => {
         if (pattern.test(workflow)) {
           if (
             isAllowedHostSupportTypeScriptCache(file, workflow, description)
-            || isAllowedNativeIosHostedE2eHandoff(file, workflow, description)
+            || isAllowedNativeHostedE2eHandoff(file, workflow, description)
+            || isAllowedPrHeadDraftResetHandoff(file, workflow, description)
+            || isAllowedTemporalCompatibilityHandoff(file, workflow, description)
           ) {
             continue
           }
@@ -110,40 +112,52 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     expect(findings).toEqual([])
   })
 
-  it('allows only the native iOS E2E handoff that keeps PR code outside the secret runner', () => {
-    const workflow = readFileSync(
+  it('allows only native E2E handoffs that keep PR code outside the secret runner', () => {
+    const iosWorkflow = readFileSync(
       path.join(workflowsDir, 'native-ios-hosted-e2e.yml'),
+      'utf8',
+    )
+    const androidWorkflow = readFileSync(
+      path.join(workflowsDir, 'native-android-hosted-e2e.yml'),
       'utf8',
     )
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow,
+        iosWorkflow,
         'workflow_run handoff trigger',
       ),
     ).toBe(true)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
+        'native-android-hosted-e2e.yml',
+        androidWorkflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+
+    expect(
+      isAllowedNativeHostedE2eHandoff(
         'release.yml',
-        workflow,
+        iosWorkflow,
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow.replace('- Repo Hygiene', '- Release'),
+        iosWorkflow.replace('- Repo Hygiene', '- Release'),
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow.replace(
+        iosWorkflow.replace(
           " && needs.select-pr.outputs.trusted == 'true'",
           '',
         ),
@@ -152,17 +166,17 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        removeWorkflowStep(workflow, 'Revalidate exact PR head before runner setup'),
+        removeWorkflowStep(iosWorkflow, 'Revalidate exact PR head before runner setup'),
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow.replace(
+        iosWorkflow.replace(
           '      pull-requests: read\n',
           '      pull-requests: read\n      statuses: write\n',
         ),
@@ -171,17 +185,17 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow.replace('      contents: read\n', '      contents: write\n'),
+        iosWorkflow.replace('      contents: read\n', '      contents: write\n'),
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow.replace(
+        iosWorkflow.replace(
           'ref: ${{ github.event.repository.default_branch }}',
           () => 'ref: ${{ needs.select-pr.outputs.head_ref }}',
         ),
@@ -190,9 +204,190 @@ describe('GitHub Actions cache trust-boundary guards', () => {
     ).toBe(false)
 
     expect(
-      isAllowedNativeIosHostedE2eHandoff(
+      isAllowedNativeHostedE2eHandoff(
         'native-ios-hosted-e2e.yml',
-        workflow.replace('persist-credentials: false', 'persist-credentials: true'),
+        iosWorkflow.replace('persist-credentials: false', 'persist-credentials: true'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+
+    expect(
+      isAllowedNativeHostedE2eHandoff(
+        'native-android-hosted-e2e.yml',
+        androidWorkflow.replace(
+          'NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}',
+          'NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: untrusted',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+  })
+
+  it('allows only the exact-head trusted pull-request draft-reset handoff', () => {
+    const workflow = readFileSync(
+      path.join(workflowsDir, 'pr-head-draft-reset.yml'),
+      'utf8',
+    )
+
+    expect(
+      isAllowedPrHeadDraftResetHandoff(
+        'pr-head-draft-reset.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+
+    for (const [file, mutation] of [
+      ['renamed-draft-reset.yml', workflow],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace('workflows: ["Pull Request Head Change"]', 'workflows: ["Repo Hygiene"]'),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace('  pull-requests: write', '  contents: write'),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '    name: Return synchronized pull request to draft',
+          '    name: Return synchronized pull request to draft\n    permissions:\n      contents: write',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          'if [[ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then',
+          'if [[ -z "${current_head_sha}" ]]; then',
+        ),
+      ],
+      [
+        'pr-head-draft-reset.yml',
+        workflow.replace(
+          '    steps:\n      - name: Convert the exact synchronized head to draft',
+          '    steps:\n      - uses: actions/checkout@untrusted\n      - name: Convert the exact synchronized head to draft',
+        ),
+      ],
+    ] as const) {
+      expect(
+        isAllowedPrHeadDraftResetHandoff(
+          file,
+          mutation,
+          'workflow_run handoff trigger',
+        ),
+      ).toBe(false)
+    }
+  })
+
+  it('allows only the trusted Temporal compatibility workflow_run controller', () => {
+    const workflow = readFileSync(
+      path.join(workflowsDir, 'temporal-compatibility.yml'),
+      'utf8',
+    )
+
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(true)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'release.yml',
+        workflow,
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('- Repo Hygiene', '- Release'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(" && needs.select-pr.outputs.trusted == 'true'", ''),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          " && needs.select-pr.outputs.targets_default_branch == 'true'",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          "        if: ${{ steps.select.outputs.targets_default_branch == 'true' }}\n",
+          '',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          '      - name: Dispatch exact private reader matrix\n        env:\n          EXPECTED_BASE_REF: ${{ github.event.repository.default_branch }}\n',
+          '      - name: Dispatch exact private reader matrix\n        env:\n',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        removeWorkflowStep(workflow, 'Revalidate exact PR head before credentialed setup'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replaceAll(
+          'ref: ${{ github.event.repository.default_branch }}',
+          'ref: ${{ needs.select-pr.outputs.head_sha }}',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('      actions: read\n', ''),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('      actions: read', '      actions: none'),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace(
+          '      pull-requests: read\n    steps:',
+          '      pull-requests: read\n      statuses: write\n    steps:',
+        ),
+        'workflow_run handoff trigger',
+      ),
+    ).toBe(false)
+    expect(
+      isAllowedTemporalCompatibilityHandoff(
+        'temporal-compatibility.yml',
+        workflow.replace('repositories: murph-cloud', 'repositories: murph'),
         'workflow_run handoff trigger',
       ),
     ).toBe(false)
@@ -274,15 +469,25 @@ function isAllowedHostSupportTypeScriptCache(
   return false
 }
 
-function isAllowedNativeIosHostedE2eHandoff(
+function isAllowedNativeHostedE2eHandoff(
   file: string,
   workflow: string,
   description: string,
 ): boolean {
-  if (
-    file !== 'native-ios-hosted-e2e.yml'
-    || description !== 'workflow_run handoff trigger'
-  ) {
+  const contract = file === 'native-ios-hosted-e2e.yml'
+    ? {
+        checkoutStep: 'Checkout trusted control plane',
+        databaseSecret: 'NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}',
+        dispatchCommand: 'node scripts/native-ios-hosted-e2e.mjs pr',
+      }
+    : file === 'native-android-hosted-e2e.yml'
+      ? {
+          checkoutStep: 'Checkout trusted default-branch control code',
+          databaseSecret: 'NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}',
+          dispatchCommand: 'node scripts/native-android-hosted-e2e.mjs pr',
+        }
+      : null
+  if (!contract || description !== 'workflow_run handoff trigger') {
     return false
   }
 
@@ -311,8 +516,8 @@ function isAllowedNativeIosHostedE2eHandoff(
     !isRecord(prLive)
     || !hasTrustedPrLiveAdmission(prLive)
     || !hasExactReadOnlyPrLivePermissions(prLive.permissions)
-    || !hasEarlyExactPrHeadRevalidation(prLive.steps)
-    || !hasTrustedControlPlaneCheckout(prLive.steps)
+    || !hasEarlyExactPrHeadRevalidation(prLive.steps, contract.checkoutStep)
+    || !hasTrustedControlPlaneCheckout(prLive.steps, contract.checkoutStep)
   ) {
     return false
   }
@@ -320,10 +525,219 @@ function isAllowedNativeIosHostedE2eHandoff(
   return (
     isStringArray(workflowRun.workflows, ['Repo Hygiene'])
     && isStringArray(workflowRun.types, ['completed'])
-    && workflow.includes('node scripts/native-ios-hosted-e2e.mjs pr')
+    && workflow.includes(contract.dispatchCommand)
     && workflow.includes('PR_HEAD_SHA: ${{ needs.select-pr.outputs.head_sha }}')
-    && workflow.includes('NATIVE_IOS_E2E_DATABASE_URL: ${{ secrets.NATIVE_IOS_E2E_DATABASE_URL }}')
+    && workflow.includes(contract.databaseSecret)
+    && (
+      file !== 'native-android-hosted-e2e.yml'
+      || hasAndroidAppCredentials(prLive.steps)
+    )
   )
+}
+
+function isAllowedPrHeadDraftResetHandoff(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (
+    file !== 'pr-head-draft-reset.yml'
+    || description !== 'workflow_run handoff trigger'
+    || workflow.includes('secrets.')
+    || workflow.includes('pull_request_target')
+  ) {
+    return false
+  }
+
+  const parsedWorkflow: unknown = parse(workflow)
+  if (!isRecord(parsedWorkflow)) {
+    return false
+  }
+
+  const triggers = parsedWorkflow.on
+  const permissions = parsedWorkflow.permissions
+  const jobs = parsedWorkflow.jobs
+  if (!isRecord(triggers) || !isRecord(permissions) || !isRecord(jobs)) {
+    return false
+  }
+
+  const workflowRun = triggers.workflow_run
+  const resetJob = jobs['return-to-draft']
+  if (
+    !isRecord(workflowRun)
+    || !isRecord(resetJob)
+    || !Array.isArray(resetJob.steps)
+    || resetJob.steps.length !== 1
+  ) {
+    return false
+  }
+
+  const resetStep = resetJob.steps[0]
+  if (!isRecord(resetStep) || !isRecord(resetStep.env) || typeof resetStep.run !== 'string') {
+    return false
+  }
+
+  return (
+    isStringArray(workflowRun.workflows, ['Pull Request Head Change'])
+    && isStringArray(workflowRun.types, ['completed'])
+    && Object.keys(triggers).join(',') === 'workflow_run'
+    && Object.keys(permissions).join(',') === 'pull-requests'
+    && permissions['pull-requests'] === 'write'
+    && resetJob.permissions === undefined
+    && resetJob.if === "${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request' }}"
+    && resetStep.name === 'Convert the exact synchronized head to draft'
+    && resetStep.shell === 'bash'
+    && resetStep.env.EXPECTED_HEAD_SHA === '${{ github.event.workflow_run.head_sha }}'
+    && resetStep.env.GH_TOKEN === '${{ github.token }}'
+    && resetStep.env.HEAD_BRANCH === '${{ github.event.workflow_run.head_branch }}'
+    && resetStep.env.HEAD_REPOSITORY === '${{ github.event.workflow_run.head_repository.full_name }}'
+    && !workflow.includes('github.event.workflow_run.pull_requests[0]')
+    && !resetStep.run.includes('commits/${EXPECTED_HEAD_SHA}/pulls')
+    && resetStep.run.includes('HEAD_OWNER="${HEAD_REPOSITORY%%/*}"')
+    && resetStep.run.includes('gh api --method GET --paginate --slurp')
+    && resetStep.run.includes('repos/${GITHUB_REPOSITORY}/pulls')
+    && resetStep.run.includes('-f state=open')
+    && resetStep.run.includes('-f head="${HEAD_OWNER}:${HEAD_BRANCH}"')
+    && resetStep.run.includes('if [[ "${candidate_count}" != 1 ]]; then')
+    && resetStep.run.includes('.base.repo.full_name == $base_repository')
+    && resetStep.run.includes('.head.repo.full_name == $head_repository')
+    && resetStep.run.includes('.head.ref == $head_branch')
+    && resetStep.run.includes('.head.sha == $head_sha')
+    && resetStep.run.includes('.state == "open"')
+    && resetStep.run.includes('gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"')
+    && resetStep.run.includes('if [[ "${current_head_sha}" != "${EXPECTED_HEAD_SHA}" ]]; then')
+    && resetStep.run.includes('if [[ "${state}" != open ]]; then')
+    && resetStep.run.includes('if [[ "${draft}" == true ]]; then')
+    && resetStep.run.includes('convertPullRequestToDraft')
+    && resetStep.run.includes('"${converted_draft}" == true')
+  )
+}
+
+function isAllowedTemporalCompatibilityHandoff(
+  file: string,
+  workflow: string,
+  description: string,
+): boolean {
+  if (
+    file !== 'temporal-compatibility.yml'
+    || description !== 'workflow_run handoff trigger'
+  ) {
+    return false
+  }
+
+  const parsedWorkflow: unknown = parse(workflow)
+  if (!isRecord(parsedWorkflow)) {
+    return false
+  }
+
+  const triggers = parsedWorkflow.on
+  const permissions = parsedWorkflow.permissions
+  const jobs = parsedWorkflow.jobs
+  if (!isRecord(triggers) || !isRecord(permissions) || !isRecord(jobs)) {
+    return false
+  }
+
+  const workflowRun = triggers.workflow_run
+  const selectPr = jobs['select-pr']
+  const compatibility = jobs.compatibility
+  const required = jobs.required
+  if (
+    !isRecord(workflowRun)
+    || !isRecord(selectPr)
+    || !isRecord(compatibility)
+    || !isRecord(required)
+  ) {
+    return false
+  }
+
+  const selectOutputs = selectPr.outputs
+  const selectSteps = selectPr.steps
+  if (!isRecord(selectOutputs) || !Array.isArray(selectSteps)) {
+    return false
+  }
+  const selectStep = selectSteps.find((step) =>
+    isRecord(step) && step.name === 'Resolve exact PR head and compatibility owners'
+  )
+  const pendingStep = selectSteps.find((step) =>
+    isRecord(step) && step.name === 'Mark stable status pending'
+  )
+  const compatibilitySteps = compatibility.steps
+  const dispatchStep = Array.isArray(compatibilitySteps)
+    ? compatibilitySteps.find((step) =>
+      isRecord(step) && step.name === 'Dispatch exact private reader matrix'
+    )
+    : null
+  if (
+    !isRecord(selectStep)
+    || !isRecord(selectStep.env)
+    || !isRecord(pendingStep)
+    || !isRecord(dispatchStep)
+    || !isRecord(dispatchStep.env)
+  ) {
+    return false
+  }
+
+  return (
+    isStringArray(workflowRun.workflows, ['Repo Hygiene'])
+    && isStringArray(workflowRun.types, ['completed'])
+    && Object.keys(permissions).sort().join(',') === 'contents,pull-requests,statuses'
+    && permissions.contents === 'read'
+    && permissions['pull-requests'] === 'read'
+    && permissions.statuses === 'write'
+    && selectPr.if === "${{ github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null }}"
+    && selectOutputs.targets_default_branch === '${{ steps.select.outputs.targets_default_branch }}'
+    && selectStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
+    && pendingStep.if === "${{ steps.select.outputs.targets_default_branch == 'true' }}"
+    && compatibility.if === "${{ github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.targets_default_branch == 'true' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
+    && compatibility.environment === 'temporal-compatibility'
+    && dispatchStep.env.EXPECTED_BASE_REF === '${{ github.event.repository.default_branch }}'
+    && required.if === "${{ always() && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.pull_requests[0] != null && needs.select-pr.outputs.targets_default_branch == 'true' }}"
+    && hasTemporalCompatibilityPermissions(compatibility.permissions)
+    && hasEarlyExactPrHeadRevalidation(
+      compatibility.steps,
+      'Checkout trusted controller',
+    )
+    && hasTrustedControlPlaneCheckout(
+      compatibility.steps,
+      'Checkout trusted controller',
+    )
+    && hasTemporalCompatibilityAppToken(compatibility.steps)
+    && workflow.includes('node scripts/hosted-orchestration-compatibility.mjs run')
+  )
+}
+
+function hasTemporalCompatibilityAppToken(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+
+  const token = value.find((step) =>
+    isRecord(step) && step.name === 'Mint private compatibility token'
+  )
+  if (!isRecord(token) || !isRecord(token.with)) {
+    return false
+  }
+
+  return token.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1'
+    && token.with['app-id'] === '${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}'
+    && token.with['private-key'] === '${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}'
+    && token.with.owner === 'cobuildwithus'
+    && token.with.repositories === 'murph-cloud'
+    && token.with['permission-actions'] === 'write'
+    && token.with['permission-contents'] === 'read'
+}
+
+function hasAndroidAppCredentials(value: unknown): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+  const controller = value.find((step) =>
+    isRecord(step) && step.name === 'Run exact candidate lifecycle and private Android journey'
+  )
+  return isRecord(controller)
+    && isRecord(controller.env)
+    && controller.env.NATIVE_ANDROID_E2E_GITHUB_APP_ID === '${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}'
+    && controller.env.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY === '${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}'
 }
 
 function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
@@ -336,17 +750,28 @@ function hasExactReadOnlyPrLivePermissions(value: unknown): boolean {
     && value['pull-requests'] === 'read'
 }
 
+function hasTemporalCompatibilityPermissions(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return Object.keys(value).sort().join(',') === 'actions,contents,pull-requests'
+    && value.actions === 'read'
+    && value.contents === 'read'
+    && value['pull-requests'] === 'read'
+}
+
 function hasTrustedPrLiveAdmission(prLive: Record<string, unknown>): boolean {
   return prLive.if === "${{ github.run_attempt == 1 && github.event.workflow_run.conclusion == 'success' && needs.select-pr.outputs.selected == 'true' && needs.select-pr.outputs.trusted == 'true' }}"
 }
 
-function hasEarlyExactPrHeadRevalidation(value: unknown): boolean {
+function hasEarlyExactPrHeadRevalidation(value: unknown, checkoutStepName: string): boolean {
   if (!Array.isArray(value)) {
     return false
   }
 
   const checkoutIndex = value.findIndex((step) =>
-    isRecord(step) && step.name === 'Checkout trusted control plane'
+    isRecord(step) && step.name === checkoutStepName
   )
   const revalidationIndex = value.findIndex((step) => {
     if (!isRecord(step) || !isRecord(step.env) || typeof step.run !== 'string') {
@@ -367,13 +792,13 @@ function hasEarlyExactPrHeadRevalidation(value: unknown): boolean {
     && revalidationIndex < checkoutIndex
 }
 
-function hasTrustedControlPlaneCheckout(value: unknown): boolean {
+function hasTrustedControlPlaneCheckout(value: unknown, checkoutStepName: string): boolean {
   if (!Array.isArray(value)) {
     return false
   }
 
   const checkoutStep = value.find((step) =>
-    isRecord(step) && step.name === 'Checkout trusted control plane'
+    isRecord(step) && step.name === checkoutStepName
   )
   if (!isRecord(checkoutStep)) {
     return false

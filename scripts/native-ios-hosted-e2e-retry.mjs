@@ -10,15 +10,36 @@ const REPO_HYGIENE_WORKFLOW_FILE = "repo-hygiene.yml";
 const REPO_HYGIENE_WORKFLOW_NAME = "Repo Hygiene";
 const REPO_HYGIENE_WORKFLOW_PATH = ".github/workflows/repo-hygiene.yml";
 const SHA_PATTERN = /^[0-9a-f]{40}$/u;
-const USAGE = "Usage: node scripts/native-ios-hosted-e2e-retry.mjs --pr <number>.";
+const RETRYABLE_INFRASTRUCTURE_FAILURE_CODES = new Set([
+  "android_workflow_rerun",
+  "xcodebuild_failed",
+]);
+const USAGE = "Usage: node scripts/native-ios-hosted-e2e-retry.mjs --pr <number> --failure-code <android_workflow_rerun|xcodebuild_failed>.";
+
+export function inspectRetryableNativeIosFailureCode(value) {
+  if (typeof value !== "string" || !RETRYABLE_INFRASTRUCTURE_FAILURE_CODES.has(value)) {
+    throw new Error(
+      "Native hosted E2E may be retried only for the allowlisted infrastructure failure codes android_workflow_rerun or xcodebuild_failed.",
+    );
+  }
+  return value;
+}
 
 export function parseNativeIosHostedE2eRetryArgs(argv) {
-  if (argv.length !== 2 || argv[0] !== "--pr" || !/^[1-9][0-9]*$/u.test(argv[1])) {
+  if (
+    argv.length !== 4
+    || argv[0] !== "--pr"
+    || !/^[1-9][0-9]*$/u.test(argv[1])
+    || argv[2] !== "--failure-code"
+  ) {
     throw new Error(USAGE);
   }
   const prNumber = Number(argv[1]);
   if (!Number.isSafeInteger(prNumber)) throw new Error(USAGE);
-  return { prNumber };
+  return {
+    failureCode: inspectRetryableNativeIosFailureCode(argv[3]),
+    prNumber,
+  };
 }
 
 export function inspectRetryableNativeIosPullRequest(
@@ -34,9 +55,14 @@ export function inspectRetryableNativeIosPullRequest(
   if (value.state !== "open") {
     throw new Error(`PR #${expectedPrNumber} is not open.`);
   }
+  if (value.draft !== false) {
+    throw new Error(
+      `PR #${expectedPrNumber} must be ready for review before native hosted E2E can be retried.`,
+    );
+  }
   if (value.head?.repo?.full_name !== REPOSITORY || value.user?.type !== "User") {
     throw new Error(
-      "Native iOS hosted E2E retries require an open same-repository human-authored PR.",
+      "Native hosted E2E retries require an open same-repository human-authored PR.",
     );
   }
   const headRef = value.head?.ref;
@@ -93,7 +119,8 @@ export function selectRetryableRepoHygieneRun(
   return eligible.reduce((latest, run) => run.id > latest.id ? run : latest);
 }
 
-export async function retryNativeIosHostedE2e({ prNumber, request = requestGitHubApi }) {
+export async function retryNativeIosHostedE2e({ failureCode, prNumber, request = requestGitHubApi }) {
+  const admittedFailureCode = inspectRetryableNativeIosFailureCode(failureCode);
   if (!Number.isSafeInteger(prNumber) || prNumber <= 0) throw new Error(USAGE);
   const prEndpoint = `repos/${REPOSITORY}/pulls/${prNumber}`;
   const initial = inspectRetryableNativeIosPullRequest(
@@ -122,7 +149,12 @@ export async function retryNativeIosHostedE2e({ prNumber, request = requestGitHu
     endpoint: `repos/${REPOSITORY}/actions/runs/${run.id}/rerun`,
     method: "POST",
   });
-  return { headSha: initial.headSha, prNumber, repoHygieneRunId: run.id };
+  return {
+    failureCode: admittedFailureCode,
+    headSha: initial.headSha,
+    prNumber,
+    repoHygieneRunId: run.id,
+  };
 }
 
 function requestGitHubApi({ endpoint, method, paginate = false }) {
@@ -135,7 +167,7 @@ function requestGitHubApi({ endpoint, method, paginate = false }) {
     stdio: ["ignore", "pipe", "pipe"],
   });
   if (result.error?.code === "ENOENT") {
-    throw new Error("GitHub CLI (gh) is required for the native iOS retry helper.");
+    throw new Error("GitHub CLI (gh) is required for the native hosted E2E retry helper.");
   }
   if (result.error) throw new Error("Unable to execute GitHub CLI.");
   if (result.status !== 0) {
@@ -145,17 +177,17 @@ function requestGitHubApi({ endpoint, method, paginate = false }) {
   try {
     return JSON.parse(result.stdout);
   } catch {
-    throw new Error("GitHub returned invalid JSON to the native iOS retry helper.");
+    throw new Error("GitHub returned invalid JSON to the native hosted E2E retry helper.");
   }
 }
 
 async function main(argv) {
-  const { prNumber } = parseNativeIosHostedE2eRetryArgs(argv);
-  const result = await retryNativeIosHostedE2e({ prNumber });
+  const { failureCode, prNumber } = parseNativeIosHostedE2eRetryArgs(argv);
+  const result = await retryNativeIosHostedE2e({ failureCode, prNumber });
   console.log([
     `Restarted exact-head Repo Hygiene run ${result.repoHygieneRunId}`,
-    `for PR #${result.prNumber} at ${result.headSha}; its successful completion`,
-    "will create a fresh native iOS waiter.",
+    `for PR #${result.prNumber} at ${result.headSha} after ${result.failureCode};`,
+    "its successful completion will create fresh applicable native iOS and Android waiters.",
   ].join(" "));
 }
 

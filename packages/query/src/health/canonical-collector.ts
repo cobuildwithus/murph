@@ -2,6 +2,7 @@ import { VAULT_LAYOUT, type BankEntityKind } from "@murphai/contracts";
 
 import {
   compareCanonicalEntities,
+  type CanonicalEntityFamily,
   type CanonicalEntity,
 } from "../canonical-entities.ts";
 import { projectAssessmentEntity } from "./projectors/assessment.ts";
@@ -207,6 +208,39 @@ const REGISTRY_COLLECTORS = [
     (document) => toRegistryRecord(document, workoutFormatRegistryDefinition),
   ),
 ] as const satisfies readonly RegistryCollectorConfig[];
+
+/**
+ * Read one health-owned canonical family without traversing every registry.
+ *
+ * This is the source-backed counterpart to filtered projection reads. It is
+ * intended for exact and family-local resolution paths where rebuilding the
+ * shared query projection would be disproportionate to the requested read.
+ */
+export async function readCanonicalHealthFamilyEntities(
+  vaultRoot: string,
+  family: CanonicalEntityFamily,
+): Promise<CanonicalEntity[]> {
+  if (family === "assessment") {
+    return readJsonlEntitiesStrict(
+      vaultRoot,
+      VAULT_LAYOUT.assessmentLedgerDirectory,
+      projectAssessmentEntity,
+    );
+  }
+
+  const collector = REGISTRY_COLLECTORS.find((candidate) => candidate.family === family);
+  if (!collector) {
+    return [];
+  }
+
+  const result = await readRegistryEntitiesAsync(
+    vaultRoot,
+    collector,
+    new Map<string, string>(),
+    readMarkdownDocument,
+  );
+  return result.entities;
+}
 
 function createRegistryCollectorConfig(
   key: RegistryCollectionKey,

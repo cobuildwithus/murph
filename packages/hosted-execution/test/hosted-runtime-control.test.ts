@@ -239,6 +239,7 @@ describe("hosted runtime control contracts", () => {
       "assistant.ask.completed",
       "clinical-records.sync-requested",
       "device-sync.wake",
+      "environment-interview.completed",
       "environment-voice.captured",
       "health.daily-metric.reported",
       "meal-photo.captured",
@@ -2544,6 +2545,9 @@ describe("hosted runtime control contracts", () => {
       phase: "import",
       redactedJson: {
         importedCount: 2,
+        junctionWorkoutStreamMaxTimestampCount: 100_000,
+        junctionWorkoutStreamTimestampCardinalityKind: "over_limit",
+        junctionWorkoutStreamTimestampCount: 100_127,
         messageReactionsAvailable: true,
         reasoningEffort: "low",
         retryable: false,

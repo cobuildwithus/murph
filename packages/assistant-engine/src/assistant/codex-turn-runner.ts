@@ -16,7 +16,6 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 import {
   MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE,
-  MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE,
   MURPH_MEMBER_READ_PERMISSION_PROFILE,
   MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
 } from '@murphai/hosted-execution/assistant-permissions'
@@ -115,6 +114,7 @@ import {
 import {
   resolveAssistantConversationScope,
 } from './conversation-policy.js'
+import { recordAdditionalAssistantUsageEvents } from './service-usage.js'
 
 const ASSISTANT_PROVIDER_PLAN_TRACE_SCHEMA =
   'murph.assistant-provider-plan-diagnostics.v1'
@@ -687,6 +687,24 @@ async function executeAssistantCodexAttempt(input: {
           attemptPlan.routePlan.onboardingGuidanceInjected &&
           executionPlan.input.scheduledOccurrenceAt == null &&
           executionPlan.input.scheduledInvocationAuthority == null,
+        onAdditionalUsage: executionPlan.executionContext.hosted?.usageRecorder
+          ? (additionalUsage) => recordAdditionalAssistantUsageEvents({
+              additionalUsages: [additionalUsage],
+              effectiveEnv: attemptEnv,
+              executionContext: executionPlan.executionContext,
+              providerRequestAcceptedInputIds:
+                (executionPlan.acceptedInputItems ?? []).map((item) => item.id),
+              providerResult: {
+                attemptCount: attemptPlan.attemptCount,
+                provider: attemptPlan.route.provider,
+                providerOptions: attemptPlan.route.providerOptions,
+                route: attemptPlan.route,
+                session: attemptPlan.session,
+                usageAttribution,
+              },
+              turnId: executionPlan.turnId,
+            })
+          : null,
         onEvent: executionPlan.input.onProviderEvent ?? undefined,
         onFinishWithoutReplyAccepted:
           executionPlan.onFinishWithoutReplyAccepted ?? null,
@@ -727,9 +745,7 @@ async function executeAssistantCodexAttempt(input: {
         permissions:
           groupRoomModelMaintenanceTurn
             ? MURPH_GROUP_ROOM_MODEL_MAINTENANCE_PERMISSION_PROFILE
-            : memberMemoryMaintenanceTurn
-              ? MURPH_MEMBER_MEMORY_MAINTENANCE_PERMISSION_PROFILE
-              : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
+            : readOnlyAutomationTurn && executionPlan.executionContext?.hosted
               ? MURPH_MEMBER_READ_PERMISSION_PROFILE
               : ordinaryHostedWorkspaceTurn
                 ? hostedLocalTestProviderTurn

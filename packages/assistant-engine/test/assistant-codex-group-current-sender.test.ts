@@ -6,7 +6,8 @@ import type {
 import {
   claimCurrentSenderTurnDecision,
   executeMurphDynamicToolRequest,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_CONSULT_TOOL,
+  MURPH_GROUP_TOOL_NAME,
   readMurphDynamicToolRequest,
 } from "../src/assistant-codex/dynamic-tools.ts";
 
@@ -23,7 +24,7 @@ function groupToolCall(argumentsValue: unknown): Record<string, unknown> {
       callId: "call-test",
       namespace: "murph",
       threadId: "thread-test",
-      tool: MURPH_GROUP_TOOL.name,
+      tool: MURPH_GROUP_TOOL_NAME,
       turnId: "turn-test",
     },
   };
@@ -168,8 +169,8 @@ describe("murph.group current-sender intent", () => {
         .toMatchObject({ kind: "invalid-group-arguments" });
     }
 
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
-      maxProperties: 2,
+    expect(MURPH_GROUP_CONSULT_TOOL.inputSchema).toMatchObject({
+      additionalProperties: false,
       properties: {
         action: {
           enum: expect.arrayContaining([
@@ -181,7 +182,7 @@ describe("murph.group current-sender intent", () => {
         },
         message_ref: { pattern: "^ain_[0-9a-f]{32}$" },
       },
-      required: ["action", "message_ref"],
+      required: ["action"],
     });
   });
 

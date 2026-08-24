@@ -4,12 +4,22 @@ import {
   type HostedExecutionSystemWake,
 } from "@murphai/hosted-execution/contracts";
 import {
+  isHostedSystemMailboxModelFreeNotification,
+} from "@murphai/hosted-execution/orchestration-control";
+import {
   parseHostedExecutionWake,
 } from "@murphai/hosted-execution/parsers";
+import {
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+} from "@murphai/hosted-execution/runtime-control";
 import { parseMemberActionOutcomeV1 } from "@murphai/contracts";
 import {
   parseHostedClinicalRecordsRecordOutcomeRequest,
 } from "@murphai/hosted-execution/clinical-records-boundary";
+import {
+  persistHostedRuntimeStateAtCanonicalBoundary,
+} from "@murphai/core";
 import {
   withAssistantRuntimeWriteLock,
 } from "@murphai/assistant-engine/assistant-state";
@@ -68,6 +78,7 @@ export type HostedSystemMailboxRouteAction =
   | "continue-assistant-ask"
   | "run-clinical-records-sync"
   | "run-device-sync-wake"
+  | "run-environment-interview"
   | "run-environment-voice"
   | "import-reported-daily-metric"
   | "apply-runtime-control-request";
@@ -118,16 +129,19 @@ export async function readHostedSystemMailboxState(
 
 export async function readHostedSystemMailboxHandledThroughSeq(input: {
   importedSeq: string;
+  now?: () => string;
   vaultRoot: string;
 }): Promise<string> {
   return resolveHostedSystemMailboxHandledThroughSeq({
     importedSeq: input.importedSeq,
+    now: (input.now ?? (() => new Date().toISOString()))(),
     state: await readHostedSystemMailboxState(input.vaultRoot),
   });
 }
 
 export function resolveHostedSystemMailboxHandledThroughSeq(input: {
   importedSeq: string;
+  now?: string;
   state: HostedSystemMailboxState;
 }): string {
   if (!/^(?:0|[1-9]\d*)$/u.test(input.importedSeq)) {
@@ -136,8 +150,12 @@ export function resolveHostedSystemMailboxHandledThroughSeq(input: {
 
   const importedSeq = BigInt(input.importedSeq);
   let earliestPendingSeq: bigint | null = null;
+  const now = input.now ?? new Date().toISOString();
   for (const item of input.state.pending) {
     if (isHostedDeviceSyncDenseRawRetentionMailboxItem(item)) {
+      continue;
+    }
+    if (isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)) {
       continue;
     }
     if (item.mailboxLaneSeq === null) {
@@ -164,6 +182,7 @@ export async function updateHostedSystemMailboxState<TResult = void>(
     | HostedSystemMailboxState
     | { result: TResult; state: HostedSystemMailboxState }
     | Promise<HostedSystemMailboxState | { result: TResult; state: HostedSystemMailboxState }>,
+  options: { now?: () => string } = {},
 ): Promise<TResult> {
   return await withAssistantRuntimeWriteLock(vaultRoot, async () => {
     const current = await readHostedSystemMailboxState(vaultRoot);
@@ -171,7 +190,13 @@ export async function updateHostedSystemMailboxState<TResult = void>(
     const nextState = isHostedSystemMailboxStateUpdateResult<TResult>(updated)
       ? updated.state
       : updated;
-    await writeHostedSystemMailboxState(vaultRoot, nextState);
+    await writeHostedSystemMailboxState(
+      vaultRoot,
+      excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+        nextState,
+        (options.now ?? (() => new Date().toISOString()))(),
+      ),
+    );
     return isHostedSystemMailboxStateUpdateResult<TResult>(updated)
       ? updated.result
       : undefined as TResult;
@@ -233,11 +258,15 @@ export async function removeHostedSystemMailboxPendingItems(input: {
 export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
   nextWakeAt: string | null;
   now?: () => string;
+  persistAtCanonicalBoundary?: boolean;
   userId: string;
   vaultRoot: string;
 }): Promise<void> {
   if (!input.nextWakeAt) {
     await removePendingHostedDeviceSyncDenseRawRetentionMailboxSuccessors(input.vaultRoot);
+    if (input.persistAtCanonicalBoundary === true) {
+      await persistHostedRuntimeStateAtCanonicalBoundary();
+    }
     return;
   }
 
@@ -275,6 +304,9 @@ export async function setHostedDeviceSyncDenseRawRetentionMailboxWakeAt(input: {
       nextItem,
     ],
   }));
+  if (input.persistAtCanonicalBoundary === true) {
+    await persistHostedRuntimeStateAtCanonicalBoundary();
+  }
 }
 
 async function removePendingHostedDeviceSyncDenseRawRetentionMailboxSuccessors(
@@ -323,11 +355,20 @@ export async function resolveHostedSystemMailboxNextWakeCandidate(input: {
   vaultRoot: string;
 }): Promise<HostedRuntimeWakeCandidate> {
   const now = (input.now ?? (() => new Date().toISOString()))();
-  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+    await readHostedSystemMailboxState(input.vaultRoot),
+    now,
+  );
+  const notificationProjectedState = shouldProjectHostedSystemMailboxModelFreeNotifications({
+    allowedRouteActions: input.allowedRouteActions ?? null,
+    allowedWakeKinds: input.allowedWakeKinds ?? null,
+  })
+    ? projectHostedSystemMailboxModelFreeNotificationFrontier(state)
+    : state;
   const selectionState = input.allowedWakeKinds == null
-    ? state
+    ? notificationProjectedState
     : {
-        pending: state.pending.filter((item) =>
+        pending: notificationProjectedState.pending.filter((item) =>
           input.allowedWakeKinds?.includes(item.wake.kind)
         ),
       };
@@ -366,6 +407,42 @@ export function findNextHostedSystemMailboxQueueItem(input: {
   now: string;
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxPendingItem | null {
+  const state = excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+    input.state,
+    input.now,
+  );
+  if (input.allowedRouteActions == null) {
+    const approvedContinuation = state.pending.find((item) =>
+      systemMailboxItemIsDue(item, input.now)
+      && isHostedPendingEffectsContinuationSystemMailboxItem(item)
+    ) ?? null;
+    if (approvedContinuation) {
+      return approvedContinuation;
+    }
+
+    const delegatedItem = findNextHostedSystemMailboxQueueItemByOrder({
+      allowedRouteActions: null,
+      now: input.now,
+      state: {
+        pending: state.pending.filter(isHostedUserInvokedDelegatedSystemMailboxItem),
+      },
+    });
+    if (delegatedItem) {
+      return delegatedItem;
+    }
+  }
+
+  return findNextHostedSystemMailboxQueueItemByOrder({
+    ...input,
+    state,
+  });
+}
+
+function findNextHostedSystemMailboxQueueItemByOrder(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  now: string;
+  state: HostedSystemMailboxState;
+}): HostedSystemMailboxPendingItem | null {
   const blockedSerializationKeys = new Set<HostedSystemMailboxSerializationKey>();
   let oldestDueItem: HostedSystemMailboxPendingItem | null = null;
   for (const item of input.state.pending) {
@@ -373,13 +450,6 @@ export function findNextHostedSystemMailboxQueueItem(input: {
       continue;
     }
     const isDue = systemMailboxItemIsDue(item, input.now);
-    if (
-      input.allowedRouteActions == null
-      && isDue
-      && isHostedApprovedContinuationSystemMailboxItem(item)
-    ) {
-      return item;
-    }
     const serializationKey = resolveHostedSystemMailboxSerializationKey(item);
     if (blockedSerializationKeys.has(serializationKey)) {
       continue;
@@ -397,8 +467,138 @@ export function findNextHostedSystemMailboxQueueItem(input: {
 export function isHostedApprovedContinuationSystemMailboxItem(
   item: HostedSystemMailboxPendingItem,
 ): boolean {
+  // The system-mailbox runner uses this predicate to decide whether its
+  // model-free invocation must upgrade to the ordinary assistant path. Keep
+  // that decision derived from the exact local wake instead of adding another
+  // orchestration or persisted-state owner.
+  return isHostedPendingEffectsContinuationSystemMailboxItem(item)
+    || isHostedUserInvokedDelegatedSystemMailboxItem(item);
+}
+
+function isHostedPendingEffectsContinuationSystemMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
   return item.routeAction === "apply-runtime-control-request"
     && item.wake.kind === "runtime.pending-effects-reconcile-requested";
+}
+
+function isHostedUserInvokedDelegatedSystemMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  if (
+    item.routeAction === "run-assistant-ask"
+    && item.wake.kind === "assistant.ask.requested"
+  ) {
+    const targetKind = item.wake.ask.target.kind;
+    return targetKind === "joined_group"
+      || targetKind === "current_sender_personal"
+      || targetKind === "group_sender"
+      || targetKind === "group_sender_private";
+  }
+  return isHostedGroupContextHandoffSystemMailboxItem(item);
+}
+
+function isHostedGroupContextHandoffSystemMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  if (
+    item.routeAction !== "dispatch-assistant-notification"
+    || item.wake.kind !== "assistant.notification.requested"
+    || !item.mailboxDedupeKey.startsWith(
+      HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
+    )
+  ) {
+    return false;
+  }
+
+  const notification = item.wake.notification;
+  return item.wake.eventId === item.mailboxDedupeKey
+    && notification.deliveryDedupeToken === item.mailboxDedupeKey
+    && notification.deliveryIdempotencyKey === item.mailboxDedupeKey
+    && notification.deliveryDispatchMode === "queue-only"
+    && notification.notificationPromptProfile === "context-handoff"
+    && notification.responsePolicy?.kind === "require_send"
+    && notification.groupContextHandoff != null;
+}
+
+function isExpiredHostedGroupContextHandoffSystemMailboxItem(
+  item: HostedSystemMailboxPendingItem,
+  now: string,
+): boolean {
+  if (
+    !isHostedGroupContextHandoffSystemMailboxItem(item)
+    || item.status !== "pending"
+    || item.postCheckpointRecord !== null
+  ) {
+    return false;
+  }
+  const occurredAtMs = Date.parse(item.wake.occurredAt);
+  const nowMs = Date.parse(now);
+  return Number.isFinite(occurredAtMs)
+    && Number.isFinite(nowMs)
+    && nowMs >= occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
+}
+
+function excludeExpiredHostedGroupContextHandoffSystemMailboxItems(
+  state: HostedSystemMailboxState,
+  now: string,
+): HostedSystemMailboxState {
+  return {
+    pending: state.pending.filter((item) =>
+      !isExpiredHostedGroupContextHandoffSystemMailboxItem(item, now)
+    ),
+  };
+}
+
+export function isHostedSystemMailboxModelFreeExactNotificationItem(
+  item: HostedSystemMailboxPendingItem,
+): boolean {
+  if (
+    item.routeAction !== "dispatch-assistant-notification"
+    || item.wake.kind !== "assistant.notification.requested"
+  ) {
+    return false;
+  }
+
+  const notification = item.wake.notification;
+  const deliveryDedupeToken = notification.deliveryDedupeToken ?? "";
+  const deliveryIdempotencyKey = notification.deliveryIdempotencyKey ?? "";
+  const expectedDedupeKey =
+    `assistant.notification.requested:${deliveryDedupeToken}`;
+
+  return deliveryDedupeToken.length > 0
+    && deliveryDedupeToken === deliveryIdempotencyKey
+    && item.mailboxDedupeKey === expectedDedupeKey
+    && item.wake.eventId === expectedDedupeKey
+    && notification.deliveryDispatchMode === "queue-only"
+    && notification.responsePolicy?.kind === "require_send_exact_text"
+    && notification.responsePolicy.text.length > 0
+    && isHostedSystemMailboxModelFreeNotification({
+      dedupeKey: item.mailboxDedupeKey,
+      kind: item.wake.kind,
+    });
+}
+
+export function projectHostedSystemMailboxModelFreeNotificationFrontier(
+  state: HostedSystemMailboxState,
+): HostedSystemMailboxState {
+  const durableFrontier = findHostedSystemMailboxDurableFrontierItem(state.pending);
+  if (
+    !durableFrontier
+    || durableFrontier.wake.kind !== "assistant.notification.requested"
+  ) {
+    return {
+      pending: state.pending.filter((item) =>
+        item.wake.kind !== "assistant.notification.requested"
+      ),
+    };
+  }
+
+  return {
+    pending: isHostedSystemMailboxModelFreeExactNotificationItem(durableFrontier)
+      ? [durableFrontier]
+      : [],
+  };
 }
 
 export function mergeHostedSystemMailboxRollbackItems(input: {
@@ -540,6 +740,7 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     || value === "continue-assistant-ask"
     || value === "run-clinical-records-sync"
     || value === "run-device-sync-wake"
+    || value === "run-environment-interview"
     || value === "run-environment-voice"
     || value === "import-reported-daily-metric"
     || value === "apply-runtime-control-request"
@@ -826,6 +1027,41 @@ function findNextHostedSystemMailboxQueueItemsForWake(input: {
     items.push(item);
   }
   return items;
+}
+
+function shouldProjectHostedSystemMailboxModelFreeNotifications(input: {
+  allowedRouteActions: readonly HostedSystemMailboxRouteAction[] | null;
+  allowedWakeKinds: readonly HostedExecutionSystemWake["kind"][] | null;
+}): boolean {
+  const includesModelFreeMaintenanceAction =
+    input.allowedRouteActions?.includes("apply-runtime-control-request") === true
+    || input.allowedRouteActions?.includes("run-device-sync-wake") === true;
+  return input.allowedRouteActions?.includes(
+    "dispatch-assistant-notification",
+  ) === true
+    && includesModelFreeMaintenanceAction
+    && input.allowedWakeKinds?.includes(
+      "assistant.notification.requested",
+    ) === true;
+}
+
+function findHostedSystemMailboxDurableFrontierItem(
+  pending: readonly HostedSystemMailboxPendingItem[],
+): HostedSystemMailboxPendingItem | null {
+  let frontier: HostedSystemMailboxPendingItem | null = null;
+  let frontierSeq: bigint | null = null;
+  for (const item of pending) {
+    if (item.mailboxLaneSeq === null) {
+      continue;
+    }
+
+    const seq = BigInt(item.mailboxLaneSeq);
+    if (frontierSeq === null || seq < frontierSeq) {
+      frontier = item;
+      frontierSeq = seq;
+    }
+  }
+  return frontier;
 }
 
 function systemMailboxItemRouteActionAllowed(

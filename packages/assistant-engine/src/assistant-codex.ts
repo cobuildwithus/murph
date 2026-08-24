@@ -58,6 +58,7 @@ import {
 } from './assistant-codex-events.js'
 import {
   buildCodexTurnInterruptParams,
+  buildCodexThreadMetadataResumeParams,
   buildCodexThreadResumeParams,
   buildCodexThreadStartParams,
   buildCodexTurnSteerParams,
@@ -90,6 +91,10 @@ import {
   createAskGrokTurnState,
   type AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
+import {
+  createAnalyzeVideoTurnState,
+  type AnalyzeVideoToolRuntime,
+} from './assistant-codex/analyze-video-tool.js'
 import {
   attachCodexAppServerProcessExitCleanup,
   attachCodexAbortListener,
@@ -137,10 +142,10 @@ import {
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
 import {
+  buildCodexSubagentUsageDraft,
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
-  readCodexCollabReceiverThreadIds,
 } from './assistant/providers/helpers.js'
 import {
   materializeCodexImages,
@@ -170,6 +175,9 @@ import type {
 import type {
   AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
+import type {
+  SafeToolCallValidationDigest,
+} from './assistant/tool-validation-digest.js'
 import {
   ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   normalizeAssistantResponseMediaList,
@@ -205,6 +213,9 @@ export type {
 export type {
   AskGrokToolRuntime,
 } from './assistant-codex/ask-grok-tool.js'
+export type {
+  AnalyzeVideoToolRuntime,
+} from './assistant-codex/analyze-video-tool.js'
 
 const CODEX_RPC_CLIENT_NAME = 'murph'
 const CODEX_RPC_CLIENT_TITLE = 'Murph'
@@ -243,10 +254,6 @@ const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
 const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
   'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
-// Bound on distinct subagent threads whose token usage is tracked per parent
-// turn. Far above any sane spawn fan-out; threads past the cap are ignored.
-const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
-
 type CodexAppServerProcessState =
   | 'idle'
   | 'reserved'
@@ -309,6 +316,7 @@ type CodexAppServerActiveTurnBinding = {
   onError(error: Error): void
   onFramingError(line: string): void
   onParsedMessage(message: CodexRpcMessage): void
+  onSubagentMessage?(message: CodexRpcMessage): void
   onStderrLine(line: string): void
   onStderrText(text: string): void
   onStdinError(error: unknown): VaultCliError | null
@@ -503,6 +511,7 @@ export interface CodexAppServerTurnInput {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
+  onAdditionalUsage?: ((usage: AssistantProviderUsageDraft) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
@@ -533,6 +542,7 @@ export interface CodexAppServerTurnInput {
   requireHostedPrivateImageDelivery?: boolean | null
   vaultRoot?: string | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
+  analyzeVideoRuntime?: AnalyzeVideoToolRuntime | null
   askGrokRuntime?: AskGrokToolRuntime | null
   workingDirectory: string
 }
@@ -781,6 +791,7 @@ export async function executeCodexAppServerTurn(
     publicInternetFetch: input.publicInternetFetch ?? null,
     tempRoot,
     voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+    analyzeVideoRuntime: input.analyzeVideoRuntime ?? null,
     askGrokRuntime: input.askGrokRuntime ?? null,
   }
 
@@ -1025,8 +1036,13 @@ class CodexAppServerProcess {
   // reply.
   private readonly detachedChildThreadIds = new Set<string>()
   private readonly detachedCompletedChildThreadIds = new Set<string>()
+  private readonly detachedChildMessageHandlers = new Map<
+    string,
+    NonNullable<CodexAppServerActiveTurnBinding['onSubagentMessage']>
+  >()
   private detachedChildViolation: string | null = null
   private readonly detachedRootThreadIds = new Set<string>()
+  private readonly pendingDetachedUsageReports = new Set<Promise<void>>()
   private stopCompleted = false
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
@@ -1279,11 +1295,41 @@ class CodexAppServerProcess {
     rejectPendingCodexRpcRequests(this.pendingRequests, error)
   }
 
-  sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+  sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.beginRequest(method, params).promise
+  }
+
+  sendRequestWithTimeout(input: {
+    method: string
+    params: Record<string, unknown>
+    timeoutLabel: string
+    timeoutMs: number
+  }): Promise<unknown> {
+    const request = this.beginRequest(input.method, input.params)
+    return withCodexRpcTimeout(
+      request.promise,
+      input.timeoutMs,
+      input.timeoutLabel,
+      () => {
+        this.pendingRequests.delete(request.id)
+      },
+    )
+  }
+
+  private beginRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): {
+    id: CodexRpcId
+    promise: Promise<unknown>
+  } {
     const id = this.nextRequestId
     this.nextRequestId += 1
 
-    return new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pendingRequests.set(id, {
         method,
         reject,
@@ -1299,6 +1345,7 @@ class CodexAppServerProcess {
         reject(failure)
       }
     })
+    return { id, promise }
   }
 
   sendNotification(method: string, params: Record<string, unknown>): void {
@@ -1329,6 +1376,7 @@ class CodexAppServerProcess {
       this.assertBackgroundWorkProcessAvailable()
       await this.waitForDetachedChildren(signal)
       this.assertDetachedChildrenQuiescent()
+      await this.waitForDetachedUsageReports(signal)
       await this.assertNoBackgroundTerminals(signal)
       throwIfCodexBackgroundWorkWaitAborted(signal)
       this.assertBackgroundWorkProcessAvailable()
@@ -1412,6 +1460,22 @@ class CodexAppServerProcess {
     }
   }
 
+  trackDetachedUsageReport(report: Promise<void>): void {
+    this.pendingDetachedUsageReports.add(report)
+    void report.finally(() => {
+      this.pendingDetachedUsageReports.delete(report)
+    })
+  }
+
+  private async waitForDetachedUsageReports(
+    signal: AbortSignal | null,
+  ): Promise<void> {
+    while (this.pendingDetachedUsageReports.size > 0) {
+      throwIfCodexBackgroundWorkWaitAborted(signal)
+      await Promise.all([...this.pendingDetachedUsageReports])
+    }
+  }
+
   private async assertNoBackgroundTerminals(
     signal: AbortSignal | null,
   ): Promise<void> {
@@ -1445,6 +1509,7 @@ class CodexAppServerProcess {
   private clearDetachedChildBoundary(): void {
     this.detachedChildThreadIds.clear()
     this.detachedCompletedChildThreadIds.clear()
+    this.detachedChildMessageHandlers.clear()
     this.detachedChildViolation = null
     this.detachedRootThreadIds.clear()
   }
@@ -1468,6 +1533,12 @@ class CodexAppServerProcess {
           )
         } else {
           this.detachedChildThreadIds.add(activity.agentThreadId)
+          if (this.activeTurn?.onSubagentMessage) {
+            this.detachedChildMessageHandlers.set(
+              activity.agentThreadId,
+              this.activeTurn.onSubagentMessage,
+            )
+          }
         }
       } else {
         this.recordDetachedChildViolation(
@@ -1739,12 +1810,6 @@ class CodexAppServerProcess {
     this.boundThreadModel = normalizeNullableString(model)
   }
 
-  // Exposed so a freshly bound turn can route foreign-thread events before
-  // its own thread/start response has produced the new thread id.
-  get lastBoundThreadId(): string | null {
-    return this.boundThreadId
-  }
-
   private handleIdleServerMessage(message: CodexRpcMessage): void {
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
@@ -1771,11 +1836,45 @@ class CodexAppServerProcess {
     })
   }
 
+  private routeSubagentMessage(message: CodexRpcMessage): boolean {
+    if (readCodexRpcResponseId(message) !== null) {
+      return false
+    }
+
+    const threadId = extractCodexThreadIdFromMessage(message)
+    if (!threadId || this.detachedRootThreadIds.has(threadId)) {
+      return false
+    }
+
+    let handler = this.detachedChildMessageHandlers.get(threadId)
+    const activeHandler = this.activeTurn?.onSubagentMessage
+    if (!handler && activeHandler) {
+      // The app-server process is exclusively owned by Assistant Engine. A
+      // foreign thread notification on an active root is therefore enough to
+      // correlate that child with the current turn; parent item shape is not a
+      // billing authorization boundary.
+      handler = activeHandler
+      this.detachedChildMessageHandlers.set(threadId, handler)
+    }
+    if (!handler) {
+      return false
+    }
+
+    if (isCodexTurnStartedMethod(readCodexEventMethod(message))) {
+      this.detachedChildThreadIds.add(threadId)
+    }
+    handler(message)
+    return true
+  }
+
   private handleStdoutLine(line: string): void {
     const parsed = tryParseJsonLine(line)
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
+      if (this.routeSubagentMessage(parsed.value)) {
+        return
+      }
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
       } else {
@@ -2942,6 +3041,44 @@ function createCodexSubagentTurnUsageKey(input: {
   return `${input.threadId}\u0000${input.turnId}`
 }
 
+interface CodexSubagentEffectiveMetadata {
+  model: string
+  modelProvider: string
+  serviceTier: AssistantProviderServiceTier | null
+}
+
+function readCodexSubagentEffectiveMetadataResult(input: {
+  result: unknown
+  threadId: string
+}): CodexSubagentEffectiveMetadata | null {
+  if (extractCodexThreadIdFromResult(input.result) !== input.threadId) {
+    return null
+  }
+
+  const result = readCodexRecord(input.result)
+  if (!result) {
+    return null
+  }
+
+  const model = readCodexNonEmptyString(result.model)
+  const modelProvider = readCodexNonEmptyString(result.modelProvider)
+  const serviceTier = result.serviceTier
+  if (
+    !model ||
+    !modelProvider ||
+    !Object.hasOwn(result, 'serviceTier') ||
+    (serviceTier !== null && serviceTier !== 'flex')
+  ) {
+    return null
+  }
+
+  return {
+    model,
+    modelProvider,
+    serviceTier,
+  }
+}
+
 function isCodexTurnCompletedMethod(method: string | null): boolean {
   return method === 'turn/completed'
 }
@@ -3186,8 +3323,9 @@ async function runCodexAppServerTurnOnProcess(
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
-  // Trusted turn-scoped murph.ask_grok provider-call ceiling: one counter per
-  // assistant turn, owned here and threaded into the dynamic-tool executor.
+  // Trusted turn-scoped provider-call ceilings: one counter per assistant turn,
+  // owned here and threaded into the dynamic-tool executor.
+  const analyzeVideoTurnState = createAnalyzeVideoTurnState()
   const askGrokTurnState = createAskGrokTurnState()
   const groupSharedReadTurnState = {
     currentSenderDecisionByMessageRef: new Map(),
@@ -3210,11 +3348,6 @@ async function runCodexAppServerTurnOnProcess(
     : null
   const subagentTokenUsageByTurn =
     new Map<string, CodexSubagentTurnTokenUsageSample>()
-  const trackedSubagentUsageThreadIds = new Set<string>()
-  // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
-  // collected live so evidenced subagent threads win buffer slots over
-  // stale/unattributed foreign threads when the cap is reached.
-  const collabReceiverThreadIds = new Set<string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -3222,6 +3355,7 @@ async function runCodexAppServerTurnOnProcess(
   const runtimeIssueInputs: AssistantRuntimeIssueInput[] = []
   const actionRuntimeIssueTracker = createCodexActionRuntimeIssueTracker()
   let computerToolsLockedAfterUserPause = false
+  let requiredFinalResponseFallback: string | null = null
   const requiredVaultFileApprovalUrls: string[] = []
   const requiredAutomationLocalAtClarifications =
     new Map<string, RequiredAutomationLocalAtClarification>()
@@ -3229,6 +3363,10 @@ async function runCodexAppServerTurnOnProcess(
     ? createCodexActionDiagnosticsReducer()
     : null
   let actionDiagnosticsTraceEmitted = false
+  let requiredFinalResponseFallbackOutcome:
+    | 'analyze-video-failure'
+    | 'analyze-video-success'
+    | null = null
   const assistantStreams = new Map<string, string>()
   const assistantStreamOrder: string[] = []
   const externallyVisibleAssistantOutputDeliveryContexts = new Set<number>()
@@ -3309,18 +3447,16 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
-  // Subagent usage drafts are derived lazily from the buffered per-thread
-  // samples so both the success result and the failure context can include
-  // whatever child usage was observed before the turn settled.
   const buildSubagentUsageDrafts = (): AssistantProviderUsageDraft[] =>
-    extractCodexSubagentUsageDrafts({
-      modelProvider: normalizeNullableString(input.modelProvider) ?? null,
-      ordinalStart: nextDynamicToolUsageOrdinal,
-      parentModel: normalizeNullableString(input.model) ?? null,
-      parentRawEvents: jsonEvents,
-      serviceTier: input.serviceTier ?? null,
-      subagentTokenUsageByTurn,
-    })
+    input.onAdditionalUsage
+      ? []
+      : extractCodexSubagentUsageDrafts({
+          modelProvider: normalizeNullableString(input.modelProvider) ?? null,
+          ordinalStart: nextDynamicToolUsageOrdinal,
+          parentModel: normalizeNullableString(input.model) ?? null,
+          serviceTier: input.serviceTier ?? null,
+          subagentTokenUsageByTurn,
+        })
 
   const hasNoReplyFinalActionPatch = (): boolean =>
     finalActionPatches.some((entry) => entry.patch.kind === 'none')
@@ -3334,6 +3470,7 @@ async function runCodexAppServerTurnOnProcess(
 
   const hasRequiredUserVisibleOutput = (): boolean =>
     computerToolsLockedAfterUserPause ||
+    requiredFinalResponseFallback !== null ||
     requiredAutomationLocalAtClarifications.size > 0 ||
     requiredVaultFileApprovalUrls.length > 0
 
@@ -4706,6 +4843,11 @@ async function runCodexAppServerTurnOnProcess(
             dynamicToolRequest.kind === 'generate-song'
               ? input.voiceMemoRuntime ?? null
               : null,
+          analyzeVideoRuntime:
+            dynamicToolRequest.kind === 'analyze-video'
+              ? input.analyzeVideoRuntime ?? null
+              : null,
+          analyzeVideoTurnState,
           askGrokRuntime:
             dynamicToolRequest.kind === 'ask-grok'
               ? input.askGrokRuntime ?? null
@@ -4718,6 +4860,20 @@ async function runCodexAppServerTurnOnProcess(
     ).then(async (result) => {
       if (dynamicToolRequest.kind === 'send-progress-update') {
         releaseDynamicProgressPending?.()
+      }
+      if (dynamicToolRequest.kind === 'analyze-video') {
+        const analyzeVideoFallback = normalizeNullableString(
+          result.requiredFinalResponseFallback,
+        )
+        if (analyzeVideoFallback !== null) {
+          if (result.rpcResult.success) {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-success'
+          } else if (requiredFinalResponseFallbackOutcome !== 'analyze-video-success') {
+            requiredFinalResponseFallback = analyzeVideoFallback
+            requiredFinalResponseFallbackOutcome = 'analyze-video-failure'
+          }
+        }
       }
       for (const runtimeIssueInput of result.runtimeIssueInputs ?? []) {
         pushRuntimeIssueInput(runtimeIssueInput)
@@ -4985,9 +5141,6 @@ async function runCodexAppServerTurnOnProcess(
         )
       }
     }
-    for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
-      collabReceiverThreadIds.add(receiverThreadId)
-    }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
@@ -5216,39 +5369,17 @@ async function runCodexAppServerTurnOnProcess(
       if (subagentTokenUsageByTurn.has(usageKey)) {
         return
       }
-      if (
-        !trackedSubagentUsageThreadIds.has(threadId)
-        && trackedSubagentUsageThreadIds.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS
-      ) {
-        const evictableThreadId = collabReceiverThreadIds.has(threadId)
-          ? [...trackedSubagentUsageThreadIds].find(
-            (trackedThreadId) => !collabReceiverThreadIds.has(trackedThreadId),
-          )
-          : undefined
-        if (evictableThreadId === undefined) {
-          return
-        }
-        trackedSubagentUsageThreadIds.delete(evictableThreadId)
-        for (const [trackedUsageKey, sample] of subagentTokenUsageByTurn) {
-          if (sample.threadId === evictableThreadId) {
-            subagentTokenUsageByTurn.delete(trackedUsageKey)
-          }
-        }
-      }
-      trackedSubagentUsageThreadIds.add(threadId)
       subagentTokenUsageByTurn.set(usageKey, {
         firstEvent: null,
         lastEvent: null,
         occurredAt: new Date().toISOString(),
+        providerRequestOutcome: 'succeeded',
         threadId,
         turnId: messageTurnId,
       })
       return
     }
-    if (
-      !isAssistantCodexTokenUsageEventType(eventMethod)
-      || !messageTurnId
-    ) {
+    if (!messageTurnId) {
       return
     }
 
@@ -5257,10 +5388,32 @@ async function runCodexAppServerTurnOnProcess(
       turnId: messageTurnId,
     })
     const sample = subagentTokenUsageByTurn.get(usageKey)
+    if (isCodexTurnCompletedMethod(eventMethod)) {
+      if (!sample) {
+        return
+      }
+      const status = extractCodexTurnStatus(message)
+      sample.providerRequestOutcome = status === 'interrupted'
+        ? 'aborted'
+        : isFailedCodexTurnStatus(status)
+          ? 'partial'
+          : 'succeeded'
+      if (!input.onAdditionalUsage) {
+        return
+      }
+      // Removing the terminal sample is the exactly-once fence.
+      subagentTokenUsageByTurn.delete(usageKey)
+      if (sample.firstEvent === null || sample.lastEvent === null) {
+        return
+      }
+      reportSubagentUsage(sample)
+      return
+    }
+    if (!isAssistantCodexTokenUsageEventType(eventMethod)) {
+      return
+    }
     if (!sample) {
-      // A child token sample without an observed start has no safe accounting
-      // timestamp. Parent collab evidence authorizes the child but cannot
-      // establish when its provider operation began.
+      // A child token sample without an observed start has no accounting timestamp.
       return
     }
     sample.firstEvent ??= message
@@ -5350,23 +5503,6 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
-    // Codex owns subagent/thread lifecycle. Murph only keeps foreign thread
-    // traffic away from the active parent turn: token usage is buffered for
-    // billing, server requests are denied, and other child events are dropped.
-    // Before a fresh thread/start response produces this turn's thread id, the
-    // previous bound thread id is enough to distinguish late child traffic.
-    const messageThreadId = extractCodexThreadIdFromMessage(message)
-    const knownParentThreadId =
-      codexThreadId ?? requestedResumeThreadId ?? codexProcess.lastBoundThreadId
-    if (
-      messageThreadId !== null &&
-      knownParentThreadId !== null &&
-      messageThreadId !== knownParentThreadId
-    ) {
-      handleSubagentThreadMessage(messageThreadId, message)
-      return
-    }
-
     const messageTurnId = extractCodexTurnIdFromMessage(message)
     const method = readCodexEventMethod(message)
     const requestId = readCodexRpcServerRequestId(message)
@@ -5420,6 +5556,15 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (
+      method === 'rawResponseItem/completed' ||
+      method === 'rawResponse/completed'
+    ) {
+      // Raw response notifications can contain provider payload content and
+      // do not belong in the parent turn's persisted event surface.
+      return
+    }
+
     handleAcceptedEvent(message, method)
   }
 
@@ -5457,6 +5602,40 @@ async function runCodexAppServerTurnOnProcess(
     method: string,
     params: Record<string, unknown>,
   ): Promise<unknown> => codexProcess.sendRequest(method, params)
+
+  const readSubagentEffectiveMetadata = (
+    threadId: string,
+  ): Promise<CodexSubagentEffectiveMetadata | null> =>
+    codexProcess.sendRequestWithTimeout({
+      method: 'thread/resume',
+      params: buildCodexThreadMetadataResumeParams(threadId),
+      timeoutLabel: 'thread/resume',
+      timeoutMs: CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+    }).then((result) =>
+      readCodexSubagentEffectiveMetadataResult({ result, threadId }),
+    ).catch(() => null)
+
+  const reportSubagentUsage = (
+    sample: CodexSubagentTurnTokenUsageSample,
+  ): void => {
+    const ordinal = nextDynamicToolUsageOrdinal++
+    const report = readSubagentEffectiveMetadata(sample.threadId)
+      .then(async (metadata) => {
+        if (!metadata) {
+          return
+        }
+        const draft = buildCodexSubagentUsageDraft({
+          metadata,
+          ordinal,
+          sample,
+        })
+        if (draft) {
+          await input.onAdditionalUsage?.(draft)
+        }
+      })
+      .catch(() => undefined)
+    codexProcess.trackDetachedUsageReport(report)
+  }
 
   const requireLiveTurnIds = (): {
     threadId: string
@@ -5604,6 +5783,12 @@ async function runCodexAppServerTurnOnProcess(
       )
     },
     onParsedMessage: handleParsedMessage,
+    onSubagentMessage(message) {
+      const threadId = extractCodexThreadIdFromMessage(message)
+      if (threadId) {
+        handleSubagentThreadMessage(threadId, message)
+      }
+    },
     onStderrLine(line) {
       const progressEvent = extractCodexStatusEventFromStderrLine(line)
       if (progressEvent) {
@@ -5659,11 +5844,6 @@ async function runCodexAppServerTurnOnProcess(
       assertCodexResumeContextMatches({
         input,
         requestedThreadId: resumeThreadId,
-        threadResult,
-      })
-    } else if (normalizeNullableString(input.permissions)) {
-      assertCodexThreadStartPermissionAttestation({
-        input,
         threadResult,
       })
     }
@@ -5893,6 +6073,10 @@ async function runCodexAppServerTurnOnProcess(
     : finalResponseCardTextFallback
       ? renderAssistantWorkoutResponseCardText(finalResponseCardTextFallback)
       : modelFinalMessage
+  const requiredSemanticFinalMessage =
+    normalizeNullableString(semanticFinalMessage) ??
+    requiredFinalResponseFallback ??
+    semanticFinalMessage
   const requiredAutomationLocalAtClarificationsInOrder =
     [...requiredAutomationLocalAtClarifications.values()]
   const deliveredFinalResponseCard =
@@ -5901,22 +6085,25 @@ async function runCodexAppServerTurnOnProcess(
       : null
   const finalMessage = appendRequiredVaultFileApprovalUrls(
     appendRequiredAutomationLocalAtClarification(
-      semanticFinalMessage,
+      requiredSemanticFinalMessage,
       requiredAutomationLocalAtClarificationsInOrder,
     ),
     requiredVaultFileApprovalUrls,
   )
+  const semanticTranscriptMessage = finalResponseCard
+    ? requiredAutomationLocalAtClarificationsInOrder.length === 0
+      ? renderAssistantResponseCardTranscriptText(finalResponseCard)
+      : renderAssistantResponseCardText(finalResponseCard)
+    : finalResponseCardTextFallback
+      ? renderAssistantWorkoutResponseCardTranscriptText(
+          finalResponseCardTextFallback,
+        )
+      : normalizeNullableString(modelFinalMessage) ??
+        (finalResponseMedia.length > 0 ? '' : null)
   const transcriptMessage = appendRequiredAutomationLocalAtClarification(
-    finalResponseCard
-      ? requiredAutomationLocalAtClarificationsInOrder.length === 0
-        ? renderAssistantResponseCardTranscriptText(finalResponseCard)
-        : renderAssistantResponseCardText(finalResponseCard)
-      : finalResponseCardTextFallback
-        ? renderAssistantWorkoutResponseCardTranscriptText(
-            finalResponseCardTextFallback,
-          )
-        : normalizeNullableString(modelFinalMessage) ??
-          (finalResponseMedia.length > 0 ? '' : null),
+    normalizeNullableString(semanticTranscriptMessage) ??
+      requiredFinalResponseFallback ??
+      semanticTranscriptMessage,
     requiredAutomationLocalAtClarificationsInOrder,
   )
   if (
@@ -6013,63 +6200,6 @@ function mergeAutomationRelativeDateReferenceWindows(
   }
 }
 
-function assertCodexThreadStartPermissionAttestation(input: {
-  input: CodexAppServerPreparedTurnInput
-  threadResult: unknown
-}): void {
-  const result = asCodexRecord(input.threadResult)
-  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
-  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
-  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
-  const instructionSources = Array.isArray(result?.instructionSources)
-    ? result.instructionSources
-    : null
-  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
-  const mismatchedFields: string[] = []
-
-  const permissionProfileMismatch =
-    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
-      normalizeNullableString(input.input.permissions) ||
-    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
-  if (permissionProfileMismatch) {
-    mismatchedFields.push('activePermissionProfile')
-  }
-  if (
-    !actualRoots ||
-    actualRoots.length !== expectedRoots.length ||
-    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
-  ) {
-    mismatchedFields.push('runtimeWorkspaceRoots')
-  }
-  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
-    mismatchedFields.push('cwd')
-  }
-  if (
-    input.input.processLifetime === 'one-shot' &&
-    (instructionSources === null || instructionSources.length !== 0)
-  ) {
-    mismatchedFields.push('instructionSources')
-  }
-  if (
-    asCodexString(result?.approvalPolicy) !==
-    mapCodexAppServerApprovalPolicy(input.input.approvalPolicy)
-  ) {
-    mismatchedFields.push('approvalPolicy')
-  }
-  if (mismatchedFields.length === 0) {
-    return
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested named-permission execution context.',
-    {
-      mismatchedFields,
-      retryable: false,
-    },
-  )
-}
-
 function emitCodexSuppressedFinalMessageTrace(input: {
   codexThreadId: string | null
   finalActionKind: AssistantNoReplyDisposition['kind']
@@ -6158,39 +6288,10 @@ function isInvalidDynamicToolRequest(
 ): request is Extract<
   MurphDynamicToolRequest,
   {
-    kind:
-      | 'invalid-generate-image-arguments'
-      | 'invalid-automation-arguments'
-      | 'invalid-assistant-style-arguments'
-      | 'invalid-computer-arguments'
-      | 'invalid-device-arguments'
-      | 'invalid-generate-voice-memo-arguments'
-      | 'invalid-pending-vault-files-arguments'
-      | 'invalid-finish-without-reply-arguments'
-      | 'invalid-progress-arguments'
-      | 'invalid-reaction-arguments'
-      | 'invalid-reply-target-arguments'
-      | 'invalid-product-feedback-arguments'
-      | 'invalid-response-card-arguments'
-      | 'invalid-response-media-arguments'
+    validationDigest: SafeToolCallValidationDigest
   }
 > {
-  return (
-    request.kind === 'invalid-generate-image-arguments' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'invalid-assistant-style-arguments' ||
-    request.kind === 'invalid-computer-arguments' ||
-    request.kind === 'invalid-device-arguments' ||
-    request.kind === 'invalid-generate-voice-memo-arguments' ||
-    request.kind === 'invalid-pending-vault-files-arguments' ||
-    request.kind === 'invalid-finish-without-reply-arguments' ||
-    request.kind === 'invalid-progress-arguments' ||
-    request.kind === 'invalid-reaction-arguments' ||
-    request.kind === 'invalid-reply-target-arguments' ||
-    request.kind === 'invalid-product-feedback-arguments' ||
-    request.kind === 'invalid-response-card-arguments' ||
-    request.kind === 'invalid-response-media-arguments'
-  )
+  return 'validationDigest' in request
 }
 
 function isSerializedDynamicToolRequest(

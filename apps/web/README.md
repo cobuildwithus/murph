@@ -815,7 +815,7 @@ Hosted onboarding extras:
 - `HOSTED_MAILBOX_FINGERPRINT_KEY`
 - `HOSTED_ONBOARDING_SIGNUP_PHONE_NUMBER`
 - `RESEND_API_KEY`, `HOSTED_SIGNUP_WELCOME_EMAIL_FROM`, and `HOSTED_SIGNUP_WELCOME_EMAIL_FOUNDER_NAME` enable the plain-text post-activation signup welcome email to the member's verified email address, or to the Stripe checkout email when no verified email is linked yet. Leave any of them unset to disable the send path.
-- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. Leave it unset to disable the internal notification path.
+- `HOSTED_SIGNUP_NOTIFICATION_EMAILS` optionally enables a plain-text internal notification to comma-separated recipients after hosted onboarding commits a member activation. Starter enrollment, the Checkout success return, Stripe reconciliation, and Family invite acceptance from the browser, Linq, or Telegram register one post-response task at their first post-commit boundary and share the same canonical-access, durable per-member notification gate. When available, the email uses temporary encrypted context to add approximate network city/region/country, local time, and the exact signup surface. A context-free direct path can label its exact activation surface; batch activation omits source when per-member provenance is unavailable. The email never includes the member ID, request IP, coordinates, or provider event identifiers. Leave the variable unset to disable the internal notification path.
 - `HOSTED_SIGNUP_WELCOME_EMAIL_TIMEOUT_MS` optionally bounds the Resend request timeout; the default is 10 seconds.
 - `HOSTED_LINQ_ALERT_EMAIL_FROM` and `HOSTED_LINQ_ALERT_EMAILS`, together with
   `RESEND_API_KEY`, enable the shared plain-text operational channel. Stripe
@@ -1003,7 +1003,7 @@ Hosted AI usage metering:
 - Web derives one read-only member plan-usage projection from that same allowance resolver and usage ledger for Settings and `murph.plan_usage`. It persists no forecast and performs no Stripe read. `recommendedAction` is thresholded and may return `add_usage` only for eligible direct paid Pulse and Edge members; the authenticated Settings surface exposes the fixed $5, $10, and $25 catalog, including the active Family owner's authorized own-seat target. An opted-in `subscriptionActionQuote` returns current terms for an explicit subscription request even below the threshold; it is not a recommendation or consent. Callers that send the original empty request receive the original response shape with that field omitted.
 - Settings keeps the aggregate usage meter as the only current-capacity view. Personal and owner-seat Family checkout success returns reconcile and refresh the authenticated beneficiary's present meter without a confirmation modal or messaging handoff, while one pre-mounted visually hidden polite status region announces fulfillment; only a failed or unresolved return opens compact payment recovery. A personal return with unavailable usage status, another active Family member, and former-member recovery retain one compact close-owned result because their meter is not present; the personal copy confirms durable account credit without claiming current availability. The Family roster owns an exact active-member return without requiring its Manage dialog to open, and closing an off-meter result owns terminal refresh so it cannot disappear before dismissal. A fulfilled purchase starts a fresh 0%-used display window, and later counted usage advances it without changing admission or ledger accounting. Its read-only activity detail leads with compact mission status and reward ownership, keeps requirements and selection dates in a native details disclosure, then shows flat purchase-grant history with added amount, source, and date.
 - Usage-credit payment accepts the existing personal self-target, an authenticated active Family owner selecting one exact active unsuspended Family membership, or the existing hosted-group funding target. Family admission re-binds the opaque path selector to the authenticated owner, their active unsuspended group, the exact active member, and that group's canonical `HostedAccountGroupBillingRef` customer. Every flow accepts only a server-owned offer code and single-use request key, re-fetches the configured active one-time Price to verify its exact single-currency amount and shape, and keeps the browser from choosing an arbitrary amount, Price, Customer, payer, beneficiary, grant, or Checkout URL.
-- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, or $20 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. A no-navigation pending recovery keeps one focused live status region, performs bounded authenticated management reads, transitions to explicit confirmation, and falls back to a read-only status recheck without starting another payment. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
+- Hosted-group funding offers monthly sponsorship first and one-time contribution second at every current capacity. One-time amount choices use plain `usage` copy and open in the shared bottom drawer on phones, with the contribution action pinned above the safe area, while retaining the centered desktop dialog. Monthly activation freezes one exact $5 purchase plus a payer/group authorization with a $5, $10, $20, or $50 maximum. The durable settlement seam may admit one deterministic exact-$5 refill under the group beneficiary lock when capacity is low; the existing Stripe minute sweep charges it after commit. Pending and fulfilled purchases derive period commitment, unused ledger credit carries forward, and the authorization never stores a balance. Periods roll lazily from the successful activation anchor, including month-end. Payment failure blocks further automatic charges until the authenticated payer follows the private recovery path. A no-navigation pending recovery keeps one focused live status region, performs bounded authenticated management reads, transitions to explicit confirmation, and falls back to a read-only status recheck without starting another payment. Automatic refills create no sponsorship moment or refill-specific room notification. Assistant-visible group usage exposes only whether a funding ask is timely and the first-party funding URL: low capacity stays quiet while an automatic refill is available or pending, otherwise it uses the ordinary group funding heads-up, and every exhausted room receives the ordinary pause copy plus the link. The funding page separately preserves the single-automatic-sponsor invariant and private payer management.
 - Personal, Family, and group funding use Stripe `mode=payment` Checkout with Adaptive Pricing disabled. Current-policy personal and Family purchases resolve the exact Murph billing Subscription whose Customer matches the frozen purchase, then use its attached explicit default card or inherited attached Customer default. Missing, stale, terminal, customer-mismatched, unattached, or legacy Source-only exact-subscription state stays in Checkout, and unrelated Subscriptions never participate. Group funding has no required billing Subscription and may use the attached Customer default or sole attached card only when no legacy Customer default Source exists. Stripe's redisplay setting controls Checkout presentation rather than whether the existing subscription card can fund the payer's explicit top-up. The service creates an unconfirmed PaymentIntent, then rechecks active payer, still-created purchase state, and the current exact personal or Family billing Customer, Subscription, canonical status, suspension state, and last accepted Stripe-event time while durably binding that intent under the payer lock before off-session confirmation. A billing-reference change, deletion, or terminal-state race cancels the unbound intent and never confirms it; after bind, recovery remains tied to that exact intent rather than retargeting. Ambiguous responses remain bound to that exact intent and frozen offer, the browser preserves the original amount/request key for recovery, and authentication or card failure may open Checkout only after verified cancellation. The payer-owned cancel path also resolves a sessionless direct attempt from Settings or a target-conflict surface. Current-policy Checkout asks the payer whether to save the selected method so Stripe may present it in later Checkout flows, but ordinary one-time purchases do not force that choice. Monthly sponsorship activation and recovery retain future-use setup and explicitly accept only Stripe card methods, including wallets that materialize as card methods, because automatic refills derive the exact reusable card from the latest provider-verified explicit sponsorship payment: the ordinal-zero direct activation or a Checkout-backed activation or recovery. One-time contributions retain Dashboard-managed dynamic payment methods. A legacy sponsorship method outside the reusable-card domain returns to explicit recovery without substituting an attached method, and an unbound legacy failed refill upgrades to the current card-only request before opening recovery Checkout. Sessionless automatic refills, card fingerprints, attached-method count, and separate one-time contributions never replace that authority. Murph stores no raw card data and never charges from amount selection alone.
 - Family conversion reuses an exact active direct paid or Trial Subscription in place under the owner lock; a Trial ends immediately and Trial-only metadata is cleared. Web and the private Family tool both disclose the current server-owned immediate-conversion terms and require fresh explicit confirmation before ending an active Trial. Automatic phone/email invite capacity carries its normalized target into the capacity owner, which repeats the active-member check under the same lock immediately before Stripe; acceptance repeats admission checks transactionally, while Telegram remains open-seat-only. An accepting member's exact never-paid, owner-only draft is removed only after the invite is claimed and the destination membership is written in the same transaction. A draft with a live Checkout remains a conflict until the authenticated owner uses Settings to retrieve and expire that exact Session outside the transaction; locked revalidation preserves any concurrent completion, replacement, invite, membership, capacity, or billing authority. Suspended direct members retain exact-customer Portal management, inactive Family billing projects a Portal recovery action, and sponsorship payers retain cancellation-only management after beneficiary authority disappears. The first event that recognizes a competing Family-sponsored direct subscription performs exact cancel/refund inspection before local terminalization; complex refund shapes remain support-required.
 - A browser return or synchronous PaymentIntent response never grants credit. The existing verified Stripe event receipt owner re-fetches Checkout and line-item facts when present plus the exact PaymentIntent and Charge, then commits at most one purchase grant. After a new grant commits, the same durable Stripe-event retry lane requests the normal runtime recheck so preserved blocked input can resume.
@@ -1197,6 +1197,11 @@ Callback auth contract:
   payload binding succeed, `apps/web` consumes the SHA-256 nonce with one
   primary-Postgres insert; the `nonce_hash` primary-key conflict rejects a
   replay, and callback admission never sweeps expired rows
+- `GET /api/internal/hosted-orchestration/temporal-worker/binding-admission`
+  is the memberless exception for production Temporal worker startup. It binds
+  the signature to a null member, rejects a presented member header, consumes
+  the nonce under a reserved system owner in the same replay table, and returns
+  only the `bindings-v1` Web owner/key identity with `Cache-Control: no-store`.
 - the existing hourly hosted-retention cron removes only strictly expired nonce
   rows in bounded `expires_at`, `nonce_hash` order with `FOR UPDATE SKIP LOCKED`;
   account deletion still independently deletes the member's nonce rows
@@ -2072,30 +2077,69 @@ Current hosted billing assumptions:
 - `/ops/usage` is the operator-only allowance inspection and recovery surface.
   It derives personal-member and synthetic-group message activity from retained
   canonical mailbox rows, derives all-time priced AI cost from immutable usage
-  rows, and labels the mailbox retention boundary. The table and reset reuse the
-  runtime's canonical allowance gate. A row reset verifies the displayed
-  current-period and usage-credit versions. Paid, Family, and container resets
-  atomically clear current included spend and the block. An exhausted canonical
-  Starter reset instead appends one fresh $4.50 grant under the beneficiary
-  lock, keyed to the displayed ledger version, then clears the derived period.
-  The distinct Ops grant source is excluded from Starter enrollment and
-  conversion metrics. Both paths release only that capacity epoch's logical
-  notice claim, preserve immutable usage, prior grants and debits, purchased and
-  referral credit, billing state, mailbox rows, and delivery history, and refuse
-  to race an in-flight notice dispatch. After commit the route signals the
-  existing runtime recheck; a
-  rejected or bounded-timeout wake is returned as a committed partial result
-  with a wake-only retry. For Starter recovery, the page reconstructs that
-  wake-only action after close or reload from the active Ops grant and
-  unconsumed mailbox work previously denied for usage. The table reads its
-  decision and reset version from one repeatable database snapshot, and derives
-  blocked/available only from
-  that canonical decision rather than the potentially stale persisted marker.
-  Historical notice status is displayed independently from current admission.
-  A later crossing reuses the logical claim key but receives a fresh durable
-  delivery ID and provider idempotency key. Generic runtime and webhook
+  rows, and labels the mailbox retention boundary. The ordinary list keeps its
+  25-row primary-key cursor pages. URL-backed search has no page controls and
+  accepts only one complete hosted ID, one exact verified email, or four final
+  phone digits. Email lookup uses the existing blind-index read candidates and
+  never selects or decrypts the encrypted address; phone lookup uses only the
+  persisted masked hint. Search hydrates at most 100 ID-ordered matches and
+  explicitly asks the operator to narrow the query when a 101st match proves
+  overflow. Capped or multi-member email/phone candidates are discovery-only;
+  row mutations remain locked until exact hosted-ID lookup resolves one target.
+  Submitting or clearing a query closes any open row confirmation and locks the
+  old result set's row mutation paths until the new server render arrives.
+  Whole-population summary totals remain unfiltered.
+- The table and reset reuse the runtime's canonical allowance gate. A row reset
+  verifies the displayed current-period and usage-credit versions. Paid,
+  Family, and container resets atomically clear current included spend and the
+  block. An exhausted canonical Starter reset instead appends one fresh $4.50
+  grant under the beneficiary lock, keyed to the displayed ledger version, then
+  clears the derived period. The distinct Ops grant source is excluded from
+  Starter enrollment and conversion metrics. Both paths release only that
+  capacity epoch's logical notice claim, preserve immutable usage, prior grants
+  and debits, purchased and referral credit, billing state, mailbox rows, and
+  delivery history, and refuse to race an in-flight notice dispatch. After
+  commit the route signals the existing runtime recheck; a rejected or
+  bounded-timeout wake is returned as a committed partial result with a
+  wake-only retry. For Starter recovery, the page reconstructs that wake-only
+  action after close or reload from the active Ops grant and unconsumed mailbox
+  work previously denied for usage. The table reads its decision and reset
+  version in one short repeatable-read transaction per admitted row, processed
+  sequentially, and derives blocked/available only from that canonical decision
+  rather than the potentially stale persisted
+  marker. Historical notice status is displayed independently from current
+  admission. A later crossing reuses the logical claim key but receives a fresh
+  durable delivery ID and provider idempotency key. Generic runtime and webhook
   delivery fences keep deterministic durable IDs for latency and receipt
   correlation.
+- `Reset everyone` requires the exact typed phrase, ignores any active search,
+  and walks ascending hosted IDs in authenticated same-origin batches of 10.
+  Members are reset sequentially through the same canonical transaction; one
+  stale re-read is allowed, the batch stops before acknowledging a remaining
+  failure, and each runtime wake begins only after that member commits. The page
+  reports processed/reset/unchanged/skipped/pending-wake/failed outcomes, loops
+  one request at a time while open, records the unfiltered starting population
+  as a reference, and makes clear that the live population can change. An
+  operator-requested pause takes effect after the current acknowledged batch
+  and resumes the same operation from that cursor. Known failures use the same
+  resume boundary. Ambiguous population responses may rewalk from the
+  beginning with the same browser-generated operation UUID. Pending-wake
+  recovery instead pages only that UUID's existing receipts and never re-enters
+  population mutation. It can be hidden without locking ordinary search or row
+  recovery, remains hidden across remounts and search navigation until the
+  operator explicitly reopens it under the same UUID, or is cleared after a
+  transient warned abandonment. One append-only
+  per-member receipt is written atomically with the first reset outcome; replay
+  returns that outcome without clearing later included usage or duplicating a
+  consumed Starter grant, and can repeat only a required post-commit runtime
+  wake. The same locked transaction reads the live gate and exact period: a
+  valid included allowance with no materialized zero-usage row commits a skip
+  and advances, while accounting that commits first leaves a period for the
+  reset to observe. The dialog claims completion only after a pass has no
+  pending wake. It
+  does not snapshot the population, pause usage, overlap interactive
+  transactions, or add a campaign, queue, scheduler, or duplicate usage read
+  model.
 - Delayed legacy Stripe trial objects remain eligible only for exact bounded
   reconciliation or cleanup. They cannot create, extend, or restore free
   access; starter capacity and paid invoices are the current authorities.

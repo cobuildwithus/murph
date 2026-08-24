@@ -474,6 +474,7 @@ test.sequential("provider and event CLI usecases map renamed core error codes to
           queryRuntime: {
             readVault: async () => ({}),
             lookupEntityById: () => eventRecord,
+            resolveCanonicalEntityInFamily: async () => eventRecord,
           },
           run: async ({ records }) => {
             const { editEventRecord } = records;
@@ -537,18 +538,28 @@ test.sequential("editEventRecord strips stored lifecycle metadata before calling
 
   await withCliUsecaseMocks({
     coreRuntime: {
+      readEvent: async () => ({
+        eventId: eventRecord.primaryLookupId,
+        ledgerFile: eventRecord.path,
+        event: eventRecord.attributes,
+      }),
       upsertEvent: async (input: { payload: Record<string, unknown> }) => {
         capturedPayloads.push(input.payload);
         return {
           eventId: "evt_01JNV422Y2M5ZBV64ZP4N1DRB1",
           ledgerFile: "ledger/events/2026/2026-03.jsonl",
           created: false,
+          event: {
+            ...input.payload,
+            lifecycle: { revision: 8 },
+          },
         };
       },
     },
     queryRuntime: {
       readVault: async () => ({}),
       lookupEntityById: () => eventRecord,
+      resolveCanonicalEntityInFamily: async () => eventRecord,
     },
     run: async ({ records }) => {
       const { editEventRecord } = records;
@@ -582,6 +593,10 @@ test.sequential("experiment and journal CLI usecases map renamed core error code
     queryRuntime: {
       readVault: async () => ({}),
       lookupEntityById: () => ({
+        family: "experiment",
+        path: "experiments/focus-sprint.md",
+      }),
+      resolveCanonicalEntityInFamily: async () => ({
         family: "experiment",
         path: "experiments/focus-sprint.md",
       }),

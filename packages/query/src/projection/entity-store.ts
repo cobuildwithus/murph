@@ -139,12 +139,12 @@ function queryStoredCanonicalEntities(
     parameters.push(...filters.kinds);
   }
   if (filters.from) {
-    whereClauses.push("(date >= ? OR occurred_at >= ?)");
-    parameters.push(filters.from, `${filters.from}T00:00:00.000Z`);
+    whereClauses.push("COALESCE(date, substr(occurred_at, 1, 10)) >= ?");
+    parameters.push(filters.from);
   }
   if (filters.to) {
-    whereClauses.push("(date <= ? OR occurred_at <= ?)");
-    parameters.push(filters.to, `${filters.to}T23:59:59.999Z`);
+    whereClauses.push("COALESCE(date, substr(occurred_at, 1, 10)) <= ?");
+    parameters.push(filters.to);
   }
 
   const limit = filters.limit === null ? null : normalizeCanonicalEntityLimit(filters.limit ?? 1_000);

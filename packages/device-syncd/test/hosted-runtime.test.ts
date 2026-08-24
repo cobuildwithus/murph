@@ -3200,6 +3200,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
             emptyBackfillAttempts: 2,
             historicalBackfill: true,
             historicalBackfillVersion: 2,
+            historicalProofFirstSeenAt: "2026-04-01T12:00:00Z",
+            historicalProofSourceProviderSlug: "google_health",
             historicalProviderRecordsSeen: true,
             historicalRecordsSeen: true,
             historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -3236,6 +3238,8 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
       emptyBackfillAttempts: 2,
       historicalBackfill: true,
       historicalBackfillVersion: 2,
+      historicalProofFirstSeenAt: "2026-04-01T12:00:00.000Z",
+      historicalProofSourceProviderSlug: "google_health",
       historicalProviderRecordsSeen: true,
       historicalRecordsSeen: true,
       historicalUnresolvedProviderRecordIdentitiesJson: unresolvedIdentitiesJson,
@@ -3282,9 +3286,11 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
           kind: "resource",
           payload: {
             objectId: "",
-            resource: "heartrate",
+            resource: "workout_stream",
             resourceCategory: "timeseries",
             sourceProviderSlug: "",
+            workoutStreamEmptyReplay: true,
+            workoutStreamEmptySeen: true,
             windowStart: "2026-04-08T00:00:00Z",
           },
         },
@@ -3292,8 +3298,10 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     });
 
     expect(hint?.jobs?.[0]?.payload).toEqual({
-      resource: "heartrate",
+      resource: "workout_stream",
       resourceCategory: "timeseries",
+      workoutStreamEmptyReplay: true,
+      workoutStreamEmptySeen: true,
       windowStart: "2026-04-08T00:00:00.000Z",
     });
   });

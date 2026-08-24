@@ -10,6 +10,12 @@ import {
 import type { GenerateVoiceMemoToolResult } from '../generate-voice-memo-tool.js'
 
 export interface DynamicToolResult {
+  /**
+   * Trusted runtime-owned text that must be delivered when the model supplies
+   * no response text or card. Analyze-video uses this for the best completed
+   * tool outcome so successful observations cannot disappear behind no-reply.
+   */
+  requiredFinalResponseFallback?: string
   responseMediaPatch?: {
     media: AssistantResponseMedia[]
     op: 'append'

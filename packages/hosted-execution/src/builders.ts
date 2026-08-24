@@ -15,9 +15,11 @@ import type {
   HostedExecutionConversationMessageWake,
   HostedExecutionAssistantNotificationRequestedPayload,
   HostedExecutionAssistantNotificationRequestedWake,
+  HostedExecutionAssistantNotificationRoute,
   HostedExecutionDeviceSyncWake,
   HostedExecutionDeviceSyncWakeEvent,
   HostedExecutionDailyMetricReportedWake,
+  HostedExecutionEnvironmentInterviewCompletedWake,
   HostedExecutionEnvironmentVoiceCapturedWake,
   HostedExecutionEmailConversationMessagePayload,
   HostedExecutionLinqConversationMessagePayload,
@@ -495,6 +497,8 @@ export function buildHostedExecutionMemberActivatedWake(input: {
   initialGroupRoomModelMarkdown?: string | null;
   memberChannels: HostedExecutionMemberChannels;
   memberId: string;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   occurredAt: string;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
@@ -517,6 +521,14 @@ export function buildHostedExecutionMemberActivatedWake(input: {
       ? {}
       : { initialGroupRoomModelMarkdown }),
     memberChannels: { ...input.memberChannels },
+    onboardingFollowupEnrollment: input.onboardingFollowupEnrollment ?? true,
+    ...(input.onboardingFollowupRoute === undefined
+      ? {}
+      : {
+          onboardingFollowupRoute: input.onboardingFollowupRoute
+            ? cloneAssistantNotificationRoute(input.onboardingFollowupRoute)
+            : null,
+        }),
     ...(input.signupWelcome === undefined
       ? {}
       : {
@@ -552,6 +564,9 @@ function cloneAssistantNotificationPayload(
     ...(value.firstContact === undefined
       ? {}
       : { firstContact: value.firstContact ? { ...value.firstContact } : null }),
+    ...(value.groupContextHandoff === undefined
+      ? {}
+      : { groupContextHandoff: { ...value.groupContextHandoff } }),
     ...(value.privateAssistantAskCompletion === undefined
       ? {}
       : {
@@ -966,6 +981,41 @@ export function buildHostedExecutionEnvironmentVoiceCapturedWake(input: {
       sha256: input.sha256,
     },
     kind: "environment-voice.captured",
+    occurredAt: input.occurredAt,
+    userId: input.memberId,
+  };
+}
+
+export function buildHostedExecutionEnvironmentInterviewCompletedWake(input: {
+  completedAt: string;
+  completionId: string;
+  eventId: string;
+  memberId: string;
+  occurredAt: string;
+  topics: HostedExecutionEnvironmentInterviewCompletedWake["environmentInterview"]["topics"];
+}): HostedExecutionEnvironmentInterviewCompletedWake {
+  if (input.occurredAt !== input.completedAt) {
+    throw new TypeError(
+      "Hosted environment interview wake occurredAt must match completedAt.",
+    );
+  }
+
+  return {
+    environmentInterview: {
+      completedAt: input.completedAt,
+      completionId: input.completionId,
+      topics: input.topics.map((topic) => ({
+        answers: topic.answers.map((answer) => ({
+          aspectId: answer.aspectId,
+          indicatorId: answer.indicatorId,
+          ...(answer.note === undefined ? {} : { note: answer.note }),
+          value: answer.value,
+        })),
+        topicId: topic.topicId,
+      })),
+    },
+    eventId: input.eventId,
+    kind: "environment-interview.completed",
     occurredAt: input.occurredAt,
     userId: input.memberId,
   };

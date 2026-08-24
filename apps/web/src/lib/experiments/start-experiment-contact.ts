@@ -45,6 +45,7 @@ export type ExperimentStartContactAction =
 interface ExperimentStartContactOptionsInput {
   accountContainer?: HostedPrivyLinkedAccountContainer | null;
   initialContactChannels?: Partial<ExperimentStartContactChannels> | null;
+  murphEmailAddress?: string | null;
   murphPhoneNumber?: string | null;
   protocolTitle: string;
 }
@@ -110,8 +111,11 @@ export function resolveExperimentStartContactOptions(
     },
     {
       connected: contactChannels.email,
-      description: "Open a ready-to-send email to Murph.",
+      description: input.murphEmailAddress
+        ? "Open a ready-to-send email to Murph."
+        : "Email Murph to get a private reply, then send the experiment request.",
       href: buildExperimentStartEmailHref({
+        address: input.murphEmailAddress ?? null,
         body: message,
         protocolTitle: input.protocolTitle,
       }),
@@ -228,14 +232,21 @@ function buildExperimentStartSmsHref(input: {
 }
 
 function buildExperimentStartEmailHref(input: {
+  address: string | null;
   body: string;
   protocolTitle: string;
 }): string {
   const subject = `Start experiment: ${normalizeOptionalString(input.protocolTitle) ?? "Murph protocol"}`;
-  return buildMurphEmailHref({
-    body: input.body,
-    subject,
-  });
+  return input.address
+    ? buildMurphEmailHref({
+        address: input.address,
+        body: input.body,
+        subject,
+      })
+    : buildMurphEmailHref({
+        body: "Please send me a private Murph reply.",
+        subject: "Start a private Murph conversation",
+      });
 }
 
 function normalizeOptionalString(value: string | null | undefined): string | null {

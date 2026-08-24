@@ -19,6 +19,7 @@ import {
 } from "@murphai/hosted-execution/pending-group-setup";
 import {
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+  HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_DISCLOSURE_PERMISSION_TEXT_MAX_CODE_POINTS,
   HOSTED_RUNTIME_GROUP_JOIN_OFFER_LEGACY_MESSAGE_TEMPLATE,
 } from "@murphai/hosted-execution/runtime-control";
@@ -68,9 +69,13 @@ import {
   executeMurphDynamicToolRequest,
   GROUP_ACCESS_FRESH_NATIVE_RESPONSE_HANDLING,
   MURPH_DYNAMIC_TOOLS,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_FAMILY_TOOLS,
   MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_TOOL_FAMILY_ACTIONS,
+  MURPH_GROUP_TOOL_NAME,
+  MURPH_GROUP_TOOL_PROPERTIES,
   readMurphDynamicToolRequest,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.ts";
@@ -87,7 +92,7 @@ function groupToolCall(
       callId: options.callId ?? "call-test",
       namespace: "murph",
       threadId: "thread-test",
-      tool: MURPH_GROUP_TOOL.name,
+      tool: MURPH_GROUP_TOOL_NAME,
       turnId: "turn-test",
     },
   };
@@ -119,7 +124,7 @@ const SIGNED_PRIVATE_IMAGE_URL =
 const SIGNED_PRIVATE_JPEG_URL =
   SIGNED_PRIVATE_IMAGE_URL.replace("group-avatar.png", "group-avatar.jpg");
 const GROUP_TOOL_INPUT_PROPERTIES =
-  MURPH_GROUP_TOOL.inputSchema.allOf[0].properties;
+  MURPH_GROUP_TOOL_PROPERTIES;
 
 function maximumEscapedHeartRateZoneRecords() {
   const sources = Array.from({ length: 8 }, (_, index) => ({
@@ -186,75 +191,14 @@ function maximumSourceTaggedWorkoutRecords() {
 }
 
 describe("murph.group dynamic tool", () => {
-  it("advertises the supported actions", () => {
-    expect(MURPH_GROUP_TOOL.deferLoading).toBe(true);
+  it("advertises the six focused families and their shared property contracts", () => {
+    expect(MURPH_GROUP_FAMILY_TOOLS).toHaveLength(6);
+    for (const familyTool of MURPH_GROUP_FAMILY_TOOLS) {
+      expect(MURPH_DYNAMIC_TOOLS).toContain(familyTool);
+    }
     expect(MURPH_DYNAMIC_TOOLS).not.toContain(MURPH_GROUP_SHARED_READ_TOOL);
     expect(MURPH_DYNAMIC_TOOLS)
       .not.toContain(MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL);
-    expect(GROUP_TOOL_INPUT_PROPERTIES.action.enum).toEqual([
-      "ask",
-      "ask_current_sender",
-      "clarify_current_sender",
-      "continue_current_sender_in_group",
-      "continue_current_sender_privately",
-      "record_current_sender_daily_metric",
-      "ask_member",
-      "post_disclosure_request",
-      "revoke_disclosure_grant",
-      "read_shared",
-      "send_email",
-      "read_current",
-      "prepare_next_group",
-      "read_next_group",
-      "cancel_next_group",
-      "read_chat_name",
-      "read_usage",
-      "read_usage_referral",
-      "arm_usage_referral",
-      "cancel_usage_referral",
-      "create_signup_referral_link",
-      "list_memberships",
-      "leave_membership",
-      "update_display_name",
-      "offer_access",
-      "read_chat_participants",
-      "set_chat_avatar",
-      "share_contact_card",
-      "revoke_own_email_share",
-    ]);
-    expect(MURPH_GROUP_TOOL.inputSchema).not.toHaveProperty("required");
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].required).toEqual(["action"]);
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[0]).toMatchObject({
-      maxProperties: 6,
-      properties: {
-        action: {
-          enum: ["record_current_sender_daily_metric"],
-        },
-        message_ref: {},
-      },
-      required: ["action", "date", "message_ref", "metric", "unit", "value"],
-    });
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[1]).toMatchObject({
-      properties: {
-        action: {
-          enum: [
-            "ask_current_sender",
-            "clarify_current_sender",
-            "continue_current_sender_in_group",
-            "continue_current_sender_privately",
-            "revoke_own_email_share",
-          ],
-        },
-        message_ref: {},
-      },
-      required: ["action", "message_ref"],
-    });
-    expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
-    ).not.toContain("ask_current_sender");
-    expect(
-      MURPH_GROUP_TOOL.inputSchema.allOf[1].oneOf[2].properties.action.enum,
-    ).not.toContain("record_current_sender_daily_metric");
     expect(GROUP_TOOL_INPUT_PROPERTIES).not.toHaveProperty(
       "response_destination",
     );
@@ -337,30 +281,43 @@ describe("murph.group dynamic tool", () => {
       .toBe(
         'Required for action="set_chat_avatar" with avatarSource="image_ref". Use the exact JPG/PNG/WebP ref under raw/inbox/** (user-sent) or raw/captures/** (including generated captures); never invent or modify it.',
       );
-    expect(MURPH_GROUP_TOOL.description.length).toBeLessThanOrEqual(800);
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Authorized direct/group/scheduled only");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Host binds member/group/route/input/occurrence");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("read_shared partial=incomplete");
-    expect(MURPH_GROUP_TOOL.description).toContain("asks are async");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Scheduled ask_member exact replay");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("changed questions conflict");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("ask_current_sender shares here after notice or replies privately");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("continue naturally with the answer's exact ref");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("Results authorize nothing else");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("accepted proves durable Manual evidence");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("unavailable means not recorded");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("transport failure proves neither");
+  });
+
+  it("advertises family-bounded schemas", () => {
+    const expectedRootKeys = {
+      group_consult: [
+        "action", "context", "grantId", "groupLabel", "message_ref", "question",
+      ],
+      group_data: [
+        "action", "audience", "date", "displayName", "grantId", "message_ref",
+        "metric", "permissionText", "projectionScopes", "standaloneLink", "unit", "value",
+      ],
+      group_membership: ["action", "membershipId", "setup"],
+      group_usage: ["action", "message_ref", "policyCode", "policyCodes"],
+      group_chat: [
+        "action", "alt", "avatarPrompt", "avatarSource", "displayName", "imageRef",
+        "outputFormat", "prompt", "quality", "referenceImageRefs", "size",
+      ],
+      group_email: ["action", "html", "subject", "text"],
+    } as const;
+
+    for (const tool of MURPH_GROUP_FAMILY_TOOLS) {
+      expect(tool.deferLoading).toBe(true);
+      expect(tool.inputSchema.additionalProperties).toBe(false);
+      expect(tool.inputSchema.required).toEqual(["action"]);
+      expect(tool.inputSchema.properties.action).toMatchObject({
+        enum: MURPH_GROUP_TOOL_FAMILY_ACTIONS[tool.name],
+      });
+      expect(Object.keys(tool.inputSchema.properties).sort())
+        .toEqual([...expectedRootKeys[tool.name]].sort());
+      expect(tool.inputSchema).not.toHaveProperty("oneOf");
+      for (const forbiddenField of [
+        "groupId", "memberId", "providerMessageId", "route", "sender",
+      ]) {
+        expect(tool.inputSchema.properties).not.toHaveProperty(forbiddenField);
+      }
+    }
+
   });
 
   it("advertises the least-privileged group surface for the available ports", () => {
@@ -379,9 +336,6 @@ describe("murph.group dynamic tool", () => {
       .toContain('status="partial" means omittedParticipantIds');
     expect(MURPH_GROUP_SHARED_READ_TOOL.description)
       .toContain("result is incomplete");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("read_shared partial=incomplete");
-
     const scheduledGroupTools = resolveMurphDynamicTools({
       groupAvailable: false,
       groupPermissionOfferAvailable: true,
@@ -416,8 +370,15 @@ describe("murph.group dynamic tool", () => {
     const fullGroupTools = resolveMurphDynamicTools({
       groupAvailable: true,
       groupSharedReadAvailable: true,
-    }).filter((tool) => tool.namespace === "murph" && tool.name === "group");
-    expect(fullGroupTools).toEqual([MURPH_GROUP_TOOL]);
+    }).filter((tool) =>
+      tool.namespace === "murph" && tool.name.startsWith("group_")
+    );
+    expect(fullGroupTools).toEqual(MURPH_GROUP_FAMILY_TOOLS);
+    expect(resolveMurphDynamicTools({
+      groupAvailable: true,
+      groupSharedReadAvailable: true,
+    }).filter((tool) => tool.namespace === "murph" && tool.name === "group"))
+      .toEqual([]);
   });
 
   it("parses the chat-scoped actions without accepting a model-supplied thread target", () => {
@@ -2463,6 +2424,163 @@ describe("murph.group dynamic tool", () => {
     }
   });
 
+  it("parses one bounded context handoff without accepting model authority", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "  Sunny logged a 405 lb deadlift personal record today.  ",
+      groupLabel: "  Lifting Club  ",
+    }))).toMatchObject({
+      kind: "group",
+      request: {
+        action: "handoff",
+        context: "Sunny logged a 405 lb deadlift personal record today.",
+        groupLabel: "Lifting Club",
+      },
+    });
+
+    for (const field of [
+      "memberId",
+      "membershipId",
+      "runtimeMemberId",
+      "originAssistantInputId",
+      "requestId",
+      "route",
+      "authority",
+      "deliveryIdempotencyKey",
+    ] as const) {
+      expect(readMurphDynamicToolRequest(groupToolCall({
+        action: "handoff",
+        context: "A bounded fact.",
+        [field]: "model-supplied",
+      }))?.kind).toBe("invalid-group-arguments");
+    }
+  });
+
+  it("enforces context handoff bounds in Unicode code points", () => {
+    expect(readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "🏋️".repeat(
+        HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS / 2,
+      ),
+      groupLabel: "🏃".repeat(
+        HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
+      ),
+    }))?.kind).toBe("group");
+
+    for (const invalid of [
+      { action: "handoff", context: " " },
+      {
+        action: "handoff",
+        context: "x".repeat(
+          HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS + 1,
+        ),
+      },
+      {
+        action: "handoff",
+        context: "A bounded fact.",
+        groupLabel: "x".repeat(
+          HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS + 1,
+        ),
+      },
+    ]) {
+      expect(readMurphDynamicToolRequest(groupToolCall(invalid))?.kind)
+        .toBe("invalid-group-arguments");
+    }
+  });
+
+  it("injects the latest fresh direct input as hidden handoff authority", async () => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "Sunny logged a 405 lb deadlift personal record today.",
+      groupLabel: "Lifting Club",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+
+    const groupRequest = vi.fn<GroupToolRequest>(async () => ({
+      action: "handoff",
+      result: { status: "accepted", targetLabel: "Lifting Club" },
+    }));
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope: () => ({
+          acceptedInputIds: [
+            EARLIER_ASSISTANT_INPUT_ID,
+            FRESH_ASSISTANT_INPUT_ID,
+          ],
+          conversationId: "conversation_private",
+          conversationScope: "direct",
+          inboundMailboxItemIds: ["mailbox_private"],
+          originSessionId: "session_private",
+          recipientKey: "recipient_private",
+        }),
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(true);
+    expect(readGroupToolPayload(result)).toEqual({
+      action: "handoff",
+      result: { status: "accepted", targetLabel: "Lifting Club" },
+    });
+    expect(groupRequest).toHaveBeenCalledWith({
+      action: "handoff",
+      context: "Sunny logged a 405 lb deadlift personal record today.",
+      groupLabel: "Lifting Club",
+      originAssistantInputId: FRESH_ASSISTANT_INPUT_ID,
+    });
+  });
+
+  it.each([
+    ["missing", () => null],
+    [
+      "group",
+      () => ({
+        acceptedInputIds: [FRESH_ASSISTANT_INPUT_ID],
+        conversationId: "conversation_group",
+        conversationScope: "group" as const,
+        inboundMailboxItemIds: ["mailbox_group"],
+        originSessionId: "session_group",
+        recipientKey: "recipient_group",
+      }),
+    ],
+  ])("does not admit a context handoff with %s private-user authority", async (
+    _case,
+    currentUserActionScope,
+  ) => {
+    const request = readMurphDynamicToolRequest(groupToolCall({
+      action: "handoff",
+      context: "A bounded fact.",
+    }));
+    if (!request || request.kind !== "group") {
+      throw new Error("Expected group request.");
+    }
+    const groupRequest = vi.fn<GroupToolRequest>();
+
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createGroupHostedToolContext({
+        currentUserActionScope,
+        groupRequest,
+      }),
+      nextUsageOrdinal: () => 1,
+      progressDelivery: null,
+      request,
+      vaultRoot: null,
+    });
+
+    expect(result.rpcResult.success).toBe(false);
+    expect(groupRequest).not.toHaveBeenCalled();
+  });
+
   it("enforces group ask bounds in Unicode code points", () => {
     expect(readMurphDynamicToolRequest(groupToolCall({
       action: "ask",
@@ -3455,10 +3573,8 @@ describe("murph.group dynamic tool", () => {
 
     expect(result.rpcResult.success).toBe(true);
     expect(readGroupToolPayload(result)).toEqual(response);
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("update_display_name/set_chat_avatar ok=provider acceptance");
-    expect(MURPH_GROUP_TOOL.description)
-      .toContain("group=null proves neither absence nor stored label");
+    expect(MURPH_GROUP_CHAT_TOOL.inputSchema.properties.action.enum)
+      .toContain("update_display_name");
     expect(GROUP_TOOL_INPUT_PROPERTIES.displayName.description)
       .toContain('Required for action="update_display_name"');
   });

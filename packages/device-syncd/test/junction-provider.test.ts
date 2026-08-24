@@ -8069,7 +8069,7 @@ test("Junction provider cleanup deregisters only the requested source", async ()
   ]);
 });
 
-test("Junction provider proves source access only from explicit active statuses", async () => {
+test("Junction provider proves source access only from an unambiguous explicit connected status", async () => {
   const provider = createJunctionProvider(async (input) => {
     assert.equal(
       readUrl(input),
@@ -8078,6 +8078,7 @@ test("Junction provider proves source access only from explicit active statuses"
     return createJsonResponse({
       data: [
         { slug: "source_connected", status: "connected" },
+        { slug: "source_connected", status: "CONNECTED" },
         { slug: "source_active", status: "active" },
         { slug: "source_available", status: "available" },
         { slug: "source_ok", status: "ok" },
@@ -8089,6 +8090,8 @@ test("Junction provider proves source access only from explicit active statuses"
         { slug: "source_disconnected", status: "disconnected" },
         { slug: "source_revoked", status: "revoked" },
         { slug: "source_inactive", status: "inactive" },
+        { slug: "source_mixed", status: "connected" },
+        { slug: "source_mixed", status: "error" },
       ],
     });
   });
@@ -8096,15 +8099,11 @@ test("Junction provider proves source access only from explicit active statuses"
     provider.connectionHandler?.isSourceAccessActive,
   );
 
+  assert.equal(await isSourceAccessActive(createAccount(), "source_connected"), true);
   for (const slug of [
-    "source_connected",
     "source_active",
     "source_available",
     "source_ok",
-  ]) {
-    assert.equal(await isSourceAccessActive(createAccount(), slug), true);
-  }
-  for (const slug of [
     "source_unknown",
     "source_missing",
     "source_unrecognized",
@@ -8113,8 +8112,27 @@ test("Junction provider proves source access only from explicit active statuses"
     "source_disconnected",
     "source_revoked",
     "source_inactive",
+    "source_mixed",
   ]) {
     assert.equal(await isSourceAccessActive(createAccount(), slug), false);
+  }
+  for (const slug of [
+    "source_active",
+    "source_available",
+    "source_ok",
+    "source_unknown",
+    "source_missing",
+    "source_unrecognized",
+    "source_error",
+    "source_failed",
+    "source_mixed",
+  ]) {
+    await assert.rejects(
+      () => isSourceAccessActive(createAccount(), slug, { requireDefinitive: true }),
+      (error: unknown) => error instanceof DeviceSyncError
+        && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
+        && error.retryable === true,
+    );
   }
 });
 
@@ -8130,7 +8148,8 @@ test("Junction provider requires definitive absence for cutover recovery", async
         { slug: "fitbit", status: "revoked" },
         { slug: "oura", status: "revoked" },
         { slug: "garmin", status: "connected" },
-        { slug: "garmin", status: "error" },
+        { slug: "mixed", status: "connected" },
+        { slug: "mixed", status: "error" },
       ],
     });
   });
@@ -8148,6 +8167,12 @@ test("Junction provider requires definitive absence for cutover recovery", async
   );
   await assert.rejects(
     () => isSourceAccessActive(createAccount(), "fitbit", { requireDefinitive: true }),
+    (error: unknown) => error instanceof DeviceSyncError
+      && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
+      && error.retryable === true,
+  );
+  await assert.rejects(
+    () => isSourceAccessActive(createAccount(), "mixed", { requireDefinitive: true }),
     (error: unknown) => error instanceof DeviceSyncError
       && error.code === "JUNCTION_SOURCE_STATUS_AMBIGUOUS"
       && error.retryable === true,
@@ -21779,7 +21804,7 @@ test("Junction workout_stream diagnostics use one bounded index read and serial 
   assert.equal(maximumActiveStreams, 1);
 });
 
-test("Junction workout_stream skips malformed metric cardinality without blocking valid workouts", async () => {
+test("Junction workout_stream skips empty or malformed streams without blocking valid workouts", async () => {
   const importedSnapshots: unknown[] = [];
   const warningCodes: string[] = [];
   const harness = createJunctionWorkoutStreamTestProvider({
@@ -21787,9 +21812,7 @@ test("Junction workout_stream skips malformed metric cardinality without blockin
     streamResponse: (workoutId) => createJsonResponse(
       workoutId === "workout-1"
         ? {
-            time: [1_775_131_200, 1_775_133_000],
-            heartrate: [100, 160],
-            distance: [0],
+            time: [],
           }
         : workoutId === "workout-2"
           ? {
@@ -21805,7 +21828,7 @@ test("Junction workout_stream skips malformed metric cardinality without blockin
     ),
   });
 
-  await executeJunctionJob(
+  const initial = await executeJunctionJob(
     harness.provider,
     createJunctionJobContext({
       importSnapshot: async (snapshot) => {
@@ -21819,6 +21842,12 @@ test("Junction workout_stream skips malformed metric cardinality without blockin
       },
     }),
     createJunctionWorkoutStreamResourceJob(),
+  );
+  assert.equal(
+    initial.scheduledJobs?.filter((job) =>
+      job.payload?.workoutStreamEmptyReplay === true
+    ).length,
+    1,
   );
 
   assert.deepEqual(harness.streamRequests, ["workout-1", "workout-2", "workout-3"]);
@@ -21837,9 +21866,186 @@ test("Junction workout_stream skips malformed metric cardinality without blockin
   });
   assert.deepEqual(workoutIds, ["workout-3"]);
   assert.deepEqual(warningCodes, [
-    "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
+    "JUNCTION_WORKOUT_STREAM_EMPTY",
     "JUNCTION_WORKOUT_STREAM_CARDINALITY_MISMATCH",
   ]);
+});
+
+test.each([
+  {
+    jobKind: "backfill" as const,
+    label: "ten-day-old backfill day",
+    timeseriesCursor: "2026-04-05T00:00:00.000Z",
+    windowStart: "2026-04-01T00:00:00.000Z",
+  },
+  {
+    jobKind: "reconcile" as const,
+    label: "oldest rolling reconcile day",
+    timeseriesCursor: "2026-04-08T00:00:00.000Z",
+    windowStart: "2026-04-08T00:00:00.000Z",
+  },
+])("Junction workout_stream replays an empty $label after it leaves the normal horizon", async ({
+  jobKind,
+  timeseriesCursor,
+  windowStart,
+}) => {
+  const importedSnapshots: unknown[] = [];
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1"],
+    streamResponse: (_workoutId, streamRequest) => createJsonResponse(
+      streamRequest === 1
+        ? { time: [] }
+        : {
+            time: [1_775_131_200, 1_775_133_000],
+            heartrate: [100, 160],
+            distance: [0, 5_000],
+          },
+    ),
+  });
+  const importSnapshot = async (snapshot: unknown) => {
+    importedSnapshots.push(snapshot);
+    return { imported: true };
+  };
+  const context = createJunctionJobContext({
+    now: "2026-04-15T12:00:00.000Z",
+    importSnapshot,
+  });
+
+  const initial = await executeJunctionJob(
+    harness.provider,
+    context,
+    createJob(jobKind, {
+      timeseriesCursor,
+      timeseriesResourceCursor: "workout_stream",
+      windowEnd: "2026-04-15T00:00:00.000Z",
+      windowStart,
+    }),
+  );
+  assert.equal(importedSnapshots.length, 0);
+  const replay = requireValue(
+    initial.scheduledJobs?.find((job) => job.payload?.workoutStreamEmptyReplay === true),
+    "empty workout should schedule one bounded exact-day replay",
+  );
+  assert.equal(replay.kind, "resource");
+  assert.equal(replay.availableAt, "2026-04-16T12:00:00.000Z");
+  assert.equal(replay.payload?.windowStart, timeseriesCursor);
+  assert.equal(
+    replay.payload?.windowEnd,
+    new Date(Date.parse(timeseriesCursor) + 24 * 60 * 60_000).toISOString(),
+  );
+
+  const replayResult = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({
+      now: "2026-04-16T12:00:00.000Z",
+      importSnapshot,
+    }),
+    createJobFromInput(replay),
+  );
+
+  assert.deepEqual(harness.streamRequests, ["workout-1", "workout-1"]);
+  assert.equal(importedSnapshots.length, 1);
+  assert.equal(
+    replayResult.scheduledJobs?.some((job) =>
+      job.payload?.workoutStreamEmptyReplay === true
+    ) ?? false,
+    false,
+  );
+});
+
+test("Junction workout_stream empty replay cannot schedule another delayed replay", async () => {
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2"],
+    streamResponse: () => createJsonResponse({ time: [] }),
+  });
+  const context = createJunctionJobContext({ now: "2026-04-16T12:00:00.000Z" });
+  const initial = await executeJunctionJob(
+    harness.provider,
+    context,
+    createJunctionWorkoutStreamResourceJob(),
+  );
+  const replay = requireValue(
+    initial.scheduledJobs?.find((job) => job.payload?.workoutStreamEmptyReplay === true),
+    "initial empty stream should schedule its bounded replay",
+  );
+
+  const replayResult = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ now: "2026-04-17T12:00:00.000Z" }),
+    createJobFromInput(replay),
+  );
+
+  assert.equal(replayResult.scheduledJobs?.length ?? 0, 0);
+  assert.deepEqual(harness.streamRequests, [
+    "workout-1",
+    "workout-2",
+    "workout-1",
+    "workout-2",
+  ]);
+});
+
+test("Junction workout_stream retains empty-day replay ownership across a retryable candidate", async () => {
+  const importedWorkoutIds: string[] = [];
+  let allowImport = false;
+  let progressCursor: string | null = null;
+  const failure = new DeviceSyncError({
+    code: "TEST_WORKOUT_STREAM_RETRYABLE",
+    message: "retry the populated candidate",
+    retryable: true,
+  });
+  const harness = createJunctionWorkoutStreamTestProvider({
+    listWorkoutIds: () => ["workout-1", "workout-2"],
+    streamResponse: (workoutId) => createJsonResponse(
+      workoutId === "workout-1"
+        ? { time: [] }
+        : {
+            time: [1_775_131_200],
+            heartrate: [120],
+          },
+    ),
+  });
+  const importSnapshot = async (snapshot: { timeseries?: Record<string, unknown[]> }) => {
+    const feature = snapshot.timeseries?.workout_stream?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    const workoutId = String(feature?.workoutId);
+    if (!allowImport) throw failure;
+    importedWorkoutIds.push(workoutId);
+    return { imported: true };
+  };
+
+  await assert.rejects(
+    () => executeJunctionJob(
+      harness.provider,
+      createJunctionJobContext({ importSnapshot }),
+      createJunctionWorkoutStreamResourceJob(),
+    ),
+    (error) => {
+      assert.ok(error instanceof JunctionTimeseriesProgressError);
+      assert.equal(error.failure, failure);
+      assert.equal(error.workoutStreamEmptySeen, true);
+      progressCursor = error.workoutStreamCursor;
+      return true;
+    },
+  );
+  allowImport = true;
+
+  const result = await executeJunctionJob(
+    harness.provider,
+    createJunctionJobContext({ importSnapshot }),
+    createJunctionWorkoutStreamResourceJob({
+      workoutStreamCursor: requireValue(progressCursor),
+      workoutStreamEmptySeen: true,
+    }),
+  );
+
+  assert.deepEqual(importedWorkoutIds, ["workout-2"]);
+  assert.equal(
+    result.scheduledJobs?.filter((job) =>
+      job.payload?.workoutStreamEmptyReplay === true
+    ).length,
+    1,
+  );
 });
 
 test("Junction workout_stream hard call bound is 100 index pages plus 32 serial streams", async () => {

@@ -1,6 +1,9 @@
 import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
+import {
+  projectHostedRuntimeReconciliationFactsWireResponse,
+} from "@murphai/hosted-execution/orchestration-control";
 
 import {
   requireHostedCloudflareCallbackRequest,
@@ -38,9 +41,13 @@ export const GET = withJsonError(async (
     userId: routeUserId,
   });
 
-  return jsonOk(
-    await readHostedRuntimeReconciliationFactsWithVisibleAccess(factsRequest),
+  const facts = await readHostedRuntimeReconciliationFactsWithVisibleAccess(
+    factsRequest,
   );
+
+  // Keep the wire response compatible with the deployed Temporal worker.
+  // Additive facts must reach that consumer before Web begins emitting them.
+  return jsonOk(projectHostedRuntimeReconciliationFactsWireResponse(facts));
 });
 
 function assertHostedOrchestrationUserMatches(input: {

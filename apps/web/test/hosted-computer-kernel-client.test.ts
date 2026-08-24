@@ -94,6 +94,35 @@ describe("KernelComputerClient", () => {
     });
   });
 
+  it("creates stealth automation browsers without recording the canary session", async () => {
+    kernelSdkMocks.browserCreate.mockResolvedValueOnce({
+      cdp_ws_url: "wss://cdp.test-browser.onkernel.com/session/1",
+      session_id: "kernel-session-1",
+    });
+    const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
+
+    await expect(client.createAutomationBrowser({
+      headless: true,
+      profileName: "profile-1",
+      saveChanges: true,
+      timeoutSeconds: 480,
+    })).resolves.toEqual({
+      cdpWsUrl: "wss://cdp.test-browser.onkernel.com/session/1",
+      sessionId: "kernel-session-1",
+    });
+
+    expect(kernelSdkMocks.browserCreate).toHaveBeenCalledWith({
+      headless: true,
+      profile: {
+        name: "profile-1",
+        save_changes: true,
+      },
+      stealth: true,
+      telemetry: { enabled: false },
+      timeout_seconds: 480,
+    });
+  });
+
   it("maps OS-control actions to the corresponding Kernel computer methods", async () => {
     const client = new KernelComputerClient({ apiKey: "test-kernel-key" });
     const sessionId = "kernel-session-1";

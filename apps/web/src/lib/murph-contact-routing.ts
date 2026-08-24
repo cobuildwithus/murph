@@ -1,3 +1,5 @@
+import { HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS } from "@murphai/hosted-execution/hosted-email";
+
 import { normalizePhoneNumber } from "@/src/lib/hosted-onboarding/phone";
 import {
   extractHostedPrivyPhoneAccount,
@@ -8,7 +10,7 @@ import {
   type PrivyLinkedAccountLike,
 } from "@/src/lib/hosted-onboarding/privy-shared";
 
-export const MURPH_CONTACT_EMAIL = "murph@mail.withmurph.ai";
+export const MURPH_CONTACT_EMAIL = HOSTED_EMAIL_CANONICAL_PUBLIC_ADDRESS;
 export const DEFAULT_MURPH_TELEGRAM_BOT_USERNAME = "withmurph_bot";
 export const MURPH_TELEGRAM_USERNAME_OVERRIDE_ENV = "MURPH_TELEGRAM_USERNAME_OVERRIDE";
 export const MURPH_TELEGRAM_BOT_USERNAME = resolveMurphTelegramBotUsername();

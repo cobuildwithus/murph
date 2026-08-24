@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { rm, writeFile } from 'node:fs/promises'
+import { rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -353,6 +353,104 @@ test.sequential(
         [retried.mealId, first.mealId],
       )
       assert.deepEqual(work.items[0]?.data.attachments ?? [], [])
+    } finally {
+      await rm(parentRoot, { force: true, recursive: true })
+    }
+  },
+)
+
+test.sequential(
+  'meal closeout-work keeps a next-local-day photo for that day closeout',
+  async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-cli-meal-closeout-local-day-',
+    )
+
+    try {
+      await initializeVault({ vaultRoot, timezone: 'Europe/Berlin' })
+      const day20PhotoPath = path.join(parentRoot, 'august-20-meal.jpg')
+      const day21PhotoPath = path.join(parentRoot, 'august-21-meal.jpg')
+      await Promise.all([
+        writeFile(day20PhotoPath, 'august 20 synthetic image', 'utf8'),
+        writeFile(day21PhotoPath, 'august 21 synthetic image', 'utf8'),
+      ])
+      const day20Meal = await addMeal({
+        externalRef: {
+          resourceId: 'capture_closeout_august_20',
+          resourceType: 'photo',
+          system: 'meal-photo-capture',
+          version: '3'.repeat(64),
+        },
+        occurredAt: '2026-08-20T19:30:00.000Z',
+        photoPath: day20PhotoPath,
+        source: 'device',
+        vaultRoot,
+      })
+      const day21Meal = await addMeal({
+        externalRef: {
+          resourceId: 'capture_closeout_august_21',
+          resourceType: 'photo',
+          system: 'meal-photo-capture',
+          version: '4'.repeat(64),
+        },
+        occurredAt: '2026-08-20T22:15:00.000Z',
+        photoPath: day21PhotoPath,
+        source: 'device',
+        vaultRoot,
+      })
+      assert.equal(day20Meal.event.dayKey, '2026-08-20')
+      assert.equal(day21Meal.event.dayKey, '2026-08-21')
+
+      const day20Result = await runInProcessJsonCli<MealCloseoutWorkResult>(
+        createMealCli(),
+        [
+          'meal',
+          'closeout-work',
+          '--occurrence-at',
+          '2026-08-20T21:00:00.000Z',
+          '--to',
+          '2026-08-20',
+          '--limit',
+          '10',
+          '--vault',
+          vaultRoot,
+        ],
+      )
+      assert.equal(day20Result.exitCode, null)
+      const day20Work = requireData(day20Result.envelope)
+      assert.deepEqual(day20Work.items.map((item) => item.id), [day20Meal.mealId])
+
+      const removed = await runInProcessJsonCli<ShowResult>(createMealCli(), [
+        'meal',
+        'remove-photo',
+        day20Meal.mealId,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(removed.exitCode, null)
+      assert.ok(day21Meal.photo)
+      await stat(path.join(vaultRoot, day21Meal.photo.relativePath))
+
+      const day21Result = await runInProcessJsonCli<MealCloseoutWorkResult>(
+        createMealCli(),
+        [
+          'meal',
+          'closeout-work',
+          '--occurrence-at',
+          '2026-08-21T21:00:00.000Z',
+          '--to',
+          '2026-08-21',
+          '--limit',
+          '10',
+          '--vault',
+          vaultRoot,
+        ],
+      )
+      assert.equal(day21Result.exitCode, null)
+      assert.equal(
+        requireData(day21Result.envelope).items.some((item) => item.id === day21Meal.mealId),
+        true,
+      )
     } finally {
       await rm(parentRoot, { force: true, recursive: true })
     }

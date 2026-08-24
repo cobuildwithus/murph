@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-16
+Last verified: 2026-08-22
 
 ## Decision
 
@@ -105,11 +105,23 @@ attempt.
 
 An exact system-mailbox pointer is admission, not completion. Web projects the
 authenticated `hostedMailboxSystemHandledThroughSeq` scalar from the existing
-redacted workspace checkpoint, and Temporal retires the pointer only when that
-frontier reaches its lane sequence. Workspace-version movement may bypass
-same-version no-progress backoff, but cannot prove that the pointed system item
-was handled. The frontier is optional during additive deployment skew; absence
-retains the pointer and its ordinary retry owner.
+redacted workspace checkpoint. Temporal applies three distinct retirement
+rules: a handled-through frontier that reaches the pointer lane sequence retires
+it as completed; an explicit `systemMailboxFrontier: null` retires only
+Temporal's noncanonical pointer projection because the current facts admit no
+live system frontier; and an omitted frontier retains the pointer during
+additive deployment skew. Explicit-null retirement never marks the mailbox item
+handled or deletes Web-owned durable mailbox state. Inactive facts can therefore
+retire retry ownership without reading or consuming retained work, which Web
+re-reads after reactivation. Every owner that restores runtime access appends a
+deterministic `runtime.maintenance-requested` item in the same transaction as
+the access change. Direct billing recovery, won or reinstated disputes, Family
+billing restoration for its bounded active roster, and established-member
+Family invite acceptance all signal that exact pointer after commit. The signal
+is a latency hint: the existing bounded mailbox-handoff sweep owns recovery, and
+Stripe receipts retain their exact pointers for replay.
+Workspace-version movement may bypass same-version no-progress backoff, but
+cannot prove that the pointed system item was handled.
 
 Web/runtime status is durable truth when no runner owns execution. Cloudflare's
 write fence is the active ownership truth while a run is in flight.
@@ -230,6 +242,21 @@ Production workers explicitly reuse the V8 context and cache at most 100
 Workflow executions; the cache ceiling must remain no lower than concurrent
 Workflow task executions. This avoids deriving a much larger cache from the
 container heap after an instance-size change.
+Production worker startup is also fail-closed on two public owner admissions
+before it connects or registers pollers. The private worker signs memberless
+`GET` requests with the existing callback key to Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and to
+Cloudflare at `/internal/temporal-worker/binding-admission`. Each owner verifies
+the exact method, path, search, timestamp, nonce, signature, and key id; Web
+rejects a presented member header and consumes the nonce under a reserved
+system owner in the existing Postgres replay table, while Cloudflare uses its
+existing callback replay verifier. Each uncached response contains only the
+shared `bindings-v1` revision, `production` environment, exact owner, contract
+kind, and accepted non-secret key id. These routes admit deployment wiring;
+they do not own Workflow routing, member state, readiness, health, or rollback.
+Deploy both public owners before configuring the exact production URLs on the
+inactive Render colors, and retain the routes until the old color is outside
+the rollback window.
 Each production worker uses fixed execution slots for at most 100 concurrent
 Activities and 20 concurrent Workflow Tasks, while both poller types use
 Temporal's server-feedback autoscaling behavior. Render runs two Standard
@@ -363,9 +390,12 @@ The per-user workflow reads source-less reconciliation facts from web:
 Facts do not contain run/idle decisions, raw mailbox kinds, producer
 source/reason, raw mailbox payloads, workspace redacted status, signed usage
 decisions, or direct wake flags. The frontier classification exposes only
-whether the first retained system item is bounded model-free work or remains
-default-owned. Temporal interprets the facts mechanically: fresh mailbox signals may
-ensure processing directly; carried pointers and timers re-read facts;
+whether the first retained system item is bounded model-free work, remains
+default-owned, or is not admitted by the current facts. Inactive access uses
+the explicit not-admitted value without reading mailbox rows; Temporal may
+retire its pointer projection while Web retains durable mailbox truth for a
+future reactivation. Temporal interprets the facts mechanically: fresh mailbox
+signals may ensure processing directly; carried pointers and timers re-read facts;
 conversation lag or a due assistant workspace wake selects default processing;
 system-only lag selects `system_mailbox` processing; a due inbox media retention
 wake selects `inbox_media_retention` processing when foreground/default work is
@@ -652,6 +682,20 @@ The hard-cut architecture is accepted when:
   public Temporal worker implementation cannot re-enter production source
   silently. Murph Cloud independently owns Workflow bundle and replay-policy
   gates.
+- Relevant public producer, contract, hosted-runtime, harness, and CI-owner
+  changes publish one exact-SHA `Temporal compatibility` status. The public
+  controller validates the pull request's exact base repository and ref; only
+  pull requests targeting the default branch may publish that SHA-global
+  status, so stacked non-default-branch pull requests cannot overwrite it. The
+  candidate producer runs only in unprivileged Repo Hygiene and hands the
+  trusted controller a run/head-bound bounded JSON artifact. The controller
+  never owns worker code or reader policy: private Murph Cloud receives only
+  serialized fixture data, declares the immutable supported-reader set,
+  automatically includes its pinned controller revision, runs every reader,
+  and returns one producer-and-reader proof digest. The committed public policy
+  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
+  skipped, canceled, duplicated, malformed, or failed proof remains red or
+  pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

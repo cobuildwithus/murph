@@ -28,6 +28,39 @@ Runner bundle assembly esbuild-bundles two boot-critical surfaces with byte budg
 The device-sync package boundary suite also walks the static source graph from the runner's runtime-config entrypoint and rejects provider runtime modules, importer modules, and the Junction SDK. This focused gate catches boot-closure ownership regressions before the packed-bundle guard validates the final esbuild metafile.
 Hosted assistant delivery recovery now relies on committed side-effect state inside the encrypted workspace and the web-owned hosted workspace checkpoint.
 
+## Gemini Video Analysis Rollout
+
+Deploy Web's Gemini usage-record acceptance and date-bound Gemini 3.7 Flash
+pricing first. Next, map the platform-owned `GEMINI_API_KEY` in the private
+Murph Cloud workflow and GitHub Environment without exposing its value to the
+public repository, only after vendor approval confirms that the exact hosted
+Gemini project has the applicable paid/no-training controls required by
+Murph's health-data policy. Key presence alone does not prove those controls.
+Finally, deploy the Worker and runner bundle together with
+immediate convergence. The runner receives only the normal injected-credential
+sentinel; the Worker owns the real key and substitutes it only after the exact
+Gemini request passes authorization and shape validation.
+
+Do not deploy the Cloudflare producer ahead of Web pricing: the Worker now
+withholds a successful Gemini response until Web accepts its usage row, so an
+older Web would turn every otherwise successful analysis into a 502. Missing
+key configuration is fail-closed and
+omits `murph.analyze_video`. During an immediate rollout, old instances omit
+the tool and new instances expose it only for a private-direct turn with
+accepted user-action input. Group turns continue to omit it. A direct turn may
+receive the schema before its accepted input has video authority because the
+provider tool set freezes at turn start; this lets the first live-steered video
+be frozen and authorized before tool execution in that same turn. There is no
+schema, backfill, dual-write, or stored compatibility state.
+
+Rollback the Worker/runner producer first, then remove the private secret
+mapping if desired; the Web reader and pricing branch are safe to leave in
+place. Post-deploy, use one consented short MP4/MOV/WebM video in a private
+direct conversation to verify a single Gemini request, explicit 1 FPS
+metadata, bounded output, and one usage
+record. Inspect only bounded status/error aggregates, never media, prompts,
+paths, response bodies, or credential values.
+
 ## Assistant Turn-Profile V2 Rollout
 
 Deploy Web's shared hosted-execution reader first; it accepts both v1 and v2
@@ -612,6 +645,18 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+The private-to-group context-handoff exact-replay transport is a paired
+Web/runner change. Deploy the Web replay validator first; old runners remain
+safe but do not recover a lost successful handoff response. Then deploy the
+Worker and runner bundle with `container_rollout=immediate`, require managed
+container smoke to report the new bundle fingerprint, and exercise one
+handoff whose first response body is lost so the byte-identical retry returns
+the already accepted mailbox item. New runners against the preceding Web
+version fail closed on that retry but do not provide the intended truthful
+recovery, so this is not a supported steady state. Roll back the runner bundle
+before Web; if Web must roll back first, treat handoff replay as degraded until
+the runner rollback converges. No mailbox schema or record migration is needed.
+
 ## Phone-Call Result Deployment
 
 A completed phone call delivers its result as a proactive
@@ -1130,6 +1175,14 @@ runner. Its entries are compatibility material only; the required
 key.
 
 The callback-signing key remains part of the required worker secret surface because Cloudflare reads mailbox items, side inputs, workspace checkpoints, and runtime logs through the signed hosted-web boundary. It is no longer documented as a broad lifecycle or correctness callback seam.
+The versioned Temporal worker must not register pollers until both signed,
+uncached owner checks succeed: Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and this
+Worker at `/internal/temporal-worker/binding-admission`. Deploy Web and
+Cloudflare first, configure the two exact production URLs on both inactive
+Render colors, then allow the private exact-SHA blue/green controller to ramp.
+Rollback the Temporal candidate before either owner route; keep both owner
+routes through the whole retained-color rollback window.
 The optional read-only Labs port uses that existing signed callback and adds no
 Cloudflare secret or provider credential. `JUNCTION_API_KEY` for Labs remains in
 hosted Web; the Worker and runner carry only the normalized semantic
@@ -1206,7 +1259,9 @@ Core execution tuning:
 - `CF_WEB_CONTROL_TIMEOUT_MS` defaults to `30000`
 - `CF_RUNNER_COMMIT_TIMEOUT_MS` defaults to `45000` and must exceed
   `CF_WEB_CONTROL_TIMEOUT_MS` by at least 5 seconds
-- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`
+- `CF_RUNNER_READY_TIMEOUT_MS` defaults to `20000`. A shorter caller deadline
+  does not cancel a recent platform cold start; later readiness checks rejoin
+  that same start until this container-owned window expires.
 - `CF_ALLOWED_RUNNER_SECRET_KEYS` to seed `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` in the rendered worker config
 - `HOSTED_EXECUTION_CONTAINER_ROLLOUT` controls the one-off Wrangler container rollout flag during deploy. While the vault-share selector-scope migration is active, production deploy helpers default to `immediate` and production preflight rejects explicit `gradual`; use `gradual` only for non-production deploys or after the selector-scope rollout guard is removed.
 - `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` adds deploy-time profiles on top of the runtime's minimal `assistant` baseline; deploy automation defaults to `exa,hosted-email,linq,mapbox,telegram`. Hosted device-sync runtime config is resolved from worker env directly rather than a runtime-env profile.
@@ -1955,7 +2010,7 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
 - `GET /health`
 - if `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`, one signed `POST /internal/deploy/container-smoke` that waits until the Cloudflare-managed runner container reports the expected runner-bundle fingerprint and assistant CLI surface hot-path schema proof
 - the managed-container runner smoke also proves the native
-  `murph-group-read` profile and thread-start attestation used by Assistant Ask:
+  `murph-group-read` profile enforcement used by Assistant Ask:
   intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
   files, other roots, inherited shell secrets, and tool network are denied
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object

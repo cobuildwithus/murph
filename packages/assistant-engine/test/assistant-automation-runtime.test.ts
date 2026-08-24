@@ -8106,7 +8106,10 @@ describe('assistant auto-reply runtime', () => {
     })
   })
 
-  it('skips recent self-authored assistant echoes when the provider timestamp precedes the transcript write', async () => {
+  it('skips a visible workout follow-up echo when the provider timestamp precedes the transcript write', async () => {
+    const message =
+      'How many reps did you get?\n\n' +
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]'
     replyMocks.resolveAssistantSession.mockResolvedValue({
       created: false,
       session: {
@@ -8117,7 +8120,7 @@ describe('assistant auto-reply runtime', () => {
     replyMocks.listAssistantTranscriptEntries.mockResolvedValue([
       createTranscriptEntry({
         createdAt: '2026-04-08T00:00:01.000Z',
-        text: 'same text',
+        text: message,
       }),
     ])
     const inboxServices = createInboxServices({
@@ -8127,7 +8130,7 @@ describe('assistant auto-reply runtime', () => {
             actorIsSelf: true,
             occurredAt: '2026-04-08T00:00:00.000Z',
             source: 'linq',
-            text: 'same text',
+            text: message,
             threadId: 'thread-1',
           }),
         ),
@@ -8142,7 +8145,7 @@ describe('assistant auto-reply runtime', () => {
           actorIsSelf: true,
           occurredAt: '2026-04-08T00:00:00.000Z',
           source: 'linq',
-          text: 'same text',
+          text: message,
           threadId: 'thread-1',
         }),
       ),

@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   executeMurphDynamicToolRequest,
-  MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE,
   MURPH_SUBMIT_PRODUCT_FEEDBACK_TOOL,
   resolveMurphDynamicTools,
 } from "../src/assistant-codex/dynamic-tools.js";
@@ -134,26 +133,6 @@ describe("assistant product feedback", () => {
     expect(description).toContain("optional related changelog item ids");
     expect(description).toContain("accepted, already accepted, or unavailable");
     expect(description).toContain("Provide the feedback kind, one concise product-only summary");
-    expect(description).toContain(
-      MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE,
-    );
-    const baseDescription = description.replace(
-      ` ${MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE}`,
-      "",
-    );
-    const discoveryRuleBytes = Buffer.byteLength(description, "utf8")
-      - Buffer.byteLength(baseDescription, "utf8");
-    expect(discoveryRuleBytes).toBe(Buffer.byteLength(
-      ` ${MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE}`,
-      "utf8",
-    ));
-    expect(discoveryRuleBytes).toBeLessThanOrEqual(180);
-    expect(MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE)
-      .not.toContain("tool_search");
-    expect(MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE)
-      .not.toContain("ALL_TOOLS");
-    expect(MURPH_PRODUCT_FEEDBACK_DEFERRED_DISCOVERY_RULE)
-      .not.toContain("exec");
     expect(description).toContain(
       "append a privacy-safe reproduction recipe in the same summary field",
     );
@@ -394,12 +373,14 @@ describe("assistant product feedback", () => {
         request,
       });
 
-      expect(result.rpcResult).toEqual({
-        success: false,
-        contentItems: [{
-          type: "inputText",
-          text: "invalid product feedback arguments",
-        }],
+      expect(result.rpcResult.success).toBe(false);
+      const feedback = result.rpcResult.contentItems[0];
+      expect(feedback?.type).toBe("inputText");
+      expect(JSON.parse(feedback?.text ?? "")).toMatchObject({
+        error: "invalid_product_feedback_arguments",
+        validationIssues: expect.arrayContaining([
+          expect.objectContaining({ code: expect.any(String) }),
+        ]),
       });
     }
 

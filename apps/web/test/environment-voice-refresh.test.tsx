@@ -42,17 +42,18 @@ vi.mock("@/src/lib/browser-vault/context", () => ({
 vi.mock(
   "../app/(dashboard)/environment/environment-voice-capture",
   () => ({
+    EnvironmentChatAction: () => null,
     EnvironmentVoiceCapture: ({
       disabled,
       onAccepted,
-      onUploadStarted,
       triggerLabel,
     }: {
       disabled?: boolean;
       onAccepted?: () => void;
-      onUploadStarted?: () => void;
       triggerLabel: ReactNode;
-    }) =>
+    }) => createElement(
+      "div",
+      null,
       createElement(
         "button",
         {
@@ -60,13 +61,19 @@ vi.mock(
           onClick: disabled
             ? undefined
             : () => {
-                onUploadStarted?.();
                 onAccepted?.();
               },
           type: "button",
         },
         triggerLabel,
       ),
+      createElement("button", {
+        "aria-label": "Accept another realtime topic",
+        hidden: true,
+        onClick: () => onAccepted?.(),
+        type: "button",
+      }),
+    ),
   }),
 );
 
@@ -90,12 +97,11 @@ beforeEach(() => {
   });
 });
 
-test("waits for a replica newer than the explicit post-processing refresh boundary", async () => {
+test("waits for changed Environment values after realtime topic processing", async () => {
   vi.useFakeTimers();
   const originalFetch = globalThis.fetch;
   const baselineRef = createReplicaRef("a");
   const unrelatedRef = createReplicaRef("b");
-  const replacementRef = createReplicaRef("c");
   mocks.vault.ref = baselineRef;
   const processingResponses = [false, true, false];
   const fetchMock = vi.fn(async () =>
@@ -121,14 +127,14 @@ test("waits for a replica newer than the explicit post-processing refresh bounda
     });
     const trigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Start the 2-minute"));
+    ).find((button) => button.textContent?.includes("Start report"));
     assert.ok(trigger instanceof rendered.window.HTMLButtonElement);
     await act(async () => {
       trigger.click();
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Murph is processing your recording/,
+      /Murph is saving your answers/,
     );
 
     await act(async () => {
@@ -143,7 +149,7 @@ test("waits for a replica newer than the explicit post-processing refresh bounda
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Murph is processing your recording/,
+      /Murph is saving your answers/,
     );
 
     await act(async () => {
@@ -152,11 +158,7 @@ test("waits for a replica newer than the explicit post-processing refresh bounda
     assert.equal(mocks.refresh.mock.calls.length, 1);
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Updating your environment report/,
-    );
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Murph finished processing your recording/,
+      /Murph is saving your answers/,
     );
     assert.doesNotMatch(
       rendered.window.document.body.textContent ?? "",
@@ -164,61 +166,23 @@ test("waits for a replica newer than the explicit post-processing refresh bounda
     );
     const refreshingTrigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Processing recording"));
+    ).find((button) => button.textContent?.includes("Saving report"));
     assert.ok(refreshingTrigger instanceof rendered.window.HTMLButtonElement);
     assert.equal(refreshingTrigger.disabled, true);
     const refreshingNotice = Array.from(
       rendered.window.document.querySelectorAll('[aria-live="polite"]'),
     ).find((element) =>
-      element.textContent?.includes("Updating your environment report")
+      element.textContent?.includes("Murph is saving your answers")
     );
     assert.ok(refreshingNotice);
 
     const refreshOptions = mocks.refresh.mock.calls[0]?.[0];
     assert.equal(refreshOptions?.background, true);
-    assert.equal(refreshOptions?.requestRuntimeRefreshUntil, undefined);
-    const completion =
-      refreshOptions?.requestRuntimeRefreshUntilAfterRequest;
-    assert.ok(completion);
-
-    mocks.vault.runtimeRefreshPending = true;
-    await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    );
-    mocks.vault.workspaceVersion = "workspace-v3";
-    await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    );
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /Updating your environment report/,
-    );
-    assert.doesNotMatch(
-      rendered.window.document.body.textContent ?? "",
-      /The report was not updated/,
-    );
     assert.equal(
-      Reflect.apply(completion, undefined, [null, replacementRef]),
-      true,
+      typeof refreshOptions?.requestRuntimeRefreshUntilAfterRequest,
+      "function",
     );
-
-    mocks.vault.ref = replacementRef;
-    mocks.vault.runtimeRefreshPending = false;
-    await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /The report was not updated/,
-    );
-    const nextRecordingTrigger = Array.from(
-      rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Start the 2-minute"));
-    assert.ok(nextRecordingTrigger instanceof rendered.window.HTMLButtonElement);
-    assert.equal(nextRecordingTrigger.disabled, false);
+    assert.equal(refreshOptions?.requestRuntimeRefreshUntil, undefined);
   } finally {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
@@ -226,11 +190,143 @@ test("waits for a replica newer than the explicit post-processing refresh bounda
   }
 });
 
-test("restores server-side processing after reload and still waits for the replacement replica", async () => {
+test("restarts replica tracking for every accepted realtime topic", async () => {
+  vi.useFakeTimers();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async () => Response.json({ processing: false }));
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const acceptAnother = rendered.window.document.querySelector(
+      '[aria-label="Accept another realtime topic"]',
+    );
+    assert.ok(acceptAnother instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      acceptAnother.click();
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+
+    await act(async () => {
+      acceptAnother.click();
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
+
+test("keeps saving when an earlier accepted topic refresh finishes last", async () => {
+  vi.useFakeTimers();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = vi.fn(async () => Response.json({ processing: false }));
+  let resolveFirstRefresh: (() => void) | null = null;
+  let resolveSecondRefresh: (() => void) | null = null;
+  mocks.refresh
+    .mockImplementationOnce(() => new Promise<undefined>((resolve) => {
+      resolveFirstRefresh = () => resolve(undefined);
+    }))
+    .mockImplementationOnce(() => new Promise<undefined>((resolve) => {
+      resolveSecondRefresh = () => resolve(undefined);
+    }));
+  const rendered = await renderClientComponent(
+    createElement(EnvironmentPageClient, { contactOptions: [] }),
+    {
+      location: {
+        hash: "",
+        href: "https://local.withmurph.ai/environment",
+        origin: "https://local.withmurph.ai",
+        pathname: "/environment",
+        search: "",
+      },
+    },
+  );
+
+  try {
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const acceptAnother = rendered.window.document.querySelector(
+      '[aria-label="Accept another realtime topic"]',
+    );
+    assert.ok(acceptAnother instanceof rendered.window.HTMLButtonElement);
+
+    await act(async () => {
+      acceptAnother.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 1);
+
+    await act(async () => {
+      acceptAnother.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+    });
+    assert.equal(mocks.refresh.mock.calls.length, 2);
+
+    const firstCompletion =
+      mocks.refresh.mock.calls[0]?.[0]?.requestRuntimeRefreshUntilAfterRequest;
+    assert.equal(typeof firstCompletion, "function");
+    assert.equal(firstCompletion?.(null!, createReplicaRef("b")), true);
+    assert.ok(resolveFirstRefresh);
+    await act(async () => {
+      resolveFirstRefresh?.();
+      await Promise.resolve();
+    });
+    assert.match(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is saving your answers/,
+    );
+
+    const secondCompletion =
+      mocks.refresh.mock.calls[1]?.[0]?.requestRuntimeRefreshUntilAfterRequest;
+    assert.equal(typeof secondCompletion, "function");
+    assert.equal(secondCompletion?.(null!, createReplicaRef("c")), true);
+    assert.ok(resolveSecondRefresh);
+    await act(async () => {
+      resolveSecondRefresh?.();
+      await Promise.resolve();
+    });
+    assert.doesNotMatch(
+      rendered.window.document.body.textContent ?? "",
+      /Murph is saving your answers/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+    await rendered.cleanup();
+  }
+});
+
+test("restores server-side realtime processing after reload", async () => {
   vi.useFakeTimers();
   const originalFetch = globalThis.fetch;
   const baselineRef = createReplicaRef("a");
-  const replacementRef = createReplicaRef("b");
   mocks.vault.ref = baselineRef;
   const processingResponses = [true, true, false];
   globalThis.fetch = vi.fn(async () =>
@@ -260,11 +356,11 @@ test("restores server-side processing after reload and still waits for the repla
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Murph is processing your recording/,
+      /Murph is saving your answers/,
     );
     const processingTrigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Processing recording"));
+    ).find((button) => button.textContent?.includes("Saving report"));
     assert.ok(processingTrigger instanceof rendered.window.HTMLButtonElement);
     assert.equal(processingTrigger.disabled, true);
 
@@ -274,27 +370,12 @@ test("restores server-side processing after reload and still waits for the repla
     assert.equal(mocks.refresh.mock.calls.length, 1);
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Updating your environment report/,
+      /Murph is saving your answers/,
     );
 
-    mocks.vault.runtimeRefreshPending = true;
-    await rendered.rerender(renderEnvironment());
-    const completion = mocks.refresh.mock.calls[0]?.[0]
-      ?.requestRuntimeRefreshUntilAfterRequest;
-    assert.ok(completion);
     assert.equal(
-      Reflect.apply(completion, undefined, [null, replacementRef]),
-      true,
-    );
-    mocks.vault.ref = replacementRef;
-    mocks.vault.runtimeRefreshPending = false;
-    await rendered.rerender(renderEnvironment());
-    await act(async () => {
-      await Promise.resolve();
-    });
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /The report was not updated/,
+      typeof mocks.refresh.mock.calls[0]?.[0]?.requestRuntimeRefreshUntilAfterRequest,
+      "function",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -307,7 +388,6 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
   vi.useFakeTimers();
   const originalFetch = globalThis.fetch;
   const baselineRef = createReplicaRef("a");
-  const replacementRef = createReplicaRef("b");
   mocks.vault.ref = baselineRef;
   let processing = true;
   const fetchMock = vi.fn(async (
@@ -339,11 +419,11 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /You do not need to record it again/,
+      /Your saved topics are safe/,
     );
     const delayedRecordingTrigger = Array.from(
       rendered.window.document.querySelectorAll("button"),
-    ).find((button) => button.textContent?.includes("Processing recording"));
+    ).find((button) => button.textContent?.includes("Saving report"));
     assert.ok(
       delayedRecordingTrigger instanceof rendered.window.HTMLButtonElement,
     );
@@ -358,17 +438,17 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
       await Promise.resolve();
     });
     assert.ok(fetchMock.mock.calls.some(([input, init]) =>
-      input === "/api/environment/voice" && init?.method === "PATCH"
+      input === "/api/environment/realtime/topics" && init?.method === "PATCH"
     ));
 
     processing = false;
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000);
     });
-    assert.equal(mocks.refresh.mock.calls.length, 1);
+    assert.equal(mocks.refresh.mock.calls.length, 2);
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /Updating your environment report/,
+      /Murph is saving your answers/,
     );
 
     mocks.vault.runtimeRefreshPending = true;
@@ -376,7 +456,7 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
       createElement(EnvironmentPageClient, { contactOptions: [] }),
     );
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
     });
     assert.match(
       rendered.window.document.body.textContent ?? "",
@@ -384,12 +464,12 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
     );
     assert.match(
       rendered.window.document.body.textContent ?? "",
-      /You do not need to record it again/,
+      /Your saved topics are safe/,
     );
 
     const patchCallsBeforeReplicaRetry = fetchMock.mock.calls.filter(
       ([input, init]) =>
-        input === "/api/environment/voice" && init?.method === "PATCH",
+        input === "/api/environment/realtime/topics" && init?.method === "PATCH",
     ).length;
     const secondCheckAgain = Array.from(
       rendered.window.document.querySelectorAll("button"),
@@ -399,34 +479,18 @@ test("preserves delayed recovery for voice processing and replica refresh timeou
       secondCheckAgain.click();
       await Promise.resolve();
     });
-    assert.equal(mocks.refresh.mock.calls.length, 2);
-    assert.deepEqual(mocks.refresh.mock.calls[1]?.[0], {
-      background: true,
+    assert.equal(mocks.refresh.mock.calls.length, 3);
+    assert.deepEqual(mocks.refresh.mock.calls[2]?.[0], {
       retryRuntimeRefreshAfterRequest: true,
     });
     assert.equal(fetchMock.mock.calls.filter(
       ([input, init]) =>
-        input === "/api/environment/voice" && init?.method === "PATCH",
-    ).length, patchCallsBeforeReplicaRetry);
+        input === "/api/environment/realtime/topics" && init?.method === "PATCH",
+    ).length, patchCallsBeforeReplicaRetry + 1);
 
-    const originalCompletion = mocks.refresh.mock.calls[0]?.[0]
-      ?.requestRuntimeRefreshUntilAfterRequest;
-    assert.ok(originalCompletion);
     assert.equal(
-      Reflect.apply(originalCompletion, undefined, [null, replacementRef]),
-      true,
-    );
-    mocks.vault.ref = replacementRef;
-    mocks.vault.runtimeRefreshPending = false;
-    await rendered.rerender(
-      createElement(EnvironmentPageClient, { contactOptions: [] }),
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    assert.match(
-      rendered.window.document.body.textContent ?? "",
-      /The report was not updated/,
+      typeof mocks.refresh.mock.calls[1]?.[0]?.requestRuntimeRefreshUntilAfterRequest,
+      "function",
     );
   } finally {
     globalThis.fetch = originalFetch;

@@ -36,12 +36,18 @@ const JUNCTION_WEARABLE_LIVE_ENV_KEYS = [
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "JUNCTION_ENV",
   "JUNCTION_REGION",
+  "KERNEL_API_KEY",
   JUNCTION_WEARABLE_LIVE_ENV,
+  "MURPH_E2E_GARMIN_EMAIL",
+  "MURPH_E2E_GARMIN_PASSWORD",
+  "MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID",
   "MURPH_E2E_JUNCTION_OURA_MEMBER_ID",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
   "MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID",
+  "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_OURA_EMAIL",
   "MURPH_E2E_OURA_OTP",
+  "MURPH_E2E_PROVIDER_BROWSER",
   "MURPH_E2E_WHOOP_EMAIL",
   "MURPH_E2E_WHOOP_OTP",
   "MURPH_E2E_WHOOP_PASSWORD",
@@ -57,6 +63,7 @@ interface HostedLocalE2eRunnerCleanupOptions {
 
 export type HostedLocalE2eScenarioName =
   | "all"
+  | "analyze-video-roundtrip"
   | "active-turn-latency"
   | "canonical-receipt-lost-ack-recovery"
   | "checkpoint-baseline"
@@ -417,6 +424,12 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
     file: "apps/cloudflare/test/hosted-local-vault-file-approval-resume-e2e.test.ts",
     name: "vault-file-approval-resume",
+    testControls: true,
+  },
+  {
+    file: "apps/cloudflare/test/hosted-local-analyze-video-roundtrip-e2e.test.ts",
+    name: "analyze-video-roundtrip",
+    requiresParserToolchain: true,
     testControls: true,
   },
   {

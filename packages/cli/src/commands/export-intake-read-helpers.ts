@@ -142,10 +142,13 @@ async function loadQueryRuntime() {
 
 async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
   const query = await loadQueryRuntime()
-  const readModel = await query.readVault(vaultRoot)
-  const record = query.lookupEntityById(readModel, assessmentId)
+  const record = await query.resolveCanonicalEntityInFamily(
+    vaultRoot,
+    'assessment',
+    assessmentId,
+  )
 
-  if (!record || record.family !== 'assessment') {
+  if (!record) {
     throw new VaultCliError(
       'not_found',
       `No assessment found for "${assessmentId}".`,
