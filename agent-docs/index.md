@@ -509,7 +509,9 @@ Daily nutrition cards use one prompt-owned known-context suitability rule and
 one compact safety question before new numeric targets when needed. Routine
 cards do not run a universal clinical-history or measurement preflight, and a
 health-context fact constrains only the target or advice it materially affects.
-The Goal, totals, card-validation, and delivery owners remain unchanged. This
+Stale or incomplete context snapshots likewise direct only the canonical read
+needed for a concrete concern or an owning workflow's explicit contract. The
+Goal, totals, card-validation, and delivery owners remain unchanged. This
 contract is jointly specified by `ARCHITECTURE.md`,
 `agent-docs/RELIABILITY.md`, and
 `agent-docs/operations/imessage-deliverability.md`.

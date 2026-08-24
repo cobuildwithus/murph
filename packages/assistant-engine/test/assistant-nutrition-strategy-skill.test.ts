@@ -495,6 +495,9 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain(
       'An allergy, intolerance, dietary restriction, or\nclinician-directed diet is not by itself a reason to suppress benign totals or\nan accepted compatible target bundle.',
     )
+    expect(nutrition).toContain(
+      'A scheduled occurrence with unresolved suitability uses ordinary nonnumeric\ncloseout text and makes no proposal, mutation, question, or card.',
+    )
     expect(nutrition).toContain('Do not calculate energy availability or diagnose RED-S')
     expect(nutrition).toContain('little or nothing for about five days')
     expect(nutrition).toContain('refeeding can require medical monitoring')

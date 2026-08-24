@@ -206,8 +206,9 @@ On a scheduled run:
    `murph.attach_response_card` prompt before deriving or presenting numeric
    values, any Goal write, totals, or a card. Do not run a universal medical
    history or measurement checklist. When known context suppresses numeric
-   output, keep the ordinary compact closeout, perform no Goal or measurement
-   mutation, ask no question, and attach no card. When the complete all-status
+   output or suitability remains unresolved, keep the ordinary compact closeout,
+   perform no Goal or measurement mutation, ask no question, and attach no card.
+   When the complete all-status
    lookup proves absence, known context permits numeric guidance, compatible
    explicit targets are unambiguous,
    and already-known inputs prove one responsible five-target bundle, create

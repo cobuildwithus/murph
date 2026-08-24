@@ -977,7 +977,16 @@ describe('murph.attach_response_card', () => {
       'A routine card with complete accepted goals needs no repeated screening unless new context raises a concern.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'ask one compact question confirming that the member is at least 18',
+      'ask one compact question covering every unresolved category',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'underweight, frailty, or malnutrition',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'kidney disease, advanced liver disease, significant heart disease, or relevant endocrine disease',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'post-bariatric care',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Apply safety at the narrowest relevant scope',
@@ -993,6 +1002,9 @@ describe('murph.attach_response_card', () => {
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'A missing unrelated fact or failed unrelated read does not block a routine card.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'A scheduled occurrence with unresolved suitability uses ordinary non-numeric closeout with no proposal, Goal mutation, question, or card.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).not.toMatch(
       /memory show|condition list|regimen list|measurement entry list|event list --kind (?:procedure|encounter|test)/u,
@@ -1031,7 +1043,7 @@ describe('murph.attach_response_card', () => {
       'its next unambiguous acceptance may complete that pending request only after reapplying the known-context suitability rule',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
-      'A scheduled occurrence asks no screening questions and never activates provisional targets.',
+      'A scheduled occurrence never activates provisional targets.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'once that Goal exists in any status, scheduled turns never create, change, or automatically repeat it.',

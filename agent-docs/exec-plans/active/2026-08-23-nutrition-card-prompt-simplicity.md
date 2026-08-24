@@ -64,6 +64,15 @@ Updated: 2026-08-23
   use Codex prompt guidance for contextual nutrition suitability.
 - Apply safety at the narrowest relevant scope instead of treating any diagnosis,
   medication, allergy, restriction, or clinician involvement as a blanket veto.
+- Resolve the specialist prompt finding by deleting the context snapshot's
+  universal active-record enumeration and keeping only targeted reads for a
+  concrete concern or an owning workflow's explicit contract.
+- Keep one compact new-target question, but require it to cover every unresolved
+  contraindication already named by the prompt. Scheduled unresolved suitability
+  stays nonnumeric and performs no proposal, mutation, question, or card.
+- Accept deterministic assembled-prompt coverage for the prompt-owner conflict;
+  reject a large real-model safety matrix because it would recreate the brittle
+  machinery this change removes.
 
 ## Verification
 

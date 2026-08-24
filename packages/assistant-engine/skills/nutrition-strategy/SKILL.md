@@ -78,6 +78,9 @@ the explanation-before-card sequence. Do not send a goal-less card, create a
 second goal store, or broaden the one scheduled exception into recurring
 unsolicited diet planning.
 
+A scheduled occurrence with unresolved suitability uses ordinary nonnumeric
+closeout text and makes no proposal, mutation, question, or card.
+
 ## Named Diets And Dietary Patterns
 
 A named diet is a rule package, not the user's goal. First identify the job the user is asking for - a definition, comparison, fit decision, practical adaptation, or troubleshooting - and the outcome they actually care about. Answer a direct factual question before asking about goals. Ask one focused question only when the answer would materially change for the user's goal, implementation, or safety.

@@ -145,7 +145,7 @@ describe('assistant automatic meal capture skill', () => {
       'Do not run a universal medical history or measurement checklist.',
     )
     expect(compactSkill).toContain(
-      'When known context suppresses numeric output, keep the ordinary compact closeout',
+      'When known context suppresses numeric output or suitability remains unresolved, keep the ordinary compact closeout',
     )
     expect(compactSkill).toContain(
       'Only when the complete target-authority read in step 6 resolves one unambiguous card-authorizing bundle',
