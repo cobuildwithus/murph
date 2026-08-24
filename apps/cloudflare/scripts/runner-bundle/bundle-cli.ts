@@ -145,7 +145,8 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
 // Experiment and Murph Age recovery metadata add 8,772 B to the lazy CLI graph.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_476_420;
+// The corrected terminal recovery hint sets the public Linux baseline to 9,476,554 B.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_476_554;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
