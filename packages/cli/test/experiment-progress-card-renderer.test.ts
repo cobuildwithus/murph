@@ -309,7 +309,11 @@ test("progress-card persistence reports a stable integrity stage without exposin
     assert.ok(captured instanceof VaultCliError);
     assert.equal(captured.code, "progress_card_integrity_failed");
     assert.equal(captured.repair?.stage, "integrity");
-    assert.match(captured.repair?.hint ?? "", /repair-experiment-media/u);
+    assert.doesNotMatch(captured.repair?.hint ?? "", /repair-experiment-media/u);
+    assert.equal(
+      captured.repair?.hint,
+      "Do not retry this progress card. Continue the final review without the card attachment.",
+    );
     const encoded = JSON.stringify({
       code: captured.code,
       message: captured.message,

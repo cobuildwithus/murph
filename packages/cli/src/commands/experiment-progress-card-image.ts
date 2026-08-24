@@ -30,8 +30,8 @@ const CARD_HEIGHT = 780;
 const CARD_CONTENT_TYPE = "image/png";
 const CARD_SOURCE = "murph.experiment-progress-card";
 const CARD_LOOKUP_ROLE = "media_1";
-const EXPERIMENT_MEDIA_REPAIR_HINT =
-  "Run vault repair-experiment-media in dry-run mode before retrying.";
+const TERMINAL_PROGRESS_CARD_HINT =
+  "Do not retry this progress card. Continue the final review without the card attachment.";
 const DIRECTION_UNAVAILABLE_COPY =
   "Direction context unavailable · mover sentiment is neutral.";
 const CONTENT_LEFT = 64;
@@ -66,7 +66,7 @@ function progressCardFailure(
   code: string,
   message: string,
   stage: string,
-  hint: string = EXPERIMENT_MEDIA_REPAIR_HINT,
+  hint: string,
 ): VaultCliError {
   return new VaultCliError(code, message, undefined, { hint, stage });
 }
@@ -174,6 +174,7 @@ async function resolveSavedProgressCard(input: {
       "progress_card_capture_conflict",
       "The deterministic progress-card capture was previously deleted.",
       "persistence",
+      TERMINAL_PROGRESS_CARD_HINT,
     );
   }
   if (existing.status === "live") {
@@ -225,6 +226,7 @@ async function resolveSavedProgressCard(input: {
           "progress_card_persist_failed",
           "The progress-card capture did not contain an image attachment.",
           "persistence",
+          TERMINAL_PROGRESS_CARD_HINT,
         );
       }
       return { ref };
@@ -241,6 +243,7 @@ async function resolveSavedProgressCard(input: {
           "progress_card_capture_conflict",
           "A concurrent progress-card capture did not produce a live image.",
           "persistence",
+          TERMINAL_PROGRESS_CARD_HINT,
         );
       }
       await assertSavedProgressCardMatches({
@@ -272,6 +275,7 @@ async function assertSavedProgressCardMatches(input: {
       "progress_card_integrity_failed",
       "The saved progress-card image could not be verified.",
       "integrity",
+      TERMINAL_PROGRESS_CARD_HINT,
     );
   }
   const savedSha256 = createHash("sha256").update(savedBytes).digest("hex");
@@ -283,6 +287,7 @@ async function assertSavedProgressCardMatches(input: {
       "progress_card_integrity_failed",
       "The saved progress-card image does not match the deterministic render.",
       "integrity",
+      TERMINAL_PROGRESS_CARD_HINT,
     );
   }
 }
