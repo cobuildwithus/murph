@@ -12,6 +12,7 @@ import {
   registerScheduledLogCommands,
   scheduledLogActionOptionKeysByKind,
 } from "../src/commands/scheduled-log.js";
+import { workoutTypedRepairFields } from "../src/commands/workout-typed-repair-fields.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
@@ -210,6 +211,9 @@ test("scheduled-log save schema exposes typed parity fields while import-json re
     "body",
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field);
+  }
+  for (const field of workoutTypedRepairFields) {
+    assert.equal(field in saveSchema.options.properties, true, `scheduled-log save missing ${field}`);
   }
 
   const importJsonSchema = await readCommandSchema(cli, ["scheduled-log", "import-json"]);
@@ -1005,6 +1009,8 @@ test("scheduled-log save and import return bounded field recovery without echoin
   try {
     const cli = createScheduledLogCli();
     await initializeVault({ vaultRoot });
+    const saveSchema = await readCommandSchema(cli, ["scheduled-log", "save"]);
+    const beforeInvalidWrites = await snapshotVaultFiles(vaultRoot);
 
     const typed = await runInProcessJsonCli(cli, [
       "scheduled-log",
@@ -1042,6 +1048,36 @@ test("scheduled-log save and import return bounded field recovery without echoin
     );
     assert.doesNotMatch(JSON.stringify(typed.envelope), /PRIVATE_TYPED_PAYLOAD_SENTINEL/u);
 
+    const typedWorkout = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      "PRIVATE_TYPED_WORKOUT_SENTINEL",
+      "--schedule-kind",
+      "cron",
+      "--schedule-cron",
+      "15 6 * * 3",
+      "--action-kind",
+      "activity_session.add",
+      "--action-title",
+      "Strength",
+      "--duration-minutes",
+      "30",
+      "--workout-exercise",
+      "order=1;name=PRIVATE_TYPED_EXERCISE_SENTINEL",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(typedWorkout.exitCode, 1);
+    assert.equal(typedWorkout.envelope.ok, false);
+    assert.equal(typedWorkout.envelope.error.code, "invalid_option");
+    assert.equal(typedWorkout.envelope.error.stage, "validation");
+    assert.equal(typedWorkout.envelope.error.fieldErrors?.[0]?.path, "workoutSet");
+    assert.equal("workoutSet" in saveSchema.options.properties, true);
+    assert.doesNotMatch(
+      JSON.stringify(typedWorkout.envelope),
+      /PRIVATE_TYPED_(?:WORKOUT|EXERCISE)_SENTINEL/u,
+    );
+
     const payloadPath = path.join(parentRoot, "invalid-scheduled-log.json");
     await writeFile(payloadPath, JSON.stringify({
       title: "PRIVATE_IMPORTED_PAYLOAD_SENTINEL",
@@ -1072,8 +1108,47 @@ test("scheduled-log save and import return bounded field recovery without echoin
       /PRIVATE_IMPORTED_(?:PAYLOAD|BODY)_SENTINEL/u,
     );
 
+    const workoutPayloadPath = path.join(parentRoot, "invalid-scheduled-workout.json");
+    await writeFile(workoutPayloadPath, JSON.stringify({
+      title: "PRIVATE_IMPORTED_WORKOUT_SENTINEL",
+      schedule: { kind: "cron", expression: "15 6 * * 3" },
+      action: {
+        kind: "activity_session.add",
+        title: "Strength",
+        activityType: "strength",
+        durationMinutes: 30,
+        workout: {
+          exercises: [{
+            name: "PRIVATE_IMPORTED_EXERCISE_SENTINEL",
+            order: 1,
+            sets: [],
+          }],
+        },
+      },
+    }), "utf8");
+    const importedWorkout = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "import-json",
+      "--input",
+      `@${workoutPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(importedWorkout.exitCode, 1);
+    assert.equal(importedWorkout.envelope.ok, false);
+    assert.equal(importedWorkout.envelope.error.code, "invalid_payload");
+    assert.equal(
+      importedWorkout.envelope.error.fieldErrors?.[0]?.path,
+      "action.workout.exercises.0.sets",
+    );
+    assert.doesNotMatch(
+      JSON.stringify(importedWorkout.envelope),
+      /PRIVATE_IMPORTED_(?:WORKOUT|EXERCISE)_SENTINEL/u,
+    );
+
     const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
     assert.deepEqual(await readdir(scheduledLogDir).catch(() => []), []);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidWrites);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

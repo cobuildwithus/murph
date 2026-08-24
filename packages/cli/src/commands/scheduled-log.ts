@@ -48,6 +48,10 @@ import {
   requireCompactInteger,
   requireCompactString,
 } from "./compact-field-spec.js";
+import {
+  workoutTypedRepairFieldForIssuePath,
+  workoutTypedRepairFields,
+} from "./workout-typed-repair-fields.js";
 
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const scheduledLogActionKindValues = [
@@ -503,18 +507,9 @@ interface WorkoutOptions {
   workoutStartedAt?: string;
 }
 
-const workoutOptionKeys = [
-  "workoutSourceApp",
-  "workoutSourceWorkoutId",
-  "workoutStartedAt",
-  "workoutEndedAt",
-  "workoutRoutineId",
-  "workoutRoutineName",
-  "workoutSessionNote",
-  "workoutMedia",
-  "workoutExercise",
-  "workoutSet",
-] as const satisfies ReadonlyArray<keyof WorkoutOptions>;
+const workoutOptionKeys = workoutTypedRepairFields satisfies ReadonlyArray<
+  keyof WorkoutOptions
+>;
 
 const workoutMediaFieldKeys = [
   "kind",
@@ -724,7 +719,7 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
       undefined,
       {
         fields: parsed.error.issues.map((issue) => ({
-          path: workoutIssueOptionPath(issue.path),
+          path: workoutTypedRepairFieldForIssuePath(issue.path),
           code: issue.code,
           message: scheduledLogValidationMessage(issue),
         })),
@@ -735,31 +730,6 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
   }
 
   return parsed.data;
-}
-
-function workoutIssueOptionPath(path: readonly PropertyKey[]): string {
-  switch (path[0]) {
-    case "sourceApp":
-      return "workoutSourceApp";
-    case "sourceWorkoutId":
-      return "workoutSourceWorkoutId";
-    case "startedAt":
-      return "workoutStartedAt";
-    case "endedAt":
-      return "workoutEndedAt";
-    case "routineId":
-      return "workoutRoutineId";
-    case "routineName":
-      return "workoutRoutineName";
-    case "sessionNote":
-      return "workoutSessionNote";
-    case "media":
-      return "workoutMedia";
-    case "exercises":
-      return path.includes("sets") ? "workoutSet" : "workoutExercise";
-    default:
-      return "workoutExercise";
-  }
 }
 
 interface ScheduledLogActionOptions {
@@ -931,7 +901,7 @@ function typedActionIssueOptionPath(path: readonly PropertyKey[]): string {
           return "measurementMetric";
       }
     case "workout":
-      return workoutIssueOptionPath(path.slice(1));
+      return workoutTypedRepairFieldForIssuePath(path.slice(1));
     case "nutrition":
       switch (path.at(-1)) {
         case "calories":
