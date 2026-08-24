@@ -101,7 +101,8 @@ Updated: 2026-08-23
 
 Completed local proof:
 
-- Browser-runner unit suite: 38 passed.
-- Real headed-Chromium smoke: 7 passed.
+- Browser-runner unit suite: 40 passed.
+- Real headed-Chromium smoke: 8 passed, including a held page-load boundary
+  that proves Disconnect remains untouched until its client handler is ready.
 - Hosted Web typecheck: passed.
 - Docs drift and diff checks: passed.
