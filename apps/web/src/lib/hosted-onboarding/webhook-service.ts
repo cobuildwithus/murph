@@ -977,6 +977,9 @@ export async function handleHostedOnboardingLinqWebhook(input: {
           ? await planHostedLinqPermanentHomeRouteRecovery({ event, prisma })
           : null;
       if (!recoveredPlan) {
+        // A pre-provider failure has no persisted reply to resume. The skip
+        // writer ignores ambiguous and completed deliveries.
+        await abandonInstantFirstTurn("planner-failed-before-provider-dispatch");
         finishHostedOnboardingTiming(planTiming, "failed", {
           errorName: deriveHostedOnboardingTimingErrorName(error),
         });

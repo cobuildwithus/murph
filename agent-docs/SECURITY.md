@@ -1197,8 +1197,10 @@ Last verified: 2026-08-20
   is speculative only to preserve classifier/generation overlap, Web retains it
   after planning only for an exact model-approved active direct wake. Every
   other successfully planned outcome marks that same row skipped before signup
-  or alternate-route egress; retryable planning failures retain it for
-  exact-event recovery. The request retains every source part type in order, so
+  or alternate-route egress. A caught planning failure marks an attempted row
+  skipped before rethrowing because it has no persisted reply to resume; the
+  existing final-state guard preserves ambiguous encrypted obligations. The
+  request retains every source part type in order, so
   multiple text parts remain multipart even when their bounded classifier text
   is joined. An exact replay cannot reopen a skipped instant reply or a failed
   instant reply whose encrypted payload was cleared; only an ambiguous failure

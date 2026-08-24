@@ -82,7 +82,7 @@ was delivered.
 
 - Focused Web owner tests pass 360 cases covering strict Murph output, canonical welcome,
   plain-text eligibility, durable pre-generation ownership, accepted continuity,
-  centralized fallback terminalization, retry-preserving enrollment failure,
+  centralized fallback terminalization, failed-planning claim release,
   actual multipart cardinality, atomic rollback, encrypted-body replay,
   ambiguous send suppression, terminal exact replay, and definitive fallback.
   Webhook idempotency and Linq transport pass another 109
@@ -116,11 +116,25 @@ was delivered.
 
 ## State
 
-Active. The round 2 correction, focused local proof, and changelog packaging are complete. The design reuses
-the existing delivery ledger as the only provider outbox, stores the exact
-pending body encrypted for ambiguous recovery, and represents the completed
-exchange as two ordinary consumed conversation rows. Candidate review,
+Active. Round 4 remediation and candidate verification are complete. The
+design reuses the existing delivery ledger as the only provider outbox, stores
+the exact pending body encrypted for ambiguous recovery, and represents the
+completed exchange as two ordinary consumed conversation rows. ReviewGPT,
 exact-head gates, and completion remain.
+
+## ReviewGPT round 4 disposition
+
+The round 4 finding was accepted. A retryable enrollment or planner exception
+could escape after Web claimed and generated an answer but before provider
+dispatch persisted that body. The attempted row could not resume, yet it fenced
+later conversation work and could eventually be reclaimed after the ordinary
+runtime had answered.
+
+The planner catch now invokes the existing skip writer before rethrowing. That
+writer changes only an attempted pre-provider row, so provider-started,
+failed-with-payload, and completed delivery obligations remain untouched. The
+focused retryable-enrollment test proves generation precedes this terminal
+release. No new state, owner, lease, queue, service, or dependency is added.
 
 ## ReviewGPT round 3 disposition
 
@@ -155,8 +169,10 @@ claim therefore remains speculative in the existing delivery ledger. The
 smallest correction is one planner-convergence decision: an exact
 model-approved active direct wake continues the Web reply, and every other
 successfully planned outcome marks the same claim skipped before any fallback
-side effect. Retryable planner failures retain the claim for exact-event
-recovery. This central rule replaces the model-block-only cleanup and adds no
+side effect. A caught planner failure also skips an attempted claim because its
+generated body has not reached the provider-payload boundary; ambiguous and
+completed obligations remain final to that writer. This central rule replaces
+the model-block-only cleanup and adds no
 owner, state, queue, scheduler, service, dependency, lease, or reconciliation
 loop.
 

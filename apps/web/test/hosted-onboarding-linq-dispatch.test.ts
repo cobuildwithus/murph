@@ -9468,12 +9468,38 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       });
       expect(mocks.ensureHostedLinqInstantStartStarterUsageEnrollment)
         .toHaveBeenCalledOnce();
+      expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+        linqChatId: "chat_123",
+        prisma,
+        request: expect.objectContaining({
+          eventId: "evt_instant_start_fallback",
+          text: "Hey Murph",
+        }),
+      });
+      expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledWith({
+        claim: { kind: "generate" },
+        request: expect.objectContaining({
+          eventId: "evt_instant_start_fallback",
+          text: "Hey Murph",
+        }),
+        signal: undefined,
+      });
       expect(mocks.incrementHostedLinqInboundDailyState).not.toHaveBeenCalled();
       expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
       expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
       expect(mocks.runHostedLinqInstantStartDeferredActivationWakeBestEffort)
         .not.toHaveBeenCalled();
-      expect(mocks.abandonHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
+      expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledWith({
+        eventId: "evt_instant_start_fallback",
+        linqChatId: "chat_123",
+        prisma,
+        reason: "planner-failed-before-provider-dispatch",
+      });
+      expect(
+        mocks.startHostedLinqInstantFirstTurnGeneration.mock.invocationCallOrder[0],
+      ).toBeLessThan(
+        mocks.abandonHostedLinqInstantFirstTurn.mock.invocationCallOrder[0]!,
+      );
       expect(mocks.completeHostedLinqInstantFirstTurn).not.toHaveBeenCalled();
       return;
     }
