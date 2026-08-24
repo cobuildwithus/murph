@@ -249,7 +249,7 @@ export interface HostedWorkspaceRunnerAssistantPhaseInput {
   recordDeferredUsage?: ((
     record: AssistantUsageRecord,
     providerRequestAcceptedInputIds?: readonly string[],
-  ) => void) | null;
+  ) => Promise<void>) | null;
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   workspace: HostedWorkspaceState | null;
 }
@@ -899,10 +899,10 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
   };
   const startDeferredUsageRecords = (
     records: readonly HostedDeferredAssistantUsageRecord[],
-  ): void => {
+  ): Promise<void> => {
     if (records.length === 0) {
       maybeResolveDeferredUsageCompletion();
-      return;
+      return Promise.resolve();
     }
 
     const completion = deferredUsageWriteTail.then(async () => {
@@ -917,6 +917,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       pendingDeferredUsageWrites.delete(completion);
       maybeResolveDeferredUsageCompletion();
     });
+    return completion;
   };
   const startDeferredUsageCaptureOnce = (): Promise<void> => {
     if (deferredUsageCaptureStarted) {
@@ -924,7 +925,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     }
 
     deferredUsageCaptureStarted = true;
-    startDeferredUsageRecords(deferredUsageRecords.splice(0));
+    void startDeferredUsageRecords(deferredUsageRecords.splice(0));
     maybeResolveDeferredUsageCompletion();
     return deferredUsageCompletion;
   };
@@ -1098,7 +1099,7 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
     recordDeferredUsage(
       record: AssistantUsageRecord,
       providerRequestAcceptedInputIds?: readonly string[],
-    ): void {
+    ): Promise<void> {
       const deferredRecord = {
         ...(providerRequestAcceptedInputIds === undefined
           ? {}
@@ -1106,11 +1107,11 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
         record,
       };
       if (deferredUsageCaptureStarted) {
-        startDeferredUsageRecords([deferredRecord]);
-        return;
+        return startDeferredUsageRecords([deferredRecord]);
       }
 
       deferredUsageRecords.push(deferredRecord);
+      return Promise.resolve();
     },
     shouldYieldBackgroundMaintenance,
     workspace: input.workspace,

@@ -27,6 +27,7 @@ import {
   refreshAssistantContextSnapshot,
   resolveAssistantContextSnapshotPath,
 } from '../src/assistant/context-snapshot.js'
+import { MURPH_ATTACH_RESPONSE_CARD_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 
 describe('assistant context snapshot', () => {
   it('classifies only prompt-snapshot source domains as dirty', () => {
@@ -270,8 +271,9 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain('Sleep schedule ramp')
       expect(prompt).toContain('Baseline 2:30 AM')
       expect(prompt).toContain(
-        'read the relevant `vault-cli condition show` / `vault-cli allergy show` / `vault-cli regimen show` / `vault-cli goal show` record',
+        'Treat this snapshot as navigation, not a completeness gate.',
       )
+      expect(prompt).toContain('do not enumerate or detail-read unrelated records')
       expect(prompt).toContain('Active experiment context for navigation only:')
       expect(prompt).toContain('Sleep consistency')
       await markAssistantContextSnapshotDirty({
@@ -646,8 +648,9 @@ describe('assistant context snapshot', () => {
       expect(promptText).toContain('Magnesium glycinate')
       expect(promptText).toContain('ingredients magnesium glycinate 200 mg')
       expect(promptText).toContain('related conditions Thoracic radiculopathy / radiculitis')
-      expect(promptText).toContain('vault-cli allergy show')
-      expect(promptText).toContain('vault-cli regimen show')
+      expect(promptText).toContain('read only the relevant canonical record needed to resolve it')
+      expect(promptText).not.toContain('vault-cli allergy show')
+      expect(promptText).not.toContain('vault-cli regimen show')
       expect(promptText).not.toContain('Inactive allergy')
       expect(promptText).not.toContain('Stopped medication')
     } finally {
@@ -698,11 +701,24 @@ describe('assistant context snapshot', () => {
 
       const stalePrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(stalePrompt).toContain('Active safety-critical health context is currently unavailable')
-      expect(stalePrompt).toContain('`vault-cli condition list --status active`')
-      expect(stalePrompt).toContain('`vault-cli allergy list --status active`')
-      expect(stalePrompt).toContain('`vault-cli regimen list --status active`')
-      expect(stalePrompt).toContain('`vault-cli goal list --status active`')
-      expect(stalePrompt).toContain('`vault-cli condition show <id>`')
+      expect(stalePrompt).toContain('For a concrete concern or an owning workflow\'s explicit contract')
+      expect(stalePrompt).toContain('Do not enumerate unrelated conditions, allergies, regimens, goals, or history.')
+      expect(stalePrompt).not.toMatch(
+        /vault-cli (?:condition|allergy|regimen|goal) list/u,
+      )
+      const assembledPrompt = [
+        stalePrompt,
+        MURPH_ATTACH_RESPONSE_CARD_TOOL.description,
+      ].join('\n')
+      expect(assembledPrompt).toContain(
+        'For daily_nutrition cards and numeric nutrition targets',
+      )
+      expect(assembledPrompt).toContain(
+        'Do not run a universal medical-history or measurement checklist.',
+      )
+      expect(assembledPrompt).not.toMatch(
+        /vault-cli (?:condition|allergy|regimen) list/u,
+      )
       expect(stalePrompt).toContain('Do not infer that history is absent')
       expect(stalePrompt).toContain('`vault-cli blood-test list`')
       expect(stalePrompt).not.toContain(
@@ -743,8 +759,8 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain('`vault-cli blood-test list`')
       expect(prompt).toContain('`vault-cli measurement list`')
       expect(prompt).toContain('`vault-cli measurement show <event-id>`')
-      expect(prompt).toContain('Before any safety-relevant guidance')
-      expect(prompt).toContain('`vault-cli regimen list --status active`')
+      expect(prompt).toContain('For a concrete concern or an owning workflow\'s explicit contract')
+      expect(prompt).not.toContain('`vault-cli regimen list --status active`')
       expect(prompt).not.toContain(
         'Active safety-critical health context is currently unavailable',
       )
@@ -773,9 +789,9 @@ describe('assistant context snapshot', () => {
       expect(prompt).toContain(
         'Canonical blood-test, body/scale, and blood-pressure availability is currently unavailable',
       )
-      expect(prompt).toContain('Before any safety-relevant guidance')
+      expect(prompt).toContain('For a concrete concern or an owning workflow\'s explicit contract')
       expect(prompt).toContain('Do not infer that history is absent')
-      expect(prompt).toContain('`vault-cli regimen list --status active`')
+      expect(prompt).not.toContain('`vault-cli regimen list --status active`')
       expect(prompt).toContain('`vault-cli measurement show <event-id>`')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
@@ -1039,7 +1055,8 @@ describe('assistant context snapshot', () => {
 
       const promptText = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(promptText).toContain('Active safety-critical health context is currently unavailable')
-      expect(promptText).toContain('`vault-cli allergy list --status active`')
+      expect(promptText).toContain('For a concrete concern or an owning workflow\'s explicit contract')
+      expect(promptText).not.toContain('`vault-cli allergy list --status active`')
       expect(promptText).not.toContain('Penicillin allergy')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
@@ -1056,7 +1073,8 @@ describe('assistant context snapshot', () => {
 
       const prompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(prompt).toContain('Active safety-critical health context is currently unavailable')
-      expect(prompt).toContain('`vault-cli condition list --status active`')
+      expect(prompt).toContain('For a concrete concern or an owning workflow\'s explicit contract')
+      expect(prompt).not.toContain('`vault-cli condition list --status active`')
     } finally {
       await rm(vaultRoot, { force: true, recursive: true })
     }
@@ -1113,7 +1131,8 @@ describe('assistant context snapshot', () => {
       )
       const oversizedPrompt = (await readAssistantContextSnapshotPrompt({ vaultRoot })) ?? ''
       expect(oversizedPrompt).toContain('Active safety-critical health context is currently unavailable')
-      expect(oversizedPrompt).toContain('`vault-cli condition list --status active`')
+      expect(oversizedPrompt).toContain('For a concrete concern or an owning workflow\'s explicit contract')
+      expect(oversizedPrompt).not.toContain('`vault-cli condition list --status active`')
     } finally {
       await rm(parentRoot, {
         force: true,

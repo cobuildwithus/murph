@@ -572,6 +572,7 @@ describe("hosted orchestration reconciliation facts", () => {
     });
     expect(facts.workspace).toMatchObject({
       inboxMediaRetentionWakeAt: FIXED_NOW,
+      systemMailboxFrontier: null,
       version: "4",
     });
     expect(mocks.readHostedMailboxMaxSeqByLane).not.toHaveBeenCalled();
@@ -1679,6 +1680,7 @@ describe("hosted orchestration reconciliation facts", () => {
         inboxMediaRetentionWakeAt: null,
         nextWakeAt: null,
         nextWakeReason: null,
+        systemMailboxFrontier: null,
         version: "4",
       },
     });
