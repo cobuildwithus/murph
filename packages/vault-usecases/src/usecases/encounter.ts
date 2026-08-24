@@ -32,6 +32,7 @@ import {
   normalizeOptionalText,
   normalizeStringArray,
   toVaultCliError,
+  validationRepairFromZodIssues,
 } from './vault-usecase-helpers.js'
 import { normalizeMeasurementEntry } from './measurement.js'
 
@@ -241,9 +242,15 @@ function invalidPayload(message: string) {
 function parseEncounterPayloadInput(payload: unknown): ParsedEncounterBundlePayload {
   const result = encounterBundlePayloadSchema.safeParse(payload)
   if (!result.success) {
-    throw new VaultCliError('invalid_payload', 'encounter payload failed validation.', {
-      issues: result.error.issues.map((issue) => issue.message),
-    })
+    throw new VaultCliError(
+      'invalid_payload',
+      'encounter payload failed validation.',
+      undefined,
+      validationRepairFromZodIssues(
+        result.error.issues,
+        'Correct the listed fields or run encounter payload-schema for the exact writable contract.',
+      ),
+    )
   }
 
   return result.data

@@ -9,6 +9,7 @@ import { afterEach, test } from "vitest";
 
 import {
   registerAssertionCommands,
+  registerDiagnosticTestCommands,
   registerSocialHistoryCommands,
 } from "../src/commands/clinical-imports.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
@@ -30,6 +31,7 @@ function createSliceCli() {
   });
   cli.use(incurErrorBridge);
   registerAssertionCommands(cli);
+  registerDiagnosticTestCommands(cli);
   registerSocialHistoryCommands(cli);
 
   return cli;
@@ -133,6 +135,89 @@ test("clinical import payload-schema command emits the writable JSON contract", 
   assert.deepEqual(requireData(scaffoldResult).payload.rawRefs, [
     "raw/documents/2026/06/synthetic-clinical-summary.pdf",
   ]);
+});
+
+test("clinical typed date options return native field-specific envelopes", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-dates-"));
+  cleanupPaths.push(vaultRoot);
+  const privateDate = "private-date-marker";
+  const cases: Array<{ args: string[]; path: string }> = [
+    {
+      args: [
+        "assertion",
+        "save",
+        "--assertion",
+        "denial_asserted",
+        "--asserted-on",
+        privateDate,
+        "--vault",
+        vaultRoot,
+      ],
+      path: "assertedOn",
+    },
+    {
+      args: [
+        "diagnostic-test",
+        "save",
+        "Synthetic panel",
+        "--reported-at",
+        privateDate,
+        "--vault",
+        vaultRoot,
+      ],
+      path: "reportedAt",
+    },
+  ];
+
+  for (const entry of cases) {
+    const result = await runSliceCli(entry.args);
+    assert.equal(result.ok, false);
+    if (result.ok) {
+      continue;
+    }
+    assert.equal(result.error.code, "VALIDATION_ERROR");
+    assert.equal(result.error.fieldErrors?.[0]?.path, entry.path);
+    assert.equal(result.error.fieldErrors?.[0]?.received, "");
+    assert.equal(JSON.stringify(result).includes(privateDate), false);
+  }
+});
+
+test("clinical import validation returns bounded repair fields without payload values", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-invalid-"));
+  cleanupPaths.push(vaultRoot);
+  const inputFile = path.join(vaultRoot, "assertion.json");
+  const privateValue = "private-assertion-date";
+  await writeFile(inputFile, `${JSON.stringify({
+    occurredAt: "2026-06-17T14:00:00.000Z",
+    source: "import",
+    assertion: "denial_asserted",
+    assertedOn: privateValue,
+    externalRef: {
+      system: "synthetic-pdf",
+      resourceType: "clinical-assertion",
+      resourceId: "synthetic-assertion",
+    },
+  })}\n`, "utf8");
+
+  const result = await runSliceCli([
+    "assertion",
+    "import-json",
+    "--vault",
+    vaultRoot,
+    "--input",
+    `@${inputFile}`,
+  ]);
+
+  assert.equal(result.ok, false);
+  if (result.ok) {
+    return;
+  }
+  assert.equal(result.error.code, "invalid_payload");
+  assert.equal(result.error.stage, "validation");
+  assert.equal(result.error.fieldErrors?.[0]?.path, "assertedOn");
+  assert.equal(result.error.fieldErrors?.[0]?.code, "custom");
+  assert.match(result.error.hint ?? "", /assertion payload-schema/u);
+  assert.equal(JSON.stringify(result).includes(privateValue), false);
 });
 
 test("social-history import-json retries return a schema-valid no-op result", async () => {

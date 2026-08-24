@@ -1,6 +1,10 @@
 import path from 'node:path'
 
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { ZodIssue } from '@murphai/contracts/zod-runtime'
+import {
+  VaultCliError,
+  type VaultCliRepairInput,
+} from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
@@ -10,6 +14,81 @@ import {
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
 const WINDOWS_DRIVE_PREFIX_PATTERN = /^[A-Za-z]:/
+
+function flattenValidationIssues(issues: readonly ZodIssue[]): ZodIssue[] {
+  return issues.flatMap((issue) =>
+    issue.code === 'invalid_union'
+      ? issue.errors.flatMap((branch) => flattenValidationIssues(branch))
+      : [issue],
+  )
+}
+
+function validationIssueExpected(issue: ZodIssue): string | undefined {
+  if (
+    'expected' in issue &&
+    typeof issue.expected === 'string' &&
+    /^[A-Za-z0-9_.| -]{1,80}$/u.test(issue.expected)
+  ) {
+    return issue.expected
+  }
+
+  if ('values' in issue && Array.isArray(issue.values)) {
+    const values = issue.values.flatMap((value): string[] => {
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean' ||
+        value === null
+      ) {
+        return [String(value)]
+      }
+      return []
+    })
+    const expected = values.join(' | ')
+    return expected.length > 0 && expected.length <= 160 ? expected : undefined
+  }
+
+  return undefined
+}
+
+function validationIssueMessage(issue: ZodIssue): string {
+  switch (issue.code) {
+    case 'invalid_type':
+      return 'Use the expected value type.'
+    case 'invalid_value':
+      return 'Use one of the allowed values.'
+    case 'unrecognized_keys':
+      return 'Remove fields that are not defined by this payload schema.'
+    case 'invalid_format':
+      return 'Use the required field format.'
+    case 'too_small':
+      return 'Use a value that meets the minimum size or range.'
+    case 'too_big':
+      return 'Use a value that stays within the maximum size or range.'
+    default:
+      return 'Correct this field to match the payload schema.'
+  }
+}
+
+export function validationRepairFromZodIssues(
+  issues: readonly ZodIssue[],
+  hint: string,
+): VaultCliRepairInput {
+  return {
+    stage: 'validation',
+    hint,
+    fields: flattenValidationIssues(issues).map((issue) => ({
+      path: issue.path,
+      code: issue.code,
+      message: validationIssueMessage(issue),
+      expected: validationIssueExpected(issue),
+      missing:
+        issue.code === 'invalid_type' &&
+        'input' in issue &&
+        issue.input === undefined,
+    })),
+  }
+}
 
 interface VaultPathRuntime {
   resolveVaultPathOnDisk(inputVaultRoot: string, relativePath: string): Promise<{

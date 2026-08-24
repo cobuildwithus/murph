@@ -493,6 +493,7 @@ test('encounter import-json rejects child facts without stable event ids', async
   await initVault(cli, vaultRoot)
 
   const payloadPath = path.join(parentRoot, 'encounter.json')
+  const privateTitle = 'private-visit-vitals-title'
   await writeFile(
     payloadPath,
     JSON.stringify({
@@ -505,7 +506,7 @@ test('encounter import-json rejects child facts without stable event ids', async
       },
       measurements: [
         {
-          title: 'Visit vitals',
+          title: privateTitle,
           measurements: [
             {
               metric: 'systolic-blood-pressure',
@@ -533,5 +534,17 @@ test('encounter import-json rejects child facts without stable event ids', async
   if (!importResult.envelope.ok) {
     assert.equal(importResult.envelope.error.code, 'invalid_payload')
     assert.equal(importResult.envelope.error.message, 'encounter payload failed validation.')
+    assert.equal(importResult.envelope.error.stage, 'validation')
+    assert.equal(
+      importResult.envelope.error.fieldErrors?.some(
+        (field) =>
+          field.path === 'measurements.0.eventId' &&
+          field.code === 'invalid_type' &&
+          field.expected === 'string',
+      ),
+      true,
+    )
+    assert.match(importResult.envelope.error.hint ?? '', /encounter payload-schema/u)
+    assert.equal(JSON.stringify(importResult.envelope).includes(privateTitle), false)
   }
 })

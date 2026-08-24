@@ -72,6 +72,7 @@ function createPayloadSchemaCli() {
   cli.command(createHealthEntityCrudGroup(services, 'goal'))
   cli.command(createHealthEntityCrudGroup(services, 'condition'))
   cli.command(createHealthEntityCrudGroup(services, 'blood-test'))
+  cli.command(createHealthEntityCrudGroup(services, 'immunization'))
   registerEncounterCommands(cli)
   registerEventCommands(cli, services)
 
@@ -208,6 +209,31 @@ test('payload-schema commands emit import body schemas without requiring vault s
     title: 'Functional health panel',
     testName: 'functional_health_panel',
   }, true)
+
+  const immunization = requireData(
+    (await runInProcessJsonCli<PayloadSchemaResult>(cli, [
+      'immunization',
+      'payload-schema',
+    ])).envelope,
+  )
+  assert.equal(immunization.command, 'immunization import-json')
+  assert.equal(immunization.schemaName, 'immunization-import-payload')
+  assert.equal(immunization.schema.additionalProperties, false)
+  assert.equal(
+    (immunization.schema.required as unknown[] | undefined)?.includes('vaccineName'),
+    true,
+  )
+  assertJsonSchemaValidation(immunization.schema, {
+    occurredAt: '2026-03-12',
+    title: 'Influenza vaccine',
+    vaccineName: 'Influenza',
+  }, true)
+  assertJsonSchemaValidation(immunization.schema, {
+    occurredAt: '2026-03-12',
+    title: 'Influenza vaccine',
+    vaccineName: 'Influenza',
+    manufactuer: 'Misspelled key',
+  }, false)
   assertJsonSchemaValidation(bloodTest.schema, {
     occurredAt: '2026-03-12',
     title: 'Functional health panel',
@@ -411,6 +437,7 @@ test('payload-schema discovery copy is limited to supported import nouns', async
   for (const path of [
     'condition payload-schema',
     'blood-test payload-schema',
+    'immunization payload-schema',
     'encounter payload-schema',
     'event payload-schema',
   ]) {
@@ -422,7 +449,6 @@ test('payload-schema discovery copy is limited to supported import nouns', async
     'allergy payload-schema',
     'family payload-schema',
     'genetics payload-schema',
-    'immunization payload-schema',
   ]) {
     assert.equal(findManifestLeafCommand(path), undefined, `unexpected ${path}`)
   }
@@ -441,6 +467,7 @@ test('payload-schema manifest leaves share the canonical envelope output schema'
   for (const path of [
     'condition payload-schema',
     'blood-test payload-schema',
+    'immunization payload-schema',
     'encounter payload-schema',
     'event payload-schema',
     'workout payload-schema',

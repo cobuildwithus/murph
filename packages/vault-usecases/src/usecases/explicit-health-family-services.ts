@@ -2,6 +2,7 @@ import {
   bloodTestImportPayloadSchema,
   conditionImportPayloadSchema,
   healthEntityDefinitionByKind,
+  immunizationImportPayloadSchema,
   safeParseContract,
   supplementIngredientPayloadSchema,
   type JsonObject,
@@ -61,6 +62,7 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
+import { validationRepairFromZodIssues } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -146,11 +148,19 @@ function parseRegistryPayloadWithSharedSchema(
     return payload;
   }
 
-  const result = safeParseContract(schema, payload);
+  const result = schema.safeParse(payload);
   if (!result.success) {
-    throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
-      issues: result.errors,
-    });
+    const recoveryCommand =
+      kind === "condition" ? "condition payload-schema" : `${kind} scaffold`;
+    throw new VaultCliError(
+      "invalid_payload",
+      `${kind} payload failed validation.`,
+      undefined,
+      validationRepairFromZodIssues(
+        result.error.issues,
+        `Correct the listed fields and retry; run ${recoveryCommand} for the canonical writable fields.`,
+      ),
+    );
   }
 
   return result.data as JsonObject;
@@ -171,6 +181,19 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
       throw new VaultCliError(
         "invalid_payload",
         `results[${index}].valueText is not supported. Did you mean results[${index}].textValue?`,
+        undefined,
+        {
+          stage: "validation",
+          hint: "Rename valueText to textValue and retry the import.",
+          fields: [
+            {
+              path: ["results", index, "valueText"],
+              code: "unsupported_field",
+              message: "Use textValue for a textual blood-test result.",
+              expected: "textValue",
+            },
+          ],
+        },
       );
     }
   }
@@ -178,11 +201,34 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
 
 function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
   assertNoBloodTestValueTextAlias(payload);
-  const result = safeParseContract(bloodTestImportPayloadSchema, payload);
+  const result = bloodTestImportPayloadSchema.safeParse(payload);
   if (!result.success) {
-    throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
-      issues: result.errors,
-    });
+    throw new VaultCliError(
+      "invalid_payload",
+      "blood-test payload failed validation.",
+      undefined,
+      validationRepairFromZodIssues(
+        result.error.issues,
+        "Correct the listed fields or run blood-test payload-schema for the exact writable contract.",
+      ),
+    );
+  }
+
+  return result.data as JsonObject;
+}
+
+function parseImmunizationImportPayload(payload: JsonObject): JsonObject {
+  const result = immunizationImportPayloadSchema.safeParse(payload);
+  if (!result.success) {
+    throw new VaultCliError(
+      "invalid_payload",
+      "immunization payload failed validation.",
+      undefined,
+      validationRepairFromZodIssues(
+        result.error.issues,
+        "Correct the listed fields or run immunization payload-schema for the exact writable contract.",
+      ),
+    );
   }
 
   return result.data as JsonObject;
@@ -1209,8 +1255,9 @@ export function createExplicitHealthCoreServices(
       };
     },
     async upsertImmunization(input: JsonFileInput) {
-      const payload = await readJsonPayload(input.input);
-      assertNoReservedPayloadKeys(payload);
+      const rawPayload = await readJsonPayload(input.input);
+      assertNoReservedPayloadKeys(rawPayload);
+      const payload = parseImmunizationImportPayload(rawPayload);
       const { core } = await loadRuntime();
       const result = await core.appendImmunization({
         ...payload,

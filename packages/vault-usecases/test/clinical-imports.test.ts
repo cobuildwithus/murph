@@ -306,7 +306,21 @@ describe("clinical import usecases", () => {
     await expect(importSocialHistoryRecord({
       vault: vaultRoot,
       inputFile: `@${inputFile}`,
-    })).rejects.toThrow("social-history payload is invalid.");
+    })).rejects.toMatchObject({
+      name: "VaultCliError",
+      code: "invalid_payload",
+      message: "social-history payload is invalid.",
+      repair: {
+        stage: "validation",
+        hint: expect.stringContaining("social-history payload-schema"),
+        fields: expect.arrayContaining([
+          expect.objectContaining({
+            path: "entries.1.externalRef",
+            code: "custom",
+          }),
+        ]),
+      },
+    });
     expect(mocks.importEventBatch).not.toHaveBeenCalled();
   });
 

@@ -540,10 +540,22 @@ test("blood-test import-json points valueText typo at textValue", async () => {
 
     assert.equal(imported.exitCode, 1);
     assert.equal(imported.envelope.ok, false);
-    assert.equal(
-      imported.envelope.error.message,
-      "results[0].valueText is not supported. Did you mean results[0].textValue?",
-    );
+    if (!imported.envelope.ok) {
+      assert.equal(imported.envelope.error.code, "invalid_payload");
+      assert.equal(
+        imported.envelope.error.message,
+        "results[0].valueText is not supported. Did you mean results[0].textValue?",
+      );
+      assert.equal(imported.envelope.error.stage, "validation");
+      assert.deepEqual(imported.envelope.error.fieldErrors?.[0], {
+        path: "results.0.valueText",
+        code: "unsupported_field",
+        message: "Use textValue for a textual blood-test result.",
+        expected: "textValue",
+        received: "invalid",
+      });
+      assert.match(imported.envelope.error.hint ?? "", /Rename valueText to textValue/u);
+    }
   } finally {
     await rm(parentRoot, {
       force: true,
@@ -1119,7 +1131,68 @@ test("blood-test save rejects JSON objects that are not analyte records without 
     assert.equal(result.envelope.ok, false);
     assert.equal(result.envelope.error.code, "invalid_option");
     assert.match(result.envelope.error.message ?? "", /analyte payload/u);
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(
+      result.envelope.error.fieldErrors?.some(
+        (field) => field.path === "result.analyte" && field.code === "invalid_type",
+      ),
+      true,
+    );
+    assert.match(result.envelope.error.hint ?? "", /Correct --result/u);
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
+    assert.equal(JSON.stringify(result.envelope).includes("private marker"), false);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, {
+      force: true,
+      recursive: true,
+    });
+  }
+});
+
+test("blood-test save reports invalid link fields without echoing submitted values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-invalid-link-",
+  );
+  const privateLinkValue = "private-link-marker";
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Synthetic link validation panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "synthetic_link_validation_panel",
+      "--result",
+      JSON.stringify({ analyte: "Ferritin", value: 45, unit: "ng/mL" }),
+      "--link",
+      `type=related_to;privateField=${privateLinkValue}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(
+        result.envelope.error.fieldErrors?.some(
+          (field) => field.path === "link.targetId" && field.code === "invalid_type",
+        ),
+        true,
+      );
+      assert.match(result.envelope.error.hint ?? "", /Correct --link/u);
+      assert.equal(JSON.stringify(result.envelope).includes(privateLinkValue), false);
+    }
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
       false,

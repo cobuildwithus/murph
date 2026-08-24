@@ -8,6 +8,8 @@ import {
 } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
+  isoTimestampSchema,
+  localDateSchema,
   occurredAtOptionSchema,
   pathSchema,
   timeZoneSchema,
@@ -154,7 +156,9 @@ export function registerAssertionCommands(cli: Cli.Cli) {
       polarity: z.enum(CLINICAL_ASSERTION_POLARITIES).optional(),
       subject: z.string().min(1).max(240).optional(),
       assertionText: z.string().min(1).max(1000).optional(),
-      assertedOn: z.string().min(1).optional(),
+      assertedOn: localDateSchema
+        .optional()
+        .describe('Optional assertion date in YYYY-MM-DD form.'),
       sourceLabel: z.string().min(1).max(240).optional(),
     }),
     output: clinicalImportResultSchema,
@@ -329,7 +333,9 @@ export function registerDiagnosticTestCommands(cli: Cli.Cli) {
       testCategory: z.string().min(1).max(64).optional(),
       specimenType: z.string().min(1).max(64).optional(),
       labName: z.string().min(1).max(160).optional(),
-      reportedAt: z.string().min(1).optional(),
+      reportedAt: isoTimestampSchema
+        .optional()
+        .describe('Optional report timestamp in ISO 8601 form with an explicit offset.'),
     }),
     output: clinicalImportResultSchema,
     async run({ args, options }) {
