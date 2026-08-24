@@ -1,6 +1,6 @@
 # Temporal compatibility live-proof remediation
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-24
 
@@ -56,11 +56,11 @@ Updated: 2026-08-24
 - [x] Correct and verify public live run-identity validation.
 - [x] Correct and verify private cross-runner fixture transport.
 - [x] Review, merge, and immutably tag the private correction.
-- [ ] Merge the public validator correction while retaining the current private
+- [x] Merge the public validator correction while retaining the current private
   policy revision already advanced on `main`.
-- [ ] Run live relevant and irrelevant convergence proof.
-- [ ] Enable the strict no-bypass Temporal compatibility ruleset.
-- [ ] Run the private deployment preflight and safely advance workers.
+- [x] Run live relevant and irrelevant convergence proof.
+- [x] Enable the strict no-bypass Temporal compatibility ruleset.
+- [x] Run the private deployment preflight and safely advance workers.
 
 ## Decisions
 
@@ -81,3 +81,21 @@ Updated: 2026-08-24
 - Expected outcomes: all focused and required checks pass, or any unrelated
   baseline failure is isolated and reported with the narrow reproducer; live
   statuses bind the exact producer and policy revision before enforcement.
+
+## Completion evidence
+
+- Public validator PR `#2198` merged at `0b4c381f5978b7fe43b81132a0683ee01391d53b` after its exact-head protected
+  checks passed; the known bootstrap-only Temporal status remained outside the
+  required ruleset until the trusted validator landed.
+- Relevant PR `#2200` reached successful exact-head compatibility through four
+  immutable private readers and a digest-bound attestation. Irrelevant PR
+  `#2154` reached its successful terminal status without private dispatch.
+- Repository ruleset `21296616` is active on the default branch with strict
+  current-base enforcement, no bypass actors, and the GitHub Actions-owned
+  `Temporal compatibility` context as its sole requirement.
+- Private deploy run `32692556079` promoted revision
+  `06e781509f22bf425c7766b7f6c5838f0af774f7` through healthy 5% and 25%
+  ramps, verified it as Current, and suspended the former Current service. Its
+  post-policy rerun then re-proved exact policy, Current-only routing, and two
+  stable Workflow and Activity poller instances without another rollout.
+Completed: 2026-08-24
