@@ -1322,7 +1322,6 @@ function requireValidTurnProfileJson(
       `${label}.tools must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_TOOLS} entries.`,
     );
   }
-
   const isV2 = record.schema === ASSISTANT_TURN_PROFILE_SCHEMA;
   if (
     isV2

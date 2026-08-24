@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import { resolveMapboxAddress } from '../src/mapbox-address.js'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -580,6 +581,47 @@ describe('resolveMapboxAddress', () => {
       code: 'route_mapbox_response_invalid',
       message: 'Mapbox returned an invalid address-resolution response.',
     })
+  })
+
+  it('does not project a rejected provider body or submitted address', async () => {
+    const submittedValue = 'private-submitted-value'
+    const providerBody = 'private-provider-response'
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          message: `${providerBody} echoed ${submittedValue}`,
+        },
+        400,
+      ),
+    )
+
+    const failure = await resolveMapboxAddress(
+      {
+        query: submittedValue,
+      },
+      dependencies(fetchImpl),
+    ).then(
+      () => null,
+      (error: unknown) => error,
+    )
+    expect(failure).toBeInstanceOf(Error)
+    if (!(failure instanceof Error)) {
+      throw new TypeError('Expected Mapbox address resolution to fail.')
+    }
+    expect(failure.message).toContain(submittedValue)
+    expect(failure.message).toContain(providerBody)
+
+    const projection = projectVaultCliError(failure)
+    const serialized = JSON.stringify(projection)
+
+    expect(projection).toMatchObject({
+      code: 'UNKNOWN',
+      message: 'The command failed without a safe recoverable detail.',
+      retryable: false,
+      stage: 'command',
+    })
+    expect(serialized).not.toContain(submittedValue)
+    expect(serialized).not.toContain(providerBody)
   })
 
   it('fails closed when the shared Mapbox runtime token is unavailable', async () => {

@@ -269,7 +269,7 @@ test.sequential('built CLI classifies document and intake file inputs without pa
 
       assert.equal(missingError.code, 'not_found')
       assert.equal(missingError.retryable, false)
-      assert.equal(missingError.stage, 'validation')
+      assert.equal(missingError.stage, 'filesystem')
       assert.equal(missingError.hint, undefined)
       assert.equal(missingError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(missing, [missingPath, vaultRoot])
@@ -285,7 +285,7 @@ test.sequential('built CLI classifies document and intake file inputs without pa
 
       assert.equal(directoryError.code, 'invalid_path')
       assert.equal(directoryError.retryable, false)
-      assert.equal(directoryError.stage, 'validation')
+      assert.equal(directoryError.stage, 'filesystem')
       assert.equal(directoryError.hint, undefined)
       assert.equal(directoryError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(directory, [vaultRoot])
@@ -306,7 +306,7 @@ test.sequential('built CLI classifies document and intake file inputs without pa
 
         assert.equal(unreadableError.code, 'permission_denied')
         assert.equal(unreadableError.retryable, false)
-        assert.equal(unreadableError.stage, 'validation')
+        assert.equal(unreadableError.stage, 'filesystem')
         assert.equal(unreadableError.hint, undefined)
         assert.equal(unreadableError.fieldErrors?.[0]?.path, 'file')
         assertDoesNotEcho(unreadable, [lockedPath, vaultRoot])
@@ -461,7 +461,7 @@ test.sequential('built CLI returns fields for intake title and lookup failures',
 
     assert.equal(projectionError.code, 'not_found')
     assert.equal(projectionError.retryable, false)
-    assert.equal(projectionError.stage, 'validation')
+    assert.equal(projectionError.stage, 'read')
     assert.equal(projectionError.hint, undefined)
     assert.equal(projectionError.fieldErrors?.[0]?.path, 'id')
     assertDoesNotEcho(missingProjection, [privateAssessmentId, vaultRoot])
@@ -493,7 +493,7 @@ test.sequential('built CLI keeps stored assessment ledger failures terminal and 
 
     assert.equal(malformedLedgerError.code, 'assessment_store_invalid')
     assert.equal(malformedLedgerError.retryable, false)
-    assert.equal(malformedLedgerError.stage, undefined)
+    assert.equal(malformedLedgerError.stage, 'read')
     assert.equal(malformedLedgerError.hint, undefined)
     assertDoesNotEcho(malformedLedger, [
       requestedAssessmentId,
@@ -527,7 +527,7 @@ test.sequential('built CLI keeps stored assessment ledger failures terminal and 
 
     assert.equal(invalidStoredRecordError.code, 'assessment_store_invalid')
     assert.equal(invalidStoredRecordError.retryable, false)
-    assert.equal(invalidStoredRecordError.stage, undefined)
+    assert.equal(invalidStoredRecordError.stage, 'read')
     assert.equal(invalidStoredRecordError.hint, undefined)
     assertDoesNotEcho(invalidStoredRecord, [
       requestedAssessmentId,
@@ -559,7 +559,7 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(missingRecordError.code, 'not_found')
     assert.equal(missingRecordError.retryable, false)
-    assert.equal(missingRecordError.stage, 'validation')
+    assert.equal(missingRecordError.stage, 'read')
     assert.equal(missingRecordError.hint, undefined)
     assert.equal(missingRecordError.fieldErrors?.[0]?.path, 'id')
     assertDoesNotEcho(missingRecord, [missingAssessmentId, vaultRoot])
@@ -586,7 +586,7 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(missingManifestError.code, 'manifest_missing')
     assert.equal(missingManifestError.retryable, false)
-    assert.equal(missingManifestError.stage, undefined)
+    assert.equal(missingManifestError.stage, 'read')
     assert.equal(missingManifestError.hint, undefined)
     assertDoesNotEcho(missingManifest, [
       missingManifestFixture.assessmentId,
@@ -618,7 +618,7 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(invalidJsonError.code, 'manifest_invalid')
     assert.equal(invalidJsonError.retryable, false)
-    assert.equal(invalidJsonError.stage, 'validation')
+    assert.equal(invalidJsonError.stage, 'read')
     assert.equal(invalidJsonError.hint, undefined)
     assert.equal(invalidJsonError.fieldErrors?.[0]?.path, '$')
     assertDoesNotEcho(invalidJson, [
@@ -679,7 +679,7 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
 
     assert.equal(invalidSchemaError.code, 'manifest_invalid')
     assert.equal(invalidSchemaError.retryable, false)
-    assert.equal(invalidSchemaError.stage, 'validation')
+    assert.equal(invalidSchemaError.stage, 'read')
     assert.equal(invalidSchemaError.hint, undefined)
     assert.equal((invalidSchemaError.fieldErrors?.length ?? 0) > 0, true)
     assert.equal(
@@ -788,7 +788,7 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
       assert.equal(missingError.code, 'not_found')
       assert.equal(missingError.retryable, false)
-      assert.equal(missingError.stage, 'validation')
+      assert.equal(missingError.stage, 'read')
       assert.equal(missingError.hint, undefined)
       assert.equal(missingError.fieldErrors?.[0]?.path, 'id')
       assertDoesNotEcho(missing, [missingPackId, vaultRoot])
@@ -807,7 +807,7 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
       assert.equal(missingManifestError.code, 'manifest_missing')
       assert.equal(missingManifestError.retryable, false)
-      assert.equal(missingManifestError.stage, undefined)
+      assert.equal(missingManifestError.stage, 'read')
       assert.equal(missingManifestError.hint, undefined)
       assertDoesNotEcho(missingManifest, [missingManifestPackId, vaultRoot])
     }
@@ -833,7 +833,7 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(invalidJsonManifestError.code, 'manifest_invalid')
     assert.equal(invalidJsonManifestError.retryable, false)
-    assert.equal(invalidJsonManifestError.stage, 'validation')
+    assert.equal(invalidJsonManifestError.stage, 'read')
     assert.equal(invalidJsonManifestError.hint, undefined)
     assert.equal(invalidJsonManifestError.fieldErrors?.[0]?.path, '$')
     assertDoesNotEcho(invalidJsonManifest, [
@@ -866,7 +866,7 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(malformedError.code, 'manifest_invalid')
     assert.equal(malformedError.retryable, false)
-    assert.equal(malformedError.stage, 'validation')
+    assert.equal(malformedError.stage, 'read')
     assert.equal(malformedError.hint, undefined)
     assert.equal((malformedError.fieldErrors?.length ?? 0) > 0, true)
     assertDoesNotEcho(malformed, [privatePackId, privateManifestValue, vaultRoot])
@@ -902,7 +902,7 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(mismatchedError.code, 'manifest_invalid')
     assert.equal(mismatchedError.retryable, false)
-    assert.equal(mismatchedError.stage, 'validation')
+    assert.equal(mismatchedError.stage, 'read')
     assert.equal(mismatchedError.hint, undefined)
     assert.equal(mismatchedError.fieldErrors?.[0]?.path, 'packId')
     assertDoesNotEcho(mismatched, [
@@ -929,7 +929,7 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
     assert.equal(unwritableError.code, 'invalid_path')
     assert.equal(unwritableError.retryable, false)
-    assert.equal(unwritableError.stage, 'validation')
+    assert.equal(unwritableError.stage, 'filesystem')
     assert.equal(unwritableError.hint, undefined)
     assert.equal(unwritableError.fieldErrors?.[0]?.path, 'out')
     assertDoesNotEcho(unwritable, [blockingFile, blockedOutput, vaultRoot])

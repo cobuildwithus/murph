@@ -326,13 +326,13 @@ function contractValidationDetails(details: Record<string, unknown>) {
   return {
     stage: 'validation',
     issues: errors.map((issue) => ({
-      path: contractIssuePath(issue),
+      publicPath: contractIssuePublicPath(issue),
       code: 'custom',
     })),
   }
 }
 
-function contractIssuePath(issue: unknown): readonly string[] {
+function contractIssuePublicPath(issue: unknown): readonly string[] {
   if (typeof issue !== 'string') {
     return []
   }
@@ -349,14 +349,14 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
     code: 'contract_invalid',
     details: {
       stage: 'validation',
-      issues: [{ code: 'invalid_value', path: ['kind'] }],
+      issues: [{ code: 'invalid_value', publicPath: ['kind'] }],
     },
   },
   EVENT_OCCURRED_AT_MISSING: {
     code: 'invalid_timestamp',
     details: {
       stage: 'validation',
-      issues: [{ code: 'invalid_type', path: ['occurredAt'], expected: 'string' }],
+      issues: [{ code: 'invalid_type', publicPath: ['occurredAt'], expected: 'string' }],
     },
   },
   EVENT_CONTRACT_INVALID: {
@@ -367,7 +367,7 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
     code: 'invalid_option',
     details: {
       stage: 'validation',
-      issues: [{ code: 'unrecognized_keys', path: ['eventId'] }],
+      issues: [{ code: 'unrecognized_keys', publicPath: ['eventId'] }],
     },
   },
   EVENT_MISSING: {
@@ -382,7 +382,7 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
     code: 'invalid_timestamp',
     details: {
       stage: 'validation',
-      issues: [{ code: 'invalid_format', path: [] }],
+      issues: [{ code: 'invalid_format', publicPath: [] }],
     },
   },
   INVALID_INPUT: {
@@ -442,7 +442,7 @@ export function toEventUpsertVaultCliError(error: unknown) {
         code: 'contract_invalid',
         details: {
           stage: 'validation',
-          issues: [{ code: 'invalid_type', path: ['title'], expected: 'string' }],
+          issues: [{ code: 'invalid_type', publicPath: ['title'], expected: 'string' }],
         },
       },
     })
@@ -464,7 +464,7 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
       'The input file was not found.',
       {
         stage: 'filesystem',
-        issues: [{ code: 'custom', path: ['file'] }],
+        issues: [{ code: 'custom', publicPath: ['file'] }],
       },
     )
   }
@@ -478,7 +478,7 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
       'The input path is not a regular file.',
       {
         stage: 'filesystem',
-        issues: [{ code: 'invalid_type', path: ['file'], expected: 'string' }],
+        issues: [{ code: 'invalid_type', publicPath: ['file'], expected: 'string' }],
       },
     )
   }
@@ -489,7 +489,7 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
       'The input file could not be read.',
       {
         stage: 'filesystem',
-        issues: [{ code: 'custom', path: ['file'] }],
+        issues: [{ code: 'custom', publicPath: ['file'] }],
       },
     )
   }
@@ -553,8 +553,8 @@ export function toVaultCliFilesystemError(
       retryable: false,
       stage: 'filesystem',
       issues: input.fieldPath
-        ? [{
-            path: [input.fieldPath],
+          ? [{
+            publicPath: [input.fieldPath],
             code: classification.issueCode,
           }]
         : [],
@@ -573,7 +573,7 @@ export function toAssessmentImportVaultCliError(error: unknown, inputFilePath: s
       code: 'invalid_payload',
       details: {
         stage: 'validation',
-        issues: [{ code: 'invalid_format', path: [] }],
+        issues: [{ code: 'invalid_format', publicPath: [] }],
       },
     },
     ASSESSMENT_RESPONSE_INVALID: {
@@ -606,7 +606,7 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
       message: 'The requested assessment response was not found.',
       details: {
         stage: 'read',
-        issues: [{ code: 'custom', path: ['id'] }],
+        issues: [{ code: 'custom', publicPath: ['id'] }],
       },
     },
     ASSESSMENT_RESPONSE_PROJECT_INVALID: {
@@ -638,6 +638,30 @@ function errorTargetsInputFile(error: unknown, inputFilePath: string): boolean {
 
 export function toVaultMetadataCliError(error: unknown) {
   return toVaultCliError(error, vaultMetadataVaultErrorMappings)
+}
+
+export function toRegimenUpsertVaultCliError(error: unknown) {
+  if (!isVaultLikeError(error)) {
+    return error
+  }
+
+  const slugExists = error.code === 'VAULT_REGIMEN_SLUG_EXISTS'
+  if (!slugExists && error.code !== 'VAULT_REGIMEN_CONFLICT') {
+    return error
+  }
+
+  return new VaultCliError(
+    'conflict',
+    slugExists
+      ? 'A regimen slug already exists. Use its regimen id or choose a different slug.'
+      : 'Regimen selectors conflict. Use one regimen id or slug.',
+    slugExists
+      ? {
+          issues: [{ code: 'custom', publicPath: ['slug'] }],
+          stage: 'conflict',
+        }
+      : { stage: 'conflict' },
+  )
 }
 
 function toVaultRelativePathError(relativePath: string, error: unknown) {

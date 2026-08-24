@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { healthEntityDefinitions } from "@murphai/contracts";
+import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
@@ -49,6 +50,7 @@ import {
   toAssessmentProjectVaultCliError,
   toEventUpsertVaultCliError,
   toImporterInputFileVaultCliError,
+  toRegimenUpsertVaultCliError,
   toVaultCliError,
   toVaultCliFilesystemError,
   toVaultMetadataCliError,
@@ -462,19 +464,19 @@ describe("helper barrel exports", () => {
     }
     expect(eventContractError.context?.issues).toEqual([
         {
-          path: ["title"],
+          publicPath: ["title"],
           code: "custom",
         },
         {
-          path: ["links"],
+          publicPath: ["links"],
           code: "custom",
         },
         {
-          path: ["fields"],
+          publicPath: ["fields"],
           code: "custom",
         },
         {
-          path: [],
+          publicPath: [],
           code: "custom",
         },
     ]);
@@ -490,7 +492,7 @@ describe("helper barrel exports", () => {
       code: "contract_invalid",
       context: expect.objectContaining({
         stage: "validation",
-        issues: [expect.objectContaining({ path: ["title"], code: "invalid_type" })],
+        issues: [expect.objectContaining({ publicPath: ["title"], code: "invalid_type" })],
       }),
     }));
 
@@ -542,7 +544,7 @@ describe("helper barrel exports", () => {
       message: "The input file was not found.",
       context: expect.objectContaining({
         stage: "filesystem",
-        issues: [expect.objectContaining({ path: ["file"], code: "custom" })],
+        issues: [expect.objectContaining({ publicPath: ["file"], code: "custom" })],
       }),
     }));
     expect(JSON.stringify(inputFileError)).not.toContain("/synthetic/member-file.json");
@@ -570,7 +572,7 @@ describe("helper barrel exports", () => {
       context: expect.objectContaining({
         retryable: false,
         stage: "filesystem",
-        issues: [expect.objectContaining({ path: ["out"] })],
+        issues: [expect.objectContaining({ publicPath: ["out"] })],
       }),
     }));
     expect(JSON.stringify(exportWriteError)).not.toContain("/private/output");
@@ -587,7 +589,7 @@ describe("helper barrel exports", () => {
       message: "The requested assessment response was not found.",
       context: expect.objectContaining({
         stage: "read",
-        issues: [expect.objectContaining({ path: ["id"] })],
+        issues: [expect.objectContaining({ publicPath: ["id"] })],
       }),
     }));
     expect((missingAssessmentError as VaultCliError).message).not.toContain("private-id");
@@ -893,5 +895,29 @@ describe("helper barrel exports", () => {
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("regimen upsert errors", () => {
+  it.each([
+    "private duplicate-slug detail",
+    "private differing-selector detail",
+  ])("projects regimen conflicts without field or private detail guesses", (message) => {
+    const projection = projectVaultCliError(
+      toRegimenUpsertVaultCliError(
+        Object.assign(new Error(message), {
+          name: "VaultError",
+          code: "VAULT_REGIMEN_CONFLICT",
+        }),
+      ),
+    );
+
+    expect(projection).toEqual({
+      code: "conflict",
+      message: "Regimen selectors conflict. Use one regimen id or slug.",
+      retryable: false,
+      stage: "conflict",
+    });
+    expect(JSON.stringify(projection)).not.toContain(message);
   });
 });

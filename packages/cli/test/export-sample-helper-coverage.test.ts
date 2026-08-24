@@ -104,7 +104,7 @@ test('stored export pack helpers tolerate a missing exports root and enforce man
       assert.equal(serialized.includes('pack-alpha'), false)
       assert.deepEqual(
         (error as { context?: { issues?: unknown } }).context?.issues,
-        [{ path: ['packId'], code: 'custom' }],
+        [{ publicPath: ['packId'], code: 'custom' }],
       )
       assert.equal(
         (error as { context?: { stage?: unknown } }).context?.stage,
@@ -149,8 +149,13 @@ test('stored export pack schema errors retain bounded issue paths without manife
       assert.equal(serialized.includes(vaultRoot), false)
       assert.equal(serialized.includes('pack-invalid'), false)
       assert.equal(
-        (error as { context?: { issues?: Array<{ path?: string[] }> } }).context?.issues
-          ?.some((issue) => issue.path?.[0] === 'manifest'),
+        (
+          error as {
+            context?: { issues?: Array<{ publicPath?: string[] }> }
+          }
+        ).context?.issues?.some(
+          (issue) => issue.publicPath?.[0] === 'manifest',
+        ),
         true,
       )
       assert.equal(

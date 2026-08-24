@@ -131,7 +131,7 @@ function exportPackNotFoundError() {
     {
       retryable: false,
       stage: 'read',
-      issues: [{ code: 'custom', path: ['id'] }],
+      issues: [{ code: 'custom', publicPath: ['id'] }],
     },
   )
 }
@@ -194,7 +194,7 @@ function manifestValidationContext(
           : undefined
 
       return {
-        path: issuePath,
+        publicPath: issuePath,
         code: issueCode,
         ...(expected ? { expected } : {}),
       }
@@ -269,7 +269,7 @@ async function readJsonRelativeFile<T>(
       {
         retryable: false,
         stage: 'read',
-        issues: [{ code: 'invalid_format', path: [] }],
+        issues: [{ code: 'invalid_format', publicPath: [] }],
       },
     )
   }
@@ -308,7 +308,7 @@ async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
       {
         retryable: false,
         stage: 'read',
-        issues: [{ code: 'custom', path: ['id'] }],
+        issues: [{ code: 'custom', publicPath: ['id'] }],
       },
     )
   }
@@ -479,7 +479,7 @@ async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
       {
         retryable: false,
         stage: 'read',
-        issues: [{ code: 'custom', path: ['packId'] }],
+        issues: [{ code: 'custom', publicPath: ['packId'] }],
       },
     )
   }

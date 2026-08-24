@@ -15,6 +15,7 @@ const HTTP_TIMEOUT_MS = 30_000;
 const PRIVATE_RUN_TIMEOUT_MS = 60 * 60_000;
 const CANCEL_GRACE_MS = 2 * 60_000;
 const POLL_MS = 15_000;
+const PRIVATE_RUN_VISIBILITY_READS = 5;
 const MAX_CHANGED_FILES = 3_000;
 const MAX_PRODUCER_FIXTURE_BYTES = 32 * 1024;
 const MAX_PRODUCER_FIXTURES = 16;
@@ -276,15 +277,15 @@ export function inspectDispatchReceipt(raw) {
 
 export function inspectPrivateRun(raw, { privateRef, privateSha, runId, workflowId }) {
   assertRecord(raw, "private compatibility run");
-  const expectedPath = `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${privateRef}`;
   const repository = isRecord(raw.repository) ? raw.repository.full_name : null;
   const headRepository = isRecord(raw.head_repository) ? raw.head_repository.full_name : null;
   if (
     raw.id !== runId
     || raw.workflow_id !== workflowId
     || raw.name !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME
-    || raw.path !== expectedPath
+    || raw.path !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH
     || raw.event !== "workflow_dispatch"
+    || raw.head_branch !== privateRef
     || raw.head_sha !== privateSha
     || raw.run_attempt !== 1
     || repository !== TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY
@@ -488,15 +489,20 @@ export async function runTemporalCompatibility({
   ));
 
   let terminal = false;
+  let runVisible = false;
   try {
     const deadline = Date.now() + PRIVATE_RUN_TIMEOUT_MS;
     while (Date.now() < deadline) {
-      const run = inspectPrivateRun(await readPrivateRun(runId, privateToken), {
+      const run = inspectPrivateRun(await readPrivateRun(runId, privateToken, {
+        retryNotFound: !runVisible,
+        sleepFn,
+      }), {
         privateRef: inspectedPrivateRef,
         privateSha,
         runId,
         workflowId,
       });
+      runVisible = true;
       if (run.complete) {
         terminal = true;
         if (run.conclusion !== "success") {
@@ -607,12 +613,28 @@ async function waitForTerminal({
   return false;
 }
 
-async function readPrivateRun(runId, token) {
-  return fetchJson(
-    `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}`,
-    { headers: githubHeaders(token) },
-    "private compatibility run lookup",
-  );
+async function readPrivateRun(runId, token, {
+  retryNotFound = false,
+  sleepFn = sleep,
+} = {}) {
+  const reads = retryNotFound ? PRIVATE_RUN_VISIBILITY_READS : 1;
+  for (let read = 1; read <= reads; read += 1) {
+    try {
+      return await fetchJson(
+        `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${runId}`,
+        { headers: githubHeaders(token) },
+        "private compatibility run lookup",
+      );
+    } catch (error) {
+      if (
+        !(error instanceof HttpStatusError)
+        || error.status !== 404
+        || read === reads
+      ) throw error;
+      await sleepFn(POLL_MS);
+    }
+  }
+  throw new Error("Private compatibility run visibility retry was exhausted.");
 }
 
 async function postRunControl(repository, runId, operation, token) {
@@ -688,12 +710,20 @@ async function fetchJson(url, init, label) {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
-    throw new Error(`${label} failed with HTTP ${response.status}.`);
+    throw new HttpStatusError(label, response.status);
   }
   try {
     return await response.json();
   } catch {
     throw new Error(`${label} returned invalid JSON.`);
+  }
+}
+
+class HttpStatusError extends Error {
+  constructor(label, status) {
+    super(`${label} failed with HTTP ${status}.`);
+    this.name = "HttpStatusError";
+    this.status = status;
   }
 }
 
