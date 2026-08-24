@@ -44,3 +44,10 @@ The runtime already owns both canonical reminder reads and scheduler projection.
 - Typechecks for changed workspace packages.
 - Exact-head ReviewGPT and required GitHub checks.
 
+## Current evidence
+
+- The regression first failed because the tool result omitted the pending occurrence projection, then passed after the typed response contract was implemented.
+- Focused assistant-engine coverage passes 208 tests across scripted turns, hosted domain tools, model behavior, and onboarding continuity; targeted runtime and scheduler checks pass the pending, resolved, delivery-cutoff, and telemetry paths.
+- Assistant Engine and Assistant Runtime package typechecks pass.
+- Complete first provider-visible requests captured through the pinned Codex App Server with identical direct and group reminder fixtures, `gpt-5.6-terra`, low reasoning, production code mode, and `gpt-tokenizer` 3.4.0 `o200k_harmony` grow by 156 tokens and 819 UTF-8 bytes in each route. Direct changes from 26,890 tokens / 124,124 bytes to 27,046 / 124,943; group changes from 22,751 / 105,397 to 22,907 / 106,216. The delta is entirely the assembled reminder guidance; tool/schema/generated guidance and other provider-visible fields are unchanged after volatile paths and identifiers are normalized.
+- Product UX walkthrough: pending projection confirms the saved active reminder and requires no member action; unavailable projection stays honest; resolved, device-triggered, exhausted, scheduler, and delivery behavior remain unchanged.
