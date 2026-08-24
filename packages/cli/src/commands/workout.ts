@@ -187,7 +187,45 @@ const workoutImportPayloadExample = {
 } satisfies Record<string, unknown>
 
 function invalidWorkoutAddOption(message: string): never {
-  throw new VaultCliError('invalid_option', message)
+  throw new VaultCliError(
+    'invalid_option',
+    message,
+    undefined,
+    {
+      fields: [{
+        path: '$',
+        code: 'invalid_option',
+        message: 'Workout options are incompatible or incomplete.',
+      }],
+      hint: 'Correct the workout options and retry.',
+      stage: 'validation',
+    },
+  )
+}
+
+function workoutValidationMessage(issue: {
+  code: string
+  path: readonly PropertyKey[]
+}): string {
+  if (issue.code === 'too_small' && issue.path.at(-1) === 'sets') {
+    return 'At least one workout set is required.'
+  }
+
+  switch (issue.code) {
+    case 'invalid_type':
+      return 'Value does not match the required type.'
+    case 'too_big':
+      return 'Value exceeds the allowed maximum.'
+    case 'too_small':
+      return 'Value is below the allowed minimum.'
+    case 'invalid_value':
+    case 'invalid_enum_value':
+      return 'Value is not one of the allowed options.'
+    case 'unrecognized_keys':
+      return 'Field is not supported.'
+    default:
+      return 'Value failed workout validation.'
+  }
 }
 
 function normalizeWorkoutMediaRelativePath(relativePath: string): string {
@@ -369,9 +407,20 @@ function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutS
 
   const parsed = workoutSessionSchema.safeParse(workout)
   if (!parsed.success) {
-    throw new VaultCliError('invalid_option', 'Invalid workout session fields.', {
-      issues: parsed.error.issues,
-    })
+    throw new VaultCliError(
+      'invalid_option',
+      'Invalid workout session fields.',
+      undefined,
+      {
+        stage: 'validation',
+        hint: 'Correct the listed workout fields and retry.',
+        fields: parsed.error.issues.map((issue) => ({
+          path: ['workout', ...issue.path],
+          code: issue.code,
+          message: workoutValidationMessage(issue),
+        })),
+      },
+    )
   }
 
   return parsed.data

@@ -561,6 +561,8 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(missingExercise.exitCode, 1)
   assert.equal(missingExercise.envelope.ok, false)
   assert.match(missingExercise.envelope.error.message ?? '', /no matching --workout-exercise/u)
+  assert.equal(missingExercise.envelope.error.stage, 'validation')
+  assert.equal(missingExercise.envelope.error.fieldErrors?.[0]?.path, '$')
 
   const missingSet = await runInProcessJsonCli(cli, [
     'workout',
@@ -572,13 +574,31 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
     '--type',
     'strength-training',
     '--workout-exercise',
-    'order=1;name=Bench press',
+    'order=1;name=PRIVATE_WORKOUT_SENTINEL',
     '--vault',
     vaultRoot,
   ])
   assert.equal(missingSet.exitCode, 1)
   assert.equal(missingSet.envelope.ok, false)
-  assert.match(missingSet.envelope.error.message ?? '', /Invalid workout session fields/u)
+  assert.equal(missingSet.envelope.error.code, 'invalid_option')
+  assert.equal(missingSet.envelope.error.stage, 'validation')
+  assert.equal(
+    missingSet.envelope.error.hint,
+    'Correct the listed workout fields and retry.',
+  )
+  assert.deepEqual(
+    missingSet.envelope.error.fieldErrors?.map(({ code, message, path }) => ({
+      code,
+      message,
+      path,
+    })),
+    [{
+      code: 'too_small',
+      message: 'At least one workout set is required.',
+      path: 'workout.exercises.0.sets',
+    }],
+  )
+  assert.doesNotMatch(JSON.stringify(missingSet.envelope), /PRIVATE_WORKOUT_SENTINEL/u)
 
   const misspelledSetField = await runInProcessJsonCli(cli, [
     'workout',
@@ -668,6 +688,25 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(editableWorkout.envelope.ok, true)
   const editableWorkoutData = requireData(editableWorkout.envelope)
   const beforeEdit = await showWorkout(cli, vaultRoot, editableWorkoutData.lookupId)
+
+  const incompleteEdit = await runInProcessJsonCli(cli, [
+    'workout',
+    'edit',
+    editableWorkoutData.lookupId,
+    '--workout-exercise',
+    'order=1;name=PRIVATE_EDIT_SENTINEL',
+    '--vault',
+    vaultRoot,
+  ])
+  assert.equal(incompleteEdit.exitCode, 1)
+  assert.equal(incompleteEdit.envelope.ok, false)
+  assert.equal(incompleteEdit.envelope.error.code, 'invalid_option')
+  assert.equal(incompleteEdit.envelope.error.stage, 'validation')
+  assert.equal(
+    incompleteEdit.envelope.error.fieldErrors?.[0]?.path,
+    'workout.exercises.0.sets',
+  )
+  assert.doesNotMatch(JSON.stringify(incompleteEdit.envelope), /PRIVATE_EDIT_SENTINEL/u)
 
   const unsupportedEditField = await runInProcessJsonCli(cli, [
     'workout',

@@ -147,7 +147,43 @@ function toScheduledLogListItem(
 }
 
 function invalidScheduledLogOption(message: string): never {
-  throw new VaultCliError("invalid_option", message);
+  throw new VaultCliError(
+    "invalid_option",
+    message,
+    undefined,
+    {
+      fields: [{
+        path: "$",
+        code: "invalid_option",
+        message: "Scheduled-log options are incompatible or incomplete.",
+      }],
+      hint: "Correct the listed scheduled-log fields and retry.",
+      stage: "validation",
+    },
+  );
+}
+
+function scheduledLogValidationMessage(issue: {
+  code: string;
+  message: string;
+}): string {
+  switch (issue.code) {
+    case "custom":
+      return issue.message;
+    case "invalid_type":
+      return "Value does not match the required type.";
+    case "too_big":
+      return "Value exceeds the allowed maximum.";
+    case "too_small":
+      return "Value is below the allowed minimum.";
+    case "invalid_value":
+    case "invalid_enum_value":
+      return "Value is not one of the allowed options.";
+    case "unrecognized_keys":
+      return "Field is not supported.";
+    default:
+      return "Value failed scheduled-log validation.";
+  }
 }
 
 function requireStringOption(value: string | undefined, optionName: string): string {
@@ -290,7 +326,20 @@ function parseScheduledLogScheduleIntent(value: unknown): ExecutableScheduleInte
     const message =
       formatScheduleIntentIssues(parsed.error) ||
       "schedule must match a supported scheduled-log schedule.";
-    invalidScheduledLogOption(message);
+    throw new VaultCliError(
+      "invalid_option",
+      message,
+      undefined,
+      {
+        fields: parsed.error.issues.map((issue) => ({
+          path: ["schedule", ...issue.path],
+          code: issue.code,
+          message: scheduledLogValidationMessage(issue),
+        })),
+        hint: "Correct the listed schedule fields and retry.",
+        stage: "validation",
+      },
+    );
   }
   return parsed.data;
 }
@@ -604,15 +653,26 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
 
   const parsed = workoutSessionSchema.safeParse(workout);
   if (!parsed.success) {
-    throw new VaultCliError("invalid_option", "Invalid workout template fields.", {
-      issues: parsed.error.issues,
-    });
+    throw new VaultCliError(
+      "invalid_option",
+      "Invalid workout template fields.",
+      undefined,
+      {
+        fields: parsed.error.issues.map((issue) => ({
+          path: ["action", "workout", ...issue.path],
+          code: issue.code,
+          message: scheduledLogValidationMessage(issue),
+        })),
+        hint: "Correct the listed workout template fields and retry.",
+        stage: "validation",
+      },
+    );
   }
 
   return parsed.data;
 }
 
-function buildScheduledLogActionFromOptions(options: {
+interface ScheduledLogActionOptions {
   actionKind: (typeof scheduledLogActionKindValues)[number];
   actionNote?: string;
   actionTag?: string[];
@@ -647,22 +707,258 @@ function buildScheduledLogActionFromOptions(options: {
   workoutSourceApp?: string;
   workoutSourceWorkoutId?: string;
   workoutStartedAt?: string;
-}): ScheduledLogAction {
+}
+
+const mealActionOptionKeys = [
+  "foodId",
+  "ingredient",
+  "nutritionCalories",
+  "nutritionCarbsGrams",
+  "nutritionConfidence",
+  "nutritionFatGrams",
+  "nutritionFiberGrams",
+  "nutritionProteinGrams",
+  "nutritionSource",
+  "nutritionSourceDetail",
+] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
+
+const activityActionOptionKeys = [
+  "actionTitle",
+  "activityType",
+  "distanceKm",
+  "durationMinutes",
+  ...workoutOptionKeys,
+] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
+
+const interventionActionOptionKeys = [
+  "actionTitle",
+  "durationMinutes",
+  "interventionType",
+  "protocolId",
+] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
+
+const measurementActionOptionKeys = [
+  "actionTitle",
+  "measurementMetric",
+  "measurementNote",
+  "measurementQualifier",
+  "measurementUnit",
+  "measurementValue",
+] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
+
+const actionSpecificOptionKeys = [
+  ...mealActionOptionKeys,
+  ...activityActionOptionKeys,
+  ...interventionActionOptionKeys,
+  ...measurementActionOptionKeys,
+] as const satisfies ReadonlyArray<keyof ScheduledLogActionOptions>;
+
+const allowedActionOptionKeys = {
+  "meal.add": new Set<keyof ScheduledLogActionOptions>(mealActionOptionKeys),
+  "activity_session.add": new Set<keyof ScheduledLogActionOptions>(
+    activityActionOptionKeys,
+  ),
+  "intervention_session.add": new Set<keyof ScheduledLogActionOptions>(
+    interventionActionOptionKeys,
+  ),
+  "measurement.add": new Set<keyof ScheduledLogActionOptions>(measurementActionOptionKeys),
+} satisfies Record<
+  ScheduledLogActionOptions["actionKind"],
+  ReadonlySet<keyof ScheduledLogActionOptions>
+>;
+
+function rejectIncompatibleScheduledLogActionOptions(
+  options: ScheduledLogActionOptions,
+): void {
+  const allowed = allowedActionOptionKeys[options.actionKind];
+  const incompatible = [...new Set(actionSpecificOptionKeys)].filter(
+    (key) => options[key] !== undefined && !allowed.has(key),
+  );
+  if (incompatible.length === 0) {
+    return;
+  }
+
+  throw new VaultCliError(
+    "invalid_option",
+    "Some action fields are incompatible with the selected scheduled-log action kind.",
+    undefined,
+    {
+      fields: incompatible.map((key) => ({
+        path: key,
+        code: "incompatible_option",
+        message: `This option is not valid with action kind ${options.actionKind}.`,
+      })),
+      hint: "Remove incompatible action flags or choose their matching --action-kind.",
+      stage: "validation",
+    },
+  );
+}
+
+function parseScheduledLogAction(value: unknown): ScheduledLogAction {
+  const parsed = scheduledLogActionSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new VaultCliError(
+      "invalid_option",
+      "Invalid scheduled-log action fields.",
+      undefined,
+      {
+        fields: parsed.error.issues.map((issue) => ({
+          path: ["action", ...issue.path],
+          code: issue.code,
+          message: scheduledLogValidationMessage(issue),
+        })),
+        hint: "Correct the listed action fields and retry.",
+        stage: "validation",
+      },
+    );
+  }
+  return parsed.data;
+}
+
+function parseScheduledLogPayload(
+  value: unknown,
+  code: "invalid_option" | "invalid_payload",
+): ScheduledLogScaffoldPayload {
+  const parsed = scheduledLogScaffoldPayloadSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new VaultCliError(
+      code,
+      "Invalid scheduled-log payload fields.",
+      undefined,
+      {
+        fields: parsed.error.issues.map((issue) => ({
+          path: issue.path,
+          code: issue.code,
+          message: scheduledLogValidationMessage(issue),
+        })),
+        hint: "Correct the listed scheduled-log payload fields and retry.",
+        stage: "validation",
+      },
+    );
+  }
+  return parsed.data;
+}
+
+interface ScheduledLogVaultError extends Error {
+  code: string;
+}
+
+function isScheduledLogVaultError(error: unknown): error is ScheduledLogVaultError {
+  return Boolean(
+    error instanceof Error &&
+    error.name === "VaultError" &&
+    "code" in error &&
+    typeof error.code === "string",
+  );
+}
+
+function toScheduledLogCliError(error: unknown): unknown {
+  if (error instanceof VaultCliError || !isScheduledLogVaultError(error)) {
+    return error;
+  }
+
+  switch (error.code) {
+    case "VAULT_SCHEDULED_LOG_MISSING":
+      return new VaultCliError(
+        "not_found",
+        "The requested scheduled log was not found.",
+        undefined,
+        {
+          fields: [
+            {
+              path: "lookup",
+              code: "not_found",
+              message: "No scheduled log matched this lookup.",
+            },
+          ],
+          hint: "List scheduled logs and retry with an existing id or slug.",
+          stage: "lookup",
+        },
+      );
+    case "VAULT_SCHEDULED_LOG_CONFLICT":
+      return new VaultCliError(
+        "conflict",
+        "The scheduled-log id and slug resolve to different records.",
+        undefined,
+        {
+          fields: [
+            {
+              path: "scheduledLogId",
+              code: "conflict",
+              message: "This id conflicts with the selected slug.",
+            },
+            {
+              path: "slug",
+              code: "conflict",
+              message: "This slug conflicts with the selected id.",
+            },
+          ],
+          hint: "Retry with one identifier from the same scheduled log.",
+          stage: "lookup",
+        },
+      );
+    case "VAULT_INVALID_SCHEDULED_LOG":
+      return new VaultCliError(
+        "invalid_registry",
+        "A scheduled-log registry document is invalid.",
+        undefined,
+        {
+          fields: [
+            {
+              path: "registry",
+              code: "invalid_document",
+              message: "A stored scheduled-log document failed canonical validation.",
+            },
+          ],
+          hint: "Repair or restore the invalid scheduled-log document, then retry.",
+          stage: "registry",
+        },
+      );
+    case "VAULT_INVALID_INPUT":
+      return new VaultCliError(
+        "contract_invalid",
+        "Scheduled-log data failed canonical validation.",
+        undefined,
+        {
+          fields: [
+            {
+              path: "$",
+              code: "contract_invalid",
+              message: "The scheduled-log data does not satisfy the canonical contract.",
+            },
+          ],
+          hint: "Correct the scheduled-log fields and retry.",
+          stage: "validation",
+        },
+      );
+    default:
+      return error;
+  }
+}
+
+async function runScheduledLogOperation<TResult>(
+  operation: () => Promise<TResult>,
+): Promise<TResult> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw toScheduledLogCliError(error);
+  }
+}
+
+function buildScheduledLogActionFromOptions(
+  options: ScheduledLogActionOptions,
+): ScheduledLogAction {
+  rejectIncompatibleScheduledLogActionOptions(options);
   const actionTags = normalizeRepeatableFlagOption(options.actionTag, "action-tag");
   const commonFields = actionTags ? { tags: actionTags } : {};
   const workout = buildWorkoutFromOptions(options);
-
-  if (workout && options.actionKind !== "activity_session.add") {
-    invalidScheduledLogOption(
-      "Workout template fields are only valid with --action-kind=activity_session.add.",
-    );
-  }
 
   switch (options.actionKind) {
     case "meal.add": {
       const ingredients = normalizeRepeatableFlagOption(options.ingredient, "ingredient");
       const nutrition = buildMealNutritionFromOptions(options);
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "meal.add",
         ...commonFields,
         ...(options.foodId ? { foodId: options.foodId } : {}),
@@ -672,7 +968,7 @@ function buildScheduledLogActionFromOptions(options: {
       });
     }
     case "activity_session.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "activity_session.add",
         ...commonFields,
         title: requireStringOption(options.actionTitle, "action-title"),
@@ -683,7 +979,7 @@ function buildScheduledLogActionFromOptions(options: {
         ...(workout ? { workout } : {}),
       });
     case "intervention_session.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "intervention_session.add",
         ...commonFields,
         title: requireStringOption(options.actionTitle, "action-title"),
@@ -695,7 +991,7 @@ function buildScheduledLogActionFromOptions(options: {
         ...(options.actionNote ? { note: options.actionNote } : {}),
       });
     case "measurement.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "measurement.add",
         ...commonFields,
         ...(options.actionTitle ? { title: options.actionTitle } : {}),
@@ -979,21 +1275,29 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
     }),
     output: scheduledLogWriteResultSchema,
     async run(context) {
-      const input = scheduledLogScaffoldPayloadSchema.parse({
-        scheduledLogId: context.options.id,
-        slug: context.options.slug,
-        title: context.args.title,
-        status: context.options.status,
-        schedule: buildScheduleIntentFromOptions(context.options),
-        action: buildScheduledLogActionFromOptions(context.options),
-        summary: context.options.summary,
-        tags: normalizeRepeatableFlagOption(context.options.tag, "tag"),
-        body: context.options.body ?? defaultScheduledLogBody(context.args.title, context.options.summary),
-      });
-      const result = await upsertScheduledLog({
-        ...input,
-        vaultRoot: context.options.vault,
-      });
+      const input = parseScheduledLogPayload(
+        {
+          scheduledLogId: context.options.id,
+          slug: context.options.slug,
+          title: context.args.title,
+          status: context.options.status,
+          schedule: buildScheduleIntentFromOptions(context.options),
+          action: buildScheduledLogActionFromOptions(context.options),
+          summary: context.options.summary,
+          tags: normalizeRepeatableFlagOption(context.options.tag, "tag"),
+          body: context.options.body ?? defaultScheduledLogBody(
+            context.args.title,
+            context.options.summary,
+          ),
+        },
+        "invalid_option",
+      );
+      const result = await runScheduledLogOperation(() =>
+        upsertScheduledLog({
+          ...input,
+          vaultRoot: context.options.vault,
+        })
+      );
 
       return {
         vault: context.options.vault,
@@ -1015,7 +1319,9 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
     async run(context) {
       return {
         vault: context.options.vault,
-        scheduledLog: await showScheduledLog(context.options.vault, context.args.lookup),
+        scheduledLog: await runScheduledLogOperation(() =>
+          showScheduledLog(context.options.vault, context.args.lookup)
+        ),
       };
     },
   });
@@ -1037,11 +1343,13 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
     }),
     output: scheduledLogListResultSchema,
     async run(context) {
-      const items = await listScheduledLogs(context.options.vault, {
-        limit: context.options.limit,
-        status: context.options.status,
-        text: context.options.text,
-      });
+      const items = await runScheduledLogOperation(() =>
+        listScheduledLogs(context.options.vault, {
+          limit: context.options.limit,
+          status: context.options.status,
+          text: context.options.text,
+        })
+      );
 
       return {
         vault: context.options.vault,
@@ -1071,11 +1379,13 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
         context.options.input,
         "scheduled-log payload",
       );
-      const input = scheduledLogScaffoldPayloadSchema.parse(rawInput);
-      const result = await upsertScheduledLog({
-        ...input,
-        vaultRoot: context.options.vault,
-      });
+      const input = parseScheduledLogPayload(rawInput, "invalid_payload");
+      const result = await runScheduledLogOperation(() =>
+        upsertScheduledLog({
+          ...input,
+          vaultRoot: context.options.vault,
+        })
+      );
 
       return {
         vault: context.options.vault,
@@ -1100,15 +1410,34 @@ export function registerScheduledLogCommands(cli: Cli.Cli) {
       options: withBaseOptions(),
       output: scheduledLogStatusResultSchema,
       async run(context) {
-        const existing = await showScheduledLog(context.options.vault, context.args.lookup);
+        const existing = await runScheduledLogOperation(() =>
+          showScheduledLog(context.options.vault, context.args.lookup)
+        );
         if (!existing) {
-          throw new Error(`Scheduled log "${context.args.lookup}" was not found.`);
+          throw new VaultCliError(
+            "not_found",
+            "The requested scheduled log was not found.",
+            undefined,
+            {
+              fields: [
+                {
+                  path: "lookup",
+                  code: "not_found",
+                  message: "No scheduled log matched this lookup.",
+                },
+              ],
+              hint: "List scheduled logs and retry with an existing id or slug.",
+              stage: "lookup",
+            },
+          );
         }
-        const result = await setScheduledLogStatus({
-          vaultRoot: context.options.vault,
-          scheduledLogId: existing.scheduledLogId,
-          status,
-        });
+        const result = await runScheduledLogOperation(() =>
+          setScheduledLogStatus({
+            vaultRoot: context.options.vault,
+            scheduledLogId: existing.scheduledLogId,
+            status,
+          })
+        );
 
         return {
           vault: context.options.vault,

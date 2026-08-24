@@ -20,6 +20,33 @@ const exerciseEnvironmentOptions = z.enum(exerciseCatalogEnvironmentValues)
 const exerciseLevelOptions = z.enum(exerciseCatalogLevelValues)
 const exerciseCommonnessOptions = z.enum(exerciseCatalogCommonnessValues)
 
+function getExerciseCatalogReader(
+  getCatalogReader: () => ExerciseCatalogReader,
+): ExerciseCatalogReader {
+  try {
+    return getCatalogReader()
+  } catch (error) {
+    const invalidCatalog =
+      error instanceof SyntaxError ||
+      (error instanceof Error && (
+        error.message.startsWith('Unexpected exercise ') ||
+        error.message === 'Exercise generated artifact hashes do not match.'
+      ))
+
+    throw new VaultCliError(
+      invalidCatalog ? 'exercise_catalog_invalid' : 'exercise_catalog_unavailable',
+      invalidCatalog
+        ? 'The public exercise catalog artifacts are invalid.'
+        : 'The public exercise catalog is unavailable.',
+      undefined,
+      {
+        stage: 'exercise_catalog',
+        hint: 'Reinstall or rebuild the Murph CLI package, then retry.',
+      },
+    )
+  }
+}
+
 export function registerExerciseCommands(
   cli: Cli.Cli,
   options: { getCatalogReader?: () => ExerciseCatalogReader } = {},
@@ -66,7 +93,7 @@ export function registerExerciseCommands(
     ],
     output: exerciseListResultSchema,
     async run({ options }) {
-      const reader = getCatalogReader()
+      const reader = getExerciseCatalogReader(getCatalogReader)
       const listOptions = {
         category: options.category,
         commonness: options.commonness,
@@ -114,7 +141,7 @@ export function registerExerciseCommands(
     ],
     output: exerciseShowResultSchema,
     async run({ args }) {
-      const reader = getCatalogReader()
+      const reader = getExerciseCatalogReader(getCatalogReader)
       const result = reader.findByLookup(args.lookup)
 
       if (result.kind === 'not_found') {
@@ -146,7 +173,7 @@ export function registerExerciseCommands(
     options: z.object({}),
     output: exerciseFacetsResultSchema,
     async run() {
-      const reader = getCatalogReader()
+      const reader = getExerciseCatalogReader(getCatalogReader)
       return {
         catalogHash: reader.catalogHash,
         facets: reader.facets(),

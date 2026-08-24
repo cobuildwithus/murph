@@ -6,6 +6,16 @@ import { test } from "vitest";
 
 import { listScheduledLogs, readScheduledLog, showScheduledLog } from "../src/index.ts";
 
+function isInvalidScheduledLogQueryError(error: unknown): boolean {
+  return Boolean(
+    error instanceof Error &&
+    error.name === "VaultError" &&
+    "code" in error &&
+    error.code === "VAULT_INVALID_SCHEDULED_LOG" &&
+    error.message === "Scheduled log registry document is invalid.",
+  );
+}
+
 async function writeVaultFile(vaultRoot: string, relativePath: string, contents: string) {
   await mkdir(path.dirname(path.join(vaultRoot, relativePath)), {
     recursive: true,
@@ -220,9 +230,17 @@ test("scheduled log queries reject malformed registry documents", async () => {
 
     await assert.rejects(
       () => listScheduledLogs(vaultRoot),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "Scheduled log registry document has an unexpected shape.",
+      isInvalidScheduledLogQueryError,
+    );
+
+    await writeVaultFile(
+      vaultRoot,
+      "bank/scheduled-logs/bad-shape.md",
+      "---\nschemaVersion: [unterminated\n---\n",
+    );
+    await assert.rejects(
+      () => listScheduledLogs(vaultRoot),
+      isInvalidScheduledLogQueryError,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -257,9 +275,7 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await assert.rejects(
       () => readScheduledLog(vaultRoot, "slog_01JX8T6QY2M5ZBV64ZP4N1DRB6"),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "schedule.kind must match a supported scheduled-log schedule.",
+      isInvalidScheduledLogQueryError,
     );
 
     await rm(path.join(vaultRoot, "bank/scheduled-logs/bad-schedule.md"), {
@@ -289,9 +305,7 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await assert.rejects(
       () => readScheduledLog(vaultRoot, "slog_01JX8T8QY2M5ZBV64ZP4N1DRB8"),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "schedule must be an object.",
+      isInvalidScheduledLogQueryError,
     );
 
     await rm(path.join(vaultRoot, "bank/scheduled-logs/non-object-schedule.md"), {
@@ -323,9 +337,7 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await assert.rejects(
       () => readScheduledLog(vaultRoot, "slog_01JX8TAQY2M5ZBV64ZP4N1DRA"),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "schedule.everyMs must be at least 60000 ms.",
+      isInvalidScheduledLogQueryError,
     );
 
     await rm(path.join(vaultRoot, "bank/scheduled-logs/too-frequent.md"), {
@@ -358,9 +370,7 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await assert.rejects(
       () => listScheduledLogs(vaultRoot),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message === "status must be one of active, paused, archived.",
+      isInvalidScheduledLogQueryError,
     );
 
     await rm(path.join(vaultRoot, "bank/scheduled-logs/bad-status.md"), {
@@ -390,9 +400,7 @@ test("scheduled log queries reject unsupported schedules and actions", async () 
 
     await assert.rejects(
       () => readScheduledLog(vaultRoot, "slog_01JX8T7QY2M5ZBV64ZP4N1DRB7"),
-      (error: unknown) =>
-        error instanceof Error &&
-        error.message.includes("meal.add scheduled logs require"),
+      isInvalidScheduledLogQueryError,
     );
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
