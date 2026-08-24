@@ -50,9 +50,20 @@ describe('repeated workout tally guidance', () => {
     expect(behavior).not.toContain(
       'unnamed repeated sets for an alternating or phased strength routine',
     )
-    expect(strength).toContain('Choose one owner before loading an execution skill')
+    expect(strength).toContain(
+      'Choose one canonical write path before loading an execution skill',
+    )
     expect(strength).toContain('Read `tracked-table` and no repeated-routine execution skill')
     expect(strength).toContain('never redirects an established live workout')
+    expect(strength).toContain(
+      'even when that reminder also carries a `workout_format` template reference',
+    )
+    expect(strength).toContain(
+      'Only an exact standalone `workout_format` reminder context',
+    )
+    expect(strength).toContain(
+      'starts a new `activity_session` through `tracked-table`',
+    )
     expect(strength).toContain(
       'Resolve one exercise, one owner, and one current per-occurrence standard',
     )
@@ -101,7 +112,7 @@ describe('repeated workout tally guidance', () => {
 
     expect(strength?.triggerHint).toContain('logging completed strength sets')
     expect(prompt).toContain(
-      'Strength sets: strength-training chooses one canonical owner. Exact live-workout context uses tracked-table only; otherwise an exact saved routine or experiment may own repeated occurrences. Terse wording never switches owners. In groups, hand off privately without reads or writes',
+      'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes',
     )
   })
 

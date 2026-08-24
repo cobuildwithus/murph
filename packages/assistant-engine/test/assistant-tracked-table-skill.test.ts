@@ -112,6 +112,9 @@ describe('assistant tracked workout table skill', () => {
     expect(strengthSkill).toContain(
       'Once an exact live workout owns the exchange, use only this execution owner',
     )
+    expect(strengthSkill).toContain(
+      'Only an exact standalone `workout_format` reminder context',
+    )
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 

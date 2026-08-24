@@ -84,10 +84,12 @@ Treat physique photos, body measurements, pain and symptom notes, training logs,
 
 ### Canonical owner for set confirmations
 
-Choose one owner before loading an execution skill:
+Choose one canonical write path before loading an execution skill:
 
 - Exact live-workout context from a current workout command, workout card, workout follow-up marker, or the immediate established live-workout exchange means the canonical `activity_session` owns the confirmation. Read `tracked-table` and no repeated-routine execution skill. Terse wording, several sets across a day, or calling the set part of a routine never redirects an established live workout into a regimen or experiment occurrence. If the exact workout or set coordinate is unavailable, ask one narrow workout clarification and write nothing.
-- Only when no live workout owns the exchange may a saved repeated routine or experiment own the confirmation. Read the full canonical regimen and, when applicable, exact experiment through `behavior-followthrough` and `experiment-onboarding`. Resolve one exercise, one owner, and one current per-occurrence standard for the member-local date before writing. Conversational recency and the previous logged set are not owner evidence. If canonical records do not resolve all three, ask one narrow clarification and write nothing.
+- Exact regimen or experiment context owns a repeated occurrence. This includes trusted reminder context whose `supportSeriesId`, exact owner reference, and `plannedOccurrenceAt` identify an occurrence, even when that reminder also carries a `workout_format` template reference. Read the full canonical regimen and, when applicable, exact experiment through `behavior-followthrough` and `experiment-onboarding`. Resolve one exercise, one owner, and one current per-occurrence standard before writing. Conversational recency and the previous logged set are not owner evidence.
+- Only an exact standalone `workout_format` reminder context, with neither of the owners above, starts a new `activity_session` through `tracked-table`. Read that format and log the stated set against the returned workout id. An older unfinished workout remains untouched and never receives the reminder completion.
+- If no path resolves exactly, ask one narrow clarification and write nothing.
 
 Set logging is private-only. In a group conversation, do not read or mutate a participant's private workout, routine, or experiment; acknowledge briefly and ask them to continue in their private Murph conversation.
 

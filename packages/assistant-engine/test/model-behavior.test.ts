@@ -1806,7 +1806,7 @@ describe('assistant consumption lookup guidance', () => {
       'Training/movement: daily-activity owns wearable facts; workout-csv-import owns workout CSVs; running-cardio and strength-training own programming; aerobic-fitness, competition-training, mobility-posture, physical-therapy. Use Health Commons for recovery-modality evidence and safety.',
     )
     expect(prompt).toContain(
-      'Strength sets: strength-training chooses one canonical owner. Exact live-workout context uses tracked-table only; otherwise an exact saved routine or experiment may own repeated occurrences. Terse wording never switches owners. In groups, hand off privately without reads or writes.',
+      'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes.',
     )
     expect(prompt).toContain(
       'Physical-therapy owns active pain, injury, rehabilitation, return-to-activity, and pain-driven workout modification.',
