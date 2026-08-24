@@ -1,6 +1,6 @@
 # Murph Agent Docs Index
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Purpose
 
@@ -26,6 +26,13 @@ specialist results and final `FINDINGS` results retain the evidence-backed
 finding-disposition pause. This boundary is specified by
 `agent-docs/operations/completion-workflow.md` and
 `agent-docs/operations/pr-reviewgpt-loop.md`.
+
+Required Temporal compatibility tolerates only the bounded `404` visibility
+window for the exact private run id returned by an accepted dispatch. It never
+searches for or guesses a run, and every later polling, identity, reader, and
+attestation failure remains fail-closed. This boundary and its focused proof
+are specified by `agent-docs/RELIABILITY.md` and
+`agent-docs/references/testing-ci-map.md`.
 
 Optional local Frog issue repair uses exact App-and-main-bound admission,
 ReviewGPT-authored implementation patches, parent-revalidated ordinary
@@ -164,7 +171,10 @@ authority because provider tools freeze at turn start and the first video may
 arrive through live steering. Murph freezes attachment metadata before Codex
 can act on each initial or live-steered input, verifies the exact bytes before
 cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
-the Worker boundary. The architecture, security, deployment order, and
+the Worker boundary. Ordinary inbound hosted video bytes stay outside workspace
+snapshots and become immediately retention-eligible when active input no longer
+needs them; explicit canonical durable references are the exception. The
+architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
 `agent-docs/references/testing-ci-map.md`.
@@ -504,6 +514,17 @@ contract is specified by `ARCHITECTURE.md` and `agent-docs/RELIABILITY.md`.
 Member-owned device-provider application authority, including the shared
 webhook admission fence for app-bound connections, is jointly specified by
 `ARCHITECTURE.md`, `agent-docs/SECURITY.md`, and `agent-docs/RELIABILITY.md`.
+
+Daily nutrition cards use one prompt-owned known-context suitability rule and
+one compact safety question before new numeric targets when needed. Routine
+cards do not run a universal clinical-history or measurement preflight, and a
+health-context fact constrains only the target or advice it materially affects.
+Stale or incomplete context snapshots likewise direct only the canonical read
+needed for a concrete concern or an owning workflow's explicit contract. The
+Goal, totals, card-validation, and delivery owners remain unchanged. This
+contract is jointly specified by `ARCHITECTURE.md`,
+`agent-docs/RELIABILITY.md`, and
+`agent-docs/operations/imessage-deliverability.md`.
 
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |

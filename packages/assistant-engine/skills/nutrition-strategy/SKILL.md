@@ -62,18 +62,24 @@ An explicit request for a numeric daily nutrition card supplies numeric intent
 for Murph's goal-aware card workflow. The first eligible managed automatic meal
 closeout may also propose once when complete all-status Goal discovery proves
 that no managed proposal has ever existed. Both paths authorize only the paused
-canonical proposal, subject to the safety rules below; neither activates or uses
-the provisional targets. Before every card,
-even when five active goals already exist, read and apply
-`references/daily-nutrition-card-safety.md`. When five usable daily goals are
-missing, also read and follow `references/daily-nutrition-card-goals.md`. The
-safety gate includes its bounded canonical procedure-event and
-encounter-diagnosis discovery plus the separate bounded `pregnancy-test`
-measurement and canonical test-event reads. It
-owns evidence-grounded default derivation, the single canonical Goal proposal,
-and the explanation-before-card sequence. Do not send a goal-less card, create
-a second goal store, or broaden the one scheduled exception into recurring
+canonical proposal; neither activates or uses provisional targets. The
+`murph.attach_response_card` prompt owns the numeric-suitability rule. Apply it
+from known context and do not add a universal medical-history or measurement
+preflight. It may ask one compact safety question before proposing new targets,
+but a routine card with accepted goals does not repeat screening without a new
+concern. Apply that rule only to the numeric target or guidance the known fact
+materially affects. An allergy, intolerance, dietary restriction, or
+clinician-directed diet is not by itself a reason to suppress benign totals or
+an accepted compatible target bundle. When five usable daily goals are missing,
+read and follow
+`references/daily-nutrition-card-goals.md`. That reference owns
+evidence-grounded default derivation, the single canonical Goal proposal, and
+the explanation-before-card sequence. Do not send a goal-less card, create a
+second goal store, or broaden the one scheduled exception into recurring
 unsolicited diet planning.
+
+A scheduled occurrence with unresolved suitability uses ordinary nonnumeric
+closeout text and makes no proposal, mutation, question, or card.
 
 ## Named Diets And Dietary Patterns
 

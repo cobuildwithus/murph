@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-16
+Last verified: 2026-08-23
 
 ## Decision
 
@@ -1309,9 +1309,23 @@ Cloudflare state and cannot attach to default foreground processing.
 The optional workspace `systemMailboxFrontier` fact is a separate rollout seam.
 An omitted field means an older Web producer, `model_free` means the first live
 system item beyond the runtime's handled-through frontier is eligible for the
-bounded system-mailbox executor, `default_owned` leaves that item with ordinary
-default processing, and `null` proves no live retained frontier. Deploy the
+bounded system-mailbox executor, and `default_owned` leaves that item with
+ordinary default processing. `null` means no system work is admitted by the
+current reconciliation facts. For active access, Web derives that result from
+the durable retained frontier. For inactive access, Web emits `null` without a
+mailbox read so Temporal can retire its pointer projection while the durable
+mailbox remains canonical and can be re-read after reactivation. Deploy the
 tolerant Temporal consumer before Web begins emitting the classification.
+Because explicit-null retirement removes Temporal's last local reason to wake,
+every Web owner that restores active access must append a deterministic
+`runtime.maintenance-requested` mailbox item in the same transaction as the
+access change. The normal exact-pointer signal is only a latency hint: the
+existing bounded mailbox-handoff sweep recovers a failed first signal from the
+durable item. Direct `invoice.paid` recovery, won or reinstated disputes,
+Family subscription recovery for its bounded active roster, and established
+member Family invite acceptance all use this one handoff. Stripe receipts retain
+the exact mailbox pointers for replay. Ordinary successful active-to-active
+billing events append no restoration item and do not wake the member or roster.
 Web-to-Temporal signal kinds have the same compatibility constraint: add
 workflow `patched()`/version gating for any new signal that changes wait or
 reconciliation behavior, deploy the Temporal worker before web emits that signal, and
@@ -2144,9 +2158,11 @@ insufficient.
 ### Hosted Runtime Maintenance Wake
 
 `runtime.maintenance-requested` is the durable no-payload wake for one-time
-hosted runtime maintenance such as a vault format rollout and for a committed
-group projection grant that needs its first private-runtime pass. Web appends
-the runtime-control mailbox row and signals the normal hosted runtime workflow;
+hosted runtime maintenance such as a vault format rollout, for a committed
+group projection grant that needs its first private-runtime pass, and for an
+access-restoration transaction whose runtime may have retired its inactive
+frontier. Web appends the runtime-control mailbox row and signals the normal
+hosted runtime workflow;
 the assistant runtime treats the row as a no-op control receipt, then runs the
 same restore, local runtime maintenance, idle checkpoint, and workspace-version
 CAS path as any other hosted invocation. The maintenance wake must not carry
@@ -2885,8 +2901,16 @@ marker, or second persistence owner is introduced.
 The portable workspace policy excludes explicit unsafe/process-local or
 repair-bin material such as secrets, device-sync runtime state, parser
 executable-selector config, quarantine payloads, locks, pid/socket files, global
-cache/tmp, rebuildable projections, and assistant JSONL event logs. The one
-derived-cache exception is the exact query SQLite triplet
+cache/tmp, rebuildable projections, and assistant JSONL event logs. The
+private-media-specific exclusion is ordinary inbound hosted video: snapshot planning
+reads validated canonical inbox-capture records and excludes every normalized
+video path that has not been promoted through an explicit canonical event raw
+reference. Pending accepted input may protect the local file for active work,
+but never makes it portable; invalid capture metadata fails snapshot planning
+closed. Idle maintenance separately gives unprotected video a zero-length
+retention window, preserving descriptors and parser derivatives while the
+canonical retention transaction appends the tombstone and deletes the bytes.
+The one derived-cache exception is the exact query SQLite triplet
 `.runtime/projections/query.sqlite{,-wal,-shm}`: carrying it avoids a foreground
 canonical rescan after a cold restore, while normal source-manifest validation
 still discards and rebuilds stale copies. New archives use the POSIX PAX format

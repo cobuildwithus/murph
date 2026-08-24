@@ -18,6 +18,7 @@ import {
   rebuildRuntimeFromVault,
   runInboxMediaRetention,
 } from "../src/index.ts";
+import { listTransientInboxVideoStoredPaths } from "../src/retention.ts";
 import type { InboundCapture } from "../src/contracts/capture.ts";
 
 async function makeTempDirectory(name: string): Promise<string> {
@@ -419,6 +420,138 @@ test("runInboxMediaRetention applies the cutoff and exact path protections", asy
   assert.equal(await fileExists(vaultRoot, duplicatePath), false);
 });
 
+test("hosted retention can expire unprotected videos immediately without changing image or audio windows", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-video-transient-retention");
+  const now = "2026-07-05T00:00:00.000Z";
+  await initializeVault({ vaultRoot, createdAt: now });
+  const imageBytes = await createPngBytes();
+
+  const persisted = await persistCanonicalInboxCapture({
+    vaultRoot,
+    captureId: "cap_transient_video",
+    eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VJ",
+    storedAt: now,
+    input: {
+      source: "telegram",
+      externalId: "msg-transient-video",
+      thread: {
+        id: "thread-transient-video",
+        isDirect: true,
+      },
+      actor: {
+        isSelf: false,
+      },
+      occurredAt: now,
+      text: "fresh mixed media",
+      attachments: [
+        {
+          kind: "video",
+          mime: "video/mp4",
+          fileName: "clip.mp4",
+          data: Buffer.from("synthetic-video-bytes"),
+        },
+        {
+          kind: "image",
+          mime: "image/png",
+          fileName: "photo.png",
+          data: imageBytes,
+        },
+        {
+          kind: "audio",
+          mime: "audio/mpeg",
+          fileName: "voice.mp3",
+          data: Buffer.from("synthetic-audio-bytes"),
+        },
+        {
+          kind: "video",
+          mime: "video/webm",
+          fileName: "saved.webm",
+          data: Buffer.from("synthetic-saved-video-bytes"),
+        },
+      ],
+      raw: {},
+    },
+  });
+  const videoPath = persisted.stored.attachments[0]?.storedPath ?? "";
+  const imagePath = persisted.stored.attachments[1]?.storedPath ?? "";
+  const audioPath = persisted.stored.attachments[2]?.storedPath ?? "";
+  const savedVideoPath = persisted.stored.attachments[3]?.storedPath ?? "";
+  assert.ok(videoPath);
+  assert.ok(imagePath);
+  assert.ok(audioPath);
+  assert.ok(savedVideoPath);
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.event.v1",
+      id: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VK",
+      kind: "note",
+      occurredAt: now,
+      recordedAt: now,
+      dayKey: "2026-07-05",
+      source: "manual",
+      title: "Saved inbox media",
+      note: "A canonical event keeps one exact raw path.",
+      rawRefs: [savedVideoPath],
+    },
+  });
+  assert.deepEqual(
+    await listTransientInboxVideoStoredPaths({ vaultRoot }),
+    [videoPath],
+  );
+
+  const result = await runInboxMediaRetention({
+    now,
+    vaultRoot,
+    videoRetentionWindowMs: 0,
+  });
+
+  assert.equal(result.expiredAttachments, 1);
+  assert.deepEqual(result.records.map((record) => record.storedPath), [videoPath]);
+  assert.equal(result.nextEligibleAt, "2026-07-19T00:00:00.000Z");
+  assert.equal(await fileExists(vaultRoot, videoPath), false);
+  assert.equal(await fileExists(vaultRoot, imagePath), true);
+  assert.equal(await fileExists(vaultRoot, audioPath), true);
+  assert.equal(await fileExists(vaultRoot, savedVideoPath), true);
+});
+
+test("transient video snapshot exclusion fails closed on an invalid capture record", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-video-snapshot-fail-closed");
+  await initializeVault({ vaultRoot, createdAt: "2026-07-05T00:00:00.000Z" });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/inbox-captures/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.inbox-capture.v2",
+      attachments: "invalid",
+    },
+  });
+
+  await assert.rejects(
+    listTransientInboxVideoStoredPaths({ vaultRoot }),
+    /Invalid inbox capture record prevents safe hosted snapshot construction/,
+  );
+});
+
+test("transient video snapshot exclusion fails closed on an invalid durable event record", async () => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-video-event-fail-closed");
+  await initializeVault({ vaultRoot, createdAt: "2026-07-05T00:00:00.000Z" });
+  await appendJsonlRecord({
+    vaultRoot,
+    relativePath: "ledger/events/2026/2026-07.jsonl",
+    record: {
+      schemaVersion: "murph.event.v1",
+      rawRefs: ["raw/inbox/telegram/unclassified-video.mp4"],
+    },
+  });
+
+  await assert.rejects(
+    listTransientInboxVideoStoredPaths({ vaultRoot }),
+    /Invalid event record prevents safe hosted snapshot construction/,
+  );
+});
+
 test("runInboxMediaRetention protects every attachment in an active pending capture", async () => {
   const vaultRoot = await makeTempDirectory("murph-inbox-media-retention-protected-capture");
   await initializeVault({ vaultRoot, createdAt: "2026-06-01T00:00:00.000Z" });
@@ -455,19 +588,28 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
           fileName: "voice.m4a",
           data: Buffer.from("audio-bytes"),
         },
+        {
+          kind: "video",
+          mime: "video/mp4",
+          fileName: "clip.mp4",
+          data: Buffer.from("video-bytes"),
+        },
       ],
       raw: {},
     },
   });
   const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
   const audioPath = persisted.stored.attachments[1]?.storedPath ?? "";
+  const videoPath = persisted.stored.attachments[2]?.storedPath ?? "";
   assert.ok(imagePath);
   assert.ok(audioPath);
+  assert.ok(videoPath);
 
   const result = await runInboxMediaRetention({
     now: "2026-07-05T00:00:00.000Z",
     protectedCaptureIds: [captureId],
     vaultRoot,
+    videoRetentionWindowMs: 0,
   });
 
   assert.equal(result.expiredAttachments, 0);
@@ -475,6 +617,7 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
   assert.equal(result.nextEligibleAt, "2026-07-06T00:00:00.000Z");
   assert.equal(await fileExists(vaultRoot, imagePath), true);
   assert.equal(await fileExists(vaultRoot, audioPath), true);
+  assert.equal(await fileExists(vaultRoot, videoPath), true);
 });
 
 test("runInboxMediaRetention materializes bounded missing candidates before hashing", async () => {
