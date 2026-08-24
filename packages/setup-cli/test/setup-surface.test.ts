@@ -89,6 +89,19 @@ async function runJsonCli(args: string[]): Promise<{
       )
     },
   })
+  cli.command('fail-permission', {
+    args: z.object({}),
+    async run() {
+      const privatePath = '/private/workspace/member-vault/config.json'
+      throw Object.assign(
+        new Error(`EACCES: permission denied, open '${privatePath}'`),
+        {
+          code: 'EACCES',
+          path: privatePath,
+        },
+      )
+    },
+  })
 
   const output: string[] = []
   let exitCode: number | null = null
@@ -109,8 +122,17 @@ async function runJsonCli(args: string[]): Promise<{
       data?: unknown
       error?: {
         code?: string
+        fieldErrors?: Array<{
+          code?: string
+          expected: string
+          message: string
+          path: string
+          received: string
+        }>
+        hint?: string
         message?: string
         retryable?: boolean
+        stage?: string
       }
     },
     exitCode,
@@ -190,6 +212,18 @@ test('setup bridge omits invalid retryable and exitCode context types', async ()
   assert.equal(result.envelope.error?.code, 'SETUP_BRIDGE_INVALID')
   assert.equal(result.envelope.error?.retryable, false)
   assert.equal(result.exitCode, 1)
+})
+
+test('setup bridge classifies filesystem failures without exposing paths', async () => {
+  const result = await runJsonCli(['fail-permission'])
+  const serialized = JSON.stringify(result.envelope)
+
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error?.code, 'permission_denied')
+  assert.equal(result.envelope.error?.stage, 'filesystem')
+  assert.equal(result.envelope.error?.retryable, false)
+  assert.equal(serialized.includes('/private/workspace/member-vault'), false)
+  assert.equal(serialized.includes('permission denied, open'), false)
 })
 
 test('onboard CLI builds setup CTAs from configured channels, updates, wearables, and missing env', async () => {

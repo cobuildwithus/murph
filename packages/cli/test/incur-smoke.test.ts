@@ -366,6 +366,73 @@ test('built CLI discovery surfaces remain available', async () => {
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
 
+test('built duplicate-vault failures emit one safe machine document in every mode', async () => {
+  const firstVault = '/private/synthetic/first-vault'
+  const secondVault = '/private/synthetic/second-vault'
+  const modes = [
+    { args: ['--format', 'json'], envelope: false, format: 'json' },
+    { args: ['--json'], envelope: false, format: 'json' },
+    { args: ['--format', 'toon'], envelope: false, format: 'toon' },
+    {
+      args: ['--full-output', '--format', 'json'],
+      envelope: true,
+      format: 'json',
+    },
+    {
+      args: ['--full-output', '--format', 'toon'],
+      envelope: true,
+      format: 'toon',
+    },
+    {
+      args: ['--full-output', '--format', 'yaml'],
+      envelope: true,
+      format: 'yaml',
+    },
+  ] as const
+
+  for (const mode of modes) {
+    const result = await runBuiltCliProcess([
+      '--vault',
+      firstVault,
+      '--vault',
+      secondVault,
+      ...mode.args,
+    ])
+    const combinedOutput = `${result.stdout}\n${result.stderr}`
+
+    assert.equal(result.exitCode, 1, mode.args.join(' '))
+    assert.equal(combinedOutput.includes(firstVault), false, mode.args.join(' '))
+    assert.equal(combinedOutput.includes(secondVault), false, mode.args.join(' '))
+    assert.equal(result.stdout.trim().length > 0, true, mode.args.join(' '))
+
+    if (mode.format === 'json') {
+      const document = JSON.parse(result.stdout) as {
+        code?: string
+        error?: { code?: string }
+        ok?: boolean
+      }
+      assert.equal(document.ok, mode.envelope ? false : undefined)
+      assert.equal(
+        mode.envelope ? document.error?.code : document.code,
+        'invalid_option',
+      )
+      assert.equal(mode.envelope ? document.code : document.error, undefined)
+      continue
+    }
+
+    assert.equal(
+      result.stdout.split('invalid_option').length - 1,
+      1,
+      mode.args.join(' '),
+    )
+    assert.equal(
+      /^ok:\s+false$/mu.test(result.stdout),
+      mode.envelope,
+      mode.args.join(' '),
+    )
+  }
+}, INCUR_HELP_TIMEOUT_MS)
+
 test('root config file can provide command option defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
   const homeRoot = path.join(tempRoot, 'home')

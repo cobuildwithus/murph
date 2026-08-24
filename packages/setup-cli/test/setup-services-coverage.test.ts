@@ -1160,7 +1160,7 @@ test('codex home selection covers explicit home validation, unreadable current h
   }
 })
 
-test('incur error bridge maps VaultCliError metadata and preserves typed defaults', async () => {
+test('incur error bridge maps rich VaultCliError metadata and preserves typed defaults', async () => {
   const middlewareContext: Parameters<typeof incurErrorBridge>[0] = {
     agent: false,
     command: 'setup',
@@ -1229,6 +1229,22 @@ test('incur error bridge maps VaultCliError metadata and preserves typed default
       error.retryable === false &&
       error.exitCode === undefined,
   )
+
+  for (const nativeError of [
+    new Errors.ParseError({ message: 'Unknown option.' }),
+    new Errors.ValidationError({
+      message: 'Invalid arguments.',
+      fieldErrors: [],
+    }),
+  ]) {
+    await assert.rejects(
+      async () =>
+        incurErrorBridge(middlewareContext, async () => {
+          throw nativeError
+        }),
+      (error: unknown) => error === nativeError,
+    )
+  }
 })
 
 test('createSetupServices reuses deterministic linux toolchain inputs and writes setup state safely', async () => {
