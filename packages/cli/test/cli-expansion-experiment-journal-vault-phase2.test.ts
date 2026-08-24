@@ -3414,6 +3414,17 @@ test.sequential(
     try {
       await runSliceCli(['init', '--vault', vaultRoot])
 
+      const regexShapedLegacyDate = await runSliceCli<{
+        created: boolean
+        date: string
+        journalPath: string
+      }>([
+        'journal',
+        'ensure',
+        '2026-02-30',
+        '--vault',
+        vaultRoot,
+      ])
       const appended = await runSliceCli<{
         created: boolean
         updated: boolean
@@ -3568,6 +3579,13 @@ test.sequential(
         vaultRoot,
       ])
 
+      assert.equal(regexShapedLegacyDate.ok, true)
+      assert.equal(requireData(regexShapedLegacyDate).created, true)
+      assert.equal(requireData(regexShapedLegacyDate).date, '2026-02-30')
+      assert.equal(
+        requireData(regexShapedLegacyDate).journalPath,
+        'journal/2026/2026-02-30.md',
+      )
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
@@ -3626,6 +3644,7 @@ test.sequential(
       )
       assert.equal('markdown' in (requireData(listed).items[0] ?? {}), false)
 
+      await access(path.join(vaultRoot, 'journal/2026/2026-02-30.md'))
       const journalPath = path.join(vaultRoot, 'journal/2026/2026-03-12.md')
       const journalMarkdown = await readFile(journalPath, 'utf8')
       assert.match(journalMarkdown, /Evening note from the CLI append helper\./u)
