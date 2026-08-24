@@ -38,15 +38,15 @@ describe('assistant dynamic context prompt blocks', () => {
     ].join('\n')
 
     expect(
-      prompt.match(/`stage` names the CLI failure/gu) ?? [],
+      prompt.match(/`stage` names the failure/gu) ?? [],
     ).toHaveLength(1)
     expect(prompt).toContain(
-      '`retryable: true` permits an unchanged repeat',
+      '`retryable: true` permits an unchanged retry',
     )
     expect(prompt).toContain(
-      'fixing a named `fieldErrors` field or `hint` prerequisite is a new attempt',
+      'fixing a `fieldErrors` field or `hint` prerequisite is a new attempt',
     )
-    expect(prompt).toContain('Without concrete guidance, stop')
+    expect(prompt).toContain('Otherwise stop')
     expect(prompt).toContain('never guess or echo omitted details')
   })
 
