@@ -2267,7 +2267,7 @@ describe("hosted Linq observability stores", () => {
     }
   });
 
-  it("reclaims an identifiable Linq usage-limit rich-link partial with the same provider key", async () => {
+  it("reclaims an identifiable Linq usage-limit rich-link partial from later work with the same provider key", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.052Z");
     const previousAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -2312,7 +2312,7 @@ describe("hosted Linq observability stores", () => {
       periodStart: AI_USAGE_NOTICE_PERIOD_START,
       prisma: fixture.prisma as never,
       source: "hosted_webhook_side_effect",
-      sourceRef: "linq-message:event-123",
+      sourceRef: "linq-message:event-456",
       targetKind: "thread",
       usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
@@ -2343,7 +2343,7 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
-  it("keeps a bounded usage-limit rich-link replay fence in flight", async () => {
+  it("keeps a bounded usage-limit rich-link replay fence in flight for later work", async () => {
     const fixture = createObservabilityPrismaFixture();
     const previousAttemptedAt = new Date("2026-03-26T12:04:00.000Z");
     const lastReceiptAt = new Date("2026-03-26T12:03:59.000Z");
@@ -2381,7 +2381,7 @@ describe("hosted Linq observability stores", () => {
       periodStart: AI_USAGE_NOTICE_PERIOD_START,
       prisma: fixture.prisma as never,
       source: "hosted_webhook_side_effect",
-      sourceRef: "linq-message:event-123",
+      sourceRef: "linq-message:event-456",
       targetKind: "thread",
       usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
