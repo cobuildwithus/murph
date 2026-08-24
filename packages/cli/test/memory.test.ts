@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
-import { afterEach, test } from "vitest";
+import { afterEach, test, vi } from "vitest";
 import {
   buildMemoryPromptBlock,
   createEmptyMemoryDocument,
@@ -24,9 +24,33 @@ import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { registerMemoryCommands } from "../src/commands/memory.js";
 
+const memoryPersistenceFault = vi.hoisted(() => ({
+  enabled: false,
+  upsertCalls: 0,
+}));
+
+vi.mock("@murphai/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@murphai/core")>();
+
+  return {
+    ...actual,
+    upsertMemory: async (...args: Parameters<typeof actual.upsertMemory>) => {
+      if (!memoryPersistenceFault.enabled) {
+        return actual.upsertMemory(...args);
+      }
+
+      memoryPersistenceFault.upsertCalls += 1;
+      await actual.upsertMemory(...args);
+      throw new actual.MemoryPersistenceError("upsert");
+    },
+  };
+});
+
 const cleanupPaths: string[] = [];
 
 afterEach(async () => {
+  memoryPersistenceFault.enabled = false;
+  memoryPersistenceFault.upsertCalls = 0;
   await Promise.all(
     cleanupPaths.splice(0).map(async (target) => {
       await rm(target, {
@@ -446,6 +470,57 @@ test("memory update refuses missing record ids through the registered CLI", asyn
   assert.equal(updated.envelope.error.stage, "memory_lookup");
   assert.equal(updated.envelope.error.message, "The requested canonical memory record does not exist.");
   assert.doesNotMatch(JSON.stringify(updated.envelope), /mem_missing|Should fail/u);
+});
+
+test("memory upsert exposes a terminal inspect-first envelope after an ambiguous write", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-memory-cli-persistence-",
+  );
+  cleanupPaths.push(parentRoot);
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+  registerMemoryCommands(cli);
+
+  memoryPersistenceFault.enabled = true;
+  const result = await runInProcessJsonCli(cli, [
+    "memory",
+    "upsert",
+    "private-post-write-memory-marker",
+    "--section",
+    "Context",
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.envelope.ok, false);
+  if (result.envelope.ok) {
+    throw new Error("Expected the ambiguous memory write to fail.");
+  }
+  assert.equal(result.envelope.error.code, "memory_persistence_invalid");
+  assert.equal(result.envelope.error.retryable, false);
+  assert.equal(result.envelope.error.stage, "memory_read_after_write");
+  assert.equal(
+    result.envelope.error.hint,
+    "Inspect canonical memory before deciding whether another write is necessary.",
+  );
+  assert.doesNotMatch(result.envelope.error.hint ?? "", /retry|rerun|try again/iu);
+  assert.equal(memoryPersistenceFault.upsertCalls, 1);
+  const persisted = await readMemoryDocumentFromCore(vaultRoot);
+  assert.equal(
+    persisted.records.filter((record) => record.text === "private-post-write-memory-marker").length,
+    1,
+  );
+  const serialized = JSON.stringify(result.envelope);
+  assert.doesNotMatch(serialized, /private-post-write-memory-marker/u);
+  assert.doesNotMatch(
+    serialized,
+    new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+  );
 });
 
 test("memory show refuses missing record ids through the registered CLI", async () => {

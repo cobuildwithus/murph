@@ -7,6 +7,7 @@ import { localParallelCliTest as test } from "./local-parallel-test.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { registerCommonsCommands } from "../src/commands/commons.js";
 import {
+  type InProcessCliJsonResult,
   requireData,
   runInProcessJsonCli,
 } from "./cli-test-helpers.js";
@@ -21,6 +22,58 @@ function createCommonsSliceCli() {
   registerCommonsCommands(cli);
 
   return cli;
+}
+
+const protocolArtifactFailureScenarios = [
+  {
+    args: ["commons", "protocol", "list", "--query", "private-list-lookup"],
+    artifact: "protocol-index.json",
+    lookup: "private-list-lookup",
+    stage: "protocol_index",
+  },
+  {
+    args: ["commons", "protocol", "show", "private-show-lookup"],
+    artifact: "protocol-run-specs.json",
+    lookup: "private-show-lookup",
+    stage: "protocol_run_specs",
+  },
+  {
+    args: ["commons", "protocol", "explore", "private-explore-lookup"],
+    artifact: "protocol-family-graph.json",
+    lookup: "private-explore-lookup",
+    stage: "protocol_family_graph",
+  },
+] as const;
+
+const protocolArtifactFailureHint =
+  "Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.";
+
+function assertProtocolArtifactFailure(
+  result: InProcessCliJsonResult,
+  input: {
+    code: "commons_protocol_artifact_invalid" | "commons_protocol_artifact_unavailable";
+    privateValues: readonly string[];
+    stage: string;
+  },
+): void {
+  assert.equal(result.exitCode, 1, input.stage);
+  assert.equal(result.envelope.ok, false, input.stage);
+  if (result.envelope.ok) {
+    throw new Error(`Expected ${input.stage} artifact failure.`);
+  }
+  assert.equal(result.envelope.error.code, input.code);
+  assert.equal(result.envelope.error.retryable, false);
+  assert.equal(result.envelope.error.stage, input.stage);
+  assert.equal(result.envelope.error.hint, protocolArtifactFailureHint);
+  assert.equal("data" in result.envelope, false);
+  const serialized = JSON.stringify(result.envelope);
+  assert.doesNotMatch(serialized, /"(?:protocols|protocol|groups|starterCandidate)"\s*:/u);
+  for (const value of input.privateValues) {
+    assert.doesNotMatch(
+      serialized,
+      new RegExp(value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+    );
+  }
 }
 
 test("deleted generic Commons commands are no longer registered", async () => {
@@ -179,26 +232,19 @@ test("commons knowledge search stays non-blocking when its generated index is mi
   }
 });
 
-test("commons protocol artifacts fail with safe recovery guidance when unavailable", async () => {
+test("commons protocol commands fail closed when their artifacts are unavailable", async () => {
   const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
   const missingRoot = path.join(tmpdir(), `missing-health-commons-protocol-${process.pid}`);
   process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = missingRoot;
   try {
-    const result = await runInProcessJsonCli(createCommonsSliceCli(), [
-      "commons",
-      "protocol",
-      "list",
-    ]);
-
-    assert.equal(result.envelope.ok, false);
-    if (result.envelope.ok) {
-      throw new Error("Expected missing Commons protocol artifacts to fail.");
+    for (const scenario of protocolArtifactFailureScenarios) {
+      const result = await runInProcessJsonCli(createCommonsSliceCli(), [...scenario.args]);
+      assertProtocolArtifactFailure(result, {
+        code: "commons_protocol_artifact_unavailable",
+        privateValues: [scenario.lookup, missingRoot],
+        stage: scenario.stage,
+      });
     }
-    assert.equal(result.envelope.error.code, "commons_protocol_artifact_unavailable");
-    assert.equal(result.envelope.error.retryable, false);
-    assert.equal(result.envelope.error.stage, "protocol_index");
-    assert.match(result.envelope.error.hint ?? "", /continue without Commons protocol context/iu);
-    assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(missingRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   } finally {
     if (previousRoot === undefined) {
       delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
@@ -208,34 +254,32 @@ test("commons protocol artifacts fail with safe recovery guidance when unavailab
   }
 });
 
-test("commons protocol artifacts fail without echoing malformed artifact content", async () => {
+test("commons protocol commands fail closed when their artifacts are invalid", async () => {
   const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
-  const packageRoot = await mkdtemp(path.join(tmpdir(), "invalid-health-commons-protocol-"));
-  await mkdir(path.join(packageRoot, "generated"), { recursive: true });
-  await writeFile(
-    path.join(packageRoot, "generated", "protocol-index.json"),
-    "private-artifact-marker {not-json}",
-    "utf8",
-  );
-  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = packageRoot;
   try {
-    const result = await runInProcessJsonCli(createCommonsSliceCli(), [
-      "commons",
-      "protocol",
-      "list",
-    ]);
+    for (const scenario of protocolArtifactFailureScenarios) {
+      const packageRoot = await mkdtemp(path.join(tmpdir(), "invalid-health-commons-protocol-"));
+      const privateArtifactValue = `private-artifact-${scenario.stage}`;
+      try {
+        await mkdir(path.join(packageRoot, "generated"), { recursive: true });
+        await writeFile(
+          path.join(packageRoot, "generated", scenario.artifact),
+          `${privateArtifactValue} {not-json}`,
+          "utf8",
+        );
+        process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = packageRoot;
 
-    assert.equal(result.envelope.ok, false);
-    if (result.envelope.ok) {
-      throw new Error("Expected malformed Commons protocol artifacts to fail.");
+        const result = await runInProcessJsonCli(createCommonsSliceCli(), [...scenario.args]);
+        assertProtocolArtifactFailure(result, {
+          code: "commons_protocol_artifact_invalid",
+          privateValues: [scenario.lookup, privateArtifactValue, packageRoot],
+          stage: scenario.stage,
+        });
+      } finally {
+        await rm(packageRoot, { force: true, recursive: true });
+      }
     }
-    assert.equal(result.envelope.error.code, "commons_protocol_artifact_invalid");
-    assert.equal(result.envelope.error.retryable, false);
-    assert.equal(result.envelope.error.stage, "protocol_index");
-    assert.doesNotMatch(JSON.stringify(result.envelope), /private-artifact-marker/u);
-    assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(packageRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
   } finally {
-    await rm(packageRoot, { force: true, recursive: true });
     if (previousRoot === undefined) {
       delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
     } else {

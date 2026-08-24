@@ -146,7 +146,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // and static-startup budgets remain unchanged because error projection is lazy.
 // Knowledge, memory, and Exa recovery metadata measure 9,482,512 B on public
 // Linux after the reviewed path/privacy and Exa body-read remediation.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_482_512;
+// Fail-closed Commons protocol recovery reduces that lazy graph by 20 B without
+// changing the entry or static-startup topology.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_482_492;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

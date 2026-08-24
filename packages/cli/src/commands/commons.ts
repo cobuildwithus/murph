@@ -401,9 +401,7 @@ function loadCommonsProtocolReader<TReader>(
       { retryable: false },
       {
         stage,
-        hint: unavailable
-          ? "Continue without Commons protocol context, or restore the packaged artifacts before retrying."
-          : "Continue without Commons protocol context, or regenerate the packaged artifacts before retrying.",
+        hint: "Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.",
       },
     );
   }
