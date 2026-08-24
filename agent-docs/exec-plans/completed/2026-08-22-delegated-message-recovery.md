@@ -115,3 +115,6 @@ Prefer a rolling-compatible public runtime change that derives the existing
 deadline from already-present trusted fields and does not require a new schema.
 If the final patch changes a cross-service contract, document and verify the
 compatible deployment order before handoff.
+Status: completed
+Updated: 2026-08-23
+Completed: 2026-08-23
