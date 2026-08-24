@@ -540,8 +540,8 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
-              message: 'private invalid time zone value',
-              expected: 'IANA time zone',
+              expected: 'string',
+              message: 'Use a valid IANA time zone.',
             },
           ],
         },
@@ -556,20 +556,207 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
   assert.equal(result.envelope.error?.message, 'bridge preserved the command error')
   assert.equal(result.envelope.error?.retryable, true)
   assert.equal(result.envelope.error?.stage, 'validation')
-  assert.equal(
-    result.envelope.error?.hint,
-    'Correct the invalid fields, then rerun the command.',
-  )
+  assert.equal(result.envelope.error?.hint, undefined)
   assert.deepEqual(result.envelope.error?.fieldErrors, [
     {
       code: 'invalid_value',
       path: 'schedule.timeZone',
-      expected: 'IANA time zone',
+      expected: 'string',
       received: 'invalid',
-      message: 'Value is not one of the allowed options.',
+      message: 'This field is invalid.',
     },
   ])
   assert.equal(result.exitCode, 7)
+})
+
+test('Cli.fetch returns safe validation fields without arbitrary error context', async () => {
+  const cli = Cli.create('bridge-fetch-smoke', {
+    description: 'bridge fetch smoke test',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+  cli.command('fail', {
+    args: z.object({}),
+    async run() {
+      throw new VaultCliError(
+        'BRIDGE_FETCH_SMOKE',
+        'bridge preserved the fetch error',
+        {
+          ignored: 'private-submitted-value',
+          retryable: false,
+          issues: [
+            {
+              path: ['schedule', 'timeZone'],
+              code: 'invalid_value',
+              expected: 'string',
+              message: 'Use a valid IANA time zone.',
+            },
+          ],
+        },
+      )
+    },
+  })
+
+  const response = await cli.fetch(new Request('http://localhost/fail'))
+  const envelope = (await response.json()) as CliEnvelope
+
+  assert.equal(response.status, 500)
+  assert.equal(envelope.ok, false)
+  assert.equal(envelope.error.code, 'BRIDGE_FETCH_SMOKE')
+  assert.equal(envelope.error.retryable, false)
+  assert.equal(envelope.error.stage, 'validation')
+  assert.equal(envelope.error.hint, undefined)
+  assert.deepEqual(envelope.error.fieldErrors, [
+    {
+      code: 'invalid_value',
+      path: 'schedule.timeZone',
+      expected: 'string',
+      received: 'invalid',
+      message: 'This field is invalid.',
+    },
+  ])
+  assert.equal(JSON.stringify(envelope).includes('private-submitted-value'), false)
+})
+
+test('built validation owners project safe field repair details', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-validation-repair-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const cases = [
+      {
+        args: [
+          'workout',
+          'add',
+          '--vault',
+          vaultRoot,
+          '--workout-exercise',
+          'order=1;name=Bench press',
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'too_small',
+        message: 'Invalid workout session fields.',
+        path: 'exercises.0.sets',
+        privateText: 'Bench press',
+      },
+      {
+        args: [
+          'scheduled-log',
+          'save',
+          'Weekly strength template',
+          '--vault',
+          vaultRoot,
+          '--schedule-kind',
+          'cron',
+          '--schedule-cron',
+          '0 7 * * 1',
+          '--action-kind',
+          'meal.add',
+        ],
+        errorCode: 'invalid_payload',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'custom',
+        message: 'Input failed validation.',
+        path: 'foodId',
+        privateText: 'Weekly strength template',
+      },
+      {
+        args: [
+          'blood-test',
+          'save',
+          'Invalid analyte panel',
+          '--vault',
+          vaultRoot,
+          '--occurred-at',
+          '2026-03-12T13:00:00.000Z',
+          '--test-name',
+          'invalid_analyte_panel',
+          '--result',
+          JSON.stringify({
+            note: 'Ferritin private marker',
+          }),
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'invalid_union',
+        message: 'Invalid --result blood-test analyte payload.',
+        path: '$',
+        privateText: 'Ferritin private marker',
+      },
+    ] as const
+
+    for (const candidate of cases) {
+      const result = await runBuiltCliProcess([
+        ...candidate.args,
+        '--full-output',
+        '--format',
+        'json',
+      ])
+      const envelope = JSON.parse(result.stdout) as CliEnvelope
+      assert.equal(result.exitCode, 1, candidate.message)
+      assert.equal(envelope.ok, false, candidate.message)
+      if (envelope.ok) {
+        assert.fail(`Expected ${candidate.message} to fail.`)
+      }
+
+      const error = envelope.error
+      const serialized = JSON.stringify(error)
+      assert.equal(error.code, candidate.errorCode)
+      assert.equal(error.message, candidate.message)
+      assert.equal(error.retryable, false)
+      assert.equal(error.stage, 'validation')
+      assert.equal(error.hint, undefined)
+      assert.deepEqual(error.fieldErrors?.[0], {
+        code: candidate.issueCode,
+        expected: '',
+        message: candidate.fieldMessage,
+        path: candidate.path,
+        received: 'invalid',
+      })
+      assert.equal(result.stderr.includes(candidate.privateText), false)
+      assert.equal(serialized.includes(candidate.privateText), false)
+      assert.equal(serialized.includes('Required'), false)
+      assert.equal(serialized.includes('Too small'), false)
+    }
+
+    const manyExerciseArgs = [
+      'workout',
+      'add',
+      '--vault',
+      vaultRoot,
+      ...Array.from({ length: 14 }, (_, index) => [
+        '--workout-exercise',
+        `order=${index + 1};name=Lift ${index + 1}`,
+      ]).flat(),
+    ]
+    const manyExercises = await runBuiltCliProcess([
+      ...manyExerciseArgs,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const manyExerciseEnvelope = JSON.parse(manyExercises.stdout) as CliEnvelope
+    assert.equal(manyExercises.exitCode, 1)
+    assert.equal(manyExerciseEnvelope.ok, false)
+    if (manyExerciseEnvelope.ok) {
+      assert.fail('Expected many missing workout sets to fail.')
+    }
+    assert.equal(manyExerciseEnvelope.error.stage, 'validation')
+    assert.equal(manyExerciseEnvelope.error.fieldErrors?.length, 13)
+    assert.deepEqual(manyExerciseEnvelope.error.fieldErrors?.at(-1), {
+      path: '$',
+      code: 'issues_omitted',
+      expected: '',
+      received: 'invalid',
+      message: '2 additional validation issues were omitted.',
+    })
+    assert.equal(JSON.stringify(manyExerciseEnvelope.error).includes('Lift'), false)
+    assert.equal(manyExercises.stderr.includes('Lift'), false)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('VaultCliError envelopes default retryable to false', async () => {

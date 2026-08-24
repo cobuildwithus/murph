@@ -49,10 +49,22 @@ async function runJsonCli(args: string[]): Promise<{
   cli.command('fail', {
     args: z.object({}),
     async run() {
-      throw new VaultCliError('SETUP_BRIDGE', 'setup bridge preserved the error', {
-        exitCode: 9,
-        retryable: true,
-      })
+      throw new VaultCliError(
+        'SETUP_BRIDGE',
+        'setup bridge preserved the error',
+        {
+          exitCode: 9,
+          retryable: true,
+          issues: [
+            {
+              path: ['assistant', 'provider'],
+              code: 'invalid_value',
+              message: 'private raw validation message',
+              expected: 'string',
+            },
+          ],
+        },
+      )
     },
   })
   cli.command('fail-invalid-context', {
@@ -148,6 +160,17 @@ test('VaultCliError remains a typed incur envelope through the setup bridge', as
     'setup bridge preserved the error',
   )
   assert.equal(result.envelope.error?.retryable, true)
+  assert.equal(result.envelope.error?.stage, 'validation')
+  assert.equal(result.envelope.error?.hint, undefined)
+  assert.deepEqual(result.envelope.error?.fieldErrors, [
+    {
+      code: 'invalid_value',
+      path: 'assistant.provider',
+      expected: 'string',
+      received: 'invalid',
+      message: 'This field is invalid.',
+    },
+  ])
   assert.equal(result.exitCode, 9)
 })
 

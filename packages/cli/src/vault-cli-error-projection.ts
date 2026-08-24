@@ -1,23 +1,14 @@
-import type { Errors } from 'incur'
+import {
+  projectVaultCliError as projectGenericVaultCliError,
+  type VaultCliErrorProjection,
+} from '@murphai/operator-config/vault-cli-error-projection'
 
-import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-
-export interface VaultCliErrorProjection {
-  code: string
-  message: string
-  retryable: boolean
-  exitCode?: number | undefined
-  fieldErrors?: Errors.FieldError[] | undefined
-  hint?: string | undefined
-  stage?: string | undefined
-}
+export type {
+  VaultCliErrorProjection,
+  VaultCliProjectedFieldError,
+} from '@murphai/operator-config/vault-cli-error-projection'
 
 export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
-  if (error instanceof VaultCliError) {
-    return projectStableVaultCliError(error)
-  }
-
   const querySourceDetails = readQuerySourceDetails(error)
   if (querySourceDetails !== null) {
     return projectQuerySourceError(querySourceDetails)
@@ -28,62 +19,7 @@ export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
     return projectHealthCommonsProtocolArtifactError(commonsArtifactError)
   }
 
-  const nodeProjection = projectNodeError(error)
-  if (nodeProjection !== null) {
-    return nodeProjection
-  }
-
-  const fieldErrors = projectValidationIssues(readZodLikeIssues(error))
-  if (fieldErrors.length > 0) {
-    return {
-      code: 'invalid_payload',
-      message: 'Input failed validation.',
-      retryable: false,
-      fieldErrors,
-      hint: 'Correct the invalid fields, then rerun the command.',
-      stage: 'validation',
-    }
-  }
-
-  return {
-    code: 'UNKNOWN',
-    message: safeUnhandledErrorMessage(error),
-    retryable: false,
-    hint: 'Check the command inputs and runtime status before retrying.',
-    stage: 'command',
-  }
-}
-
-function projectStableVaultCliError(
-  error: VaultCliError,
-): VaultCliErrorProjection {
-  const retryable =
-    typeof error.context?.retryable === 'boolean'
-      ? error.context.retryable
-      : false
-  const exitCode =
-    typeof error.context?.exitCode === 'number' &&
-    Number.isSafeInteger(error.context.exitCode) &&
-    error.context.exitCode > 0
-      ? error.context.exitCode
-      : undefined
-  const fieldErrors = projectValidationIssues(
-    readZodLikeIssues({ issues: error.context?.issues }),
-  )
-
-  return {
-    code: error.code,
-    message: redactSensitivePathSegments(error.message),
-    retryable,
-    ...(exitCode === undefined ? {} : { exitCode }),
-    ...(fieldErrors.length === 0
-      ? {}
-      : {
-          fieldErrors,
-          hint: 'Correct the invalid fields, then rerun the command.',
-          stage: 'validation',
-        }),
-  }
+  return projectGenericVaultCliError(error)
 }
 
 function projectQuerySourceError(
@@ -126,65 +62,6 @@ function projectQuerySourceError(
       : {}),
     hint: `Repair ${location}, then rerun the command. Vault validation can identify additional source issues.`,
     stage: 'query_source',
-  }
-}
-
-function projectHealthCommonsProtocolArtifactError(
-  error: HealthCommonsProtocolArtifactDetails,
-): VaultCliErrorProjection {
-  const unavailable = error.category === 'unavailable'
-  return {
-    code: unavailable
-      ? 'commons_protocol_artifact_unavailable'
-      : 'commons_protocol_artifact_invalid',
-    message: unavailable
-      ? 'Health Commons protocol artifacts are unavailable.'
-      : 'Health Commons protocol artifacts are invalid.',
-    retryable: false,
-    hint:
-      'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
-    stage: error.artifact,
-  }
-}
-
-function projectNodeError(error: unknown): VaultCliErrorProjection | null {
-  switch (readErrorCode(error)) {
-    case 'ENOENT':
-      return {
-        code: 'not_found',
-        message: 'A required file or directory was not found.',
-        retryable: false,
-        hint: 'Check the input path and retry the command.',
-        stage: 'filesystem',
-      }
-    case 'EACCES':
-    case 'EPERM':
-      return {
-        code: 'permission_denied',
-        message: 'The command could not access a required file or directory.',
-        retryable: false,
-        hint: 'Check the file permissions before retrying.',
-        stage: 'filesystem',
-      }
-    case 'EISDIR':
-    case 'ENOTDIR':
-      return {
-        code: 'invalid_path',
-        message: 'The command received the wrong kind of filesystem path.',
-        retryable: false,
-        hint: 'Check whether the option expects a file or a directory.',
-        stage: 'filesystem',
-      }
-    case 'ENOSPC':
-      return {
-        code: 'storage_unavailable',
-        message: 'The command could not write because storage is unavailable.',
-        retryable: false,
-        hint: 'Free storage space before retrying.',
-        stage: 'filesystem',
-      }
-    default:
-      return null
   }
 }
 
@@ -320,29 +197,22 @@ function readHealthCommonsProtocolArtifactError(
   }
 }
 
-function safeUnhandledErrorMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return 'The command failed without a safe recoverable detail.'
+function projectHealthCommonsProtocolArtifactError(
+  error: HealthCommonsProtocolArtifactDetails,
+): VaultCliErrorProjection {
+  const unavailable = error.category === 'unavailable'
+  return {
+    code: unavailable
+      ? 'commons_protocol_artifact_unavailable'
+      : 'commons_protocol_artifact_invalid',
+    message: unavailable
+      ? 'Health Commons protocol artifacts are unavailable.'
+      : 'Health Commons protocol artifacts are invalid.',
+    retryable: false,
+    hint:
+      'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
+    stage: error.artifact,
   }
-
-  const normalized = redactSensitivePathSegments(error.message)
-    .replace(/[\u0000-\u001F\u007F]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-  if (
-    normalized.length === 0 ||
-    /^[\[{]/u.test(normalized) ||
-    /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|bearer\s|token=)/iu.test(
-      normalized,
-    )
-  ) {
-    return 'The command failed without a safe recoverable detail.'
-  }
-
-  const codePoints = Array.from(normalized)
-  return codePoints.length <= 320
-    ? normalized
-    : `${codePoints.slice(0, 319).join('')}…`
 }
 
 function readErrorCode(error: unknown): string | null {
@@ -351,100 +221,4 @@ function readErrorCode(error: unknown): string | null {
   }
 
   return typeof error.code === 'string' ? error.code : null
-}
-
-interface ZodLikeIssue {
-  code?: string | undefined
-  expected?: string | undefined
-  path: readonly (string | number)[]
-}
-
-function readZodLikeIssues(error: unknown): ZodLikeIssue[] {
-  if (!error || typeof error !== 'object' || !('issues' in error)) {
-    return []
-  }
-
-  if (!Array.isArray(error.issues)) {
-    return []
-  }
-
-  return error.issues.flatMap((issue): ZodLikeIssue[] => {
-    if (!issue || typeof issue !== 'object') {
-      return []
-    }
-
-    const path =
-      'path' in issue && Array.isArray(issue.path)
-        ? issue.path.filter(
-            (segment: unknown): segment is string | number =>
-              (typeof segment === 'string' &&
-                /^[A-Za-z_][A-Za-z0-9_.-]{0,79}$/u.test(segment)) ||
-              (typeof segment === 'number' &&
-                Number.isSafeInteger(segment) &&
-                segment >= 0),
-          )
-        : []
-    const code =
-      'code' in issue &&
-      typeof issue.code === 'string' &&
-      /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/u.test(issue.code)
-        ? issue.code
-        : undefined
-    const expected =
-      'expected' in issue && typeof issue.expected === 'string'
-        ? safeExpectedType(issue.expected)
-        : undefined
-
-    return [{ path, ...(code ? { code } : {}), ...(expected ? { expected } : {}) }]
-  })
-}
-
-function projectValidationIssues(
-  issues: readonly ZodLikeIssue[],
-): Errors.FieldError[] {
-  const included = issues.slice(0, 12).map((issue): Errors.FieldError => {
-    const missing = issue.code === 'missing_field' || issue.code?.endsWith('_missing')
-    return {
-      ...(issue.code ? { code: issue.code } : {}),
-      path: issue.path.length === 0 ? '$' : issue.path.join('.'),
-      expected: issue.expected ?? '',
-      received: missing ? 'missing' : 'invalid',
-      message: validationMessageForCode(issue.code),
-      ...(missing ? { missing: true } : {}),
-    }
-  })
-
-  if (issues.length > included.length) {
-    included.push({
-      code: 'issues_omitted',
-      path: '$',
-      expected: '',
-      received: 'invalid',
-      message: `${issues.length - included.length} additional validation ${issues.length - included.length === 1 ? 'issue was' : 'issues were'} omitted.`,
-    })
-  }
-
-  return included
-}
-
-function safeExpectedType(value: string): string | undefined {
-  return /^[A-Za-z0-9_.| -]{1,80}$/u.test(value) ? value : undefined
-}
-
-function validationMessageForCode(code: string | undefined): string {
-  switch (code) {
-    case 'invalid_type':
-      return 'Value does not match the required type.'
-    case 'too_big':
-      return 'Value exceeds the allowed maximum.'
-    case 'too_small':
-      return 'Value is below the allowed minimum.'
-    case 'invalid_value':
-    case 'invalid_enum_value':
-      return 'Value is not one of the allowed options.'
-    case 'unrecognized_keys':
-      return 'Field is not supported.'
-    default:
-      return 'Value failed validation.'
-  }
 }

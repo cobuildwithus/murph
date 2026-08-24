@@ -30,13 +30,10 @@ test('projects stable VaultCliError issues without echoing issue messages', () =
       path: 'schedule.timeZone',
       expected: '',
       received: 'invalid',
-      message: 'Value is not one of the allowed options.',
+      message: 'This field is invalid.',
     },
   ])
-  assert.equal(
-    projection.hint,
-    'Correct the invalid fields, then rerun the command.',
-  )
+  assert.equal(projection.hint, undefined)
   assert.equal(JSON.stringify(projection).includes(submittedValue), false)
   assert.equal(JSON.stringify(projection).includes(providerBody), false)
 })
@@ -60,6 +57,7 @@ test('classifies filesystem errors without returning the absolute path or cause'
 test('classifies escaped validation issues without echoing raw issue messages', () => {
   const privateValue = 'secret-invalid-value'
   const projection = projectVaultCliError({
+    name: 'ZodError',
     issues: [
       {
         code: 'invalid_type',

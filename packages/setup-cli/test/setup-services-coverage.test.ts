@@ -1182,11 +1182,23 @@ test('incur error bridge maps VaultCliError metadata and preserves typed default
       incurErrorBridge(
         middlewareContext,
         async () => {
-          throw new VaultCliError('setup_bridge', 'bridge failure', {
-            retryable: true,
-            exitCode: 7,
-            ignored: 'value',
-          })
+          throw new VaultCliError(
+            'setup_bridge',
+            'bridge failure',
+            {
+              retryable: true,
+              exitCode: 7,
+              ignored: 'value',
+              issues: [
+                {
+                  path: ['assistant', 'provider'],
+                  code: 'invalid_value',
+                  expected: 'string',
+                  message: 'private raw validation message',
+                },
+              ],
+            },
+          )
         },
       ),
     (error: unknown) =>
@@ -1194,7 +1206,10 @@ test('incur error bridge maps VaultCliError metadata and preserves typed default
       error.code === 'setup_bridge' &&
       error.message === 'bridge failure' &&
       error.retryable === true &&
-      error.exitCode === 7,
+      error.exitCode === 7 &&
+      error.stage === 'validation' &&
+      error.hint === undefined &&
+      error.fieldErrors[0]?.path === 'assistant.provider',
   )
 
   await assert.rejects(
