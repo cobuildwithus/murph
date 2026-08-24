@@ -8,7 +8,11 @@ import {
   EXPERIMENT_PROGRESS_CARD_DAY_CODES,
   experimentProgressCardSchema,
 } from "@murphai/contracts";
-import { initializeVault } from "@murphai/core";
+import {
+  deleteEvent,
+  findCaptureByLookup,
+  initializeVault,
+} from "@murphai/core";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import sharp from "sharp";
 import { test } from "vitest";
@@ -279,6 +283,53 @@ test("progress-card renderer makes unavailable direction context visible and acc
       "Morning light & recovery <check> experiment progress",
     );
     assert.doesNotMatch(healthyMedia.alt ?? "", /Direction context unavailable/u);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card capture deletion reports a terminal conflict without exposing paths", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-conflict-"),
+  );
+  const experimentId = "exp_01JNV4458HYPP53JDQCBP1QJFQ";
+  try {
+    await initializeVault({ vaultRoot });
+    const input = { card: CARD, experimentId, vaultRoot };
+    const media = await renderAndSaveExperimentProgressCard(input);
+    const lookup = await findCaptureByLookup({
+      lookupKey:
+        `murph.experiment-progress-card.capture.v1:${experimentId}:${CARD.asOf}:${media.sha256}`,
+      vaultRoot,
+    });
+    assert.equal(lookup.status, "live");
+    if (lookup.status !== "live") {
+      assert.fail("expected the saved progress card to have a live capture lookup");
+    }
+    await deleteEvent({ eventId: lookup.eventId, vaultRoot });
+
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard(input);
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_capture_conflict");
+    assert.equal(captured.repair?.stage, "conflict");
+    assert.equal(
+      captured.repair?.hint,
+      "Do not retry this progress card. Continue the final review without the card attachment.",
+    );
+    const encoded = JSON.stringify({
+      code: captured.code,
+      message: captured.message,
+      repair: captured.repair,
+    });
+    for (const forbidden of [experimentId, media.ref, vaultRoot]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden);
+    }
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

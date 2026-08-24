@@ -173,7 +173,7 @@ async function resolveSavedProgressCard(input: {
     throw progressCardFailure(
       "progress_card_capture_conflict",
       "The deterministic progress-card capture was previously deleted.",
-      "persistence",
+      "conflict",
       TERMINAL_PROGRESS_CARD_HINT,
     );
   }
@@ -242,7 +242,7 @@ async function resolveSavedProgressCard(input: {
         throw progressCardFailure(
           "progress_card_capture_conflict",
           "A concurrent progress-card capture did not produce a live image.",
-          "persistence",
+          "conflict",
           TERMINAL_PROGRESS_CARD_HINT,
         );
       }

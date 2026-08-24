@@ -1587,7 +1587,7 @@ export const murphAgeSubmittedPreviewPayloadSchema = z.object({
   functionResidualParameterPack: murphAgeFunctionResidualParameterPackSchema.optional(),
   wearableResidualParameterPack: murphAgeWearableResidualParameterPackSchema.optional(),
   wearableResidualParameterPacks: z.array(murphAgeWearableResidualParameterPackSchema).min(1).optional(),
-})
+}).strict()
 type MurphAgeSubmittedPreviewPayload = z.infer<typeof murphAgeSubmittedPreviewPayloadSchema>
 type MurphAgeSubmittedPreviewOptions = {
   input: string;
@@ -2112,7 +2112,7 @@ function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayl
 async function loadMurphAgeSubmittedPreviewReport(
   options: MurphAgeSubmittedPreviewOptions,
 ) {
-  const payload = parseMurphAgeSubmittedPayload(
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
     await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
   )
 
@@ -2125,7 +2125,7 @@ async function loadMurphAgeSubmittedPreviewReport(
 async function loadMurphAgeSubmittedCalculatorReport(
   options: MurphAgeSubmittedPreviewOptions & { mode: z.infer<typeof murphAgeModeSchema> },
 ) {
-  const payload = parseMurphAgeSubmittedPayload(
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2164,7 +2164,7 @@ async function loadMurphAgeSubmittedCalculatorReport(
 async function loadMurphAgeSubmittedCalculatorViewBundle(
   options: MurphAgeSubmittedPreviewOptions & { includeResearchPreview: boolean },
 ): Promise<MurphAgeSubmittedCalculatorViewBundle> {
-  const payload = parseMurphAgeSubmittedPayload(
+  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2221,46 +2221,6 @@ async function loadMurphAgeSubmittedCalculatorViewBundle(
             ],
           },
         },
-  }
-}
-
-function parseMurphAgeSubmittedPayload(
-  value: unknown,
-): MurphAgeSubmittedPreviewPayload {
-  const parsed = murphAgeSubmittedPreviewPayloadSchema.safeParse(value)
-  if (parsed.success) {
-    return parsed.data
-  }
-
-  throw new VaultCliError(
-    'invalid_payload',
-    'Murph Age submitted input failed validation.',
-    undefined,
-    {
-      fields: parsed.error.issues.map((issue) => ({
-        path: issue.path,
-        code: issue.code,
-        message: murphAgeValidationMessage(issue.code),
-      })),
-      hint: 'Repair the listed JSON fields and retry with the same input option.',
-      stage: 'validation',
-    },
-  )
-}
-
-function murphAgeValidationMessage(code: string): string {
-  switch (code) {
-    case 'invalid_type':
-      return 'Value does not match the required type.'
-    case 'too_big':
-      return 'Value exceeds the allowed maximum.'
-    case 'too_small':
-      return 'Value is below the allowed minimum.'
-    case 'invalid_value':
-    case 'invalid_enum_value':
-      return 'Value is not one of the allowed options.'
-    default:
-      return 'Value failed Murph Age input validation.'
   }
 }
 

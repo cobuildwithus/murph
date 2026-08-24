@@ -991,7 +991,7 @@ test('age evidence rejects invalid top-level and wrapper shapes with repair fiel
   }
 })
 
-test('age submitted-data commands return bounded field repair without echoing values', async () => {
+test('age submitted-data commands use shared bounded validation projection without echoing values', async () => {
   const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-input-repair-'))
   const payloadPath = path.join(payloadRoot, 'payload.json')
   const privateMarker = 'private-as-of-marker'
@@ -1017,11 +1017,73 @@ test('age submitted-data commands return bounded field repair without echoing va
       }
       assert.equal(result.envelope.error.code, 'invalid_payload')
       assert.equal(result.envelope.error.stage, 'validation')
-      assert.equal(
-        result.envelope.error.fieldErrors?.some((field) => field.path === 'asOf'),
-        true,
+      assert.equal(result.envelope.error.message, 'Input failed validation.')
+      assert.equal(result.envelope.error.retryable, false)
+      assert.equal(result.envelope.error.hint, undefined)
+      assert.deepEqual(
+        result.envelope.error.fieldErrors?.find(
+          (field) => field.path === 'asOf' && field.code === 'invalid_format',
+        ),
+        {
+          code: 'invalid_format',
+          expected: '',
+          message: 'Value failed validation.',
+          path: 'asOf',
+          received: 'invalid',
+        },
       )
-      assert.match(result.envelope.error.hint ?? '', /listed JSON fields/u)
+      for (const field of result.envelope.error.fieldErrors ?? []) {
+        assert.equal(field.expected.length <= 160, true)
+        assert.equal(field.message.length <= 240, true)
+      }
+      const encoded = JSON.stringify(result.envelope)
+      for (const forbidden of [privateMarker, payloadRoot, payloadPath]) {
+        assert.equal(encoded.includes(forbidden), false, forbidden)
+      }
+    }
+  } finally {
+    await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('age submitted-data commands classify unsupported fields without echoing values', async () => {
+  const payloadRoot = await mkdtemp(path.join(os.tmpdir(), 'murph-age-cli-unsupported-field-'))
+  const payloadPath = path.join(payloadRoot, 'payload.json')
+  const privateMarker = 'private-unsupported-field-value'
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      asOf: '2026-05-10T00:00:00.000Z',
+      chronologicalAgeYears: 45,
+      sex: 'female',
+      submittedMetrics: [{ metricKey: 'HbA1c', value: 5.4 }],
+      unsupportedField: privateMarker,
+    }))
+
+    for (const command of ['preview', 'preview-view', 'calculate', 'calculate-bundle']) {
+      const result = await runSliceCliResult<unknown>([
+        'age',
+        command,
+        '--input',
+        `@${payloadPath}`,
+      ])
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.envelope.ok, false)
+      if (result.envelope.ok) {
+        assert.fail(`expected age ${command} to reject an unsupported field`)
+      }
+      assert.equal(result.envelope.error.code, 'invalid_payload')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(result.envelope.error.message, 'Input failed validation.')
+      assert.equal(result.envelope.error.hint, undefined)
+      assert.deepEqual(result.envelope.error.fieldErrors, [
+        {
+          code: 'unrecognized_keys',
+          expected: '',
+          message: 'Field is not supported.',
+          path: '$',
+          received: 'invalid',
+        },
+      ])
       const encoded = JSON.stringify(result.envelope)
       for (const forbidden of [privateMarker, payloadRoot, payloadPath]) {
         assert.equal(encoded.includes(forbidden), false, forbidden)
