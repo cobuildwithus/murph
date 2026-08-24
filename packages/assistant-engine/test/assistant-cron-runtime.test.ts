@@ -1587,10 +1587,11 @@ describe('assistant cron runtime orchestration', () => {
       route: {
         channel: 'telegram',
         deliverySource: null,
-        deliveryTarget: 'room-1',
+        deliveryTarget: 'telegram-provider-target',
         identityId: null,
         participantId: null,
-        threadId: null,
+        threadId: 'hid_telegram_conversation',
+        threadIsDirect: true,
       },
       schedule: {
         kind: 'dailyLocal',
@@ -1605,6 +1606,18 @@ describe('assistant cron runtime orchestration', () => {
     if (!job) {
       throw new Error('Expected onboarding follow-up to be seeded.')
     }
+    expect(findCanonicalAutomation(
+      vaultRoot,
+      MURPH_ONBOARDING_FOLLOWUP_AUTOMATION.slug,
+    )?.route).toEqual({
+      channel: 'telegram',
+      deliverySource: null,
+      deliveryTarget: 'telegram-provider-target',
+      identityId: null,
+      participantId: null,
+      threadId: 'hid_telegram_conversation',
+      threadIsDirect: true,
+    })
     cronMocks.sendAssistantMessageLocal.mockResolvedValue({
       decision: {
         kind: 'skip',
@@ -1635,6 +1648,16 @@ describe('assistant cron runtime orchestration', () => {
     }
 
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(3)
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        bindingDeliveryTarget: 'telegram-provider-target',
+        channel: 'telegram',
+        deliveryTarget: 'telegram-provider-target',
+        threadId: 'hid_telegram_conversation',
+        threadIsDirect: true,
+      }),
+    )
     expect(events.filter((event) =>
       event.type === 'onboarding.followup.completed'
     )).toHaveLength(3)

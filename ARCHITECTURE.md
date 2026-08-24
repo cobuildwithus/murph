@@ -338,24 +338,32 @@ checkout continues directly to `/join`, while an accessible member retains the
 existing chat-channel or Home return. The group feature adds no onboarding or
 billing state owner.
 
-`murph.group action="read_shared"` is the only hosted assistant path for group
+`murph.group_data action="read_shared"` is the only ordinary hosted assistant path for group
 standings, shared facts, and diagnostics. Its runtime adapter is synchronous and
 performs no I/O when constructed. This path adds no pre-model roster, grant,
 snapshot, device, projection, configuration, or attribution read; existing
 accepted-input and route-binding work is unchanged. Web is contacted only after
 the model invokes the tool.
 
-Assistant-engine also accepts six parser-only group family names:
+Assistant-engine advertises six focused group family names:
 `murph.group_consult`, `murph.group_data`, `murph.group_membership`,
 `murph.group_usage`, `murph.group_chat`, and `murph.group_email`. Each is a
 strict action subset derived from the canonical `murph.group` argument parser
-and normalizes into the same existing group request/executor path. These names
-remain absent from the dynamic-tool catalog, so this consumer-first deployment
-does not change provider input or the assistant contract fingerprint. A later
-catalog cutover may advertise them only after parser compatibility is deployed
-everywhere; until then `murph.group` remains the sole advertised full surface.
+and normalizes into the same existing group request/executor path. The legacy
+full `murph.group` name remains parser-compatible for rollback but is absent
+from ordinary discovery. Detached or scheduled contexts with only shared-read
+authority still receive their existing narrow `murph.group` descriptor, so the
+catalog split does not widen those contexts or create another executor.
 
-`murph.group action="read_chat_name"` is the on-demand provider-title primitive.
+Strict dynamic-tool parsing returns the complete Zod issue list to the same
+originating model call so it can repair unknown fields, invalid actions, and
+cross-field failures without guessing at a product or permission limitation.
+That complete reason is held only in an invocation-local weak association with
+the existing validation digest. Runtime-issue persistence and JSON serialization
+retain only the bounded value-free digest; a reconstructed digest therefore
+uses the older bounded repair hints rather than recovering model-only detail.
+
+`murph.group_chat action="read_chat_name"` is the on-demand provider-title primitive.
 Web resolves the signed callback member's single encrypted thread-container
 route only after the model invokes it, then performs one bounded Linq chat read
 or Telegram `getChat` read. The model supplies no provider thread id. Linq's
@@ -778,7 +786,7 @@ The native `murph-group-read` permission profile then exposes the live group
 read: exact workspace roots are read-only, `.runtime/**`, `.codex/**`, and
 retired vault-share projection roots, and environment files are denied; tool
 network is off, shell commands inherit no secrets, and the child receives only
-the consent-aware lazy `murph.group/read_shared` dynamic tool, with no mutation
+the consent-aware narrow legacy `murph.group/read_shared` dynamic tool, with no mutation
 or delivery authority.
 The thread request supplies the exact profile, roots, empty working directory,
 disabled instruction sources, and approval policy. The App Server response is
@@ -808,7 +816,7 @@ table, or second service.
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
-Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. A group newsletter is an ordinary automation whose instructions reopen the private editorial skill and record its chosen delivery and exact scopes. Its slug and instructions grant no capability, and cron never recognizes newsletter metadata. Current-chat editions use the ordinary consent-aware shared read and bound-route conversation outbox. Any scheduled non-direct group cron occurrence may instead use the generic one-shot group-email effect: `murph.group` prepares address-free authorized facts through `read_shared audience="group_email"`, then accepts a recipient-free `send_email`. Preparation derives the group from the signed runtime member and keeps its private authorization proof outside model-visible output. Send persists the proof plus HTML on the existing assistant outbox parent and ends the turn so the group outbox cannot duplicate the edition. The outbox reports an accepted parent to cron immediately, Web marks it sent only after current-authority revalidation and durable recipient fanout, and the existing cron reconciler settles the occurrence without another model turn. Recipient intents use only the generic outbox retry lifecycle. Bounded readers recognize prior newsletter idempotency keys and proof fields solely to drain already-accepted effects; new writes use generic group-email names. Because group-email `From` identity is spoofable, replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
+Hosted group runtimes execute as synthetic thread-container members, not as any participant's personal account. Turn planning derives that scope from the existing conversation audience and makes it part of the thread contract. Group turns omit personal browser, phone, Family, wearable-connect, and connected-account management authority; connected-app search and execution remain only for server-allowlisted accountless service tools. The web control plane independently rejects personal Family, wearable authorization, and connected-account operations for thread-container members. Group-owned management, sharing/join flows, and explicitly room-routed automations remain separate authorities; a personal Settings page never configures a room. A group newsletter is an ordinary automation whose instructions reopen the private editorial skill and record its chosen delivery and exact scopes. Its slug and instructions grant no capability, and cron never recognizes newsletter metadata. Current-chat editions use the ordinary consent-aware shared read and bound-route conversation outbox. Any scheduled non-direct group cron occurrence may instead use the generic one-shot group-email effect: `murph.group_data` prepares address-free authorized facts through `read_shared audience="group_email"`, then `murph.group_email` accepts a recipient-free `send_email`. Preparation derives the group from the signed runtime member and keeps its private authorization proof outside model-visible output. Send persists the proof plus HTML on the existing assistant outbox parent and ends the turn so the group outbox cannot duplicate the edition. The outbox reports an accepted parent to cron immediately, Web marks it sent only after current-authority revalidation and durable recipient fanout, and the existing cron reconciler settles the occurrence without another model turn. Recipient intents use only the generic outbox retry lifecycle. Bounded readers recognize prior newsletter idempotency keys and proof fields solely to drain already-accepted effects; new writes use generic group-email names. Because group-email `From` identity is spoofable, replies may converse and read current group context but cannot mutate automations, join policy, group presentation, or other durable room controls; those actions require the authenticated group-chat route.
 
 For retained group-participant activity reporting, an authenticated non-direct
 Linq or Telegram mailbox wake may carry the internal member id already accepted
@@ -1316,7 +1324,7 @@ Only five packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 - `packages/contracts`: canonical Zod contracts, shared event-envelope/lifecycle parse and revision-collapse helpers, TypeScript types, generated JSON Schema artifacts, the canonical static lookup-ID family catalog/classifiers consumed by query and vault-usecases, and the shared vault-family registry/layout/query-source metadata consumed by core, query, and inboxd
 - `packages/clinical-records`: workspace-private pure Clinical Records Intake contract owner for raw FHIR retrieval manifests, explicit completed-resource-family declarations, canonical FHIR base/patient/page hashing helpers, facet-free resource-level FHIR external references, and one-decision-per-resource `upsert | retract | review` import plans; it does not own OAuth, provider credentials, raw-file writes, assistant behavior, or canonical vault mutation
 - `packages/hosted-execution`: shared hosted control-plane contracts, HMAC signing/verification helpers, vendor-neutral env readers, route builders, computer-use request schemas, phone-call start contracts, and side-effect codecs; it no longer owns Cloudflare worker-host topology or proxy-client inference, and app-local adapters now own deployment-specific transport, hostname, and token policy
-- `cobuildwithus/murph-cloud` (private external owner): owns the hosted Temporal worker, Workflows, Activities, Schedule/client helpers, production bundle, replay gates, and Render deployment. Public Murph contains only shared pointer-level contracts, Web signaling/status adapters, and the hosted-local external-worker seam; it must not contain a Temporal worker implementation or production bundle. Hosted-local Temporal requires `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR` to select the private package, or it must be disabled explicitly. Temporal workflow state must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents.
+- `cobuildwithus/murph-cloud` (private external owner): owns the hosted Temporal worker, Workflows, Activities, Schedule/client helpers, production bundle, replay gates, supported-reader compatibility manifest, and Render deployment. Public Murph contains only shared pointer-level contracts, Web signaling/status adapters, the hosted-local external-worker seam, and the trusted exact-SHA controller that translates private reader attestation into one public required status; it must not contain a Temporal worker implementation, production bundle, or private reader policy. Hosted-local Temporal requires `MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR` to select the private package, or it must be disabled explicitly. Temporal workflow state must not store raw webhook payloads, mailbox bodies, prompts, transcripts, provider responses, provider tokens, dirty resource bodies, or workspace snapshot contents.
 - `packages/runtime-state`: workspace-private shared hosted email/env/loopback/id helpers plus pure hosted bundle identity types/equality on the root package, a worker-safe `@murphai/runtime-state/assistant-generated-deliveries` exact-ref contract, an explicit `@murphai/runtime-state/node` subpath for hosted bundle codec/materialization, an explicit `@murphai/runtime-state/node/assistant-state-fs` subpath for assistant runtime-state write/audit/repair permission policy, explicit `.runtime` taxonomy/path resolution (`operations` vs `projections` vs `cache/tmp`), assistant runtime path/security helpers, process scoping, versioned JSON helpers, and SQLite-backed Node-only migration seams
 - `packages/core`: workspace-private canonical mutation owner for live local-vault evolution, with current-format canonical reads/writes failing closed on non-current `formatVersion` values; it also owns the shared raw-attachment staging/manifests and canonical event attachment metadata used by document, meal, workout, and measurement writes, the dedicated `addActivitySession` and `addBodyMeasurement` seams for workout-session and body-measurement persistence, provider-agnostic wearable storage repair primitives for proven legacy/debug telemetry bloat, the verified raw-to-gzip transition and streaming gzip read/amendment path for closed monthly integration-ingest shards, and the shared event-spine envelope assembly used by generic events and health-event writes over the single `ledger/events` seam. Public bulk event import accepts legacy payload batches plus explicit upsert/retract decision batches and reconciles strict ISO `externalRef.version` values monotonically at that owner: it orders same-identity decisions by source revision within a batch, ignores retrieval-local provenance for source-semantically equal replay, rejects equal-version conflicts, supersedes newer same-kind values, tombstones and replaces newer kind changes, and tombstones newer retractions. Core also owns bounded raw-reference lookup, using a fixed number of event-shard passes per lookup set so compatibility resolution does not become one ledger walk per imported row. An unseen retraction is persisted as an invisible deleted source marker in the same event ledger, preventing stale resurrection without a parallel watermark store. Blood tests stay canonical `kind: "test"` records behind a projected user-facing view.
 - `packages/importers`: workspace-private ingestion adapters that parse external files or provider API snapshots, normalize them behind registry-based adapters, and delegate all writes to core. It owns the bounded, non-writing workout CSV planner, including explicit Strong/Hevy dialect selection, exact-signature/provider-marker inference, fail-closed shared-header and provider-conflict handling, vault-timezone normalization, explicit unit gates, aggregate repair/omission reporting, provider-neutral privacy-safe source-session keys for snapshot overlap, and provider-scoped public source identities. The clinical FHIR adapter validates each raw page exactly once for file integrity, declared resource family, manifest patient plus FHIR-base binding, same-base root-reachable pagination, and FHIR modifier semantics before emitting one upsert, retract, or review decision per resource
@@ -2377,8 +2385,21 @@ binding and encrypted conversation mailbox append remain one Web-owned
 transaction; unmanaged, ambiguous, disabled, flagged, critical, unhealthy, or
 structurally unavailable recipient lines cannot establish this exact-line
 authority, and ordinary fallback selection remains fail-closed when no eligible
-line exists. Successful welcome delivery seeds the existing finite
-unfinished-onboarding automation, with at most one low-pressure opportunity on
+line exists. Member activation owns unfinished-onboarding follow-up enrollment
+for every signup path. It persists the canonical onboarding start at the
+activation timestamp and carries an optional direct follow-up route separately
+from the optional signup welcome. A present route seeds the existing finite
+automation before optional welcome delivery, so standard Linq and suppressed-
+welcome Linq instant-start share one transition. Telegram activation remains
+silent; when no bot thread exists yet, the persisted onboarding start is the
+durable pending fact and managed-automation reconciliation uses the first later
+deliverable direct route. That delayed seed stays anchored to the activation
+window and becomes a no-op after its cutoff. Activation seed failures retry
+through the activation mailbox, while later-route failures reuse the existing
+bounded managed-setup wake ladder. Canonical slug idempotency and onboarding
+state preserve completed or archived follow-ups as closed. No delivery receipt,
+channel-specific state, queue, or scheduler is another enrollment owner.
+The automation has at most one low-pressure opportunity on
 each of the next three local days and the existing completion, decline,
 response, suspension, and expiry stops. The companion path does not send the
 separate signup welcome email. A committed activation whose runtime wake is not
@@ -3436,7 +3457,28 @@ for bounded provider cleanup and audit compatibility; those fields never grant
 capacity. The ops growth read derives current starter activation from the
 immutable starter grant and maps invalid source references to Unknown while
 exposing only the existing masked phone hint; it never decrypts contact data
-for attribution. Operator recovery is not acquisition: an exhausted canonical
+for attribution.
+
+Invited Web onboarding continues from launch consent inside the authenticated
+consent request rather than relying on a later browser-only enrollment effect.
+The join client supplies its invite code as an explicit continuation hint; the
+legal-consent owner first commits the requested scope and continues only when
+the authoritative returned status has both launch scopes current. The existing
+Starter enrollment boundary then revalidates invite/member matching,
+suspension, messaging readiness, direct billing, and Family recovery under its
+member/beneficiary lock before any append-only grant. Messaging or billing
+recovery defers successfully to the existing server-rendered join owner. Join
+rendering and consent continuation share the canonical recoverable-billing
+predicate; retained Subscription identity is checked before paid evidence, so
+recovery cannot be mistaken for active access. An actual Starter enrollment
+returns its canonical destination through the same request so the browser can
+reuse the existing full-document Home or armed group-start handoff. The hint
+grants no authority by itself. The existing Starter island remains a recovery
+path for already-consented historical or interrupted states; Privy
+authentication webhooks are not activation authority and do not replace the
+consent-owned continuation.
+
+Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
 version, appends immutable history with a distinct Ops source, and is excluded

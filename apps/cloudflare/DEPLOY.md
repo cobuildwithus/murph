@@ -645,6 +645,18 @@ runner-bundle fingerprint, then deploy Web so every newly failing Ask can return
 the correlation metadata immediately. Either mixed version remains functionally
 safe because Web does not require the runner to consume the header.
 
+The private-to-group context-handoff exact-replay transport is a paired
+Web/runner change. Deploy the Web replay validator first; old runners remain
+safe but do not recover a lost successful handoff response. Then deploy the
+Worker and runner bundle with `container_rollout=immediate`, require managed
+container smoke to report the new bundle fingerprint, and exercise one
+handoff whose first response body is lost so the byte-identical retry returns
+the already accepted mailbox item. New runners against the preceding Web
+version fail closed on that retry but do not provide the intended truthful
+recovery, so this is not a supported steady state. Roll back the runner bundle
+before Web; if Web must roll back first, treat handoff replay as degraded until
+the runner rollback converges. No mailbox schema or record migration is needed.
+
 ## Phone-Call Result Deployment
 
 A completed phone call delivers its result as a proactive

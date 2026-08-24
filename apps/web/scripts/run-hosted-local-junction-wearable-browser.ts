@@ -21,20 +21,22 @@ import {
 } from "./hosted-local-browser-process.ts";
 import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-challenge.ts";
 
+type WearableSource = "garmin" | "oura" | "whoop";
+
 interface BrowserConfig {
   browserChannel: "chrome" | undefined;
   browserTransport: "kernel" | "local";
-  disclosureSourceName: "Oura" | "Whoop";
+  disclosureSourceName: "Garmin" | "Oura" | "Whoop";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
   kernelApiKey: string | null;
   kernelCliPath: string | null;
-  label: "Oura" | "WHOOP";
+  label: "Garmin" | "Oura" | "WHOOP";
   manualAuthorizationAllowed: boolean;
   otp: string | null;
   password: string | null;
-  source: "oura" | "whoop";
+  source: WearableSource;
   startUrl: string;
   timeoutMs: number;
   webBaseUrl: string;
@@ -85,13 +87,14 @@ const TRUSTED_AUTHORIZATION_DOMAINS = [
   "tryvital.io",
 ] as const;
 const PROVIDER_AUTHORIZATION_DOMAINS = {
+  garmin: ["garmin.com"],
   oura: ["ouraring.com"],
   whoop: ["whoop.com"],
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
+const GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT = 3;
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
-const KERNEL_CANARY_PROFILE = "murph-junction-whoop-canary";
 const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
 const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
@@ -100,6 +103,8 @@ const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_WEBHOOK_SECRET",
   "KERNEL_API_KEY",
   "MURPH_E2E_CONNECT_URL",
+  "MURPH_E2E_GARMIN_EMAIL",
+  "MURPH_E2E_GARMIN_PASSWORD",
   "MURPH_E2E_HOSTED_SESSION_COOKIE",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
   "MURPH_E2E_KERNEL_CLI_PATH",
@@ -247,10 +252,11 @@ async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession
   }
   const tunnelPort = requireKernelTunnelPort(config.webBaseUrl);
   const kernelClient = new KernelComputerClient({ apiKey });
-  await kernelClient.ensureProfile(KERNEL_CANARY_PROFILE);
+  const kernelProfile = `murph-junction-${config.source}-canary`;
+  await kernelClient.ensureProfile(kernelProfile);
   const kernelBrowser = await kernelClient.createAutomationBrowser({
     headless: config.headless,
-    profileName: KERNEL_CANARY_PROFILE,
+    profileName: kernelProfile,
     saveChanges: true,
     timeoutSeconds: Math.ceil((config.timeoutMs + 60_000) / 1_000),
   });
@@ -544,15 +550,39 @@ async function completeExternalAuthorization(
         }
       }
 
-      await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(
-        page,
-        AUTH_ACTIONS,
-        config.source,
-      );
+      const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
+        && await completeGarminPartnerConsent(page, config.source);
+      if (completedGarminPartnerConsent) {
+        automationBlockedObservedAt = null;
+        blockedWindowObservedChallenge = false;
+        await waitForGarminPartnerConsentProgression(
+          page,
+          Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+          now,
+        );
+        await page.waitForTimeout(750);
+        continue;
+      }
+
+      const garminConfirmation = config.source === "garmin"
+        && readGarminPartnerConsentStep(page.url()) === "permissions_updated";
+      let clicked: boolean;
+      if (garminConfirmation) {
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      } else {
+        await checkRequiredConsentCheckboxes(page);
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      }
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
+        if (garminConfirmation) {
+          await waitForGarminPartnerConfirmationDeparture(
+            page,
+            Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+            now,
+          );
+        }
         await page.waitForTimeout(750);
         continue;
       }
@@ -584,6 +614,126 @@ async function completeExternalAuthorization(
   }
 
   throw new Error("Timed out before Junction returned the browser to Murph.");
+}
+
+async function completeGarminPartnerConsent(
+  page: Page,
+  source: BrowserConfig["source"],
+): Promise<boolean> {
+  if (source !== "garmin") {
+    return false;
+  }
+  const step = readGarminPartnerConsentStep(page.url());
+  if (step === null || step === "permissions_updated") return false;
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+
+  const checkboxes = page.getByRole("checkbox");
+  if (await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
+    throw new Error(
+      `Garmin consent expected exactly ${GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT} data-sharing checkboxes.`,
+    );
+  }
+  for (
+    let index = 0;
+    index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
+    index += 1
+  ) {
+    const checkbox = checkboxes.nth(index);
+    if (
+      !await checkbox.isVisible().catch(() => false)
+      || !await checkbox.isEnabled().catch(() => false)
+    ) {
+      throw new Error("Garmin consent data-sharing checkbox was unavailable.");
+    }
+    await checkAuthorizationCheckbox(checkbox);
+    if (!await checkbox.isChecked().catch(() => false)) {
+      throw new Error("Garmin consent data-sharing checkbox was not selected.");
+    }
+  }
+
+  const save = page.getByRole("button", { exact: true, name: "Save" });
+  if (await save.count() !== 1) {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+  const saveAction = save.nth(0);
+  if (await readAuthorizationActionState(saveAction) !== "enabled") {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+  await clickAuthorizationControl(saveAction);
+  return true;
+}
+
+type GarminPartnerConsentStep =
+  | "invalid"
+  | "permissions_updated"
+  | "selection";
+
+function readGarminPartnerConsentStep(
+  value: string,
+): GarminPartnerConsentStep | null {
+  const url = new URL(value);
+  if (
+    url.hostname !== "connect.garmin.com"
+    || url.pathname !== "/partner/oauthConfirm"
+  ) {
+    return null;
+  }
+  const permissionsUpdated = url.searchParams.has("permissionsUpdated");
+  const selectedCapabilities = url.searchParams.has("selectedCapabilities");
+  if (permissionsUpdated !== selectedCapabilities) return "invalid";
+  return permissionsUpdated ? "permissions_updated" : "selection";
+}
+
+async function waitForGarminPartnerConsentProgression(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "selection" && now() < deadline) {
+    await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
+  }
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent Save did not advance the consent flow.");
+  }
+}
+
+async function waitForGarminPartnerConfirmationDeparture(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "permissions_updated" && now() < deadline) {
+    await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
+  }
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent confirmation returned to the selection state.");
+  }
+  if (step === "permissions_updated") {
+    const surface = await describeAuthorizationSurface(page);
+    step = readGarminPartnerConsentStep(page.url());
+    if (step === null) return;
+    if (step === "invalid") {
+      throw new Error("Garmin consent exposed an invalid progression state.");
+    }
+    if (step === "selection") {
+      throw new Error("Garmin consent confirmation returned to the selection state.");
+    }
+    throw new Error(
+      `Garmin consent confirmation did not leave the consent route. ${surface}`,
+    );
+  }
 }
 
 async function completeAuthorizationAndRequireCallback(
@@ -769,6 +919,19 @@ async function clickAuthorizationControl(
   }
 }
 
+async function checkAuthorizationCheckbox(
+  checkbox: Pick<Locator, "check">,
+): Promise<void> {
+  try {
+    await checkbox.check();
+  } catch (error) {
+    const category = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout"
+      : "other";
+    throw new Error(`Authorization consent selection failed (${category}).`);
+  }
+}
+
 async function hasNegativeAccessibleName(
   control: Locator,
   negativeControls: Locator,
@@ -908,7 +1071,11 @@ async function disconnectJunctionAccount(
 
 function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
-  const label = source === "oura" ? "Oura" : "WHOOP";
+  const label = source === "garmin"
+    ? "Garmin"
+    : source === "oura"
+    ? "Oura"
+    : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
   const browserTransport = requireBrowserTransport(
     environment.MURPH_E2E_PROVIDER_BROWSER,
@@ -917,9 +1084,9 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
   const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
-  if (source === "whoop" && !password) {
+  if ((source === "garmin" || source === "whoop") && !password) {
     throw new Error(
-      "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
+      `Hosted-local Junction ${label} browser runner requires MURPH_E2E_PROVIDER_PASSWORD.`,
     );
   }
   if (source === "oura" && !manualAuthorizationAllowed && !otp) {
@@ -927,9 +1094,16 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
-  if (browserTransport === "kernel" && (source !== "whoop" || !headless)) {
+  if (
+    browserTransport === "kernel"
+    && (
+      source === "oura"
+      || manualAuthorizationAllowed
+      || (source === "whoop" && !headless)
+    )
+  ) {
     throw new Error(
-      "Kernel browser transport is reserved for the unattended headless WHOOP canary.",
+      "Kernel browser transport requires unattended Garmin or headless WHOOP authorization.",
     );
   }
   const kernelApiKey = browserTransport === "kernel"
@@ -982,7 +1156,11 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       ? "chrome"
       : undefined,
     browserTransport,
-    disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
+    disclosureSourceName: source === "garmin"
+      ? "Garmin"
+      : source === "oura"
+      ? "Oura"
+      : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
       "MURPH_E2E_PROVIDER_EMAIL",
@@ -1053,12 +1231,12 @@ function assertTrustedAuthorizationUrl(
   }
 }
 
-function requireWearableSource(value: string | undefined): "oura" | "whoop" {
+function requireWearableSource(value: string | undefined): WearableSource {
   const source = value?.trim();
-  if (source === "oura" || source === "whoop") {
+  if (source === "garmin" || source === "oura" || source === "whoop") {
     return source;
   }
-  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be oura or whoop.");
+  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be garmin, oura, or whoop.");
 }
 
 function requireBrowserTransport(

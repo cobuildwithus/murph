@@ -226,7 +226,7 @@ jobs:
           state=failure
           description='Hosted-native Android selection failed; no passing proof was recorded.'
           if [[ "${RUN_ATTEMPT}" != 1 ]]; then
-            description="Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER}; native reruns do not enter the live queue."
+            description="Retry: node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER} --failure-code android_workflow_rerun"
           elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
             description='Repo Hygiene did not pass; hosted-native Android was not run.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then

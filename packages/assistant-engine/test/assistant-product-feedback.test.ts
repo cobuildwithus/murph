@@ -373,12 +373,14 @@ describe("assistant product feedback", () => {
         request,
       });
 
-      expect(result.rpcResult).toEqual({
-        success: false,
-        contentItems: [{
-          type: "inputText",
-          text: "invalid product feedback arguments",
-        }],
+      expect(result.rpcResult.success).toBe(false);
+      const feedback = result.rpcResult.contentItems[0];
+      expect(feedback?.type).toBe("inputText");
+      expect(JSON.parse(feedback?.text ?? "")).toMatchObject({
+        error: "invalid_product_feedback_arguments",
+        validationIssues: expect.arrayContaining([
+          expect.objectContaining({ code: expect.any(String) }),
+        ]),
       });
     }
 

@@ -3348,6 +3348,34 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it("does not let an old stop clear a replacement before its start hook", async () => {
+    let container: RunnerContainer;
+    const startAndWaitForPorts = vi.fn(async () => {
+      container.onStop({ exitCode: 137, reason: "exit" });
+      container.onStart();
+    });
+    ({ container } = createContainerDouble({
+      initialStatus: "stopped",
+      platformRunning: false,
+      startAndWaitForPorts,
+    }));
+
+    await expect(container.ensureReadyForProcessing({
+      timeoutMs: 7_500,
+      userId: "member_123",
+    })).resolves.toEqual({
+      action: "started",
+      kind: "ready",
+    });
+
+    expect(startAndWaitForPorts).toHaveBeenCalledOnce();
+    expect(Reflect.get(container, "currentContainerStart")).toMatchObject({
+      pendingOnStartObservation: false,
+      pendingUntilMs: null,
+      readyObservedBy: "cold-start-ready",
+    });
+  });
+
   it("falls back to warm health after a container stop invalidates startup readiness proof", async () => {
     const { container, containerFetch, startAndWaitForPorts } = createContainerDouble();
 

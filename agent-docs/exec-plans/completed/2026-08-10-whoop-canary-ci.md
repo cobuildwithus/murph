@@ -1,8 +1,9 @@
 # Restore the live Junction WHOOP canary
 
-Status: active
+Status: completed
 Created: 2026-08-10
-Updated: 2026-08-15
+Updated: 2026-08-22
+Superseded: 2026-08-22 after the protected canary target changed from WHOOP to Garmin.
 
 ## Goal
 
@@ -134,3 +135,4 @@ Updated: 2026-08-15
   `GRANT` button, binds checks and activation to one element handle, asks
   Playwright for the current negative accessible-name set, ignores hidden
   values and Oura, and collapses ambiguous click failures to a fixed category.
+Completed: 2026-08-22

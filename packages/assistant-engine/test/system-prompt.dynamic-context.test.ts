@@ -136,7 +136,7 @@ describe('assistant dynamic context prompt blocks', () => {
       'Group email has no filesystem access. Do not try to read a usage skill.',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'call `murph.group action="read_usage"` exactly once',
+      'call `murph.group_usage action="read_usage"` exactly once',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
       'For an integer from 0 through 99, answer exactly',

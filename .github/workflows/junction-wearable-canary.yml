@@ -1,4 +1,4 @@
-name: Live Junction WHOOP Canary
+name: Live Junction Garmin Canary
 
 on:
   push:
@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   connect:
-    name: Connect WHOOP through Junction
+    name: Connect Garmin through Junction
     if: ${{ github.ref == 'refs/heads/main' && github.ref_protected }}
     environment: junction-wearable-canary
     runs-on: ubuntu-24.04
@@ -103,13 +103,14 @@ jobs:
           KERNEL_API_KEY: ${{ secrets.KERNEL_API_KEY }}
           MURPH_DEV_TEMPORAL: disabled
           MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"
-          MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop
-          MURPH_E2E_JUNCTION_WHOOP_MEMBER_ID: member_e2e_junction_whoop_github_canary
+          MURPH_E2E_JUNCTION_GARMIN_MEMBER_ID: member_e2e_junction_garmin_github_canary
+          MURPH_E2E_JUNCTION_WEARABLE_SOURCES: garmin
           MURPH_E2E_PROVIDER_BROWSER: kernel
-          # Kernel owns the remote stealth browser and its dedicated persisted
-          # WHOOP profile; authorization and callback assertions stay exact.
-          MURPH_E2E_WEARABLE_HEADLESS: "1"
+          # Kernel owns the headed remote stealth browser and its dedicated
+          # persisted Garmin profile. CI remains unattended and the exact
+          # authorization and callback assertions stay fail-closed.
+          MURPH_E2E_WEARABLE_HEADLESS: "0"
           MURPH_E2E_WEARABLE_TIMEOUT_MS: "420000"
-          MURPH_E2E_WHOOP_EMAIL: ${{ secrets.WHOOP_CANARY_EMAIL }}
-          MURPH_E2E_WHOOP_PASSWORD: ${{ secrets.WHOOP_CANARY_PASSWORD }}
+          MURPH_E2E_GARMIN_EMAIL: ${{ secrets.GARMIN_CANARY_EMAIL }}
+          MURPH_E2E_GARMIN_PASSWORD: ${{ secrets.GARMIN_CANARY_PASSWORD }}
         run: pnpm hosted-local e2e device-connect

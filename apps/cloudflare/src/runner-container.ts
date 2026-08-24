@@ -1743,7 +1743,11 @@ export class RunnerContainer extends Container {
       destroyRequestPresent: this.lastDestroyRequest !== null,
       idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
     });
-    const stopAppliedToCurrentGeneration = !(
+    // onStop has no start identity. Preserve a bounded replacement start until
+    // its onStart hook or readiness deadline resolves which generation owns it.
+    const pendingReplacementStart =
+      this.currentContainerStart?.pendingOnStartObservation === true;
+    const stopAppliedToCurrentGeneration = !pendingReplacementStart && !(
       this.isPlatformContainerDefinitelyRunning()
       && this.currentContainerStart !== null
     )

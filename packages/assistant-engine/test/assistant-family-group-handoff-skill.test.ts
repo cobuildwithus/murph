@@ -42,7 +42,7 @@ describe('Murph Family group setup handoff', () => {
       'This classification outranks generic group funding or usage language.',
     )
     expect(normalized).toContain(
-      'Do not call `murph.group` usage or referral actions',
+      'Do not call `murph.group_usage` actions',
     )
     expect(normalized).toContain(
       'unless the same request explicitly asks about funding or usage for the current room.',

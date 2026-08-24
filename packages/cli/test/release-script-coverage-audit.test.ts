@@ -1929,7 +1929,10 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('## Finding Disposition Pause')
     expect(prReviewGptLoop).toMatch(
-      /Every substantive `PASS` or `FINDINGS` result from either ReviewGPT stage pauses/u,
+      /Every substantive preliminary specialist result and every final `FINDINGS`\s+result pauses/u,
+    )
+    expect(prReviewGptLoop).toMatch(
+      /A validated final `ROUND_OUTCOME: PASS` has no findings to\s+disposition and proceeds directly/u,
     )
     expect(prReviewGptLoop).toContain(
       'may reject a finding as wrong, already handled,',
@@ -2005,7 +2008,7 @@ describe('monorepo release flow coverage audit', () => {
       /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
     )
     expect(agentsGuide).toContain(
-      'agents may reject speculative, unproven, or disproportionate fixes',
+      'Agents may reject speculative, unproven, or disproportionate fixes',
     )
     expect(agentWorkflowRouting).toContain(
       'evidence-backed rejections are terminal',

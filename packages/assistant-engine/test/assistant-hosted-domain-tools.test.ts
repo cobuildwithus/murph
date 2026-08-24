@@ -746,7 +746,7 @@ describe('hosted domain dynamic tools', () => {
       'Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` identifying the existing automation.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'Never invent schedule, update, or timezone fields outside the schema.',
+      'Never invent schedule, update, timezone, route, group, or member fields outside the schema.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules',
@@ -847,7 +847,7 @@ describe('hosted domain dynamic tools', () => {
     }
   })
 
-  it('returns schema-owned automation repair hints without calling the port', async () => {
+  it('returns complete automation validation reasons without calling the port', async () => {
     const privateMarker = 'synthetic-private-automation-marker'
     const request = readToolRequest('automation', {
       action: 'inspect',
@@ -875,12 +875,55 @@ describe('hosted domain dynamic tools', () => {
 
     expect(result.rpcResult.success).toBe(false)
     expect(feedback).toContain('"error":"invalid_automation_arguments"')
-    expect(feedback).toContain(
-      '"field":"lookup","code":"invalid_type","expected":"string"',
-    )
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_automation_arguments',
+      validationIssues: [expect.objectContaining({
+        code: 'invalid_type',
+        expected: 'string',
+        path: ['lookup'],
+      })],
+    })
     expect(feedback).not.toContain(privateMarker)
     expect(feedback).not.toContain('privateMarker')
     expect(feedback).not.toContain('"received"')
+    expect(automationRequest).not.toHaveBeenCalled()
+  })
+
+  it('explains paired automation support fields without calling the port', async () => {
+    const request = readToolRequest('automation', {
+      action: 'save',
+      instructions: 'Ask how the weekly check-in went.',
+      schedule: { kind: 'cron', expression: '0 9 * * 1' },
+      supportKind: 'check_in',
+      title: 'Weekly check-in',
+    })
+    expect(request).toMatchObject({ kind: 'invalid-automation-arguments' })
+    if (!request || request.kind !== 'invalid-automation-arguments') {
+      throw new Error('Expected invalid automation arguments.')
+    }
+
+    const automationRequest = vi.fn(async () => {
+      throw new Error('Automation port must not be called for invalid arguments.')
+    })
+    const result = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        automationTool: { request: automationRequest },
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    const feedback = result.rpcResult.contentItems[0]?.text ?? ''
+
+    expect(JSON.parse(feedback)).toMatchObject({
+      error: 'invalid_automation_arguments',
+      validationIssues: [expect.objectContaining({
+        message: 'Plan-owned support requires supportKind and supportSeriesId together.',
+        path: ['supportSeriesId'],
+      })],
+    })
     expect(automationRequest).not.toHaveBeenCalled()
   })
 

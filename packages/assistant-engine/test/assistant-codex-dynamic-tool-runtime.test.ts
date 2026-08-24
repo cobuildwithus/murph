@@ -683,7 +683,7 @@ async function runScriptedTerminalGroupEmailTurn(
       callId: 'call-41',
       namespace: 'murph',
       threadId: 'thread-group-email-terminal',
-      tool: 'group',
+      tool: 'group_email',
       turnId: 'turn-group-email-terminal',
     },
   }))

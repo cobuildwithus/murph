@@ -398,7 +398,7 @@ No projection watermark is stored on the share, and the group runtime is not
 woken; its next ordinary read continues to query the current Web-owned
 replacement snapshot.
 
-`murph.group action="read_shared"` accepts one to three unique exact selectable
+`murph.group_data action="read_shared"` accepts one to three unique exact selectable
 projection scopes. The signed Web handler captures the current group roster and
 exact active grants, decrypts only the captured encrypted snapshots, and returns
 every current member with every requested scope. Each result is explicitly
@@ -859,7 +859,7 @@ request. A private request sends no group notice. Web remains the identity and
 route authority, reloads the exact source, and prevents a replay from changing
 the already-fixed result destination.
 
-`murph.group(action="ask")` is admitted only from a fresh authenticated private
+`murph.group_consult(action="ask")` is admitted only from a fresh authenticated private
 input. The runtime calls `assistantAskPort.request`; the signed
 `POST /api/internal/hosted-execution/assistant-asks/runtime` Web control owner
 resolves the current `HostedGroupMember` row and synthetic group runtime from
@@ -1018,7 +1018,7 @@ metadata only and are never accepted as routing or authorization input.
 The reverse `consented_member` adapter uses the same mailbox lifecycle but a
 different admission and delivery policy. An authenticated group turn first
 posts a server-authored permission request through
-`murph.group(action="post_disclosure_request")`. Web stores its exact
+`murph.group_data(action="post_disclosure_request")`. Web stores its exact
 canonical natural-language permission and digest. It derives a stable request
 id and provider idempotency key from the exact group, trusted accepted-input id,
 and permission digest. Replay succeeds only when the stored group,
@@ -1033,7 +1033,7 @@ that member's active grants as a top-level additive `disclosureGrants` array;
 older Web responses without the field normalize to an empty array. Revocation
 may select only an exact id from that private read.
 
-For `murph.group(action="ask_member")`, trusted runtime code injects one origin:
+For `murph.group_consult(action="ask_member")`, trusted runtime code injects one origin:
 either the current accepted non-direct group input and signed route or one
 claimed canonical scheduled-automation occurrence for that group runtime. Web
 resolves the supplied current grant selector, binds the group runtime, personal

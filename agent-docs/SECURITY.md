@@ -463,7 +463,7 @@ Last verified: 2026-08-20
   behavior.
   Provider choice never grants delivery, vault, billing, or identity authority.
 - An accepted-message `Message ref` is an opaque selector, not authority. Render only the existing `AssistantInputEvent.inputId` when at least one exact-message action is eligible and the accepted input is positively identified route-authorized Linq iMessage or Telegram; conversation source and reply-target channel must also agree. Linq SMS, RCS, and unknown service types expose no ref and are ineligible. `murph.select_reply_target`, `murph.react_to_message`, `revoke_own_email_share`, and group phone-call requester selection must require an exact active root invocation, use the same resolver, bind the ref to the current delivery-context ordinal, reload the stored event, and recheck route, conversation, direct/group audience, account, provider target or sender evidence, and action-specific capability before execution. Participant-specific group effects accept no canonical member id: the runtime forwards only the exact accepted input id plus trusted provider source/sender evidence, and Web resolves the canonical member and revalidates current room membership or share authority. Missing or unattributed sender evidence fails that participant effect without suppressing the normal conversational reply. The dispatcher must reject descendant, stale-turn, or foreign-thread tool requests before consulting accepted-message authority, and descendant shell env carries no targeting authority. Invented, stale, cross-turn, cross-thread, cross-room, wrong-sender, descendant, or unsupported refs fail closed. Provider message ids must stay out of prompts, tool arguments/results, model history, diagnostics, and model-visible errors; only the local delivery owner may resolve one immediately before the effect.
-- `murph.group action="read_chat_name"` is a read-only, Web-owned provider
+- `murph.group_chat action="read_chat_name"` is a read-only, Web-owned provider
   metadata boundary. The signed callback member selects the synthetic group
   runtime; Web resolves its single encrypted Linq or Telegram thread route and
   never accepts a provider chat id from the model. Provider titles are bounded
@@ -967,6 +967,16 @@ Last verified: 2026-08-20
   records the generic server-owned `native-companion` audit source because
   member authentication does not attest the client platform; a request's
   client-supplied source label must never become audit authority.
+- The browser legal-consent route may accept an invite code only as an explicit
+  invited-onboarding continuation hint. The Murph app session still binds the
+  member, the committed consent owner still proves both current launch scopes,
+  and the canonical Starter enrollment service must revalidate exact invite
+  ownership, suspension, messaging readiness, direct billing, and Family
+  recovery under the existing member/beneficiary lock before activation. A
+  current messaging or billing owner defers the request back to the
+  server-rendered join flow instead of granting Starter. A client-supplied
+  invite code or a Privy authentication webhook is never independent enrollment
+  authority.
 - Cloudflare-hosted reply aliases are private signed routing capabilities, not SMTP sender-identity proof. Hosted email ingress may accept the current per-user signed reply alias after the web-owned callback resolves its alias key to an active member, and it must do that before persisting the raw `.eml` or dispatching hosted execution; leaked aliases must not route to another member or be described as verified email ownership. Web is allowed to derive and display the same deterministic per-member alias as Cloudflare because web owns member routing state; verified-email sync should persist the alias lookup key before settings presents the alias as reachable. Treat hosted email signing-secret rotation as a compatibility event because deterministic displayed aliases and stored lookup keys are derived from that secret. Direct mail to the fixed public sender address must remain fail-closed unless a trusted runtime seam supplies a provider-authenticated sender verdict with aligned SPF, DKIM, or DMARC proof, then resolves only through a synced verified-owner index that stores secret-derived sender hashes instead of raw verified emails. The direct-public path must require matching envelope and `From` sender values plus authenticated sender proof before lookup, public-sender misses or failed owner authorization should be accepted-and-dropped instead of bounced so the mailbox leaks less account state, new outbound mail should reuse one stable per-user reply alias instead of minting fresh per-thread route state, and any accepted reply-alias message must remain scoped to the alias owner. Every direct hosted email egress, including a serialized thread reply, must resolve that owner's current verified email immediately before provider entry and replace the target's entire `To`/`Cc` audience with only that address; group targets continue through group authority and fanout unchanged. The hosted worker must never treat envelope/header `From` fields or raw `Authentication-Results` / `ARC-*` headers as authentication proof.
 - The canonical `mail@mail.withmurph.ai` address is an unauthenticated bootstrap hint, never a private assistant-input route. Cloudflare may read only a bounded header prefix to require one matching envelope/Header `From`, then must discard the original subject, body, attachments, threading metadata, and raw message before storage, mailbox append, model or tool execution, or runtime wake. Web may use that sender only as a blinded lookup candidate, take the global admission advisory lock without waiting, recheck current verified-email and active-member authority under the member lock, and send a fixed private continuation to the current verified inbox with the current signed personal alias in `Reply-To`. A global-lock collision is silently dropped so unauthenticated bursts cannot fill the shared database pool with lock waiters. Verified-email authentication must prepare the reply capability from the freshly read provider identity, not a stale bearer snapshot, and atomically rotate it with the authoritative email update. Unknown, inactive, mismatched, limited, lock-colliding, or provider-failed outcomes remain non-diagnostic to the SMTP sender. The member's reply to that private continuation is the first assistant input; the original public message is never retroactively authorized.
 - An authenticated Web action that already resolves the member's current signed personal alias may put its prepared request directly into a `mailto:` for that alias. It must not route an intent-bearing body through the unauthenticated public bootstrap; only the signed-alias message may become the first assistant input.
@@ -1438,8 +1448,23 @@ Last verified: 2026-08-20
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- Public Temporal compatibility credentials belong only to the protected
+  `temporal-compatibility` GitHub Environment. The GitHub App installation is
+  limited to private `cobuildwithus/murph-cloud` and grants only Actions write
+  plus Contents read. The `workflow_run` controller executes default-branch
+  code, classifies and revalidates the exact public head before token minting,
+  and checks out only the public default branch. Candidate code executes only
+  in the unprivileged Repo Hygiene job, which uploads one exact-run/head fixture
+  artifact. The trusted controller bounds and canonicalizes that artifact as
+  untrusted JSON, pins the reviewed private SHA and SHA-suffixed immutable
+  lightweight tag from `.github/temporal-compatibility-controller.json`, and
+  accepts only the returned exact private run and proof-digest job. Private CI
+  must never check out or import public candidate code. Neither side may restore
+  candidate-controlled caches beside credentials, read private logs or
+  artifacts, expose reader revisions publicly, or accept workflow/check names
+  from the candidate.
 - The public automated live Junction wearable canary uses only sandbox Junction
-  authority, Kernel browser authority, and a dedicated WHOOP test account. Keep
+  authority, Kernel browser authority, and a dedicated Garmin test account. Keep
   those five credentials
   exclusively in the `junction-wearable-canary` GitHub Environment, restrict it to
   protected `main`, and never duplicate them as repository secrets. The
@@ -1459,7 +1484,7 @@ Last verified: 2026-08-20
   `KERNEL_API_KEY` must pass only to the isolated browser child, never the
   hosted-local Web, Worker, runner, Temporal, bundle, cleanup, or generic browser
   environment. The Kernel browser must keep telemetry disabled and use only the
-  dedicated WHOOP canary profile; clear hosted-local cookies before deleting the
+  dedicated Garmin canary profile; clear hosted-local cookies before deleting the
   browser so only external authorization session state is eligible for profile
   persistence.
   Oura web authentication requires a fresh emailed one-time code, so its live

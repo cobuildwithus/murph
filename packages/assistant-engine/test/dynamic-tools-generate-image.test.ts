@@ -10,7 +10,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   MURPH_ATTACH_RESPONSE_MEDIA_TOOL,
   MURPH_GENERATE_IMAGE_TOOL,
-  MURPH_GROUP_TOOL,
+  MURPH_GROUP_CHAT_TOOL,
+  MURPH_GROUP_TOOL_PROPERTIES,
   executeMurphDynamicToolRequest,
   readMurphDynamicToolRequest as readExactMurphDynamicToolRequest,
 } from '../src/assistant-codex/dynamic-tools.js'
@@ -684,9 +685,9 @@ describe('murph.generate_image dynamic tool schema', () => {
     expect(generateImageReferenceDescription).toContain(
       'whenever Murph itself appears',
     )
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.referenceImageRefs.description)
+    expect(MURPH_GROUP_TOOL_PROPERTIES.referenceImageRefs.description)
       .toContain('skill-assets/murph-character-sheet-v1.png')
-    expect(MURPH_GROUP_TOOL.inputSchema.allOf[0].properties.action.enum).toContain(
+    expect(MURPH_GROUP_CHAT_TOOL.inputSchema.properties.action.enum).toContain(
       'set_chat_avatar',
     )
   })

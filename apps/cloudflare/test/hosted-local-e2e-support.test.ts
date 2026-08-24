@@ -1,6 +1,9 @@
 import { createServer as createNetServer } from "node:net";
 import { describe, expect, it } from "vitest";
-import { listMurphDynamicToolNames } from "@murphai/assistant-engine/assistant-codex";
+import {
+  listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
+} from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
@@ -29,6 +32,10 @@ import {
 } from "@murphai/hosted-local-harness/e2e";
 
 const temporalDevUiPortOffset = 1_000;
+const hostedGroupFamilyToolNames = resolveMurphDynamicTools({
+  groupAvailable: true,
+}).filter((tool) => tool.name.startsWith("group_"))
+  .map((tool) => `${tool.namespace}.${tool.name}`);
 
 describe("readHostedLocalAssistantProviderToolOutputs", () => {
   it("does not treat a marker in failed command arguments as successful output", () => {
@@ -592,6 +599,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       name !== "murph.analyze_video"
       && !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
+      && !hostedGroupFamilyToolNames.includes(name)
       && name !== "murph.group_room_model"
       && name !== "murph.imessage_contact"
       && name !== "murph.react_to_message"
@@ -609,12 +617,34 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     const baseToolNamesWithoutProgress = baseToolNames.filter((name) =>
       name !== "murph.send_progress_update"
     );
+    const allToolsAvailable = {
+      analyzeVideoAvailable: true,
+      askGrokAvailable: true,
+      connectedAppsAvailable: true,
+      computerToolsAvailable: true,
+      exerciseRoutineResponseCardAvailable: true,
+      groupAvailable: true,
+      groupRoomModelAvailable: true,
+      imessageContactAvailable: true,
+      messageTargetingAvailable: true,
+      pendingVaultFilesAvailable: true,
+      phoneCallsAvailable: true,
+      physicalNoteRecoveryAvailable: true,
+      physicalNotesAvailable: true,
+      progressUpdatesAvailable: true,
+      responseCardAvailable: true,
+      telegramRichContentResponseCardAvailable: true,
+      vaultFileSendAvailable: true,
+    } as const;
     expect(allToolNames).toContain("murph.analyze_video");
     expect(allToolNames).toContain("murph.react_to_message");
     expect(allToolNames).toContain("murph.select_reply_target");
     expect(allToolNames).toContain("murph.computer_open");
     expect(allToolNames).toContain("murph.connected_apps_manage");
     expect(allToolNames).toContain("murph.create_phone_call");
+    expect(hostedGroupFamilyToolNames).toHaveLength(6);
+    expect(allToolNames)
+      .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
     expect(allToolNames).toContain("murph.group_room_model");
     expect(allToolNames).toContain("murph.imessage_contact");
     expect(allToolNames).toContain("murph.resolve_physical_note");
@@ -668,24 +698,11 @@ describe("expectAdvertisedMurphDynamicTools", () => {
 
     expectAdvertisedMurphDynamicTools(
       [buildResponsesRequest(allToolNames)],
-      {
-        analyzeVideoAvailable: true,
-        connectedAppsAvailable: true,
-        computerToolsAvailable: true,
-        exerciseRoutineResponseCardAvailable: true,
-        groupRoomModelAvailable: true,
-        imessageContactAvailable: true,
-        messageTargetingAvailable: true,
-        pendingVaultFilesAvailable: true,
-        physicalNoteRecoveryAvailable: true,
-        physicalNotesAvailable: true,
-        phoneCallsAvailable: true,
-        progressUpdatesAvailable: true,
-        responseCardAvailable: true,
-        telegramRichContentResponseCardAvailable: true,
-        vaultFileSendAvailable: true,
-        askGrokAvailable: true,
-      },
+      allToolsAvailable,
+    );
+    expectAdvertisedMurphDynamicTools(
+      [buildResponsesRequest(allToolNames, "code-mode")],
+      allToolsAvailable,
     );
   });
 });
@@ -915,7 +932,8 @@ function buildResponsesRequest(
   const codeModeExecTool = {
     description: namespacedToolNames
       .filter((name) =>
-        name !== "murph.automation" && name !== "murph.group"
+        name !== "murph.automation"
+        && !hostedGroupFamilyToolNames.includes(name)
       )
       .map((name) => name.replace(/^murph\./u, "murph__"))
       .concat("ALL_TOOLS")
