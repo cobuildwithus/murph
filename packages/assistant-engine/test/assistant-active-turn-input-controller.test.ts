@@ -14,6 +14,7 @@ type Deferred<T> = {
 }
 
 afterEach(() => {
+  vi.doUnmock('node:timers/promises')
   vi.resetModules()
   vi.restoreAllMocks()
   vi.clearAllMocks()
@@ -320,6 +321,76 @@ test('active-turn controller closes a quiet held-draft cutoff atomically', async
       prompt: 'After cutoff',
       vault: '/vaults/test',
     })).toBeNull()
+  } finally {
+    controller.close()
+  }
+})
+
+test('active-turn controller anchors the held cutoff at provider response completion', async () => {
+  vi.useFakeTimers()
+  const draftDelay = createDeferred<void>()
+  const finalProbeStarted = createDeferred<void>()
+  const sleep = vi.fn(async (
+    _delayMs: number,
+    value?: unknown,
+    options?: { signal?: AbortSignal },
+  ) => {
+    await draftDelay.promise
+    options?.signal?.throwIfAborted()
+    return value
+  })
+  vi.doMock('node:timers/promises', () => ({ setTimeout: sleep }))
+  const {
+    createAssistantActiveTurnInputController,
+    steerAssistantActiveTurnInput,
+  } = await import('../src/assistant/active-turn-input-controller.ts')
+  const admissionHook = vi.fn(async () => {
+    finalProbeStarted.resolve()
+    return { kind: 'no-new-input' as const }
+  })
+  const controller = createAssistantActiveTurnInputController({
+    admissionHook,
+    conversationKeys: ['channel:telegram|identity:identity-1|audience:indeterminate|thread:thread-1'],
+    sessionId: 'session-test',
+    turnId: 'turn-active',
+    vault: '/vaults/test',
+  })
+
+  try {
+    controller.pauseProviderSteering()
+    expect(sleep).toHaveBeenCalledWith(
+      4_000,
+      undefined,
+      { signal: expect.any(AbortSignal) },
+    )
+    await vi.advanceTimersByTimeAsync(5_000)
+    draftDelay.resolve()
+    await finalProbeStarted.promise
+    controller.pauseProviderSteering()
+    expect(admissionHook).toHaveBeenCalledTimes(1)
+    expect(sleep).toHaveBeenCalledTimes(1)
+
+    await expect(controller.notifyInputAvailable({
+      inputIds: ['after-held-cutoff'],
+    })).resolves.toBeUndefined()
+    expect(steerAssistantActiveTurnInput({
+      conversation: {
+        channel: 'telegram',
+        identityId: 'identity-1',
+        threadId: 'thread-1',
+      },
+      expectedActiveTurnId: 'turn-active',
+      prompt: 'After the held cutoff',
+      vault: '/vaults/test',
+    })).toBeNull()
+
+    const outcomePromise = controller.finishDraftWindow()
+    await vi.advanceTimersByTimeAsync(0)
+    await expect(outcomePromise).resolves.toEqual({
+      controllerClosed: true,
+      kind: 'commit',
+    })
+    expect(admissionHook).toHaveBeenCalledTimes(1)
   } finally {
     controller.close()
   }

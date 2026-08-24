@@ -107,6 +107,9 @@ class AssistantActiveTurnInputController {
   private liveProviderTurn: AssistantActiveTurnLiveProviderTurn | null = null
   private liveProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
   private completedProviderTurnKey: AssistantActiveTurnLiveProviderTurnKey | null = null
+  private readonly draftWindowAbortController = new AbortController()
+  private draftWindowEndsAtMs: number | null = null
+  private draftWindowOutcome: Promise<AssistantActiveTurnDraftWindowOutcome> | null = null
   private pending: QueuedAssistantActiveTurnInputAdmission[] = []
   private manualCompletions: AssistantActiveTurnManualInputCompletion[] = []
   private availableInputIds = new Set<string>()
@@ -122,13 +125,18 @@ class AssistantActiveTurnInputController {
       }) => Promise<AssistantProviderAcceptedInputsRelease | void>
       eventAdmissionEnabled?: boolean
       sessionId: string
+      signal?: AbortSignal
       turnId: string
       vault: string
     },
   ) {}
 
   enqueueManualActiveTurnInput(input: AssistantMessageInput): AssistantActiveTurnInputSteerResult {
-    if (this.closed || typeof input.expectedActiveTurnId !== 'string') {
+    if (
+      this.closed ||
+      this.isDraftWindowExpired() ||
+      typeof input.expectedActiveTurnId !== 'string'
+    ) {
       return {
         kind: 'no-active-turn',
       }
@@ -169,7 +177,11 @@ class AssistantActiveTurnInputController {
     inputIds?: readonly string[]
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnInputAdmissionResult | undefined> {
-    if (this.input.eventAdmissionEnabled === false || this.closed) {
+    if (
+      this.input.eventAdmissionEnabled === false ||
+      this.closed ||
+      this.isDraftWindowExpired()
+    ) {
       return Promise.resolve(undefined)
     }
 
@@ -196,6 +208,7 @@ class AssistantActiveTurnInputController {
 
   close(): void {
     this.closed = true
+    this.draftWindowAbortController.abort()
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
     this.completedProviderTurnKey = null
@@ -203,6 +216,7 @@ class AssistantActiveTurnInputController {
 
   closeTurnAdmission(): void {
     this.closed = true
+    this.draftWindowAbortController.abort()
     // Final cutoff blocks every new admission, but the exact provider
     // turn key remains necessary until a steer already started under it settles.
     this.completedProviderTurnKey =
@@ -215,10 +229,13 @@ class AssistantActiveTurnInputController {
     if (this.closed) {
       return
     }
+    this.draftWindowEndsAtMs ??=
+      Date.now() + ASSISTANT_ACTIVE_TURN_DRAFT_GRACE_MS
     this.completedProviderTurnKey =
       this.liveProviderTurnKey ?? this.completedProviderTurnKey
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
+    void this.startDraftWindow()
   }
 
   registerLiveProviderTurn(input: AssistantActiveTurnLiveProviderTurn): () => void {
@@ -250,14 +267,43 @@ class AssistantActiveTurnInputController {
   async finishDraftWindow(input?: {
     signal?: AbortSignal
   }): Promise<AssistantActiveTurnDraftWindowOutcome> {
+    return await this.startDraftWindow(input?.signal)
+  }
+
+  private startDraftWindow(
+    signal?: AbortSignal,
+  ): Promise<AssistantActiveTurnDraftWindowOutcome> {
+    if (this.draftWindowOutcome) {
+      return this.draftWindowOutcome
+    }
+    this.draftWindowEndsAtMs ??=
+      Date.now() + ASSISTANT_ACTIVE_TURN_DRAFT_GRACE_MS
+    const signals = [
+      this.draftWindowAbortController.signal,
+      this.input.signal,
+      signal,
+    ].filter((candidate): candidate is AbortSignal => candidate !== undefined)
+    const draftWindowSignal = signals.length === 1
+      ? signals[0]!
+      : AbortSignal.any(signals)
+    const outcome = this.runDraftWindow(draftWindowSignal)
+    outcome.catch(() => undefined)
+    this.draftWindowOutcome = outcome
+    return outcome
+  }
+
+  private async runDraftWindow(
+    signal: AbortSignal,
+  ): Promise<AssistantActiveTurnDraftWindowOutcome> {
+    const draftWindowEndsAtMs = this.draftWindowEndsAtMs ?? Date.now()
     await sleep(
-      ASSISTANT_ACTIVE_TURN_DRAFT_GRACE_MS,
+      Math.max(0, draftWindowEndsAtMs - Date.now()),
       undefined,
-      input?.signal ? { signal: input.signal } : undefined,
+      { signal },
     )
 
     return await this.runWithAdmissionHookQueue(async () => {
-      input?.signal?.throwIfAborted()
+      signal.throwIfAborted()
       this.throwFatalAdmissionError()
 
       let acceptedInput = await this.admitPending()
@@ -267,13 +313,14 @@ class AssistantActiveTurnInputController {
         !this.closed
       ) {
         const result = await this.input.admissionHook(
-          this.buildAdmissionInput({ signal: input?.signal }),
+          this.buildAdmissionInput({ signal }),
         )
         await this.queueAvailableInputAdmissionResult(result)
         acceptedInput = await this.admitPending()
       }
 
       if (acceptedInput?.kind === 'accepted') {
+        this.draftWindowEndsAtMs = null
         return {
           acceptedInput,
           kind: 'review',
@@ -286,6 +333,11 @@ class AssistantActiveTurnInputController {
         kind: 'commit',
       }
     })
+  }
+
+  private isDraftWindowExpired(): boolean {
+    return this.draftWindowEndsAtMs !== null &&
+      Date.now() >= this.draftWindowEndsAtMs
   }
 
   async admitAvailable(input?: {
@@ -376,6 +428,7 @@ class AssistantActiveTurnInputController {
 
   fail(error: unknown): void {
     this.closed = true
+    this.draftWindowAbortController.abort()
     this.liveProviderTurn = null
     this.liveProviderTurnKey = null
     this.completedProviderTurnKey = null
@@ -756,6 +809,7 @@ export function createAssistantActiveTurnInputController(input: {
   conversationKeys?: readonly string[] | null
   eventAdmissionEnabled?: boolean
   sessionId: string
+  signal?: AbortSignal
   turnId: string
   vault: string
 }): {
@@ -788,6 +842,7 @@ export function createAssistantActiveTurnInputController(input: {
     admissionHook: input.admissionHook,
     eventAdmissionEnabled: input.eventAdmissionEnabled,
     sessionId: input.sessionId,
+    signal: input.signal,
     turnId: input.turnId,
     vault: input.vault,
   })

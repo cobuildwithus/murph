@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-08-20
-Updated: 2026-08-21
+Updated: 2026-08-24
 
 ## Goal
 
@@ -199,9 +199,22 @@ Updated: 2026-08-21
   default 4 GB combined focused invocation exhausted its test worker before
   reporting assertions; isolated focused runs and the full 6 GB runtime file
   pass.
-- Remaining: commit and push the retrospective fix, run exact-head ReviewGPT
-  round 5 concurrently with CI, close the plan, prove a clean current-base
-  merge tree, merge, and confirm production rollout. The PR remains unmerged.
+- Took over the inactive PR, reconciled it with current `main`, and added the
+  missing top-level ordered-progress exception for this narrow held-draft path.
+  The exception preserves the ordinary completed-segment rule everywhere else
+  and keeps completed tools, progress, and real-world effects authoritative.
+- Corrected the held-window clock so the one-shot timer and serialized final
+  source probe start at request 0's first completed response, even while later
+  provider cleanup is still settling. The controller rejects post-deadline
+  notifications and targeted input until that probe classifies the turn, and a
+  regression proves a repeated completion callback cannot reset the deadline.
+- The current-main candidate passes the Assistant Engine typecheck, all 104
+  local-service runtime tests, the focused controller cutoff suite,
+  documentation drift, changelog proof, and diff checks.
+- Remaining: push the corrected exact head, run ReviewGPT round 5 concurrently
+  with exact-head CI, resolve any accepted findings, close the plan, prove a
+  clean current-base merge tree, merge, and confirm the required checks remain
+  green. The PR remains unmerged.
 
 ## Product UX walkthrough
 

@@ -814,6 +814,7 @@ export async function sendAssistantMessageLocal(
             resolveAssistantConversationLookupKey(input),
           ].filter((key): key is string => key !== null),
           sessionId: resolved.session.sessionId,
+          signal: input.abortSignal,
           turnId: receipt.turnId,
           vault: input.vault,
         })
