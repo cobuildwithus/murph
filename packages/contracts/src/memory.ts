@@ -672,16 +672,23 @@ function resolveMemoryBodyStartLine(text: string): number {
 }
 
 function normalizeMemorySourcePath(value: string): string {
-  const normalized = value.replaceAll("\\", "/").replace(/^\/+/, "");
   if (
-    normalized.length === 0
-    || normalized === ".."
-    || normalized.startsWith("../")
-    || /[\u0000-\u001F\u007F]/u.test(normalized)
+    value.length === 0
+    || value.length > 160
+    || value.includes("\\")
+    || value.startsWith("/")
+    || /^[A-Za-z][A-Za-z\d+.-]*:/u.test(value)
+    || /[\u0000-\u001F\u007F]/u.test(value)
   ) {
     return memoryDocumentRelativePath;
   }
-  return Array.from(normalized).slice(0, 160).join("");
+
+  const segments = value.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    return memoryDocumentRelativePath;
+  }
+
+  return value;
 }
 
 function normalizeMemoryRecordId(

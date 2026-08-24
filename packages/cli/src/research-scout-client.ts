@@ -331,13 +331,13 @@ class RunnerScopedExaClient extends Exa {
     try {
       payload = await response.json()
     } catch (error) {
-      const timedOut = timeoutSignal.aborted
-        && error === timeoutSignal.reason
       const abortedByCaller = this.callerSignal?.aborted === true
-        && error === this.callerSignal.reason
+      const timedOut = timeoutSignal.aborted && !abortedByCaller
       throw createExaResearchScoutRequestError({
         abortedByCaller,
-        failureStage: 'response_body',
+        failureStage: error instanceof SyntaxError
+          ? 'response_json'
+          : 'response_body',
         status: response.status,
         timedOut,
         transportErrorName: readSafeErrorName(error),
@@ -440,12 +440,20 @@ function classifyExaResearchScoutFailure(input: {
       retryable: true,
     }
   }
-  if (input.failureStage === 'response_body' || input.failureStage === 'response_shape') {
+  if (input.failureStage === 'response_json' || input.failureStage === 'response_shape') {
     return {
       code: 'research_exa_invalid_response',
       hint: 'Do not retry unchanged; check the Exa integration or provider status.',
       message: 'Exa returned an invalid research scout response.',
       retryable: false,
+    }
+  }
+  if (input.failureStage === 'response_body') {
+    return {
+      code: 'research_exa_unavailable',
+      hint: 'Retry the research request later.',
+      message: 'Exa research scout response could not be read.',
+      retryable: true,
     }
   }
   if (input.status !== undefined && input.status >= 400) {

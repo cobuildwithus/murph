@@ -91,6 +91,40 @@ function jsonResponse(payload: unknown, status = 200): Response {
   })
 }
 
+function failedBodyResponse(error: Error): Response {
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(error)
+    },
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  })
+}
+
+function bodyResponseThatFailsWhenAborted(
+  signal: AbortSignal,
+  privateMarker: string,
+): Response {
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      const fail = () => controller.error(new TypeError(privateMarker))
+      if (signal.aborted) {
+        fail()
+        return
+      }
+      signal.addEventListener('abort', fail, { once: true })
+    },
+  }), {
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+    },
+    status: 200,
+  })
+}
+
 function createResearchCli() {
   const cli = Cli.create('vault-cli', {
     description: 'research scout test cli',
@@ -574,7 +608,10 @@ describe('research scout', () => {
     })
     await expect(malformedJsonRequest).rejects.toMatchObject({
       code: 'research_exa_invalid_response',
-      context: expect.objectContaining({ retryable: false }),
+      context: expect.objectContaining({
+        failureStage: 'response_json',
+        retryable: false,
+      }),
     })
     await expect(malformedJsonRequest).rejects.not.toThrow(/private-malformed-provider-payload/u)
 
@@ -585,8 +622,101 @@ describe('research scout', () => {
       })),
     })).rejects.toMatchObject({
       code: 'research_exa_invalid_response',
-      context: expect.objectContaining({ retryable: false }),
+      context: expect.objectContaining({
+        failureStage: 'response_shape',
+        retryable: false,
+      }),
     })
+  })
+
+  it('keeps 2xx response-body transport failures retryable and private', async () => {
+    const directRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: vi.fn<typeof fetch>(async () =>
+        failedBodyResponse(new TypeError('private-direct-body-transport-marker'))
+      ),
+    })
+    await expect(directRequest).rejects.toMatchObject({
+      code: 'research_exa_unavailable',
+      context: {
+        abortedByCaller: false,
+        failureStage: 'response_body',
+        retryable: true,
+        status: 200,
+        timedOut: false,
+        transportErrorName: 'TypeError',
+      },
+    })
+    await expect(directRequest).rejects.not.toThrow(/private-direct-body-transport-marker/u)
+
+    const result = await runInProcessJsonCli(
+      createResearchFailureCli(vi.fn<typeof fetch>(async () =>
+        failedBodyResponse(new TypeError('private-response-body-transport-marker'))
+      )),
+      ['provider-failure'],
+    )
+
+    expect(result.envelope.ok).toBe(false)
+    if (result.envelope.ok) {
+      throw new Error('Expected response-body transport failure envelope.')
+    }
+    expect(result.envelope.error).toMatchObject({
+      code: 'research_exa_unavailable',
+      retryable: true,
+      stage: 'response_body',
+    })
+    expect(result.envelope.error.hint).toMatch(/Retry the research request later/u)
+    expect(JSON.stringify(result.envelope)).not.toMatch(
+      /private-response-body-transport-marker/u,
+    )
+  })
+
+  it('preserves caller-abort and timeout priority while reading a 2xx body', async () => {
+    const caller = new AbortController()
+    const callerRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: vi.fn<typeof fetch>(async (_target, init) => {
+        const signal = init?.signal
+        if (!signal) {
+          throw new Error('Expected an Exa request signal.')
+        }
+        setTimeout(() => caller.abort(new Error('private-body-abort-reason')), 0)
+        return bodyResponseThatFailsWhenAborted(signal, 'private-body-abort-marker')
+      }),
+      signal: caller.signal,
+    })
+    await expect(callerRequest).rejects.toMatchObject({
+      code: 'research_exa_aborted',
+      context: expect.objectContaining({
+        abortedByCaller: true,
+        failureStage: 'response_body',
+        retryable: false,
+      }),
+    })
+    await expect(callerRequest).rejects.not.toThrow(
+      /private-body-abort-reason|private-body-abort-marker/u,
+    )
+
+    const timeoutRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: vi.fn<typeof fetch>(async (_target, init) => {
+        const signal = init?.signal
+        if (!signal) {
+          throw new Error('Expected an Exa request signal.')
+        }
+        return bodyResponseThatFailsWhenAborted(signal, 'private-body-timeout-marker')
+      }),
+      timeoutMs: 5,
+    })
+    await expect(timeoutRequest).rejects.toMatchObject({
+      code: 'research_exa_timeout',
+      context: expect.objectContaining({
+        failureStage: 'response_body',
+        retryable: true,
+        timedOut: true,
+      }),
+    })
+    await expect(timeoutRequest).rejects.not.toThrow(/private-body-timeout-marker/u)
   })
 
   it('posts one bounded research-paper search for each batch lane', async () => {

@@ -47,18 +47,25 @@ export class QueryVaultSourceError extends Error {
 }
 
 function normalizeQuerySourcePath(value: string): string {
-  const normalized = path.posix.normalize(value.replaceAll("\\", "/")).replace(/^\/+/, "");
   if (
-    normalized.length === 0
-    || normalized === "."
-    || normalized === ".."
-    || normalized.startsWith("../")
-    || /[\u0000-\u001F\u007F]/u.test(normalized)
+    value.length === 0
+    || value.length > 160
+    || value.includes("\\")
+    || path.posix.isAbsolute(value)
+    || path.win32.isAbsolute(value)
+    || /^[A-Za-z][A-Za-z\d+.-]*:/u.test(value)
+    || /[\u0000-\u001F\u007F]/u.test(value)
   ) {
     return "<vault-source>";
   }
 
-  return Array.from(normalized).slice(0, 160).join("");
+  const segments = value.split("/");
+  if (segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")) {
+    return "<vault-source>";
+  }
+
+  const normalized = path.posix.normalize(value);
+  return normalized === value ? normalized : "<vault-source>";
 }
 
 function normalizeLineNumber(value: number | undefined): number | undefined {
