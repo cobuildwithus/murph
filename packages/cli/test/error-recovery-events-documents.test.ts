@@ -139,7 +139,16 @@ test.sequential('built CLI never exposes submitted event record keys in import o
   const payloadPath = path.join(vaultRoot, 'event-input.json')
   const privateConfounderKey = 'private_confounder_key_7f3a'
   const privateFieldKey = 'private_field_key_9b2c'
-  const privateKeys = [privateConfounderKey, privateFieldKey]
+  const privateTopLevelKey = 'private_event_field_4d7e'
+  const privateNestedKey = 'private_nested_field_6a8c'
+  const privateValue = 'private submitted event value'
+  const privateKeys = [
+    privateConfounderKey,
+    privateFieldKey,
+    privateTopLevelKey,
+    privateNestedKey,
+    privateValue,
+  ]
 
   try {
     await initializeVault({ vaultRoot })
@@ -156,9 +165,13 @@ test.sequential('built CLI never exposes submitted event record keys in import o
         fields: {
           [privateFieldKey]: { nested: 'invalid' },
         },
+        [privateTopLevelKey]: {
+          [privateNestedKey]: privateValue,
+        },
       }),
       'utf8',
     )
+    const filesBeforeInvalidImport = (await readdir(vaultRoot, { recursive: true })).sort()
 
     const importArgs = [
       'event',
@@ -183,6 +196,10 @@ test.sequential('built CLI never exposes submitted event record keys in import o
     for (const privateKey of privateKeys) {
       assert.doesNotMatch(rawImportError, new RegExp(privateKey, 'u'))
     }
+    assert.deepEqual(
+      (await readdir(vaultRoot, { recursive: true })).sort(),
+      filesBeforeInvalidImport,
+    )
 
     await writeFile(
       payloadPath,
@@ -623,15 +640,31 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
       vaultRoot,
       invalidSchemaFixture.manifestFile,
     )
+    const originalManifestContents = await readFile(invalidSchemaManifestPath, 'utf8')
+    const originalManifest = JSON.parse(originalManifestContents) as Record<string, unknown>
+    const originalOwner = originalManifest.owner
+    assert.equal(typeof originalOwner, 'object')
+    assert.notEqual(originalOwner, null)
+    assert.equal(Array.isArray(originalOwner), false)
+    if (!originalOwner || typeof originalOwner !== 'object' || Array.isArray(originalOwner)) {
+      throw new Error('expected stored raw-import manifest owner')
+    }
+    const privateTopLevelKey = 'private_manifest_field_8e4d'
+    const privateNestedKey = 'private_owner_field_2a7c'
     const invalidSchemaValue = 'private-invalid-schema-manifest-value'
-    const invalidRawDirectory = 'private/raw/assessment/directory'
+    const invalidSchemaContents = JSON.stringify({
+      ...originalManifest,
+      owner: {
+        ...originalOwner,
+        [privateNestedKey]: invalidSchemaValue,
+      },
+      [privateTopLevelKey]: {
+        [privateNestedKey]: invalidSchemaValue,
+      },
+    })
     await writeFile(
       invalidSchemaManifestPath,
-      JSON.stringify({
-        importId: invalidSchemaFixture.assessmentId,
-        rawDirectory: invalidRawDirectory,
-        source: invalidSchemaValue,
-      }),
+      invalidSchemaContents,
       'utf8',
     )
 
@@ -649,6 +682,13 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
     assert.equal(invalidSchemaError.stage, 'validation')
     assert.equal(invalidSchemaError.hint, undefined)
     assert.equal((invalidSchemaError.fieldErrors?.length ?? 0) > 0, true)
+    assert.equal(
+      invalidSchemaError.fieldErrors?.every((field) => ['$', 'owner'].includes(field.path)),
+      true,
+    )
+    assert.equal(invalidSchemaError.fieldErrors?.some((field) => field.path === '$'), true)
+    assert.equal(invalidSchemaError.fieldErrors?.some((field) => field.path === 'owner'), true)
+    assert.equal(await readFile(invalidSchemaManifestPath, 'utf8'), invalidSchemaContents)
     assertDoesNotEcho(invalidSchema, [
       invalidSchemaFixture.assessmentId,
       invalidSchemaFixture.manifestFile,
@@ -656,8 +696,9 @@ test.sequential('built CLI keeps intake manifest stored-state failures terminal 
       invalidSchemaFixture.sourcePath,
       invalidSchemaFixture.sourceValue,
       invalidSchemaManifestPath,
+      privateTopLevelKey,
+      privateNestedKey,
       invalidSchemaValue,
-      invalidRawDirectory,
       vaultRoot,
     ])
   } finally {

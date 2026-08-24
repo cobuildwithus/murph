@@ -441,6 +441,7 @@ describe("helper barrel exports", () => {
             "$.title: private-submitted-title is too long",
             "$.links[2].targetId: private-submitted-id is invalid",
             "$.fields.private-submitted-key: private-submitted-value is invalid",
+            "$.private_submitted_top.private_nested_key: private-submitted-value is invalid",
           ],
         },
       }),
@@ -451,6 +452,7 @@ describe("helper barrel exports", () => {
         context: expect.objectContaining({
           vaultCode: "EVENT_CONTRACT_INVALID",
           field: "kind",
+          stage: "validation",
         }),
       }),
     );
@@ -471,6 +473,10 @@ describe("helper barrel exports", () => {
           path: ["fields"],
           code: "custom",
         },
+        {
+          path: [],
+          code: "custom",
+        },
     ]);
     expect(JSON.stringify(eventContractError.context?.issues)).not.toContain("private-submitted");
 
@@ -483,6 +489,7 @@ describe("helper barrel exports", () => {
     expect(missingEventTitle).toEqual(expect.objectContaining({
       code: "contract_invalid",
       context: expect.objectContaining({
+        stage: "validation",
         issues: [expect.objectContaining({ path: ["title"], code: "invalid_type" })],
       }),
     }));
@@ -495,7 +502,32 @@ describe("helper barrel exports", () => {
     );
     expect(unrelatedInvalidInput).toEqual(expect.objectContaining({
       code: "contract_invalid",
-      context: expect.not.objectContaining({ issues: expect.anything() }),
+      context: expect.objectContaining({ stage: "validation" }),
+    }));
+    expect((unrelatedInvalidInput as VaultCliError).context).not.toEqual(
+      expect.objectContaining({ issues: expect.anything() }),
+    );
+
+    const missingEvent = toEventUpsertVaultCliError(
+      Object.assign(new Error("Missing event"), {
+        name: "VaultError",
+        code: "EVENT_MISSING",
+      }),
+    );
+    expect(missingEvent).toEqual(expect.objectContaining({
+      code: "not_found",
+      context: expect.objectContaining({ stage: "read" }),
+    }));
+
+    const eventConflict = toEventUpsertVaultCliError(
+      Object.assign(new Error("Conflicting event revision"), {
+        name: "VaultError",
+        code: "EVENT_REVISION_CONFLICT",
+      }),
+    );
+    expect(eventConflict).toEqual(expect.objectContaining({
+      code: "conflict",
+      context: expect.objectContaining({ stage: "conflict" }),
     }));
 
     const inputFileError = toImporterInputFileVaultCliError(
@@ -509,6 +541,7 @@ describe("helper barrel exports", () => {
       code: "not_found",
       message: "The input file was not found.",
       context: expect.objectContaining({
+        stage: "filesystem",
         issues: [expect.objectContaining({ path: ["file"], code: "custom" })],
       }),
     }));
@@ -536,6 +569,7 @@ describe("helper barrel exports", () => {
       code: "storage_unavailable",
       context: expect.objectContaining({
         retryable: false,
+        stage: "filesystem",
         issues: [expect.objectContaining({ path: ["out"] })],
       }),
     }));
@@ -552,6 +586,7 @@ describe("helper barrel exports", () => {
       code: "not_found",
       message: "The requested assessment response was not found.",
       context: expect.objectContaining({
+        stage: "read",
         issues: [expect.objectContaining({ path: ["id"] })],
       }),
     }));
@@ -583,6 +618,7 @@ describe("helper barrel exports", () => {
         code: "assessment_store_invalid",
         context: expect.objectContaining({
           retryable: false,
+          stage: "read",
           vaultCode: storedError.code,
         }),
       }));

@@ -27,6 +27,7 @@ interface StoredManifestRecovery {
   subject: string
   missingCode: string
   invalidCode: string
+  publicFields: ReadonlySet<string>
 }
 
 const exportPackFileSchema = z
@@ -74,11 +75,31 @@ const exportPackManifestRecovery: StoredManifestRecovery = {
   subject: 'export pack',
   missingCode: 'manifest_missing',
   invalidCode: 'manifest_invalid',
+  publicFields: new Set([
+    'format',
+    'packId',
+    'generatedAt',
+    'filters',
+    'manifest',
+    'health',
+    'files',
+  ]),
 }
 const assessmentManifestRecovery: StoredManifestRecovery = {
   subject: 'assessment raw-import',
   missingCode: 'manifest_missing',
   invalidCode: 'manifest_invalid',
+  publicFields: new Set([
+    'schemaVersion',
+    'importId',
+    'importKind',
+    'importedAt',
+    'source',
+    'owner',
+    'rawDirectory',
+    'artifacts',
+    'provenance',
+  ]),
 }
 
 let queryRuntimePromise: Promise<QueryRuntimeModule> | null = null
@@ -109,6 +130,7 @@ function exportPackNotFoundError() {
     'The requested export pack was not found.',
     {
       retryable: false,
+      stage: 'read',
       issues: [{ code: 'custom', path: ['id'] }],
     },
   )
@@ -141,7 +163,10 @@ function readErrorCode(error: unknown): string | null {
   return typeof error.code === 'string' ? error.code : null
 }
 
-function manifestValidationContext(error: unknown) {
+function manifestValidationContext(
+  error: unknown,
+  publicFields: ReadonlySet<string>,
+) {
   const issues =
     error && typeof error === 'object' && 'issues' in error && Array.isArray(error.issues)
       ? error.issues
@@ -149,6 +174,7 @@ function manifestValidationContext(error: unknown) {
 
   return {
     retryable: false,
+    stage: 'read',
     issues: issues.map((issue) => {
       const issueRecord = issue && typeof issue === 'object' ? issue : null
       const issueCode =
@@ -157,7 +183,7 @@ function manifestValidationContext(error: unknown) {
           : 'custom'
       const issuePath =
         issueRecord && 'path' in issueRecord && Array.isArray(issueRecord.path)
-          ? topLevelValidationPath(issueRecord.path)
+          ? topLevelValidationPath(issueRecord.path, publicFields)
           : []
       const expected =
         issueRecord
@@ -182,9 +208,12 @@ function safeValidationIssueCode(code: string) {
     : 'custom'
 }
 
-function topLevelValidationPath(pathSegments: readonly unknown[]) {
+function topLevelValidationPath(
+  pathSegments: readonly unknown[],
+  publicFields: ReadonlySet<string>,
+) {
   const topLevel = pathSegments[0]
-  return typeof topLevel === 'string' && /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(topLevel)
+  return typeof topLevel === 'string' && publicFields.has(topLevel)
     ? [topLevel]
     : []
 }
@@ -204,7 +233,7 @@ async function readJsonRelativeFile<T>(
       throw new VaultCliError(
         'invalid_path',
         `The stored ${recovery.subject} manifest path is invalid.`,
-        { retryable: false },
+        { retryable: false, stage: 'read' },
       )
     }
 
@@ -225,7 +254,7 @@ async function readJsonRelativeFile<T>(
     throw new VaultCliError(
       recovery.missingCode,
       `The stored ${recovery.subject} manifest is missing.`,
-      { retryable: false },
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -239,6 +268,7 @@ async function readJsonRelativeFile<T>(
       `The stored ${recovery.subject} manifest is not valid JSON.`,
       {
         retryable: false,
+        stage: 'read',
         issues: [{ code: 'invalid_format', path: [] }],
       },
     )
@@ -250,7 +280,7 @@ async function readJsonRelativeFile<T>(
     throw new VaultCliError(
       recovery.invalidCode,
       `The stored ${recovery.subject} manifest does not match the expected JSON shape.`,
-      manifestValidationContext(error),
+      manifestValidationContext(error, recovery.publicFields),
     )
   }
 }
@@ -277,6 +307,7 @@ async function loadAssessmentRecord(vaultRoot: string, assessmentId: string) {
       'The requested assessment was not found.',
       {
         retryable: false,
+        stage: 'read',
         issues: [{ code: 'custom', path: ['id'] }],
       },
     )
@@ -292,7 +323,7 @@ function resolveAssessmentRawFile(record: AssessmentEntity) {
     throw new VaultCliError(
       'raw_missing',
       'The stored assessment does not declare a raw artifact path.',
-      { retryable: false },
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -319,7 +350,7 @@ async function resolveStoredRawManifestFile(
       throw new VaultCliError(
         'invalid_path',
         'The stored assessment raw artifact path is invalid.',
-        { retryable: false },
+        { retryable: false, stage: 'read' },
       )
     }
 
@@ -340,7 +371,7 @@ async function resolveStoredRawManifestFile(
     throw new VaultCliError(
       assessmentManifestRecovery.missingCode,
       'The stored assessment raw-import directory is missing.',
-      { retryable: false },
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -357,7 +388,7 @@ async function resolveStoredRawManifestFile(
     throw new VaultCliError(
       assessmentManifestRecovery.missingCode,
       'The stored assessment raw-import manifest is missing.',
-      { retryable: false },
+      { retryable: false, stage: 'read' },
     )
   }
 
@@ -447,6 +478,7 @@ async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
       'The stored export pack manifest does not match its directory.',
       {
         retryable: false,
+        stage: 'read',
         issues: [{ code: 'custom', path: ['packId'] }],
       },
     )
@@ -653,6 +685,7 @@ export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
     throw new VaultCliError(
       'export_pack_changed',
       `Export pack "${packId}" changed before it could be pruned.`,
+      { retryable: false, stage: 'conflict' },
     )
   }
 

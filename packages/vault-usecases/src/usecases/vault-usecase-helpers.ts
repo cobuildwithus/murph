@@ -232,10 +232,99 @@ interface VaultErrorMapping {
   details?: Record<string, unknown> | ((details: Record<string, unknown>) => Record<string, unknown>)
 }
 
+const publicEventContractFields = new Set([
+  'eventId',
+  'occurredAt',
+  'recordedAt',
+  'source',
+  'title',
+  'note',
+  'tags',
+  'links',
+  'rawRefs',
+  'evidence',
+  'attachments',
+  'externalRef',
+  'dataOrigin',
+  'timeZone',
+  'kind',
+  'symptom',
+  'intensity',
+  'bodySite',
+  'experimentId',
+  'experimentSlug',
+  'noteType',
+  'authoredAt',
+  'signedAt',
+  'author',
+  'providerId',
+  'facility',
+  'encounterId',
+  'sections',
+  'metric',
+  'queryVisibility',
+  'qualifiers',
+  'value',
+  'visibility',
+  'canonicalFact',
+  'observationGrain',
+  'unit',
+  'assertion',
+  'domain',
+  'polarity',
+  'subject',
+  'assertionText',
+  'code',
+  'codeSystem',
+  'assertedOn',
+  'sourceLabel',
+  'exposureType',
+  'substance',
+  'duration',
+  'measurements',
+  'media',
+  'testName',
+  'resultStatus',
+  'summary',
+  'testCategory',
+  'specimenType',
+  'labName',
+  'labPanelId',
+  'collectedAt',
+  'reportedAt',
+  'fastingStatus',
+  'results',
+  'medicationName',
+  'dose',
+  'supplementName',
+  'activityType',
+  'durationMinutes',
+  'distanceKm',
+  'workout',
+  'startAt',
+  'endAt',
+  'sleepType',
+  'interventionType',
+  'protocolId',
+  'regimenId',
+  'sessionStatus',
+  'sessionLocalDate',
+  'scheduledLocalDate',
+  'timing',
+  'temperatureC',
+  'afterExercise',
+  'symptoms',
+  'confounders',
+  'fields',
+  'contextType',
+  'severity',
+])
+
 function contractValidationDetails(details: Record<string, unknown>) {
   const errors = Array.isArray(details.errors) ? details.errors : []
 
   return {
+    stage: 'validation',
     issues: errors.map((issue) => ({
       path: contractIssuePath(issue),
       code: 'custom',
@@ -249,19 +338,24 @@ function contractIssuePath(issue: unknown): readonly string[] {
   }
 
   const topLevelPath = /^\$\.([A-Za-z_][A-Za-z0-9_-]*)(?=[:.\[])/u.exec(issue.trim())
-  return topLevelPath?.[1] ? [topLevelPath[1]] : []
+  const topLevelField = topLevelPath?.[1]
+  return topLevelField && publicEventContractFields.has(topLevelField)
+    ? [topLevelField]
+    : []
 }
 
 const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   EVENT_KIND_INVALID: {
     code: 'contract_invalid',
     details: {
+      stage: 'validation',
       issues: [{ code: 'invalid_value', path: ['kind'] }],
     },
   },
   EVENT_OCCURRED_AT_MISSING: {
     code: 'invalid_timestamp',
     details: {
+      stage: 'validation',
       issues: [{ code: 'invalid_type', path: ['occurredAt'], expected: 'string' }],
     },
   },
@@ -272,26 +366,32 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
   EVENT_ID_NOT_ALLOWED: {
     code: 'invalid_option',
     details: {
+      stage: 'validation',
       issues: [{ code: 'unrecognized_keys', path: ['eventId'] }],
     },
   },
   EVENT_MISSING: {
     code: 'not_found',
+    details: { stage: 'read' },
   },
   EVENT_REVISION_CONFLICT: {
     code: 'conflict',
+    details: { stage: 'conflict' },
   },
   INVALID_TIMESTAMP: {
     code: 'invalid_timestamp',
     details: {
+      stage: 'validation',
       issues: [{ code: 'invalid_format', path: [] }],
     },
   },
   INVALID_INPUT: {
     code: 'contract_invalid',
+    details: { stage: 'validation' },
   },
   CAPTURE_MEDIA_MISSING: {
     code: 'invalid_option',
+    details: { stage: 'validation' },
   },
 }
 
@@ -341,6 +441,7 @@ export function toEventUpsertVaultCliError(error: unknown) {
       INVALID_INPUT: {
         code: 'contract_invalid',
         details: {
+          stage: 'validation',
           issues: [{ code: 'invalid_type', path: ['title'], expected: 'string' }],
         },
       },
@@ -362,6 +463,7 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
       'not_found',
       'The input file was not found.',
       {
+        stage: 'filesystem',
         issues: [{ code: 'custom', path: ['file'] }],
       },
     )
@@ -375,6 +477,7 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
       'invalid_path',
       'The input path is not a regular file.',
       {
+        stage: 'filesystem',
         issues: [{ code: 'invalid_type', path: ['file'], expected: 'string' }],
       },
     )
@@ -385,6 +488,7 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
       'permission_denied',
       'The input file could not be read.',
       {
+        stage: 'filesystem',
         issues: [{ code: 'custom', path: ['file'] }],
       },
     )
@@ -397,7 +501,7 @@ export function toVaultCliFilesystemError(
   error: unknown,
   input: {
     message: string
-    fieldPath?: string
+    fieldPath?: 'out' | 'vault'
   },
 ) {
   if (error instanceof VaultCliError) {
@@ -447,6 +551,7 @@ export function toVaultCliFilesystemError(
     input.message,
     {
       retryable: false,
+      stage: 'filesystem',
       issues: input.fieldPath
         ? [{
             path: [input.fieldPath],
@@ -467,6 +572,7 @@ export function toAssessmentImportVaultCliError(error: unknown, inputFilePath: s
     ASSESSMENT_INVALID_JSON: {
       code: 'invalid_payload',
       details: {
+        stage: 'validation',
         issues: [{ code: 'invalid_format', path: [] }],
       },
     },
@@ -482,7 +588,7 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
     return new VaultCliError(
       'assessment_store_invalid',
       'The stored assessment ledger is not valid JSONL.',
-      { retryable: false, vaultCode: error.code },
+      { retryable: false, stage: 'read', vaultCode: error.code },
     )
   }
 
@@ -490,7 +596,7 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
     return new VaultCliError(
       'assessment_store_invalid',
       'Stored assessment data does not match the assessment contract.',
-      { retryable: false, vaultCode: error.code },
+      { retryable: false, stage: 'read', vaultCode: error.code },
     )
   }
 
@@ -499,11 +605,13 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
       code: 'not_found',
       message: 'The requested assessment response was not found.',
       details: {
+        stage: 'read',
         issues: [{ code: 'custom', path: ['id'] }],
       },
     },
     ASSESSMENT_RESPONSE_PROJECT_INVALID: {
       code: 'contract_invalid',
+      details: { stage: 'read' },
     },
   })
 }

@@ -106,6 +106,10 @@ test('stored export pack helpers tolerate a missing exports root and enforce man
         (error as { context?: { issues?: unknown } }).context?.issues,
         [{ path: ['packId'], code: 'custom' }],
       )
+      assert.equal(
+        (error as { context?: { stage?: unknown } }).context?.stage,
+        'read',
+      )
       return true
     },
   )
@@ -148,6 +152,10 @@ test('stored export pack schema errors retain bounded issue paths without manife
         (error as { context?: { issues?: Array<{ path?: string[] }> } }).context?.issues
           ?.some((issue) => issue.path?.[0] === 'manifest'),
         true,
+      )
+      assert.equal(
+        (error as { context?: { stage?: unknown } }).context?.stage,
+        'read',
       )
       return true
     },
