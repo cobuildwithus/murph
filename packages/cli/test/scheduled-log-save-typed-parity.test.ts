@@ -1255,6 +1255,8 @@ test("scheduled-log save and import return bounded field recovery without echoin
       parentRoot,
       "invalid-scheduled-qualifier.json",
     );
+    const privateQualifierKey = "private_qualifier_key_sentinel";
+    const privateQualifierValue = `private-qualifier-value-${"x".repeat(160)}`;
     await writeFile(qualifierPayloadPath, JSON.stringify({
       title: "Invalid imported qualifier",
       schedule: { kind: "cron", expression: "15 6 * * 3" },
@@ -1265,7 +1267,7 @@ test("scheduled-log save and import return bounded field recovery without echoin
           value: 72.5,
           unit: "kg",
           qualifiers: {
-            [invalidQualifierKey]: invalidQualifierValue,
+            [privateQualifierKey]: privateQualifierValue,
           },
         }],
       },
@@ -1283,16 +1285,24 @@ test("scheduled-log save and import return bounded field recovery without echoin
     assert.equal(importedQualifier.envelope.error.code, "invalid_payload");
     assert.equal(
       importedQualifier.envelope.error.fieldErrors?.[0]?.path,
-      "action.measurements.0.qualifiers.<field>",
+      "action.measurements.0.qualifiers",
     );
-    assert.doesNotMatch(
-      JSON.stringify(importedQualifier.envelope),
-      new RegExp(`${invalidQualifierKey}|${invalidQualifierValue}`, "u"),
-    );
+    const importedQualifierEnvelope = JSON.stringify(importedQualifier.envelope);
+    assert.equal(importedQualifierEnvelope.includes(privateQualifierKey), false);
+    assert.equal(importedQualifierEnvelope.includes(privateQualifierValue), false);
 
     const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
     assert.deepEqual(await readdir(scheduledLogDir).catch(() => []), []);
-    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeInvalidWrites);
+    const afterInvalidWrites = await snapshotVaultFiles(vaultRoot);
+    assert.deepEqual(
+      [...afterInvalidWrites].filter(([relativePath]) =>
+        relativePath.startsWith("audit/")
+      ),
+      [...beforeInvalidWrites].filter(([relativePath]) =>
+        relativePath.startsWith("audit/")
+      ),
+    );
+    assert.deepEqual(afterInvalidWrites, beforeInvalidWrites);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }

@@ -962,6 +962,14 @@ function scheduledLogPayloadIssuePath(
   surface: "typed_save" | "import_json",
 ): readonly PropertyKey[] {
   if (surface === "import_json") {
+    if (
+      path[0] === "action" &&
+      path[1] === "measurements" &&
+      typeof path[2] === "number" &&
+      path[3] === "qualifiers"
+    ) {
+      return safeScheduledLogIssuePath(path.slice(0, 4));
+    }
     return safeScheduledLogIssuePath(path);
   }
 
