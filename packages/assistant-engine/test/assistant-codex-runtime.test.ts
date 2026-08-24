@@ -18611,7 +18611,10 @@ describe('assistant codex event shaping', () => {
   })
 
   describe('codex subagent thread events', () => {
-    it('holds the workspace boundary for child usage reported after the parent reply', async () => {
+    const verifyLateChildUsage = async (
+      childStatus: 'completed' | 'failed' | 'interrupted',
+      expectedOutcome: 'aborted' | 'partial' | 'succeeded',
+    ): Promise<void> => {
       const workingDirectory = await createTempDir(
         'assistant-codex-subagent-terminal-usage-work-',
       )
@@ -18695,11 +18698,13 @@ describe('assistant codex event shaping', () => {
               child,
               'thread-subagent-terminal-child',
               'turn-subagent-terminal-child',
+              childStatus,
             )
             writeCompletedTurn(
               child,
               'thread-subagent-terminal-child',
               'turn-subagent-terminal-child',
+              childStatus,
             )
 
             const metadataResume = await waitForRpcMethodCount(
@@ -18747,11 +18752,27 @@ describe('assistant codex event shaping', () => {
 
       expect(result.finalMessage).toBe('Parent replied before child usage')
       expect(result.additionalUsages).toEqual([])
+
+      let boundaryFinished = false
+      const boundary = waitForWarmCodexBackgroundWork().then(() => {
+        boundaryFinished = true
+      })
+      await Promise.resolve()
+      expect(boundaryFinished).toBe(false)
+      expect(
+        readWrittenRpcMessages(
+          requireMockChildProcess(spawnedChildren[0] ?? null),
+        ).filter((message) =>
+          message.method === 'thread/backgroundTerminals/list'
+        ),
+      ).toHaveLength(0)
+
       releaseChildUsage.resolve(undefined)
       const usage = await reportedUsage.promise
       expect(usage).toMatchObject({
         provider: 'codex-cli',
         providerRequestOrdinal: 1,
+        providerRequestOutcome: expectedOutcome,
         usage: {
           cacheWriteTokens: 8,
           cachedInputTokens: 40,
@@ -18784,21 +18805,29 @@ describe('assistant codex event shaping', () => {
         ),
       ).toHaveLength(1)
 
-      let boundaryFinished = false
-      const boundary = waitForWarmCodexBackgroundWork().then(() => {
-        boundaryFinished = true
-      })
       await Promise.resolve()
       expect(boundaryFinished).toBe(false)
 
       releaseUsageRecording.resolve(undefined)
       const child = requireMockChildProcess(spawnedChildren[0] ?? null)
-      const terminalScan = await respondToBackgroundTerminals(child, 1)
-      expect(asRecord(terminalScan.params).threadId)
+      const parentTerminalScan = await respondToBackgroundTerminals(child, 1)
+      expect(asRecord(parentTerminalScan.params).threadId)
         .toBe('thread-subagent-terminal-parent')
+      const childTerminalScan = await respondToBackgroundTerminals(child, 2)
+      expect(asRecord(childTerminalScan.params).threadId)
+        .toBe('thread-subagent-terminal-child')
       await expect(boundary).resolves.toBeUndefined()
       expect(boundaryFinished).toBe(true)
-    })
+    }
+
+    it.each([
+      ['completed', 'succeeded'],
+      ['failed', 'partial'],
+      ['interrupted', 'aborted'],
+    ] as const)(
+      'holds the workspace boundary for %s child usage reported after the parent reply',
+      verifyLateChildUsage,
+    )
 
     it('drops child usage when effective metadata is incomplete without retrying or inheriting the parent', async () => {
       const workingDirectory = await createTempDir(

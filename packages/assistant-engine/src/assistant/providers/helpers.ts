@@ -46,6 +46,7 @@ import type {
   AssistantUserMessageContentPart,
 } from '../content-types.js'
 import type {
+  AssistantProviderRequestOutcome,
   AssistantProviderServiceTier,
   AssistantProviderTurnExecutionInput,
   AssistantProviderUsage,
@@ -1010,6 +1011,7 @@ export interface CodexSubagentTurnTokenUsageSample {
   firstEvent: unknown
   lastEvent: unknown
   occurredAt: string
+  providerRequestOutcome: AssistantProviderRequestOutcome
   threadId: string
   turnId: string
 }
@@ -1081,7 +1083,7 @@ export function buildCodexSubagentUsageDraft(input: {
     occurredAt: input.sample.occurredAt,
     provider: 'codex-cli',
     providerRequestOrdinal: input.ordinal,
-    providerRequestOutcome: 'succeeded',
+    providerRequestOutcome: input.sample.providerRequestOutcome,
     usage: {
       apiKeyEnv: null,
       baseUrl: null,

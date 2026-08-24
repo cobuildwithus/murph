@@ -1,8 +1,8 @@
 # Evaluate Luna high workers for hosted onboarding delegation
 
-Status: active
+Status: completed
 Created: 2026-08-15
-Updated: 2026-08-22
+Updated: 2026-08-24
 
 ## Goal
 
@@ -25,8 +25,9 @@ Updated: 2026-08-22
   by the deferred Luna/high proposal.
 - Murph's ReviewGPT dependency resolves the latest published package and its
   package-backed runner contract remains covered.
-- Focused tests, affected package typechecks, exact-head CI, and required
-  ReviewGPT gates pass.
+- Focused tests, affected package typechecks, and exact-head CI pass. Required
+  review gates pass unless explicitly waived in favor of the documented local
+  deep-review fallback.
 
 ## Scope
 
@@ -84,9 +85,10 @@ Updated: 2026-08-22
 8. [x] Push the corrected candidate and run sensitive final ReviewGPT round 2
    concurrently with exact-head CI; the one allowed preliminary specialist
    pass already completed on the immutable first-reviewed head.
-9. [ ] Delete the raw-event branch, verify the terminal cumulative owner, and
-   run sensitive final ReviewGPT round 3 concurrently with exact-head CI.
-10. [ ] Complete the parent final review, archive this plan, and create the final
+9. [x] Delete the raw-event branch, verify the terminal cumulative owner, and
+   finish the correction review. After repeated final-gate tooling stalls, use
+   the explicitly authorized local deep-review fallback.
+10. [x] Complete the parent final review, archive this plan, and create the final
    scoped commit.
 
 ## Decisions
@@ -145,13 +147,19 @@ Updated: 2026-08-22
 - Non-hosted result aggregation retains the existing cumulative helper and
   parent model because it has no ledger callback. Hosted accounting never
   inspects parent collab events for authorization or model attribution.
+- Register a foreign child when its accepted `turn/started` notification is
+  routed, even when no parent lifecycle item was emitted. This keeps the same
+  child set authoritative for boundary waiting and terminal scans.
+- Carry the child terminal outcome on the cumulative sample: completed maps to
+  succeeded, interrupted to aborted, and failed with observed usage to partial,
+  matching the root provider-request semantics.
 
 ## Verification
 
 - `pnpm --dir packages/assistant-engine exec vitest run --config
   vitest.config.ts --no-coverage test/assistant-codex-subagent-usage.test.ts
   test/assistant-codex-runtime.test.ts` passed on the terminal cumulative
-  correction: 274 tests.
+  correction and final local-review fixes: 276 tests.
 - `pnpm --dir packages/hosted-execution exec vitest run --config
   vitest.config.ts --no-coverage test/assistant-usage.test.ts` passed: 23 tests.
 - `pnpm --dir packages/assistant-engine typecheck` and
@@ -203,7 +211,7 @@ Updated: 2026-08-22
   findings were removed on a remediation head. A 41-minute final pass confirmed
   those findings resolved and found the ambient trust-floor override introduced
   by ReviewGPT 0.5.131; the repository-boundary pin and regression above resolve
-  it. A fresh final pass and exact-head CI remain pending. Two pre-send browser
+  it. Later exact-head verification is recorded below. Two pre-send browser
   failures and one rejected nine-second response were not treated as reviews;
   no Eragon lane was used.
 - Two later marked `PASS` candidates on the trust-floor remediation were also
@@ -229,7 +237,8 @@ Updated: 2026-08-22
   five-minute option. A later local review found that appending it after caller
   arguments let a trailing value-taking option consume it; the option now
   precedes caller arguments, with invocation-order regression coverage. A
-  fresh exact-head final pass remains pending; no Eragon lane was used.
+  later final-gate attempt stalled without a substantive result; the user
+  explicitly waived another retry and authorized the local deep-review fallback.
 - The current PR's one preliminary specialist pass found two medium coverage
   gaps: metadata failure lacked direct no-retry proof, and raw-response privacy
   was asserted for buffered events but not traces. Both were accepted and
@@ -257,3 +266,9 @@ Updated: 2026-08-22
   The correction deletes raw-event enablement, parsing, response deduplication,
   synthetic request profiles, cached metadata state, and spawn-model parsing;
   the child terminal now owns one cumulative ledger draft.
+- The final local deep review found that no-lifecycle child notifications were
+  correlated for usage but omitted from workspace-boundary tracking, and that
+  child terminal status was discarded. The minimal correction registers the
+  accepted child start in the existing boundary set and carries normalized
+  succeeded, partial, or aborted outcomes into the immutable usage draft.
+Completed: 2026-08-24

@@ -1826,6 +1826,9 @@ class CodexAppServerProcess {
       return false
     }
 
+    if (isCodexTurnStartedMethod(readCodexEventMethod(message))) {
+      this.detachedChildThreadIds.add(threadId)
+    }
     handler(message)
     return true
   }
@@ -5336,6 +5339,7 @@ async function runCodexAppServerTurnOnProcess(
         firstEvent: null,
         lastEvent: null,
         occurredAt: new Date().toISOString(),
+        providerRequestOutcome: 'succeeded',
         threadId,
         turnId: messageTurnId,
       })
@@ -5351,7 +5355,16 @@ async function runCodexAppServerTurnOnProcess(
     })
     const sample = subagentTokenUsageByTurn.get(usageKey)
     if (isCodexTurnCompletedMethod(eventMethod)) {
-      if (!sample || !input.onAdditionalUsage) {
+      if (!sample) {
+        return
+      }
+      const status = extractCodexTurnStatus(message)
+      sample.providerRequestOutcome = status === 'interrupted'
+        ? 'aborted'
+        : isFailedCodexTurnStatus(status)
+          ? 'partial'
+          : 'succeeded'
+      if (!input.onAdditionalUsage) {
         return
       }
       // Removing the terminal sample is the exactly-once fence.

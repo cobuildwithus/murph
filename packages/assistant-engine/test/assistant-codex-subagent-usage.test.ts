@@ -63,6 +63,7 @@ function sampleFromEvents(
     firstEvent: events[0],
     lastEvent: events.at(-1),
     occurredAt,
+    providerRequestOutcome: 'succeeded',
     threadId,
     turnId,
   }
