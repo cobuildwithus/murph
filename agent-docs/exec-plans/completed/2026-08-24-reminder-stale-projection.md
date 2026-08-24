@@ -1,6 +1,6 @@
 # Distinguish overdue reminder occurrences
 
-Status: active
+Status: completed
 Created: 2026-08-24
 
 ## Product UX
@@ -49,3 +49,7 @@ When multiple projection problems coexist, keep the underlying uncertainty and o
 - The accepted review correction keeps `stale_recurring_occurrence` out of any response that already carries another projection issue, so the producer cannot expose a derived overdue claim alongside an unverified timing basis. This is one owner-boundary condition with no new state or prompt precedence machinery.
 - The focused Assistant Runtime file passes all 305 tests, including the false-overdue timezone sequence, stale projection, automatic readback, and content-free diagnostics. Assistant Engine prompt/tool contracts pass 96 tests, and all three scripted overdue-member journeys pass. Both changed packages typecheck.
 - Complete first provider-visible request bodies captured through the pinned Codex App Server with identical direct and group reminder fixtures, `gpt-5.6-terra`, low reasoning, production code mode, and `gpt-tokenizer` 3.4.0 `o200k_harmony` grow by 51 tokens and 277 UTF-8 bytes in each route. Direct changes from 27,865 tokens / 127,340 bytes to 27,916 / 127,617; group changes from 23,738 tokens / 108,608 bytes to 23,789 / 108,885. No provider-visible field was excluded from either serialized request. The delta is entirely assembled reminder instructions; the deferred automation tool description is absent from the first request, and all other provider-visible fields are unchanged.
+- ReviewGPT's fresh full round-two audit passed on exact head `f646f62bfef129143211477ea386190b64b51388` with no findings. It confirmed the producer-owned stale classification, timezone uncertainty protection, direct inspection/edit journeys, neutral eligible-group journey, independent response assertions, and absence of a new lifecycle owner.
+- All required GitHub checks on exact head `f646f62bfef129143211477ea386190b64b51388` are green, including release build/typecheck, Assistant/CLI/platform coverage, runner fixtures and bundle budget, host matrices, repository hygiene, billing, foreground reply cardinality, Cloudflare sandbox, native hosted E2E, and Vercel.
+Updated: 2026-08-24
+Completed: 2026-08-24
