@@ -258,8 +258,11 @@ Last verified: 2026-08-20
   supported-reader digest, and producer digest. Missing artifacts or dispatch
   identity, stale heads, incomplete pagination, duplicate or failed readers,
   skipped proof jobs, a mismatched digest, cancellation, or private failure
-  cannot publish success. Once dispatch
-  returns a run id, uncertain polling or timeout cancels only that run, escalates
+  cannot publish success. Once dispatch returns a run id, the controller allows
+  five exact-id reads over at most 60 seconds for GitHub to make that newly
+  accepted run visible; only `404` is retryable, and the controller never
+  searches for or guesses a run. After the exact run is visible, uncertain
+  polling or timeout cancels only that run, escalates
   to force-cancel only if ordinary cancellation does not make it terminal, and
   never searches for or cancels a guessed run.
 - Native iMessage nutrition-card delivery falls back to its already-derived

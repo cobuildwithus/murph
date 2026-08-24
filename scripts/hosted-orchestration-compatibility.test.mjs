@@ -559,6 +559,88 @@ test("controller dispatches only after tag, workflow, and current-head proof", a
   }));
 });
 
+test("controller waits for its accepted exact run to become visible", async () => {
+  let runReads = 0;
+  let sleeps = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.includes("/git/ref/tags/")) {
+      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      runReads += 1;
+      return runReads === 1
+        ? new Response("not yet visible", { status: 404 })
+        : jsonResponse(privateRun());
+    }
+    if (url.includes(`/actions/runs/${RUN_ID}/jobs`)) {
+      return jsonResponse({ jobs: proofJobs(), total_count: 3 });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    const proof = await runTemporalCompatibility(compatibilityArgs({
+      sleepFn: async () => {
+        sleeps += 1;
+      },
+    }));
+    assert.equal(proof.readerCount, 2);
+    assert.equal(runReads, 2);
+    assert.equal(sleeps, 1);
+  }));
+});
+
+test("controller bounds exact-run visibility recovery before cancellation", async () => {
+  const controls = [];
+  let runReads = 0;
+  let sleeps = 0;
+  await withCompatibilityEnv(async () => withFetch(async (url) => {
+    if (url.includes("/git/ref/tags/")) {
+      return jsonResponse({ object: { sha: PRIVATE_SHA, type: "commit" }, ref: `refs/tags/${PRIVATE_REF}` });
+    }
+    if (url.includes("/actions/workflows/") && !url.endsWith("/dispatches")) {
+      return jsonResponse({
+        id: WORKFLOW_ID,
+        name: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME,
+        path: TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH,
+        state: "active",
+      });
+    }
+    if (url.endsWith("/pulls/42")) return jsonResponse(pullRequest());
+    if (url.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: RUN_ID });
+    if (url.endsWith(`/actions/runs/${RUN_ID}/cancel`)) {
+      controls.push(url);
+      return new Response(null, { status: 202 });
+    }
+    if (url.endsWith(`/actions/runs/${RUN_ID}`)) {
+      runReads += 1;
+      return runReads <= 5
+        ? new Response("not yet visible", { status: 404 })
+        : jsonResponse(privateRun({ conclusion: "cancelled" }));
+    }
+    throw new Error(`unexpected URL ${url}`);
+  }, async () => {
+    await assert.rejects(() => runTemporalCompatibility(compatibilityArgs({
+      sleepFn: async () => {
+        sleeps += 1;
+      },
+    })), /run lookup failed with HTTP 404/u);
+    assert.equal(runReads, 6);
+    assert.equal(sleeps, 4);
+    assert.deepEqual(controls, [
+      `https://api.github.com/repos/${TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY}/actions/runs/${RUN_ID}/cancel`,
+    ]);
+  }));
+});
+
 test("controller cancels only its accepted run when status polling becomes uncertain", async () => {
   const controlUrls = [];
   let runReads = 0;
