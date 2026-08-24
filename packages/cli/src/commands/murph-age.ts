@@ -1594,6 +1594,118 @@ type MurphAgeSubmittedPreviewOptions = {
   modelCardArtifactRoot?: string;
 }
 
+const murphAgeSubmittedPayloadTopLevelFields = new Set([
+  'asOf',
+  'cardId',
+  'chronologicalAgeYears',
+  'functionResidualParameterPack',
+  'modelCardArtifactRoot',
+  'sex',
+  'submittedMetrics',
+  'wearableResidualParameterPack',
+  'wearableResidualParameterPacks',
+])
+const murphAgeSubmittedMetricFields = new Set([
+  'confidence',
+  'context',
+  'effectiveDate',
+  'metricKey',
+  'observedAt',
+  'sourceKind',
+  'sourceLabel',
+  'unit',
+  'value',
+])
+const murphAgeSubmittedMetricContextFields = new Set([
+  'fastingStatus',
+  'flag',
+  'measurementMethodKey',
+  'qualifiers',
+  'referenceRange',
+])
+const murphAgeSubmittedMetricReferenceRangeFields = new Set([
+  'high',
+  'low',
+  'text',
+])
+
+function parseMurphAgeSubmittedPreviewPayload(
+  value: unknown,
+): MurphAgeSubmittedPreviewPayload {
+  const parsed = murphAgeSubmittedPreviewPayloadSchema.safeParse(value)
+  if (parsed.success) {
+    return parsed.data
+  }
+
+  throw new VaultCliError(
+    'invalid_payload',
+    'Input failed validation.',
+    {
+      issues: parsed.error.issues.map((issue) => ({
+        code: issue.code,
+        path: projectMurphAgeSubmittedPayloadIssuePath(issue.path),
+      })),
+      retryable: false,
+      stage: 'validation',
+    },
+  )
+}
+
+function projectMurphAgeSubmittedPayloadIssuePath(
+  path: readonly PropertyKey[],
+): PropertyKey[] {
+  const [topLevelField, metricIndex, metricField, contextField, referenceRangeField] = path
+  if (
+    typeof topLevelField !== 'string' ||
+    !murphAgeSubmittedPayloadTopLevelFields.has(topLevelField)
+  ) {
+    return []
+  }
+  if (topLevelField !== 'submittedMetrics') {
+    return [topLevelField]
+  }
+
+  const projectedPath: PropertyKey[] = [topLevelField]
+  if (
+    typeof metricIndex !== 'number' ||
+    !Number.isSafeInteger(metricIndex) ||
+    metricIndex < 0
+  ) {
+    return projectedPath
+  }
+  projectedPath.push(metricIndex)
+  if (
+    typeof metricField !== 'string' ||
+    !murphAgeSubmittedMetricFields.has(metricField)
+  ) {
+    return projectedPath
+  }
+  projectedPath.push(metricField)
+  if (metricField !== 'context') {
+    return projectedPath
+  }
+  if (
+    typeof contextField !== 'string' ||
+    !murphAgeSubmittedMetricContextFields.has(contextField)
+  ) {
+    return projectedPath
+  }
+  projectedPath.push(contextField)
+  if (contextField === 'qualifiers') {
+    return projectedPath
+  }
+  if (contextField !== 'referenceRange') {
+    return projectedPath
+  }
+  if (
+    typeof referenceRangeField === 'string' &&
+    murphAgeSubmittedMetricReferenceRangeFields.has(referenceRangeField)
+  ) {
+    projectedPath.push(referenceRangeField)
+  }
+  return projectedPath
+}
+
 export function registerMurphAgeCommands(
   cli: Cli.Cli,
   _services: VaultServices,
@@ -2112,7 +2224,7 @@ function scaffoldMurphAgeSubmittedPreviewPayload(): MurphAgeSubmittedPreviewPayl
 async function loadMurphAgeSubmittedPreviewReport(
   options: MurphAgeSubmittedPreviewOptions,
 ) {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPreviewPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted preview payload'),
   )
 
@@ -2125,7 +2237,7 @@ async function loadMurphAgeSubmittedPreviewReport(
 async function loadMurphAgeSubmittedCalculatorReport(
   options: MurphAgeSubmittedPreviewOptions & { mode: z.infer<typeof murphAgeModeSchema> },
 ) {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPreviewPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {
@@ -2164,7 +2276,7 @@ async function loadMurphAgeSubmittedCalculatorReport(
 async function loadMurphAgeSubmittedCalculatorViewBundle(
   options: MurphAgeSubmittedPreviewOptions & { includeResearchPreview: boolean },
 ): Promise<MurphAgeSubmittedCalculatorViewBundle> {
-  const payload = murphAgeSubmittedPreviewPayloadSchema.parse(
+  const payload = parseMurphAgeSubmittedPreviewPayload(
     await loadJsonInputObject(options.input, 'Murph Age submitted calculator payload'),
   )
   const {

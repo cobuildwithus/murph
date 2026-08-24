@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Cli } from 'incur'
@@ -55,6 +55,7 @@ import type { CliEnvelope } from './cli-test-helpers.js'
 import {
   createTempVaultContext,
   requireData,
+  runCli,
   runInProcessJsonCli,
 } from './cli-test-helpers.js'
 
@@ -1092,6 +1093,86 @@ test('age submitted-data commands classify unsupported fields without echoing va
     }
   } finally {
     await rm(payloadRoot, { force: true, recursive: true })
+  }
+})
+
+test('built age calculate-bundle collapses private qualifier paths without writing', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-age-cli-private-qualifier-',
+  )
+  const payloadPath = path.join(parentRoot, 'payload.json')
+  const artifactRoot = path.join(vaultRoot, 'private-artifacts')
+  const privateQualifierKey = 'privateQualifierKey'
+  const privateQualifierValue = 'privateQualifierValue'
+  const payload = {
+    asOf: '2026-05-10T00:00:00.000Z',
+    chronologicalAgeYears: 45,
+    modelCardArtifactRoot: artifactRoot,
+    sex: 'female',
+    submittedMetrics: [{
+      context: {
+        qualifiers: {
+          [privateQualifierKey]: [privateQualifierValue],
+        },
+      },
+      metricKey: 'HbA1c',
+      value: 5.4,
+    }],
+  }
+  try {
+    const rawSchemaResult = murphAgeSubmittedPreviewPayloadSchema.safeParse(payload)
+    assert.equal(rawSchemaResult.success, false)
+    if (rawSchemaResult.success) {
+      assert.fail('expected the private qualifier fixture to fail schema validation')
+    }
+    assert.equal(
+      rawSchemaResult.error.issues.some(
+        (issue) => issue.path.includes(privateQualifierKey),
+      ),
+      true,
+    )
+    await writeFile(payloadPath, JSON.stringify(payload))
+
+    const result = await runCli<unknown>([
+      'age',
+      'calculate-bundle',
+      '--input',
+      `@${payloadPath}`,
+    ], {
+      env: {
+        MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        VAULT: vaultRoot,
+      },
+    })
+
+    assert.equal(result.ok, false)
+    if (result.ok) {
+      assert.fail('expected invalid submitted qualifier data to fail')
+    }
+    assert.equal(result.error.code, 'invalid_payload')
+    assert.equal(result.error.message, 'Input failed validation.')
+    assert.equal(result.error.stage, 'validation')
+    assert.equal(result.error.retryable, false)
+    assert.deepEqual(result.error.fieldErrors, [{
+      code: 'invalid_union',
+      expected: '',
+      message: 'This field is invalid.',
+      path: 'submittedMetrics.0.context.qualifiers',
+      received: 'invalid',
+    }])
+    const encoded = JSON.stringify(result)
+    for (const forbidden of [
+      privateQualifierKey,
+      privateQualifierValue,
+      parentRoot,
+      payloadPath,
+      artifactRoot,
+    ]) {
+      assert.equal(encoded.includes(forbidden), false, forbidden)
+    }
+    assert.deepEqual(await readdir(vaultRoot), [])
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
   }
 })
 

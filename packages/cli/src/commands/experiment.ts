@@ -414,7 +414,7 @@ function normalizeExpectedDirectionEntries(
             code: 'invalid_format',
           }],
           retryable: false,
-          stage: 'option_validation',
+          stage: 'validation',
         },
       )
     }
@@ -432,7 +432,7 @@ function normalizeExpectedDirectionEntries(
             code: 'invalid_value',
           }],
           retryable: false,
-          stage: 'option_validation',
+          stage: 'validation',
         },
       )
     }
@@ -701,7 +701,7 @@ function parseExperimentPrimaryOutcomeOptions(
         code: issue.code,
       })),
       retryable: false,
-      stage: 'option_validation',
+      stage: 'validation',
     },
   )
 }
