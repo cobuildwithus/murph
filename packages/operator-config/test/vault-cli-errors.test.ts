@@ -215,33 +215,24 @@ describe('projectVaultCliError', () => {
     },
   )
 
-  test('redacts unexpected exception paths while retaining bounded error text', () => {
-    const privatePath = '/private/workspace/member-vault/data.json'
-    const projection = projectVaultCliError(
-      new Error(`Unexpected parser failure in ${privatePath}`),
-    )
-
-    expect(projection).toMatchObject({
-      code: 'UNKNOWN',
-      stage: 'command',
-      retryable: false,
-    })
-    expect(JSON.stringify(projection)).not.toContain(privatePath)
-    expect(projection.message).toMatch(/Unexpected parser failure in <PATH>/u)
-  })
-
-  test('does not return provider-shaped or credential-bearing unknown messages', () => {
+  test('returns one value-free message for every unhandled failure', () => {
+    const submittedValue = 'private-submitted-value'
+    const providerBody = 'private-provider-response'
     for (const message of [
-      '{"error":{"message":"private-provider-response"}}',
-      'Bearer <REDACTED_TOKEN>',
+      `Unexpected parser failure for ${submittedValue}`,
+      `Mapbox address resolution request failed (HTTP 400: ${providerBody} echoed ${submittedValue}).`,
+      `Bearer <REDACTED_TOKEN> while processing ${submittedValue}`,
     ]) {
       const projection = projectVaultCliError(new Error(message))
 
-      expect(projection.code).toBe('UNKNOWN')
-      expect(projection.message).toBe(
-        'The command failed without a safe recoverable detail.',
-      )
-      expect(JSON.stringify(projection)).not.toContain('private-provider-response')
+      expect(projection).toMatchObject({
+        code: 'UNKNOWN',
+        message: 'The command failed without a safe recoverable detail.',
+        retryable: false,
+        stage: 'command',
+      })
+      expect(JSON.stringify(projection)).not.toContain(submittedValue)
+      expect(JSON.stringify(projection)).not.toContain(providerBody)
       expect(JSON.stringify(projection)).not.toContain('<REDACTED_TOKEN>')
     }
   })

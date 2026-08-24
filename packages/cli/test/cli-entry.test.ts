@@ -161,8 +161,11 @@ test("loadCliEnvFiles rethrows non-ENOENT load errors", () => {
   assert.throws(() => loadCliEnvFiles("/repo/worktree"), loadFailure);
 });
 
-test("renderMurphCliEntrypointError classifies human failures without raw detail", async () => {
-  const error = Object.assign(new Error("Config validation failed."), {
+test("renderMurphCliEntrypointError uses a value-free unknown failure", async () => {
+  const submittedValue = "private-submitted-value";
+  const providerBody = "private-provider-response";
+  const rawMessage = `Parser rejected ${submittedValue}: ${providerBody}.`;
+  const error = Object.assign(new Error(rawMessage), {
     code: "CONFIG_INVALID",
     details: {
       errors: [
@@ -178,11 +181,13 @@ test("renderMurphCliEntrypointError classifies human failures without raw detail
   assert.equal(
     rendered.output,
     [
-      "Error: Config validation failed.",
+      "Error: The command failed without a safe recoverable detail.",
       "Stage: command",
       "Hint: Check the command inputs and runtime status before retrying.",
     ].join("\n"),
   );
+  assert.equal(rendered.output.includes(submittedValue), false);
+  assert.equal(rendered.output.includes(providerBody), false);
 });
 
 test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", async () => {
