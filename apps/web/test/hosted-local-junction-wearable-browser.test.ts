@@ -1210,6 +1210,144 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(now).toBe(1_250);
   });
 
+  it("revalidates an unexpected host after incomplete Garmin consent departs", async () => {
+    let now = 0;
+    let unexpectedClicks = 0;
+    const consentFrame = authorizationFrame({});
+    const unexpectedFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          unexpectedClicks += 1;
+        },
+        text: "Continue",
+      }],
+    });
+    const currentFrame = () => now < 500 ? consentFrame : unexpectedFrame;
+    const page = {
+      frames: () => [currentFrame()],
+      getByRole: (
+        ...args: Parameters<typeof consentFrame.getByRole>
+      ) => currentFrame().getByRole(...args),
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: currentFrame,
+      title: vi.fn(async () => "Unexpected Authorization"),
+      url: () => now < 500
+        ? "https://connect.garmin.com/partner/oauthConfirm"
+        : "https://unexpected.example.test/authorize",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).rejects.toThrow(
+      "Refusing to enter Garmin credentials at unexpected authorization host",
+    );
+
+    expect(unexpectedClicks).toBe(0);
+  });
+
+  it("revalidates a provider challenge after incomplete Garmin consent departs", async () => {
+    let now = 0;
+    let challengeClicks = 0;
+    const consentFrame = authorizationFrame({});
+    const challengeFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          challengeClicks += 1;
+        },
+        text: "Continue",
+      }],
+    });
+    const currentFrame = () => now < 500 ? consentFrame : challengeFrame;
+    const page = {
+      frames: () => [currentFrame()],
+      getByRole: (
+        ...args: Parameters<typeof consentFrame.getByRole>
+      ) => currentFrame().getByRole(...args),
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: currentFrame,
+      title: vi.fn(async () => now < 500
+        ? "Garmin Partner Auth"
+        : "Just a moment..."),
+      url: () => now < 500
+        ? "https://connect.garmin.com/partner/oauthConfirm"
+        : "https://sso.garmin.com/portal/sso/en-US/sign-in",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).rejects.toThrow(
+      "Garmin authorization was blocked by an external provider challenge.",
+    );
+
+    expect(challengeClicks).toBe(0);
+  });
+
+  it("revalidates Garmin Save after selecting the consent checkboxes", async () => {
+    let saveClicks = 0;
+    const checkboxes = Array.from({ length: 3 }, () => ({
+      checked: false,
+      text: "",
+    }));
+    const initialFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          saveClicks += 1;
+        },
+        text: "Save",
+      }],
+      checkboxes,
+    });
+    const changedFrame = authorizationFrame({
+      buttons: [{ text: "Save" }, { text: "Save" }],
+      checkboxes,
+    });
+    const currentFrame = () => checkboxes.some((checkbox) => checkbox.checked)
+      ? changedFrame
+      : initialFrame;
+    const page = {
+      frames: () => [currentFrame()],
+      getByRole: (
+        ...args: Parameters<typeof initialFrame.getByRole>
+      ) => currentFrame().getByRole(...args),
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: currentFrame,
+      title: vi.fn(async () => "Garmin Partner Auth"),
+      url: () => "https://connect.garmin.com/partner/oauthConfirm",
+      waitForTimeout: vi.fn(async () => undefined),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+    )).rejects.toThrow(
+      "Garmin consent did not expose one enabled Save action.",
+    );
+
+    expect(saveClicks).toBe(0);
+  });
+
   it("fails closed on a partial Garmin consent progression marker pair", async () => {
     let agreeClicks = 0;
     const mainFrame = authorizationFrame({

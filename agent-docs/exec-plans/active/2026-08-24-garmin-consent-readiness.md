@@ -34,7 +34,11 @@ Updated: 2026-08-24
 
 1. [x] Prove the transient consent-surface race from the protected canary.
 2. [x] Add bounded exact-surface readiness and regression coverage.
-3. [ ] Run focused verification and required PR review gates.
+3. [ ] Run focused verification and required PR review gates. The preliminary
+   specialist review returned two accepted coverage findings: route departure
+   must restart the outer authorization guard before any action, and the exact
+   controls must be ready and revalidated at the final `Save` boundary. Both
+   are remediated on the follow-up candidate.
 4. [ ] Merge and prove the latest protected `main` Garmin canary green.
 
 ## Decisions
@@ -57,8 +61,9 @@ Updated: 2026-08-24
 
 Completed local proof:
 
-- Browser-runner unit suite: 41 passed.
+- Browser-runner unit suite: 44 passed, including unexpected-host and provider-
+  challenge revalidation after route departure plus final `Save` revalidation.
 - Real headed-Chromium smoke: 8 passed, including delayed Garmin consent
-  controls on the exact route.
+  checkbox readiness on the exact route.
 - Hosted Web typecheck and scoped ESLint: passed.
 - Docs drift and diff checks: passed.
