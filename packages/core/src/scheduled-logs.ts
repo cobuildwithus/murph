@@ -262,6 +262,30 @@ function buildScheduledLogFrontmatter(record: ScheduledLogRecord): FrontmatterOb
   });
 }
 
+function validateScheduledLogCandidateFrontmatter(
+  attributes: FrontmatterObject,
+): void {
+  const parsed = scheduledLogFrontmatterSchema.safeParse(attributes);
+  if (parsed.success) {
+    return;
+  }
+
+  throw new VaultError(
+    "VAULT_INVALID_INPUT",
+    "Scheduled-log data failed canonical validation.",
+    {
+      issues: parsed.error.issues.map((issue) => ({
+        code: issue.code,
+        path: issue.path.map((segment) =>
+          typeof segment === "string" || typeof segment === "number"
+            ? segment
+            : "<field>"
+        ),
+      })),
+    },
+  );
+}
+
 function buildScheduledLogMarkdown(record: ScheduledLogRecord): string {
   return stringifyFrontmatterDocument({ attributes: buildScheduledLogFrontmatter(record), body: record.body });
 }
@@ -464,10 +488,12 @@ async function upsertScheduledLogWithLatestRegistry(input: UpsertScheduledLogInp
     relativePath: target.relativePath,
     markdown: "",
   };
+  const attributes = buildScheduledLogFrontmatter(record);
+  validateScheduledLogCandidateFrontmatter(attributes);
   const { auditPath, record: writtenRecord } = await writeMarkdownRegistryRecord({
     vaultRoot: input.vaultRoot,
     target,
-    attributes: buildScheduledLogFrontmatter(record),
+    attributes,
     body: record.body,
     recordFromParts: parseScheduledLogRecord,
     operationType: "scheduled_log_upsert",

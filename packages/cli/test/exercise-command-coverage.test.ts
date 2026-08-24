@@ -230,12 +230,10 @@ test('exercise commands classify catalog artifact failures without echoing inter
     assert.equal(result.exitCode, 1)
     assert.equal(result.envelope.ok, false)
     assert.equal(result.envelope.error.code, 'exercise_catalog_unavailable')
-    assert.equal(result.envelope.error.stage, 'exercise_catalog')
     assert.equal(result.envelope.error.retryable, false)
-    assert.equal(
-      result.envelope.error.hint,
-      'Use only a simple conservative movement description without catalog details; if that is unsafe or insufficient, stop.',
-    )
+    assert.match(result.envelope.error.message ?? '', /simple conservative movement description/u)
+    assert.equal(result.envelope.error.hint, undefined)
+    assert.equal(result.envelope.error.stage, undefined)
     assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_ARTIFACT_SENTINEL/u)
   }
 
@@ -250,11 +248,9 @@ test('exercise commands classify catalog artifact failures without echoing inter
   assert.equal(invalid.exitCode, 1)
   assert.equal(invalid.envelope.ok, false)
   assert.equal(invalid.envelope.error.code, 'exercise_catalog_invalid')
-  assert.equal(invalid.envelope.error.stage, 'exercise_catalog')
   assert.equal(invalid.envelope.error.retryable, false)
-  assert.equal(
-    invalid.envelope.error.hint,
-    'Use only a simple conservative movement description without catalog details; if that is unsafe or insufficient, stop.',
-  )
+  assert.match(invalid.envelope.error.message ?? '', /stop instead of using catalog details/u)
+  assert.equal(invalid.envelope.error.hint, undefined)
+  assert.equal(invalid.envelope.error.stage, undefined)
   assert.doesNotMatch(JSON.stringify(invalid.envelope), /PRIVATE_CATALOG_CONTENT_SENTINEL/u)
 })

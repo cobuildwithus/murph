@@ -81,12 +81,6 @@ import {
 } from './compact-field-spec.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { registerWorkoutLiveCommands } from './workout-live.js'
-import {
-  workoutTypedRepairFieldForIssuePath,
-  workoutTypedRepairFields,
-  type WorkoutTypedRepairField,
-} from './workout-typed-repair-fields.js'
-
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const workoutListLimitOptionSchema = z
   .number()
@@ -121,9 +115,47 @@ interface WorkoutAddTypedOptions {
   workoutStartedAt?: string
 }
 
-const workoutAddSessionOptionKeys = workoutTypedRepairFields satisfies ReadonlyArray<
-  keyof WorkoutAddTypedOptions
->
+const workoutAddSessionOptionKeys = [
+  'workoutSourceApp',
+  'workoutSourceWorkoutId',
+  'workoutStartedAt',
+  'workoutEndedAt',
+  'workoutRoutineId',
+  'workoutRoutineName',
+  'workoutSessionNote',
+  'workoutMedia',
+  'workoutExercise',
+  'workoutSet',
+] as const satisfies ReadonlyArray<keyof WorkoutAddTypedOptions>
+
+type WorkoutTypedIssuePath = (typeof workoutAddSessionOptionKeys)[number]
+
+function workoutTypedIssuePath(
+  path: readonly PropertyKey[],
+): WorkoutTypedIssuePath {
+  switch (path[0]) {
+    case 'sourceApp':
+      return 'workoutSourceApp'
+    case 'sourceWorkoutId':
+      return 'workoutSourceWorkoutId'
+    case 'startedAt':
+      return 'workoutStartedAt'
+    case 'endedAt':
+      return 'workoutEndedAt'
+    case 'routineId':
+      return 'workoutRoutineId'
+    case 'routineName':
+      return 'workoutRoutineName'
+    case 'sessionNote':
+      return 'workoutSessionNote'
+    case 'media':
+      return 'workoutMedia'
+    case 'exercises':
+      return path.includes('sets') ? 'workoutSet' : 'workoutExercise'
+    default:
+      return 'workoutExercise'
+  }
+}
 
 const workoutAddMediaFields = new Set([
   'kind',
@@ -184,20 +216,16 @@ const workoutImportPayloadExample = {
 
 function invalidWorkoutAddOption(
   message: string,
-  path: WorkoutTypedRepairField | 'note',
+  path: WorkoutTypedIssuePath | 'note',
 ): never {
   throw new VaultCliError(
     'invalid_option',
     message,
-    undefined,
     {
-      fields: [{
-        path,
-        code: 'invalid_option',
-        message: 'Workout options are incompatible or incomplete.',
+      issues: [{
+        path: [path],
+        code: 'custom',
       }],
-      hint: 'Correct the workout options and retry.',
-      stage: 'validation',
     },
   )
 }
@@ -212,31 +240,6 @@ function invalidWorkoutExerciseOption(message: string): never {
 
 function invalidWorkoutSetOption(message: string): never {
   return invalidWorkoutAddOption(message, 'workoutSet')
-}
-
-function workoutValidationMessage(issue: {
-  code: string
-  path: readonly PropertyKey[]
-}): string {
-  if (issue.code === 'too_small' && issue.path.at(-1) === 'sets') {
-    return 'At least one workout set is required.'
-  }
-
-  switch (issue.code) {
-    case 'invalid_type':
-      return 'Value does not match the required type.'
-    case 'too_big':
-      return 'Value exceeds the allowed maximum.'
-    case 'too_small':
-      return 'Value is below the allowed minimum.'
-    case 'invalid_value':
-    case 'invalid_enum_value':
-      return 'Value is not one of the allowed options.'
-    case 'unrecognized_keys':
-      return 'Field is not supported.'
-    default:
-      return 'Value failed workout validation.'
-  }
 }
 
 function normalizeWorkoutMediaRelativePath(relativePath: string): string {
@@ -421,14 +424,10 @@ function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutS
     throw new VaultCliError(
       'invalid_option',
       'Invalid workout session fields.',
-      undefined,
       {
-        stage: 'validation',
-        hint: 'Correct the listed workout fields and retry.',
-        fields: parsed.error.issues.map((issue) => ({
-          path: workoutTypedRepairFieldForIssuePath(issue.path),
+        issues: parsed.error.issues.map((issue) => ({
+          path: [workoutTypedIssuePath(issue.path)],
           code: issue.code,
-          message: workoutValidationMessage(issue),
         })),
       },
     )

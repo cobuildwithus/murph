@@ -16,6 +16,7 @@ import {
   scaffoldScheduledLogPayload,
   setScheduledLogStatus,
   showScheduledLog,
+  upsertDailyFoodScheduledLog,
   upsertFood,
   upsertScheduledLog,
   VaultError,
@@ -30,6 +31,20 @@ async function writeVaultFile(vaultRoot: string, relativePath: string, contents:
     recursive: true,
   });
   await fs.writeFile(path.join(vaultRoot, relativePath), contents, "utf8");
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, string>> {
+  const snapshot = new Map<string, string>();
+  const relativePaths = await fs.readdir(vaultRoot, { recursive: true });
+
+  for (const relativePath of relativePaths.sort((left, right) => left.localeCompare(right))) {
+    const absolutePath = path.join(vaultRoot, relativePath);
+    if ((await fs.stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await fs.readFile(absolutePath, "utf8"));
+    }
+  }
+
+  return snapshot;
 }
 
 test("scheduled logs support preview, filters, renames, conflicts, and status changes", async () => {
@@ -304,6 +319,59 @@ test("scheduled log upserts resolve creates and updates under one registry lock"
   const records = await listScheduledLogs({ vaultRoot });
   assert.equal(records.items.length, 1);
   assert.equal(records.items[0]?.slug, "morning-check");
+});
+
+test("daily food scheduled logs enforce the resolved canonical slug boundary before writing", async () => {
+  const vaultRoot = await makeTempDirectory("murph-scheduled-logs-food-slug-boundary");
+  await initializeVault({ vaultRoot });
+
+  const foodAtLimit = await upsertFood({
+    vaultRoot,
+    title: "Boundary food",
+    slug: "f".repeat(111),
+  });
+  const scheduledAtLimit = await upsertDailyFoodScheduledLog({
+    vaultRoot,
+    foodId: foodAtLimit.record.foodId,
+    localTime: "09:00",
+  });
+  assert.equal(scheduledAtLimit.record.slug, `auto-log-${"f".repeat(111)}`);
+  assert.equal(scheduledAtLimit.record.slug.length, 120);
+  assert.equal(
+    (await readScheduledLog({
+      vaultRoot,
+      scheduledLogId: scheduledAtLimit.record.scheduledLogId,
+    })).slug,
+    scheduledAtLimit.record.slug,
+  );
+
+  const foodOverLimit = await upsertFood({
+    vaultRoot,
+    title: "Over-boundary food",
+    slug: "g".repeat(112),
+  });
+  const beforeRejectedSchedule = await snapshotVaultFiles(vaultRoot);
+  assert.equal(
+    [...beforeRejectedSchedule.keys()].some((relativePath) => relativePath.startsWith("audit/")),
+    true,
+  );
+
+  await assert.rejects(
+    () => upsertDailyFoodScheduledLog({
+      vaultRoot,
+      foodId: foodOverLimit.record.foodId,
+      localTime: "09:00",
+    }),
+    (error: unknown) =>
+      error instanceof VaultError &&
+      error.code === "VAULT_INVALID_INPUT" &&
+      error.message === "Scheduled-log data failed canonical validation." &&
+      JSON.stringify(error.details.issues) === JSON.stringify([{
+        code: "too_big",
+        path: ["slug"],
+      }]),
+  );
+  assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSchedule);
 });
 
 test("scheduled log execution inherits food details and is idempotent per occurrence", async () => {

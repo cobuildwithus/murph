@@ -9,7 +9,6 @@ import { Cli } from 'incur'
 import { test } from 'vitest'
 
 import { registerWorkoutCommands } from '../src/commands/workout.js'
-import { workoutTypedRepairFields } from '../src/commands/workout-typed-repair-fields.js'
 import { incurErrorBridge } from '../src/incur-error-bridge.js'
 import {
   createTempVaultContext,
@@ -547,7 +546,18 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   await initializeVault({ vaultRoot, title: 'Workout add invalid typed vault' })
   const addSchema = await readCommandSchema(cli, ['workout', 'add'])
   const editSchema = await readCommandSchema(cli, ['workout', 'edit'])
-  for (const field of workoutTypedRepairFields) {
+  for (const field of [
+    'workoutSourceApp',
+    'workoutSourceWorkoutId',
+    'workoutStartedAt',
+    'workoutEndedAt',
+    'workoutRoutineId',
+    'workoutRoutineName',
+    'workoutSessionNote',
+    'workoutMedia',
+    'workoutExercise',
+    'workoutSet',
+  ]) {
     assert.equal(field in addSchema.options.properties, true, `workout add missing ${field}`)
     assert.equal(field in editSchema.options.properties, true, `workout edit missing ${field}`)
   }
@@ -585,7 +595,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(missingExercise.exitCode, 1)
   assert.equal(missingExercise.envelope.ok, false)
   assert.match(missingExercise.envelope.error.message ?? '', /no matching --workout-exercise/u)
-  assert.equal(missingExercise.envelope.error.stage, 'validation')
   assert.equal(missingExercise.envelope.error.fieldErrors?.[0]?.path, 'workoutSet')
   assert.equal('workoutSet' in addSchema.options.properties, true)
 
@@ -606,23 +615,17 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(missingSet.exitCode, 1)
   assert.equal(missingSet.envelope.ok, false)
   assert.equal(missingSet.envelope.error.code, 'invalid_option')
-  assert.equal(missingSet.envelope.error.stage, 'validation')
-  assert.equal(
-    missingSet.envelope.error.hint,
-    'Correct the listed workout fields and retry.',
-  )
   assert.deepEqual(
-    missingSet.envelope.error.fieldErrors?.map(({ code, message, path }) => ({
+    missingSet.envelope.error.fieldErrors?.map(({ code, path }) => ({
       code,
-      message,
       path,
     })),
     [{
       code: 'too_small',
-      message: 'At least one workout set is required.',
       path: 'workoutSet',
     }],
   )
+  assert.equal(missingSet.envelope.error.hint, undefined)
   assert.doesNotMatch(JSON.stringify(missingSet.envelope), /PRIVATE_WORKOUT_SENTINEL/u)
   assert.equal('workoutSet' in addSchema.options.properties, true)
 
@@ -733,7 +736,6 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(incompleteEdit.exitCode, 1)
   assert.equal(incompleteEdit.envelope.ok, false)
   assert.equal(incompleteEdit.envelope.error.code, 'invalid_option')
-  assert.equal(incompleteEdit.envelope.error.stage, 'validation')
   assert.equal(
     incompleteEdit.envelope.error.fieldErrors?.[0]?.path,
     'workoutSet',

@@ -36,13 +36,8 @@ function getExerciseCatalogReader(
     throw new VaultCliError(
       invalidCatalog ? 'exercise_catalog_invalid' : 'exercise_catalog_unavailable',
       invalidCatalog
-        ? 'The public exercise catalog artifacts are invalid.'
-        : 'The public exercise catalog is unavailable.',
-      undefined,
-      {
-        stage: 'exercise_catalog',
-        hint: 'Use only a simple conservative movement description without catalog details; if that is unsafe or insufficient, stop.',
-      },
+        ? 'The public exercise catalog artifacts are invalid; stop instead of using catalog details.'
+        : 'The public exercise catalog is unavailable; use only a simple conservative movement description without catalog details, or stop if that is unsafe or insufficient.',
     )
   }
 }

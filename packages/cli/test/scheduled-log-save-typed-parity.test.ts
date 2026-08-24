@@ -12,7 +12,6 @@ import {
   registerScheduledLogCommands,
   scheduledLogActionOptionKeysByKind,
 } from "../src/commands/scheduled-log.js";
-import { workoutTypedRepairFields } from "../src/commands/workout-typed-repair-fields.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import {
   createTempVaultContext,
@@ -37,6 +36,14 @@ interface ScheduledLogSaveResult {
   lookupId: string;
   path?: string;
   created: boolean;
+}
+
+interface ScheduledLogShowResult {
+  scheduledLog: {
+    relativePath: string;
+    slug: string;
+    title: string;
+  };
 }
 
 type ScheduledLogActionOptionKey =
@@ -212,10 +219,6 @@ test("scheduled-log save schema exposes typed parity fields while import-json re
   ]) {
     assert.equal(field in saveSchema.options.properties, true, field);
   }
-  for (const field of workoutTypedRepairFields) {
-    assert.equal(field in saveSchema.options.properties, true, `scheduled-log save missing ${field}`);
-  }
-
   const importJsonSchema = await readCommandSchema(cli, ["scheduled-log", "import-json"]);
   assert.equal("input" in importJsonSchema.options.properties, true);
   assert.equal(importJsonSchema.options.required?.includes("input") ?? false, true);
@@ -868,24 +871,18 @@ test("scheduled-log save rejects every action-kind-incompatible field before wri
         assert.equal(result.envelope.ok, false, `${ownerKind}:${optionKey}`);
         if (!result.envelope.ok) {
           assert.equal(result.envelope.error.code, "invalid_option");
-          assert.equal(result.envelope.error.stage, "validation");
-          assert.equal(
-            result.envelope.error.hint,
-            "Remove incompatible action flags or choose their matching --action-kind.",
-          );
           assert.deepEqual(
-            result.envelope.error.fieldErrors?.map(({ code, message, path }) => ({
+            result.envelope.error.fieldErrors?.map(({ code, path }) => ({
               code,
-              message,
               path,
             })),
             [{
-              code: "incompatible_option",
-              message: `This option is not valid with action kind ${incompatibleKind}.`,
+              code: "custom",
               path: optionKey,
             }],
             `${ownerKind}:${optionKey}`,
           );
+          assert.equal(result.envelope.error.hint, undefined);
         }
         assert.deepEqual(
           await readdir(scheduledLogDir).catch(() => []),
@@ -1001,6 +998,85 @@ test("scheduled-log save accepts shared action fields for every action kind", as
   }
 });
 
+test("scheduled-log save validates a derived slug before any registry or audit write", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-derived-slug-boundary-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+    const titleAtSlugLimit = "s".repeat(120);
+    const sharedArgs = [
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "measurement.add",
+      "--measurement-metric",
+      "weight",
+      "--measurement-value",
+      "72.5",
+      "--measurement-unit",
+      "kg",
+      "--vault",
+      vaultRoot,
+    ];
+
+    const saved = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      titleAtSlugLimit,
+      ...sharedArgs,
+    ]);
+    assert.equal(saved.exitCode, null);
+    assert.equal(saved.envelope.ok, true);
+    const savedData = requireData(saved.envelope);
+    assert.equal(savedData.lookupId, titleAtSlugLimit);
+    assert.equal(savedData.lookupId.length, 120);
+
+    const shown = await runInProcessJsonCli<ScheduledLogShowResult>(cli, [
+      "scheduled-log",
+      "show",
+      savedData.lookupId,
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(shown.exitCode, null);
+    assert.equal(shown.envelope.ok, true);
+    assert.equal(requireData(shown.envelope).scheduledLog.slug, titleAtSlugLimit);
+
+    const beforeRejectedSave = await snapshotVaultFiles(vaultRoot);
+    assert.equal(
+      [...beforeRejectedSave.keys()].some((relativePath) => relativePath.startsWith("audit/")),
+      true,
+    );
+    const privatePrefix = "private-derived-slug-sentinel-";
+    const titleOverSlugLimit = `${privatePrefix}${"x".repeat(121 - privatePrefix.length)}`;
+    assert.equal(titleOverSlugLimit.length, 121);
+
+    const rejected = await runInProcessJsonCli(cli, [
+      "scheduled-log",
+      "save",
+      titleOverSlugLimit,
+      ...sharedArgs,
+    ]);
+    assert.equal(rejected.exitCode, 1);
+    assert.equal(rejected.envelope.ok, false);
+    assert.equal(rejected.envelope.error.code, "invalid_option");
+    assert.equal(rejected.envelope.error.message, "Invalid scheduled-log payload fields.");
+    assert.deepEqual(
+      rejected.envelope.error.fieldErrors?.map(({ code, path }) => ({ code, path })),
+      [{ code: "too_big", path: "slug" }],
+    );
+    assert.equal(JSON.stringify(rejected.envelope).includes(titleOverSlugLimit), false);
+    assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSave);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
 test("scheduled-log save and import return bounded field recovery without echoing payloads", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-scheduled-log-validation-recovery-",
@@ -1028,24 +1104,18 @@ test("scheduled-log save and import return bounded field recovery without echoin
     assert.equal(typed.exitCode, 1);
     assert.equal(typed.envelope.ok, false);
     assert.equal(typed.envelope.error.code, "invalid_option");
-    assert.equal(typed.envelope.error.stage, "validation");
     assert.equal(typed.envelope.error.retryable, false);
-    assert.equal(
-      typed.envelope.error.hint,
-      "Correct the listed action fields and retry.",
-    );
     assert.deepEqual(
-      typed.envelope.error.fieldErrors?.map(({ code, message, path }) => ({
+      typed.envelope.error.fieldErrors?.map(({ code, path }) => ({
         code,
-        message,
         path,
       })),
       [{
         code: "custom",
-        message: "meal.add scheduled logs require a foodId, note, ingredients, or nutrition template.",
         path: "foodId",
       }],
     );
+    assert.equal(typed.envelope.error.hint, undefined);
     assert.doesNotMatch(JSON.stringify(typed.envelope), /PRIVATE_TYPED_PAYLOAD_SENTINEL/u);
 
     const typedWorkout = await runInProcessJsonCli(cli, [
@@ -1070,7 +1140,6 @@ test("scheduled-log save and import return bounded field recovery without echoin
     assert.equal(typedWorkout.exitCode, 1);
     assert.equal(typedWorkout.envelope.ok, false);
     assert.equal(typedWorkout.envelope.error.code, "invalid_option");
-    assert.equal(typedWorkout.envelope.error.stage, "validation");
     assert.equal(typedWorkout.envelope.error.fieldErrors?.[0]?.path, "workoutSet");
     assert.equal("workoutSet" in saveSchema.options.properties, true);
     assert.doesNotMatch(
@@ -1104,7 +1173,6 @@ test("scheduled-log save and import return bounded field recovery without echoin
     assert.equal(typedQualifier.exitCode, 1);
     assert.equal(typedQualifier.envelope.ok, false);
     assert.equal(typedQualifier.envelope.error.code, "invalid_option");
-    assert.equal(typedQualifier.envelope.error.stage, "validation");
     const typedQualifierField = typedQualifier.envelope.error.fieldErrors?.[0]?.path;
     assert.equal(typedQualifierField, "measurementQualifier");
     assert.equal(
@@ -1136,12 +1204,7 @@ test("scheduled-log save and import return bounded field recovery without echoin
     assert.equal(imported.exitCode, 1);
     assert.equal(imported.envelope.ok, false);
     assert.equal(imported.envelope.error.code, "invalid_payload");
-    assert.equal(imported.envelope.error.stage, "validation");
     assert.equal(imported.envelope.error.retryable, false);
-    assert.equal(
-      imported.envelope.error.hint,
-      "Correct the listed scheduled-log payload fields and retry.",
-    );
     assert.equal(imported.envelope.error.fieldErrors?.[0]?.path, "action.foodId");
     assert.doesNotMatch(
       JSON.stringify(imported.envelope),
@@ -1233,7 +1296,7 @@ test("scheduled-log save and import return bounded field recovery without echoin
   }
 });
 
-test("scheduled-log status commands return typed non-echoing not-found recovery", async () => {
+test("scheduled-log status commands return non-echoing not-found recovery", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-scheduled-log-status-recovery-",
   );
@@ -1253,12 +1316,10 @@ test("scheduled-log status commands return typed non-echoing not-found recovery"
       assert.equal(result.exitCode, 1);
       assert.equal(result.envelope.ok, false);
       assert.equal(result.envelope.error.code, "not_found");
-      assert.equal(result.envelope.error.stage, "lookup");
-      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "lookup");
-      assert.equal(
-        result.envelope.error.hint,
-        "List scheduled logs and retry with an existing id or slug.",
-      );
+      assert.equal(result.envelope.error.fieldErrors, undefined);
+      assert.equal(result.envelope.error.hint, undefined);
+      assert.equal(result.envelope.error.stage, undefined);
+      assert.match(result.envelope.error.message ?? "", /list scheduled logs and retry/u);
       assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_LOOKUP_SENTINEL/u);
     }
   } finally {
@@ -1333,11 +1394,8 @@ test("scheduled-log save classifies id/slug conflicts before changing either rec
     assert.equal(conflict.exitCode, 1);
     assert.equal(conflict.envelope.ok, false);
     assert.equal(conflict.envelope.error.code, "conflict");
-    assert.equal(conflict.envelope.error.stage, "lookup");
-    assert.deepEqual(
-      conflict.envelope.error.fieldErrors?.map(({ path }) => path),
-      ["id", "slug"],
-    );
+    assert.equal(conflict.envelope.error.fieldErrors, undefined);
+    assert.match(conflict.envelope.error.message ?? "", /identifiers from the same record/u);
     assert.doesNotMatch(JSON.stringify(conflict.envelope), /PRIVATE_CONFLICT_TITLE_SENTINEL/u);
     assert.deepEqual(
       await Promise.all(saved.map((record) =>
@@ -1368,11 +1426,8 @@ test("scheduled-log save classifies id/slug conflicts before changing either rec
     assert.equal(importConflict.exitCode, 1);
     assert.equal(importConflict.envelope.ok, false);
     assert.equal(importConflict.envelope.error.code, "conflict");
-    assert.equal(importConflict.envelope.error.stage, "lookup");
-    assert.deepEqual(
-      importConflict.envelope.error.fieldErrors?.map(({ path }) => path),
-      ["scheduledLogId", "slug"],
-    );
+    assert.equal(importConflict.envelope.error.fieldErrors, undefined);
+    assert.match(importConflict.envelope.error.message ?? "", /identifiers from the same record/u);
     assert.doesNotMatch(
       JSON.stringify(importConflict.envelope),
       /PRIVATE_IMPORT_CONFLICT_TITLE_SENTINEL/u,
@@ -1498,14 +1553,15 @@ test("scheduled-log commands stop on invalid stored registries without writing o
         assert.equal(result.exitCode, 1, label);
         assert.equal(result.envelope.ok, false, label);
         assert.equal(result.envelope.error.code, "invalid_registry", label);
-        assert.equal(result.envelope.error.stage, "registry", label);
         assert.equal(result.envelope.error.retryable, false, label);
         assert.equal(result.envelope.error.fieldErrors, undefined, label);
         assert.equal(
-          result.envelope.error.hint,
-          "Stop. Do not retry, edit registry files, or write scheduled logs; report that stored registry data needs operator repair.",
+          result.envelope.error.message,
+          "Stored scheduled-log registry data is invalid; stop without retrying or writing scheduled logs and report that operator repair is required.",
           label,
         );
+        assert.equal(result.envelope.error.hint, undefined, label);
+        assert.equal(result.envelope.error.stage, undefined, label);
         assert.doesNotMatch(JSON.stringify(result.envelope), /PRIVATE_[A-Z_]+_SENTINEL/u);
         assert.equal(JSON.stringify(result.envelope).includes(parentRoot), false, label);
         assert.deepEqual(await snapshotVaultFiles(vaultRoot), before, label);
