@@ -201,15 +201,15 @@ On a scheduled run:
    managed Goal is the first-run authority; add no flag or second state owner.
    If responsible inputs are missing or the bundle is infeasible, write nothing
    and keep the ordinary closeout. When either one complete accepted card bundle
-   or this responsible first-run proposal candidate remains, read and apply
-   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
-   as the complete safety gate before deriving or presenting numeric values,
-   any Goal write, totals, or a card. Reuse every complete identical current-turn
-   read the shared gate permits. When that gate suppresses numeric output or any
-   required safety read is incomplete, unavailable, or unreadable, keep the
-   ordinary compact closeout, perform no Goal or measurement mutation, ask no
-   question, and attach no card. When the complete all-status lookup proves
-   absence, the safety gate passes, compatible explicit targets are unambiguous,
+   or this responsible first-run proposal candidate remains, apply the concise
+   known-context numeric-suitability rule in the
+   `murph.attach_response_card` prompt before deriving or presenting numeric
+   values, any Goal write, totals, or a card. Do not run a universal medical
+   history or measurement checklist. When known context suppresses numeric
+   output, keep the ordinary compact closeout, perform no Goal or measurement
+   mutation, ask no question, and attach no card. When the complete all-status
+   lookup proves absence, known context permits numeric guidance, compatible
+   explicit targets are unambiguous,
    and already-known inputs prove one responsible five-target bundle, create
    that single canonical Goal as
    `paused`, with `window.startAt` equal to the selected capture/card local date.
