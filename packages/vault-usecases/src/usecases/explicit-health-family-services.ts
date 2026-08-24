@@ -62,7 +62,6 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
-import { validationRepairFromZodIssues } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -150,17 +149,9 @@ function parseRegistryPayloadWithSharedSchema(
 
   const result = schema.safeParse(payload);
   if (!result.success) {
-    const recoveryCommand =
-      kind === "condition" ? "condition payload-schema" : `${kind} scaffold`;
-    throw new VaultCliError(
-      "invalid_payload",
-      `${kind} payload failed validation.`,
-      undefined,
-      validationRepairFromZodIssues(
-        result.error.issues,
-        `Correct the listed fields and retry; run ${recoveryCommand} for the canonical writable fields.`,
-      ),
-    );
+    throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
+      issues: result.error.issues,
+    });
   }
 
   return result.data as JsonObject;
@@ -181,16 +172,12 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
       throw new VaultCliError(
         "invalid_payload",
         `results[${index}].valueText is not supported. Did you mean results[${index}].textValue?`,
-        undefined,
         {
-          stage: "validation",
-          hint: "Rename valueText to textValue and retry the import.",
-          fields: [
+          issues: [
             {
               path: ["results", index, "valueText"],
-              code: "unsupported_field",
+              code: "custom",
               message: "Use textValue for a textual blood-test result.",
-              expected: "textValue",
             },
           ],
         },
@@ -203,15 +190,9 @@ function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
   assertNoBloodTestValueTextAlias(payload);
   const result = bloodTestImportPayloadSchema.safeParse(payload);
   if (!result.success) {
-    throw new VaultCliError(
-      "invalid_payload",
-      "blood-test payload failed validation.",
-      undefined,
-      validationRepairFromZodIssues(
-        result.error.issues,
-        "Correct the listed fields or run blood-test payload-schema for the exact writable contract.",
-      ),
-    );
+    throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
+      issues: result.error.issues,
+    });
   }
 
   return result.data as JsonObject;
@@ -220,15 +201,9 @@ function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
 function parseImmunizationImportPayload(payload: JsonObject): JsonObject {
   const result = immunizationImportPayloadSchema.safeParse(payload);
   if (!result.success) {
-    throw new VaultCliError(
-      "invalid_payload",
-      "immunization payload failed validation.",
-      undefined,
-      validationRepairFromZodIssues(
-        result.error.issues,
-        "Correct the listed fields or run immunization payload-schema for the exact writable contract.",
-      ),
-    );
+    throw new VaultCliError("invalid_payload", "immunization payload failed validation.", {
+      issues: result.error.issues,
+    });
   }
 
   return result.data as JsonObject;

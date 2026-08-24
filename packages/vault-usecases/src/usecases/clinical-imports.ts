@@ -30,11 +30,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 
 import { loadJsonInputObject } from '../json-input.js'
 import { loadRuntimeModule } from '../runtime-import.js'
-import {
-  compactObject,
-  toVaultCliError,
-  validationRepairFromZodIssues,
-} from './vault-usecase-helpers.js'
+import { compactObject, toVaultCliError } from './vault-usecase-helpers.js'
 
 type ClinicalImportRuntime = {
   appendHistoryEvent(input: AppendHistoryEventInput): Promise<AppendHistoryEventResult>
@@ -282,15 +278,9 @@ function parsePayload<TPayload>(
 ): TPayload {
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
-    throw new VaultCliError(
-      'invalid_payload',
-      `${label} payload is invalid.`,
-      undefined,
-      validationRepairFromZodIssues(
-        parsed.error.issues,
-        `Correct the listed fields or run ${label} payload-schema for the exact writable contract.`,
-      ),
-    )
+    throw new VaultCliError('invalid_payload', `${label} payload is invalid.`, {
+      issues: parsed.error.issues,
+    })
   }
 
   return parsed.data

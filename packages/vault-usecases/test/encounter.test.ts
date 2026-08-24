@@ -592,11 +592,9 @@ describe("encounter usecase", () => {
       name: "VaultCliError",
       code: "invalid_payload",
       message: "encounter payload failed validation.",
-      repair: {
-        stage: "validation",
-        hint: expect.stringContaining("encounter payload-schema"),
-        fields: expect.arrayContaining([
-          expect.objectContaining({ path: expect.any(String) }),
+      context: {
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: expect.any(Array) }),
         ]),
       },
     });

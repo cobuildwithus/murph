@@ -801,7 +801,7 @@ test("goal import-json validates payloads through the shared goal schema", async
     assert.match(upsertResult.error?.message ?? "", /goal payload failed validation/i);
     assert.equal(upsertResult.error?.stage, "validation");
     assert.equal(upsertResult.error?.fieldErrors?.[0]?.path, "parentGoalId");
-    assert.match(upsertResult.error?.hint ?? "", /goal scaffold/u);
+    assert.equal(upsertResult.error?.hint, undefined);
     assert.equal(JSON.stringify(upsertResult).includes(privateParentGoalId), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
@@ -1833,6 +1833,12 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
           resourceType: "immunization-entry",
           resourceId: "synthetic-row-1",
         },
+        evidence: [
+          {
+            sourceDocumentId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            page: 2,
+          },
+        ],
       }),
       "utf8",
     );
@@ -1938,12 +1944,20 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
     assert.equal(requireData(payloadSchemaResult).schemaVersion, "murph.payload-schema.v1");
     assert.equal(requireData(payloadSchemaResult).schemaName, "immunization-import-payload");
     assert.equal(requireData(payloadSchemaResult).schema.additionalProperties, false);
+    const schemaProperties = requireData(payloadSchemaResult).schema.properties;
+    assert.equal(
+      schemaProperties !== null &&
+        typeof schemaProperties === "object" &&
+        !Array.isArray(schemaProperties) &&
+        "evidence" in schemaProperties,
+      true,
+    );
     assert.equal(invalidImport.ok, false);
     assert.equal(invalidImport.error?.code, "invalid_payload");
     assert.equal(invalidImport.error?.stage, "validation");
     assert.equal(invalidImport.error?.fieldErrors?.[0]?.path, "$");
     assert.equal(invalidImport.error?.fieldErrors?.[0]?.code, "unrecognized_keys");
-    assert.match(invalidImport.error?.hint ?? "", /immunization payload-schema/u);
+    assert.equal(invalidImport.error?.hint, undefined);
     assert.equal(JSON.stringify(invalidImport).includes(privateManufacturer), false);
     assert.equal(listAfterInvalid.ok, true);
     assert.equal(requireData(listAfterInvalid).count, 0);
@@ -1967,6 +1981,12 @@ test("immunization descriptor wiring exposes a dedicated event-backed noun", asy
     assert.equal(requireData(nounList).items[0]?.kind, "immunization");
     assert.equal(genericShow.ok, true);
     assert.equal(requireData(genericShow).entity.kind, "immunization");
+    assert.deepEqual(requireData(genericShow).entity.data.evidence, [
+      {
+        sourceDocumentId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        page: 2,
+      },
+    ]);
     const externalRef = requireData(genericShow).entity.data.externalRef;
     assert.equal(
       externalRef !== null &&

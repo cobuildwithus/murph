@@ -550,12 +550,12 @@ test("blood-test import-json points valueText typo at textValue", async () => {
       assert.equal(imported.envelope.error.stage, "validation");
       assert.deepEqual(imported.envelope.error.fieldErrors?.[0], {
         path: "results.0.valueText",
-        code: "unsupported_field",
-        message: "Use textValue for a textual blood-test result.",
-        expected: "textValue",
+        code: "custom",
+        message: "This field is invalid.",
+        expected: "",
         received: "invalid",
       });
-      assert.match(imported.envelope.error.hint ?? "", /Rename valueText to textValue/u);
+      assert.equal(imported.envelope.error.hint, undefined);
     }
   } finally {
     await rm(parentRoot, {
@@ -1135,11 +1135,11 @@ test("blood-test save rejects JSON objects that are not analyte records without 
     assert.equal(result.envelope.error.stage, "validation");
     assert.equal(
       result.envelope.error.fieldErrors?.some(
-        (field) => field.path === "result.analyte" && field.code === "invalid_type",
+        (field) => field.path === "result" && field.code === "invalid_union",
       ),
       true,
     );
-    assert.match(result.envelope.error.hint ?? "", /Correct --result/u);
+    assert.equal(result.envelope.error.hint, undefined);
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
     assert.equal(JSON.stringify(result.envelope).includes("private marker"), false);
     assert.equal(
@@ -1187,11 +1187,11 @@ test("blood-test save reports invalid link fields without echoing submitted valu
       assert.equal(result.envelope.error.stage, "validation");
       assert.equal(
         result.envelope.error.fieldErrors?.some(
-          (field) => field.path === "link.targetId" && field.code === "invalid_type",
+          (field) => field.path === "link" && field.code === "invalid_union",
         ),
         true,
       );
-      assert.match(result.envelope.error.hint ?? "", /Correct --link/u);
+      assert.equal(result.envelope.error.hint, undefined);
       assert.equal(JSON.stringify(result.envelope).includes(privateLinkValue), false);
     }
     assert.equal(
@@ -1206,7 +1206,7 @@ test("blood-test save reports invalid link fields without echoing submitted valu
   }
 });
 
-test("built CLI reports blood-test result alternatives and enum choices without writing", async () => {
+test("built CLI reports blood-test result field paths without echoing values or writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-repair-alternatives-",
   );
@@ -1216,7 +1216,6 @@ test("built CLI reports blood-test result alternatives and enum choices without 
       result: { analyte: "private-missing-result-marker" },
       path: "result",
       code: "invalid_union",
-      expected: "value | textValue",
     },
     {
       privateValue: "private-empty-range-marker",
@@ -1225,9 +1224,8 @@ test("built CLI reports blood-test result alternatives and enum choices without 
         value: 45,
         referenceRange: {},
       },
-      path: "result.referenceRange",
+      path: "result",
       code: "invalid_union",
-      expected: "low | high | text",
     },
     {
       privateValue: "private-invalid-flag",
@@ -1236,9 +1234,8 @@ test("built CLI reports blood-test result alternatives and enum choices without 
         value: 45,
         flag: "private-invalid-flag",
       },
-      path: "result.flag",
-      code: "invalid_value",
-      expected: "low | normal | high | abnormal | critical | unknown",
+      path: "result",
+      code: "invalid_union",
     },
   ];
 
@@ -1267,13 +1264,9 @@ test("built CLI reports blood-test result alternatives and enum choices without 
         {
           path: entry.path,
           code: entry.code,
-          message:
-            entry.code === "invalid_union"
-              ? "Provide one of the alternative fields."
-              : "Use one of the allowed values.",
-          expected: entry.expected,
-          ...(entry.code === "invalid_union" ? { missing: true } : {}),
-          received: entry.code === "invalid_union" ? "missing" : "invalid",
+          message: "This field is invalid.",
+          expected: "",
+          received: "invalid",
         },
       ]);
       assert.equal(JSON.stringify(result).includes(entry.privateValue), false, entry.path);

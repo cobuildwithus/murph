@@ -9,6 +9,7 @@ import {
   type BloodTestResultRecord,
   type JsonObject,
 } from "@murphai/contracts";
+import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import {
   isoTimestampSchema,
@@ -16,15 +17,11 @@ import {
   pathSchema,
   timeZoneSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
-import {
-  VaultCliError,
-  type VaultCliRepairInput,
-} from "@murphai/operator-config/vault-cli-errors";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   normalizeRepeatableFlagOption,
   type VaultServices,
 } from "@murphai/vault-usecases";
-import { validationRepairFromZodIssues } from "@murphai/vault-usecases/helpers";
 import { Cli, z } from "incur";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
@@ -72,18 +69,15 @@ const rawVaultPathSchema = z
     "raw/... paths cannot contain . or .. segments.",
   );
 
-function bloodTestOptionRepair(input: {
+function bloodTestOptionValidationContext(input: {
   optionName: "link" | "result";
   path?: readonly PropertyKey[];
   code: string;
   message: string;
   expected?: string;
-  hint: string;
-}): VaultCliRepairInput {
+}) {
   return {
-    stage: "validation",
-    hint: input.hint,
-    fields: [
+    issues: [
       {
         path: input.path ?? [input.optionName],
         code: input.code,
@@ -91,6 +85,18 @@ function bloodTestOptionRepair(input: {
         expected: input.expected,
       },
     ],
+  };
+}
+
+function prefixedValidationIssueContext(
+  issues: readonly ZodIssue[],
+  pathPrefix: readonly PropertyKey[],
+) {
+  return {
+    issues: issues.map((issue) => ({
+      ...issue,
+      path: [...pathPrefix, ...issue.path],
+    })),
   };
 }
 
@@ -157,13 +163,10 @@ function parseKeyValueSpec(
       throw new VaultCliError(
         "invalid_option",
         keyValueSpecFormatMessage(optionName),
-        undefined,
-        bloodTestOptionRepair({
+        bloodTestOptionValidationContext({
           optionName: "link",
           code: "invalid_format",
           message: "Use key=value fields separated by semicolons.",
-          expected: "type=<relation>;targetId=<canonical-id>",
-          hint: "Correct --link and retry the blood-test save command.",
         }),
       );
     }
@@ -174,13 +177,10 @@ function parseKeyValueSpec(
       throw new VaultCliError(
         "invalid_option",
         `Expected --${optionName} entries to include non-empty keys and values.`,
-        undefined,
-        bloodTestOptionRepair({
+        bloodTestOptionValidationContext({
           optionName: "link",
           code: "invalid_format",
           message: "Provide a non-empty key and value for each link field.",
-          expected: "type=<relation>;targetId=<canonical-id>",
-          hint: "Correct --link and retry the blood-test save command.",
         }),
       );
     }
@@ -189,12 +189,10 @@ function parseKeyValueSpec(
       throw new VaultCliError(
         "invalid_option",
         `Duplicate --${optionName} field.`,
-        undefined,
-        bloodTestOptionRepair({
+        bloodTestOptionValidationContext({
           optionName: "link",
-          code: "duplicate_field",
+          code: "custom",
           message: "Provide each link field once.",
-          hint: "Remove the duplicate --link field and retry.",
         }),
       );
     }
@@ -213,13 +211,10 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "Expected --result JSON object to be valid JSON.",
-      undefined,
-      bloodTestOptionRepair({
+      bloodTestOptionValidationContext({
         optionName: "result",
-        code: "invalid_json",
+        code: "custom",
         message: "Use one valid JSON object for this result.",
-        expected: "JSON object",
-        hint: "Correct the JSON syntax in --result and retry.",
       }),
     );
   }
@@ -232,14 +227,11 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "--result.valueText is not supported. Did you mean --result.textValue?",
-      undefined,
-      bloodTestOptionRepair({
+      bloodTestOptionValidationContext({
         optionName: "result",
         path: ["result", "valueText"],
-        code: "unsupported_field",
+        code: "custom",
         message: "Use textValue for a textual blood-test result.",
-        expected: "textValue",
-        hint: "Rename valueText to textValue and retry.",
       }),
     );
   }
@@ -249,10 +241,8 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "Invalid --result blood-test analyte payload.",
-      undefined,
-      validationRepairFromZodIssues(
+      prefixedValidationIssueContext(
         parsed.error.issues,
-        "Correct --result and retry the blood-test save command.",
         ["result"],
       ),
     );
@@ -271,13 +261,11 @@ function parseBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "Expected --result JSON input to be one object per analyte, not an array. Repeat --result for each analyte or use blood-test import-json for a full payload.",
-      undefined,
-      bloodTestOptionRepair({
+      bloodTestOptionValidationContext({
         optionName: "result",
         code: "invalid_type",
         message: "Use one JSON object per repeated --result option.",
-        expected: "JSON object",
-        hint: "Repeat --result for each analyte or use blood-test import-json for a full payload.",
+        expected: "object",
       }),
     );
   }
@@ -285,13 +273,11 @@ function parseBloodTestResult(spec: string): BloodTestResult {
   throw new VaultCliError(
     "invalid_option",
     "Expected --result to be a JSON object. Example: --result '{\"analyte\":\"Glucose\",\"value\":92,\"unit\":\"mg/dL\"}'. Repeat --result for multiple analytes or use blood-test import-json for a full payload.",
-    undefined,
-    bloodTestOptionRepair({
+    bloodTestOptionValidationContext({
       optionName: "result",
       code: "invalid_type",
       message: "Use one JSON object per repeated --result option.",
-      expected: "JSON object",
-      hint: "Repeat --result for each analyte or use blood-test import-json for a full payload.",
+      expected: "object",
     }),
   );
 }
@@ -302,13 +288,11 @@ function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
     throw new VaultCliError(
       "invalid_option",
       "At least one --result entry is required.",
-      undefined,
-      bloodTestOptionRepair({
+      bloodTestOptionValidationContext({
         optionName: "result",
-        code: "missing_required",
+        code: "invalid_type",
         message: "Provide at least one blood-test result.",
-        expected: "JSON object",
-        hint: "Add --result with one analyte object and retry.",
+        expected: "object",
       }),
     );
   }
@@ -331,10 +315,8 @@ function parseBloodTestLink(spec: string): BloodTestLink {
     throw new VaultCliError(
       "invalid_option",
       "Invalid --link payload.",
-      undefined,
-      validationRepairFromZodIssues(
+      prefixedValidationIssueContext(
         parsed.error.issues,
-        "Correct --link and retry the blood-test save command.",
         ["link"],
       ),
     );

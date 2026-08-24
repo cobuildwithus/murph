@@ -310,12 +310,10 @@ describe("clinical import usecases", () => {
       name: "VaultCliError",
       code: "invalid_payload",
       message: "social-history payload is invalid.",
-      repair: {
-        stage: "validation",
-        hint: expect.stringContaining("social-history payload-schema"),
-        fields: expect.arrayContaining([
+      context: {
+        issues: expect.arrayContaining([
           expect.objectContaining({
-            path: "entries.1.externalRef",
+            path: ["entries", 1, "externalRef"],
             code: "custom",
           }),
         ]),

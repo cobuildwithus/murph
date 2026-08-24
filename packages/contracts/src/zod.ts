@@ -1068,6 +1068,7 @@ export const immunizationImportPayloadSchema = withContractMetadata(
   z
     .object({
       ...writableEventCommonPayloadShape,
+      evidence: z.array(clinicalEvidenceRefSchema).max(50).optional(),
       vaccineName: boundedString(1, 160),
       manufacturer: optionalWritableTextSchema(160),
       lotNumber: optionalWritableTextSchema(120),

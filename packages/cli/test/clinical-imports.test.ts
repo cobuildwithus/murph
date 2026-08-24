@@ -261,7 +261,7 @@ test("clinical import validation returns bounded repair fields without payload v
   assert.equal(result.error.stage, "validation");
   assert.equal(result.error.fieldErrors?.[0]?.path, "assertedOn");
   assert.equal(result.error.fieldErrors?.[0]?.code, "custom");
-  assert.match(result.error.hint ?? "", /assertion payload-schema/u);
+  assert.equal(result.error.hint, undefined);
   assert.equal(JSON.stringify(result).includes(privateValue), false);
 });
 

@@ -32,7 +32,6 @@ import {
   normalizeOptionalText,
   normalizeStringArray,
   toVaultCliError,
-  validationRepairFromZodIssues,
 } from './vault-usecase-helpers.js'
 import { normalizeMeasurementEntry } from './measurement.js'
 
@@ -239,18 +238,34 @@ function invalidPayload(message: string) {
   return new VaultCliError('invalid_payload', message)
 }
 
+function staticEncounterValidationPath(
+  path: readonly PropertyKey[],
+): PropertyKey[] {
+  const qualifierIndex = path.indexOf('qualifiers')
+  return qualifierIndex < 0
+    ? [...path]
+    : path.slice(0, qualifierIndex + 1)
+}
+
+function sanitizeEncounterValidationIssue(issue: z.ZodIssue) {
+  const expected =
+    'expected' in issue && typeof issue.expected === 'string'
+      ? issue.expected
+      : undefined
+
+  return {
+    code: issue.code,
+    path: staticEncounterValidationPath(issue.path),
+    ...(expected === undefined ? {} : { expected }),
+  }
+}
+
 function parseEncounterPayloadInput(payload: unknown): ParsedEncounterBundlePayload {
   const result = encounterBundlePayloadSchema.safeParse(payload)
   if (!result.success) {
-    throw new VaultCliError(
-      'invalid_payload',
-      'encounter payload failed validation.',
-      undefined,
-      validationRepairFromZodIssues(
-        result.error.issues,
-        'Correct the listed fields or run encounter payload-schema for the exact writable contract.',
-      ),
-    )
+    throw new VaultCliError('invalid_payload', 'encounter payload failed validation.', {
+      issues: result.error.issues.map(sanitizeEncounterValidationIssue),
+    })
   }
 
   return result.data

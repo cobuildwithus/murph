@@ -4,11 +4,8 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { bloodTestResultSchema, healthEntityDefinitions } from "@murphai/contracts";
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from "@murphai/operator-config/vault-cli-errors";
+import { healthEntityDefinitions } from "@murphai/contracts";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
 import {
@@ -53,7 +50,6 @@ import {
   toVaultCliError,
   toVaultMetadataCliError,
   uniqueStrings,
-  validationRepairFromZodIssues,
 } from "../src/usecases/vault-usecase-helpers.ts";
 import type { QueryEntity } from "../src/query-runtime.ts";
 
@@ -98,62 +94,6 @@ describe("helper barrel exports", () => {
     expect(helperApi.normalizeStringArray).toBe(normalizeStringArray);
     expect(helperApi.relativePathStrings).toBe(relativePathStrings);
     expect(helperApi.uniqueStrings).toBe(uniqueStrings);
-    expect(helperApi.validationRepairFromZodIssues).toBe(validationRepairFromZodIssues);
-  });
-
-  it("represents Zod union branches as bounded repair alternatives", () => {
-    function repairFor(value: unknown) {
-      const parsed = bloodTestResultSchema.safeParse(value);
-      expect(parsed.success).toBe(false);
-      if (parsed.success) {
-        throw new Error("Expected synthetic blood-test result to fail validation.");
-      }
-
-      return createVaultCliRepair(validationRepairFromZodIssues(
-        parsed.error.issues,
-        "Correct the synthetic result.",
-        ["result"],
-      ));
-    }
-
-    expect(repairFor({ analyte: "Synthetic analyte" }).fields).toEqual([
-      {
-        path: "result",
-        code: "invalid_union",
-        message: "Provide one of the alternative fields.",
-        expected: "value | textValue",
-        missing: true,
-      },
-    ]);
-    expect(repairFor({
-      analyte: "Synthetic analyte",
-      value: 45,
-      referenceRange: {},
-    }).fields).toEqual([
-      {
-        path: "result.referenceRange",
-        code: "invalid_union",
-        message: "Provide one of the alternative fields.",
-        expected: "low | high | text",
-        missing: true,
-      },
-    ]);
-
-    const privateFlag = "private-invalid-flag";
-    const flagRepair = repairFor({
-      analyte: "Synthetic analyte",
-      value: 45,
-      flag: privateFlag,
-    });
-    expect(flagRepair.fields).toEqual([
-      {
-        path: "result.flag",
-        code: "invalid_value",
-        message: "Use one of the allowed values.",
-        expected: "low | normal | high | abnormal | critical | unknown",
-      },
-    ]);
-    expect(JSON.stringify(flagRepair)).not.toContain(privateFlag);
   });
 
   it("keeps helper behavior stable through the public helper barrel", () => {

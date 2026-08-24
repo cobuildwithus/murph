@@ -163,6 +163,30 @@ test("immunization import payload schema rejects misspelled fields", () => {
   );
   assert.equal(jsonSchema.title, "Murph Immunization Import Payload");
   assert.equal(jsonSchema.properties?.vaccineName !== undefined, true);
+  assert.equal(jsonSchema.properties?.evidence !== undefined, true);
+
+  const evidence = {
+    sourceDocumentId: "doc_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    page: 2,
+  };
+  assert.equal(
+    safeParseContract(immunizationImportPayloadSchema, {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Influenza vaccine",
+      vaccineName: "Influenza",
+      evidence: [evidence],
+    }).success,
+    true,
+  );
+  assert.equal(
+    safeParseContract(immunizationImportPayloadSchema, {
+      occurredAt: "2026-03-12T11:15:00.000Z",
+      title: "Influenza vaccine",
+      vaccineName: "Influenza",
+      evidence: Array.from({ length: 51 }, () => evidence),
+    }).success,
+    false,
+  );
 });
 
 test("condition import payload schema requires create-safe titles", () => {

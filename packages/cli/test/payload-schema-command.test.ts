@@ -220,14 +220,17 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(immunization.schemaName, 'immunization-import-payload')
   assert.equal(immunization.schema.additionalProperties, false)
   const immunizationRequired = immunization.schema.required
+  const immunizationProperties = propertiesOf(immunization.schema)
   assert.equal(
     Array.isArray(immunizationRequired) && immunizationRequired.includes('vaccineName'),
     true,
   )
+  assert.ok(immunizationProperties.evidence)
   assertJsonSchemaValidation(immunization.schema, {
     occurredAt: '2026-03-12',
     title: 'Influenza vaccine',
     vaccineName: 'Influenza',
+    evidence: [{ sourceDocumentId: 'doc_01ARZ3NDEKTSV4RRFFQ69G5FAV' }],
   }, true)
   assertJsonSchemaValidation(immunization.schema, {
     occurredAt: '2026-03-12',
