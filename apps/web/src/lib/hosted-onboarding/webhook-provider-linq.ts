@@ -4150,7 +4150,7 @@ export function buildHostedLinqFirstContactAdmissionRequest(input: {
 function buildHostedLinqFirstContactAdmissionPartTypes(
   parts: HostedLinqMessageReceivedEvent["data"]["message"]["parts"],
 ): string[] {
-  return [...new Set(parts.map((part) => part.type))].sort();
+  return parts.map((part) => part.type);
 }
 
 function buildHostedLinqFirstContactAdmissionText(

@@ -80,11 +80,12 @@ was delivered.
 
 ## Verification
 
-- Focused Web owner tests pass 356 cases covering strict Murph output, canonical welcome,
+- Focused Web owner tests pass 360 cases covering strict Murph output, canonical welcome,
   plain-text eligibility, durable pre-generation ownership, accepted continuity,
   centralized fallback terminalization, retry-preserving enrollment failure,
-  atomic rollback, encrypted-body replay, ambiguous send suppression, and
-  definitive fallback. Webhook idempotency and Linq transport pass another 109
+  actual multipart cardinality, atomic rollback, encrypted-body replay,
+  ambiguous send suppression, terminal exact replay, and definitive fallback.
+  Webhook idempotency and Linq transport pass another 109
   cases. A credential-gated seven-case real-model semantic matrix
   exercises greetings, capabilities, concrete health questions, missing
   personal context, requested actions, and urgent safety guidance without a
@@ -92,14 +93,15 @@ was delivered.
 - The full focused Linq dispatch file passes 206 tests, including parallel
   generation/prewarm, outbound-checkpoint wake, activation continuation, and
   ambiguous-delivery wake suppression.
-- Delivery-store tests pass 137 cases, including exact attempted-to-provider
-  advancement and conflicting chat ownership; webhook idempotency and Linq
+- Delivery-store tests pass 140 cases, including exact attempted-to-provider
+  advancement, terminal skipped/definitive fallback, encrypted ambiguous
+  recovery, and conflicting chat ownership; webhook idempotency and Linq
   transport pass 109 cases.
 - Web typecheck, changed-file ESLint, Prisma validation, `git diff --check`, the
   expand-only migration guard, and the reviewed migration/schema snapshots
   pass. The payload migration now contains only nullable columns, its member
   foreign key, and its index.
-- `pnpm test:diff` exits 0. Its Web lane passes 850 files and 11,026 tests,
+- `pnpm test:diff` exits 0. Its Web lane passes 850 files and 11,031 tests,
   changed-app typecheck, lint with no errors, dev smoke, and production build.
   The workspace boundary step still reports two unrelated pre-existing Junction
   test-import diagnostics outside this PR.
@@ -119,6 +121,25 @@ the existing delivery ledger as the only provider outbox, stores the exact
 pending body encrypted for ambiguous recovery, and represents the completed
 exchange as two ordinary consumed conversation rows. Candidate review,
 exact-head gates, and completion remain.
+
+## ReviewGPT round 3 disposition
+
+Both round 3 findings were accepted. First, admission metadata deduplicated part
+types, so two source text parts looked like one plain-text message after their
+content was joined and bounded. The request now preserves each source part type
+in order; the existing one-part eligibility check therefore measures actual
+cardinality with no new field or parser.
+
+Second, the shared delivery claimant intentionally reopens terminal rows for
+signup and notice retries, but that generic policy also reopened a skipped or
+definitively failed instant first turn on exact webhook replay. The existing
+ledger now returns one template-specific terminal outcome when the instant row
+is skipped or failed with no payload schema. A failed row whose exact encrypted
+reply remains retained still follows the existing reclaim-and-resume path. Web
+maps the terminal outcome to ordinary-runtime fallback before model generation
+or provider entry. Other templates keep their existing behavior. This adds no
+queue, service, state owner, dependency, lifecycle enum, or reconciliation
+process.
 
 ## ReviewGPT round 2 retrospective
 

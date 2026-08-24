@@ -326,7 +326,7 @@ export type HostedLinqDeliveryProviderDispatchClaim = {
   claimed: boolean;
   failureCode?: string | null;
   id: string | null;
-  outcome?: "completed" | "incompatible";
+  outcome?: "completed" | "incompatible" | "terminal";
   replayingRichLinkPartial?: true;
   retryAt?: Date;
 };
@@ -2728,6 +2728,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   linqChatLookupKey: true,
   messageLookupKey: true,
   phoneNumberLookupKey: true,
+  payloadSchema: true,
   retryAfterAt: true,
   skippedAt: true,
   source: true,
@@ -2841,6 +2842,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     linqChatLookupKey: string | null;
     messageLookupKey: string | null;
     phoneNumberLookupKey: string | null;
+    payloadSchema: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
     source: string;
@@ -3003,6 +3005,28 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       ...(isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
+    };
+  }
+
+  const terminalInstantFirstTurnFallback =
+    input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && (
+      input.delivery.skippedAt !== null
+      || input.delivery.status === "skipped"
+      || (
+        input.delivery.payloadSchema === null
+        && (
+          input.delivery.failedAt !== null
+          || input.delivery.status === "failed"
+        )
+      )
+    );
+  if (terminalInstantFirstTurnFallback) {
+    return {
+      claimed: false,
+      id: input.delivery.id,
+      outcome: "terminal",
     };
   }
 

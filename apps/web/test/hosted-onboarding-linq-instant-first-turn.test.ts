@@ -275,6 +275,7 @@ describe("hosted Linq instant first turn", () => {
   it("limits the web path to a direct, plain-text-only iMessage", () => {
     expect(isHostedLinqInstantFirstTurnRequestEligible(REQUEST)).toBe(true);
     for (const request of [
+      { ...REQUEST, partTypes: ["text", "text"] },
       { ...REQUEST, partTypes: ["text", "image"] },
       { ...REQUEST, partTypes: ["image"] },
       { ...REQUEST, service: "sms" as const },
@@ -347,6 +348,27 @@ describe("hosted Linq instant first turn", () => {
       claim: { kind: "resume" },
       request: REQUEST,
     })).resolves.toEqual({ kind: "resume" });
+  });
+
+  it("does not regenerate a terminal ledger fallback on an exact retry", async () => {
+    mocks.claimHostedLinqDeliveryProviderDispatchTx.mockResolvedValueOnce({
+      claimed: false,
+      id: "delivery_123",
+      outcome: "terminal",
+    });
+
+    const claim = await claimHostedLinqInstantFirstTurn({
+      linqChatId: "chat_123",
+      prisma: createPrisma(),
+      request: REQUEST,
+    });
+
+    expect(claim).toEqual({ kind: "unavailable" });
+    await expect(startHostedLinqInstantFirstTurnGeneration({
+      claim,
+      request: REQUEST,
+    })).resolves.toEqual({ kind: "unavailable" });
+    expect(mocks.hostedLinqDeliveryFindUnique).not.toHaveBeenCalled();
   });
 
   it("requests one tool-free Murph answer with strict output", async () => {

@@ -1543,7 +1543,11 @@ claim. Once planning converges, only an exact model-approved active direct wake
 keeps that claim for Web delivery. Every completed non-instant plan marks the
 same row skipped before its fallback side effect, while a retryable planning
 failure retains the row for exact-event recovery. An unavailable result leaves
-the original conversation checkpoint unchanged. An accepted result instead
+the original conversation checkpoint unchanged. The eligibility request keeps
+source-part cardinality, so only one actual text part can use this path. A
+skipped row or failed row with no encrypted payload remains terminal on exact
+webhook replay; a failed row with retained payload may recover only that exact
+body. An accepted result instead
 passes through the existing
 Linq delivery ledger, then Web atomically appends its ordinary self-authored
 conversation row, stamps the original inbound and that outbound row consumed,

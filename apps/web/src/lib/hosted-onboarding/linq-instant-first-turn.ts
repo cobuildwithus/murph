@@ -191,6 +191,9 @@ export async function claimHostedLinqInstantFirstTurn(input: {
         if (claim.outcome === "completed") {
           return { kind: "completed" } as const;
         }
+        if (claim.outcome === "terminal") {
+          return { kind: "unavailable" } as const;
+        }
         throw buildHostedLinqInstantFirstTurnRetryError(
           claim.outcome === "incompatible"
             ? "delivery-intent-incompatible"
@@ -469,6 +472,9 @@ export async function completeHostedLinqInstantFirstTurn(input: {
         prisma,
         wakeHandoff: input.wakeHandoff,
       });
+    }
+    if (claim.outcome === "terminal") {
+      return { kind: "fallback" };
     }
     throw buildHostedLinqInstantFirstTurnRetryError(
       claim.outcome === "incompatible"

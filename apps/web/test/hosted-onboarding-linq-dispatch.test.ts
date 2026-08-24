@@ -9796,6 +9796,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
   });
 
   it("sends first-contact signup links even when inbound Linq parts exceed mailbox limits", async () => {
+    mocks.hostedOnboardingEnvironment.linqFirstContactAdmissionMode = "enforce";
     const invite = {
       channel: "linq",
       id: "invite_many_parts",
@@ -9846,7 +9847,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
         data: {
           parts: Array.from({ length: 33 }, (_, index) => ({
             type: "text",
-            value: `part ${index}`,
+            value: `part ${index} ${"x".repeat(100)}`,
           })),
         },
         eventId: "evt_first_contact_many_parts",
@@ -9861,7 +9862,7 @@ describe("handleHostedOnboardingLinqWebhook", () => {
       reason: "sent-signup-link",
     });
 
-    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(2);
+    expect(prismaMocks.hostedMember.findUnique).toHaveBeenCalledTimes(3);
     expect(prismaMocks.hostedMember.create).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.findFirst).toHaveBeenCalledTimes(1);
     expect(prismaMocks.hostedInvite.create).toHaveBeenCalledTimes(1);
@@ -9875,6 +9876,16 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     });
     expect(mocks.incrementHostedLinqInboundDailyState).toHaveBeenCalled();
     expect(mocks.markHostedLinqOnboardingLinkNoticeSent).toHaveBeenCalled();
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledWith({
+      request: expect.objectContaining({
+        partTypes: Array.from({ length: 33 }, () => "text"),
+        text: expect.stringMatching(/^part 0 x/u),
+      }),
+      signal: undefined,
+    });
+    const admissionRequest = mocks.classifyHostedLinqFirstContactAdmission
+      .mock.calls[0]?.[0]?.request;
+    expect(admissionRequest?.text).toHaveLength(2_000);
     expect(mocks.sendHostedLinqChatMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         chatId: "chat_123",

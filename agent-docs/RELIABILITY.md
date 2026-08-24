@@ -779,8 +779,10 @@ Last verified: 2026-08-20
   activation failure falls back to the existing signup-link path, while the
   single-owner wait remains provider-retryable, without creating a second
   entitlement, queue, or runtime.
-  Before generation, Web claims the exact eligible plain-text chat/event in the
-  existing delivery ledger under the chat lock. It then runs one bounded
+  Before generation, Web claims the exact eligible chat/event only when the
+  provider payload contains one non-empty text part. Source-part cardinality is
+  preserved rather than deduplicated by type, so two text parts cannot enter
+  the fast path after their text is joined. Web then runs one bounded
   tool-free Murph reply generation beside the admission classifier, enrollment,
   and shell prewarm. After the planner converges and before any fallback side
   effect, only an exact model-approved active direct wake retains that claim for
@@ -794,8 +796,11 @@ Last verified: 2026-08-20
   dispatch. Linq receives the stable event-derived idempotency key. An
   ambiguous or retryable send retains that ciphertext, suppresses both the
   conversation and deferred activation wakes, and replays only the same body;
-  it never regenerates the reply. A definitive pre-acceptance rejection clears
-  the payload and returns to the ordinary runtime. After provider acceptance,
+  it never regenerates the reply. A skipped claim or definitive pre-acceptance
+  rejection with no retained payload is terminal for this template and cannot
+  be reopened by an exact webhook replay; the ordinary runtime remains the
+  reply owner. Other delivery templates retain their existing retry behavior.
+  After provider acceptance,
   one short transaction records the delivery milestone, appends the ordinary
   self-authored Linq conversation envelope, stamps both that row and the exact
   inbound row consumed, and clears the encrypted delivery payload. The runtime
