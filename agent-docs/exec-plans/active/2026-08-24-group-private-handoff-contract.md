@@ -59,3 +59,31 @@ Updated: 2026-08-24
 - Provider-visible description byte and route-wide budget comparison.
 - `git diff --check` and privacy-sensitive diff inspection.
 - Exact-head CI and preliminary specialist ReviewGPT pass.
+
+## Product UX Walkthrough
+
+- Fresh complete handoff: the current Message selects the existing new private
+  request action, while the host still owns sender identity, route checks, and
+  delivery. Contract coverage passed.
+- Missing-detail path: Murph persists the existing clarification before asking
+  the participant, so a later answer has a continuation owner. Contract coverage
+  passed alongside the existing mutual-exclusion tests.
+- Later clarification answer: only a later Message may select group or private
+  continuation; a fresh request cannot use continuation. Existing mapping and
+  authority tests passed.
+- Failure and recovery: unavailable routing and rejected authority remain
+  truthful server results, and accepted work remains described as queued rather
+  than sent. No fallback or retry behavior changed.
+- Result: Ready. The existing journey is restored for each changed path without
+  a new state, action, or user-visible step.
+
+## Local Evidence
+
+- Assistant Engine focused suites: 41 tests passed.
+- Assistant Engine typecheck: passed.
+- Changelog registry: 38 focused tests passed; Web typecheck passed.
+- Normalized real Codex App Server capture with `gpt-tokenizer` 3.4.0
+  `o200k_harmony`: the initial deferred-tool request is unchanged at 13,843
+  tokens / 58,845 UTF-8 bytes. The first request after `group_consult` discovery
+  changes from 16,973 tokens / 72,448 bytes to 17,038 / 72,803, a delta of 65
+  tokens / 355 bytes entirely from the tool description.
