@@ -2018,9 +2018,9 @@ describe('assistant system prompt cache stability', () => {
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
     // longitudinal recommendation policy, response-card dietary/burn
-    // target-authority boundary, and explicit group-family tool routing set this
-    // ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_104)
+    // target-authority boundary, explicit group-family tool routing, and the
+    // cross-route CLI error-recovery contract set this exact ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_301)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
