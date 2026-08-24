@@ -47,8 +47,12 @@ import {
   saveAssistantAutomationState,
 } from "@murphai/assistant-engine/assistant-state";
 import {
+  initializeVault,
   withCanonicalWriteLock,
 } from "@murphai/core";
+import {
+  persistCanonicalInboxCapture,
+} from "@murphai/inboxd";
 import {
   ASSISTANT_GENERATED_DELIVERY_DIRECTORY,
 } from "@murphai/runtime-state/assistant-generated-deliveries";
@@ -1496,6 +1500,70 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, activeOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedOperationPath));
     await expectPresent(path.join(vaultRoot, uncheckpointedCommittedStageRoot));
+  });
+
+  it("excludes transient inbox videos from v2 snapshots without deleting live bytes", async () => {
+    const vaultRoot = await createVaultRoot();
+    const now = "2026-06-10T00:00:00.000Z";
+    await initializeVault({ createdAt: now, vaultRoot });
+    const persisted = await persistCanonicalInboxCapture({
+      captureId: "cap_snapshot_transient_video",
+      eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2VK",
+      input: {
+        actor: { isSelf: false },
+        attachments: [
+          {
+            data: Buffer.from("synthetic-video-bytes"),
+            fileName: "clip.mp4",
+            kind: "video",
+            mime: "video/mp4",
+          },
+          {
+            data: Buffer.from("synthetic-audio-bytes"),
+            fileName: "voice.mp3",
+            kind: "audio",
+            mime: "audio/mpeg",
+          },
+        ],
+        externalId: "msg-snapshot-transient-video",
+        occurredAt: now,
+        raw: {},
+        receivedAt: now,
+        source: "telegram",
+        text: "synthetic mixed media",
+        thread: {
+          id: "thread-snapshot-transient-video",
+          isDirect: true,
+        },
+      },
+      storedAt: now,
+      vaultRoot,
+    });
+    const videoPath = persisted.stored.attachments[0]?.storedPath ?? "";
+    const audioPath = persisted.stored.attachments[1]?.storedPath ?? "";
+    expect(videoPath).not.toBe("");
+    expect(audioPath).not.toBe("");
+    const { platform } = createRuntimePlatform();
+    const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
+    const options = createBridgeOptions({
+      platform,
+      request: createInvocationRequestWithWorkspaceCheckpoint(now),
+      snapshotArchiveBuilder,
+      vaultRoot,
+    });
+
+    await options.createCheckpointSnapshot(createCheckpointInput("idle_shutdown"));
+
+    const archiveEntries =
+      vi.mocked(snapshotArchiveBuilder.buildEncryptedSnapshot).mock.calls[0]?.[0]
+        .archiveEntries ?? [];
+    expect(archiveEntries.some((entry) =>
+      entry.root === "vault" && entry.relativePath === videoPath
+    )).toBe(false);
+    expect(archiveEntries.some((entry) =>
+      entry.root === "vault" && entry.relativePath === audioPath
+    )).toBe(true);
+    await expectPresent(path.join(vaultRoot, videoPath));
   });
 
   it("prunes settled assistant runtime residue before v2 snapshot archive planning", async () => {

@@ -164,7 +164,10 @@ authority because provider tools freeze at turn start and the first video may
 arrive through live steering. Murph freezes attachment metadata before Codex
 can act on each initial or live-steered input, verifies the exact bytes before
 cross-provider egress, pins 1 FPS and bounded output, and keeps credentials at
-the Worker boundary. The architecture, security, deployment order, and
+the Worker boundary. Ordinary inbound hosted video bytes stay outside workspace
+snapshots and become immediately retention-eligible when active input no longer
+needs them; explicit canonical durable references are the exception. The
+architecture, security, deployment order, and
 verification owners are `ARCHITECTURE.md`,
 `agent-docs/SECURITY.md`, `apps/cloudflare/DEPLOY.md`, and
 `agent-docs/references/testing-ci-map.md`.
