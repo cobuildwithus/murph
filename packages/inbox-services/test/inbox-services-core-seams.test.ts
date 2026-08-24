@@ -382,7 +382,7 @@ test('inbox failure summaries preserve domain codes and redact message causes', 
     category: 'vault_cli_error',
     code: 'INBOX_DOMAIN_FAILED',
     cause: 'transport failed with api_key=[redacted] and <redacted-phone> '
-      + 'at <redacted-path> while reading /v2/usercollection/daily_sleep',
+      + 'at <redacted-path> while reading <PATH>',
     message: "domain failed for <redacted-url> at '<redacted-path>' and <redacted-path>",
   })
 
