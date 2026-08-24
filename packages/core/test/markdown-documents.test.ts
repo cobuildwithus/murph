@@ -547,6 +547,51 @@ describe("markdown document primitives", () => {
     })).resolves.toEqual(created.record);
   });
 
+  it("creates a distinct automation when a create-only slug belongs only to an archived record", async () => {
+    const vaultRoot = await makeVaultRoot();
+    const archived = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2031-02-14T12:00:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "archived",
+        title: "Mobility reminder",
+      }),
+    });
+
+    await expect(upsertAutomation({
+      vaultRoot,
+      automationId: archived.record.automationId,
+      createOnly: true,
+      now: new Date("2031-02-15T11:59:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "active",
+        title: "Mobility reminder",
+      }),
+    })).rejects.toMatchObject({ code: "VAULT_AUTOMATION_CONFLICT" });
+
+    const created = await upsertAutomation({
+      vaultRoot,
+      createOnly: true,
+      now: new Date("2031-02-15T12:00:00.000Z"),
+      ...createAutomationPayload({
+        slug: "mobility-reminder",
+        status: "active",
+        title: "Mobility reminder",
+      }),
+    });
+
+    expect(created.created).toBe(true);
+    expect(created.record.automationId).not.toBe(archived.record.automationId);
+    expect(created.record.slug).toBe("mobility-reminder-2");
+    expect(created.record.relativePath).toBe("bank/automations/mobility-reminder-2.md");
+    await expect(showAutomation({
+      slug: "mobility-reminder",
+      vaultRoot,
+    })).resolves.toEqual(archived.record);
+  });
+
   it("allows first support-series assignment but preserves ownership thereafter", async () => {
     const vaultRoot = await makeVaultRoot();
     const supportSeriesTag = buildAutomationSupportSeriesTag("experiment:exp_sleep");
