@@ -1565,6 +1565,83 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
+  it.each([
+    {
+      expectedReplay: "terminal",
+      expectedRuntime: "available",
+      label: "explicitly ceded buffered failure",
+      overrides: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        lastReceiptAt: new Date("2026-03-26T12:00:02.000Z"),
+        messageLookupKey: "hbidx:linq-message:failed",
+        skippedAt: new Date("2026-03-26T12:00:01.000Z"),
+        status: "failed",
+      },
+    },
+    {
+      expectedReplay: "completed",
+      expectedRuntime: "already_answered",
+      label: "late failure after completed Web continuity",
+      overrides: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        failedAt: new Date("2026-03-26T12:00:02.000Z"),
+        lastReceiptAt: new Date("2026-03-26T12:00:02.000Z"),
+        messageLookupKey: "hbidx:linq-message:failed",
+        skippedAt: null,
+        status: "failed",
+      },
+    },
+    {
+      expectedReplay: "completed",
+      expectedRuntime: "already_answered",
+      label: "delivered evidence after an earlier fallback marker",
+      overrides: {
+        acceptedAt: new Date("2026-03-26T12:00:01.000Z"),
+        deliveredAt: new Date("2026-03-26T12:00:03.000Z"),
+        lastReceiptAt: new Date("2026-03-26T12:00:03.000Z"),
+        messageLookupKey: "hbidx:linq-message:delivered",
+        skippedAt: new Date("2026-03-26T12:00:01.000Z"),
+        status: "delivered",
+      },
+    },
+  ] as const)("keeps runtime and exact replay aligned for $label", async ({
+    expectedReplay,
+    expectedRuntime,
+    overrides,
+  }) => {
+    const fixture = createObservabilityPrismaFixture();
+    const delivery = buildInstantFirstTurnDeliveryFixture(overrides);
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValueOnce(delivery);
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(delivery);
+
+    await expect(
+      resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx({
+        eventId: "evt_first_turn",
+        linqChatId: "chat_123",
+        prisma: fixture.prisma as never,
+      }),
+    ).resolves.toBe(expectedRuntime);
+    await expect(claimHostedLinqDeliveryProviderDispatchTx({
+      attemptedAt: new Date("2026-03-26T12:30:00.000Z"),
+      idempotencyKey: "linq-instant-first-turn-v1:event",
+      linqChatId: "chat_123",
+      prisma: fixture.prisma as never,
+      reclaimStalePreProviderAttempt: true,
+      source: "hosted_web_instant_first_turn",
+      sourceRef: "evt_first_turn",
+      status: "attempted",
+      targetKind: "thread",
+      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
+    })).resolves.toEqual({
+      claimed: false,
+      id: "hld_instant_first_turn",
+      outcome: expectedReplay,
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("leaves an inbound with no exact Web delivery available to the runtime", async () => {
     const fixture = createObservabilityPrismaFixture();
 
@@ -6095,8 +6172,13 @@ function createOwnedDeliveryReceiptPrismaFixture(
 }
 
 function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
   failureCode: string | null;
   failedAt: Date | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  payloadCiphertext: string | null;
   payloadSchema: string | null;
   skippedAt: Date | null;
   status: string;
@@ -6114,6 +6196,7 @@ function buildInstantFirstTurnDeliveryFixture(overrides: Partial<{
     linqChatLookupKey:
       createHostedLinqChatLookupKeyReadCandidates("chat_123")[0],
     messageLookupKey: null,
+    payloadCiphertext: null,
     payloadSchema: null,
     phoneNumberLookupKey: null,
     retryAfterAt: null,

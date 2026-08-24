@@ -114,11 +114,51 @@ was delivered.
 
 ## State
 
-Active. Round 6 remediation and focused verification are complete. The
+Active. Round 7 remediation and focused verification are complete. The
 design reuses the existing delivery ledger as the only provider outbox, stores
 the exact pending body encrypted for ambiguous recovery, and represents the
 completed exchange as two ordinary consumed conversation rows. ReviewGPT,
 exact-head gates, and completion remain.
+
+## ReviewGPT round 7 disposition
+
+The finding was accepted. Linq can report a buffered terminal failure while
+Web records provider acceptance. The finalizer cleared the encrypted body and
+correctly returned to ordinary-runtime fallback, but the accepted timestamp,
+message lookup key, and receipt still made both exact replay and runtime egress
+classify the row as already answered. That silenced both owners.
+
+The same failed-delivery update now records explicit fallback cession on the
+existing ledger row. One private pure disposition function orders the evidence
+for both consumers: delivered evidence wins, then explicit cession, then other
+provider correlation, then definitive uncorrelated failure. This preserves a
+late failure after completed continuity as already answered while letting a
+buffered failure reach the ordinary runtime. Focused tests compose the real
+runtime and exact-replay owners over all three order-sensitive states. No new
+field, enum, owner, queue, service, dependency, lease, or recovery process was
+added.
+
+## ReviewGPT round 7 cap retrospective
+
+The original requirement remains one low-latency Web reply for an eligible
+first plain-text iMessage, with the ordinary runtime owning every fallback and
+later turn. The first-reviewed head had 1,065 added and 3 deleted authored
+source lines. The round-7 corrected working patch has 1,703 added and 26
+deleted authored source lines: review remediation increased source additions by
+638 (60%) while total source churn remains 1,729 lines. The growth came from
+making the existing delivery-ledger lifecycle explicit at already-required
+boundaries: pre-generation ownership, terminal release, encrypted exact-body
+replay, route revalidation, runtime egress authority, and outbox
+supersession. The repeated mechanism was incomplete ordering of states already
+owned by that ledger, not proliferation of independent machinery.
+
+Deletion, splitting, or a new coordinator would either remove the latency
+outcome or duplicate delivery authority. The corrected shape has one ledger,
+one chat lock, one route authority, one provider idempotency key, and one shared
+disposition rule. The recommended cap decision is therefore one explicit
+continuation round to obtain a resolved result on this exact simplified shape;
+that decision remains pending user authorization after the required local,
+parent, CI, and preliminary-gate confirmations.
 
 ## ReviewGPT round 5 disposition
 

@@ -1568,8 +1568,12 @@ targets, so the first exchange is available to later normal turns without
   existing chat-locked Web egress transaction and resolves that exact instant
   row before claiming its own provider effect. Attempted, provider-started, or
   encrypted failed rows defer; accepted or delivered rows end the stale runtime
-  send as already answered; absent, skipped, and definitive failed-without-payload
-  rows allow the ordinary runtime path. Already-answered terminally supersedes
+  send as already answered; absent, explicitly ceded, and definitive
+  uncorrelated failed-without-payload rows allow the ordinary runtime path. If
+  acceptance replays a buffered failure, Web clears the payload and records
+  explicit cession on the existing row. Exact replay and runtime dispatch use
+  the same precedence: delivered evidence, explicit cession, then remaining
+  provider correlation. Already-answered terminally supersedes
   the stale runtime outbox intent without a retry, failure input, or recovery
   wake while retaining the exact reason for diagnostics. An ambiguous provider
   outcome starts no runtime wake and retains the exact encrypted reply for

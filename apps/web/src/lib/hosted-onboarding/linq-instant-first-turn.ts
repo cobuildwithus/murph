@@ -778,6 +778,8 @@ async function finalizeHostedLinqInstantFirstTurn(input: {
           payloadCiphertext: null,
           payloadOwnerMemberId: null,
           payloadSchema: null,
+          skippedAt: input.acceptedAt,
+          skipReason: "instant_first_turn_provider_failed",
         },
         where: {
           idempotencyKey:

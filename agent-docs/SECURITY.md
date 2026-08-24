@@ -1209,8 +1209,12 @@ Last verified: 2026-08-20
   validated source event and, under the existing chat lock, reopens that exact
   instant delivery row. An unresolved row defers runtime dispatch, a
   provider-correlated row terminates the stale runtime reply as already
-  answered, and only an absent, skipped, or definitive failed-without-payload
-  row permits the runtime provider claim. The already-answered result preserves
+  answered, and only an absent, explicitly ceded, or definitive uncorrelated
+  failed-without-payload row permits the runtime provider claim. A buffered
+  failed receipt observed during acceptance is explicitly ceded on that same
+  row when Web clears its payload. Delivered evidence takes precedence over an
+  earlier fallback marker; explicit cession takes precedence over other
+  provider correlation. The already-answered result preserves
   its exact reason while terminally superseding the stale runtime outbox intent,
   without a retry, failure-recovery input, or recovery wake. An exact replay
   cannot reopen a skipped instant reply or a failed

@@ -687,6 +687,8 @@ describe("hosted Linq instant first turn", () => {
           payloadCiphertext: null,
           payloadOwnerMemberId: null,
           payloadSchema: null,
+          skippedAt: expect.any(Date),
+          skipReason: "instant_first_turn_provider_failed",
         },
       }),
     );

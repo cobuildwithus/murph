@@ -749,6 +749,38 @@ export function isHostedLinqInstantFirstTurnFallbackTerminal(input: {
     );
 }
 
+type HostedLinqInstantFirstTurnDeliveryDisposition =
+  | "answered"
+  | "fallback"
+  | "unresolved";
+
+function resolveHostedLinqInstantFirstTurnDeliveryDisposition(input: {
+  acceptedAt: Date | null;
+  deliveredAt: Date | null;
+  failedAt: Date | null;
+  failureCode?: string | null;
+  lastReceiptAt: Date | null;
+  messageLookupKey: string | null;
+  payloadCiphertext: string | null;
+  payloadSchema: string | null;
+  skippedAt: Date | null;
+  status: string;
+}): HostedLinqInstantFirstTurnDeliveryDisposition {
+  if (input.deliveredAt !== null || input.status === "delivered") {
+    return "answered";
+  }
+  if (input.skippedAt !== null || input.status === "skipped") {
+    return "fallback";
+  }
+  if (isHostedLinqDeliveryProviderCorrelated(input)) {
+    return "answered";
+  }
+  if (isHostedLinqInstantFirstTurnFallbackTerminal(input)) {
+    return "fallback";
+  }
+  return "unresolved";
+}
+
 export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionTx(
   input: {
     eventId: string;
@@ -786,13 +818,14 @@ export async function resolveHostedLinqInstantFirstTurnRuntimeEgressDispositionT
   if (!delivery) {
     return "available";
   }
-  if (isHostedLinqDeliveryProviderCorrelated(delivery)) {
-    return "already_answered";
-  }
-  if (isHostedLinqInstantFirstTurnFallbackTerminal(delivery)) {
-    return "available";
-  }
-  return "defer";
+  const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(
+    delivery,
+  );
+  return disposition === "answered"
+    ? "already_answered"
+    : disposition === "fallback"
+      ? "available"
+      : "defer";
 }
 
 export async function hasUnresolvedHostedLinqProviderDispatchForChatTx(input: {
@@ -2795,6 +2828,7 @@ const hostedLinqDeliveryLifecycleSelect = {
   linqChatLookupKey: true,
   messageLookupKey: true,
   phoneNumberLookupKey: true,
+  payloadCiphertext: true,
   payloadSchema: true,
   retryAfterAt: true,
   skippedAt: true,
@@ -2909,6 +2943,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     linqChatLookupKey: string | null;
     messageLookupKey: string | null;
     phoneNumberLookupKey: string | null;
+    payloadCiphertext: string | null;
     payloadSchema: string | null;
     retryAfterAt: Date | null;
     skippedAt: Date | null;
@@ -3065,6 +3100,22 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
     };
   }
 
+  if (
+    input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+    && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
+  ) {
+    const disposition = resolveHostedLinqInstantFirstTurnDeliveryDisposition(
+      input.delivery,
+    );
+    if (disposition !== "unresolved") {
+      return {
+        claimed: false,
+        id: input.delivery.id,
+        outcome: disposition === "answered" ? "completed" : "terminal",
+      };
+    }
+  }
+
   if (isHostedLinqDeliveryProviderCorrelated(input.delivery)) {
     return {
       claimed: false,
@@ -3072,28 +3123,6 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
       ...(isHostedLinqPinnedTargetDeliveryTemplate(input.data.template)
         ? { outcome: "completed" as const }
         : {}),
-    };
-  }
-
-  const terminalInstantFirstTurnFallback =
-    input.data.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
-    && input.delivery.template === HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE
-    && (
-      input.delivery.skippedAt !== null
-      || input.delivery.status === "skipped"
-      || (
-        input.delivery.payloadSchema === null
-        && (
-          input.delivery.failedAt !== null
-          || input.delivery.status === "failed"
-        )
-      )
-    );
-  if (terminalInstantFirstTurnFallback) {
-    return {
-      claimed: false,
-      id: input.delivery.id,
-      outcome: "terminal",
     };
   }
 
