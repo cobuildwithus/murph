@@ -591,6 +591,16 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         const status = await requireScenario().harness.readUserStatus(
           identity.userId,
         );
+        const activationProcessed = (await listHostedRuntimeLogsForTest({
+          environment: requireScenario().runtimeEnv,
+          limit: 100,
+          userId: identity.userId,
+        })).some((entry) =>
+          entry.eventCode === "mailbox.system_processed"
+          && entry.redactedJson?.routeAction === "apply-member-activation"
+          && entry.redactedJson?.status === "processed"
+          && entry.redactedJson?.wakeKind === "member.activated"
+        );
         systemMailboxPreparedObserved = Math.max(
           systemMailboxPreparedObserved,
           Number(
@@ -611,6 +621,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         });
         return {
           activeFence: await readActiveRuntimeFenceForTest(identity.userId),
+          activationProcessed,
           conversationConsumed: consumedConversation.consumedAt !== null,
           lastErrorCode: status.lastErrorCode ?? null,
           mailboxLag: status.mailboxLag.map(({ importedSeq, lag, lane, maxSeq }) => ({
@@ -619,9 +630,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
             lane,
             maxSeq,
           })),
-          systemHandledThroughSeq:
-            status.workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq
-              ?? null,
           systemImportedSeq:
             status.workspace?.redactedStatus?.hostedMailboxSystemImportedSeq
               ?? null,
@@ -633,6 +641,7 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
         timeout: 60_000,
       }).toEqual({
         activeFence: conversationFence,
+        activationProcessed: true,
         conversationConsumed: true,
         lastErrorCode: null,
         mailboxLag: [
@@ -649,7 +658,6 @@ describe.sequential("hosted local foreground reply priority e2e", () => {
             maxSeq: conversationItem.laneSeq,
           },
         ],
-        systemHandledThroughSeq: activationAppend.wake.seq,
         systemImportedSeq: activationAppend.wake.seq,
         systemMailboxPreparedObserved: 0,
         systemMailboxRetryableFailedObserved: 0,

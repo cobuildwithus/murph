@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   completeExternalJunctionAuthorizationForTest,
+  disconnectHostedLocalJunctionAccountForTest,
   readHostedLocalJunctionBrowserConfigForTest,
 } from "../scripts/run-hosted-local-junction-wearable-browser";
 
@@ -54,36 +55,147 @@ describe("hosted headed browser boundary", () => {
   });
 
   it.runIf(smokeEnabled)(
-    "checks the exact Garmin consent set before the route-bound Save action",
+    "waits for the reloaded connect page before disconnecting Garmin",
+    async () => {
+      const browser = await chromium.launch({ headless: false });
+      let releaseLoad: (() => void) | undefined;
+      const loadGate = new Promise<void>((resolve) => {
+        releaseLoad = resolve;
+      });
+      try {
+        const page = await browser.newPage();
+        await page.route("https://app.example.test/hold-load", async (route) => {
+          await loadGate;
+          await route.fulfill({ body: "", contentType: "image/png" });
+        });
+        await page.route("https://app.example.test/connect", (route) =>
+          route.fulfill({
+            body: [
+              "<main>",
+              "<div>",
+              "<h2>Garmin</h2>",
+              '<span data-connection-state="connected" ',
+              'style="display:block;width:1px;height:1px"></span>',
+              '<button aria-label="Disconnect account">Disconnect</button>',
+              "</div>",
+              '<div id="dialog-root"></div>',
+              '<div id="notice"></div>',
+              "</main>",
+              "<script>",
+              "window.disconnectClickAttempts = 0;",
+              "document.addEventListener('click', (event) => {",
+              "if (event.target.closest('[aria-label=\"Disconnect account\"]')) {",
+              "window.disconnectClickAttempts += 1;",
+              "}",
+              "}, true);",
+              "window.addEventListener('load', () => {",
+              "document.querySelector('[aria-label=\"Disconnect account\"]')",
+              ".addEventListener('click', () => {",
+              "document.querySelector('#dialog-root').innerHTML = [",
+              "'<div role=\"dialog\">',",
+              "'<h2>Disconnect account?</h2>',",
+              "'<button>Disconnect</button>',",
+              "'</div>',",
+              "].join('');",
+              "document.querySelector('[role=\"dialog\"] button')",
+              ".addEventListener('click', () => {",
+              "document.querySelector('#notice').textContent = 'Source disconnected';",
+              "document.querySelector('[data-connection-state]')",
+              ".setAttribute('data-connection-state', 'idle');",
+              "});",
+              "});",
+              "});",
+              "</script>",
+              '<img src="https://app.example.test/hold-load" alt="">',
+            ].join(""),
+            contentType: "text/html",
+          })
+        );
+        await page.goto("https://app.example.test/connect", {
+          waitUntil: "domcontentloaded",
+        });
+
+        const cleanup = disconnectHostedLocalJunctionAccountForTest(
+          page,
+          createGarminConfig(),
+        );
+        await expect(page.getByRole("button", { name: "Disconnect account" }).isVisible())
+          .resolves.toBe(true);
+        await expect(page.getByRole("dialog").count()).resolves.toBe(0);
+        await expect(page.evaluate(() => Reflect.get(
+          window,
+          "disconnectClickAttempts",
+        ))).resolves.toBe(0);
+
+        releaseLoad?.();
+        await expect(cleanup).resolves.toBeUndefined();
+        await expect(page.evaluate(() => Reflect.get(
+          window,
+          "disconnectClickAttempts",
+        ))).resolves.toBe(1);
+        await expect(page.getByText("Source disconnected", { exact: true }).isVisible())
+          .resolves.toBe(true);
+        await expect(page.locator('[data-connection-state="idle"]').count())
+          .resolves.toBe(1);
+      } finally {
+        releaseLoad?.();
+        await browser.close();
+      }
+    },
+  );
+
+  it.runIf(smokeEnabled)(
+    "completes Garmin's exact two-step consent flow",
     async () => {
       const browser = await chromium.launch({ headless: false });
       try {
         const page = await browser.newPage();
-        await page.route("https://connect.garmin.com/**", (route) => route.fulfill({
-          body: [
-            '<input type="checkbox">',
-            '<input type="checkbox">',
-            '<input type="checkbox">',
-            '<button id="save">Save</button>',
-            '<button onclick="location.href=\'https://app.example.test/cancel\'">',
-            "Cancel</button>",
-            "<script>",
-            "document.querySelector('#save').addEventListener('click', () => {",
-            "const allChecked = [...document.querySelectorAll('input[type=checkbox]')]",
-            ".every((input) => input.checked);",
-            "location.href = allChecked",
-            "? 'https://app.example.test/home'",
-            ": 'https://app.example.test/incomplete';",
-            "});",
-            "</script>",
-          ].join(""),
-          contentType: "text/html",
-        }));
+        await page.route("https://connect.garmin.com/**", (route) => {
+          const url = new URL(route.request().url());
+          const progressed = url.searchParams.has("permissionsUpdated")
+            && url.searchParams.has("selectedCapabilities");
+          return route.fulfill({
+            body: progressed
+              ? [
+                '<button onclick="setTimeout(() => location.href=\'https://app.example.test/home\', 750)">',
+                "Agree</button>",
+                '<button onclick="location.href=\'https://app.example.test/declined\'">',
+                "Do Not Agree</button>",
+              ].join("")
+              : [
+                '<input type="checkbox" disabled>',
+                '<input type="checkbox" disabled>',
+                '<input type="checkbox" disabled>',
+                '<button id="save">Save</button>',
+                '<button onclick="location.href=\'https://app.example.test/cancel\'">',
+                "Cancel</button>",
+                "<script>",
+                "setTimeout(() => {",
+                "document.querySelectorAll('input[type=checkbox]')",
+                ".forEach((input) => input.disabled = false);",
+                "}, 500);",
+                "document.querySelector('#save').addEventListener('click', () => {",
+                "const allChecked = [...document.querySelectorAll('input[type=checkbox]')]",
+                ".every((input) => input.checked);",
+                "location.href = allChecked",
+                "? 'https://connect.garmin.com/partner/oauthConfirm",
+                "?oauth_token=opaque&oauth_callback=opaque",
+                "&permissionsUpdated=1&selectedCapabilities=opaque'",
+                ": 'https://app.example.test/incomplete';",
+                "});",
+                "</script>",
+              ].join(""),
+            contentType: "text/html",
+          });
+        });
         await page.route("https://app.example.test/**", (route) => route.fulfill({
           body: "",
           contentType: "text/html",
         }));
-        await page.goto("https://connect.garmin.com/partner/oauthConfirm");
+        await page.goto([
+          "https://connect.garmin.com/partner/oauthConfirm",
+          "?oauth_token=opaque&oauth_callback=opaque",
+        ].join(""));
 
         await expect(completeExternalJunctionAuthorizationForTest(
           page,

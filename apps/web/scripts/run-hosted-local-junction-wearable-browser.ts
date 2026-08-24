@@ -550,12 +550,19 @@ async function completeExternalAuthorization(
         }
       }
 
+      const garminPartnerConsentStep = config.source === "garmin"
+        ? readGarminPartnerConsentStep(page.url())
+        : null;
+      if (garminPartnerConsentStep === "invalid") {
+        throw new Error("Garmin consent exposed an invalid progression state.");
+      }
       const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
-        && await completeGarminPartnerConsent(page, config.source);
+        && garminPartnerConsentStep === "selection"
+        && await completeGarminPartnerConsent(page);
       if (completedGarminPartnerConsent) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
-        await waitForGarminPartnerConsentDeparture(
+        await waitForGarminPartnerConsentProgression(
           page,
           Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
           now,
@@ -564,15 +571,27 @@ async function completeExternalAuthorization(
         continue;
       }
 
-      await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(
-        page,
-        AUTH_ACTIONS,
-        config.source,
-      );
+      const garminConfirmation =
+        garminPartnerConsentStep === "permissions_updated";
+      let clicked = false;
+      if (garminConfirmation) {
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      } else if (garminPartnerConsentStep !== "selection") {
+        // The outer loop owns readiness and challenge revalidation, so an
+        // incomplete exact Garmin surface never enters generic actions.
+        await checkRequiredConsentCheckboxes(page);
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      }
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
+        if (garminConfirmation) {
+          await waitForGarminPartnerConfirmationDeparture(
+            page,
+            Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+            now,
+          );
+        }
         await page.waitForTimeout(750);
         continue;
       }
@@ -608,21 +627,17 @@ async function completeExternalAuthorization(
 
 async function completeGarminPartnerConsent(
   page: Page,
-  source: BrowserConfig["source"],
 ): Promise<boolean> {
-  if (
-    source !== "garmin"
-    || !isGarminPartnerConsentUrl(page.url())
-  ) {
-    return false;
-  }
-
   const checkboxes = page.getByRole("checkbox");
-  if (await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
-    throw new Error(
-      `Garmin consent expected exactly ${GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT} data-sharing checkboxes.`,
-    );
-  }
+  if (
+    await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT
+    || !await areGarminConsentCheckboxesReady(checkboxes)
+  ) return false;
+  let save = page.getByRole("button", { exact: true, name: "Save" });
+  if (await save.count() !== 1) return false;
+  let saveAction = save.nth(0);
+  if (await readAuthorizationActionState(saveAction) !== "enabled") return false;
+
   for (
     let index = 0;
     index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
@@ -641,11 +656,16 @@ async function completeGarminPartnerConsent(
     }
   }
 
-  const save = page.getByRole("button", { exact: true, name: "Save" });
+  const step = readGarminPartnerConsentStep(page.url());
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step !== "selection") return false;
+  save = page.getByRole("button", { exact: true, name: "Save" });
   if (await save.count() !== 1) {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
-  const saveAction = save.nth(0);
+  saveAction = save.nth(0);
   if (await readAuthorizationActionState(saveAction) !== "enabled") {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
@@ -653,22 +673,93 @@ async function completeGarminPartnerConsent(
   return true;
 }
 
-function isGarminPartnerConsentUrl(value: string): boolean {
-  const url = new URL(value);
-  return url.hostname === "connect.garmin.com"
-    && url.pathname === "/partner/oauthConfirm";
+async function areGarminConsentCheckboxesReady(
+  checkboxes: Locator,
+): Promise<boolean> {
+  for (
+    let index = 0;
+    index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
+    index += 1
+  ) {
+    const checkbox = checkboxes.nth(index);
+    if (
+      !await checkbox.isVisible().catch(() => false)
+      || !await checkbox.isEnabled().catch(() => false)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
-async function waitForGarminPartnerConsentDeparture(
+type GarminPartnerConsentStep =
+  | "invalid"
+  | "permissions_updated"
+  | "selection";
+
+function readGarminPartnerConsentStep(
+  value: string,
+): GarminPartnerConsentStep | null {
+  const url = new URL(value);
+  if (
+    url.hostname !== "connect.garmin.com"
+    || url.pathname !== "/partner/oauthConfirm"
+  ) {
+    return null;
+  }
+  const permissionsUpdated = url.searchParams.has("permissionsUpdated");
+  const selectedCapabilities = url.searchParams.has("selectedCapabilities");
+  if (permissionsUpdated !== selectedCapabilities) return "invalid";
+  return permissionsUpdated ? "permissions_updated" : "selection";
+}
+
+async function waitForGarminPartnerConsentProgression(
   page: Page,
   deadline: number,
   now: () => number,
 ): Promise<void> {
-  while (isGarminPartnerConsentUrl(page.url()) && now() < deadline) {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "selection" && now() < deadline) {
     await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
   }
-  if (isGarminPartnerConsentUrl(page.url())) {
-    throw new Error("Garmin consent Save did not leave the consent route.");
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent Save did not advance the consent flow.");
+  }
+}
+
+async function waitForGarminPartnerConfirmationDeparture(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "permissions_updated" && now() < deadline) {
+    await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
+  }
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent confirmation returned to the selection state.");
+  }
+  if (step === "permissions_updated") {
+    const surface = await describeAuthorizationSurface(page);
+    step = readGarminPartnerConsentStep(page.url());
+    if (step === null) return;
+    if (step === "invalid") {
+      throw new Error("Garmin consent exposed an invalid progression state.");
+    }
+    if (step === "selection") {
+      throw new Error("Garmin consent confirmation returned to the selection state.");
+    }
+    throw new Error(
+      `Garmin consent confirmation did not leave the consent route. ${surface}`,
+    );
   }
 }
 
@@ -989,6 +1080,7 @@ async function disconnectJunctionAccount(
   page: Page,
   config: BrowserConfig,
 ): Promise<void> {
+  await page.waitForLoadState("load", { timeout: config.timeoutMs });
   await page
     .getByRole("button", { name: new RegExp(`^Disconnect (?:${config.label}|account)$`, "i") })
     .click();
@@ -1135,6 +1227,7 @@ export {
   closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,

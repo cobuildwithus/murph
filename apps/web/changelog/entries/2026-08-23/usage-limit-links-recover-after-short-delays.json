@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-23",
+  "order": 100,
+  "item": {
+    "id": "usage-limit-links-recover-after-short-delays",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Usage-limit links recover after short delays",
+    "summary": "Account recovery links now resume promptly when a delivery receipt arrives during a delayed message retry.",
+    "details": "Murph waits for an active delivery to finish before retrying the link, while ordinary messages remain blocked until account access is restored.",
+    "relevanceTags": ["assistant", "billing", "reliability"],
+    "sourcePullRequests": [2185]
+  }
+}
