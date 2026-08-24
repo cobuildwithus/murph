@@ -1,5 +1,6 @@
 import type { Errors } from 'incur'
 
+import { isHealthCommonsProtocolArtifactError } from '@murphai/health-commons/runtime'
 import { redactSensitivePathSegments } from '@murphai/operator-config/text/shared'
 import {
   createVaultCliRepair,
@@ -57,6 +58,24 @@ function toIncurFieldError(field: VaultCliRepairField): Errors.FieldError {
 }
 
 function classifyUnhandledCliError(error: unknown): VaultCliError {
+  if (isHealthCommonsProtocolArtifactError(error)) {
+    const unavailable = error.category === 'unavailable'
+    return new VaultCliError(
+      unavailable
+        ? 'commons_protocol_artifact_unavailable'
+        : 'commons_protocol_artifact_invalid',
+      unavailable
+        ? 'Health Commons protocol artifacts are unavailable.'
+        : 'Health Commons protocol artifacts are invalid.',
+      { retryable: false },
+      {
+        stage: error.artifact,
+        hint:
+          'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
+      },
+    )
+  }
+
   const nodeCode = readErrorCode(error)
 
   if (nodeCode === 'ENOENT') {

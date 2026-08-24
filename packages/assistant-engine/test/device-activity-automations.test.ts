@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
@@ -28,6 +28,7 @@ const deviceActivityMocks = vi.hoisted(() => ({
   advanceAutomationDeviceActivityCursor: vi.fn(),
   automations: [] as AutomationQueryRecord[],
   readModel: null as VaultReadModel | null,
+  useRealVaultReader: false,
 }))
 
 vi.mock('@murphai/core', () => ({
@@ -55,7 +56,10 @@ vi.mock('@murphai/query', async (importOriginal) => {
         : deviceActivityMocks.automations
     }),
     listScheduledLogs: vi.fn(async () => []),
-    readVaultRawTolerant: vi.fn(async () => {
+    readVaultRawTolerant: vi.fn(async (vault: string) => {
+      if (deviceActivityMocks.useRealVaultReader) {
+        return await actual.readVaultRawTolerant(vault)
+      }
       if (!deviceActivityMocks.readModel) {
         throw new Error('Missing mocked read model.')
       }
@@ -82,6 +86,7 @@ describe('device activity triggered automations', () => {
       entities: [],
       vaultRoot,
     })
+    deviceActivityMocks.useRealVaultReader = false
     deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockReset()
     deviceActivityMocks.advanceAutomationDeviceActivityCursor.mockResolvedValue({
       advanced: true,
@@ -184,6 +189,52 @@ describe('device activity triggered automations', () => {
         vaultRoot,
       }),
     )
+  })
+
+  it('schedules hosted device activity while tolerant vault hydration falls back on malformed markdown', async () => {
+    deviceActivityMocks.automations = [createDeviceActivityAutomation({
+      activityKind: 'walk',
+      after: '2026-06-07T11:00:00.000Z',
+      automationId: 'auto_hosted_tolerant_walk',
+    })]
+    deviceActivityMocks.useRealVaultReader = true
+
+    await mkdir(path.join(vaultRoot, 'journal', '2026'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'journal', '2026', '2026-06-07.md'),
+      ['---', 'title broken', '---', '', 'Legacy note.'].join('\n'),
+      'utf8',
+    )
+    await mkdir(path.join(vaultRoot, 'ledger', 'events', '2026'), { recursive: true })
+    await writeFile(
+      path.join(vaultRoot, 'ledger', 'events', '2026', '2026-06.jsonl'),
+      `${JSON.stringify({
+        dataOrigin: { sourceProviderSlug: 'junction' },
+        externalRef: {
+          resourceType: 'whoop_v2/activity_session',
+          system: 'junction',
+        },
+        id: 'evt_hosted_tolerant_walk',
+        kind: 'activity_session',
+        occurredAt: '2026-06-07T12:00:00.000Z',
+        recordedAt: '2026-06-07T12:00:30.000Z',
+        title: 'Hosted walk',
+        workout: { type: 'walking' },
+      })}\n`,
+      'utf8',
+    )
+
+    await expect(scheduleDeviceActivityTriggeredAutomations({
+      now: () => '2026-06-07T12:01:00.000Z',
+      vault: vaultRoot,
+    })).resolves.toMatchObject({
+      matched: 1,
+      scheduled: 1,
+    })
+
+    const jobs = await readQueuedCronJobs(vaultRoot)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0]?.prompt).toContain('Hosted walk')
   })
 
   it('does not schedule later activity for an archived parent automation', async () => {

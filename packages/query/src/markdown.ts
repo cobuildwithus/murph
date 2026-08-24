@@ -13,6 +13,10 @@ export interface ParsedMarkdownDocument {
   rawFrontmatter: string | null;
 }
 
+export type ParseMarkdownDocumentOptions =
+  | { mode: "strict"; relativePath: string }
+  | { mode: "tolerant" };
+
 function parseMarkdownScalar(value: string): FrontmatterValue {
   const trimmed = value.trim();
 
@@ -28,18 +32,18 @@ function parseMarkdownScalar(value: string): FrontmatterValue {
 
 export function parseMarkdownDocument(
   source: string,
-  options: { relativePath?: string } = {},
+  options: ParseMarkdownDocumentOptions,
 ): ParsedMarkdownDocument {
   const parsed = parseFrontmatterDocument(source, {
-    mode: options.relativePath ? "strict" : "tolerant",
+    mode: options.mode,
     bodyNormalization: "trim",
     allowSameIndentArrayItems: true,
-    ...(options.relativePath
+    ...(options.mode === "strict"
       ? {
           createError: (problem: FrontmatterParseProblem) =>
             new QueryVaultSourceError({
               issue: "frontmatter_invalid",
-              relativePath: options.relativePath ?? "<vault-source>",
+              relativePath: options.relativePath,
               ...(problem.index === undefined
                 ? {}
                 : { lineNumber: problem.index + 2 }),

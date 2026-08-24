@@ -344,10 +344,17 @@ type HealthCommonsProtocolActivationRecord = {
     }
   }
 }
+type HealthCommonsProtocolArtifactFailure = {
+  artifact: 'protocol_family_graph' | 'protocol_index' | 'protocol_run_specs'
+  category: 'invalid' | 'unavailable'
+}
 type HealthCommonsProtocolActivationRuntime = {
   getGeneratedHealthCommonsProtocolRunSpecReader(): {
     findByLookup(lookup: string): HealthCommonsProtocolActivationRecord | null
   }
+  isHealthCommonsProtocolArtifactError(
+    error: unknown,
+  ): error is HealthCommonsProtocolArtifactFailure
 }
 
 const healthCommonsSafetyDispositionRank: Record<
@@ -662,9 +669,30 @@ async function findCurrentHealthCommonsProtocol(
   const runtime = await loadRuntimeModule<HealthCommonsProtocolActivationRuntime>(
     '@murphai/health-commons/runtime',
   )
-  return runtime
-    .getGeneratedHealthCommonsProtocolRunSpecReader()
-    .findByLookup(reference.key)
+  try {
+    return runtime
+      .getGeneratedHealthCommonsProtocolRunSpecReader()
+      .findByLookup(reference.key)
+  } catch (error) {
+    if (!runtime.isHealthCommonsProtocolArtifactError(error)) {
+      throw error
+    }
+    const unavailable = error.category === 'unavailable'
+    throw new VaultCliError(
+      unavailable
+        ? 'commons_protocol_artifact_unavailable'
+        : 'commons_protocol_artifact_invalid',
+      unavailable
+        ? 'Health Commons protocol artifacts are unavailable.'
+        : 'Health Commons protocol artifacts are invalid.',
+      { retryable: false },
+      {
+        stage: error.artifact,
+        hint:
+          'Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.',
+      },
+    )
+  }
 }
 
 function assertHealthCommonsProtocolSafetyAllowsActivation(input: {

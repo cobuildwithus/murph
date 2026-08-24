@@ -8,7 +8,8 @@ export type QuerySourceIssue =
   | "frontmatter_invalid"
   | "malformed_json"
   | "metadata_invalid"
-  | "missing_field";
+  | "missing_field"
+  | "unsupported_format";
 
 export interface QueryVaultSourceErrorDetails {
   field?: string;

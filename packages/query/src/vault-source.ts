@@ -32,7 +32,10 @@ import {
 import { walkRelativeFiles } from "./health/loaders.ts";
 import { collapseEventLedgerEntities } from "./health/projectors/history.ts";
 import { deriveVaultRecordIdentity } from "./id-families.ts";
-import { parseMarkdownDocument } from "./markdown.ts";
+import {
+  parseMarkdownDocument,
+  type ParseMarkdownDocumentOptions,
+} from "./markdown.ts";
 import { lookupCanonicalEntityById } from "./read-model.ts";
 import { isDefaultProjectedQueryEntity } from "./query-visibility.ts";
 import {
@@ -47,6 +50,7 @@ export type { QueryRecordData } from "./query-record-data.ts";
 
 type FrontmatterRecordType = "core" | "experiment" | "journal" | "protocol";
 type JsonRecordType = "audit" | "event" | "metric_sample";
+type MarkdownParseMode = "strict" | "tolerant";
 
 export interface VaultSourceSnapshot {
   metadata: QueryRecordData | null;
@@ -98,7 +102,7 @@ export async function readVaultSourceStrict(
 ): Promise<VaultSourceSnapshot> {
   const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
   const [baseEntities, healthEntities] = await Promise.all([
-    readBaseEntities(vaultRoot, metadata),
+    readBaseEntities(vaultRoot, metadata, "strict"),
     collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
   ]);
 
@@ -113,7 +117,7 @@ export async function readVaultSourceTolerant(
 ): Promise<VaultSourceSnapshot> {
   const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
   const [baseEntities, healthEntities] = await Promise.all([
-    readBaseEntities(vaultRoot, metadata),
+    readBaseEntities(vaultRoot, metadata, "tolerant"),
     collectCanonicalEntities(vaultRoot, { mode: "tolerant-async" }),
   ]);
 
@@ -138,18 +142,18 @@ export async function readCanonicalEntityFamilySource(
       const metadata = await readOptionalVaultMetadata(
         path.join(vaultRoot, VAULT_LAYOUT.metadata),
       );
-      const entity = await readOptionalCoreEntity(vaultRoot, metadata);
+      const entity = await readOptionalCoreEntity(vaultRoot, metadata, "strict");
       entities = entity ? [entity] : [];
       break;
     }
     case "experiment":
-      entities = await readExperimentEntities(vaultRoot);
+      entities = await readExperimentEntities(vaultRoot, "strict");
       break;
     case "protocol":
-      entities = await readProtocolEntities(vaultRoot);
+      entities = await readProtocolEntities(vaultRoot, "strict");
       break;
     case "journal":
-      entities = await readJournalEntities(vaultRoot);
+      entities = await readJournalEntities(vaultRoot, "strict");
       break;
     case "event":
       entities = await readJsonlRecordFamily(
@@ -394,7 +398,10 @@ function validateVaultMetadataForQuery(value: unknown): QueryRecordData {
   }
 
   throw new QueryVaultSourceError({
-    issue: "metadata_invalid",
+    issue:
+      result.error.code === "VAULT_UNSUPPORTED_FORMAT"
+        ? "unsupported_format"
+        : "metadata_invalid",
     relativePath: VAULT_LAYOUT.metadata,
   });
 }
@@ -402,11 +409,12 @@ function validateVaultMetadataForQuery(value: unknown): QueryRecordData {
 async function readBaseEntities(
   vaultRoot: string,
   metadata: QueryRecordData | null,
+  markdownMode: MarkdownParseMode,
 ): Promise<CanonicalEntity[]> {
-  const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata);
-  const experiments = await readExperimentEntities(vaultRoot);
-  const protocols = await readProtocolEntities(vaultRoot);
-  const journalEntries = await readJournalEntities(vaultRoot);
+  const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata, markdownMode);
+  const experiments = await readExperimentEntities(vaultRoot, markdownMode);
+  const protocols = await readProtocolEntities(vaultRoot, markdownMode);
+  const journalEntries = await readJournalEntities(vaultRoot, markdownMode);
   const events = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, "event");
   const metricSamples = await readMetricSampleEntities(vaultRoot);
   const audits = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.auditDirectory, "audit");
@@ -422,17 +430,28 @@ async function readBaseEntities(
   ];
 }
 
+function markdownParseOptions(
+  mode: MarkdownParseMode,
+  relativePath: string,
+): ParseMarkdownDocumentOptions {
+  return mode === "strict"
+    ? { mode, relativePath }
+    : { mode };
+}
+
 async function readOptionalCoreEntity(
   vaultRoot: string,
   metadata: QueryRecordData | null,
+  markdownMode: MarkdownParseMode,
 ): Promise<CanonicalEntity | null> {
   const filePath = path.join(vaultRoot, VAULT_LAYOUT.coreDocument);
 
   try {
     const source = await readFile(filePath, "utf8");
-    const document = parseMarkdownDocument(source, {
-      relativePath: VAULT_LAYOUT.coreDocument,
-    });
+    const document = parseMarkdownDocument(
+      source,
+      markdownParseOptions(markdownMode, VAULT_LAYOUT.coreDocument),
+    );
     const attributes = normalizeFrontmatterAttributes("core", document.attributes);
     const title = pickString(attributes, ["title"]) ?? extractMarkdownHeading(document.body);
     const id = pickString(attributes, ["vaultId"]) ?? pickString(metadata, ["vaultId"]) ?? "core";
@@ -470,14 +489,20 @@ async function readOptionalCoreEntity(
   }
 }
 
-async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+async function readExperimentEntities(
+  vaultRoot: string,
+  markdownMode: MarkdownParseMode,
+): Promise<CanonicalEntity[]> {
   const relativePaths = await listCanonicalExperimentMarkdownPaths(vaultRoot);
 
   const pages = await Promise.all(
     relativePaths.map(async (relativePath) => {
       const filePath = path.join(vaultRoot, relativePath);
       const source = await readFile(filePath, "utf8");
-      const document = parseMarkdownDocument(source, { relativePath });
+      const document = parseMarkdownDocument(
+        source,
+        markdownParseOptions(markdownMode, relativePath),
+      );
       const attributes = readExperimentProtocolAttributesForQuery(
         normalizeFrontmatterAttributes(
           "experiment",
@@ -567,14 +592,20 @@ async function listCanonicalExperimentMarkdownPaths(
   }
 }
 
-async function readProtocolEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+async function readProtocolEntities(
+  vaultRoot: string,
+  markdownMode: MarkdownParseMode,
+): Promise<CanonicalEntity[]> {
   const relativePaths = await walkRelativeFiles(vaultRoot, PROTOCOL_DIRECTORY, ".md");
 
   const pages = await Promise.all(
     relativePaths.map(async (relativePath) => {
       const filePath = path.join(vaultRoot, relativePath);
       const source = await readFile(filePath, "utf8");
-      const document = parseMarkdownDocument(source, { relativePath });
+      const document = parseMarkdownDocument(
+        source,
+        markdownParseOptions(markdownMode, relativePath),
+      );
       const attributes = readProtocolAttributesForQuery(
         normalizeFrontmatterAttributes(
           "protocol",
@@ -618,14 +649,20 @@ async function readProtocolEntities(vaultRoot: string): Promise<CanonicalEntity[
   return pages.sort(compareCanonicalEntities);
 }
 
-async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+async function readJournalEntities(
+  vaultRoot: string,
+  markdownMode: MarkdownParseMode,
+): Promise<CanonicalEntity[]> {
   const relativePaths = await walkRelativeFiles(vaultRoot, VAULT_LAYOUT.journalDirectory, ".md");
   const pages: CanonicalEntity[] = [];
 
   for (const relativePath of relativePaths) {
     const filePath = path.join(vaultRoot, relativePath);
     const source = await readFile(filePath, "utf8");
-    const document = parseMarkdownDocument(source, { relativePath });
+    const document = parseMarkdownDocument(
+      source,
+      markdownParseOptions(markdownMode, relativePath),
+    );
     const attributes = normalizeFrontmatterAttributes("journal", document.attributes);
     const date = pickString(attributes, ["dayKey"]) ?? path.basename(relativePath, ".md");
     const title =

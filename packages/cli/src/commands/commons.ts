@@ -237,10 +237,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     ],
     output: commonsProtocolListResultSchema,
     async run({ options }) {
-      const reader = loadCommonsProtocolReader(
-        "protocol_index",
-        getGeneratedHealthCommonsProtocolIndexReader,
-      );
+      const reader = getGeneratedHealthCommonsProtocolIndexReader();
       const listOptions = {
         categories: options.category,
         limit: options.limit,
@@ -286,10 +283,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
     ],
     output: commonsProtocolShowResultSchema,
     async run({ args }) {
-      const reader = loadCommonsProtocolReader(
-        "protocol_run_specs",
-        getGeneratedHealthCommonsProtocolRunSpecReader,
-      );
+      const reader = getGeneratedHealthCommonsProtocolRunSpecReader();
       const entity = reader.findByLookup(args.key);
 
       if (!entity) {
@@ -343,10 +337,7 @@ export function registerCommonsCommands(cli: Cli.Cli) {
       "Use this during experiment onboarding when a broad query or named protocol may have lower-burden family variants.",
     output: commonsProtocolExploreResultSchema,
     async run({ args, options }) {
-      const reader = loadCommonsProtocolReader(
-        "protocol_family_graph",
-        getGeneratedHealthCommonsProtocolFamilyGraphReader,
-      );
+      const reader = getGeneratedHealthCommonsProtocolFamilyGraphReader();
       const matchedEntity = reader.findEntity({
         entityTypes: [familyEntityType, protocolEntityType],
         lookup: args.lookup,
@@ -380,37 +371,6 @@ export function registerCommonsCommands(cli: Cli.Cli) {
   commons.command(protocol);
   commons.command(knowledge);
   cli.command(commons);
-}
-
-function loadCommonsProtocolReader<TReader>(
-  stage: string,
-  load: () => TReader,
-): TReader {
-  try {
-    return load();
-  } catch (error) {
-    const code = readNodeErrorCode(error);
-    const unavailable = code === "ENOENT" || code === "EACCES" || code === "EPERM";
-    throw new VaultCliError(
-      unavailable
-        ? "commons_protocol_artifact_unavailable"
-        : "commons_protocol_artifact_invalid",
-      unavailable
-        ? "Health Commons protocol artifacts are unavailable."
-        : "Health Commons protocol artifacts are invalid.",
-      { retryable: false },
-      {
-        stage,
-        hint: "Stop protocol discovery, onboarding, planning, and starting a protocol until the packaged artifacts are restored or regenerated; then rerun the command. No protocol-backed run was created.",
-      },
-    );
-  }
-}
-
-function readNodeErrorCode(error: unknown): string | null {
-  return error && typeof error === "object" && "code" in error && typeof error.code === "string"
-    ? error.code
-    : null;
 }
 
 function toEntitySummary(entity: CommonsProtocolEntity) {
