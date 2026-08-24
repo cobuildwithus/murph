@@ -94,6 +94,12 @@ and that Android environment's client id must belong to it. The fixed OTP
 remains only in the private Android repository; the shared backend neither
 receives nor stores it.
 
+A native Privy app client may be shared across iOS and Android only when its
+allowed app identifiers include the exact Android application ids
+`ai.withmurph.app` and `ai.withmurph.app.dev`. The dashboard client label is
+descriptive, not an authorization boundary; the allowed identifiers are the
+enforced contract.
+
 The database URLs name the same explicit E2E/test database. The shared Vercel
 custom environment and Junction namespace remain the existing hosted-native
 E2E target and namespace; do not provision a second live-row owner for Android.
