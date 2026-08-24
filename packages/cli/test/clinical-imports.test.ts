@@ -182,17 +182,35 @@ test("clinical typed date options return native field-specific envelopes", async
   }
 });
 
-test("built CLI rejects impossible assertion dates before writing", async () => {
+test("built CLI accepts leap-day assertions and rejects impossible dates before writing", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-cli-clinical-calendar-"));
   cleanupPaths.push(vaultRoot);
   const impossibleDate = "2026-02-30";
   await runCli(["init", "--vault", vaultRoot]);
+
+  const leapDayResult = await runCli([
+    "assertion",
+    "save",
+    "--assertion",
+    "denial_asserted",
+    "--occurred-at",
+    "2024-02-29T12:00:00.000Z",
+    "--asserted-on",
+    "2024-02-29",
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(leapDayResult.ok, true);
+  await stat(path.join(vaultRoot, "ledger/events/2024/2024-02.jsonl"));
 
   const result = await runCli([
     "assertion",
     "save",
     "--assertion",
     "denial_asserted",
+    "--occurred-at",
+    "2026-03-01T12:00:00.000Z",
     "--asserted-on",
     impossibleDate,
     "--vault",
@@ -204,7 +222,7 @@ test("built CLI rejects impossible assertion dates before writing", async () => 
   assert.equal(result.error?.fieldErrors?.[0]?.path, "assertedOn");
   assert.equal(JSON.stringify(result).includes(impossibleDate), false);
   await assert.rejects(
-    () => stat(path.join(vaultRoot, "ledger/events/2026/2026-02.jsonl")),
+    () => stat(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
     { code: "ENOENT" },
   );
 }, 120_000);

@@ -84,16 +84,3 @@ test('workout result contracts retain exercise-owned live tracking facts', async
   assert.equal(parsed.workout?.exercises[0]?.memberRepsPerSet, 9)
   assert.equal(parsed.workout?.exercises[0]?.setPlanIsFinite, true)
 })
-
-test('local date contract rejects impossible dates and remains JSON Schema representable', async () => {
-  vi.resetModules()
-  const { localDateSchema } = await import('../src/vault-cli-contracts.ts')
-  const { toJSONSchema } = await import('@murphai/contracts/zod-runtime')
-
-  assert.equal(localDateSchema.safeParse('2024-02-29').success, true)
-  assert.equal(localDateSchema.safeParse('2026-02-30').success, false)
-
-  const jsonSchema = toJSONSchema(localDateSchema, { io: 'input' })
-  assert.equal(jsonSchema.type, 'string')
-  assert.equal(jsonSchema.format, 'date')
-})

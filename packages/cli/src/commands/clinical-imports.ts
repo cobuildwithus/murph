@@ -5,6 +5,7 @@ import {
   CLINICAL_ASSERTION_TYPES,
   TEST_RESULT_STATUSES,
   eventSourceSchema,
+  isStrictIsoDate,
 } from '@murphai/contracts'
 import { withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
@@ -100,6 +101,11 @@ const commonSaveOptions = {
   timeZone: timeZoneSchema.optional(),
 }
 
+const assertionDateOptionSchema = localDateSchema.refine(
+  isStrictIsoDate,
+  'Expected a real calendar date in YYYY-MM-DD form.',
+)
+
 function dateFromTimestamp(value: string): string {
   return value.slice(0, 10)
 }
@@ -156,7 +162,7 @@ export function registerAssertionCommands(cli: Cli.Cli) {
       polarity: z.enum(CLINICAL_ASSERTION_POLARITIES).optional(),
       subject: z.string().min(1).max(240).optional(),
       assertionText: z.string().min(1).max(1000).optional(),
-      assertedOn: localDateSchema
+      assertedOn: assertionDateOptionSchema
         .optional()
         .describe('Optional assertion date in YYYY-MM-DD form.'),
       sourceLabel: z.string().min(1).max(240).optional(),
