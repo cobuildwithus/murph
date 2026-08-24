@@ -1,8 +1,8 @@
 # Wearable delivery-stall notices
 
-Status: active
+Status: completed
 Created: 2026-08-23
-Updated: 2026-08-23
+Updated: 2026-08-24
 
 ## Goal
 
@@ -64,10 +64,11 @@ future evidence-backed additions.
    provider policy, runtime apply, mailbox, engagement, and route owners.
 3. [x] Run focused tests, typecheck, lint, diff/privacy checks, and direct
    episode replay proof.
-4. [ ] Add the member-facing changelog entry and complete the required
+4. [x] Add the member-facing changelog entry and complete the required
    preliminary specialist and final ReviewGPT gates on the exact PR head.
-5. [ ] Resolve accepted findings, run the parent final review, close this plan,
-   commit, push, open the PR, and require green exact-head CI.
+5. [x] Resolve accepted findings, run the parent final review, close this plan,
+   and prepare the final PR candidate. Exact-head CI and merge remain the
+   post-archive delivery gates.
 
 ## Verification
 
@@ -77,3 +78,12 @@ future evidence-backed additions.
 - Affected package and Hosted Web typechecks plus scoped lint.
 - `git diff --check`, repository privacy/path inspection, exact-head ReviewGPT
   gates, current-base merge-tree proof, and required GitHub checks.
+
+Completed local proof: 9 focused device-sync policy tests and package build; 2
+hosted-execution identity tests; 4 assistant-runtime frontier tests; 170 focused
+Web tests; Web typecheck, scoped lint, clean-source Web typecheck with generated
+device-sync output removed, and diff/privacy checks. Preliminary ReviewGPT
+findings were resolved. Final ReviewGPT round 2 passed on the immutable
+remediation head with no remaining qualifying issue. The archived commit is the
+candidate for the final exact-head ReviewGPT, CI, merge-tree, and merge gates.
+Completed: 2026-08-24
