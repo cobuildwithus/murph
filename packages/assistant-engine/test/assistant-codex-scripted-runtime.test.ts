@@ -2701,11 +2701,13 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'onboarding-first-personal-read',
-              nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-07T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-06T21:00:00.000Z',
             }
           },
@@ -3747,11 +3749,13 @@ if (!tool) {
               created: true,
               effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
-              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -3867,7 +3871,10 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: 'America/Chicago',
               lookupId: 'evening-reminder',
-              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 kind: 'dailyLocal',
@@ -3875,7 +3882,6 @@ text(JSON.stringify(result));
                 timeZone: 'America/Chicago',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -3944,7 +3950,10 @@ text(JSON.stringify(result));
               automationId: 'automation-central-evening',
               effectiveTimeZone: 'America/Chicago',
               lookupId: 'evening-reminder',
-              nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 kind: 'dailyLocal',
@@ -3952,7 +3961,6 @@ text(JSON.stringify(result));
                 timeZone: 'America/Chicago',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:00:00.000Z',
             }
           },
@@ -4094,11 +4102,13 @@ text(JSON.stringify(result));
                 created: true,
                 effectiveTimeZone: 'America/New_York',
                 lookupId: 'weekly-movement-check-in',
-                nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                occurrenceProjection: {
+                  nextOccurrenceAt: '2026-08-24T13:00:00.000Z',
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'current_conversation',
                 schedule: request.schedule,
                 status: 'active',
-                timingVerified: true,
                 updatedAt: '2026-08-17T13:00:00.000Z',
               }
             },
@@ -4208,14 +4218,16 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'group-one-shot-reminder',
-              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: {
                 at: '2031-02-15T09:20:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2031-02-14T12:00:00.000Z',
             }
           },
@@ -4244,7 +4256,7 @@ text(JSON.stringify(result));
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
       .replace(/\\"/gu, '"')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(toolOutputs).toContain('"effectiveTimeZone":null')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2031-02-15T09:20:00.000Z"')
     expect(result.finalMessage).toBe(
@@ -4473,11 +4485,13 @@ text(JSON.stringify(result));
               effectiveTimeZone: null,
               lookupId: retrySlug
                 ?? retryTitle.toLowerCase().replace(/\s+/gu, '-'),
-              nextOccurrenceAt: expectedAt,
+              occurrenceProjection: {
+                nextOccurrenceAt: expectedAt,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: steerAt,
             }
           },
@@ -4765,11 +4779,13 @@ text(JSON.stringify(result));
         created: true,
         effectiveTimeZone: 'America/New_York',
         lookupId: 'replacement-reminder',
-        nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-03-09T07:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule,
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-03-08T05:01:00.000Z',
       }
     })
@@ -4954,14 +4970,16 @@ text(JSON.stringify(result));
         created: false,
         effectiveTimeZone: 'America/New_York',
         lookupId: responseLookup,
-        nextOccurrenceAt: expectedAt,
+        occurrenceProjection: {
+          nextOccurrenceAt: expectedAt,
+          status: 'resolved' as const,
+        },
         routeBinding: 'current_conversation' as const,
         schedule: request.schedule ?? {
           at: expectedAt,
           kind: 'at' as const,
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-03-08T05:01:00.000Z',
       }
     })
@@ -5053,13 +5071,15 @@ text(JSON.stringify(result));
       created: true,
       effectiveTimeZone: 'America/New_York',
       lookupId: 'take-medicine',
-      nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+        status: 'resolved' as const,
+      },
       routeBinding: 'current_conversation' as const,
       schedule: request.action === 'save'
         ? request.schedule
         : { at: '2026-03-08T07:30:00.000Z', kind: 'at' as const },
       status: 'active' as const,
-      timingVerified: true,
       updatedAt: '2026-03-08T05:01:00.000Z',
     }))
     const result = await executeCodexAppServerTurn({
@@ -5158,11 +5178,13 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'breakfast-reminder',
-              nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-03-08T08:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-03-08T05:01:00.000Z',
             }
           },
@@ -5384,11 +5406,13 @@ text(JSON.stringify(result));
           created: true,
           effectiveTimeZone: 'America/New_York',
           lookupId: 'medication-reminder',
-          nextOccurrenceAt: resolvedAt,
+          occurrenceProjection: {
+            nextOccurrenceAt: resolvedAt,
+            status: 'resolved' as const,
+          },
           routeBinding: 'current_conversation' as const,
           schedule: request.schedule,
           status: 'active' as const,
-          timingVerified: true,
           updatedAt: '2026-03-08T05:01:00.000Z',
         }
       })
@@ -5848,11 +5872,13 @@ text(JSON.stringify(result));
                 created: true,
                 effectiveTimeZone: 'America/New_York',
                 lookupId,
-                nextOccurrenceAt: request.schedule.at,
+                occurrenceProjection: {
+                  nextOccurrenceAt: request.schedule.at,
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'current_conversation',
                 schedule: request.schedule,
                 status: 'active',
-                timingVerified: true,
                 updatedAt: '2026-03-08T05:01:00.000Z',
               }
             },
@@ -6115,14 +6141,16 @@ text(JSON.stringify(result));
                 automationId,
                 effectiveTimeZone: 'America/New_York',
                 lookupId: slug,
-                nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
+                occurrenceProjection: {
+                  nextOccurrenceAt: '2026-03-07T21:00:00.000Z',
+                  status: 'resolved' as const,
+                },
                 routeBinding: 'preserved',
                 schedule: {
                   at: '2026-03-07T21:00:00.000Z',
                   kind: 'at',
                 },
                 status: 'active',
-                timingVerified: true,
                 updatedAt,
               }
             }
@@ -6135,11 +6163,13 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: 'America/New_York',
               lookupId: newSlug ?? slug,
-              nextOccurrenceAt: resolvedAt,
+              occurrenceProjection: {
+                nextOccurrenceAt: resolvedAt,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule ?? { at: resolvedAt, kind: 'at' },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-03-08T05:01:00.000Z',
             }
           },
@@ -6408,14 +6438,16 @@ text(JSON.stringify(result));
               created: true,
               effectiveTimeZone: null,
               lookupId: 'steered-one-shot-reminder',
-              nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2031-02-15T09:20:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: {
                 at: '2031-02-15T09:20:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2031-02-15T09:59:59.950Z',
             }
           },
@@ -6578,14 +6610,16 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'one-time-evening-reminder',
-              nextOccurrenceAt: null,
+              occurrenceProjection: {
+                nextOccurrenceAt: null,
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: {
                 at: '2026-08-01T13:00:00.000Z',
                 kind: 'at',
               },
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -6613,7 +6647,7 @@ text(JSON.stringify(result));
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"at"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(result.finalMessage).toMatch(/already passed|no longer deliverable/iu)
     expect(result.finalMessage).toMatch(/new time|reschedule/iu)
   })
@@ -6660,12 +6694,13 @@ text(JSON.stringify(result));
               created: false,
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-11T00:01:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'preserved',
               schedule: { everyMs: 86_400_000, kind: 'every' },
               status: 'active',
-              timingVerified: true,
-              timingVerificationIssues: [],
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
           },
@@ -6687,7 +6722,7 @@ text(JSON.stringify(result));
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"every"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":"2026-08-11T00:01:00.000Z"')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(automationRequests).toEqual([
       {
         action: 'patch',
@@ -6701,7 +6736,7 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
-  it('reports persistent timing uncertainty without offering more inspection', {
+  it('confirms an active reminder while its occurrence projection is pending', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     const scenario = await prepareScriptedTurnScenario()
@@ -6722,7 +6757,7 @@ text(JSON.stringify(result));
         },
       },
       {
-        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is still finishing existing work, so the next run is not confirmed yet.',
+        text: 'The reminder wording is updated and the daily schedule remains active. The scheduler is finishing the current reminder work and will project the next occurrence automatically, so no action is needed.',
       },
     )
 
@@ -6738,12 +6773,10 @@ text(JSON.stringify(result));
               automationId: 'automation-daily-interval',
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
-              nextOccurrenceAt: null,
+              occurrenceProjection: { status: 'pending' as const },
               routeBinding: 'preserved' as const,
               schedule: { everyMs: 86_400_000, kind: 'every' as const },
               status: 'active' as const,
-              timingVerified: false,
-              timingVerificationIssues: ['runtime_state_pending'] as const,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
             if (request.action !== 'patch') {
@@ -6775,9 +6808,19 @@ text(JSON.stringify(result));
         lookup: 'daily-interval-reminder',
       },
     ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"occurrenceProjection":{"status":"pending"}',
+    )
+    expect(toolOutputs).not.toContain('"timingVerified"')
     expect(result.finalMessage).toMatch(/updated|active/iu)
-    expect(result.finalMessage).toMatch(/next run is not confirmed yet/iu)
-    expect(result.finalMessage).not.toMatch(/if you want|inspect|10:30|tomorrow/iu)
+    expect(result.finalMessage).toMatch(/automatically|no action is needed/iu)
+    expect(result.finalMessage).not.toMatch(
+      /if you want|inspect|10:30|tomorrow|unconfirmed|not confirmed|could not verify/iu,
+    )
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
@@ -6834,11 +6877,13 @@ if (!tool) {
               created: true,
               effectiveTimeZone: null,
               lookupId: 'next-workout-check-in',
-              nextOccurrenceAt: null,
+              occurrenceProjection: {
+                nextOccurrenceAt: null,
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },
@@ -6871,7 +6916,7 @@ if (!tool) {
       .replace(/\\"/gu, '"')
     expect(toolOutputs).toContain('"kind":"deviceActivity"')
     expect(toolOutputs).toContain('"nextOccurrenceAt":null')
-    expect(toolOutputs).toContain('"timingVerified":true')
+    expect(toolOutputs).toContain('"status":"resolved"')
     expect(result.finalMessage).toContain('after your next workout')
     expect(result.finalMessage).not.toMatch(/no (?:future|later) delivery/iu)
   })
@@ -9976,11 +10021,13 @@ text(result.output);
               created: true,
               effectiveTimeZone: 'America/New_York',
               lookupId: 'morning-reminder',
-              nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+              occurrenceProjection: {
+                nextOccurrenceAt: '2026-08-08T13:00:00.000Z',
+                status: 'resolved' as const,
+              },
               routeBinding: 'current_conversation',
               schedule: request.schedule,
               status: 'active',
-              timingVerified: true,
               updatedAt: '2026-08-08T12:00:00.000Z',
             }
           },

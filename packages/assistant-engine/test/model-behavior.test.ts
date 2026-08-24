@@ -3303,7 +3303,7 @@ describe('assistant conversation scope', () => {
       'Before correcting, pausing, reactivating, or archiving with `action: patch`, inspect the stored automation and pass its current `updatedAt` as `expectedUpdatedAt`',
     )
     expect(prompt).toContain(
-      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `timingVerified`, `timingVerificationIssues`, `effectiveTimeZone`, and `nextOccurrenceAt`.',
+      'After saving or patching, inspect the returned stored `schedule`, `status`, `updatedAt`, `effectiveTimeZone`, and `occurrenceProjection`.',
     )
     for (const scheduleExample of [
       '`{"kind":"every","everyMs":3600000}`',
@@ -3337,22 +3337,31 @@ describe('assistant conversation scope', () => {
       'For an active `deviceActivity` schedule, confirm the persisted event trigger directly',
     )
     expect(prompt).toContain(
-      'a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+      '`occurrenceProjection.status: resolved` with a null `nextOccurrenceAt` means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
     )
     expect(prompt).toContain(
       'do not invent a time or offer timing recovery',
     )
     expect(prompt).toContain(
-      'For time-based schedules, confirm timing only from a result with `timingVerified: true`',
+      'For time-based schedules, confirm an exact next occurrence only when `occurrenceProjection.status: resolved`',
     )
     expect(prompt).toContain(
-      'a verified null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
+      'a resolved null `nextOccurrenceAt` means no later deliverable occurrence is scheduled, never a retry or cutoff wake',
     )
     expect(prompt).toContain(
-      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+      'For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'A save or patch result already includes its host-owned read-only timing readback',
+      'When `occurrenceProjection.status: pending`, confirm that the write succeeded and report the returned schedule and status; when the status is active, say it remains active',
+    )
+    expect(prompt).toContain(
+      'make clear that no member action is needed; do not call pending timing unconfirmed or imply that the repair failed',
+    )
+    expect(prompt).toContain(
+      'When `occurrenceProjection.status: unavailable`, confirm that the write succeeded',
+    )
+    expect(prompt).toContain(
+      'A save or patch result already includes its host-owned readback',
     )
     expect(prompt).toContain(
       'follow the tool contract and never issue a second inspection or recovery write.',
