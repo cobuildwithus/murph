@@ -64,3 +64,12 @@ instead of adding another selector, state record, or reconciliation path.
 - Assistant Engine typecheck: passed.
 - The focused real-model scenario is collected but skipped locally because no
   provider credential is configured in this checkout.
+- Changelog fragment validation: 7 passed.
+- Hosted Web typecheck: passed.
+- Product UX walkthrough: exact live-workout context remains on the same
+  workout and ends in its verified card; exact repeated-routine context keeps
+  its occurrence owner; missing exact ownership asks one question and writes
+  nothing. Group privacy behavior is unchanged.
+- Changelog: added a priority-3 reliability item. No visual is needed because
+  this narrow routing correction is explained more clearly in two sentences
+  and introduces no new interaction or presentation.
