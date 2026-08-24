@@ -1,58 +1,249 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  createVaultCliRepair,
   describeVaultCliFailure,
   VaultCliError,
 } from '../src/vault-cli-errors.ts'
+import { projectVaultCliError } from '../src/vault-cli-error-projection.ts'
 
-describe('createVaultCliRepair', () => {
-  test('bounds and normalizes the explicit model-facing repair contract', () => {
-    const repair = createVaultCliRepair({
+describe('projectVaultCliError', () => {
+  test('keeps context as the sole VaultCliError metadata channel', () => {
+    const context = { retryable: true }
+    const error = new VaultCliError('temporary_failure', 'Retry later.', context)
+
+    expect(error.context).toBe(context)
+    expect(Object.hasOwn(error, 'repair')).toBe(false)
+    expect(projectVaultCliError(error)).toEqual({
+      code: 'temporary_failure',
+      message: 'Retry later.',
+      retryable: true,
+    })
+  })
+
+  test('projects Zod-like VaultCliError details without raw issue text', () => {
+    const submittedValue = 'private-submitted-value'
+    const providerBody = 'private-provider-response'
+    const projection = projectVaultCliError(
+      new VaultCliError(
+        'invalid_payload',
+        'Schedule failed validation.',
+        {
+          retryable: false,
+          issues: [
+            {
+              code: 'too_small',
+              path: ['exercises', 0, 'sets'],
+              message: `Missing set details for ${submittedValue}.`,
+            },
+            {
+              code: 'custom',
+              expected: 'string/../../private',
+              path: ['results', 'private submitted path'],
+              message: providerBody,
+              received: submittedValue,
+              submitted: providerBody,
+            },
+          ],
+          providerBody,
+        },
+      ),
+    )
+
+    expect(projection).toMatchObject({
+      code: 'invalid_payload',
       stage: 'validation',
-      hint: ` Remove the unsupported field. ${'x'.repeat(400)} `,
-      fields: Array.from({ length: 14 }, (_, index) => ({
-        path: ['items', index, index === 0 ? 'private value' : 'name'],
-        code: index === 0 ? 'invalid type with spaces' : 'invalid_type',
-        message: ` Invalid field ${index}. `,
-        expected: 'string',
-      })),
+      retryable: false,
+      fieldErrors: [
+        {
+          code: 'too_small',
+          path: 'exercises.0.sets',
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
+        },
+        {
+          code: 'custom',
+          path: 'results.<field>',
+          expected: '',
+          received: 'invalid',
+          message: 'This field is invalid.',
+        },
+      ],
     })
+    expect(JSON.stringify(projection)).not.toContain(submittedValue)
+    expect(JSON.stringify(projection)).not.toContain(providerBody)
+  })
 
-    expect(repair.stage).toBe('validation')
-    expect(repair.hint?.length).toBeLessThanOrEqual(320)
-    expect(repair.fields).toHaveLength(13)
-    expect(repair.fields[0]).toEqual({
-      path: 'items.0.<field>',
-      message: 'Invalid field 0.',
-      expected: 'string',
+  test('ignores repair-shaped arbitrary context beside established Zod issues', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError(
+        'invalid_payload',
+        'Payload is invalid.',
+        {
+          issues: [{
+            code: 'invalid_type',
+            expected: 'number',
+            path: ['inferred'],
+            message: 'private inferred issue',
+          }],
+          repair: {
+            stage: 'owner-validation',
+            hint: 'private owner hint',
+            fields: [{
+              code: 'owner_rule',
+              path: ['explicit'],
+              message: 'private owner message',
+            }],
+          },
+        },
+      ),
+    )
+
+    expect(projection).toMatchObject({
+      stage: 'validation',
+      fieldErrors: [{
+        code: 'invalid_type',
+        path: 'inferred',
+        message: 'This field is invalid.',
+      }],
     })
-    expect(repair.fields.at(-1)).toEqual({
+    expect(projection.hint).toBeUndefined()
+    expect(JSON.stringify(projection)).not.toContain('explicit')
+    expect(JSON.stringify(projection)).not.toContain('private owner')
+    expect(JSON.stringify(projection)).not.toContain('private inferred issue')
+  })
+
+  test('caps validation details with one omitted-count field', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        issues: Array.from({ length: 14 }, (_, index) => ({
+          code: 'invalid_type',
+          expected: 'string',
+          path: ['items', index, 'name'],
+          message: `private raw issue ${index}`,
+        })),
+      }),
+    )
+
+    expect(projection.fieldErrors).toHaveLength(13)
+    expect(projection.fieldErrors?.at(0)).toMatchObject({
+      code: 'invalid_type',
+      expected: 'string',
+      message: 'This field is invalid.',
+      path: 'items.0.name',
+    })
+    expect(projection.fieldErrors?.at(-1)).toEqual({
       path: '$',
       code: 'issues_omitted',
+      expected: '',
+      received: 'invalid',
       message: '2 additional validation issues were omitted.',
     })
+    expect(JSON.stringify(projection)).not.toContain('private raw issue')
   })
 
-  test('does not inspect ordinary error context as repair guidance', () => {
-    const error = new VaultCliError('invalid_payload', 'Payload is invalid.', {
-      issues: [{ path: ['secret'], message: 'submitted-private-value' }],
-    })
+  test('does not inspect non-Zod issue context as field guidance', () => {
+    const projection = projectVaultCliError(
+      new VaultCliError('invalid_payload', 'Payload is invalid.', {
+        issues: [{ message: 'private-submitted-value' }],
+      }),
+    )
 
-    expect(error.repair).toBeUndefined()
+    expect(projection.fieldErrors).toBeUndefined()
+    expect(JSON.stringify(projection)).not.toContain('private-submitted-value')
   })
 
-  test('normalizes repair input at the error boundary', () => {
-    const error = new VaultCliError('invalid_payload', 'Payload is invalid.', undefined, {
-      fields: Array.from({ length: 14 }, (_, index) => ({
-        path: index === 0 ? 'private submitted path' : ['items', index],
-        message: ` Invalid field ${index}. `,
-      })),
+  test('classifies raw Zod-like errors through the same validation mapper', () => {
+    const projection = projectVaultCliError({
+      name: 'ZodError',
+      issues: [
+        {
+          code: 'invalid_value',
+          expected: 'number',
+          path: ['schedule', 'timeZone'],
+          message: 'private invalid value',
+        },
+      ],
     })
 
-    expect(error.repair?.fields).toHaveLength(13)
-    expect(error.repair?.fields[0]?.path).toBe('<field>')
-    expect(error.repair?.fields.at(-1)?.code).toBe('issues_omitted')
+    expect(projection).toMatchObject({
+      code: 'invalid_payload',
+      message: 'Input failed validation.',
+      retryable: false,
+      stage: 'validation',
+      fieldErrors: [
+        {
+          code: 'invalid_value',
+          expected: 'number',
+          message: 'This field is invalid.',
+          path: 'schedule.timeZone',
+          received: 'invalid',
+        },
+      ],
+    })
+    expect(JSON.stringify(projection)).not.toContain('private invalid value')
+  })
+
+  test.each([
+    ['EACCES', 'permission_denied'],
+    ['EPERM', 'permission_denied'],
+    ['ENOENT', 'not_found'],
+    ['EISDIR', 'invalid_path'],
+    ['ENOTDIR', 'invalid_path'],
+    ['ENOSPC', 'storage_unavailable'],
+  ] as const)(
+    'classifies %s without returning paths or causes',
+    (nodeCode, expectedCode) => {
+      const privatePath = '/private/workspace/member-vault/config.json'
+      const projection = projectVaultCliError(
+        Object.assign(
+          new Error(`${nodeCode}: filesystem failure at '${privatePath}'`),
+          {
+            code: nodeCode,
+            path: privatePath,
+          },
+        ),
+      )
+
+      expect(projection).toMatchObject({
+        code: expectedCode,
+        stage: 'filesystem',
+        retryable: false,
+      })
+      expect(JSON.stringify(projection)).not.toContain(privatePath)
+      expect(JSON.stringify(projection)).not.toContain('filesystem failure at')
+    },
+  )
+
+  test('redacts unexpected exception paths while retaining bounded repair text', () => {
+    const privatePath = '/private/workspace/member-vault/data.json'
+    const projection = projectVaultCliError(
+      new Error(`Unexpected parser failure in ${privatePath}`),
+    )
+
+    expect(projection).toMatchObject({
+      code: 'UNKNOWN',
+      stage: 'command',
+      retryable: false,
+    })
+    expect(JSON.stringify(projection)).not.toContain(privatePath)
+    expect(projection.message).toMatch(/Unexpected parser failure in <PATH>/u)
+  })
+
+  test('does not return provider-shaped or credential-bearing unknown messages', () => {
+    for (const message of [
+      '{"error":{"message":"private-provider-response"}}',
+      'Authorization: Bearer private-token',
+    ]) {
+      const projection = projectVaultCliError(new Error(message))
+
+      expect(projection.code).toBe('UNKNOWN')
+      expect(projection.message).toBe(
+        'The command failed without a safe recoverable detail.',
+      )
+      expect(JSON.stringify(projection)).not.toContain('private-provider-response')
+      expect(JSON.stringify(projection)).not.toContain('private-token')
+    }
   })
 })
 
