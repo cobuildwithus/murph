@@ -13,11 +13,13 @@ test('projects stable VaultCliError issues without echoing issue messages', () =
       issues: [
         {
           path: ['schedule', 'timeZone'],
+          publicPath: ['schedule', 'timeZone'],
           code: 'invalid_value',
           message: submittedValue,
         },
       ],
       providerBody,
+      stage: 'validation',
     }),
   )
 
@@ -54,7 +56,7 @@ test('classifies filesystem errors without returning the absolute path or cause'
   assert.equal(JSON.stringify(projection).includes('permission denied, open'), false)
 })
 
-test('classifies escaped validation issues without echoing raw issue messages', () => {
+test('classifies escaped validation issues without projecting raw paths or messages', () => {
   const privateValue = 'secret-invalid-value'
   const projection = projectVaultCliError({
     name: 'ZodError',
@@ -69,12 +71,13 @@ test('classifies escaped validation issues without echoing raw issue messages', 
   })
 
   assert.equal(projection.code, 'invalid_payload')
-  assert.equal(projection.fieldErrors?.[0]?.path, 'schedule.expression')
-  assert.equal(projection.fieldErrors?.[0]?.expected, 'string')
+  assert.equal(projection.stage, 'validation')
+  assert.equal(projection.fieldErrors, undefined)
+  assert.equal(JSON.stringify(projection).includes('schedule'), false)
   assert.equal(JSON.stringify(projection).includes(privateValue), false)
 })
 
-test('redacts unexpected exception paths while retaining bounded repair text', () => {
+test('returns value-free unknown exception messages', () => {
   const privatePath = '/private/workspace/member-vault/data.json'
   const projection = projectVaultCliError(
     new Error(`Unexpected parser failure in ${privatePath}`),
@@ -84,7 +87,10 @@ test('redacts unexpected exception paths while retaining bounded repair text', (
   assert.equal(projection.stage, 'command')
   assert.equal(projection.retryable, false)
   assert.equal(JSON.stringify(projection).includes(privatePath), false)
-  assert.match(projection.message, /Unexpected parser failure in <PATH>/u)
+  assert.equal(
+    projection.message,
+    'The command failed without a safe recoverable detail.',
+  )
 })
 
 test('does not return provider-shaped or credential-bearing unknown messages', () => {

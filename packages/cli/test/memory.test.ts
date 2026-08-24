@@ -467,6 +467,7 @@ test("memory update refuses missing record ids through the registered CLI", asyn
   assert.equal(updated.envelope.ok, false);
   assert.equal(updated.envelope.error.code, "memory_not_found");
   assert.equal(updated.envelope.error.retryable, false);
+  assert.equal(updated.envelope.error.stage, "read");
   assert.equal(updated.envelope.error.message, "The requested canonical memory record does not exist.");
   assert.doesNotMatch(JSON.stringify(updated.envelope), /mem_missing|Should fail/u);
 });
@@ -502,6 +503,7 @@ test("memory upsert exposes a terminal inspect-first envelope after an ambiguous
   }
   assert.equal(result.envelope.error.code, "memory_persistence_invalid");
   assert.equal(result.envelope.error.retryable, false);
+  assert.equal(result.envelope.error.stage, "persistence");
   assert.equal(
     result.envelope.error.message,
     "The canonical memory write completed but could not be verified. Inspect canonical memory before deciding whether another write is necessary.",
@@ -543,6 +545,7 @@ test("memory show refuses missing record ids through the registered CLI", async 
   assert.equal(shown.exitCode, 1);
   assert.equal(shown.envelope.ok, false);
   assert.equal(shown.envelope.error.code, "memory_not_found");
+  assert.equal(shown.envelope.error.stage, "read");
   assert.equal(shown.envelope.error.message, "The requested canonical memory record does not exist.");
   assert.doesNotMatch(JSON.stringify(shown.envelope), /mem_missing/u);
 });
@@ -581,7 +584,7 @@ test("built memory parse failures expose a fixed safe field without echoing or w
   }
   assert.equal(envelope.error.code, "memory_document_invalid");
   assert.equal(envelope.error.retryable, false);
-  assert.equal(envelope.error.stage, "validation");
+  assert.equal(envelope.error.stage, "read");
   assert.deepEqual(envelope.error.fieldErrors, [
     {
       code: "custom",

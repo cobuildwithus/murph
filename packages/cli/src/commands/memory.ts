@@ -213,11 +213,12 @@ async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<T
           retryable: false,
           issue,
           sourcePath,
+          stage: "read",
           ...(lineNumber ? { lineNumber } : {}),
           ...(field
             ? {
                 issues: [{
-                  path: [field],
+                  publicPath: [field],
                   code: "custom",
                 }],
               }
@@ -229,14 +230,14 @@ async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<T
       throw new VaultCliError(
         "memory_not_found",
         "The requested canonical memory record does not exist.",
-        { retryable: false },
+        { retryable: false, stage: "read" },
       );
     }
     if (error instanceof MemoryPersistenceError) {
       throw new VaultCliError(
         "memory_persistence_invalid",
         "The canonical memory write completed but could not be verified. Inspect canonical memory before deciding whether another write is necessary.",
-        { retryable: false, operation: error.operation },
+        { retryable: false, operation: error.operation, stage: "persistence" },
       );
     }
     throw error;
