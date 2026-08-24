@@ -15,6 +15,8 @@ Updated: 2026-08-23
   procedure, encounter, body-measurement, or test-history scans.
 - Known context that makes self-directed numeric nutrition unsuitable still
   suppresses numeric targets and cards without exposing private reasoning.
+- Health context constrains only the affected guidance; benign totals, logging,
+  education, and unrelated low-risk work continue.
 - The canonical Goal, meal-total, response-card schema, and delivery boundaries
   remain unchanged.
 - Focused tests, typecheck, Product UX walkthrough, required ReviewGPT gates,
@@ -60,6 +62,8 @@ Updated: 2026-08-23
   health-safety change.
 - Keep deterministic validators only at the independent card/schema boundary;
   use Codex prompt guidance for contextual nutrition suitability.
+- Apply safety at the narrowest relevant scope instead of treating any diagnosis,
+  medication, allergy, restriction, or clinician involvement as a blanket veto.
 
 ## Verification
 

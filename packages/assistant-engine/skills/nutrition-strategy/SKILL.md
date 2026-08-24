@@ -67,7 +67,11 @@ canonical proposal; neither activates or uses provisional targets. The
 from known context and do not add a universal medical-history or measurement
 preflight. It may ask one compact safety question before proposing new targets,
 but a routine card with accepted goals does not repeat screening without a new
-concern. When five usable daily goals are missing, read and follow
+concern. Apply that rule only to the numeric target or guidance the known fact
+materially affects. An allergy, intolerance, dietary restriction, or
+clinician-directed diet is not by itself a reason to suppress benign totals or
+an accepted compatible target bundle. When five usable daily goals are missing,
+read and follow
 `references/daily-nutrition-card-goals.md`. That reference owns
 evidence-grounded default derivation, the single canonical Goal proposal, and
 the explanation-before-card sequence. Do not send a goal-less card, create a

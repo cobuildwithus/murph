@@ -489,6 +489,12 @@ describe('assistant nutrition strategy skill', () => {
     expect(nutrition).toContain(
       'do not add a universal medical-history or measurement\npreflight',
     )
+    expect(nutrition).toContain(
+      'Apply that rule only to the numeric target or guidance the known fact\nmaterially affects.',
+    )
+    expect(nutrition).toContain(
+      'An allergy, intolerance, dietary restriction, or\nclinician-directed diet is not by itself a reason to suppress benign totals or\nan accepted compatible target bundle.',
+    )
     expect(nutrition).toContain('Do not calculate energy availability or diagnose RED-S')
     expect(nutrition).toContain('little or nothing for about five days')
     expect(nutrition).toContain('refeeding can require medical monitoring')

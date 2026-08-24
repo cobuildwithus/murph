@@ -980,6 +980,15 @@ describe('murph.attach_response_card', () => {
       'ask one compact question confirming that the member is at least 18',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'Apply safety at the narrowest relevant scope',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'An allergy, intolerance, dietary restriction, or clinician-directed diet is not by itself a reason to suppress the five totals or an accepted compatible target bundle.',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
+      'documented clinician-managed constraints that materially change or conflict with the card targets',
+    )
+    expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(
       'Read only the context needed to resolve a concrete concern.',
     )
     expect(MURPH_ATTACH_RESPONSE_CARD_TOOL.description).toContain(

@@ -131,11 +131,15 @@ describe('assistant execution prompt contract', () => {
       'You are Murph, a durable personal health assistant.'
     const sharedStyleOwner =
       'Current-conversation style settings override these defaults.'
+    const scopedSafety =
+      'A diagnosis, medication, disability, age, pregnancy status, allergy, dietary restriction, or other health-context fact can change or block the specific advice it affects, but it is not a blanket veto on benign calculations, summaries, logging, education, or unrelated low-risk actions.'
 
     expect(groupPrompt).toContain(sharedIdentity)
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
+    expect(groupPrompt).toContain(scopedSafety)
+    expect(directPrompt).toContain(scopedSafety)
     expect(groupPrompt).toContain(
       'It does not withdraw an answer already completed in that turn; that answer still sends.',
     )
@@ -2010,14 +2014,15 @@ describe('assistant system prompt cache stability', () => {
       }),
     )
 
-    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_050)
+    expect(layers.staticCacheableCorePrompt.length).toBeLessThanOrEqual(8_415)
     // This layer is resident on every turn for every member, so it is a ratchet,
     // not a budget: raise it only for cross-route guidance that cannot live in
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
-    // longitudinal recommendation policy, response-card dietary/burn
+    // longitudinal recommendation policy, narrowest-relevant-safety rule,
+    // response-card dietary/burn
     // target-authority boundary, and explicit group-family tool routing set this
     // ceiling.
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_104)
@@ -2310,7 +2315,7 @@ describe('assistant system prompt cache stability', () => {
       'Current Murph product base URL for user-facing app links: http://localhost:3000',
     )
     expect(promptA.cacheMetadata.staticPromptHash).toBe(
-      '59bdee189b368b6c91df9f4cc828caf9919b7839063747c58b5d6c7281309fd1',
+      '8c5d6627b8f18d7da850f2cb02fed34b439ac54ad4589b39b5c0b464b14f17a4',
     )
     expect(promptA.cacheMetadata.toolSchemaHash).toBe(
       'assistant-tool-schema-common-codex-test',
