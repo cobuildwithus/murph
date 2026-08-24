@@ -588,19 +588,28 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
           fileName: "voice.m4a",
           data: Buffer.from("audio-bytes"),
         },
+        {
+          kind: "video",
+          mime: "video/mp4",
+          fileName: "clip.mp4",
+          data: Buffer.from("video-bytes"),
+        },
       ],
       raw: {},
     },
   });
   const imagePath = persisted.stored.attachments[0]?.storedPath ?? "";
   const audioPath = persisted.stored.attachments[1]?.storedPath ?? "";
+  const videoPath = persisted.stored.attachments[2]?.storedPath ?? "";
   assert.ok(imagePath);
   assert.ok(audioPath);
+  assert.ok(videoPath);
 
   const result = await runInboxMediaRetention({
     now: "2026-07-05T00:00:00.000Z",
     protectedCaptureIds: [captureId],
     vaultRoot,
+    videoRetentionWindowMs: 0,
   });
 
   assert.equal(result.expiredAttachments, 0);
@@ -608,6 +617,7 @@ test("runInboxMediaRetention protects every attachment in an active pending capt
   assert.equal(result.nextEligibleAt, "2026-07-06T00:00:00.000Z");
   assert.equal(await fileExists(vaultRoot, imagePath), true);
   assert.equal(await fileExists(vaultRoot, audioPath), true);
+  assert.equal(await fileExists(vaultRoot, videoPath), true);
 });
 
 test("runInboxMediaRetention materializes bounded missing candidates before hashing", async () => {
