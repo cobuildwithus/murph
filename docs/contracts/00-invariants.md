@@ -389,10 +389,11 @@ it has been explicitly elevated to a cross-cutting invariant.
   next ordinary turn. Every completed assistant text or media segment remains
   part of an ordinary turn and is delivered; no audience-specific
   last-response-wins rule may discard it. In the held-draft exception,
-  completed conversational segments remain provisional until selection, only
-  request 1's latest terminal response is deliverable when reconsideration
-  occurs, and completed tools, progress messages, and other real-world effects
-  remain authoritative and must not be repeated. A gap, legacy or missing causal
+  completed conversational segments remain provisional until selection, and
+  only the selected request's latest terminal response is deliverable: request
+  0 at a quiet cutoff or request 1 when reconsideration occurs. Completed tools,
+  progress messages, and other real-world effects remain authoritative and must
+  not be repeated. A gap, legacy or missing causal
   identifier, changed direct anchor or actor, or changed room boundary starts a
   later turn; terminal evidence covers every admitted input so restart repair
   cannot resend the reply.
