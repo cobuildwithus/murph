@@ -276,15 +276,15 @@ export function inspectDispatchReceipt(raw) {
 
 export function inspectPrivateRun(raw, { privateRef, privateSha, runId, workflowId }) {
   assertRecord(raw, "private compatibility run");
-  const expectedPath = `${TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH}@${privateRef}`;
   const repository = isRecord(raw.repository) ? raw.repository.full_name : null;
   const headRepository = isRecord(raw.head_repository) ? raw.head_repository.full_name : null;
   if (
     raw.id !== runId
     || raw.workflow_id !== workflowId
     || raw.name !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_NAME
-    || raw.path !== expectedPath
+    || raw.path !== TEMPORAL_COMPATIBILITY_PRIVATE_WORKFLOW_PATH
     || raw.event !== "workflow_dispatch"
+    || raw.head_branch !== privateRef
     || raw.head_sha !== privateSha
     || raw.run_attempt !== 1
     || repository !== TEMPORAL_COMPATIBILITY_PRIVATE_REPOSITORY
