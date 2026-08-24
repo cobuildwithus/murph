@@ -66,7 +66,7 @@ describe("hosted headed browser boundary", () => {
           return route.fulfill({
             body: progressed
               ? [
-                '<button onclick="location.href=\'https://app.example.test/home\'">',
+                '<button onclick="setTimeout(() => location.href=\'https://app.example.test/home\', 750)">',
                 "Agree</button>",
                 '<button onclick="location.href=\'https://app.example.test/declined\'">',
                 "Do Not Agree</button>",

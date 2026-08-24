@@ -318,7 +318,15 @@ exact `/partner/oauthConfirm` route, the unattended runner requires exactly
 three available data-sharing checkboxes and one enabled `Save` action before it
 continues. `Save` is one-shot and may advance on that pathname only when both
 the `permissionsUpdated` and `selectedCapabilities` markers appear; the runner
-then resumes its existing positive-action loop, where negative matching wins.
+then uses the existing positive/negative classifier, where negative matching
+wins, and submits the selected confirmation action once while waiting up to the
+bounded progress window for route departure. If that window expires on the
+advanced consent route, the failure includes only content-free action,
+checkbox, and frame counts so a protected-main run can distinguish an
+unchanged action surface from same-route DOM progression without exposing
+provider content. The runner re-reads the route after collecting those counts;
+if Garmin departs during that asynchronous sample, the current route wins over
+the stale pre-sample observation and the callback proof continues.
 Changes to the checkbox count or availability, the exact `Save` count or state,
 or the paired progression markers fail closed; unrelated negative actions and
 links are not part of the selection gate. The CI boundary keeps manual

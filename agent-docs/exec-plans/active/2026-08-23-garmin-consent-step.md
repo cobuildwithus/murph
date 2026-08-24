@@ -21,13 +21,31 @@ Updated: 2026-08-23
   visible enabled buttons render: exactly one positive action and one action
   that matches both the positive and negative classifiers. The existing action
   loop would select only the positive action because negative matching wins.
+- PR #2175 merged the exact step recognition. Its protected-main canary proved
+  that `Save` now advances, but the positive confirmation action remained on
+  the same route long enough for the loop to click it repeatedly until the
+  parent killed the browser child at its outer timeout. Earlier runs failed in
+  roughly 80 seconds at the first `Save`; the merged run lasted roughly eight
+  minutes inside the browser proof and ended with an opaque `SIGTERM`, proving
+  the progress-reset defect rather than the original selection-step defect.
+- PR #2182 submitted the positive confirmation action once. Its exact
+  protected-main canary failed after the bounded 15-second confirmation window
+  because Garmin remained on the advanced consent route. The shorter,
+  phase-specific failure proves that repeated submission is fixed, but the
+  existing URL-only observation cannot distinguish an ignored click from a
+  same-route DOM transition.
+- PR #2187 added that content-free observation. Its protected-main run showed
+  no recognized Garmin actions and three unrelated Murph actions while the
+  browser was already on Murph home, proving Garmin departed during the
+  asynchronous terminal surface sample. The helper then threw from its stale
+  pre-sample route state instead of honoring the current route.
 
 ## Scope
 
 - In scope: recognize the exact query-bound progression, resume the existing
-  safe action loop, add focused unit and real-Chromium coverage, update the
-  directly affected verification contract, and require a passing protected
-  post-merge canary.
+  safe action loop, add focused unit and real-Chromium coverage, add
+  content-free stalled-confirmation diagnostics, update the directly affected
+  verification contract, and require a passing protected post-merge canary.
 - Out of scope: new action text, broad click heuristics, retries, provider-state
   repair, credential changes, Oura/WHOOP behavior, or weaker callback/cleanup
   assertions.
@@ -37,8 +55,13 @@ Updated: 2026-08-23
 1. [x] Prove the live two-step consent mechanism with content-free diagnostics.
 2. [x] Implement the smallest exact-step progression rule and regression
    coverage.
-3. Run focused verification, ReviewGPT, and exact-head CI in a follow-up PR.
-4. Merge and require a successful exact post-merge protected Garmin canary.
+3. [x] Run focused verification, ReviewGPT, and exact-head CI in PR #2175.
+4. [x] Merge PR #2175 and inspect its exact protected-main Garmin canary.
+5. [x] Submit the confirmation action once, run the follow-up completion gates,
+   merge PR #2182, and inspect its exact post-merge protected Garmin canary.
+6. Capture the stalled post-click surface without provider content, use that
+   evidence for the smallest correction, and require a successful exact
+   post-merge protected Garmin canary.
 
 ## Decisions
 
@@ -52,6 +75,14 @@ Updated: 2026-08-23
   exactly one safe action on the live surface.
 - Preserve the one-shot `Save` effect; the wait succeeds on either the observed
   same-route progression or route departure and never clicks `Save` again.
+- Preserve the existing positive/negative classifier for the advanced state,
+  but submit its selected positive action only once and require route departure
+  within the existing 15-second progress window. A stalled confirmation fails
+  with its redacted Garmin phase instead of resetting the timer through clicks.
+- After a terminal surface sample, re-read the current route before throwing.
+  A departure during that asynchronous sample continues to the existing
+  callback proof; unchanged, invalid, and regressed Garmin states still fail
+  closed.
 
 ## Verification
 
@@ -64,7 +95,7 @@ Updated: 2026-08-23
 
 Completed local proof:
 
-- Browser-runner unit suite: 37 passed.
+- Browser-runner unit suite: 38 passed.
 - Real headed-Chromium smoke: 7 passed.
 - Hosted Web typecheck: passed.
 - Docs drift and diff checks: passed.
