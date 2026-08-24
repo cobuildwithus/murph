@@ -20,7 +20,7 @@ import {
 } from "@murphai/core";
 import { readMemoryDocument as readMemoryDocumentFromQuery } from "@murphai/query";
 
-import { createTempVaultContext, runInProcessJsonCli } from "./cli-test-helpers.js";
+import { createTempVaultContext, runCli, runInProcessJsonCli } from "./cli-test-helpers.js";
 import { incurErrorBridge } from "../src/incur-error-bridge.js";
 import { registerMemoryCommands } from "../src/commands/memory.js";
 
@@ -547,7 +547,7 @@ test("memory show refuses missing record ids through the registered CLI", async 
   assert.doesNotMatch(JSON.stringify(shown.envelope), /mem_missing/u);
 });
 
-test("memory parse failures expose a safe repair location without echoing canonical content", async () => {
+test("built memory parse failures expose a fixed safe field without echoing or writing", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-invalid-");
   cleanupPaths.push(parentRoot);
   const memoryPath = path.join(vaultRoot, memoryDocumentRelativePath);
@@ -566,33 +566,39 @@ test("memory parse failures expose a safe repair location without echoing canoni
     .split("\n")
     .findIndex((line) => line.includes("private-marker-that-must-not-echo")) + 1;
   await writeFile(memoryPath, invalidMarkdown, "utf8");
+  const bytesBefore = await readFile(memoryPath);
 
-  const cli = Cli.create("vault-cli", {
-    description: "memory test cli",
-    version: "0.0.0-test",
-  });
-  cli.use(incurErrorBridge);
-  registerMemoryCommands(cli);
-
-  const result = await runInProcessJsonCli(cli, [
+  const envelope = await runCli([
     "memory",
     "show",
     "--vault",
     vaultRoot,
   ]);
 
-  assert.equal(result.envelope.ok, false);
-  if (result.envelope.ok) {
+  assert.equal(envelope.ok, false);
+  if (envelope.ok) {
     throw new Error("Expected malformed canonical memory to fail.");
   }
-  assert.equal(result.envelope.error.code, "memory_document_invalid");
-  assert.equal(result.envelope.error.retryable, false);
+  assert.equal(envelope.error.code, "memory_document_invalid");
+  assert.equal(envelope.error.retryable, false);
+  assert.equal(envelope.error.stage, "validation");
+  assert.deepEqual(envelope.error.fieldErrors, [
+    {
+      code: "custom",
+      expected: "",
+      message: "This field is invalid.",
+      path: "metadata",
+      received: "invalid",
+    },
+  ]);
   assert.match(
-    result.envelope.error.message ?? "",
+    envelope.error.message ?? "",
     new RegExp(`bank/memory\\.md:${invalidLine}`, "u"),
   );
-  assert.doesNotMatch(JSON.stringify(result.envelope), /private-marker-that-must-not-echo/u);
-  assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  const serialized = JSON.stringify(envelope);
+  assert.doesNotMatch(serialized, /private-marker-that-must-not-echo/u);
+  assert.doesNotMatch(serialized, new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  assert.deepEqual(await readFile(memoryPath), bytesBefore);
 });
 
 test("memory command module does not register a search subcommand", async () => {

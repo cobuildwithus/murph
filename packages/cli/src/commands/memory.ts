@@ -218,7 +218,7 @@ async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<T
             ? {
                 issues: [{
                   path: [field],
-                  code: issue,
+                  code: "custom",
                 }],
               }
             : {}),
