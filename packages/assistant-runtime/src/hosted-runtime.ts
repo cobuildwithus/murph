@@ -205,6 +205,7 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
+  deferHostedSystemMailboxRecordingItemForRetry,
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
@@ -232,6 +233,7 @@ import {
   collectHostedPendingAssistantInputMediaRetentionProtections,
 } from "./hosted-runtime/pending-input-index.ts";
 import {
+  assertNever,
   computeHostedRuntimeElapsedMs,
 } from "./hosted-runtime/utils.ts";
 import {
@@ -1081,7 +1083,11 @@ async function resolveHostedSystemMailboxProcessingModeWake(input: {
 function hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): boolean {
-  return preparation !== null && preparation.status !== "preempted";
+  if (!preparation || preparation.status === "preempted") {
+    return false;
+  }
+  return preparation.status !== "recording"
+    || preparation.checkpointRequired;
 }
 
 function readHostedSystemMailboxCheckpointPreparationRecordItem(
@@ -2922,13 +2928,19 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           const projectedWake = await resolveCurrentSystemMailboxModeWake(
             preparationWake ? [preparationWake] : [],
           );
+          const resumedBrowserVaultOnlyRecording =
+            preparation?.status === "recording"
+            && !preparation.checkpointRequired;
           const mustCheckpoint = importOrStartupCheckpointPending
             || hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(preparation)
-            || hostedSystemMailboxWakeChangedFromWorkspace({
-              nextWakeAt: projectedWake.nextWakeAt,
-              nextWakeReason: projectedWake.nextWakeReason,
-              workspace: activeWorkspace,
-            });
+            || (
+              !resumedBrowserVaultOnlyRecording
+              && hostedSystemMailboxWakeChangedFromWorkspace({
+                nextWakeAt: projectedWake.nextWakeAt,
+                nextWakeReason: projectedWake.nextWakeReason,
+                workspace: activeWorkspace,
+              })
+            );
           if (mustCheckpoint) {
             await checkpointSystemMailboxMode(
               `${inputItem.stagePrefix}.checkpoint.prepare`,
@@ -3196,15 +3208,34 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
             });
             throw attachHostedRuntimeFailurePhase(error, "browser_vault.refresh");
           }
-          if (hostedBrowserVaultReplicaRefreshRequiresRetry(refresh)) {
+          const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(
+            refresh,
+          );
+          if (refreshDisposition.action === "preempt") {
             if (refresh.status === "deferred_runtime_wake") {
               foregroundWakeObserved = true;
             }
-            const shouldYield = shouldYieldSystemMailboxWork();
-            return {
-              preempted: shouldYield || hostAbortObserved,
-              prepared: true,
-            };
+            return { preempted: true, prepared: true };
+          }
+          if (refreshDisposition.action === "retry") {
+            const retry = await deferHostedSystemMailboxRecordingItemForRetry({
+              errorCode: refreshDisposition.errorCode,
+              errorMessage: refreshDisposition.errorMessage,
+              incrementAttemptCount: resumedBrowserVaultOnlyRecording,
+              item: recordItem,
+              vaultRoot: restored.vaultRoot,
+            });
+            if (!retry) {
+              return { preempted: true, prepared: true };
+            }
+            await checkpointSystemMailboxMode(
+              `${inputItem.stagePrefix}.checkpoint.browser_vault_retry`,
+              [createHostedRuntimeWakeCandidate(
+                retry.nextWakeAt,
+                retry.nextWakeReason,
+              )],
+            );
+            return { preempted: false, prepared: true };
           }
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
@@ -6729,15 +6760,54 @@ function buildHostedBrowserVaultRefreshLogDetails(
   };
 }
 
-function hostedBrowserVaultReplicaRefreshRequiresRetry(
+function classifyHostedBrowserVaultReplicaRefresh(
   refresh: HostedBrowserVaultReplicaRefreshResult,
-): boolean {
-  return refresh.status === "deferred_aborted"
-    || refresh.status === "deferred_runtime_wake"
-    || refresh.status === "deferred_source_changed"
-    || refresh.status === "deferred_timeout"
-    || refresh.status === "publish_conflict"
-    || refresh.status === "refresh_failed";
+):
+  | { action: "complete" }
+  | { action: "preempt" }
+  | { action: "retry"; errorCode: string; errorMessage: string } {
+  switch (refresh.status) {
+    case "published":
+    case "skipped_current":
+    case "skipped_no_port":
+    case "workspace_missing":
+      return { action: "complete" };
+    case "deferred_aborted":
+    case "deferred_runtime_wake":
+      return { action: "preempt" };
+    case "deferred_source_changed":
+      return {
+        action: "retry",
+        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_SOURCE_CHANGED",
+        errorMessage: "Browser Vault sources changed during refresh.",
+      };
+    case "deferred_timeout":
+      return {
+        action: "retry",
+        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT",
+        errorMessage: "Browser Vault refresh reached its bounded deadline.",
+      };
+    case "publish_conflict":
+      return {
+        action: "retry",
+        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_PUBLISH_CONFLICT",
+        errorMessage: "Browser Vault publication conflicted with newer state.",
+      };
+    case "refresh_failed":
+      return {
+        action: "retry",
+        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_FAILED",
+        errorMessage: "Browser Vault refresh failed before publication.",
+      };
+    case "refresh_failed_too_large":
+      return {
+        action: "retry",
+        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_TOO_LARGE",
+        errorMessage: "Browser Vault replica exceeded the publication limit.",
+      };
+    default:
+      return assertNever(refresh);
+  }
 }
 
 function hasHostedRuntimePhaseOwnProperty(error: unknown, key: string): boolean {

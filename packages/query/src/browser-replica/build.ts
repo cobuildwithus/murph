@@ -59,6 +59,7 @@ import { createBrowserVaultProjectionQueryClient } from "./query.ts";
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
 ): Promise<BrowserVaultReplica> {
+  input.signal?.throwIfAborted();
   const generatedAt = input.generatedAt
     ? requireIsoDateTime(input.generatedAt, "Browser vault replica generatedAt")
     : new Date().toISOString();
@@ -70,6 +71,7 @@ export async function createBrowserVaultReplica(
   const timelineRows = buildTimeline(defaultProjectedVault, { limit: TIMELINE_LIMIT })
     .map(projectTimelineRow);
   const weeklySampleSummaries = projectWeeklySampleSummaries(defaultProjectedVault, generatedAt);
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const allMetricPoints = input.metricPoints;
   const requestedMetrics = collectRequestedBrowserVaultMetrics(defaultProjectedVault.entities);
   const explicitRequestedMetrics = collectExplicitBrowserVaultMetrics(defaultProjectedVault.entities);
@@ -85,11 +87,13 @@ export async function createBrowserVaultReplica(
       isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
       isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetrics))
   );
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const metricRows = toBrowserVaultMetricRows({ points: metricPoints });
   const labResultRows = toBrowserVaultLabResultRows({
     entities: defaultProjectedVault.entities,
     points: allMetricPoints,
   });
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const metricRowPointIds = new Set(metricRows.flatMap((row) => row.pointIds));
   const metricSelectionRows = createBrowserVaultMetricSelectionRows({
     generatedAt,
@@ -101,6 +105,13 @@ export async function createBrowserVaultReplica(
   const sourceHealthRows = summarizeWearableSourceHealth(defaultProjectedVault, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   const wearableSummaryBundle = buildWearableSummaryBundle(input.vault);
+  const personalPatterns = buildPersonalPatternReportFromWearableBundleAndMetricPoints(
+    input.vault,
+    wearableSummaryBundle,
+    allMetricPoints,
+    { asOf: generatedAt },
+  );
+  await yieldToBrowserVaultReplicaCancellation(input.signal);
   const replicaWithoutVersion: BrowserVaultReplica = {
     assistantSummary: projectWearableAssistantSummary(buildWearableAssistantSummary(defaultProjectedVault)),
     entities,
@@ -119,12 +130,7 @@ export async function createBrowserVaultReplica(
     metricGoalProgressRows: buildMetricGoalProgressRows(defaultProjectedVault.entities, allMetricPoints, generatedAt),
     metricRows,
     metricSelectionRows,
-    personalPatterns: buildPersonalPatternReportFromWearableBundleAndMetricPoints(
-      input.vault,
-      wearableSummaryBundle,
-      allMetricPoints,
-      { asOf: generatedAt },
-    ),
+    personalPatterns,
     policy,
     schema: BROWSER_VAULT_REPLICA_SCHEMA,
     searchRows: entities.map(projectBrowserVaultSearchRow),
@@ -142,7 +148,9 @@ export async function createBrowserVaultReplica(
       createBrowserVaultProjectionQueryClient(replicaWithoutVersion),
     ),
   };
+  input.signal?.throwIfAborted();
   const dataVersion = await hashBrowserVaultReplicaData(replicaWithDerivedCards);
+  input.signal?.throwIfAborted();
 
   return {
     ...replicaWithDerivedCards,
@@ -151,6 +159,17 @@ export async function createBrowserVaultReplica(
       dataVersion,
     },
   };
+}
+
+async function yieldToBrowserVaultReplicaCancellation(
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!signal) {
+    return;
+  }
+  signal.throwIfAborted();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  signal.throwIfAborted();
 }
 
 export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica): Promise<string> {

@@ -3002,6 +3002,18 @@ state. Runtime-side refresh runs only after foreground work and checkpoint
 correctness are settled, is capped by the browser-vault replica byte limit, and
 races the existing runtime wake signal; if a wake arrives before publish, refresh
 returns scheduled/deferred work instead of publishing partial state.
+The default refresh deadline is 20 seconds and remains bounded by any earlier
+invocation deadline. Cancellation reaches the local query and replica-build
+phases, and an owned local phase settles before the lane returns, so timed-out or
+preempted work cannot continue beside a successor attempt. A Browser Vault
+control or no-record device-sync item that already reached `recording` is
+selected read-only: a runtime wake or host abort leaves its durable state
+untouched, while timeout, source-change, publication conflict, generic failure,
+or an oversized replica records one future retry and one outcome checkpoint.
+Fresh work and recording items that own post-checkpoint effects retain their
+existing pre-effect preparation checkpoint. Missing optional publication
+support and missing workspace context remain explicit terminal no-op
+classifications rather than implicit fallthrough.
 
 Assistant liveness is the stronger invariant than dashboard sidecar freshness.
 The web checkpoint callback must accept a valid workspace snapshot checkpoint
