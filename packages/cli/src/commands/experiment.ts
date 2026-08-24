@@ -61,6 +61,7 @@ import {
   renderAndSaveExperimentProgressCard,
 } from './experiment-progress-card-image.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { publicValidationIssue } from './public-validation-issue.js'
 
 const experimentStatusSchema = z.enum(EXPERIMENT_STATUSES)
 const eventSourceOptionSchema = z.enum(EVENT_SOURCES)
@@ -410,8 +411,8 @@ function normalizeExpectedDirectionEntries(
         '--expected-direction entries must use biomarker:key=direction form.',
         {
           issues: [{
-            path: ['expectedDirection', index],
             code: 'invalid_format',
+            publicPath: ['expectedDirection', index],
           }],
           retryable: false,
           stage: 'validation',
@@ -428,8 +429,8 @@ function normalizeExpectedDirectionEntries(
         '--expected-direction uses an unsupported direction.',
         {
           issues: [{
-            path: ['expectedDirection', index],
             code: 'invalid_value',
+            publicPath: ['expectedDirection', index],
           }],
           retryable: false,
           stage: 'validation',
@@ -695,11 +696,11 @@ function parseExperimentPrimaryOutcomeOptions(
     'invalid_option',
     'Primary outcome options failed validation.',
     {
-      issues: parsed.error.issues.map((issue) => ({
-        path: [PRIMARY_OUTCOME_OPTION_BY_PATH[issue.path.join('.')]
+      issues: parsed.error.issues.map((issue) => publicValidationIssue(
+        issue,
+        [PRIMARY_OUTCOME_OPTION_BY_PATH[issue.path.join('.')]
           ?? 'primaryOutcome'],
-        code: issue.code,
-      })),
+      )),
       retryable: false,
       stage: 'validation',
     },

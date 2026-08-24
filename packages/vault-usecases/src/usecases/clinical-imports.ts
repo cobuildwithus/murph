@@ -278,9 +278,7 @@ function parsePayload<TPayload>(
 ): TPayload {
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
-    throw new VaultCliError('invalid_payload', `${label} payload is invalid.`, {
-      errors: parsed.error.issues,
-    })
+    throw new VaultCliError('invalid_payload', `${label} payload is invalid.`)
   }
 
   return parsed.data

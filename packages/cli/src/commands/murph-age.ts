@@ -64,6 +64,7 @@ import {
   loadJsonInputObject,
   loadTextInput,
 } from '@murphai/vault-usecases'
+import { publicValidationIssue } from './public-validation-issue.js'
 import { assertInitializedVaultRoot } from './vault-root-validation.js'
 
 const murphAgeModeSchema = z.enum(['product', 'research'])
@@ -1641,19 +1642,19 @@ function parseMurphAgeSubmittedPreviewPayload(
     'invalid_payload',
     'Input failed validation.',
     {
-      issues: parsed.error.issues.map((issue) => ({
-        code: issue.code,
-        path: projectMurphAgeSubmittedPayloadIssuePath(issue.path),
-      })),
+      issues: parsed.error.issues.map((issue) => publicValidationIssue(
+        issue,
+        projectMurphAgeSubmittedPayloadIssuePublicPath(issue.path),
+      )),
       retryable: false,
       stage: 'validation',
     },
   )
 }
 
-function projectMurphAgeSubmittedPayloadIssuePath(
+function projectMurphAgeSubmittedPayloadIssuePublicPath(
   path: readonly PropertyKey[],
-): PropertyKey[] {
+): (string | number)[] {
   const [topLevelField, metricIndex, metricField, contextField, referenceRangeField] = path
   if (
     typeof topLevelField !== 'string' ||
@@ -1665,7 +1666,7 @@ function projectMurphAgeSubmittedPayloadIssuePath(
     return [topLevelField]
   }
 
-  const projectedPath: PropertyKey[] = [topLevelField]
+  const projectedPath: (string | number)[] = [topLevelField]
   if (
     typeof metricIndex !== 'number' ||
     !Number.isSafeInteger(metricIndex) ||
@@ -2377,8 +2378,8 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
       'Murph Age aggregate evidence input must be a receipt object, an array, or a supported wrapper object.',
       {
         issues: [{
-          path: [],
           code: 'invalid_type',
+          publicPath: [],
         }],
         retryable: false,
         stage: 'validation',
@@ -2402,8 +2403,8 @@ async function loadMurphAgeAggregateEvidenceCandidateCards(input: string): Promi
         'Murph Age aggregate evidence wrapper fields must contain arrays.',
         {
           issues: [{
-            path: [wrapper],
             code: 'invalid_type',
+            publicPath: [wrapper],
           }],
           retryable: false,
           stage: 'validation',

@@ -302,6 +302,30 @@ export function toVaultMetadataCliError(error: unknown) {
   return toVaultCliError(error, vaultMetadataVaultErrorMappings)
 }
 
+export function toRegimenUpsertVaultCliError(error: unknown) {
+  if (!isVaultLikeError(error)) {
+    return error
+  }
+
+  const slugExists = error.code === 'VAULT_REGIMEN_SLUG_EXISTS'
+  if (!slugExists && error.code !== 'VAULT_REGIMEN_CONFLICT') {
+    return error
+  }
+
+  return new VaultCliError(
+    'conflict',
+    slugExists
+      ? 'A regimen slug already exists. Use its regimen id or choose a different slug.'
+      : 'Regimen selectors conflict. Use one regimen id or slug.',
+    slugExists
+      ? {
+          issues: [{ code: 'custom', publicPath: ['slug'] }],
+          stage: 'conflict',
+        }
+      : { stage: 'conflict' },
+  )
+}
+
 function toVaultRelativePathError(relativePath: string, error: unknown) {
   if (!isVaultLikeError(error)) {
     return error

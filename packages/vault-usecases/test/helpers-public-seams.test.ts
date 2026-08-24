@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { healthEntityDefinitions } from "@murphai/contracts";
+import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
@@ -47,6 +48,7 @@ import {
   resolveVaultRelativePath,
   stringArray,
   toEventUpsertVaultCliError,
+  toRegimenUpsertVaultCliError,
   toVaultCliError,
   toVaultMetadataCliError,
   uniqueStrings,
@@ -738,5 +740,29 @@ describe("helper barrel exports", () => {
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("regimen upsert errors", () => {
+  it.each([
+    "private duplicate-slug detail",
+    "private differing-selector detail",
+  ])("projects regimen conflicts without field or private detail guesses", (message) => {
+    const projection = projectVaultCliError(
+      toRegimenUpsertVaultCliError(
+        Object.assign(new Error(message), {
+          name: "VaultError",
+          code: "VAULT_REGIMEN_CONFLICT",
+        }),
+      ),
+    );
+
+    expect(projection).toEqual({
+      code: "conflict",
+      message: "Regimen selectors conflict. Use one regimen id or slug.",
+      retryable: false,
+      stage: "conflict",
+    });
+    expect(JSON.stringify(projection)).not.toContain(message);
   });
 });

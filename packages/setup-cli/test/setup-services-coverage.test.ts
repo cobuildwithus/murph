@@ -1192,11 +1192,13 @@ test('incur error bridge maps rich VaultCliError metadata and preserves typed de
               issues: [
                 {
                   path: ['assistant', 'provider'],
+                  publicPath: ['assistant', 'provider'],
                   code: 'invalid_value',
                   expected: 'string',
                   message: 'private raw validation message',
                 },
               ],
+              stage: 'validation',
             },
           )
         },

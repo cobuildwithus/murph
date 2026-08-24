@@ -758,7 +758,7 @@ test("assistant usage parsing validates the turn profile allowlist", () => {
   assert.deepEqual(
     parseAssistantUsageRecord({
       ...baseRecord,
-      turnProfileJson: profile,
+      turnProfileJson: { ...profile, reasoningEffort: "high" },
     }).turnProfileJson,
     profile,
   );

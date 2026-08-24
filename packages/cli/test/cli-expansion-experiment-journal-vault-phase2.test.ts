@@ -580,7 +580,7 @@ test.sequential('experiment start maps canonical plan conflicts without echoing 
       assert.fail('expected changed canonical plan data to conflict')
     }
     assert.equal(conflict.error.code, 'conflict')
-    assert.equal(conflict.error.stage, 'validation')
+    assert.equal(conflict.error.stage, 'write')
     assert.equal(conflict.error.fieldErrors?.[0]?.path, 'experiment.slug')
     assert.equal(conflict.error.retryable, false)
     assert.equal(conflict.error.hint, undefined)

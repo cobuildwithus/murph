@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -283,6 +283,49 @@ test("progress-card renderer makes unavailable direction context visible and acc
       "Morning light & recovery <check> experiment progress",
     );
     assert.doesNotMatch(healthyMedia.alt ?? "", /Direction context unavailable/u);
+  } finally {
+    await rm(vaultRoot, { force: true, recursive: true });
+  }
+});
+
+test("progress-card validation exposes only its public field and does not write", async () => {
+  const vaultRoot = await mkdtemp(
+    path.join(tmpdir(), "murph-progress-card-validation-"),
+  );
+  const privateMarker = "private-progress-card-title";
+  try {
+    let captured: unknown;
+    try {
+      await renderAndSaveExperimentProgressCard({
+        card: {
+          ...CARD,
+          phase: {
+            ...CARD.phase,
+            day: 0,
+          },
+          title: privateMarker,
+        },
+        experimentId: "exp_01JNV4458HYPP53JDQCBP1QJFR",
+        vaultRoot,
+      });
+    } catch (error) {
+      captured = error;
+    }
+
+    assert.ok(captured instanceof VaultCliError);
+    assert.equal(captured.code, "progress_card_validation_failed");
+    assert.deepEqual(captured.context, {
+      issues: [{
+        code: "too_small",
+        publicPath: ["phase"],
+      }],
+      retryable: false,
+      stage: "validation",
+    });
+    const encoded = JSON.stringify(captured.context);
+    assert.equal(encoded.includes(privateMarker), false);
+    assert.equal(encoded.includes(vaultRoot), false);
+    assert.deepEqual(await readdir(vaultRoot), []);
   } finally {
     await rm(vaultRoot, { force: true, recursive: true });
   }

@@ -277,8 +277,8 @@ function unknownHabitatAspectError(): VaultCliError {
     'The habitat aspect is not present in the catalog.',
     {
       issues: [{
-        path: ['aspect'],
         code: 'invalid_value',
+        publicPath: ['aspect'],
       }],
       retryable: false,
       stage: 'validation',
@@ -297,8 +297,8 @@ function mapHabitatCoreError(error: unknown): unknown {
       'The requested habitat aspect was not found.',
       {
         issues: [{
-          path: ['lookup'],
           code: 'custom',
+          publicPath: ['lookup'],
         }],
         retryable: false,
         stage: 'read',
@@ -316,8 +316,8 @@ function mapHabitatCoreError(error: unknown): unknown {
         'Submitted habitat input was rejected by the habitat privacy or validation boundary.',
         {
           issues: [{
-            path: ['indicator'],
             code: 'invalid_value',
+            publicPath: ['indicator'],
           }],
           retryable: false,
           stage: 'validation',
@@ -334,8 +334,8 @@ function mapHabitatCoreError(error: unknown): unknown {
         'A saved habitat record has invalid frontmatter.',
         {
           issues: [{
-            path: [],
             code: 'custom',
+            publicPath: [],
           }],
           retryable: false,
           stage: 'read',

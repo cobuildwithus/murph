@@ -147,7 +147,7 @@ test("habitat commands map unknown and missing aspects to bounded recovery field
     assert.equal(unknown.envelope.error.hint, undefined);
     assert.equal(unknown.envelope.error.retryable, false);
     assert.equal(missing.envelope.error.code, "not_found");
-    assert.equal(missing.envelope.error.stage, "validation");
+    assert.equal(missing.envelope.error.stage, "read");
     assert.equal(missing.envelope.error.fieldErrors?.[0]?.path, "lookup");
     assert.equal(missing.envelope.error.hint, undefined);
     assert.equal(missing.envelope.error.retryable, false);
@@ -297,7 +297,7 @@ test("habitat reads classify invalid saved frontmatter as terminal without expos
         assert.fail("expected malformed habitat record to fail");
       }
       assert.equal(result.envelope.error.code, "contract_invalid");
-      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(result.envelope.error.stage, "read");
       assert.equal(result.envelope.error.retryable, false);
       assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "$");
       assert.equal(result.envelope.error.hint, undefined);

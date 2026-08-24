@@ -177,9 +177,7 @@ export function toKeyedRecord(value: object): JsonObject {
     stripUndefinedJsonFields(value),
   )
   if (!result.success) {
-    throw new VaultCliError("contract_invalid", "Expected a JSON-compatible object.", {
-      issues: result.errors,
-    })
+    throw new VaultCliError("contract_invalid", "Expected a JSON-compatible object.")
   }
 
   return result.data

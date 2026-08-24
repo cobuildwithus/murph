@@ -24,6 +24,7 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import sharp from "sharp";
 
 import { MURPH_LOGO_SVG } from "./murph-logo-svg.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
 
 const CARD_WIDTH = 1200;
 const CARD_HEIGHT = 780;
@@ -54,6 +55,18 @@ const COLOR = {
   negative: "#B0651F",
 };
 
+const PROGRESS_CARD_PUBLIC_FIELDS = new Set([
+  "asOf",
+  "confounders",
+  "movers",
+  "moverSentimentContext",
+  "phase",
+  "sessions",
+  "title",
+  "v",
+  "weeks",
+]);
+
 interface RenderedProgressCard {
   bytes: Uint8Array;
   filename: string;
@@ -82,10 +95,10 @@ export async function renderAndSaveExperimentProgressCard(input: {
       "progress_card_validation_failed",
       "Experiment progress-card data failed validation.",
       {
-        issues: parsedCard.error.issues.map((issue) => ({
-          path: issue.path,
-          code: issue.code,
-        })),
+        issues: parsedCard.error.issues.map((issue) => publicValidationIssue(
+          issue,
+          progressCardPublicPath(issue.path),
+        )),
         retryable: false,
         stage: "validation",
       },
@@ -136,6 +149,15 @@ export async function renderAndSaveExperimentProgressCard(input: {
     sizeBytes: rendered.bytes.byteLength,
     source: CARD_SOURCE,
   };
+}
+
+function progressCardPublicPath(
+  path: readonly PropertyKey[],
+): readonly string[] {
+  const [field] = path;
+  return typeof field === "string" && PROGRESS_CARD_PUBLIC_FIELDS.has(field)
+    ? [field]
+    : [];
 }
 
 async function renderExperimentProgressCard(
