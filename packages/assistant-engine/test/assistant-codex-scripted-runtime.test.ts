@@ -6684,42 +6684,95 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
-  it('reports an overdue recurring reminder inspection without promising automatic recovery', {
+  it.each([
+    {
+      action: 'inspect' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The daily reminder remains active, but its occurrence is overdue and I couldn't confirm the next occurrence.",
+      prompt: 'Is my daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection',
+    },
+    {
+      action: 'patch' as const,
+      audience: 'direct' as const,
+      expectedRequest: {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T00:00:00.000Z',
+        instructions: 'Send the revised daily interval reminder.',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The edit was saved, and the daily reminder remains active on its daily schedule. Its occurrence is overdue, and I couldn't confirm the next occurrence.",
+      prompt: 'Update my daily interval reminder now.',
+      title: 'reports an overdue recurring reminder edit',
+    },
+    {
+      action: 'inspect' as const,
+      audience: 'group' as const,
+      expectedRequest: {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+      finalMessage:
+        "The room's daily reminder remains active, but its occurrence is overdue and the next occurrence couldn't be confirmed.",
+      prompt: 'Is this room\'s daily interval reminder still scheduled?',
+      title: 'reports an overdue recurring reminder inspection to its group',
+    },
+  ])('$title without promising automatic recovery', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
+  }, async ({
+    action,
+    audience,
+    expectedRequest,
+    finalMessage,
+    prompt,
+  }) => {
     const scenario = await prepareScriptedTurnScenario()
     const automationRequests: unknown[] = []
-    scenario.stub.queue(
-      {
-        customToolCall: {
-          input: `
+    const toolInput = action === 'patch'
+      ? `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T00:00:00.000Z",
+  instructions: "Send the revised daily interval reminder.",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`
+      : `
 const result = await tools.murph__automation({
   action: "inspect",
   lookup: "daily-interval-reminder",
 });
 text(JSON.stringify(result));
-`,
+`
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: toolInput,
           name: 'exec',
         },
       },
-      {
-        text: "The daily reminder remains active, but its occurrence is overdue and I couldn't confirm the next occurrence.",
-      },
+      { text: finalMessage },
     )
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      baseInstructions: buildScriptedHostedSystemPrompt(audience, true),
       dynamicTools: [MURPH_AUTOMATION_TOOL],
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
             automationRequests.push(request)
-            if (request.action !== 'inspect') {
-              throw new Error('Expected an automation inspect request.')
+            if (request.action !== action) {
+              throw new Error(`Expected an automation ${action} request.`)
             }
-            return {
-              action: 'inspect' as const,
+            const response = {
               automationId: 'automation-daily-interval',
               effectiveTimeZone: null,
               lookupId: 'daily-interval-reminder',
@@ -6732,6 +6785,17 @@ text(JSON.stringify(result));
               status: 'active' as const,
               updatedAt: '2026-08-10T00:01:00.000Z',
             }
+            if (request.action === 'patch') {
+              return {
+                action: 'patch' as const,
+                ...response,
+                created: false,
+              }
+            }
+            return {
+              action: 'inspect' as const,
+              ...response,
+            }
           },
         },
         computerToolsAvailable: false,
@@ -6742,15 +6806,10 @@ text(JSON.stringify(result));
         },
         vaultFileSendAvailable: false,
       },
-      prompt: 'Is my daily interval reminder still scheduled?',
+      prompt,
     })
 
-    expect(automationRequests).toEqual([
-      {
-        action: 'inspect',
-        lookup: 'daily-interval-reminder',
-      },
-    ])
+    expect(automationRequests).toEqual([expectedRequest])
     const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
       .flatMap((summary) => summary.customToolCallOutputs ?? [])
       .join('\n')
@@ -6759,8 +6818,20 @@ text(JSON.stringify(result));
       '"issues":["stale_recurring_occurrence"]',
     )
     expect(toolOutputs).toContain('"status":"unavailable"')
+    expect(result.finalMessage).toBe(finalMessage)
     expect(result.finalMessage).toMatch(/active/iu)
-    expect(result.finalMessage).toMatch(/overdue|could not confirm/iu)
+    expect(result.finalMessage).toMatch(/overdue/iu)
+    expect(result.finalMessage).toMatch(
+      /could(?:n't| not)(?: be)? confirm(?:ed)?/iu,
+    )
+    if (action === 'patch') {
+      expect(result.finalMessage).toMatch(/edit .*saved/iu)
+      expect(result.finalMessage).toMatch(/daily schedule/iu)
+    }
+    if (audience === 'group') {
+      expect(result.finalMessage).toMatch(/room/iu)
+      expect(result.finalMessage).not.toMatch(/\bI\b|\bmy\b|\byou(?:r)?\b/iu)
+    }
     expect(result.finalMessage).not.toMatch(
       /automatically|no action|nothing .*need|current .*work/iu,
     )

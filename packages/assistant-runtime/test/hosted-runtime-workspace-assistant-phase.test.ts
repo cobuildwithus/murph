@@ -6022,6 +6022,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       )).resolves.toMatchObject({
         state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
       });
+
+      vi.setSystemTime(new Date("2026-08-11T01:00:00.000Z"));
+      const implicitTimeZoneReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the implicit-timezone reminder.",
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        slug: "implicit-timezone-reminder",
+        title: "Implicit timezone reminder",
+      });
+      if (implicitTimeZoneReminder.action !== "save") {
+        throw new Error("Expected implicit-timezone reminder save result.");
+      }
+      expect(implicitTimeZoneReminder).toEqual(expect.objectContaining({
+        effectiveTimeZone: "America/New_York",
+        occurrenceProjection: {
+          nextOccurrenceAt: "2026-08-11T06:00:00.000Z",
+          status: "resolved",
+        },
+      }));
+
+      vi.setSystemTime(new Date("2026-08-11T03:01:00.000Z"));
+      mocks.resolveAssistantCronDefaultTimeZoneProjection.mockResolvedValueOnce({
+        timeZone: "UTC",
+        vaultTimeZoneVerified: false,
+      });
+      await expect(requestAutomation({
+        action: "inspect",
+        lookup: "implicit-timezone-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        action: "inspect",
+        effectiveTimeZone: "UTC",
+        occurrenceProjection: {
+          issues: ["default_timezone_unverified"],
+          status: "unavailable",
+        },
+        schedule: {
+          kind: "dailyLocal",
+          localTime: "02:00",
+        },
+        status: "active",
+      }));
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }

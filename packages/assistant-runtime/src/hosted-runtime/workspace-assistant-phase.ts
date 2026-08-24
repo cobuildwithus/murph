@@ -1804,6 +1804,7 @@ async function projectHostedAutomationResponseFields(input: {
     AssistantAutomationOccurrenceProjectionIssue
   >();
   let occurrenceProjectionPending = false;
+  let occurrenceProjectionStale = false;
   let defaultTimeZone: string | undefined;
   if (schedule.kind !== "deviceActivity") {
     const timeZoneProjection = await resolveAssistantCronDefaultTimeZoneProjection(
@@ -1841,7 +1842,7 @@ async function projectHostedAutomationResponseFields(input: {
         } else if (
           projection.occurrenceUnverifiedReason === "stale_recurring_occurrence"
         ) {
-          occurrenceProjectionIssues.add("stale_recurring_occurrence");
+          occurrenceProjectionStale = true;
         } else {
           occurrenceProjectionIssues.add("projection_unavailable");
         }
@@ -1855,6 +1856,9 @@ async function projectHostedAutomationResponseFields(input: {
     } catch {
       occurrenceProjectionIssues.add("projection_unavailable");
     }
+  }
+  if (occurrenceProjectionStale && occurrenceProjectionIssues.size === 0) {
+    occurrenceProjectionIssues.add("stale_recurring_occurrence");
   }
   const occurrenceProjectionIssueList = [...occurrenceProjectionIssues];
   let occurrenceProjection: AssistantAutomationOccurrenceProjection;
