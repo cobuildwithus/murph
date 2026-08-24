@@ -223,6 +223,23 @@ test("JournalPage renders the derived private health timeline", () => {
   assert.match(markup, /To add, correct, or remove something, tell Murph/u);
 });
 
+test("JournalPage renders its empty state after Browser Vault finishes without data", () => {
+  mocks.useBrowserVault.mockReturnValue({
+    client: null,
+    dataVersion: null,
+    error: null,
+    ref: null,
+    refreshPending: true,
+    refresh: mocks.refresh,
+    status: "empty",
+  });
+
+  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+
+  assert.match(markup, /No Journal events yet/u);
+  assert.doesNotMatch(markup, /Preparing your Journal/u);
+});
+
 test("Personal Patterns comparison controls name their factor and next-day outcome", () => {
   const markup = renderToStaticMarkup(
     createElement(PersonalPatternsComponentStudy),

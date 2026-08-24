@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import {
   selectBrowserVaultJournal,
+  type JournalView,
 } from "@murphai/query/browser-overview";
 
 import { Alert, AlertDescription, AlertTitle } from "@/src/components/ui/alert";
@@ -10,16 +11,22 @@ import { Button } from "@/src/components/ui/button";
 import { JournalViewContent } from "@/src/components/journal/journal-view";
 import { useBrowserVault } from "@/src/lib/browser-vault/context";
 
+const EMPTY_JOURNAL: JournalView = {
+  days: [],
+  eventCount: 0,
+  recordCount: 0,
+  windowDays: 120,
+};
+
 export default function JournalPageClient() {
-  const { client, error, refresh, refreshPending, status } = useBrowserVault();
+  const { client, error, refresh, status } = useBrowserVault();
   const journal = useMemo(
     () => client ? selectBrowserVaultJournal(client) : null,
     [client],
   );
   const journalAvailable = client?.replica.journal !== undefined;
-  const preparing = refreshPending && (status === "empty" || !journalAvailable);
 
-  if (status === "loading" || preparing) {
+  if (status === "loading") {
     return <p aria-live="polite">Preparing your Journal...</p>;
   }
 
@@ -46,9 +53,5 @@ export default function JournalPageClient() {
     );
   }
 
-  if (!journal) {
-    return <p aria-live="polite">Preparing your Journal...</p>;
-  }
-
-  return <JournalViewContent journal={journal} />;
+  return <JournalViewContent journal={journal ?? EMPTY_JOURNAL} />;
 }
