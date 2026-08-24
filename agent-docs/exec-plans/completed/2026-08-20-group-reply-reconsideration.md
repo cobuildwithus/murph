@@ -1,6 +1,6 @@
 # One-shot group reply reconsideration
 
-Status: active
+Status: completed
 Created: 2026-08-20
 Updated: 2026-08-24
 
@@ -211,10 +211,13 @@ Updated: 2026-08-24
 - The current-main candidate passes the Assistant Engine typecheck, all 104
   local-service runtime tests, the focused controller cutoff suite,
   documentation drift, changelog proof, and diff checks.
-- Remaining: push the corrected exact head, run ReviewGPT round 5 concurrently
-  with exact-head CI, resolve any accepted findings, close the plan, prove a
-  clean current-base merge tree, merge, and confirm the required checks remain
-  green. The PR remains unmerged.
+- Final ReviewGPT substantive round 5 completed as a marked full-snapshot PASS
+  on the exact corrected implementation head. The independent exact-head
+  re-review also found no remaining correctness or reliability blocker.
+- Implementation and focused verification are complete. This plan archive is
+  the final documentation-only commit; required CI on that pushed head, a clean
+  current-base merge-tree proof, merge, and worktree retirement remain the
+  operational landing steps.
 
 ## Product UX walkthrough
 
@@ -247,3 +250,4 @@ Updated: 2026-08-24
 - Walkthrough result: **Ready**. The implementation matches the approved product
   change with no added audience, permission, state, or recovery owner and no
   material difference from the plan.
+Completed: 2026-08-24
