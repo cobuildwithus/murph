@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Cli } from "incur";
@@ -170,6 +171,71 @@ test("commons knowledge search stays non-blocking when its generated index is mi
     assert.equal(data.topic, null);
     assert.match(data.warning ?? "", /continue without corpus context/u);
   } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousRoot;
+    }
+  }
+});
+
+test("commons protocol artifacts fail with safe recovery guidance when unavailable", async () => {
+  const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+  const missingRoot = path.join(tmpdir(), `missing-health-commons-protocol-${process.pid}`);
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = missingRoot;
+  try {
+    const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+      "commons",
+      "protocol",
+      "list",
+    ]);
+
+    assert.equal(result.envelope.ok, false);
+    if (result.envelope.ok) {
+      throw new Error("Expected missing Commons protocol artifacts to fail.");
+    }
+    assert.equal(result.envelope.error.code, "commons_protocol_artifact_unavailable");
+    assert.equal(result.envelope.error.retryable, false);
+    assert.equal(result.envelope.error.stage, "protocol_index");
+    assert.match(result.envelope.error.hint ?? "", /continue without Commons protocol context/iu);
+    assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(missingRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  } finally {
+    if (previousRoot === undefined) {
+      delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+    } else {
+      process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = previousRoot;
+    }
+  }
+});
+
+test("commons protocol artifacts fail without echoing malformed artifact content", async () => {
+  const previousRoot = process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
+  const packageRoot = await mkdtemp(path.join(tmpdir(), "invalid-health-commons-protocol-"));
+  await mkdir(path.join(packageRoot, "generated"), { recursive: true });
+  await writeFile(
+    path.join(packageRoot, "generated", "protocol-index.json"),
+    "private-artifact-marker {not-json}",
+    "utf8",
+  );
+  process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT = packageRoot;
+  try {
+    const result = await runInProcessJsonCli(createCommonsSliceCli(), [
+      "commons",
+      "protocol",
+      "list",
+    ]);
+
+    assert.equal(result.envelope.ok, false);
+    if (result.envelope.ok) {
+      throw new Error("Expected malformed Commons protocol artifacts to fail.");
+    }
+    assert.equal(result.envelope.error.code, "commons_protocol_artifact_invalid");
+    assert.equal(result.envelope.error.retryable, false);
+    assert.equal(result.envelope.error.stage, "protocol_index");
+    assert.doesNotMatch(JSON.stringify(result.envelope), /private-artifact-marker/u);
+    assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(packageRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  } finally {
+    await rm(packageRoot, { force: true, recursive: true });
     if (previousRoot === undefined) {
       delete process.env.MURPH_HEALTH_COMMONS_PACKAGE_ROOT;
     } else {

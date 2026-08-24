@@ -1,5 +1,5 @@
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { Cli } from 'incur'
+import { Cli, z } from 'incur'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -98,6 +98,26 @@ function createResearchCli() {
   })
   cli.use(incurErrorBridge)
   registerResearchCommands(cli)
+  return cli
+}
+
+function createResearchFailureCli(fetchImpl: typeof fetch) {
+  const cli = Cli.create('vault-cli', {
+    description: 'research failure test cli',
+    version: '0.0.0-test',
+  })
+  cli.use(incurErrorBridge)
+  cli.command('provider-failure', {
+    args: z.object({}),
+    options: z.object({}),
+    output: z.unknown(),
+    async run() {
+      return await fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+        env: { EXA_API_KEY: 'exa-test-token' },
+        fetchImpl,
+      })
+    },
+  })
   return cli
 }
 
@@ -423,8 +443,8 @@ describe('research scout', () => {
       env: { EXA_API_KEY: 'exa-test-token' },
       fetchImpl,
     })).rejects.toMatchObject({
-      code: 'research_exa_request_failed',
-      context: expect.objectContaining({ status: 503 }),
+      code: 'research_exa_unavailable',
+      context: expect.objectContaining({ retryable: true, status: 503 }),
     })
 
     expect(fetchImpl).toHaveBeenCalledTimes(1)
@@ -457,10 +477,11 @@ describe('research scout', () => {
     controller.abort(new Error('private caller abort reason'))
 
     await expect(request).rejects.toMatchObject({
-      code: 'research_exa_request_failed',
+      code: 'research_exa_aborted',
       context: {
         abortedByCaller: true,
         failureStage: 'request',
+        retryable: false,
         timedOut: false,
       },
       message: 'Exa research scout request was aborted.',
@@ -470,7 +491,7 @@ describe('research scout', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
 
-  it('returns redacted structured HTTP failures without retries', async () => {
+  it('returns redacted structured HTTP failures with retry guidance', async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse({
       message: 'echoed private query and exa-test-token',
     }, 429))
@@ -481,16 +502,91 @@ describe('research scout', () => {
     })
 
     await expect(request).rejects.toMatchObject({
-      code: 'research_exa_request_failed',
+      code: 'research_exa_rate_limited',
       context: {
         failureStage: 'response',
+        retryable: true,
         status: 429,
       },
-      message: 'Exa research scout request failed.',
+      message: 'Exa rate-limited the research scout request.',
       name: 'VaultCliError',
     } satisfies Partial<VaultCliError>)
     await expect(request).rejects.not.toThrow(/echoed private query|exa-test-token/u)
     expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('projects retry guidance without echoing a rejected provider body', async () => {
+    const result = await runInProcessJsonCli(
+      createResearchFailureCli(vi.fn<typeof fetch>(async () => jsonResponse({
+        message: 'private-provider-body-and-token',
+      }, 429))),
+      ['provider-failure'],
+    )
+
+    expect(result.envelope.ok).toBe(false)
+    if (result.envelope.ok) {
+      throw new Error('Expected provider failure envelope.')
+    }
+    expect(result.envelope.error).toMatchObject({
+      code: 'research_exa_rate_limited',
+      retryable: true,
+      stage: 'response',
+    })
+    expect(result.envelope.error.hint).toMatch(/rate limit resets/u)
+    expect(JSON.stringify(result.envelope)).not.toMatch(/private-provider-body-and-token/u)
+  })
+
+  it('classifies Exa authentication, timeout, and malformed success failures', async () => {
+    const authRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: vi.fn<typeof fetch>(async () => jsonResponse({
+        message: 'private-provider-auth-body',
+      }, 401)),
+    })
+    await expect(authRequest).rejects.toMatchObject({
+      code: 'research_exa_auth_failed',
+      context: expect.objectContaining({ retryable: false, status: 401 }),
+    })
+    await expect(authRequest).rejects.not.toThrow(/private-provider-auth-body/u)
+
+    const timeoutFetch = vi.fn<typeof fetch>(async (_target, init) => {
+      const signal = init?.signal
+      return await new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    })
+    const timeoutRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: timeoutFetch,
+      timeoutMs: 5,
+    })
+    await expect(timeoutRequest).rejects.toMatchObject({
+      code: 'research_exa_timeout',
+      context: expect.objectContaining({ retryable: true, timedOut: true }),
+    })
+
+    const malformedJsonRequest = fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: vi.fn<typeof fetch>(async () => new Response(
+        'private-malformed-provider-payload',
+        { status: 200 },
+      )),
+    })
+    await expect(malformedJsonRequest).rejects.toMatchObject({
+      code: 'research_exa_invalid_response',
+      context: expect.objectContaining({ retryable: false }),
+    })
+    await expect(malformedJsonRequest).rejects.not.toThrow(/private-malformed-provider-payload/u)
+
+    await expect(fetchExaResearchScoutCandidates(RESEARCH_SCOUT_INPUT, {
+      env: { EXA_API_KEY: 'exa-test-token' },
+      fetchImpl: vi.fn<typeof fetch>(async () => jsonResponse({
+        privateMarker: 'private-well-formed-provider-payload',
+      })),
+    })).rejects.toMatchObject({
+      code: 'research_exa_invalid_response',
+      context: expect.objectContaining({ retryable: false }),
+    })
   })
 
   it('posts one bounded research-paper search for each batch lane', async () => {

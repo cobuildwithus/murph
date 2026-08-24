@@ -41,6 +41,7 @@ import type {
   WearableSummaryFilters as WearableSummaryFiltersShape,
 } from '@murphai/query'
 import { loadRuntimeModule } from './runtime-import.js'
+import { wrapQueryRuntimeErrors } from './query-error-mapping.js'
 
 export type QueryEntityFamily = SharedCanonicalEntityFamily
 export type QueryCanonicalEntity = SharedCanonicalEntity
@@ -101,5 +102,7 @@ export type QueryExperimentMetricPeriodSummary =
 export type QueryExperimentWindows = QueryExperimentProgressSummary['windows']
 
 export async function loadQueryRuntime(): Promise<QueryRuntimeModule> {
-  return loadRuntimeModule<QueryRuntimeModule>('@murphai/query')
+  return wrapQueryRuntimeErrors(
+    await loadRuntimeModule<QueryRuntimeModule>('@murphai/query'),
+  )
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
@@ -101,7 +101,6 @@ test("memory command module registers without throwing", () => {
     description: "memory test cli",
     version: "0.0.0-test",
   });
-
   registerMemoryCommands(cli);
   assert.ok(cli);
 });
@@ -114,7 +113,6 @@ test("memory set-name stores the preferred display name in canonical memory", as
     description: "memory test cli",
     version: "0.0.0-test",
   });
-
   registerMemoryCommands(cli);
 
   const saved = await runInProcessJsonCli(cli, [
@@ -429,6 +427,7 @@ test("memory update refuses missing record ids through the registered CLI", asyn
     description: "memory test cli",
     version: "0.0.0-test",
   });
+  cli.use(incurErrorBridge);
 
   registerMemoryCommands(cli);
 
@@ -442,7 +441,11 @@ test("memory update refuses missing record ids through the registered CLI", asyn
   ]);
   assert.equal(updated.exitCode, 1);
   assert.equal(updated.envelope.ok, false);
-  assert.equal(updated.envelope.error.message, 'Memory record "mem_missing" does not exist.');
+  assert.equal(updated.envelope.error.code, "memory_not_found");
+  assert.equal(updated.envelope.error.retryable, false);
+  assert.equal(updated.envelope.error.stage, "memory_lookup");
+  assert.equal(updated.envelope.error.message, "The requested canonical memory record does not exist.");
+  assert.doesNotMatch(JSON.stringify(updated.envelope), /mem_missing|Should fail/u);
 });
 
 test("memory show refuses missing record ids through the registered CLI", async () => {
@@ -467,7 +470,57 @@ test("memory show refuses missing record ids through the registered CLI", async 
   assert.equal(shown.exitCode, 1);
   assert.equal(shown.envelope.ok, false);
   assert.equal(shown.envelope.error.code, "memory_not_found");
-  assert.equal(shown.envelope.error.message, 'Memory record "mem_missing" does not exist.');
+  assert.equal(shown.envelope.error.message, "The requested canonical memory record does not exist.");
+  assert.doesNotMatch(JSON.stringify(shown.envelope), /mem_missing/u);
+});
+
+test("memory parse failures expose a safe repair location without echoing canonical content", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-cli-invalid-");
+  cleanupPaths.push(parentRoot);
+  const memoryPath = path.join(vaultRoot, memoryDocumentRelativePath);
+  await mkdir(path.dirname(memoryPath), { recursive: true });
+  const invalidMarkdown = renderMemoryDocument({
+    document: upsertMemoryRecord(
+      createEmptyMemoryDocument(new Date("2026-08-24T00:00:00.000Z")),
+      {
+        now: new Date("2026-08-24T00:00:01.000Z"),
+        section: "Context",
+        text: "private-marker-that-must-not-echo",
+      },
+    ).document,
+  }).replace(/murph-memory:\{.*\}/u, "murph-memory:{broken-json}");
+  const invalidLine = invalidMarkdown
+    .split("\n")
+    .findIndex((line) => line.includes("private-marker-that-must-not-echo")) + 1;
+  await writeFile(memoryPath, invalidMarkdown, "utf8");
+
+  const cli = Cli.create("vault-cli", {
+    description: "memory test cli",
+    version: "0.0.0-test",
+  });
+  cli.use(incurErrorBridge);
+  registerMemoryCommands(cli);
+
+  const result = await runInProcessJsonCli(cli, [
+    "memory",
+    "show",
+    "--vault",
+    vaultRoot,
+  ]);
+
+  assert.equal(result.envelope.ok, false);
+  if (result.envelope.ok) {
+    throw new Error("Expected malformed canonical memory to fail.");
+  }
+  assert.equal(result.envelope.error.code, "memory_document_invalid");
+  assert.equal(result.envelope.error.retryable, false);
+  assert.equal(result.envelope.error.stage, "memory_read");
+  assert.match(
+    result.envelope.error.message ?? "",
+    new RegExp(`bank/memory\\.md:${invalidLine}`, "u"),
+  );
+  assert.doesNotMatch(JSON.stringify(result.envelope), /private-marker-that-must-not-echo/u);
+  assert.doesNotMatch(JSON.stringify(result.envelope), new RegExp(parentRoot.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 });
 
 test("memory command module does not register a search subcommand", async () => {

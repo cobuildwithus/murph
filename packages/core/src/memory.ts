@@ -51,6 +51,26 @@ export interface UpdateMemoryInput {
   text: string;
 }
 
+export class MemoryRecordNotFoundError extends Error {
+  readonly code = "MEMORY_RECORD_NOT_FOUND";
+
+  constructor() {
+    super("The requested canonical memory record does not exist.");
+    this.name = "MemoryRecordNotFoundError";
+  }
+}
+
+export class MemoryPersistenceError extends Error {
+  readonly code = "MEMORY_PERSISTENCE_INVALID";
+  readonly operation: "update" | "upsert";
+
+  constructor(operation: "update" | "upsert") {
+    super("The canonical memory write could not be verified after it completed.");
+    this.name = "MemoryPersistenceError";
+    this.operation = operation;
+  }
+}
+
 export function resolveMemoryDocumentPath(vaultRoot: string): string {
   return resolveVaultPath(vaultRoot, memoryDocumentRelativePath).absolutePath;
 }
@@ -175,7 +195,7 @@ export async function updateMemory(
         const snapshot = await readMemoryDocument(lockedVaultRoot);
         const existing = snapshot.records.find((record) => record.id === input.recordId) ?? null;
         if (existing === null) {
-          throw new Error(`Memory record "${input.recordId}" does not exist.`);
+          throw new MemoryRecordNotFoundError();
         }
 
         const next = upsertMemoryRecord(snapshot, {
@@ -287,7 +307,7 @@ async function readPersistedMemoryRecord(
   const document = await readMemoryDocument(vaultRoot);
   const record = document.records.find((entry) => entry.id === recordId) ?? null;
   if (record === null) {
-    throw new Error(`Memory record "${recordId}" was not found after ${operation}.`);
+    throw new MemoryPersistenceError(operation);
   }
 
   return {

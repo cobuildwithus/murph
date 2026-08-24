@@ -365,7 +365,7 @@ describe("core memory package wrapper", () => {
         recordId: "mem_missing",
         text: "Should fail",
       }),
-    ).rejects.toThrow('Memory record "mem_missing" does not exist.');
+    ).rejects.toThrow("The requested canonical memory record does not exist.");
   });
 
   test("fails closed on legacy on-disk memory docs and legacy ids", async () => {
@@ -433,7 +433,7 @@ describe("core memory package wrapper", () => {
     expect(persistedRecord).not.toBeNull();
     expect(isContractId(persistedRecord?.id ?? "", "mem")).toBe(true);
     expect(error?.message).toBe(
-      `Memory record "${persistedRecord?.id ?? ""}" was not found after upsert.`,
+      "The canonical memory write could not be verified after it completed.",
     );
 
     expect(persistedRecord).toMatchObject({
