@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-21
+Last verified: 2026-08-23
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -25,7 +25,7 @@ asks for a final bug hunt.
 
 For final-ReviewGPT-eligible PR-lane work, do not call the PR good to merge until
 the latest substantive round is resolved, local triage has zero accepted
-findings, its finding-disposition pause is complete, and PR CI is green on the
+findings, every required finding-disposition boundary is complete, and PR CI is green on the
 final head. A round is resolved by `ROUND_OUTCOME: PASS`, or by
 `ROUND_OUTCOME: FINDINGS` when the parent accepts none and records concrete
 disposition evidence. A completed anomaly retrospective may justify continuing
@@ -43,7 +43,7 @@ the same at 500 changed lines or 10 changed files; only routine PRs below both
 cutoffs send the remediation delta and its directly affected paths. An explicit
 `REVIEW_GPT_FULL_REVIEW_REASON` selects a new full-audit conversation. The gate
 completes when the exact patch has a resolved result, local triage has zero
-accepted findings, the finding-disposition pause is complete, and CI is green
+accepted findings, the finding-disposition boundary is complete, and CI is green
 on the final head. Missing or stale evidence, an invalid model/response,
 unresolved accepted findings, a required retrospective, or a merge conflict is
 a stop condition rather than permission to infer the answer.
@@ -94,9 +94,9 @@ lane. The detached watcher owns the wait and resumes Codex only after the
 response is complete; the active agent does not remain in a progress-check
 loop. Use `--poll-interval 5m` so watcher checks are no more frequent than once
 every five minutes. Unless an explicit caller- or user-supplied per-run bound
-already applies, use `--poll-timeout 240m`; preserve any explicit bound. That
+already applies, use `--poll-timeout 260m`; preserve any explicit bound. That
 wake timeout is independent of the normal ReviewGPT response-capture timeout,
-which defaults to 180 minutes.
+which defaults to 250 minutes.
 
 Manual status polling is a fallback only when neither a completion-returning
 wait nor a completion watcher can notify the owning model and the task cannot
@@ -113,12 +113,16 @@ do not use a generic wake handoff as authority to apply an artifact.
 
 ## Finding Disposition Pause
 
-Every substantive `PASS` or `FINDINGS` result from either ReviewGPT stage pauses
-the workflow before remediation, artifact application, another review, or
-merge. Validate the exact response first, then have the parent triage every
-finding. The user handoff states the result and, for each finding, the parent's
-accepted or rejected disposition, concrete code or path evidence, current user
-or operational harm, and the smallest justified fix with its complexity cost.
+Every substantive preliminary specialist result and every final `FINDINGS`
+result uses this disposition boundary before remediation, artifact application,
+another review, or merge. A validated final `ROUND_OUTCOME: PASS` has no
+findings to disposition and proceeds directly to the remaining parent review
+and merge checks without a user-resume pause. For a result that requires the
+boundary, validate the exact response first, then have the parent triage every
+finding. The user-visible report states the result and, for each finding, the
+parent's accepted or rejected disposition, concrete code or path evidence,
+current user or operational harm, and the smallest justified fix with its
+complexity cost.
 
 The parent owns disposition and may reject a finding as wrong, already handled,
 speculative, unproven, or not worth the complexity it would add. The user may
@@ -134,6 +138,20 @@ stage may finish, but its result receives its own pause. Do not mutate the
 candidate, download or apply an artifact, launch another review, or merge until
 the user resumes the task. `INVALID` and `RETROSPECTIVE_REQUIRED` retain their
 existing stop behavior rather than using this disposition path.
+
+One narrow exception completes the disposition boundary without ending the
+turn: the substantive result contains exactly one finding, ReviewGPT classifies
+it as `Complexity Collapse`, and the parent independently accepts it after
+proving that the correction preserves every requested behavior and invariant,
+stays within the current task's existing edit authority, and yields net deletion
+or removes concrete concepts or owners without replacement machinery. Report
+the result and evidence-backed disposition as a progress update, then remediate,
+verify, push, and continue the ReviewGPT loop without asking the user for
+separate permission. Use the ordinary turn-ending pause if there is another
+finding, the collapse is rejected, requested behavior or the intended outcome
+would change, scope or authority would expand, or a destructive or external
+action needs new approval. This exception does not bypass an anomaly
+retrospective or the seven-round hard cap.
 
 ## Preliminary Specialist Pass
 
@@ -168,7 +186,7 @@ or advance the final gate's baseline.
 
 Run the preliminary preset with exact-head packaging:
 
-The repo config defaults response capture to 180 minutes. The workflow commands
+The repo config defaults response capture to 250 minutes. The workflow commands
 inherit that timeout; use `--wait-timeout` only for an intentional per-run override.
 
 ```bash
@@ -235,11 +253,12 @@ same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
 specialist pass; do not split or rerun it by lens. Apply the Finding Disposition
 Pause before any remediation or artifact download.
 
-After the user resumes, handle only accepted findings against the real code and
-tests. If the response attaches `reviewgpt-coverage.patch`, retain the exact
-review thread URL, artifact index, and selected lane. Download only that
-assistant-owned artifact from the same thread with the managed lane's CDP
-endpoint, for example:
+After the user resumes, or immediately when the sole accepted finding qualifies
+for the `Complexity Collapse` exception, handle only accepted findings against
+the real code and tests. If the response attaches `reviewgpt-coverage.patch`,
+retain the exact review thread URL, artifact index, and selected lane. Download
+only that assistant-owned artifact from the same thread with the managed lane's
+CDP endpoint, for example:
 
 ```bash
 pnpm exec cobuild-review-gpt thread download \
@@ -620,8 +639,12 @@ the current user explicitly asks for it.
    migrations, shims, dual writes, queues, capability negotiation, or
    reconciliation for a low-incidence temporary window.
 
-   Apply the Finding Disposition Pause after completing this triage. Steps 5–7
-   begin only after the user resumes, and only for accepted findings.
+   Apply the Finding Disposition Pause after completing this triage for every
+   substantive specialist result and final `FINDINGS` result. Steps 5–7 begin
+   only after the user resumes, except that a sole accepted finding that
+   qualifies for the behavior-preserving `Complexity Collapse` exception may
+   proceed immediately. Remediation remains limited to accepted findings. A
+   validated final `ROUND_OUTCOME: PASS` continues without that pause.
 
 5. Before another tactical fix, run the anomaly retrospective when any of these
    is true:
@@ -729,9 +752,10 @@ worktree active, and stop. Do not poll for a quiet base.
 ## Stop Condition
 
 - Stop when the exact current patch has a resolved result, local triage produces
-  zero accepted findings, and the Finding Disposition Pause is complete. A
-  resolved result is `ROUND_OUTCOME: PASS`, or `ROUND_OUTCOME: FINDINGS` with
-  every finding rejected for an evidence-backed reason.
+  zero accepted findings, and every required finding-disposition boundary is
+  complete. A resolved result is `ROUND_OUTCOME: PASS`, which requires no
+  user-resume pause, or `ROUND_OUTCOME: FINDINGS` with every finding rejected
+  for an evidence-backed reason after its disposition boundary.
 - `ROUND_OUTCOME: INVALID` is an evidence/invocation failure. It does not advance
   the round counter; correct the gap and retry the same substantive round.
 - `ROUND_OUTCOME: RETROSPECTIVE_REQUIRED` pauses tactical remediation until the

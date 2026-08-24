@@ -1929,7 +1929,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('## Finding Disposition Pause')
     expect(prReviewGptLoop).toMatch(
-      /Every substantive `PASS` or `FINDINGS` result from either ReviewGPT stage pauses/u,
+      /Every substantive preliminary specialist result and every final `FINDINGS`\s+result uses this disposition boundary/u,
+    )
+    expect(prReviewGptLoop).toMatch(
+      /A validated final `ROUND_OUTCOME: PASS` has no\s+findings to disposition and proceeds directly/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'One narrow exception completes the disposition boundary',
+    )
+    expect(prReviewGptLoop).toMatch(
+      /continue the ReviewGPT loop without asking the user for\s+separate permission/u,
     )
     expect(prReviewGptLoop).toContain(
       'may reject a finding as wrong, already handled,',
@@ -2005,7 +2014,7 @@ describe('monorepo release flow coverage audit', () => {
       /One preliminary `completion-specialists` ReviewGPT pass\s+applies the relevant Product UX, prompt, frontend, and coverage lenses together/u,
     )
     expect(agentsGuide).toContain(
-      'agents may reject speculative, unproven, or disproportionate fixes',
+      'Agents may reject speculative, unproven, or disproportionate fixes',
     )
     expect(agentWorkflowRouting).toContain(
       'evidence-backed rejections are terminal',
@@ -2236,8 +2245,33 @@ describe('monorepo release flow coverage audit', () => {
       const defaultResult = runDry()
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
       expect(defaultResult.stdout).toContain(
-        'Response capture: enabled (10800000ms timeout)',
+        'Response capture: enabled (15000000ms timeout)',
       )
+      const responseTimeoutMatch = defaultResult.stdout.match(
+        /Response capture: enabled \((\d+)ms timeout\)/,
+      )
+      if (!responseTimeoutMatch?.[1]) {
+        throw new Error('ReviewGPT dry run omitted its response timeout')
+      }
+      const responseTimeoutMs = Number(responseTimeoutMatch[1])
+
+      for (const guidancePath of [
+        'AGENTS.md',
+        'agent-docs/operations/pr-reviewgpt-loop.md',
+      ]) {
+        const guidance = readFileSync(path.join(repoRoot, guidancePath), 'utf8')
+        const pollIntervalMatch = guidance.match(/--poll-interval (\d+)m/)
+        const wakeTimeoutMatch = guidance.match(/--poll-timeout (\d+)m/)
+        if (!pollIntervalMatch?.[1] || !wakeTimeoutMatch?.[1]) {
+          throw new Error(`${guidancePath} omitted the ReviewGPT wake defaults`)
+        }
+        expect(
+          Number(wakeTimeoutMatch[1]) * 60_000,
+          guidancePath,
+        ).toBeGreaterThanOrEqual(
+          responseTimeoutMs + Number(pollIntervalMatch[1]) * 60_000,
+        )
+      }
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )

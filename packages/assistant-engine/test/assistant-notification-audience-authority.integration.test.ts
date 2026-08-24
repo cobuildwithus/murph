@@ -992,6 +992,7 @@ describe('notification audience authority integration', () => {
         {
           createdAt: expect.any(String),
           kind: 'assistant',
+          standaloneAssistantContext: true,
           text: welcomeText,
         },
       ],

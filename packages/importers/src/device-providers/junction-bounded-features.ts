@@ -58,6 +58,24 @@ export interface JunctionWorkoutStreamReductionInput {
   readonly summary: unknown;
 }
 
+export type JunctionWorkoutStreamTimestampCardinalityKind = "empty" | "over_limit";
+
+export interface JunctionWorkoutStreamTimestampCardinalityDiagnostic {
+  readonly kind: JunctionWorkoutStreamTimestampCardinalityKind;
+  readonly maxTimestampCount: number;
+  readonly timestampCount: number;
+}
+
+export class JunctionWorkoutStreamTimestampCardinalityError extends TypeError {
+  readonly diagnostic: Readonly<JunctionWorkoutStreamTimestampCardinalityDiagnostic>;
+
+  constructor(diagnostic: JunctionWorkoutStreamTimestampCardinalityDiagnostic) {
+    super(`Junction workout stream must contain 1-${diagnostic.maxTimestampCount} timestamps.`);
+    this.name = "JunctionWorkoutStreamTimestampCardinalityError";
+    this.diagnostic = Object.freeze({ ...diagnostic });
+  }
+}
+
 interface EcgSample {
   readonly lead: string;
   readonly recordingId?: string;
@@ -148,8 +166,19 @@ export function reduceJunctionWorkoutStreamPayload(
   const summary = record(input.summary, "workout summary");
   const stream = record(input.stream, "workout stream");
   const times = array(stream.time, "workout time");
-  if (times.length === 0 || times.length > input.maxSamples) {
-    invalid(`workout stream must contain 1-${input.maxSamples} timestamps`);
+  if (times.length === 0) {
+    throw new JunctionWorkoutStreamTimestampCardinalityError({
+      kind: "empty",
+      maxTimestampCount: input.maxSamples,
+      timestampCount: 0,
+    });
+  }
+  if (times.length > input.maxSamples) {
+    throw new JunctionWorkoutStreamTimestampCardinalityError({
+      kind: "over_limit",
+      maxTimestampCount: input.maxSamples,
+      timestampCount: times.length,
+    });
   }
   const heartRateSeries = parallelArray(
     stream.heartrate ?? stream.heart_rate,

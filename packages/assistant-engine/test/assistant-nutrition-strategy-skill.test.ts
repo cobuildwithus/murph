@@ -284,13 +284,13 @@ describe('assistant nutrition strategy skill', () => {
       'Keep this active-target authority read separate from the all-status lookup used below to reuse or honor Murph\'s managed paused or abandoned proposal',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
+      'That gate includes its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
     )
     expect(compactGoals).toContain(
       'The context snapshot is not completeness proof for any of these owners.',
     )
     expect(compactGoals).toContain(
-      'If any required canonical read is saturated or unavailable, or the gate suppresses numeric goals, stop here with no Goal or measurement mutation',
+      'If any required canonical read is saturated or unavailable, or the gate suppresses numeric goals, stop with no Goal or measurement mutation',
     )
     expect(compactGoals).toContain(
       'Separately run `vault-cli goal list --limit 200 --format json`',
@@ -397,6 +397,15 @@ describe('assistant nutrition strategy skill', () => {
       'A target-setting-only request, correction, decline, ambiguous acceptance, or compound request remains ordinary text with no card.',
     )
     expect(compactGoals).toContain(
+      'Otherwise, a later eligible response may attach the card only when the target-authority read above resolves one complete, unambiguous card-authorizing bundle.',
+    )
+    expect(compactGoals).toContain(
+      'Consume that resolved bundle directly; do not restate accepted metric keys or require a second `dietary-calories` owner after calorie resolution.',
+    )
+    expect(compactGoals).not.toContain(
+      'five-value bundle from active canonical Goals',
+    )
+    expect(compactGoals).toContain(
       'A member- or clinician-chosen active target always wins for its metric.',
     )
     expect(compactGoals).toContain(
@@ -418,7 +427,28 @@ describe('assistant nutrition strategy skill', () => {
       'Unit compatibility is part of target authority.',
     )
     expect(compactGoals).toContain(
-      'This fixed-unit workflow accepts only `dietary-calories` in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
+      'Calorie metric compatibility has one narrow read-only exception for an existing complete nutrition Goal.',
+    )
+    expect(compactGoals).toContain(
+      'When exactly one compatible canonical owner remains, use it and ignore every `calories` target',
+    )
+    expect(compactGoals).toContain(
+      'Only when no canonical owner exists may the historical target `daily-calories` with metric `calories` and unit `kcal` fill the card\'s calorie slot.',
+    )
+    expect(compactGoals).toContain(
+      '`daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` / `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` / `fiber-grams` / `g`.',
+    )
+    expect(compactGoals).toContain(
+      'Any other `calories` target is not dietary authority, even when co-located with all four macro and fiber metrics.',
+    )
+    expect(compactGoals).toContain(
+      'Do not use titles, slugs, domains, descriptions, or guessed intent as authority.',
+    )
+    expect(compactGoals).not.toContain(
+      'five exact point values in the exact canonical metric/unit pairs resolved from active canonical goals',
+    )
+    expect(compactGoals).toContain(
+      'This fixed-unit workflow accepts the resolved calorie owner above in `kcal`, and `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` in `g`.',
     )
     expect(compactGoals).toContain(
       'its raw value must not be compared with the 1,200 kcal boundary, copied into a card, or used by the residual-energy or fiber calculations.',
@@ -482,7 +512,10 @@ describe('assistant nutrition strategy skill', () => {
       '`vault-cli condition show <condition-id> --format json` for every returned active condition and `vault-cli regimen show <regimen-id> --format json` for every returned active regimen.',
     )
     expect(compactSafety).toContain(
-      'If any required detail read fails or is unreadable, use the same fail-closed behavior.',
+      'If any required detail read fails, is explicitly truncated, or is unreadable, retry that exact id once through `vault-cli show <same-id> --format json`.',
+    )
+    expect(compactSafety).toContain(
+      'This read-only fallback does not authorize omitting fields, selecting a smaller safety set, or retrying indefinitely.',
     )
     expect(compactSafety).toContain(
       '`vault-cli event list --kind procedure --limit 200 --format json`',
@@ -578,13 +611,16 @@ describe('assistant nutrition strategy skill', () => {
       'first require that the containing Goal window and target-level dates include the exact card `localDate`; an out-of-window target must neither trigger nor satisfy this gate.',
     )
     expect(compactSafety).toContain(
+      'boundary only for the exact point calorie target resolved under `daily-nutrition-card-goals.md`: canonical `dietary-calories`, or the historical `daily-calories` / `calories` member of the complete stable `daily-*` nutrition target set, in `kcal`.',
+    )
+    expect(compactSafety).toContain(
       'A scheduled occurrence never gains authority to ask safety-profile questions, solicit target inputs, activate a proposal, or attach a card from provisional targets.',
     )
     expect(compactSafety).toContain(
       'The owning automatic-meal-capture skill has one narrower exception:',
     )
     expect(compactGoals).toContain(
-      'including its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
+      'That gate includes its complete canonical memory document, bounded active-condition and active-regimen discovery, lifetime procedure-event and encounter-diagnosis discovery, 45-day body-measurement read, separate 300-day `pregnancy-test` measurement read, and 300-day canonical test-event list plus required detail reads.',
     )
     expect(compactGoals).toContain(
       'including its bounded canonical memory, active-condition, active-regimen, procedure-event, encounter-diagnosis, body-measurement, `pregnancy-test` measurement, and canonical test-event reads.',
@@ -625,10 +661,10 @@ describe('assistant nutrition strategy skill', () => {
       "Treat a calorie target below 1,200 kcal/day as outside this product's self-directed numeric-card boundary.",
     )
     expect(compactSafety).toContain(
-      'This applies both to an active canonical target at card time and to an adjusted or rounded derived result before any Goal write.',
+      'This applies both to the active resolved target at card time and to an adjusted or rounded derived result before any Goal write.',
     )
     expect(compactSafety).toContain(
-      'its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
+      'Its selected-value comparator must be `between` with identical numeric `value` and `highValue`.',
     )
     expect(compactSafety).toContain(
       'Do not raise a compatible low point target to the boundary and continue',

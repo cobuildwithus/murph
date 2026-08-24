@@ -18,8 +18,10 @@ import {
 const EXPECTED_PUBLIC_SITE_URL = "https://www.withmurph.ai";
 const EXPECTED_STATIC_PUBLIC_ROUTES = [
   "/",
+  "/about",
   "/changelog",
   "/clubs",
+  "/contact",
   "/consumer-health-data-privacy-policy",
   "/experiments",
   "/knowledge",

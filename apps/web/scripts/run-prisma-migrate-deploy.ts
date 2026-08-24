@@ -170,6 +170,13 @@ const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
     // remains valid throughout the Vercel deploy window.
     new Set(["ALTER COLUMN SET NOT NULL"]),
   ],
+  [
+    "20260821120000_hosted_group_sponsorship_fifty_cap",
+    // The replacement check is a strict superset of the existing cap set.
+    // Old writers remain valid, while predeploy makes the new $50 value safe
+    // before a new Web build can present or persist it.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
 ]);
 
 const incompatiblePredeploySqlPatterns = [

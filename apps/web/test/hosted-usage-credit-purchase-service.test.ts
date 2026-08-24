@@ -529,12 +529,12 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
   it("parses monthly sponsorship as an exact $5 activation with an explicit cap", () => {
     expect(parseHostedGroupSponsorshipCheckoutRequest({
       clientRequestKey: CLIENT_REQUEST_KEY,
-      monthlyCapMinor: 1_000,
+      monthlyCapMinor: 5_000,
       offerCode: "usage_5_usd",
       sponsorshipKind: "monthly",
     })).toEqual({
       clientRequestKey: CLIENT_REQUEST_KEY,
-      monthlyCapMinor: 1_000,
+      monthlyCapMinor: 5_000,
       offerCode: "usage_5_usd",
       recoveryOnly: false,
       sponsorship: null,
@@ -5913,6 +5913,75 @@ describe("automatic group refill saved-card recovery", () => {
       stripePaymentIntentLookupKey: null,
       terminalAt: NOW,
     });
+  });
+
+  it("leaves an untouched refill retryable when runtime authority validation aborts", async () => {
+    const fake = createFakePrisma();
+    const fixture = installAutomaticGroupRefillFixture(fake);
+    mocks.stripePaymentIntentRetrieve.mockResolvedValue(
+      buildSponsorshipDirectActivationPaymentIntent(),
+    );
+    mocks.stripePaymentMethodRetrieve.mockResolvedValue(
+      buildAttachedPaymentMethod("pm_sponsorship_exact"),
+    );
+    const requiresConfirmation = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 0,
+      latestCharge: null,
+      purchaseId: fixture.refill.id,
+      status: "requires_confirmation",
+    });
+    const succeeded = buildSavedCardPaymentIntent({
+      amount: 500,
+      amountReceived: 500,
+      latestCharge: "ch_refill_after_retry",
+      purchaseId: fixture.refill.id,
+      status: "succeeded",
+    });
+    mocks.stripePaymentIntentCreate.mockResolvedValue(requiresConfirmation);
+    mocks.hasHostedRuntimeActiveAccessForUpdateTx
+      .mockRejectedValueOnce(new Error("database transaction aborted"))
+      .mockResolvedValueOnce(true);
+    mocks.stripePaymentIntentConfirm.mockResolvedValueOnce(succeeded);
+    const input = {
+      billingAuthority: {
+        automaticSponsorship: fixture.authority,
+        kind: "group" as const,
+      },
+      checkoutRequest: { customer: "cus_group_payer" } as never,
+      now: NOW,
+      policyVersion: "hosted-usage-credit-checkout-v5" as const,
+      prisma: fake.prisma as never,
+      purchase: fixture.refill as never,
+      stripe: mocks.requireHostedStripeApiMode().stripe as never,
+    };
+
+    await expect(tryChargeHostedUsageCreditSavedCard(input)).rejects.toThrow(
+      "database transaction aborted",
+    );
+    expect(fixture.refill).toMatchObject({
+      status: "created",
+      stripePaymentIntentIdEncrypted: null,
+      stripePaymentIntentLookupKey: null,
+    });
+    expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
+    expect(mocks.stripePaymentIntentConfirm).not.toHaveBeenCalled();
+
+    await expect(tryChargeHostedUsageCreditSavedCard({
+      ...input,
+      now: new Date(NOW.getTime() + 60_000),
+    })).resolves.toMatchObject({
+      id: fixture.refill.id,
+      status: "payment_pending",
+      stripePaymentIntentLookupKey: "billing:pi_saved_card_123",
+    });
+
+    expect(mocks.stripePaymentIntentCreate).toHaveBeenCalledTimes(2);
+    expect(mocks.stripePaymentIntentCreate.mock.calls[0]?.[1]).toEqual(
+      mocks.stripePaymentIntentCreate.mock.calls[1]?.[1],
+    );
+    expect(mocks.stripePaymentIntentConfirm).toHaveBeenCalledOnce();
+    expect(mocks.stripePaymentIntentCancel).not.toHaveBeenCalled();
   });
 });
 

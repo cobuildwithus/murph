@@ -169,10 +169,22 @@ describe('assistant food journal skill', () => {
       'target-authority and complete active-Goal discovery contract',
     )
     expect(skill).toContain(
+      'before deciding that the accepted active bundle is complete for the card',
+    )
+    expect(skill).not.toContain(
       'before deciding that the five canonical daily goals are complete',
     )
     expect(skill).toContain(
       'Use its\nproposal workflow only if a target is genuinely missing after that read and the\nmember made an explicit numeric-card or target-setting request. Default meal-card\nintent never invokes it.',
+    )
+    expect(skill).toContain(
+      'Treat a routine daily-card request, including a requested meal estimate needed\nfor that card, as one fulfillment workflow.',
+    )
+    expect(skill).toContain(
+      'Reply once with the card or one\nconcise truthful fallback',
+    )
+    expect(skill).toContain(
+      'concise truthful fallback. Never narrate individual safety, totals, estimation,\nor target-resolution mechanics.',
     )
     expect(skill).toContain(
       'first setup response explains a paused canonical proposal in ordinary text',

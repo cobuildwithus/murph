@@ -104,7 +104,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexGroupReadGroupWriteDenied: true,
             codexGroupReadNetworkDenied: true,
             codexGroupReadOutsideRootReadDenied: true,
-            codexGroupReadPermissionProfileAttested: true,
             codexGroupReadRuntimeReadDenied: true,
             codexGroupReadSecretEnvironmentDenied: true,
             codexGroupReadSiblingRootReadDenied: true,
@@ -115,7 +114,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
             codexMemberWorkspaceAutomationTreeUnchanged: true,
             codexMemberWorkspaceLocalMutationProofCount:
               HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
-            codexMemberWorkspacePermissionProfileAttested: true,
             codexMemberWorkspacePreloadBypassDenied: true,
             codexMemberWorkspaceTempWriteAllowed: true,
             codexMemberWorkspaceVaultWriteAllowed: true,
@@ -149,7 +147,7 @@ describe("runHostedRunnerSmokeDetailed", () => {
             reportedVaultIdMatchesExpected: true,
             ripgrepCommandDiscovered: true,
             ripgrepVersion: "ripgrep 13.0.0",
-            schema: "murph.cloudflare-hosted-runner-smoke.v1",
+            schema: "murph.cloudflare-hosted-runner-smoke.v2",
             vaultCliCommandDiscovered: true,
             vaultRootRebound: true,
             vaultShowBytes: 128,
@@ -176,7 +174,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexGroupReadGroupWriteDenied).toBe(true);
       expect(result.codexGroupReadNetworkDenied).toBe(true);
       expect(result.codexGroupReadOutsideRootReadDenied).toBe(true);
-      expect(result.codexGroupReadPermissionProfileAttested).toBe(true);
       expect(result.codexGroupReadRuntimeReadDenied).toBe(true);
       expect(result.codexGroupReadSecretEnvironmentDenied).toBe(true);
       expect(result.codexGroupReadSiblingRootReadDenied).toBe(true);
@@ -190,7 +187,6 @@ describe("runHostedRunnerSmokeDetailed", () => {
       expect(result.codexMemberWorkspaceLocalMutationProofCount).toBe(
         HOSTED_RUNNER_SMOKE_MEMBER_WORKSPACE_LOCAL_MUTATION_PROOF_COUNT,
       );
-      expect(result.codexMemberWorkspacePermissionProfileAttested).toBe(true);
       expect(result.codexMemberWorkspacePreloadBypassDenied).toBe(true);
       expect(result.codexMemberWorkspaceTempWriteAllowed).toBe(true);
       expect(result.codexMemberWorkspaceVaultWriteAllowed).toBe(true);

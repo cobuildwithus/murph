@@ -1,0 +1,106 @@
+# Automate the Garmin OAuth consent surface
+
+Status: completed
+Created: 2026-08-23
+Updated: 2026-08-22
+
+## Goal
+
+- Make the protected Junction Garmin canary complete the real Garmin OAuth
+  consent screen unattended while preserving fail-closed authorization and all
+  callback, persisted-state, disconnect, and deregistration proof.
+
+## Evidence
+
+- The headed Kernel change passed Garmin's prior Cloudflare challenge.
+- The exact protected-main run then reached
+  `https://connect.garmin.com/partner/oauthConfirm` and failed closed because it
+  found three unchecked checkboxes and five unrecognized actions.
+- A controlled protected retry plus a read-only, secret-safe attachment to its
+  exact active Kernel profile proved that the page exposes one enabled positive
+  `Save` button, one enabled negative `Cancel` button, and exactly three visible
+  enabled checkboxes with no accessible names or surrounding label text.
+
+## Scope
+
+- In scope: inspect the exact consent control shape, add the narrowest Garmin-
+  specific automation, focused regression coverage, and directly affected
+  verification guidance.
+- Out of scope: broad click heuristics, retries, CAPTCHA solving, credential
+  changes, Oura/WHOOP flow changes, or weaker callback/cleanup assertions.
+
+## Constraints
+
+- Do not print or persist provider credentials, account identity, or raw page
+  content.
+- Bind any new automation to the exact trusted Garmin consent route and explicit
+  required controls.
+- Keep protected CI unattended and fail closed when the expected surface is not
+  present.
+
+## Tasks
+
+1. [x] Inspect the exact consent surface with secret-safe diagnostics.
+2. [x] Implement and test the smallest route-bound Garmin consent action.
+3. [x] Run focused verification, ReviewGPT, and exact-head CI in a follow-up PR.
+4. [x] Prepare the clean reviewed merge head and protected post-merge Garmin
+   canary ownership. The live result remains the merge caller's gate because it
+   cannot exist on the pre-merge PR head.
+
+## Decisions
+
+- Do not add `Save` to the shared provider action allowlist: that would broaden
+  automation across unrelated authorization pages.
+- Bind the behavior to Garmin plus the exact trusted host and path. Require the
+  observed exact checkbox and positive-action cardinality, select all three
+  data-sharing checkboxes, and fail closed when those checkboxes or the exact
+  positive action change. Unrelated negative actions and links stay outside the
+  gate.
+- Keep `Cancel`, generic links, raw page text, credentials, and account identity
+  outside the automation and diagnostics.
+- Treat `Save` as one external consent effect: after its first click, wait a
+  bounded interval for departure from the exact route and fail without another
+  submission if the result remains unresolved.
+- Replace Playwright checkbox failures at the new boundary with a fixed
+  timeout/other category so provider content cannot enter protected CI logs.
+- Keep the existing headed manual-authorization path manual; only unattended
+  runs may use the route-bound Garmin consent action.
+
+## ReviewGPT
+
+- Final round 1 passed the original pushed head with no findings.
+- The preliminary specialist pass found four medium issues. All were accepted;
+  none were rejected: narrow an overbroad docs claim, make checkbox failures
+  content-free, prevent repeated `Save` submissions, and add real-Chromium
+  exact-route/nearby-route coverage. The supplied tests-only coverage patch was
+  inspected, passed `git apply --check`, and was applied deliberately.
+- Remediation adds one content-free action boundary, one bounded departure wait,
+  and existing-smoke-boundary tests. It adds no retry, service, state owner,
+  queue, dependency, or shared provider action.
+- Final round 2 found one purpose-drift issue: the helper also ran in the
+  existing headed manual path. The finding was accepted and none were rejected.
+  The fix reuses `manualAuthorizationAllowed` to scope the helper to unattended
+  runs and adds one focused regression test; it introduces no new abstraction,
+  state, service, retry, or ownership boundary.
+- Final round 3 first required the mandatory third-round retrospective rather
+  than reporting a code finding. The completed retrospective attributed growth
+  to the focused safeguards and production-shaped tests, inventoried the
+  unchanged browser-runner owner, and chose justified continuation without a
+  code change. The same-head retry passed with no findings.
+
+## Verification
+
+- Focused browser suite: 35 tests passed, including success only after all three
+  boxes are selected, failure on changed checkbox or `Save` cardinality, and
+  preservation of the existing headed manual path.
+- Real headed-Chromium smoke suite: 7 tests passed, including exact-route,
+  nearby-route refusal, and content-free obstructed-checkbox proof.
+- Hosted Web typecheck passed after remediation.
+- Final ReviewGPT passed on the exact pushed source head after the completed
+  retrospective.
+- Required GitHub Actions passed on the exact pushed source head.
+- Workflow/config contract checks if their contract changes.
+- `pnpm docs:drift`, `git diff --check`, and privacy review passed.
+- The protected post-merge Garmin run remains the merge caller's final live
+  success gate.
+Completed: 2026-08-22

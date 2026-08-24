@@ -1,6 +1,6 @@
 # Hosted Temporal Orchestration ADR
 
-Last verified: 2026-08-16
+Last verified: 2026-08-22
 
 ## Decision
 
@@ -230,6 +230,21 @@ Production workers explicitly reuse the V8 context and cache at most 100
 Workflow executions; the cache ceiling must remain no lower than concurrent
 Workflow task executions. This avoids deriving a much larger cache from the
 container heap after an instance-size change.
+Production worker startup is also fail-closed on two public owner admissions
+before it connects or registers pollers. The private worker signs memberless
+`GET` requests with the existing callback key to Web at
+`/api/internal/hosted-orchestration/temporal-worker/binding-admission` and to
+Cloudflare at `/internal/temporal-worker/binding-admission`. Each owner verifies
+the exact method, path, search, timestamp, nonce, signature, and key id; Web
+rejects a presented member header and consumes the nonce under a reserved
+system owner in the existing Postgres replay table, while Cloudflare uses its
+existing callback replay verifier. Each uncached response contains only the
+shared `bindings-v1` revision, `production` environment, exact owner, contract
+kind, and accepted non-secret key id. These routes admit deployment wiring;
+they do not own Workflow routing, member state, readiness, health, or rollback.
+Deploy both public owners before configuring the exact production URLs on the
+inactive Render colors, and retain the routes until the old color is outside
+the rollback window.
 Each production worker uses fixed execution slots for at most 100 concurrent
 Activities and 20 concurrent Workflow Tasks, while both poller types use
 Temporal's server-feedback autoscaling behavior. Render runs two Standard
@@ -652,6 +667,20 @@ The hard-cut architecture is accepted when:
   public Temporal worker implementation cannot re-enter production source
   silently. Murph Cloud independently owns Workflow bundle and replay-policy
   gates.
+- Relevant public producer, contract, hosted-runtime, harness, and CI-owner
+  changes publish one exact-SHA `Temporal compatibility` status. The public
+  controller validates the pull request's exact base repository and ref; only
+  pull requests targeting the default branch may publish that SHA-global
+  status, so stacked non-default-branch pull requests cannot overwrite it. The
+  candidate producer runs only in unprivileged Repo Hygiene and hands the
+  trusted controller a run/head-bound bounded JSON artifact. The controller
+  never owns worker code or reader policy: private Murph Cloud receives only
+  serialized fixture data, declares the immutable supported-reader set,
+  automatically includes its pinned controller revision, runs every reader,
+  and returns one producer-and-reader proof digest. The committed public policy
+  binds the private controller to a SHA-suffixed immutable tag. Missing, stale,
+  skipped, canceled, duplicated, malformed, or failed proof remains red or
+  pending.
 - Focused tests prove that wake acceptance is not completion and that Temporal
   idles only after reconciliation facts are idle.
 - The hosted-local E2E harness includes a non-manual Temporal orchestration

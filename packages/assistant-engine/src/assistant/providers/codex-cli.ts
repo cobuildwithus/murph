@@ -266,6 +266,7 @@ export async function executeCodexAssistantTurnAttempt(
       input.onboardingFirstReadCompletionTransitionAvailable ?? false,
     publicInternetFetch: input.publicInternetFetch ?? null,
     threadConfig: input.codexThreadConfig ?? null,
+    usageOperationId: input.activeTurnId ?? null,
     onFirstAssistantResponseCompleted:
       input.activeTurnSteering
         ? () => input.activeTurnSteering?.closeInputAdmission()

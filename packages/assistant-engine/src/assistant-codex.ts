@@ -141,10 +141,12 @@ import {
   readNodeErrorCode,
 } from './assistant-codex/failures.js'
 import {
+  type CodexSubagentExecutionMetadata,
+  type CodexSubagentReceiverEvidence,
   type CodexSubagentTurnTokenUsageSample,
   extractCodexSubagentUsageDrafts,
   isAssistantCodexTokenUsageEventType,
-  readCodexCollabReceiverThreadIds,
+  readCodexCollabReceiverEvidence,
 } from './assistant/providers/helpers.js'
 import {
   materializeCodexImages,
@@ -174,6 +176,9 @@ import type {
 import type {
   AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
+import type {
+  SafeToolCallValidationDigest,
+} from './assistant/tool-validation-digest.js'
 import {
   ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   normalizeAssistantResponseMediaList,
@@ -250,9 +255,31 @@ const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_SCHEMA =
 const CODEX_GENERATED_AUDIO_PHASE_TIMING_TRACE_TYPE =
   'assistant.codex.generated_audio_phase_timing'
 const CODEX_APP_SERVER_STARTUP_STDERR_MAX_LENGTH = 16_384
-// Bound on distinct subagent threads whose token usage is tracked per parent
-// turn. Far above any sane spawn fan-out; threads past the cap are ignored.
+// Bound on distinct subagent threads whose token usage is retained by the
+// resident process between workspace boundaries. Far above hosted fan-out;
+// threads past the cap are ignored.
 const MAX_CODEX_SUBAGENT_USAGE_THREADS = 32
+
+type CodexSubagentDetachedUsageRecorder = NonNullable<
+  AssistantHostedToolContext['recordDetachedUsage']
+>
+
+interface CodexSubagentUsageAuthorization {
+  modelProvider: string | null
+  parentModel: string | null
+  retainAfterRoot: boolean
+  rootThreadId: string
+  requestedModel: string | null
+  serviceTier: AssistantProviderServiceTier | null
+  recordingContext: {
+    effectiveEnv: Readonly<Record<string, string | undefined>>
+    operationId: string
+    originAssistantInputId: string
+    recordDetachedUsage: CodexSubagentDetachedUsageRecorder
+  } | null
+  unhostedUsageDrafts: AssistantProviderUsageDraft[]
+  nextUsageOrdinal(): number
+}
 
 type CodexAppServerProcessState =
   | 'idle'
@@ -419,6 +446,39 @@ function readCodexThreadTokenUsageUpdate(message: CodexRpcMessage): {
     : null
 }
 
+function readCodexSubagentExecutionMetadata(input: {
+  expectedThreadId: string
+  threadResult: unknown
+}): CodexSubagentExecutionMetadata | null {
+  const result = readCodexRecord(input.threadResult)
+  const thread = readCodexRecord(result?.thread)
+  const threadId = readCodexNonEmptyString(thread?.id)
+  const model = readCodexNonEmptyString(result?.model)
+  const modelProvider = readCodexNonEmptyString(result?.modelProvider)
+  const serviceTier = result?.serviceTier === null
+    ? null
+    : readCodexNonEmptyString(result?.serviceTier)
+  const reasoningEffort = result?.reasoningEffort === null
+    ? null
+    : readCodexNonEmptyString(result?.reasoningEffort)
+  if (
+    threadId !== input.expectedThreadId ||
+    !model ||
+    !modelProvider ||
+    (serviceTier === null && result?.serviceTier !== null) ||
+    (reasoningEffort === null && result?.reasoningEffort !== null)
+  ) {
+    return null
+  }
+
+  return {
+    model,
+    modelProvider,
+    reasoningEffort,
+    serviceTier,
+  }
+}
+
 function buildCodexAppServerNotFoundError(codexCommand: string): VaultCliError {
   return new VaultCliError(
     'ASSISTANT_CODEX_NOT_FOUND',
@@ -529,6 +589,7 @@ export interface CodexAppServerTurnInput {
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   runtimeWorkspaceRoots?: readonly string[] | null
   threadConfig?: Readonly<Record<string, unknown>> | null
+  usageOperationId?: string | null
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
@@ -1036,6 +1097,25 @@ class CodexAppServerProcess {
   private readonly detachedCompletedChildThreadIds = new Set<string>()
   private detachedChildViolation: string | null = null
   private readonly detachedRootThreadIds = new Set<string>()
+  // The resident App Server already owns detached-child lifetime across root
+  // settlement, idle completion, later turns, and workspace boundaries. Keep
+  // accounting evidence at that same boundary so a nonblocking root reply
+  // cannot discard the only exact usage signal.
+  private readonly subagentUsageAuthorizationByTurn =
+    new Map<string, CodexSubagentUsageAuthorization>()
+  private readonly subagentUsageAuthorizationByThread =
+    new Map<string, CodexSubagentUsageAuthorization>()
+  private readonly subagentUsageCompletedTurns = new Set<string>()
+  private readonly subagentUsageCumulativeFinalizedTurns = new Set<string>()
+  private subagentUsageBoundaryGeneration = 0
+  private readonly subagentUsageExecutionMetadataByThread =
+    new Map<string, CodexSubagentExecutionMetadata | null>()
+  private readonly subagentUsagePendingMetadataRequests =
+    new Map<string, Promise<void>>()
+  private readonly subagentUsageRawResponseIds = new Set<string>()
+  private readonly subagentUsageSamples =
+    new Map<string, CodexSubagentTurnTokenUsageSample>()
+  private readonly subagentUsageTrackedThreadIds = new Set<string>()
   private stopCompleted = false
   private state: CodexAppServerProcessState = 'idle'
   private stderrBuffer = ''
@@ -1288,13 +1368,54 @@ class CodexAppServerProcess {
     rejectPendingCodexRpcRequests(this.pendingRequests, error)
   }
 
-  sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+  sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    pendingMethod = method,
+  ): Promise<unknown> {
+    return this.beginRequest(method, params, pendingMethod).promise
+  }
+
+  sendRequestWithTimeout(input: {
+    method: string
+    params: Record<string, unknown>
+    pendingMethod?: string
+    timeoutLabel: string
+    timeoutMs: number
+  }): Promise<unknown> {
+    const request = this.beginRequest(
+      input.method,
+      input.params,
+      input.pendingMethod ?? input.method,
+    )
+    return withCodexRpcTimeout(
+      request.promise,
+      input.timeoutMs,
+      input.timeoutLabel,
+      () => {
+        // Ordinary responses remove themselves in
+        // resolvePendingCodexRpcRequest. A timeout has no response to do that
+        // work, so release its process-wide bookkeeping here rather than
+        // leaking one entry per unresponsive child.
+        this.pendingRequests.delete(request.id)
+      },
+    )
+  }
+
+  private beginRequest(
+    method: string,
+    params: Record<string, unknown>,
+    pendingMethod: string,
+  ): {
+    id: CodexRpcId
+    promise: Promise<unknown>
+  } {
     const id = this.nextRequestId
     this.nextRequestId += 1
 
-    return new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pendingRequests.set(id, {
-        method,
+        method: pendingMethod,
         reject,
         resolve,
       })
@@ -1308,6 +1429,360 @@ class CodexAppServerProcess {
         reject(failure)
       }
     })
+    return { id, promise }
+  }
+
+  authorizeSubagentUsage(input: {
+    evidence: readonly CodexSubagentReceiverEvidence[]
+    modelProvider: string | null
+    parentModel: string | null
+    recordingContext: CodexSubagentUsageAuthorization['recordingContext']
+    rootThreadId: string
+    serviceTier: AssistantProviderServiceTier | null
+    unhostedUsageDrafts: AssistantProviderUsageDraft[]
+    nextUsageOrdinal(): number
+  }): void {
+    for (const evidence of input.evidence) {
+      if (
+        !this.subagentUsageTrackedThreadIds.has(evidence.threadId) &&
+        !this.subagentUsageAuthorizationByThread.has(evidence.threadId) &&
+        new Set([
+          ...this.subagentUsageTrackedThreadIds,
+          ...this.subagentUsageAuthorizationByThread.keys(),
+        ]).size >= MAX_CODEX_SUBAGENT_USAGE_THREADS
+      ) {
+        const evictableThreadId = [...this.subagentUsageTrackedThreadIds]
+          .find((candidate) =>
+            !this.isSubagentUsageThreadAuthorized(candidate),
+          )
+        if (evictableThreadId === undefined) {
+          continue
+        }
+        this.removeSubagentUsageThread(evictableThreadId)
+      }
+      const authorization: CodexSubagentUsageAuthorization = {
+        modelProvider: input.modelProvider,
+        nextUsageOrdinal: input.nextUsageOrdinal,
+        parentModel: input.parentModel,
+        recordingContext: input.recordingContext,
+        retainAfterRoot:
+          evidence.detached && input.recordingContext !== null,
+        rootThreadId: input.rootThreadId,
+        requestedModel: evidence.requestedModel,
+        serviceTier: input.serviceTier,
+        unhostedUsageDrafts: input.unhostedUsageDrafts,
+      }
+      let assigned = false
+      let alreadyAuthorized = false
+      for (const [usageKey, sample] of this.subagentUsageSamples) {
+        if (sample.threadId !== evidence.threadId) {
+          continue
+        }
+        if (this.subagentUsageAuthorizationByTurn.has(usageKey)) {
+          alreadyAuthorized = true
+          continue
+        }
+        this.subagentUsageAuthorizationByTurn.set(usageKey, authorization)
+        assigned = true
+      }
+      if (assigned) {
+        this.beginSubagentUsageMetadataRequest(evidence.threadId)
+        this.finalizeSubagentUsageForThread(evidence.threadId)
+      } else if (!alreadyAuthorized) {
+        this.subagentUsageAuthorizationByThread.set(
+          evidence.threadId,
+          authorization,
+        )
+      }
+    }
+  }
+
+  finalizeSubagentUsageDraftsWithoutRecorder(): void {
+    for (const [usageKey, authorization] of this.subagentUsageAuthorizationByTurn) {
+      if (authorization.recordingContext === null) {
+        this.finalizeSubagentUsageSample(usageKey, true)
+      }
+    }
+  }
+
+  releaseSubagentUsageAuthorizationsForRoot(rootThreadId: string): void {
+    for (const [usageKey, authorization] of [
+      ...this.subagentUsageAuthorizationByTurn,
+    ]) {
+      if (
+        authorization.rootThreadId !== rootThreadId ||
+        authorization.retainAfterRoot
+      ) {
+        continue
+      }
+      this.finalizeSubagentUsageSample(usageKey, true)
+      if (this.subagentUsageSamples.has(usageKey)) {
+        this.removeSubagentUsageSample(usageKey)
+      }
+    }
+    for (const [threadId, authorization] of this.subagentUsageAuthorizationByThread) {
+      if (
+        authorization.rootThreadId === rootThreadId &&
+        !authorization.retainAfterRoot
+      ) {
+        this.subagentUsageAuthorizationByThread.delete(threadId)
+      }
+    }
+  }
+
+  private beginSubagentUsageMetadataRequest(threadId: string): void {
+    if (this.subagentUsageExecutionMetadataByThread.has(threadId)) {
+      this.finalizeSubagentUsageForThread(threadId)
+      return
+    }
+    if (this.subagentUsagePendingMetadataRequests.has(threadId)) {
+      return
+    }
+
+    const boundaryGeneration = this.subagentUsageBoundaryGeneration
+    const request = this.sendRequestWithTimeout({
+      method: 'thread/resume',
+      params: {
+        excludeTurns: true,
+        threadId,
+      },
+      pendingMethod: 'subagent/thread/resume',
+      timeoutLabel: 'subagent thread/resume',
+      timeoutMs: CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+    })
+      .then((threadResult) => readCodexSubagentExecutionMetadata({
+        expectedThreadId: threadId,
+        threadResult,
+      }))
+      .catch(() => null)
+      .then((metadata) => {
+        if (boundaryGeneration !== this.subagentUsageBoundaryGeneration) {
+          return
+        }
+        this.subagentUsageExecutionMetadataByThread.set(threadId, metadata)
+        this.finalizeSubagentUsageForThread(threadId)
+      })
+      .finally(() => {
+        this.subagentUsagePendingMetadataRequests.delete(threadId)
+      })
+    this.subagentUsagePendingMetadataRequests.set(threadId, request)
+  }
+
+  private finalizeAllSubagentUsage(forceMetadataFallback: boolean): void {
+    for (const usageKey of [...this.subagentUsageAuthorizationByTurn.keys()]) {
+      this.finalizeSubagentUsageSample(usageKey, forceMetadataFallback)
+    }
+  }
+
+  private finalizeSubagentUsageForThread(threadId: string): void {
+    for (const [usageKey, sample] of this.subagentUsageSamples) {
+      if (sample.threadId === threadId) {
+        this.finalizeSubagentUsageSample(usageKey, false)
+      }
+    }
+  }
+
+  private finalizeSubagentUsageSample(
+    usageKey: string,
+    forceMetadataFallback: boolean,
+  ): void {
+    const sample = this.subagentUsageSamples.get(usageKey)
+    const authorization = this.subagentUsageAuthorizationByTurn.get(usageKey)
+    if (!sample || !authorization) {
+      return
+    }
+    const metadataSettled =
+      this.subagentUsageExecutionMetadataByThread.has(sample.threadId)
+    if (!metadataSettled && !forceMetadataFallback) {
+      return
+    }
+
+    const executionMetadata = metadataSettled
+      ? this.subagentUsageExecutionMetadataByThread.get(sample.threadId) ?? null
+      : null
+    const commonInput = {
+      authorizedRequestedModelByThreadId: new Map([
+        [sample.threadId, authorization.requestedModel],
+      ]),
+      modelProvider: authorization.modelProvider,
+      ordinalStart: 0,
+      parentModel: authorization.parentModel,
+      parentRawEvents: [],
+      seenRawResponseIds: this.subagentUsageRawResponseIds,
+      serviceTier: authorization.serviceTier,
+    }
+    let drafts: AssistantProviderUsageDraft[] = []
+    const rawResponseEvents = sample.rawResponseEvents ?? []
+    if (rawResponseEvents.length > 0) {
+      for (const rawResponseEvent of rawResponseEvents) {
+        drafts.push(...extractCodexSubagentUsageDrafts({
+          ...commonInput,
+          subagentTokenUsageByTurn: new Map([[usageKey, {
+            ...sample,
+            executionMetadata,
+            rawResponseEvents: [rawResponseEvent],
+          }]]),
+        }))
+      }
+    } else if (
+      (
+        this.subagentUsageCompletedTurns.has(usageKey) ||
+        forceMetadataFallback
+      ) &&
+      !this.subagentUsageCumulativeFinalizedTurns.has(usageKey)
+    ) {
+      drafts = extractCodexSubagentUsageDrafts({
+        ...commonInput,
+        subagentTokenUsageByTurn: new Map([[usageKey, {
+          ...sample,
+          executionMetadata,
+        }]]),
+      })
+      this.subagentUsageCumulativeFinalizedTurns.add(usageKey)
+    }
+
+    for (const draft of drafts) {
+      draft.providerRequestOrdinal = authorization.nextUsageOrdinal()
+      const recordingContext = authorization.recordingContext
+      if (recordingContext) {
+        recordingContext.recordDetachedUsage({
+          effectiveEnv: recordingContext.effectiveEnv,
+          operationId: recordingContext.operationId,
+          originAssistantInputId: recordingContext.originAssistantInputId,
+          usageDraft: draft,
+        })
+      } else {
+        authorization.unhostedUsageDrafts.push(draft)
+      }
+    }
+
+    if (
+      this.subagentUsageCompletedTurns.has(usageKey) &&
+      (
+        rawResponseEvents.length > 0 ||
+        this.subagentUsageCumulativeFinalizedTurns.has(usageKey)
+      )
+    ) {
+      this.removeSubagentUsageSample(usageKey)
+    }
+  }
+
+  private isSubagentUsageThreadAuthorized(threadId: string): boolean {
+    if (this.subagentUsageAuthorizationByThread.has(threadId)) {
+      return true
+    }
+    for (const usageKey of this.subagentUsageAuthorizationByTurn.keys()) {
+      if (this.subagentUsageSamples.get(usageKey)?.threadId === threadId) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private observeSubagentUsage(message: CodexRpcMessage): void {
+    const method = readCodexEventMethod(message)
+    const threadId = extractCodexThreadIdFromMessage(message)
+    if (
+      !threadId ||
+      threadId === this.boundThreadId ||
+      this.detachedRootThreadIds.has(threadId)
+    ) {
+      return
+    }
+    const turnId = extractCodexTurnIdFromMessage(message)
+    if (!turnId) {
+      return
+    }
+    const usageKey = createCodexSubagentTurnUsageKey({ threadId, turnId })
+
+    if (isCodexTurnStartedMethod(method)) {
+      if (this.subagentUsageSamples.has(usageKey)) {
+        return
+      }
+      if (
+        !this.subagentUsageTrackedThreadIds.has(threadId) &&
+        this.subagentUsageTrackedThreadIds.size >=
+          MAX_CODEX_SUBAGENT_USAGE_THREADS
+      ) {
+        const evictableThreadId = [...this.subagentUsageTrackedThreadIds]
+          .find((candidate) =>
+            !this.isSubagentUsageThreadAuthorized(candidate),
+          )
+        if (evictableThreadId === undefined) {
+          return
+        }
+        this.removeSubagentUsageThread(evictableThreadId)
+      }
+      this.subagentUsageTrackedThreadIds.add(threadId)
+      const sample: CodexSubagentTurnTokenUsageSample = {
+        firstEvent: null,
+        lastEvent: null,
+        occurredAt: new Date().toISOString(),
+        rawResponseEvents: [],
+        threadId,
+        turnId,
+      }
+      this.subagentUsageSamples.set(usageKey, sample)
+      const authorization = this.subagentUsageAuthorizationByThread.get(threadId)
+      if (authorization) {
+        this.subagentUsageAuthorizationByTurn.set(usageKey, authorization)
+        this.beginSubagentUsageMetadataRequest(threadId)
+      }
+      return
+    }
+
+    const sample = this.subagentUsageSamples.get(usageKey)
+    if (!sample) {
+      return
+    }
+    if (method === 'rawResponse/completed') {
+      sample.rawResponseEvents ??= []
+      sample.rawResponseEvents.push(message)
+      this.finalizeSubagentUsageSample(usageKey, false)
+      return
+    }
+    if (isAssistantCodexTokenUsageEventType(method)) {
+      sample.firstEvent ??= message
+      sample.lastEvent = message
+      return
+    }
+    if (isCodexTurnCompletedMethod(method)) {
+      this.subagentUsageCompletedTurns.add(usageKey)
+      this.finalizeSubagentUsageSample(usageKey, false)
+    }
+  }
+
+  private removeSubagentUsageSample(usageKey: string): void {
+    const threadId = this.subagentUsageSamples.get(usageKey)?.threadId ?? null
+    const authorization = this.subagentUsageAuthorizationByTurn.get(usageKey)
+    this.subagentUsageSamples.delete(usageKey)
+    this.subagentUsageAuthorizationByTurn.delete(usageKey)
+    this.subagentUsageCompletedTurns.delete(usageKey)
+    this.subagentUsageCumulativeFinalizedTurns.delete(usageKey)
+    if (
+      threadId &&
+      authorization?.retainAfterRoot &&
+      this.subagentUsageAuthorizationByThread.get(threadId) === authorization
+    ) {
+      this.subagentUsageAuthorizationByThread.delete(threadId)
+    }
+    if (
+      threadId &&
+      ![...this.subagentUsageSamples.values()]
+        .some((sample) => sample.threadId === threadId)
+    ) {
+      this.subagentUsageTrackedThreadIds.delete(threadId)
+    }
+  }
+
+  private removeSubagentUsageThread(threadId: string): void {
+    this.subagentUsageAuthorizationByThread.delete(threadId)
+    for (const [usageKey, sample] of [...this.subagentUsageSamples]) {
+      if (sample.threadId === threadId) {
+        this.removeSubagentUsageSample(usageKey)
+      }
+    }
+    this.subagentUsageTrackedThreadIds.delete(threadId)
   }
 
   sendNotification(method: string, params: Record<string, unknown>): void {
@@ -1452,10 +1927,20 @@ class CodexAppServerProcess {
   }
 
   private clearDetachedChildBoundary(): void {
+    this.finalizeAllSubagentUsage(true)
+    this.subagentUsageBoundaryGeneration += 1
     this.detachedChildThreadIds.clear()
     this.detachedCompletedChildThreadIds.clear()
     this.detachedChildViolation = null
     this.detachedRootThreadIds.clear()
+    this.subagentUsageAuthorizationByThread.clear()
+    this.subagentUsageAuthorizationByTurn.clear()
+    this.subagentUsageCompletedTurns.clear()
+    this.subagentUsageCumulativeFinalizedTurns.clear()
+    this.subagentUsageExecutionMetadataByThread.clear()
+    this.subagentUsageRawResponseIds.clear()
+    this.subagentUsageSamples.clear()
+    this.subagentUsageTrackedThreadIds.clear()
   }
 
   private recordDetachedChildViolation(message: string): void {
@@ -1530,6 +2015,10 @@ class CodexAppServerProcess {
     this.endReason ??= resolveCodexAppServerEndReason(reason)
     this.normalShutdown = true
     this.state = 'stopping'
+    // A parsed provider response is already authoritative. Hand it off before
+    // teardown rejects optional metadata enrichment or releases process-owned
+    // detached lifecycle state.
+    this.finalizeAllSubagentUsage(true)
     this.rejectPending(
       new VaultCliError(
         'ASSISTANT_CODEX_APP_SERVER_STOPPED',
@@ -1785,6 +2274,7 @@ class CodexAppServerProcess {
     if (parsed.ok) {
       this.observeDetachedChildLifecycle(parsed.value)
       this.observeThreadTokenUsage(parsed.value)
+      this.observeSubagentUsage(parsed.value)
       if (this.activeTurn) {
         this.activeTurn.onParsedMessage(parsed.value)
       } else {
@@ -1817,6 +2307,11 @@ class CodexAppServerProcess {
       this.handleStdoutLine(this.stdoutBuffer)
     }
     this.stdoutBuffer = ''
+
+    // An unexpected exit while detached work is idle has no active turn to
+    // run the ordinary failure cleanup. Preserve any provider evidence parsed
+    // before close; a response that never reached stdout remains unknowable.
+    this.finalizeAllSubagentUsage(true)
 
     if (!this.normalShutdown) {
       this.poisoned = true
@@ -3194,6 +3689,7 @@ async function runCodexAppServerTurnOnProcess(
   }> = []
   const reservedNoReplyDeliveryContextOrdinals = new Set<number>()
   const additionalUsages: AssistantProviderUsageDraft[] = []
+  const subagentUsageDrafts: AssistantProviderUsageDraft[] = []
   let nextDynamicToolUsageOrdinal = (input.providerRequestOrdinal ?? 0) + 1
   // Trusted turn-scoped provider-call ceilings: one counter per assistant turn,
   // owned here and threaded into the dynamic-tool executor.
@@ -3218,13 +3714,6 @@ async function runCodexAppServerTurnOnProcess(
         policy: input.generateSongPolicy,
       }
     : null
-  const subagentTokenUsageByTurn =
-    new Map<string, CodexSubagentTurnTokenUsageSample>()
-  const trackedSubagentUsageThreadIds = new Set<string>()
-  // Thread ids named by this turn's collab tool calls (spawn/sendInput/...),
-  // collected live so evidenced subagent threads win buffer slots over
-  // stale/unattributed foreign threads when the cap is reached.
-  const collabReceiverThreadIds = new Set<string>()
   let rolloutRelativePath: string | null = null
   let providerActionCount = 0
   const providerActionItemIds = new Set<string>()
@@ -3324,18 +3813,14 @@ async function runCodexAppServerTurnOnProcess(
     })
   }
 
-  // Subagent usage drafts are derived lazily from the buffered per-thread
-  // samples so both the success result and the failure context can include
-  // whatever child usage was observed before the turn settled.
-  const buildSubagentUsageDrafts = (): AssistantProviderUsageDraft[] =>
-    extractCodexSubagentUsageDrafts({
-      modelProvider: normalizeNullableString(input.modelProvider) ?? null,
-      ordinalStart: nextDynamicToolUsageOrdinal,
-      parentModel: normalizeNullableString(input.model) ?? null,
-      parentRawEvents: jsonEvents,
-      serviceTier: input.serviceTier ?? null,
-      subagentTokenUsageByTurn,
-    })
+  let settledSubagentUsageDrafts: AssistantProviderUsageDraft[] | null = null
+  const buildSubagentUsageDrafts = (): AssistantProviderUsageDraft[] => {
+    if (settledSubagentUsageDrafts === null) {
+      codexProcess.finalizeSubagentUsageDraftsWithoutRecorder()
+      settledSubagentUsageDrafts = [...subagentUsageDrafts]
+    }
+    return settledSubagentUsageDrafts
+  }
 
   const hasNoReplyFinalActionPatch = (): boolean =>
     finalActionPatches.some((entry) => entry.patch.kind === 'none')
@@ -5020,9 +5505,6 @@ async function runCodexAppServerTurnOnProcess(
         )
       }
     }
-    for (const receiverThreadId of readCodexCollabReceiverThreadIds(message)) {
-      collabReceiverThreadIds.add(receiverThreadId)
-    }
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
 
@@ -5223,7 +5705,6 @@ async function runCodexAppServerTurnOnProcess(
   }
 
   const handleSubagentThreadMessage = (
-    threadId: string,
     message: CodexRpcMessage,
   ): void => {
     const requestId = readCodexRpcServerRequestId(message)
@@ -5235,71 +5716,7 @@ async function runCodexAppServerTurnOnProcess(
         requestId,
         writeRpcMessage: tryWriteRpcMessage,
       })
-      return
     }
-
-    const eventMethod = readCodexEventMethod(message)
-    const messageTurnId = extractCodexTurnIdFromMessage(message)
-    if (isCodexTurnStartedMethod(eventMethod)) {
-      if (!messageTurnId) {
-        return
-      }
-      const usageKey = createCodexSubagentTurnUsageKey({
-        threadId,
-        turnId: messageTurnId,
-      })
-      if (subagentTokenUsageByTurn.has(usageKey)) {
-        return
-      }
-      if (
-        !trackedSubagentUsageThreadIds.has(threadId)
-        && trackedSubagentUsageThreadIds.size >= MAX_CODEX_SUBAGENT_USAGE_THREADS
-      ) {
-        const evictableThreadId = collabReceiverThreadIds.has(threadId)
-          ? [...trackedSubagentUsageThreadIds].find(
-            (trackedThreadId) => !collabReceiverThreadIds.has(trackedThreadId),
-          )
-          : undefined
-        if (evictableThreadId === undefined) {
-          return
-        }
-        trackedSubagentUsageThreadIds.delete(evictableThreadId)
-        for (const [trackedUsageKey, sample] of subagentTokenUsageByTurn) {
-          if (sample.threadId === evictableThreadId) {
-            subagentTokenUsageByTurn.delete(trackedUsageKey)
-          }
-        }
-      }
-      trackedSubagentUsageThreadIds.add(threadId)
-      subagentTokenUsageByTurn.set(usageKey, {
-        firstEvent: null,
-        lastEvent: null,
-        occurredAt: new Date().toISOString(),
-        threadId,
-        turnId: messageTurnId,
-      })
-      return
-    }
-    if (
-      !isAssistantCodexTokenUsageEventType(eventMethod)
-      || !messageTurnId
-    ) {
-      return
-    }
-
-    const usageKey = createCodexSubagentTurnUsageKey({
-      threadId,
-      turnId: messageTurnId,
-    })
-    const sample = subagentTokenUsageByTurn.get(usageKey)
-    if (!sample) {
-      // A child token sample without an observed start has no safe accounting
-      // timestamp. Parent collab evidence authorizes the child but cannot
-      // establish when its provider operation began.
-      return
-    }
-    sample.firstEvent ??= message
-    sample.lastEvent = message
   }
 
   const handleStaleParentTurnMessage = (message: CodexRpcMessage): void => {
@@ -5356,6 +5773,8 @@ async function runCodexAppServerTurnOnProcess(
     const responseId = readCodexRpcResponseId(message)
     if (responseId !== null) {
       const pending = codexProcess.pendingRequests.get(responseId)
+      const isSubagentMetadataResponse =
+        pending?.method === 'subagent/thread/resume'
       const resolveResult = resolvePendingCodexRpcRequest({
         message,
         pendingRequests: codexProcess.pendingRequests,
@@ -5365,7 +5784,9 @@ async function runCodexAppServerTurnOnProcess(
         codexProcess.consumeIgnoredResponseId(responseId)
         return
       }
-      acceptJsonEvent(message)
+      if (!isSubagentMetadataResponse) {
+        acceptJsonEvent(message)
+      }
       if (message.error) {
         return
       }
@@ -5386,8 +5807,9 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     // Codex owns subagent/thread lifecycle. Murph only keeps foreign thread
-    // traffic away from the active parent turn: token usage is buffered for
-    // billing, server requests are denied, and other child events are dropped.
+    // traffic away from the active parent turn: the resident process has
+    // already observed accounting lifecycle, server requests are denied, and
+    // other child events are dropped.
     // Before a fresh thread/start response produces this turn's thread id, the
     // previous bound thread id is enough to distinguish late child traffic.
     const messageThreadId = extractCodexThreadIdFromMessage(message)
@@ -5398,7 +5820,7 @@ async function runCodexAppServerTurnOnProcess(
       knownParentThreadId !== null &&
       messageThreadId !== knownParentThreadId
     ) {
-      handleSubagentThreadMessage(messageThreadId, message)
+      handleSubagentThreadMessage(message)
       return
     }
 
@@ -5455,7 +5877,47 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (
+      method === 'rawResponseItem/completed' ||
+      method === 'rawResponse/completed'
+    ) {
+      // Raw response items can contain provider payload content. Exact child
+      // usage is captured by the resident process observer; neither raw
+      // notification belongs in the parent turn's persisted event surface.
+      return
+    }
+
     handleAcceptedEvent(message, method)
+    const evidence = readCodexCollabReceiverEvidence(message)
+    if (evidence.length > 0 && knownParentThreadId) {
+      const invocationScope =
+        input.hostedToolContext?.currentInvocationScope?.() ?? null
+      const originAssistantInputId =
+        invocationScope?.origin.kind === 'accepted_input'
+          ? invocationScope.origin.assistantInputId
+          : input.hostedToolContext?.currentAssistantInputId?.() ?? null
+      const operationId = normalizeNullableString(input.usageOperationId)
+      const recordDetachedUsage = input.hostedToolContext?.recordDetachedUsage
+      const recordingContext =
+        originAssistantInputId && operationId && recordDetachedUsage
+          ? {
+              effectiveEnv: input.env,
+              operationId,
+              originAssistantInputId,
+              recordDetachedUsage,
+            }
+          : null
+      codexProcess.authorizeSubagentUsage({
+        evidence,
+        modelProvider: normalizeNullableString(input.modelProvider) ?? null,
+        nextUsageOrdinal: () => nextDynamicToolUsageOrdinal++,
+        parentModel: normalizeNullableString(input.model) ?? null,
+        recordingContext,
+        rootThreadId: knownParentThreadId,
+        serviceTier: input.serviceTier ?? null,
+        unhostedUsageDrafts: subagentUsageDrafts,
+      })
+    }
   }
 
   const emitActionDiagnosticsTrace = () => {
@@ -5696,11 +6158,6 @@ async function runCodexAppServerTurnOnProcess(
         requestedThreadId: resumeThreadId,
         threadResult,
       })
-    } else if (normalizeNullableString(input.permissions)) {
-      assertCodexThreadStartPermissionAttestation({
-        input,
-        threadResult,
-      })
     }
     codexThreadId = extractCodexThreadIdFromResult(threadResult) ?? codexThreadId
     codexProcess.noteBoundThreadId(codexThreadId)
@@ -5829,6 +6286,10 @@ async function runCodexAppServerTurnOnProcess(
     closeLiveTurn()
     clearInterruptCleanupTimer()
     cleanupAbortListener()
+    if (codexThreadId) {
+      buildSubagentUsageDrafts()
+      codexProcess.releaseSubagentUsageAuthorizationsForRoot(codexThreadId)
+    }
     codexProcess.noteBoundThreadId(codexThreadId)
     codexProcess.releaseTurn(activeTurnBinding)
     codexProcess.releaseReservation()
@@ -6055,63 +6516,6 @@ function mergeAutomationRelativeDateReferenceWindows(
   }
 }
 
-function assertCodexThreadStartPermissionAttestation(input: {
-  input: CodexAppServerPreparedTurnInput
-  threadResult: unknown
-}): void {
-  const result = asCodexRecord(input.threadResult)
-  const activePermissionProfile = asCodexRecord(result?.activePermissionProfile)
-  const actualCwd = normalizeNullableString(asCodexString(result?.cwd))
-  const actualRoots = asCodexStringArray(result?.runtimeWorkspaceRoots)
-  const instructionSources = Array.isArray(result?.instructionSources)
-    ? result.instructionSources
-    : null
-  const expectedRoots = input.input.runtimeWorkspaceRoots ?? []
-  const mismatchedFields: string[] = []
-
-  const permissionProfileMismatch =
-    normalizeNullableString(asCodexString(activePermissionProfile?.id)) !==
-      normalizeNullableString(input.input.permissions) ||
-    normalizeNullableString(asCodexString(activePermissionProfile?.extends)) !== null
-  if (permissionProfileMismatch) {
-    mismatchedFields.push('activePermissionProfile')
-  }
-  if (
-    !actualRoots ||
-    actualRoots.length !== expectedRoots.length ||
-    actualRoots.some((root, index) => path.resolve(root) !== path.resolve(expectedRoots[index] ?? ''))
-  ) {
-    mismatchedFields.push('runtimeWorkspaceRoots')
-  }
-  if (!actualCwd || path.resolve(actualCwd) !== input.input.workingDirectory) {
-    mismatchedFields.push('cwd')
-  }
-  if (
-    input.input.processLifetime === 'one-shot' &&
-    (instructionSources === null || instructionSources.length !== 0)
-  ) {
-    mismatchedFields.push('instructionSources')
-  }
-  if (
-    asCodexString(result?.approvalPolicy) !==
-    mapCodexAppServerApprovalPolicy(input.input.approvalPolicy)
-  ) {
-    mismatchedFields.push('approvalPolicy')
-  }
-  if (mismatchedFields.length === 0) {
-    return
-  }
-
-  throw new VaultCliError(
-    'ASSISTANT_CODEX_APP_SERVER_PERMISSION_ATTESTATION_FAILED',
-    'Codex app-server did not attest the requested named-permission execution context.',
-    {
-      mismatchedFields,
-      retryable: false,
-    },
-  )
-}
-
 function emitCodexSuppressedFinalMessageTrace(input: {
   codexThreadId: string | null
   finalActionKind: AssistantNoReplyDisposition['kind']
@@ -6200,39 +6604,10 @@ function isInvalidDynamicToolRequest(
 ): request is Extract<
   MurphDynamicToolRequest,
   {
-    kind:
-      | 'invalid-generate-image-arguments'
-      | 'invalid-automation-arguments'
-      | 'invalid-assistant-style-arguments'
-      | 'invalid-computer-arguments'
-      | 'invalid-device-arguments'
-      | 'invalid-generate-voice-memo-arguments'
-      | 'invalid-pending-vault-files-arguments'
-      | 'invalid-finish-without-reply-arguments'
-      | 'invalid-progress-arguments'
-      | 'invalid-reaction-arguments'
-      | 'invalid-reply-target-arguments'
-      | 'invalid-product-feedback-arguments'
-      | 'invalid-response-card-arguments'
-      | 'invalid-response-media-arguments'
+    validationDigest: SafeToolCallValidationDigest
   }
 > {
-  return (
-    request.kind === 'invalid-generate-image-arguments' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'invalid-assistant-style-arguments' ||
-    request.kind === 'invalid-computer-arguments' ||
-    request.kind === 'invalid-device-arguments' ||
-    request.kind === 'invalid-generate-voice-memo-arguments' ||
-    request.kind === 'invalid-pending-vault-files-arguments' ||
-    request.kind === 'invalid-finish-without-reply-arguments' ||
-    request.kind === 'invalid-progress-arguments' ||
-    request.kind === 'invalid-reaction-arguments' ||
-    request.kind === 'invalid-reply-target-arguments' ||
-    request.kind === 'invalid-product-feedback-arguments' ||
-    request.kind === 'invalid-response-card-arguments' ||
-    request.kind === 'invalid-response-media-arguments'
-  )
+  return 'validationDigest' in request
 }
 
 function isSerializedDynamicToolRequest(

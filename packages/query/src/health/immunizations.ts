@@ -1,5 +1,6 @@
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { listEntities, readVault, type VaultReadModel } from "../model.ts";
+import { listCanonicalEntitiesRuntime } from "../query-projection.ts";
+import { readCanonicalEntityFamilySource } from "../vault-source.ts";
 import {
   applyLimit,
   asObject,
@@ -148,15 +149,10 @@ function matchesImmunizationOptions(
 }
 
 function selectProjectedImmunizations(
-  vault: VaultReadModel,
+  entities: readonly CanonicalEntity[],
   options: ImmunizationListOptions = {},
 ): ImmunizationQueryRecord[] {
-  const records = listEntities(vault, {
-    families: ["event"],
-    kinds: ["immunization"],
-    from: options.from,
-    to: options.to,
-  })
+  const records = entities
     .map(immunizationRecordFromEventEntity)
     .filter(isImmunizationRecord)
     .filter((record) => matchesImmunizationOptions(record, options))
@@ -169,14 +165,23 @@ export async function listImmunizations(
   vaultRoot: string,
   options: ImmunizationListOptions = {},
 ): Promise<ImmunizationQueryRecord[]> {
-  return selectProjectedImmunizations(await readVault(vaultRoot), options);
+  const entities = await listCanonicalEntitiesRuntime(vaultRoot, {
+    family: "event",
+    from: options.from,
+    kinds: ["immunization"],
+    limit: null,
+    to: options.to,
+  });
+  return selectProjectedImmunizations(entities, options);
 }
 
 export async function readImmunization(
   vaultRoot: string,
   eventId: string,
 ): Promise<ImmunizationQueryRecord | null> {
-  const records = await listImmunizations(vaultRoot);
+  const records = selectProjectedImmunizations(
+    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+  );
   return records.find((record) => record.id === eventId) ?? null;
 }
 
@@ -184,7 +189,9 @@ export async function showImmunization(
   vaultRoot: string,
   lookup: string,
 ): Promise<ImmunizationQueryRecord | null> {
-  const records = await listImmunizations(vaultRoot);
+  const records = selectProjectedImmunizations(
+    await readCanonicalEntityFamilySource(vaultRoot, "event"),
+  );
   return (
     records.find((record) =>
       matchesLookup(

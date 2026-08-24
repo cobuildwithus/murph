@@ -30,6 +30,11 @@ export interface KernelBrowserHandle {
   sessionId: string;
 }
 
+export interface KernelAutomationBrowserHandle {
+  cdpWsUrl: string;
+  sessionId: string;
+}
+
 export interface KernelPlaywrightResult {
   result: unknown;
 }
@@ -263,6 +268,29 @@ export class KernelComputerClient implements ComputerKernelClient {
 
     return {
       liveViewUrl,
+      sessionId: browser.session_id,
+    };
+  }
+
+  async createAutomationBrowser(input: {
+    headless: boolean;
+    profileName: string;
+    saveChanges: boolean;
+    timeoutSeconds: number;
+  }): Promise<KernelAutomationBrowserHandle> {
+    const browser = await this.kernel.browsers.create({
+      headless: input.headless,
+      profile: {
+        name: input.profileName,
+        save_changes: input.saveChanges,
+      },
+      stealth: true,
+      telemetry: { enabled: false },
+      timeout_seconds: input.timeoutSeconds,
+    });
+
+    return {
+      cdpWsUrl: browser.cdp_ws_url,
       sessionId: browser.session_id,
     };
   }

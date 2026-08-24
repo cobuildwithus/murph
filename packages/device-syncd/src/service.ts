@@ -4,6 +4,7 @@ import {
   JunctionSparseCalendarRepairNormalizationError,
   normalizeKnownJunctionSourceProviderSlug,
 } from "@murphai/importers";
+import { JunctionWorkoutStreamTimestampCardinalityError } from "@murphai/importers/device-providers/junction";
 import { normalizeJunctionCanonicalCoverageBoundary } from "@murphai/importers/device-providers/junction-resources";
 
 import {
@@ -1435,6 +1436,8 @@ class DeviceSyncServiceController {
               payload: {
                 ...job.payload,
                 windowStart: timeseriesProgress.windowStart,
+                workoutStreamEmptySeen:
+                  timeseriesProgress.workoutStreamEmptySeen || undefined,
                 workoutStreamCursor:
                   timeseriesProgress.workoutStreamCursor ?? undefined,
               },
@@ -2122,6 +2125,22 @@ function normalizeExecutionError(error: unknown): {
   retryable: boolean;
   accountStatus?: "reauthorization_required" | "disconnected" | null;
 } {
+  if (error instanceof JunctionWorkoutStreamTimestampCardinalityError) {
+    return {
+      code: "SYNC_JOB_FAILED",
+      details: compactFailureDiagnostics({
+        failureErrorName: readSafeDiagnosticToken(error.name),
+        junctionWorkoutStreamMaxTimestampCount: error.diagnostic.maxTimestampCount,
+        junctionWorkoutStreamTimestampCardinalityKind: readSafeDiagnosticToken(
+          error.diagnostic.kind,
+        ),
+        junctionWorkoutStreamTimestampCount: error.diagnostic.timestampCount,
+      }),
+      message: summarizeExecutionErrorMessage(error),
+      retryable: false,
+    };
+  }
+
   if (error instanceof JunctionSparseCalendarRepairNormalizationError) {
     return {
       code: error.code,

@@ -2545,6 +2545,9 @@ describe("hosted runtime control contracts", () => {
       phase: "import",
       redactedJson: {
         importedCount: 2,
+        junctionWorkoutStreamMaxTimestampCount: 100_000,
+        junctionWorkoutStreamTimestampCardinalityKind: "over_limit",
+        junctionWorkoutStreamTimestampCount: 100_127,
         messageReactionsAvailable: true,
         reasoningEffort: "low",
         retryable: false,

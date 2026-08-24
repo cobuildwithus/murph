@@ -4,6 +4,7 @@ export class JunctionTimeseriesProgressError extends Error {
   readonly failure: DeviceSyncError;
   readonly historicalProviderRecordsSeen: boolean;
   readonly historicalRecordsSeen: boolean;
+  readonly workoutStreamEmptySeen: boolean;
   readonly windowStart: string;
   readonly workoutStreamCursor: string | null;
 
@@ -14,6 +15,7 @@ export class JunctionTimeseriesProgressError extends Error {
     historicalEvidence: {
       historicalProviderRecordsSeen: boolean;
       historicalRecordsSeen: boolean;
+      workoutStreamEmptySeen?: boolean;
     } = {
       historicalProviderRecordsSeen: false,
       historicalRecordsSeen: false,
@@ -25,6 +27,8 @@ export class JunctionTimeseriesProgressError extends Error {
     this.historicalProviderRecordsSeen =
       historicalEvidence.historicalProviderRecordsSeen;
     this.historicalRecordsSeen = historicalEvidence.historicalRecordsSeen;
+    this.workoutStreamEmptySeen =
+      historicalEvidence.workoutStreamEmptySeen === true;
     this.windowStart = windowStart;
     this.workoutStreamCursor = workoutStreamCursor;
   }

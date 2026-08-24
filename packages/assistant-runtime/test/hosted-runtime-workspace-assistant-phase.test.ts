@@ -2187,6 +2187,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
           workspaceVersion: "8",
         },
         skipDirtyPendingFetch: false,
+        timeoutMs: 90_000,
       }),
     );
     expect(mocks.scheduleDeviceActivityTriggeredAutomations).toHaveBeenCalledWith(
@@ -20605,6 +20606,7 @@ function createGroupRoomModelInitializationSystemMailboxItem() {
         linq: true,
         telegram: false,
       },
+      onboardingFollowupEnrollment: false,
       occurredAt: "2026-07-29T18:01:00.000Z",
       signupWelcome: null,
       userId: "member_synthetic_phase",

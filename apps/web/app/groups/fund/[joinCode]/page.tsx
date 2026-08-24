@@ -38,6 +38,9 @@ import {
   readHostedGroupSponsorshipManagementProjection,
 } from "@/src/lib/hosted-groups/group-sponsorship-authorization";
 import {
+  HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR,
+} from "@/src/lib/hosted-groups/group-sponsorship-contract";
+import {
   hasHostedGroupSponsorshipCustomizationAuthority,
   readHostedGroupFundingSupporters,
   readHostedGroupSponsorshipDraftForCreator,
@@ -323,7 +326,7 @@ async function GroupFundingSupportersStream({
 }
 
 function projectHostedMonthlyCapOptions(): GroupSponsorshipMonthlyCapOption[] {
-  return ([500, 1_000, 2_000] as const).map((monthlyCapMinor) => ({
+  return HOSTED_GROUP_SPONSORSHIP_MONTHLY_CAPS_MINOR.map((monthlyCapMinor) => ({
     amountLabel: formatUsageTopUpAmount(monthlyCapMinor),
     monthlyCapMinor,
   }));
