@@ -3,6 +3,8 @@ import { VaultCliError } from './vault-cli-errors.js'
 
 const MAX_VALIDATION_FIELDS = 12
 const MAX_VALIDATION_PATH_LENGTH = 160
+const UNKNOWN_ERROR_MESSAGE =
+  'The command failed without a safe recoverable detail.'
 const ZOD_ISSUE_CODE_PATTERN =
   /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u
 const ZOD_EXPECTED_PATTERN =
@@ -211,36 +213,11 @@ function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
 
   return {
     code: 'UNKNOWN',
-    message: safeUnhandledErrorMessage(error),
+    message: UNKNOWN_ERROR_MESSAGE,
     retryable: false,
     stage: 'command',
     hint: 'Check the command inputs and runtime status before retrying.',
   }
-}
-
-function safeUnhandledErrorMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return 'The command failed without a safe recoverable detail.'
-  }
-
-  const normalized = redactSensitivePathSegments(error.message)
-    .replace(/[\u0000-\u001F\u007F]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-  if (
-    normalized.length === 0 ||
-    /^[\[{]/u.test(normalized) ||
-    /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|bearer\s|token=)/iu.test(
-      normalized,
-    )
-  ) {
-    return 'The command failed without a safe recoverable detail.'
-  }
-
-  const codePoints = Array.from(normalized)
-  return codePoints.length <= 320
-    ? normalized
-    : `${codePoints.slice(0, 319).join('')}…`
 }
 
 function readErrorCode(error: unknown): string | null {
