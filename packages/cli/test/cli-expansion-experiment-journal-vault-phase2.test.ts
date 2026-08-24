@@ -3571,7 +3571,7 @@ test.sequential(
       assert.equal(appended.ok, true)
       assert.equal(appended.meta?.command, 'journal append')
       assert.equal(requireData(appended).updated, true)
-      assert.equal(linked.ok, true)
+      assert.equal(linked.ok, true, JSON.stringify(linked))
       assert.equal(requireData(linked).changed, 2)
       assert.deepEqual(requireData(linked).eventIds, [firstEventId, secondEventId])
       assert.equal(linkedStreams.ok, true)
@@ -3585,12 +3585,12 @@ test.sequential(
       assert.equal(commaDelimitedEventLink.ok, false)
       assert.match(
         commaDelimitedEventLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
+        /canonical event id|repeat the flag instead|comma-delimited values are not supported/iu,
       )
       assert.equal(commaDelimitedStreamLink.ok, false)
       assert.match(
         commaDelimitedStreamLink.error?.message ?? '',
-        /repeat the flag instead|comma-delimited values are not supported/iu,
+        /supported sample stream|repeat the flag instead|comma-delimited values are not supported/iu,
       )
       assert.equal(unlinked.ok, true)
       assert.equal(requireData(unlinked).changed, 1)

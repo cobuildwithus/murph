@@ -475,6 +475,31 @@ describe("helper barrel exports", () => {
     });
     expect(JSON.stringify(eventContractError.repair)).not.toContain("private-submitted");
 
+    const missingEventTitle = toEventUpsertVaultCliError(
+      Object.assign(new Error("Event payload requires a title."), {
+        name: "VaultError",
+        code: "INVALID_INPUT",
+      }),
+    );
+    expect(missingEventTitle).toEqual(expect.objectContaining({
+      code: "contract_invalid",
+      repair: expect.objectContaining({
+        stage: "validation",
+        fields: [expect.objectContaining({ path: "title", missing: true })],
+      }),
+    }));
+
+    const unrelatedInvalidInput = toEventUpsertVaultCliError(
+      Object.assign(new Error("Capture lookup key is required."), {
+        name: "VaultError",
+        code: "INVALID_INPUT",
+      }),
+    );
+    expect(unrelatedInvalidInput).toEqual(expect.objectContaining({
+      code: "contract_invalid",
+      repair: undefined,
+    }));
+
     const inputFileError = toImporterInputFileVaultCliError(
       Object.assign(new Error("missing /private/member-file.json"), { code: "ENOENT" }),
     );

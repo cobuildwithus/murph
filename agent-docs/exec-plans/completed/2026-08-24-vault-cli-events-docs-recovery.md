@@ -1,6 +1,6 @@
 # Improve vault CLI events and document error recovery
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-24
 
@@ -74,12 +74,25 @@ Updated: 2026-08-24
   privacy risk without improving repair.
 - Reuse the foundation repair contract; do not serialize `context`, causes, or
   provider/filesystem objects.
+- Preserve journal whitespace normalization while deriving admission rules
+  from the canonical event-id pattern and sample-stream constants; invalid
+  values now fail at their exact option index.
+- Keep native framework validation retryability omitted rather than inventing
+  a value in owner code; mapped domain and filesystem failures remain explicit.
 
 ## Verification
 
-- Commands to run: focused CLI/importer/usecase tests selected after tracing,
-  package-local typechecks, built CLI envelope scenarios, `git diff --check`,
-  privacy scan, and final scoped status/diff review.
-- Expected outcomes: stable non-generic codes and bounded repair fields/hints;
-  retryability is explicit; submitted values, raw causes, and absolute paths do
-  not appear; existing JSONL behavior and valid command journeys remain green.
+- Passed: built recovery scenarios (5 tests), event JSONL regressions (10),
+  export/intake and manifest helper regressions (13), targeted journal mutation
+  regression (1), vault-usecase helpers (6), importer tests (28), and package
+  typechecks for CLI, importers, and vault-usecases.
+- The full 42-test experiment/journal phase-two file was also sampled: 31 tests
+  passed; ten experiment tests could not load the ignored generated Health
+  Commons protocol artifact in this fresh worktree, and the journal regression
+  exposed then verified the preserved whitespace behavior through its focused
+  rerun.
+- Final expectations proved: stable non-generic codes, bounded repair
+  fields/hints, explicit retryability for mapped errors, no submitted values or
+  absolute paths in final envelopes, preserved event JSONL behavior, and green
+  valid journal/import/export journeys.
+Completed: 2026-08-24

@@ -42,6 +42,7 @@ test.sequential('built CLI returns bounded event import and edit repair fields',
         occurredAt: '2026-08-24T12:00:00.000Z',
         title: privateTitle,
         symptom: 'headache',
+        intensity: 4,
       }),
       'utf8',
     )
@@ -70,6 +71,7 @@ test.sequential('built CLI returns bounded event import and edit repair fields',
         occurredAt: '2026-08-24T12:00:00.000Z',
         title: 'Headache',
         symptom: 'headache',
+        intensity: 4,
       }),
       'utf8',
     )
@@ -175,10 +177,26 @@ test.sequential('built CLI returns field repair for intake title and lookup fail
   const privateFileName = `${'private-assessment-title-'.padEnd(180, 'x')}.json`
   const assessmentPath = path.join(vaultRoot, privateFileName)
   const privateAssessmentId = 'asmt_private_missing_response'
+  const privateTitle = `private-intake-title-${'x'.repeat(170)}`
 
   try {
     await initializeVault({ vaultRoot })
     await writeFile(assessmentPath, '{}\n', 'utf8')
+
+    const invalidTitleOption = await runCli([
+      'intake',
+      'import',
+      assessmentPath,
+      '--title',
+      privateTitle,
+      '--vault',
+      vaultRoot,
+    ])
+    const titleOptionError = requireError(invalidTitleOption)
+
+    assert.equal(titleOptionError.code, 'VALIDATION_ERROR')
+    assert.equal(titleOptionError.fieldErrors?.[0]?.path, 'title')
+    assertDoesNotEcho(invalidTitleOption, [privateTitle, assessmentPath, vaultRoot])
 
     const invalidImport = await runCli([
       'intake',
@@ -234,7 +252,7 @@ test.sequential('built CLI rejects invalid journal ids and streams before mutati
     ])
     const invalidEventError = requireError(invalidEvent)
     assert.equal(invalidEventError.code, 'VALIDATION_ERROR')
-    assert.equal(invalidEventError.retryable, false)
+    assert.equal(invalidEventError.retryable, undefined)
     assert.equal(invalidEventError.fieldErrors?.[0]?.path, 'eventId.0')
     assertDoesNotEcho(invalidEvent, [privateEventId, vaultRoot])
 
@@ -249,7 +267,7 @@ test.sequential('built CLI rejects invalid journal ids and streams before mutati
     ])
     const invalidStreamError = requireError(invalidStream)
     assert.equal(invalidStreamError.code, 'VALIDATION_ERROR')
-    assert.equal(invalidStreamError.retryable, false)
+    assert.equal(invalidStreamError.retryable, undefined)
     assert.equal(invalidStreamError.fieldErrors?.[0]?.path, 'stream.0')
     assertDoesNotEcho(invalidStream, [privateStream, vaultRoot])
   } finally {

@@ -187,10 +187,10 @@ declare module 'incur' {
       'intervention edit': { args: { id: string }; options: { requestId?: string; title?: string; note?: string; occurredAt?: string | string; timeZone?: string; dayKey?: string; source?: "manual" | "import" | "device" | "derived"; tag?: string[]; clearTitle?: boolean; clearNote?: boolean; clearTimeZone?: boolean; clearDayKey?: boolean; clearSource?: boolean; clearTags?: boolean; dayKeyPolicy?: "keep" | "recompute"; type?: string; duration?: number; regimenId?: string; sessionStatus?: "completed" | "partial" | "missed" | "skipped"; clearDuration?: boolean; clearRegimenId?: boolean } }
       'journal append': { args: { date: string }; options: { requestId?: string; text: string } }
       'journal ensure': { args: { date: string }; options: { requestId?: string } }
-      'journal link': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: string[] } }
+      'journal link': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: ("heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose" | string)[] } }
       'journal list': { args: {}; options: { requestId?: string; from?: string; to?: string; limit: number } }
       'journal show': { args: { date: string }; options: { requestId?: string } }
-      'journal unlink': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: string[] } }
+      'journal unlink': { args: { date: string }; options: { requestId?: string; eventId?: string[]; stream?: ("heart_rate" | "spo2" | "hrv" | "steps" | "sleep_stage" | "respiratory_rate" | "temperature" | "glucose" | string)[] } }
       'knowledge append-section': { args: { slug: string; heading: string }; options: { requestId?: string; body: string; title?: string; position: "prepend" | "append"; sourcePath?: string[] } }
       'knowledge index rebuild': { args: {}; options: { requestId?: string } }
       'knowledge lint': { args: {}; options: { requestId?: string } }

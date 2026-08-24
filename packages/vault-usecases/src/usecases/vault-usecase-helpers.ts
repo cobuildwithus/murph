@@ -352,27 +352,17 @@ const eventUpsertVaultErrorMappings: Record<string, VaultErrorMapping> = {
     code: 'invalid_timestamp',
     repair: {
       stage: 'validation',
-      hint: 'Use an ISO 8601 occurrence timestamp and retry.',
+      hint: 'Correct the event timestamp and retry with an ISO 8601 value.',
       fields: [{
-        path: 'occurredAt',
+        path: '$',
         code: 'invalid_value',
-        message: 'Use an ISO 8601 timestamp.',
+        message: 'One event timestamp is invalid.',
         expected: 'ISO 8601 timestamp',
       }],
     },
   },
   INVALID_INPUT: {
     code: 'contract_invalid',
-    repair: {
-      stage: 'validation',
-      hint: 'Add a non-empty event title and retry.',
-      fields: [{
-        path: 'title',
-        code: 'missing',
-        missing: true,
-        message: 'A non-empty event title is required.',
-      }],
-    },
   },
   CAPTURE_MEDIA_MISSING: {
     code: 'invalid_option',
@@ -419,6 +409,30 @@ export function toVaultCliError(
 }
 
 export function toEventUpsertVaultCliError(error: unknown) {
+  if (
+    isVaultLikeError(error)
+    && error.code === 'INVALID_INPUT'
+    && (error.message === 'Event draft requires a title.'
+      || error.message === 'Event payload requires a title.')
+  ) {
+    return toVaultCliError(error, {
+      ...eventUpsertVaultErrorMappings,
+      INVALID_INPUT: {
+        code: 'contract_invalid',
+        repair: {
+          stage: 'validation',
+          hint: 'Add a non-empty event title and retry.',
+          fields: [{
+            path: 'title',
+            code: 'missing',
+            missing: true,
+            message: 'A non-empty event title is required.',
+          }],
+        },
+      },
+    })
+  }
+
   return toVaultCliError(error, eventUpsertVaultErrorMappings)
 }
 
@@ -514,7 +528,12 @@ export function toVaultCliFilesystemError(
         fieldMessage: 'The selected filesystem path is not writable.',
       }
     }
-    if (errorCode === 'EISDIR' || errorCode === 'ENOTDIR' || errorCode === 'ELOOP') {
+    if (
+      errorCode === 'EEXIST'
+      || errorCode === 'EISDIR'
+      || errorCode === 'ENOTDIR'
+      || errorCode === 'ELOOP'
+    ) {
       return {
         code: 'invalid_path',
         fieldCode: 'invalid_type',
