@@ -215,7 +215,7 @@ function toPrivateProtocolVaultCliError(error: unknown): unknown {
   if (error.code === "VAULT_INVALID_INPUT") {
     return new VaultCliError(
       "contract_invalid",
-      "Protocol payload is invalid.",
+      error.message,
       { vaultCode: error.code },
       {
         stage: "validation",

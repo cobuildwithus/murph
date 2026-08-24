@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { Cli } from "incur";
@@ -135,6 +135,29 @@ function requireSavedPath(result: SaveResult): string {
   }
 
   return result.path;
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Array<[string, string]>> {
+  const snapshot: Array<[string, string]> = [];
+
+  async function visit(directory: string, relativeDirectory: string): Promise<void> {
+    const entries = await readdir(directory, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const relativePath = path.posix.join(relativeDirectory, entry.name);
+      const absolutePath = path.join(directory, entry.name);
+
+      if (entry.isDirectory()) {
+        await visit(absolutePath, relativePath);
+        continue;
+      }
+
+      snapshot.push([relativePath, (await readFile(absolutePath)).toString("base64")]);
+    }
+  }
+
+  await visit(vaultRoot, "");
+  return snapshot.sort(([left], [right]) => left.localeCompare(right));
 }
 
 test("regimen save schema exposes typed product and primary ingredient fields", async () => {
@@ -487,6 +510,147 @@ test("protocol import maps core validation issues into a bounded repair envelope
     );
     assert.equal(serialized.includes(payloadPath), false);
     assert.doesNotMatch(serialized, /bank\/protocols/u);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("protocol import preserves fixed input constraints without leaking submitted values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-protocol-input-constraints-",
+  );
+  const payloadPath = path.join(parentRoot, "private-protocol-input.json");
+  const oversizedTitle = "SubmittedOversizedTitleSentinel".repeat(8);
+  const cases: Array<{
+    name: string;
+    payload: Record<string, unknown>;
+    expectedMessage: string;
+    submittedSentinels: string[];
+  }> = [
+    {
+      name: "invalid status",
+      payload: {
+        title: "SubmittedStatusTitleSentinel",
+        status: "submitted-status-sentinel",
+      },
+      expectedMessage: "status must be one of available, archived.",
+      submittedSentinels: ["SubmittedStatusTitleSentinel", "submitted-status-sentinel"],
+    },
+    {
+      name: "missing title",
+      payload: { slug: "submitted-missing-title-sentinel" },
+      expectedMessage: "title is required.",
+      submittedSentinels: ["submitted-missing-title-sentinel"],
+    },
+    {
+      name: "oversized title",
+      payload: { title: oversizedTitle },
+      expectedMessage: "title exceeds the maximum length.",
+      submittedSentinels: ["SubmittedOversizedTitleSentinel"],
+    },
+    {
+      name: "malformed top-level protocolId",
+      payload: {
+        protocolId: "submitted-top-level-id-sentinel",
+        title: "SubmittedTopLevelIdTitleSentinel",
+      },
+      expectedMessage: "protocolId must match prot_<ULID>.",
+      submittedSentinels: [
+        "submitted-top-level-id-sentinel",
+        "SubmittedTopLevelIdTitleSentinel",
+      ],
+    },
+    {
+      name: "malformed frontmatter.protocolId",
+      payload: {
+        frontmatter: {
+          protocolId: "submitted-frontmatter-id-sentinel",
+          title: "SubmittedFrontmatterIdTitleSentinel",
+        },
+      },
+      expectedMessage: "protocolId must match prot_<ULID>.",
+      submittedSentinels: [
+        "submitted-frontmatter-id-sentinel",
+        "SubmittedFrontmatterIdTitleSentinel",
+      ],
+    },
+    {
+      name: "invalid slug",
+      payload: {
+        slug: "!!!",
+        title: "SubmittedInvalidSlugTitleSentinel",
+      },
+      expectedMessage: "slug could not be normalized to a slug.",
+      submittedSentinels: ["!!!", "SubmittedInvalidSlugTitleSentinel"],
+    },
+    {
+      name: "wrong schemaVersion",
+      payload: {
+        schemaVersion: "submitted-schema-version-sentinel",
+        title: "SubmittedSchemaVersionTitleSentinel",
+      },
+      expectedMessage: "schemaVersion must be murph.frontmatter.protocol.v1.",
+      submittedSentinels: [
+        "submitted-schema-version-sentinel",
+        "SubmittedSchemaVersionTitleSentinel",
+      ],
+    },
+    {
+      name: "wrong docType",
+      payload: {
+        docType: "submitted-doc-type-sentinel",
+        title: "SubmittedDocTypeTitleSentinel",
+      },
+      expectedMessage: "docType must be protocol.",
+      submittedSentinels: ["submitted-doc-type-sentinel", "SubmittedDocTypeTitleSentinel"],
+    },
+  ];
+
+  try {
+    const cli = createRegimenSaveCli();
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      "init",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initResult.exitCode, null);
+    const initialVaultSnapshot = await snapshotVaultFiles(vaultRoot);
+
+    for (const testCase of cases) {
+      await writeFile(payloadPath, JSON.stringify(testCase.payload), "utf8");
+
+      const result = await runInProcessJsonCli(cli, [
+        "protocol",
+        "import-json",
+        "--input",
+        `@${payloadPath}`,
+        "--vault",
+        vaultRoot,
+      ]);
+
+      assert.equal(result.exitCode, 1, testCase.name);
+      assert.equal(result.envelope.ok, false, testCase.name);
+      if (!result.envelope.ok) {
+        assert.equal(result.envelope.error.code, "contract_invalid", testCase.name);
+        assert.equal(result.envelope.error.message, testCase.expectedMessage, testCase.name);
+        assert.equal(result.envelope.error.retryable, false, testCase.name);
+        assert.equal(result.envelope.error.stage, "validation", testCase.name);
+        assert.equal(result.envelope.error.fieldErrors, undefined, testCase.name);
+        assert.equal(
+          result.envelope.error.hint,
+          "Correct the protocol identifiers or frontmatter and retry the command.",
+          testCase.name,
+        );
+      }
+
+      const serialized = JSON.stringify(result.envelope);
+      for (const sentinel of testCase.submittedSentinels) {
+        assert.equal(serialized.includes(sentinel), false, `${testCase.name}: ${sentinel}`);
+      }
+      assert.equal(serialized.includes(payloadPath), false, testCase.name);
+      assert.doesNotMatch(serialized, /bank\/protocols/u, testCase.name);
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), initialVaultSnapshot, testCase.name);
+    }
   } finally {
     await rm(parentRoot, { force: true, recursive: true });
   }
