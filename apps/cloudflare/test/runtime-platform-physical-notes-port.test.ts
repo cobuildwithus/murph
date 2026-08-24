@@ -1,6 +1,8 @@
 import {
+  HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
   HOSTED_PHYSICAL_NOTES_PATH,
   HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
+  type HostedPhysicalNoteRecoveryRequest,
   type HostedPhysicalNoteSendRequest,
 } from "@murphai/hosted-execution/physical-notes";
 import {
@@ -56,6 +58,12 @@ const REQUEST = {
   requestKey: "physical_note_test",
 } satisfies HostedPhysicalNoteSendRequest;
 
+const RECOVERY_REQUEST = {
+  originAssistantInputId: `ain_${"c".repeat(32)}`,
+  targetKind: "recovery",
+  targetOriginAssistantInputId: `ain_${"d".repeat(32)}`,
+} satisfies HostedPhysicalNoteRecoveryRequest;
+
 const WRITE_FENCE_HEADERS = {
   [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_physical_note",
   [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "generation_physical_note",
@@ -68,6 +76,13 @@ beforeEach(() => {
 
 describe("createHostedWebPhysicalNotePort", () => {
   it("allows only the bounded physical-note POST route", () => {
+    expect(readHostedRunnerWebControlPolicy({
+      method: "POST",
+      path: HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
+    })).toEqual({
+      allowed: true,
+      operation: "physical_note_recovery",
+    });
     expect(readHostedRunnerWebControlPolicy({
       method: "POST",
       path: HOSTED_PHYSICAL_NOTES_PATH,
@@ -84,6 +99,92 @@ describe("createHostedWebPhysicalNotePort", () => {
       path: `${HOSTED_PHYSICAL_NOTES_PATH}/arbitrary`,
     }).allowed).toBe(false);
   });
+
+  it("forwards and strictly parses one paid physical-note recovery check", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
+    }));
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.resolve!(RECOVERY_REQUEST)).resolves.toEqual({
+      remainingUnresolved: false,
+      retryAfter: null,
+      settledUsageCostUsdMicros: "250000",
+      status: "accepted",
+    });
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const requestInfo = fetchImpl.mock.calls[0]![0];
+    const requestUrl = requestInfo instanceof Request
+      ? new URL(requestInfo.url)
+      : new URL(requestInfo);
+    expect(requestUrl.pathname).toBe(
+      HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
+    );
+    expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({
+      body: JSON.stringify(RECOVERY_REQUEST),
+      method: "POST",
+    });
+  });
+
+  it("rejects a recovery response that omits the settlement field", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      remainingUnresolved: false,
+      retryAfter: null,
+      status: "clear",
+    }));
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.resolve!(RECOVERY_REQUEST)).rejects.toThrow();
+  });
+
+  it("does not replay recovery after a lost response", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => createLostBodyResponse());
+    const port = createHostedWebPhysicalNotePort({
+      boundUserId: "member_physical_note",
+      fetchImpl,
+      timeoutMs: 1_000,
+      transport: { mode: "proxy" },
+    });
+
+    await expect(port.resolve!(RECOVERY_REQUEST)).rejects.toThrow();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [403, "permission_denied"],
+    [404, "unavailable"],
+  ] as const)(
+    "maps recovery HTTP %i to %s without claiming a state change",
+    async (status, expectedStatus) => {
+      const fetchImpl = vi.fn(async () => new Response(null, { status }));
+      const port = createHostedWebPhysicalNotePort({
+        boundUserId: "member_physical_note",
+        fetchImpl: fetchImpl as typeof fetch,
+        timeoutMs: 1_000,
+        transport: { mode: "proxy" },
+      });
+
+      await expect(port.resolve!(RECOVERY_REQUEST)).resolves.toEqual({
+        remainingUnresolved: null,
+        retryAfter: null,
+        settledUsageCostUsdMicros: null,
+        status: expectedStatus,
+      });
+    },
+  );
 
   it("reports participant authority rejections distinctly", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
@@ -296,6 +397,7 @@ describe("createHostedWebPhysicalNotePort", () => {
     };
 
     for (const path of [
+      HOSTED_PHYSICAL_NOTE_RECOVERY_PATH,
       HOSTED_PHYSICAL_NOTES_PATH,
       HOSTED_RUNTIME_ASSISTANT_CONFIGURATION_TOOL_PATH,
     ]) {
@@ -317,6 +419,7 @@ describe("createHostedWebPhysicalNotePort", () => {
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.map(
       ([call]) => call.timeoutMs,
     )).toEqual([
+      environment.webControlTimeoutMs,
       HOSTED_PHYSICAL_NOTE_SEND_TRANSPORT_TIMEOUT_MS,
       environment.webControlTimeoutMs,
     ]);

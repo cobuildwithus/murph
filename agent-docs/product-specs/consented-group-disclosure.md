@@ -98,7 +98,7 @@ already-persisted legacy work continues to drain under its stored authority.
 ## Product flow
 
 1. During an authenticated group-chat turn, group Murph calls
-   `murph.group(action="post_disclosure_request")` with one concise
+   `murph.group_data(action="post_disclosure_request")` with one concise
    `permissionText`.
 2. Web canonicalizes that exact text and posts a server-owned consent message;
    after Linq returns its provider message id, Web stores and binds the
@@ -120,7 +120,7 @@ already-persisted legacy work continues to drain under its stored authority.
    `grantId` beside the exact `permissionText` and bound member. The selector is
    authority metadata, not a fact supplied by a person or model.
 5. During either a fresh accepted group input or a claimed scheduled group
-   automation occurrence, group Murph calls `murph.group(action="ask_member")`
+   automation occurrence, group Murph calls `murph.group_consult(action="ask_member")`
    with one self-contained question and the exact `grantId` returned by the
    current read. Trusted runtime code injects the invocation origin, and
    delivery behavior is derived from that origin; the model supplies neither.

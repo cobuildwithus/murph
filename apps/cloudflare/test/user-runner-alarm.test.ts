@@ -1087,12 +1087,10 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
-    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
-      7_900,
-    );
-    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
-      8_000,
-    );
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 15_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     await Promise.resolve();
     expect(acceptedSettled).toBe(false);
@@ -1955,17 +1953,15 @@ describe("HostedUserRunner execution coordination", () => {
       )
     );
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
-    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
-      7_900,
-    );
-    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
-      8_000,
-    );
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 15_000,
+      userId: TEST_USER_ID,
+    });
     expect(invoke).not.toHaveBeenCalled();
     expect(acceptedSettled).toBe(false);
     expect(workspaceReadTimeouts).toHaveLength(1);
-    expect(workspaceReadTimeouts[0]).toBeGreaterThan(8_000);
-    expect(workspaceReadTimeouts[0]).toBeLessThanOrEqual(9_000);
+    expect(workspaceReadTimeouts[0]).toBeGreaterThanOrEqual(18_900);
+    expect(workspaceReadTimeouts[0]).toBeLessThanOrEqual(19_000);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
     )).toHaveLength(0);
@@ -2105,7 +2101,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     await vi.waitFor(() => expect(readRunnerMeta(sql).active_attempt_id).toBeNull());
 
-    expect(workspaceReadTimeouts).toEqual([9_000, 4_000]);
+    expect(workspaceReadTimeouts).toEqual([19_000, 4_000]);
     expect(mocks.fetchHostedExecutionWebControlPlaneResponse.mock.calls.filter(
       ([input]) => input.path === HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
     )).toHaveLength(0);
@@ -2212,13 +2208,13 @@ describe("HostedUserRunner execution coordination", () => {
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
   });
 
-  it("keeps eight seconds of useful readiness under the default command budget", async () => {
+  it("keeps the full fifteen-second readiness window under the default command budget", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(FIXED_NOW));
     const ensureReadyForProcessing = vi.fn<
       NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
     >(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 7_500));
+      await new Promise((resolve) => setTimeout(resolve, 14_500));
       return { kind: "ready" };
     });
     const { invoke, runner } = createRunnerHarness({
@@ -2232,13 +2228,11 @@ describe("HostedUserRunner execution coordination", () => {
       userId: TEST_USER_ID,
     });
     await vi.waitFor(() => expect(ensureReadyForProcessing).toHaveBeenCalledOnce());
-    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeGreaterThanOrEqual(
-      7_900,
-    );
-    expect(ensureReadyForProcessing.mock.calls[0]?.[0].timeoutMs).toBeLessThanOrEqual(
-      8_000,
-    );
-    await vi.advanceTimersByTimeAsync(7_500);
+    expect(ensureReadyForProcessing).toHaveBeenCalledWith({
+      timeoutMs: 15_000,
+      userId: TEST_USER_ID,
+    });
+    await vi.advanceTimersByTimeAsync(14_500);
 
     await expect(response).resolves.toMatchObject({
       action: "started",
@@ -2288,6 +2282,51 @@ describe("HostedUserRunner execution coordination", () => {
         }),
       }),
     );
+  });
+
+  it("accepts an ordinary retry after the same container start finishes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(FIXED_NOW));
+    let readinessCalls = 0;
+    const ensureReadyForProcessing = vi.fn<
+      NonNullable<HostedExecutionContainerStubLike["ensureReadyForProcessing"]>
+    >(async () => {
+      readinessCalls += 1;
+      if (readinessCalls === 1) {
+        const error = new Error(
+          "Hosted runner container returned HTTP 503 with non-JSON metadata response.",
+        );
+        error.name = "HostedRunnerContainerMetadataResponseError";
+        throw error;
+      }
+      return { kind: "ready" };
+    });
+    const { invoke, runner, sql } = createRunnerHarness({
+      ensureReadyForProcessing,
+      workspace: createWorkspaceState({ version: "5" }),
+    });
+    await runner.bindUser(TEST_USER_ID);
+    const orchestrationAttemptId = "test-rollout-startup-convergence";
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId,
+      userId: TEST_USER_ID,
+    })).resolves.toEqual({
+      kind: "retry_later",
+      retryAt: "2026-04-27T00:00:30.000Z",
+    });
+    expect(invoke).not.toHaveBeenCalled();
+    expect(readRunnerMeta(sql).active_attempt_id).toBeNull();
+
+    await expect(runner.ensureRuntimeProcessingForUser({
+      orchestrationAttemptId,
+      userId: TEST_USER_ID,
+    })).resolves.toMatchObject({
+      action: "started",
+      kind: "runtime_processing_accepted",
+    });
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
+    expect(ensureReadyForProcessing).toHaveBeenCalledTimes(2);
   });
 
   it("returns retry_later when runner secrets read exhausts the caller command budget", async () => {
@@ -2545,7 +2584,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2641,7 +2680,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
     expect(workspaceReadStarted).toBe(true);
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
     expect(readRunnerMeta(sql)).toMatchObject({
@@ -2743,7 +2782,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2769,7 +2808,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -2955,7 +2994,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();
@@ -3182,7 +3221,7 @@ describe("HostedUserRunner execution coordination", () => {
     ) {
       readinessReceiver = this;
       expect(input).toEqual({
-        timeoutMs: 8_000,
+        timeoutMs: 15_000,
         userId: TEST_USER_ID,
       });
       return { kind: "ready" };
@@ -3236,7 +3275,7 @@ describe("HostedUserRunner execution coordination", () => {
     });
 
     expect(ensureReadyForProcessing).toHaveBeenCalledWith({
-      timeoutMs: 8_000,
+      timeoutMs: 15_000,
       userId: TEST_USER_ID,
     });
     expect(invoke).not.toHaveBeenCalled();

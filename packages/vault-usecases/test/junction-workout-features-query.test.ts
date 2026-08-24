@@ -7,7 +7,7 @@ import { importDeviceProviderSnapshot } from "@murphai/importers"
 import {
   JUNCTION_WORKOUT_STREAM_FEATURE_SCHEMA,
   reduceJunctionWorkoutStreamPayload,
-} from "@murphai/importers/device-providers/junction-bounded-features"
+} from "@murphai/importers/device-providers/junction"
 import { expect, test } from "vitest"
 
 import { createIntegratedVaultServices } from "../src/vault-services.js"

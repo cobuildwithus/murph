@@ -52,10 +52,11 @@ describe("live Junction wearable canary workflow", () => {
       .map((match) => match[1])
       .sort();
     expect(secretNames).toEqual([
+      "GARMIN_CANARY_EMAIL",
+      "GARMIN_CANARY_PASSWORD",
       "JUNCTION_API_KEY",
       "JUNCTION_CLIENT_USER_ID_SECRET",
-      "WHOOP_CANARY_EMAIL",
-      "WHOOP_CANARY_PASSWORD",
+      "KERNEL_API_KEY",
     ]);
     expect(workflow).not.toContain("actions/upload-artifact");
     expect(workflow).not.toContain("WHOOP_CLIENT_ID");
@@ -88,14 +89,31 @@ describe("live Junction wearable canary workflow", () => {
     expect(workflow).toContain("JUNCTION_ENV: sandbox");
     expect(workflow).toContain("MURPH_DEV_TEMPORAL: disabled");
     expect(workflow).toContain('MURPH_E2E_JUNCTION_WEARABLE_LIVE: "1"');
-    expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: whoop");
+    expect(workflow).toContain("MURPH_E2E_JUNCTION_WEARABLE_SOURCES: garmin");
+    expect(workflow).toContain("MURPH_E2E_PROVIDER_BROWSER: kernel");
     expect(workflow).toContain('MURPH_E2E_WEARABLE_HEADLESS: "0"');
-    expect(workflow).toContain("      - name: Verify stable Chrome\n");
-    expect(workflow).toContain("run: google-chrome --version");
-    expect(workflow).not.toContain("playwright install");
+    expect(workflow).toContain("      - name: Prepare pinned Kernel tunnel tools\n");
     expect(workflow).toContain(
-      "run: xvfb-run --auto-servernum pnpm hosted-local e2e device-connect",
+      "https://github.com/kernel/cli/releases/download/v0.31.0/kernel_0.31.0_linux_amd64.tar.gz",
     );
+    expect(workflow).toContain(
+      "8a0e41c96b61396f53e2e9e6593a3f987f836cdd39870ed2649916f711b9377c",
+    );
+    expect(workflow).toContain('"${tools_dir}/kernel" --version');
+    expect(workflow).toContain(
+      'echo "MURPH_E2E_KERNEL_CLI_PATH=${tools_dir}/kernel" >> "$GITHUB_ENV"',
+    );
+    expect(workflow).toContain(
+      "https://github.com/vi/websocat/releases/download/v1.14.1/websocat.x86_64-unknown-linux-musl",
+    );
+    expect(workflow).toContain(
+      "66f8dd3a0394761556339117f8bb5123bddefd44e087af2a72ec22b0bd08d514",
+    );
+    expect(workflow).toContain("sha256sum --check --strict");
+    expect(workflow).not.toContain("playwright install");
+    expect(workflow).not.toContain("google-chrome");
+    expect(workflow).not.toContain("xvfb-run");
+    expect(workflow).toContain("run: pnpm hosted-local e2e device-connect");
     expect(workflow).toContain("image: public.ecr.aws/docker/library/postgres:17");
 
     const actionRefs = [...workflow.matchAll(/^\s*uses:\s*[^@\s]+@([^\s#]+)/gmu)];
@@ -120,11 +138,11 @@ describe("live Junction wearable canary workflow", () => {
     );
     expect(disclosureStep).toContain(".click({ timeout: config.timeoutMs })");
     expect(browserRunner).toContain(
-      'disclosureSourceName: source === "oura" ? "Oura" : "Whoop"',
+      'disclosureSourceName: source === "garmin"',
     );
   });
 
-  it("keeps headed CI authorization automated and fail-closed", () => {
+  it("keeps provider authorization automated and fail-closed", () => {
     expect(browserRunner).toContain(
       'const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";',
     );
@@ -132,9 +150,11 @@ describe("live Junction wearable canary workflow", () => {
       "if (source === \"oura\" && !manualAuthorizationAllowed && !otp)",
     );
     expect(browserRunner).toContain(
-      'browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,',
+      'browserChannel: browserTransport === "local"',
     );
-    expect(browserRunner).toContain("channel: config.browserChannel,");
+    expect(browserRunner).toContain("const session = await openBrowserSession(config);");
+    expect(browserRunner).toContain("await chromium.connectOverCDP(kernelBrowser.cdpWsUrl");
+    expect(browserRunner).toContain("buildKernelTunnelArguments(input.sessionId, input.port)");
 
     const clickedBranchOffset = browserRunner.indexOf("if (clicked) {");
     const blockedWindowResetOffset = browserRunner.indexOf(
@@ -166,7 +186,7 @@ describe("live Junction wearable canary workflow", () => {
 
   it("keeps Playwright's closing quote out of redacted navigation URLs", () => {
     expect(browserRunner).toContain(
-      'message.replace(/https?:\\/\\/[^\\s)"\']+/gu, (rawUrl) => {',
+      'message.replace(/(?:https?|wss?):\\/\\/[^\\s)"\']+/gu, (rawUrl) => {',
     );
   });
 });

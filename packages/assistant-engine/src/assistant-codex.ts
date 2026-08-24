@@ -175,6 +175,9 @@ import type {
 import type {
   AssistantRuntimeIssueInput,
 } from './assistant/issue-reporting.js'
+import type {
+  SafeToolCallValidationDigest,
+} from './assistant/tool-validation-digest.js'
 import {
   ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS,
   normalizeAssistantResponseMediaList,
@@ -1292,11 +1295,41 @@ class CodexAppServerProcess {
     rejectPendingCodexRpcRequests(this.pendingRequests, error)
   }
 
-  sendRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
+  sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<unknown> {
+    return this.beginRequest(method, params).promise
+  }
+
+  sendRequestWithTimeout(input: {
+    method: string
+    params: Record<string, unknown>
+    timeoutLabel: string
+    timeoutMs: number
+  }): Promise<unknown> {
+    const request = this.beginRequest(input.method, input.params)
+    return withCodexRpcTimeout(
+      request.promise,
+      input.timeoutMs,
+      input.timeoutLabel,
+      () => {
+        this.pendingRequests.delete(request.id)
+      },
+    )
+  }
+
+  private beginRequest(
+    method: string,
+    params: Record<string, unknown>,
+  ): {
+    id: CodexRpcId
+    promise: Promise<unknown>
+  } {
     const id = this.nextRequestId
     this.nextRequestId += 1
 
-    return new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pendingRequests.set(id, {
         method,
         reject,
@@ -1312,6 +1345,7 @@ class CodexAppServerProcess {
         reject(failure)
       }
     })
+    return { id, promise }
   }
 
   sendNotification(method: string, params: Record<string, unknown>): void {
@@ -5522,6 +5556,15 @@ async function runCodexAppServerTurnOnProcess(
       return
     }
 
+    if (
+      method === 'rawResponseItem/completed' ||
+      method === 'rawResponse/completed'
+    ) {
+      // Raw response notifications can contain provider payload content and
+      // do not belong in the parent turn's persisted event surface.
+      return
+    }
+
     handleAcceptedEvent(message, method)
   }
 
@@ -5563,14 +5606,12 @@ async function runCodexAppServerTurnOnProcess(
   const readSubagentEffectiveMetadata = (
     threadId: string,
   ): Promise<CodexSubagentEffectiveMetadata | null> =>
-    withCodexRpcTimeout(
-      sendRequest(
-        'thread/resume',
-        buildCodexThreadMetadataResumeParams(threadId),
-      ),
-      CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
-      'thread/resume',
-    ).then((result) =>
+    codexProcess.sendRequestWithTimeout({
+      method: 'thread/resume',
+      params: buildCodexThreadMetadataResumeParams(threadId),
+      timeoutLabel: 'thread/resume',
+      timeoutMs: CODEX_BACKGROUND_WORK_RPC_TIMEOUT_MS,
+    }).then((result) =>
       readCodexSubagentEffectiveMetadataResult({ result, threadId }),
     ).catch(() => null)
 
@@ -6247,39 +6288,10 @@ function isInvalidDynamicToolRequest(
 ): request is Extract<
   MurphDynamicToolRequest,
   {
-    kind:
-      | 'invalid-generate-image-arguments'
-      | 'invalid-automation-arguments'
-      | 'invalid-assistant-style-arguments'
-      | 'invalid-computer-arguments'
-      | 'invalid-device-arguments'
-      | 'invalid-generate-voice-memo-arguments'
-      | 'invalid-pending-vault-files-arguments'
-      | 'invalid-finish-without-reply-arguments'
-      | 'invalid-progress-arguments'
-      | 'invalid-reaction-arguments'
-      | 'invalid-reply-target-arguments'
-      | 'invalid-product-feedback-arguments'
-      | 'invalid-response-card-arguments'
-      | 'invalid-response-media-arguments'
+    validationDigest: SafeToolCallValidationDigest
   }
 > {
-  return (
-    request.kind === 'invalid-generate-image-arguments' ||
-    request.kind === 'invalid-automation-arguments' ||
-    request.kind === 'invalid-assistant-style-arguments' ||
-    request.kind === 'invalid-computer-arguments' ||
-    request.kind === 'invalid-device-arguments' ||
-    request.kind === 'invalid-generate-voice-memo-arguments' ||
-    request.kind === 'invalid-pending-vault-files-arguments' ||
-    request.kind === 'invalid-finish-without-reply-arguments' ||
-    request.kind === 'invalid-progress-arguments' ||
-    request.kind === 'invalid-reaction-arguments' ||
-    request.kind === 'invalid-reply-target-arguments' ||
-    request.kind === 'invalid-product-feedback-arguments' ||
-    request.kind === 'invalid-response-card-arguments' ||
-    request.kind === 'invalid-response-media-arguments'
-  )
+  return 'validationDigest' in request
 }
 
 function isSerializedDynamicToolRequest(

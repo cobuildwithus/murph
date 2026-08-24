@@ -1,9 +1,13 @@
 import type {
   SafeToolCallValidationDigest,
 } from './tool-validation-digest.js'
+import {
+  readModelToolCallValidationIssues,
+} from './tool-validation-digest.js'
 
 const MAX_TOOL_CALL_REPAIR_HINTS = 4
 const MAX_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 1_600
+const MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH = 60_000
 
 export interface ToolCallValidationFeedbackOptions {
   error: string
@@ -16,9 +20,9 @@ interface ToolCallRepairHint {
 }
 
 /**
- * Build bounded model-visible repair guidance from the value-free validation
- * digest. Submitted values, received shapes, and rejected key names are never
- * copied into the response.
+ * Return the originating validator's complete reason to the model while it is
+ * still available in memory. Persisted or reconstructed digests fall back to
+ * bounded, value-free repair hints.
  */
 export function buildToolCallValidationFeedback(
   digest: SafeToolCallValidationDigest,
@@ -26,6 +30,17 @@ export function buildToolCallValidationFeedback(
 ): string {
   const error = normalizeFeedbackToken(options.error, 96)
     ?? 'invalid_tool_arguments'
+  const modelValidationIssues = readModelToolCallValidationIssues(digest)
+  if (modelValidationIssues) {
+    const detailedFeedback = JSON.stringify({
+      error,
+      validationIssues: modelValidationIssues,
+    })
+    if (Buffer.byteLength(detailedFeedback, 'utf8')
+      <= MAX_MODEL_TOOL_CALL_VALIDATION_FEEDBACK_LENGTH) {
+      return detailedFeedback
+    }
+  }
   const hints = (digest.pathIssues ?? [])
     .map((issue): ToolCallRepairHint | null => {
       const field = normalizeFeedbackToken(issue.path, 160)

@@ -698,9 +698,7 @@ export async function resolveAssistantRouteTurnPlan(input: {
     ...hostedDynamicContextPrompts,
     ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
     ...(assistantResearchAvailable
-      ? [buildAssistantResearchScoutCapabilityText({
-          progressUpdateMode: authenticatedGroupChatRuntime ? 'group' : 'direct',
-        })]
+      ? [buildAssistantResearchScoutCapabilityText()]
       : []),
   ]
   const voiceMemoDeliveryChannel = outputOnlyTurn
@@ -825,8 +823,15 @@ export async function resolveAssistantRouteTurnPlan(input: {
       assistantHostedLabsAvailable:
         privateInteractiveProviderTurn &&
         input.hostedToolContext?.labsTool != null,
+      assistantHostedGroupToolSurface:
+        input.hostedToolContext?.groupTool != null
+          ? 'families'
+          : input.hostedToolContext?.groupSharedReader != null
+            ? 'shared_read'
+            : 'none',
       assistantKnowledgeToolsAvailable:
         promptCapabilityAvailability.assistantKnowledgeToolsAvailable,
+      assistantProgressUpdatesAvailable: input.progressDelivery != null,
       assistantToolNameAliases,
       assistantPersona: explicitAssistantPersona,
       assistantPersonality:
@@ -1000,6 +1005,10 @@ export async function resolveAssistantRouteTurnPlan(input: {
           (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
           input.hostedToolContext?.physicalNotes != null &&
           input.hostedToolContext?.privateImageUrlPublisher != null,
+        physicalNoteRecoveryAvailable:
+          (privateInteractiveAudience || authenticatedGroupChatRuntime) &&
+          userActionAcceptedInputIds.length > 0 &&
+          typeof input.hostedToolContext?.physicalNotes?.resolve === 'function',
         phoneCallsAvailable:
           input.hostedToolContext?.phoneCalls != null &&
           (

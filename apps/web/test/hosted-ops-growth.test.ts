@@ -2483,9 +2483,9 @@ describe("hosted ops growth metrics", () => {
         planCapacities: [{ billedQuantity: 2, planCode: "pulse" }],
       },
     ]);
-    queueCurrentMetricMocks();
+    queueCurrentMetricMocks({ includeMax: true });
     mocks.hostedGrowthDailySnapshot.upsert.mockResolvedValueOnce(
-      snapshotRow("2026-08-07", 4_200),
+      snapshotRow("2026-08-07", 9_200),
     );
 
     await captureHostedGrowthDailySnapshot(now);
@@ -2493,13 +2493,13 @@ describe("hosted ops growth metrics", () => {
     const upsertArg = mocks.hostedGrowthDailySnapshot.upsert.mock.calls[0]?.[0];
     expect(upsertArg?.create).toMatchObject({
       familyMrrUsdCents: 1_400,
-      individualMrrUsdCents: 2_800,
-      mrrUsdCents: 4_200,
+      individualMrrUsdCents: 7_800,
+      mrrUsdCents: 9_200,
     });
     expect(upsertArg?.update).toMatchObject({
       familyMrrUsdCents: 1_400,
-      individualMrrUsdCents: 2_800,
-      mrrUsdCents: 4_200,
+      individualMrrUsdCents: 7_800,
+      mrrUsdCents: 9_200,
     });
   });
 
@@ -2895,7 +2895,7 @@ describe("hosted ops growth metrics", () => {
   });
 });
 
-function queueCurrentMetricMocks() {
+function queueCurrentMetricMocks(input: { includeMax?: boolean } = {}) {
   mocks.hostedMember.count
     .mockResolvedValueOnce(4)
     .mockResolvedValueOnce(0)
@@ -2918,6 +2918,15 @@ function queueCurrentMetricMocks() {
         },
         id: "member_edge",
       },
+      ...(input.includeMax
+        ? [{
+          billingRef: {
+            currentBillingPhase: "paid",
+            currentBillingPlanCode: "launch_max_monthly",
+          },
+          id: "member_max",
+        }]
+        : []),
     ])
     .mockResolvedValueOnce([
       {

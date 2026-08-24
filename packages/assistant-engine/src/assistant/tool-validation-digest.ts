@@ -50,6 +50,7 @@ interface ValidationFacts {
 }
 
 const MAX_ROOT_KEYS = 16
+const MAX_SCHEMA_ROOT_KEYS = 256
 const MAX_PATHS = 16
 const MAX_ISSUE_CODES = 12
 const MAX_PATH_ISSUES = 12
@@ -57,6 +58,14 @@ const MAX_INPUT_SHAPE = 16
 const MAX_SCHEMA_PATHS = 256
 const MAX_SCHEMA_PATH_DEPTH = 16
 const MAX_SCHEMA_NODES = 1_024
+
+// Full Zod reasons are useful to the model that authored the current call but
+// must not become durable operational telemetry. Key the ephemeral reason by
+// the safe digest object so the executor can return it to that same model call
+// while JSON serialization and runtime-issue persistence retain only the
+// bounded value-free digest.
+const modelValidationIssuesByDigest =
+  new WeakMap<SafeToolCallValidationDigest, unknown>()
 
 export function buildSafeToolCallValidationDigest(
   input: BuildSafeToolCallValidationDigestInput,
@@ -70,7 +79,7 @@ export function buildSafeToolCallValidationDigest(
     ? uniqueSorted(rootKeys.filter((key) => schemaRootKeySet.has(key))).slice(0, MAX_ROOT_KEYS)
     : []
   const unsafeRootKeyCount = schemaRootKeySet
-    ? rootKeys.length - schemaRootKeysPresent.length
+    ? rootKeys.filter((key) => !schemaRootKeySet.has(key)).length
     : rootKeys.length
   const inputShape = buildInputShape(input.rawInput, schemaRootKeysPresent)
   const facts = readValidationFacts(
@@ -95,7 +104,7 @@ export function buildSafeToolCallValidationDigest(
   }
   const validationFingerprint = `tvd_${hashJson(fingerprintFacts).slice(0, 12)}`
 
-  return omitEmptyFields({
+  const digest: SafeToolCallValidationDigest = omitEmptyFields({
     detailsSchema: SAFE_TOOL_CALL_VALIDATION_DIGEST_SCHEMA,
     toolName: normalizeSafeIdentifier(input.toolName),
     requestedToolNameSafe: normalizeSafeIdentifier(input.requestedToolName),
@@ -115,6 +124,16 @@ export function buildSafeToolCallValidationDigest(
     pathIssues: facts.pathIssues,
     inputShape,
   })
+  if (input.error instanceof z.ZodError) {
+    modelValidationIssuesByDigest.set(digest, input.error.issues)
+  }
+  return digest
+}
+
+export function readModelToolCallValidationIssues(
+  digest: SafeToolCallValidationDigest,
+): unknown | null {
+  return modelValidationIssuesByDigest.get(digest) ?? null
 }
 
 export function isSafeSchemaLikeKey(key: string): boolean {
@@ -411,7 +430,7 @@ function normalizeSchemaRootKeySet(keys: readonly string[] | null | undefined): 
   if (!keys || keys.length === 0) {
     return null
   }
-  return new Set(keys.filter(isSafeSchemaLikeKey).slice(0, MAX_ROOT_KEYS))
+  return new Set(keys.filter(isSafeSchemaLikeKey).slice(0, MAX_SCHEMA_ROOT_KEYS))
 }
 
 function normalizeSchemaPathSet(

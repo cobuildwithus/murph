@@ -1,12 +1,17 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
   chromium,
+  type Browser,
+  type BrowserContext,
   type Locator,
   type Page,
   type Response,
 } from "@playwright/test";
 
+import { KernelComputerClient } from "../src/lib/computer-use/kernel-client.ts";
 import {
   buildHostedLocalBrowserSessionCookie,
   clearHostedLocalBrowserEnvironment,
@@ -16,21 +21,41 @@ import {
 } from "./hosted-local-browser-process.ts";
 import { isHostedLocalProviderChallengeSurface } from "./hosted-local-provider-challenge.ts";
 
+type WearableSource = "garmin" | "oura" | "whoop";
+
 interface BrowserConfig {
   browserChannel: "chrome" | undefined;
-  disclosureSourceName: "Oura" | "Whoop";
+  browserTransport: "kernel" | "local";
+  disclosureSourceName: "Garmin" | "Oura" | "Whoop";
   email: string;
   headless: boolean;
   hostedSessionCookie: string;
-  label: "Oura" | "WHOOP";
+  kernelApiKey: string | null;
+  kernelCliPath: string | null;
+  label: "Garmin" | "Oura" | "WHOOP";
   manualAuthorizationAllowed: boolean;
   otp: string | null;
   password: string | null;
-  source: "oura" | "whoop";
+  source: WearableSource;
   startUrl: string;
   timeoutMs: number;
   webBaseUrl: string;
   webOrigin: string;
+}
+
+interface BrowserSession {
+  browser: Browser;
+  context: BrowserContext;
+  kernelClient: KernelComputerClient | null;
+  kernelSessionId: string | null;
+  kernelTunnel: OwnedKernelTunnel | null;
+}
+
+interface OwnedKernelTunnel {
+  child: ChildProcess;
+  processId: number;
+  removeParentExitHandler: () => void;
+  spawnFailed: boolean;
 }
 
 const RUNNER_NAME = "Hosted-local Junction wearable browser runner";
@@ -62,20 +87,29 @@ const TRUSTED_AUTHORIZATION_DOMAINS = [
   "tryvital.io",
 ] as const;
 const PROVIDER_AUTHORIZATION_DOMAINS = {
+  garmin: ["garmin.com"],
   oura: ["ouraring.com"],
   whoop: ["whoop.com"],
 } as const;
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
+const GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT = 3;
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
+const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
+const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
 const SENSITIVE_BROWSER_ENVIRONMENT_KEYS = [
   "JUNCTION_API_KEY",
   "JUNCTION_CLIENT_USER_ID_SECRET",
   "JUNCTION_WEBHOOK_SECRET",
+  "KERNEL_API_KEY",
   "MURPH_E2E_CONNECT_URL",
+  "MURPH_E2E_GARMIN_EMAIL",
+  "MURPH_E2E_GARMIN_PASSWORD",
   "MURPH_E2E_HOSTED_SESSION_COOKIE",
   "MURPH_E2E_JUNCTION_WEARABLE_SOURCES",
+  "MURPH_E2E_KERNEL_CLI_PATH",
   "MURPH_E2E_PROVIDER_EMAIL",
+  "MURPH_E2E_PROVIDER_BROWSER",
   "MURPH_E2E_PROVIDER_HEADLESS",
   "MURPH_E2E_PROVIDER_OTP",
   "MURPH_E2E_PROVIDER_PASSWORD",
@@ -103,30 +137,23 @@ async function main(): Promise<void> {
   clearHostedLocalBrowserEnvironment(SENSITIVE_BROWSER_ENVIRONMENT_KEYS);
 
   stage = "browser_launch";
-  const browser = await chromium.launch({
-    channel: config.browserChannel,
-    headless: config.headless,
-  });
+  const session = await openBrowserSession(config);
+  let failure: unknown;
+  let failed = false;
   try {
-    const context = await browser.newContext({
-      locale: "en-US",
-      reducedMotion: "reduce",
-    });
-    await context.addCookies([
+    await session.context.addCookies([
       buildHostedLocalBrowserSessionCookie({
         sessionCookie: config.hostedSessionCookie,
         webBaseUrl: config.webBaseUrl,
       }),
     ]);
-    const page = await context.newPage();
+    const page = await session.context.newPage();
     activePage = page;
     page.setDefaultTimeout(15_000);
     page.setDefaultNavigationTimeout(config.timeoutMs);
 
     stage = "murph_connect_intent";
-    await page.goto(config.startUrl, {
-      waitUntil: "domcontentloaded",
-    });
+    await navigateToHostedLocalStart(page, config, session.kernelTunnel);
 
     stage = "murph_vital_disclosure";
     await page
@@ -165,17 +192,302 @@ async function main(): Promise<void> {
     stage = "junction_cleanup";
     await disconnectJunctionAccount(page, config);
 
-    process.stdout.write(formatHostedLocalBrowserResult({
-      callbackAutoCompleted: true,
-      connectedAfterCallback: true,
-      connectedAfterReload: true,
-      disconnectedDuringCleanup: true,
-      provider: "junction",
-      source: config.source,
-    }));
-  } finally {
-    await browser.close();
+  } catch (error) {
+    failed = true;
+    failure = error;
   }
+
+  try {
+    stage = failed ? `${stage}_cleanup` : "browser_cleanup";
+    await closeBrowserSession(session, config);
+  } catch (error) {
+    if (!failed) {
+      failed = true;
+      failure = error;
+    }
+  }
+
+  if (failed) {
+    throw failure;
+  }
+
+  process.stdout.write(formatHostedLocalBrowserResult({
+    callbackAutoCompleted: true,
+    connectedAfterCallback: true,
+    connectedAfterReload: true,
+    disconnectedDuringCleanup: true,
+    provider: "junction",
+    source: config.source,
+  }));
+}
+
+async function openBrowserSession(config: BrowserConfig): Promise<BrowserSession> {
+  if (config.browserTransport === "local") {
+    const browser = await chromium.launch({
+      channel: config.browserChannel,
+      headless: config.headless,
+    });
+    try {
+      const context = await browser.newContext({
+        locale: "en-US",
+        reducedMotion: "reduce",
+      });
+      return {
+        browser,
+        context,
+        kernelClient: null,
+        kernelSessionId: null,
+        kernelTunnel: null,
+      };
+    } catch (error) {
+      await browser.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  const apiKey = config.kernelApiKey;
+  const cliPath = config.kernelCliPath;
+  if (!apiKey || !cliPath) {
+    throw new Error("Kernel browser configuration lost its required authority or CLI path.");
+  }
+  const tunnelPort = requireKernelTunnelPort(config.webBaseUrl);
+  const kernelClient = new KernelComputerClient({ apiKey });
+  const kernelProfile = `murph-junction-${config.source}-canary`;
+  await kernelClient.ensureProfile(kernelProfile);
+  const kernelBrowser = await kernelClient.createAutomationBrowser({
+    headless: config.headless,
+    profileName: kernelProfile,
+    saveChanges: true,
+    timeoutSeconds: Math.ceil((config.timeoutMs + 60_000) / 1_000),
+  });
+  let kernelTunnel: OwnedKernelTunnel | null = null;
+
+  try {
+    kernelTunnel = startKernelTunnel({
+      apiKey,
+      cliPath,
+      port: tunnelPort,
+      sessionId: kernelBrowser.sessionId,
+    });
+    const browser = await chromium.connectOverCDP(kernelBrowser.cdpWsUrl, {
+      timeout: config.timeoutMs,
+    });
+    const context = browser.contexts()[0];
+    if (!context) {
+      throw new Error("Kernel browser did not expose its persistent context.");
+    }
+    return {
+      browser,
+      context,
+      kernelClient,
+      kernelSessionId: kernelBrowser.sessionId,
+      kernelTunnel,
+    };
+  } catch (error) {
+    if (kernelTunnel) {
+      await stopKernelTunnel(kernelTunnel).catch(() => undefined);
+    }
+    await kernelClient.deleteBrowserByIdOrName(kernelBrowser.sessionId)
+      .catch(() => undefined);
+    throw error;
+  }
+}
+
+async function closeBrowserSession(
+  session: BrowserSession,
+  config: BrowserConfig,
+): Promise<void> {
+  if (!session.kernelClient || !session.kernelSessionId || !session.kernelTunnel) {
+    await session.browser.close();
+    return;
+  }
+
+  const cleanupErrors: unknown[] = [];
+  await session.context.clearCookies({
+    domain: new URL(config.webBaseUrl).hostname,
+  }).catch((error: unknown) => cleanupErrors.push(error));
+  await stopKernelTunnel(session.kernelTunnel)
+    .catch((error: unknown) => cleanupErrors.push(error));
+  try {
+    await session.kernelClient.deleteBrowserByIdOrName(session.kernelSessionId);
+  } catch (error) {
+    cleanupErrors.push(error);
+    await session.browser.close()
+      .catch((browserError: unknown) => cleanupErrors.push(browserError));
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new Error("Kernel browser cleanup did not complete.");
+  }
+}
+
+function startKernelTunnel(input: {
+  apiKey: string;
+  cliPath: string;
+  port: number;
+  sessionId: string;
+}): OwnedKernelTunnel {
+  const child = spawn(
+    input.cliPath,
+    buildKernelTunnelArguments(input.sessionId, input.port),
+    {
+      detached: true,
+      env: buildKernelCliEnvironment(input.apiKey, process.env),
+      // Kernel's SSH command opens a remote shell in addition to the reverse
+      // forward. Keep its stdin open so EOF does not close that shell and tear
+      // down the tunnel before the browser reaches hosted-local Web.
+      stdio: ["pipe", "ignore", "ignore"],
+    },
+  );
+  if (child.pid === undefined) {
+    child.once("error", () => undefined);
+    throw new Error("Kernel reverse tunnel did not start.");
+  }
+  const tunnel: OwnedKernelTunnel = {
+    child,
+    processId: child.pid,
+    removeParentExitHandler: () => undefined,
+    spawnFailed: false,
+  };
+  const handleParentExit = () => {
+    signalOwnedKernelTunnel(tunnel, "SIGTERM");
+  };
+  process.once("exit", handleParentExit);
+  tunnel.removeParentExitHandler = () => {
+    process.off("exit", handleParentExit);
+  };
+  child.once("error", () => {
+    tunnel.spawnFailed = true;
+  });
+  return tunnel;
+}
+
+function buildKernelTunnelArguments(sessionId: string, port: number): string[] {
+  return [
+    "browsers",
+    "ssh",
+    sessionId,
+    "-R",
+    `${port}:localhost:${port}`,
+  ];
+}
+
+function buildKernelCliEnvironment(
+  apiKey: string,
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const childEnvironment: NodeJS.ProcessEnv = {
+    KERNEL_API_KEY: apiKey,
+    NODE_ENV: environment.NODE_ENV ?? "production",
+  };
+  for (const key of ["HOME", "LANG", "LC_ALL", "PATH", "TMPDIR"] as const) {
+    const value = environment[key];
+    if (value !== undefined) {
+      childEnvironment[key] = value;
+    }
+  }
+  return childEnvironment;
+}
+
+function requireKernelTunnelPort(webBaseUrl: string): number {
+  const url = new URL(webBaseUrl);
+  const port = Number(url.port);
+  if (
+    url.protocol !== "http:"
+    || url.hostname !== "localhost"
+    || !Number.isInteger(port)
+    || port < 1
+    || port > 65_535
+  ) {
+    throw new Error(
+      "Kernel browser transport requires an explicit http://localhost:<port> hosted-local Web URL.",
+    );
+  }
+  return port;
+}
+
+async function navigateToHostedLocalStart(
+  page: Page,
+  config: BrowserConfig,
+  tunnel: OwnedKernelTunnel | null,
+): Promise<void> {
+  if (!tunnel) {
+    await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
+    return;
+  }
+
+  const deadline = Date.now() + Math.min(
+    config.timeoutMs,
+    KERNEL_TUNNEL_SETUP_TIMEOUT_MS,
+  );
+  while (Date.now() < deadline) {
+    if (
+      tunnel.spawnFailed
+      || tunnel.child.exitCode !== null
+      || tunnel.child.signalCode !== null
+    ) {
+      throw new Error("Kernel reverse tunnel exited before reaching hosted-local Web.");
+    }
+    const remainingMs = deadline - Date.now();
+    try {
+      await page.goto(config.startUrl, {
+        timeout: Math.min(5_000, remainingMs),
+        waitUntil: "domcontentloaded",
+      });
+      return;
+    } catch {
+      await page.waitForTimeout(Math.min(500, Math.max(1, remainingMs)));
+    }
+  }
+  throw new Error("Kernel reverse tunnel did not reach hosted-local Web in time.");
+}
+
+async function stopKernelTunnel(tunnel: OwnedKernelTunnel): Promise<void> {
+  tunnel.removeParentExitHandler();
+  if (tunnel.child.exitCode !== null || tunnel.child.signalCode !== null) {
+    return;
+  }
+
+  const exited = new Promise<void>((resolve) => {
+    tunnel.child.once("exit", () => resolve());
+    tunnel.child.once("error", () => resolve());
+  });
+  tunnel.child.kill("SIGTERM");
+  if (await resolvesWithin(exited, KERNEL_TUNNEL_STOP_GRACE_MS)) {
+    return;
+  }
+
+  // This detached process group contains only the Kernel CLI process started
+  // above and its SSH child, so its complete ownership is explicit.
+  signalOwnedKernelTunnel(tunnel, "SIGKILL");
+  if (!await resolvesWithin(exited, KERNEL_TUNNEL_STOP_GRACE_MS)) {
+    throw new Error("Kernel reverse tunnel did not stop.");
+  }
+}
+
+function signalOwnedKernelTunnel(
+  tunnel: OwnedKernelTunnel,
+  signal: NodeJS.Signals,
+): void {
+  try {
+    process.kill(-tunnel.processId, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+      throw error;
+    }
+  }
+}
+
+async function resolvesWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<false>((resolve) => {
+    timeout = setTimeout(() => resolve(false), timeoutMs);
+  });
+  const result = await Promise.race([promise.then(() => true as const), timedOut]);
+  if (timeout !== undefined) {
+    clearTimeout(timeout);
+  }
+  return result;
 }
 
 async function completeExternalAuthorization(
@@ -238,15 +550,39 @@ async function completeExternalAuthorization(
         }
       }
 
-      await checkRequiredConsentCheckboxes(page);
-      const clicked = await clickFirstVisibleAction(
-        page,
-        AUTH_ACTIONS,
-        config.source,
-      );
+      const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
+        && await completeGarminPartnerConsent(page, config.source);
+      if (completedGarminPartnerConsent) {
+        automationBlockedObservedAt = null;
+        blockedWindowObservedChallenge = false;
+        await waitForGarminPartnerConsentProgression(
+          page,
+          Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+          now,
+        );
+        await page.waitForTimeout(750);
+        continue;
+      }
+
+      const garminConfirmation = config.source === "garmin"
+        && readGarminPartnerConsentStep(page.url()) === "permissions_updated";
+      let clicked: boolean;
+      if (garminConfirmation) {
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      } else {
+        await checkRequiredConsentCheckboxes(page);
+        clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
+      }
       if (clicked) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
+        if (garminConfirmation) {
+          await waitForGarminPartnerConfirmationDeparture(
+            page,
+            Math.min(deadline, now() + PROVIDER_AUTOMATION_BLOCKED_GRACE_MS),
+            now,
+          );
+        }
         await page.waitForTimeout(750);
         continue;
       }
@@ -278,6 +614,126 @@ async function completeExternalAuthorization(
   }
 
   throw new Error("Timed out before Junction returned the browser to Murph.");
+}
+
+async function completeGarminPartnerConsent(
+  page: Page,
+  source: BrowserConfig["source"],
+): Promise<boolean> {
+  if (source !== "garmin") {
+    return false;
+  }
+  const step = readGarminPartnerConsentStep(page.url());
+  if (step === null || step === "permissions_updated") return false;
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+
+  const checkboxes = page.getByRole("checkbox");
+  if (await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
+    throw new Error(
+      `Garmin consent expected exactly ${GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT} data-sharing checkboxes.`,
+    );
+  }
+  for (
+    let index = 0;
+    index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
+    index += 1
+  ) {
+    const checkbox = checkboxes.nth(index);
+    if (
+      !await checkbox.isVisible().catch(() => false)
+      || !await checkbox.isEnabled().catch(() => false)
+    ) {
+      throw new Error("Garmin consent data-sharing checkbox was unavailable.");
+    }
+    await checkAuthorizationCheckbox(checkbox);
+    if (!await checkbox.isChecked().catch(() => false)) {
+      throw new Error("Garmin consent data-sharing checkbox was not selected.");
+    }
+  }
+
+  const save = page.getByRole("button", { exact: true, name: "Save" });
+  if (await save.count() !== 1) {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+  const saveAction = save.nth(0);
+  if (await readAuthorizationActionState(saveAction) !== "enabled") {
+    throw new Error("Garmin consent did not expose one enabled Save action.");
+  }
+  await clickAuthorizationControl(saveAction);
+  return true;
+}
+
+type GarminPartnerConsentStep =
+  | "invalid"
+  | "permissions_updated"
+  | "selection";
+
+function readGarminPartnerConsentStep(
+  value: string,
+): GarminPartnerConsentStep | null {
+  const url = new URL(value);
+  if (
+    url.hostname !== "connect.garmin.com"
+    || url.pathname !== "/partner/oauthConfirm"
+  ) {
+    return null;
+  }
+  const permissionsUpdated = url.searchParams.has("permissionsUpdated");
+  const selectedCapabilities = url.searchParams.has("selectedCapabilities");
+  if (permissionsUpdated !== selectedCapabilities) return "invalid";
+  return permissionsUpdated ? "permissions_updated" : "selection";
+}
+
+async function waitForGarminPartnerConsentProgression(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "selection" && now() < deadline) {
+    await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
+  }
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent Save did not advance the consent flow.");
+  }
+}
+
+async function waitForGarminPartnerConfirmationDeparture(
+  page: Page,
+  deadline: number,
+  now: () => number,
+): Promise<void> {
+  let step = readGarminPartnerConsentStep(page.url());
+  while (step === "permissions_updated" && now() < deadline) {
+    await page.waitForTimeout(250);
+    step = readGarminPartnerConsentStep(page.url());
+  }
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step === "selection") {
+    throw new Error("Garmin consent confirmation returned to the selection state.");
+  }
+  if (step === "permissions_updated") {
+    const surface = await describeAuthorizationSurface(page);
+    step = readGarminPartnerConsentStep(page.url());
+    if (step === null) return;
+    if (step === "invalid") {
+      throw new Error("Garmin consent exposed an invalid progression state.");
+    }
+    if (step === "selection") {
+      throw new Error("Garmin consent confirmation returned to the selection state.");
+    }
+    throw new Error(
+      `Garmin consent confirmation did not leave the consent route. ${surface}`,
+    );
+  }
 }
 
 async function completeAuthorizationAndRequireCallback(
@@ -463,6 +919,19 @@ async function clickAuthorizationControl(
   }
 }
 
+async function checkAuthorizationCheckbox(
+  checkbox: Pick<Locator, "check">,
+): Promise<void> {
+  try {
+    await checkbox.check();
+  } catch (error) {
+    const category = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout"
+      : "other";
+    throw new Error(`Authorization consent selection failed (${category}).`);
+  }
+}
+
 async function hasNegativeAccessibleName(
   control: Locator,
   negativeControls: Locator,
@@ -584,6 +1053,7 @@ async function disconnectJunctionAccount(
   page: Page,
   config: BrowserConfig,
 ): Promise<void> {
+  await page.waitForLoadState("load", { timeout: config.timeoutMs });
   await page
     .getByRole("button", { name: new RegExp(`^Disconnect (?:${config.label}|account)$`, "i") })
     .click();
@@ -602,15 +1072,22 @@ async function disconnectJunctionAccount(
 
 function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   const source = requireWearableSource(environment.MURPH_E2E_PROVIDER_SOURCE);
-  const label = source === "oura" ? "Oura" : "WHOOP";
+  const label = source === "garmin"
+    ? "Garmin"
+    : source === "oura"
+    ? "Oura"
+    : "WHOOP";
   const headless = environment.MURPH_E2E_PROVIDER_HEADLESS !== "0";
+  const browserTransport = requireBrowserTransport(
+    environment.MURPH_E2E_PROVIDER_BROWSER,
+  );
   const ci = environment.CI?.trim().toLowerCase();
   const manualAuthorizationAllowed = !headless && ci !== "1" && ci !== "true";
   const otp = environment.MURPH_E2E_PROVIDER_OTP?.trim() || null;
   const password = environment.MURPH_E2E_PROVIDER_PASSWORD?.trim() || null;
-  if (source === "whoop" && !password) {
+  if ((source === "garmin" || source === "whoop") && !password) {
     throw new Error(
-      "Hosted-local Junction WHOOP browser runner requires MURPH_E2E_PROVIDER_PASSWORD.",
+      `Hosted-local Junction ${label} browser runner requires MURPH_E2E_PROVIDER_PASSWORD.`,
     );
   }
   if (source === "oura" && !manualAuthorizationAllowed && !otp) {
@@ -618,12 +1095,44 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "Hosted-local Junction Oura browser runner requires a current MURPH_E2E_PROVIDER_OTP unless it is a headed non-CI run with manual code entry.",
     );
   }
+  if (
+    browserTransport === "kernel"
+    && (
+      source === "oura"
+      || manualAuthorizationAllowed
+      || (source === "whoop" && !headless)
+    )
+  ) {
+    throw new Error(
+      "Kernel browser transport requires unattended Garmin or headless WHOOP authorization.",
+    );
+  }
+  const kernelApiKey = browserTransport === "kernel"
+    ? readHostedLocalBrowserEnvironmentValue(
+      environment,
+      "KERNEL_API_KEY",
+      RUNNER_NAME,
+    )
+    : null;
+  const kernelCliPath = browserTransport === "kernel"
+    ? readHostedLocalBrowserEnvironmentValue(
+      environment,
+      "MURPH_E2E_KERNEL_CLI_PATH",
+      RUNNER_NAME,
+    )
+    : null;
+  if (kernelCliPath && !path.isAbsolute(kernelCliPath)) {
+    throw new Error("MURPH_E2E_KERNEL_CLI_PATH must be an absolute path.");
+  }
   const webBaseUrl = readHostedLocalBrowserEnvironmentValue(
     environment,
     "MURPH_E2E_WEB_BASE_URL",
     RUNNER_NAME,
   );
   const parsedWebBaseUrl = new URL(webBaseUrl);
+  if (browserTransport === "kernel") {
+    requireKernelTunnelPort(parsedWebBaseUrl.toString());
+  }
   const startUrl = new URL(readHostedLocalBrowserEnvironmentValue(
     environment,
     "MURPH_E2E_CONNECT_URL",
@@ -642,8 +1151,17 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
   }
 
   return {
-    browserChannel: !headless && !manualAuthorizationAllowed ? "chrome" : undefined,
-    disclosureSourceName: source === "oura" ? "Oura" : "Whoop",
+    browserChannel: browserTransport === "local"
+        && !headless
+        && !manualAuthorizationAllowed
+      ? "chrome"
+      : undefined,
+    browserTransport,
+    disclosureSourceName: source === "garmin"
+      ? "Garmin"
+      : source === "oura"
+      ? "Oura"
+      : "Whoop",
     email: readHostedLocalBrowserEnvironmentValue(
       environment,
       "MURPH_E2E_PROVIDER_EMAIL",
@@ -655,6 +1173,8 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
       "MURPH_E2E_HOSTED_SESSION_COOKIE",
       RUNNER_NAME,
     ),
+    kernelApiKey,
+    kernelCliPath,
     label,
     manualAuthorizationAllowed,
     otp,
@@ -675,9 +1195,16 @@ function readBrowserConfig(environment: NodeJS.ProcessEnv): BrowserConfig {
 }
 
 export {
+  buildKernelCliEnvironment as buildKernelCliEnvironmentForTest,
+  buildKernelTunnelArguments as buildKernelTunnelArgumentsForTest,
+  closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
+  openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
+  sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,
+  stopKernelTunnel as stopHostedLocalJunctionKernelTunnelForTest,
 };
 
 function assertTrustedAuthorizationUrl(
@@ -706,12 +1233,22 @@ function assertTrustedAuthorizationUrl(
   }
 }
 
-function requireWearableSource(value: string | undefined): "oura" | "whoop" {
+function requireWearableSource(value: string | undefined): WearableSource {
   const source = value?.trim();
-  if (source === "oura" || source === "whoop") {
+  if (source === "garmin" || source === "oura" || source === "whoop") {
     return source;
   }
-  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be oura or whoop.");
+  throw new Error("MURPH_E2E_PROVIDER_SOURCE must be garmin, oura, or whoop.");
+}
+
+function requireBrowserTransport(
+  value: string | undefined,
+): "kernel" | "local" {
+  const transport = value?.trim() || "local";
+  if (transport === "kernel" || transport === "local") {
+    return transport;
+  }
+  throw new Error("MURPH_E2E_PROVIDER_BROWSER must be kernel or local.");
 }
 
 function readOrigin(value: string): string | null {
@@ -738,15 +1275,19 @@ function sanitizeFailure(error: unknown, config: BrowserConfig | null): string {
     config?.password,
     config?.otp,
     config?.hostedSessionCookie,
+    config?.kernelApiKey,
     config?.startUrl,
   ]) {
     if (secret) {
       message = message.replaceAll(secret, "[redacted]");
     }
   }
-  message = message.replace(/https?:\/\/[^\s)"']+/gu, (rawUrl) => {
+  message = message.replace(/(?:https?|wss?):\/\/[^\s)"']+/gu, (rawUrl) => {
     try {
       const url = new URL(rawUrl);
+      if (url.protocol === "ws:" || url.protocol === "wss:") {
+        return "[redacted-url]";
+      }
       return `${url.origin}${url.pathname}`;
     } catch {
       return "[url]";

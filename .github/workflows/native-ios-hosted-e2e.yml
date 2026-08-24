@@ -64,21 +64,33 @@ jobs:
           changed_files="$(jq -r '.changed_files' <<<"${pr}")"
           [[ "${changed_files}" =~ ^[0-9]+$ ]] || { echo "::error::PR changed-file count was invalid."; exit 1; }
 
-          # Any Web source can break native auth/control/device sync. The lower
-          # list is the current hosted-Web source-package closure plus root
-          # build/deploy files that can change the production-shaped candidate.
+          # The private iOS journey exercises the companion admission/auth,
+          # onboarding, consent, token, and status routes. Keep only those Web
+          # runtime/config owners and their actual workspace package closure;
+          # unrelated Web UI, content, and tests do not buy a native run.
           selected=false
           if (( changed_files > 3000 )); then
             selected=true
           else
             while IFS= read -r file; do
               case "${file}" in
-                apps/web/*|\
-                packages/assistant-runtime/*|packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|\
-                packages/device-syncd/*|packages/gateway-core/*|packages/health-commons/*|packages/health-metrics/*|\
-                packages/hosted-execution/*|packages/importers/*|packages/inboxd/*|packages/messaging-ingress/*|packages/parsers/*|packages/query/*|packages/runtime-state/*|\
+                apps/web/app/api/device-sync/companion/admission/*|apps/web/app/api/device-sync/companion/auth-diagnostics/*|\
+                apps/web/app/api/device-sync/companion/initial-onboarding/*|apps/web/app/api/device-sync/companion/legal-consent/*|\
+                apps/web/app/api/device-sync/companion/sign-in-token/*|apps/web/app/api/device-sync/companion/status/*|\
+                apps/web/src/lib/device-sync/*|apps/web/src/lib/hosted-crypto/*|apps/web/src/lib/hosted-execution/*|apps/web/src/lib/hosted-groups/*|\
+                apps/web/src/lib/hosted-mailbox/*|apps/web/src/lib/hosted-onboarding/*|apps/web/src/lib/hosted-orchestration/*|apps/web/src/lib/hosted-routing/*|\
+                apps/web/src/lib/hosted-web/*|apps/web/src/lib/hosted-workspace/*|apps/web/src/lib/legal/*|apps/web/src/lib/linq/*|apps/web/src/lib/phone-calls/*|\
+                apps/web/src/lib/hosted-agent-sessions.ts|apps/web/src/lib/hosted-messages/user-facing-messages.ts|apps/web/src/lib/http.ts|apps/web/src/lib/murph-contact-avatars.ts|\
+                apps/web/src/lib/murph-contact-routing.ts|apps/web/src/lib/primitives.ts|apps/web/src/lib/prisma-operation-timing.ts|\
+                apps/web/src/lib/prisma.ts|apps/web/src/lib/process-warnings.ts|\
+                apps/web/instrumentation.ts|apps/web/next.config.ts|apps/web/package.json|apps/web/prisma.config.ts|apps/web/prisma/*|apps/web/proxy.ts|\
+                apps/web/scripts/build-memory-guard.sh|apps/web/scripts/hosted-web-migration-owner.ts|apps/web/scripts/prepare-prisma-client-for-build.ts|\
+                apps/web/scripts/run-prisma-migrate-deploy.ts|apps/web/scripts/run-production-migrations.ts|apps/web/scripts/run-production-next-build.sh|\
+                apps/web/scripts/vercel-build.sh|apps/web/tsconfig.json|\
+                packages/clinical-records/*|packages/cloudflare-hosted-control/*|packages/contracts/*|packages/core/*|packages/device-syncd/*|\
+                packages/gateway-core/*|packages/health-metrics/*|packages/hosted-execution/*|packages/importers/*|packages/messaging-ingress/*|packages/runtime-state/*|\
                 .github/workflows/native-ios-hosted-e2e.yml|.github/workflows/repo-hygiene.yml|\
-                config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json)
+                config/workspace-source-resolution.ts|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|tsconfig.base.json|tsconfig.json)
                   selected=true
                   break
                   ;;
@@ -217,7 +229,7 @@ jobs:
           state=failure
           description='This controller run did not execute real native iOS hosted E2E: selection failed.'
           if [[ "${RUN_ATTEMPT}" != 1 ]]; then
-            description="Retry with node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER}; native reruns do not enter the live queue."
+            description="Retry: node scripts/native-ios-hosted-e2e-retry.mjs --pr ${PR_NUMBER} --failure-code xcodebuild_failed"
           elif [[ "${SELECT_RESULT}" == success && "${SOURCE_RESULT}" != success ]]; then
             description='This controller run did not execute real native iOS hosted E2E: Repo Hygiene did not pass.'
           elif [[ "${SELECT_RESULT}" == success && "${SELECTED}" != true ]]; then

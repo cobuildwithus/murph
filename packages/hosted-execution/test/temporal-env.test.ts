@@ -145,6 +145,13 @@ describe("readHostedRuntimeTemporalEnvironment", () => {
 });
 
 describe("readHostedRuntimeTemporalWorkflowOptions", () => {
+  it("defaults ensure-processing to the twenty-second caller budget", () => {
+    expect(readHostedRuntimeEnsureProcessingTimeouts({})).toEqual({
+      ensureRuntimeProcessingHttpTimeoutMs: 20_000,
+      ensureRuntimeProcessingStartToCloseTimeoutMs: 25_000,
+    });
+  });
+
   it("keeps ensure-processing Activity Start-To-Close above its internal HTTP timeout", () => {
     const timeouts = readHostedRuntimeEnsureProcessingTimeouts({
       HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS: "12000",

@@ -36,7 +36,7 @@ The one-time group contribution catalog is:
 
 Group funding presents capped monthly sponsorship as the primary choice and a
 one-time contribution as the secondary choice. A monthly sponsor selects a
-$5, $10, or $20 maximum; the activation and automatic refills are ordinary
+$5, $10, $20, or $50 maximum; the activation and automatic refills are ordinary
 exact $5 purchases. No public surface converts dollars or usage credit
 into an estimated message count. `usage_25_usd` remains parseable for historical
 purchases and available only to current personal and Family surfaces.

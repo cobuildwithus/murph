@@ -519,14 +519,16 @@ corresponding real Junction sandbox user and require a connected
 `apple_health_kit` provider.
 
 Fresh-signup reset is `orchestrator_owned_reset` and fail-closed: before and
-after the PR lane it retires only lane-owned E2E deployments, enumerates the
-lane-exclusive Junction sandbox team, rejects more than one or any unexpected
-user, deletes the production-derived user when the isolated member exists or the
-sole orphan when that member is already absent, proves the team empty, resets
-only the explicitly E2E-named isolated database through the real Prisma
-migration toolchain, and deletes only the fixed Privy test user. This does not
-add or restore an internal/admin member-reset route. Production canary mode keeps an existing
-identity and performs no destructive cleanup.
+after the PR lane it retires only lane-owned E2E deployments, deleting aliases
+enumerated from each exact validated deployment before the deployment itself.
+It then enumerates the lane-exclusive Junction sandbox team, rejects more than
+one or any unexpected user, deletes the production-derived user when the
+isolated member exists or the sole orphan when that member is already absent,
+proves the team empty, resets only the explicitly E2E-named isolated database
+through the real Prisma migration toolchain, and deletes only the fixed Privy
+test user. This does not add or restore an internal/admin member-reset route.
+Production canary mode keeps an existing identity and performs no destructive
+cleanup.
 
 The main repo consumes only the exact private workflow run status/conclusion.
 Auth, OTP, legal/HealthKit consent, and provider-token stages must not export

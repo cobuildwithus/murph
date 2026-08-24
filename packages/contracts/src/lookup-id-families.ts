@@ -13,6 +13,7 @@ export const LOOKUP_ID_FAMILY_REGISTRY = Object.freeze<LookupIdFamilyDefinition[
   {
     family: "core",
     entityKind: "core",
+    prefix: `${ID_PREFIXES.vault}_`,
     exactIds: ["core", "current"],
     queryable: true,
   },

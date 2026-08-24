@@ -47,7 +47,7 @@ The hosted runner does not create a canonical membership copy in the personal va
 
 ## Interface choice
 
-Personal visibility extends the existing `murph.group` dynamic tool with `action="list_memberships"`. This keeps one hosted group control boundary and avoids a second API route or state owner.
+Personal visibility uses `murph.group_membership action="list_memberships"`. The family descriptor still dispatches through the one hosted group control boundary and adds no API route or state owner.
 
 Permission changes stay on the existing authenticated join page for members who already possess the owner-authorized link. Private Murph's only membership mutation is self-leave, selected from its current Web-owned list and bound to the signed callback member. Reacting in a personal direct-message thread to change a group permission remains deliberately out of scope. Existing server-owned reactions inside a route-bound group chat remain unchanged.
 

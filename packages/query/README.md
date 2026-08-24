@@ -1,11 +1,19 @@
 # `@murphai/query`
 
-Workspace-private read-helper, filter, derived-retrieval, and export-pack surface over canonical vault state. Query code must not mutate canonical vault data. It owns the rebuildable local query projection at `.runtime/projections/query.sqlite`, which backs both canonical read materialization and lexical search.
+Workspace-private read-helper, filter, derived-retrieval, and export-pack surface over canonical vault state. Query code must not mutate canonical vault data. It owns the rebuildable local query projection at `.runtime/projections/query.sqlite`, which backs cross-family, aggregate, derived, and lexical-search reads.
 
-Narrow health reads should query that projection by family/kind/date before
-decoding records. In particular, blood-test list/show must not hydrate the full
-projected vault; blood-specific classification and text matching run over the
-filtered `event`/`test` candidate set.
+Exact and family-local reads must not rebuild or hydrate that shared projection.
+Use core-owned exact readers when the canonical owner exposes one, or use
+`resolveCanonicalEntityInFamily()` / `readCanonicalEntityFamilySource()` for a
+bounded query-shaped family read. Alias resolution stays inside the selected
+family, and exact canonical ids retain precedence over aliases. Collection
+reads that still need projection freshness should use filtered APIs such as
+`listCanonicalEntities()` rather than materializing the complete vault model.
+
+Narrow health collection reads should query that projection by family/kind/date
+before decoding records. Exact blood-test and immunization lookups use the
+bounded event-family source reader so a stale projection cannot turn one-record
+lookup into a whole-vault rebuild.
 
 The first retrieval milestone now lives here too: lexical `searchVault()` over the sparse read model plus `buildTimeline()` for descending journal/event/display-grade sample-summary context.
 

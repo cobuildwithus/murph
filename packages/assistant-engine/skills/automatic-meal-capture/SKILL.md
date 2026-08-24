@@ -175,7 +175,7 @@ On a scheduled run:
    fails the run. On retry, combine photos that remain with same-occurrence
    removal revisions so a provider or partial-cleanup failure loses no meal.
 6. After inspection, enrichment, read-back, and photo cleanup, first prove the
-   active Goal read is complete. Run `vault-cli goal list --status active
+   cheap read-only active Goal discovery is complete. Run `vault-cli goal list --status active
    --limit 200 --format json`. If it returns 200 records, fail closed with the
    ordinary compact closeout: run no Goal detail reads, perform no Goal or
    measurement mutation, ask no question, and attach no card. Otherwise, run
@@ -186,47 +186,12 @@ On a scheduled run:
    date, conflicts, and the 1,200-kcal boundary only after inspecting that
    complete detail set. This active-target authority read is separate from any
    all-status Goal lookup used to reuse or honor Murph's managed paused or
-   abandoned proposal; never substitute that lookup here. Then read and apply
-   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
-   before resolving a card, even when five accepted goals already exist. This
-   first requires `vault-cli memory show --format json`; if that complete
-   canonical memory read fails or is unreadable, keep the ordinary compact
-   closeout, perform no Goal or measurement mutation, ask no question, and
-   attach no card. A clearly current saved age under 18 or clearly current
-   intuitive-eating or number-sensitive preference uses the same non-numeric,
-   no-write, no-question, no-card path. Missing or ambiguous age alone does not
-   block a scheduled closeout and never authorizes a question. The gate also
-   requires both `vault-cli condition list --status active --limit 200 --format
-   json` and `vault-cli regimen list --status active --limit 200 --format json`.
-   If either returns exactly 200 records or fails, run no condition or regimen
-   detail reads, keep the ordinary compact closeout, perform no Goal or
-   measurement mutation, ask no question, and attach no card. Otherwise, run
-   `vault-cli condition show <condition-id> --format json` for every returned
-   condition and `vault-cli regimen show <regimen-id> --format json` for every
-   returned regimen before applying the safety gate. Never use the five-record
-   context projection, a title, substance, severity, or the default list prefix
-   to select the safety set. If any required detail read fails or is unreadable,
-   use the same ordinary-text, no-write, no-question, no-card failure behavior.
-   Also run `vault-cli event list --kind procedure --limit 200 --format json`
-   and follow the shared gate's procedure-item inspection and conditional detail
-   reads. A completed bariatric procedure uses the same non-numeric,
-   no-write, no-question, no-card path; failed, unreadable, or saturated
-   procedure discovery uses the failure path. Also run `vault-cli event list
-   --kind encounter --limit 200 --format json`, detail-read every returned item
-   with nonzero `data.diagnosesCount`, and apply the shared gate's current active
-   diagnosis rules. A relevant active documented or suspected diagnosis uses
-   the same non-numeric path; failed, unreadable, saturated, required-detail,
-   or unresolved safety-relevant diagnosis discovery uses the failure path.
-   Then run the shared gate's bounded body-measurement read, separate
-   `pregnancy-test` measurement read, and bounded canonical test-event list plus
-   every required test detail read. A failed read, a body-measurement read
-   saturated without resolving usable BMI evidence, or a saturated
-   pregnancy-evidence read uses the same failure behavior. An explicit positive
-   pregnancy-test result from either canonical owner
-   uses the same non-numeric, no-write, no-question, no-card path. Reuse all
-   complete gate reads for the current turn. If the active target bundle is
-   incomplete after those reads, the first eligible managed closeout has one
-   proposal-only exception. Read and follow
+   abandoned proposal; never substitute that lookup here. If active authority
+   is ambiguous, unit-incompatible, comparator-incompatible, or otherwise
+   cannot support either a card or responsible proposal, keep the ordinary
+   compact closeout without the unrelated safety fanout. Only when compatible
+   authority is incomplete after those reads does the first eligible managed
+   closeout have one proposal-only exception. Read and follow
    `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md`,
    then run `vault-cli goal list --limit 200 --format json` and detail-read only
    candidate managed records. If that read fails, is unreadable, is saturated,
@@ -234,15 +199,24 @@ On a scheduled run:
    status, do not create, change, or automatically repeat a numeric proposal.
    Keep the ordinary compact closeout and attach no card. The absence of that
    managed Goal is the first-run authority; add no flag or second state owner.
-   When the complete lookup proves absence, the safety gate passed, compatible
-   explicit targets are unambiguous, and already-known inputs prove one
-   responsible five-target bundle, create that single canonical Goal as
+   If responsible inputs are missing or the bundle is infeasible, write nothing
+   and keep the ordinary closeout. When either one complete accepted card bundle
+   or this responsible first-run proposal candidate remains, read and apply
+   `$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md`
+   as the complete safety gate before deriving or presenting numeric values,
+   any Goal write, totals, or a card. Reuse every complete identical current-turn
+   read the shared gate permits. When that gate suppresses numeric output or any
+   required safety read is incomplete, unavailable, or unreadable, keep the
+   ordinary compact closeout, perform no Goal or measurement mutation, ask no
+   question, and attach no card. When the complete all-status lookup proves
+   absence, the safety gate passes, compatible explicit targets are unambiguous,
+   and already-known inputs prove one responsible five-target bundle, create
+   that single canonical Goal as
    `paused`, with `window.startAt` equal to the selected capture/card local date.
    Read it back, then explain all five provisional values, their material facts
    and assumptions, and the effective date in ordinary text. Ask no question,
-   attach no card, and never activate it on the scheduled turn. If responsible
-   inputs are missing or the bundle is infeasible, write nothing and keep the
-   ordinary closeout. Member correction, acceptance, or decline remains an
+   attach no card, and never activate it on the scheduled turn. Member
+   correction, acceptance, or decline remains an
    interactive turn. If numeric presentation is suppressed, or the active
    target bundle is ambiguous, unit-incompatible, or comparator-incompatible,
    retain the ordinary compact closeout and do not attach a card. Keep the occurrence
@@ -256,9 +230,19 @@ On a scheduled run:
    out-of-window target for current authority and conflict resolution; never
    copy, expose, derive from, or mutate a Goal because of it. If fewer than five
    applicable targets remain, ask no question and use ordinary closeout text.
-   A card-qualifying target must use the exact canonical metric/unit pair:
-   `dietary-calories` with `kcal`, and
-   `protein-grams`, `carbs-grams`, `fat-grams`, and `fiber-grams` with `g`.
+   New authoring uses `dietary-calories`. Resolve that canonical owner first;
+   when it exists, use it and ignore every globally ambiguous `calories`
+   target. Only without a canonical owner may an applicable exact-point
+   `calories` target in `kcal` fill the card's calorie slot when its
+   `targetId` is `daily-calories`. Its same containing Goal must own exactly one
+   applicable compatible point for every historical id, metric, and unit pair:
+   `daily-protein` / `protein-grams` / `g`, `daily-carbohydrates` /
+   `carbs-grams` / `g`, `daily-fat` / `fat-grams` / `g`, and `daily-fiber` /
+   `fiber-grams` / `g`. Require one complete historical set. Any other
+   `calories` target is not dietary authority even when the four nutrition
+   metrics share its Goal; never combine the historical set with another Goal
+   or managed proposal. Never infer ownership from a title, slug, domain, or
+   description, and never rename or mutate a Goal just to repair this key.
    A target in another unit remains authoritative, but never compare, convert,
    or copy its raw value into this fixed-unit card; on a scheduled occurrence,
    ask no question and use ordinary closeout text. Never infer a target from
@@ -270,8 +254,8 @@ On a scheduled run:
    derive from its bound, and never create, replace, or remove a managed target
    around it. On a scheduled occurrence, ask no question, perform no Goal or
    measurement mutation, and use ordinary closeout text without a card.
-7. Only when all five qualifying exact point targets resolve from active
-   canonical Goals, run the exact canonical
+7. Only when the complete target-authority read in step 6 resolves one
+   unambiguous card-authorizing bundle, run the exact canonical
    `vault-cli meal totals --from <date> --to <date>` read for the selected date
    range immediately before any response-card attachment; do not reuse an
    earlier total or calculate nutrition independently. When the run covers

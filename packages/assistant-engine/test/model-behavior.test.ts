@@ -1703,7 +1703,10 @@ describe('assistant local PDF evidence guidance', () => {
       'For voice memos and audio/video, use transcript fragments directly when ingestion provides them',
     )
     expect(prompt).toContain(
-      'When transcripts are missing and the task truly needs the media content, call `send_progress_update` before bounded local media tools',
+      'When transcripts are missing and the task truly needs the media content, use bounded local media tools',
+    )
+    expect(prompt).not.toContain(
+      'call `send_progress_update` before bounded local media tools',
     )
     expect(prompt).not.toContain(
       'This applies even when the platform has already extracted the text',
@@ -2013,9 +2016,11 @@ describe('assistant system prompt cache stability', () => {
     // an owning skill. Capability-specific browser, connected-app, phone-call,
     // and Family mechanics are intentionally excluded from this resident layer.
     // The local automation delivery limitation, the established Apple
-    // Health/WHOOP relay and cross-route repeated-set boundary, plus the private
-    // longitudinal recommendation policy set this ceiling.
-    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(58_910)
+    // Health/WHOOP relay, cross-route repeated-set boundary, private
+    // longitudinal recommendation policy, response-card dietary/burn
+    // target-authority boundary, and explicit group-family tool routing set this
+    // ceiling.
+    expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(59_104)
   })
 
   it('passes the injected CLI contract through byte-for-byte at the stable-route tail', () => {
@@ -3059,7 +3064,7 @@ describe('assistant conversation scope', () => {
     expect(prompt).toContain('Do not log medications, symptoms, meals, measurements')
     expect(prompt).not.toContain('murph.assistant_style')
     expect(prompt).toContain(
-      'a same-turn first-party group funding URL returned by `murph.group action="read_usage"` after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link',
+      'a same-turn first-party group funding URL returned by `murph.group_usage action="read_usage"` after someone directly asks to fund, sponsor, contribute, pay to add usage, or receive its funding link',
     )
     expect(prompt).toContain(
       'or after they ask generically how to get or add more usage, keep the room going, or accept an explanation of the group\'s usage options',
@@ -3235,7 +3240,7 @@ describe('assistant conversation scope', () => {
       'Group email has no filesystem access. Do not try to read a usage skill.',
     )
     expect(prompt).toContain(
-      'call `murph.group action="read_usage"` exactly once',
+      'call `murph.group_usage action="read_usage"` exactly once',
     )
     expect(prompt).toContain(
       'At least all of this room\'s included usage for the current period has been used.',

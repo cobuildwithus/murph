@@ -85,6 +85,7 @@ import {
 import {
   attachCodexAppServerProcessExitCleanup,
   stopCodexAppServerChild,
+  withCodexRpcTimeout,
 } from '../src/assistant-codex/app-server-rpc.ts'
 import {
   extractCodexAppServerUserMessageImages,
@@ -775,6 +776,37 @@ async function runCodexTelegramVoiceMemoOnlyTurn(input: {
 }
 
 describe('assistant codex runtime', () => {
+  it('runs RPC timeout cleanup only when the timeout wins', async () => {
+    vi.useFakeTimers()
+    try {
+      const timedOutCleanup = vi.fn()
+      const timedOutRequest = withCodexRpcTimeout(
+        new Promise<never>(() => undefined),
+        25,
+        'subagent thread/resume',
+        timedOutCleanup,
+      )
+      const timeoutExpectation = expect(timedOutRequest).rejects.toMatchObject({
+        code: 'ASSISTANT_CODEX_APP_SERVER_TIMEOUT',
+      })
+
+      await vi.advanceTimersByTimeAsync(25)
+      await timeoutExpectation
+      expect(timedOutCleanup).toHaveBeenCalledOnce()
+
+      const completedCleanup = vi.fn()
+      await expect(withCodexRpcTimeout(
+        Promise.resolve('metadata'),
+        25,
+        'subagent thread/resume',
+        completedCleanup,
+      )).resolves.toBe('metadata')
+      expect(completedCleanup).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('builds Codex app-server args for configured turns', () => {
     expect(
       buildCodexAppServerArgs({
@@ -1305,7 +1337,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: '{"error":"invalid_response_media_arguments","hints":[{"field":"media[].url","code":"custom","expected":"public_https_image_url"}]}',
+                  text: '{"error":"invalid_response_media_arguments","validationIssues":[{"code":"custom","message":"Assistant response media URLs must be valid public HTTPS image URLs.","params":{"murphExpectedShape":"public_https_image_url"},"path":["media",0,"url"]}]}',
                 },
               ],
             },
@@ -3637,7 +3669,7 @@ describe('assistant codex runtime', () => {
                 message_ref: earlierInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           child.stdout.write(jsonLine({
@@ -3649,7 +3681,7 @@ describe('assistant codex runtime', () => {
                 message_ref: independentInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           child.stdout.write(jsonLine({
@@ -3661,7 +3693,7 @@ describe('assistant codex runtime', () => {
                 message_ref: laterInputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
 
@@ -3786,11 +3818,11 @@ describe('assistant codex runtime', () => {
             method: 'item/tool/call',
             params: {
               arguments: {
-                action: 'message_current_sender',
+                action: 'continue_current_sender_privately',
                 message_ref: inputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
           await privateStarted.promise
@@ -3803,7 +3835,7 @@ describe('assistant codex runtime', () => {
                 message_ref: inputId,
               },
               namespace: 'murph',
-              tool: 'group',
+              tool: 'group_consult',
             },
           }))
 
@@ -3855,7 +3887,7 @@ describe('assistant codex runtime', () => {
       expectedMode: 'continuation' as const,
       expectedNoticeCount: 1,
       label: 'group continuation',
-      laterAction: 'message_current_sender' as const,
+      laterAction: 'continue_current_sender_privately' as const,
     },
   ])('claims an earlier current-sender $label before a contradictory new request', async ({
     earlierAction,
@@ -3935,7 +3967,7 @@ describe('assistant codex runtime', () => {
                   message_ref: inputId,
                 },
                 namespace: 'murph',
-                tool: 'group',
+                tool: 'group_consult',
               },
             }),
             jsonLine({
@@ -3947,7 +3979,7 @@ describe('assistant codex runtime', () => {
                   message_ref: inputId,
                 },
                 namespace: 'murph',
-                tool: 'group',
+                tool: 'group_consult',
               },
             }),
           ].join(''))
@@ -16746,7 +16778,7 @@ describe('assistant codex runtime', () => {
               contentItems: [
                 {
                   type: 'inputText',
-                  text: 'invalid progress update arguments',
+                  text: '{"error":"invalid_progress_update_arguments","validationIssues":[{"origin":"string","code":"too_small","minimum":1,"inclusive":true,"path":["text"],"message":"Too small: expected string to have >=1 characters"}]}',
                 },
               ],
             },
@@ -16851,7 +16883,7 @@ describe('assistant codex runtime', () => {
               success: false,
               contentItems: [{
                 type: 'inputText',
-                text: 'invalid pending vault-file arguments',
+                text: '{"error":"invalid_pending_vault_files_arguments","validationIssues":[{"origin":"string","code":"invalid_format","format":"regex","pattern":"/^outbox_[0-9a-f]{32}$/u","path":["intentIds",0],"message":"Invalid string: must match pattern /^outbox_[0-9a-f]{32}$/u"}]}',
               }],
             },
           })
@@ -21630,7 +21662,7 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'group',
+                  tool: 'group_membership',
                   arguments: { action: 'list_memberships' },
                   turnId: 'turn-steered-finals',
                 },
@@ -21656,7 +21688,7 @@ describe('steered final segments', () => {
                 method: 'item/tool/call',
                 params: {
                   namespace: 'murph',
-                  tool: 'group',
+                  tool: 'group_data',
                   arguments: { action: 'offer_access' },
                   turnId: 'turn-steered-finals',
                 },
@@ -22089,6 +22121,61 @@ describe('steered final segments', () => {
     expect(result.transcriptMessage).toContain(
       '[Murph tracked workout source: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ;',
     )
+  })
+
+  it('keeps a visible workout follow-up id identical across delivery and transcript', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'assistant-workout-follow-up',
+        type: 'assistant_message',
+        message:
+          'How many reps did you get on set 2?\n\n' +
+          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+      }),
+    ])
+
+    expect(result.responseCard).toBeNull()
+    const message =
+      'How many reps did you get on set 2?\n\n' +
+      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]'
+    expect(result.finalMessage).toBe(message)
+    expect(result.transcriptMessage).toBe(message)
+    expect(result.providerAuthoredFinalMessage).toBe(message)
+  })
+
+  it('keeps a steered workout follow-up id identical across delivery and transcript', async () => {
+    const result = await runScriptedSteeredFinalSegmentsTurn([
+      completedItemEvent({
+        id: 'user-workout-follow-up-1',
+        type: 'user_message',
+        message: 'Ask me about my next set.',
+      }),
+      completedItemEvent({
+        id: 'assistant-workout-follow-up-1',
+        type: 'assistant_message',
+        message:
+          'What did you get on the next set?\n\n' +
+          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+      }),
+      completedItemEvent({
+        id: 'user-workout-follow-up-2',
+        type: 'user_message',
+        message: 'One more thought.',
+      }),
+      completedItemEvent({
+        id: 'assistant-workout-follow-up-2',
+        type: 'assistant_message',
+        message: 'Final follow-up answer.',
+      }),
+    ])
+
+    expect(result.precedingAgentMessageSegments).toEqual([{
+      deliveryContextOrdinal: 0,
+      media: [],
+      response:
+        'What did you get on the next set?\n\n' +
+        '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+    }])
   })
 
   it('renders every semantic workout set from trusted state when the card envelope is too large', async () => {

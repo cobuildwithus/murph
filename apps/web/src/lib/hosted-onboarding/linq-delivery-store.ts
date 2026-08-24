@@ -1,6 +1,11 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  acquireHostedLinqChatOwnershipLockTx,
+} from "../hosted-routing/linq-chat-ownership-lock";
+import { LINQ_API_DEFAULT_TIMEOUT_MS } from "../linq/api";
+import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
+import {
   createHostedLinqChatLookupKey,
   createHostedLinqChatLookupKeyReadCandidates,
   createHostedLinqMessageLookupKey,
@@ -42,10 +47,6 @@ import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 import { toHostedOnboardingLogIdSuffix } from "./logging";
 import { normalizePhoneNumber } from "./phone";
 import { lockHostedMemberRow } from "./shared";
-import { generateHostedRandomPrefixedId, sha256Hex } from "../primitives";
-import {
-  acquireHostedLinqChatOwnershipLockTx,
-} from "../hosted-routing/linq-chat-ownership-lock";
 
 type HostedLinqDeliveryClient = PrismaClient | Prisma.TransactionClient;
 const HOSTED_LINQ_DELIVERY_PROVIDER_DISPATCH_STARTED_STATUS =
@@ -74,6 +75,13 @@ type HostedLinqDeliveryProviderDispatchData = {
   template: string | null;
 };
 export const HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS = 15 * 60 * 1000;
+// A rich-link replay is a bounded primary request plus two bounded link
+// attempts. Once that provider window and a small completion margin pass, the
+// partial-delivery fence cannot still own useful work. Reusing the general
+// fifteen-minute pre-provider fence here would strand a receipt-triggered
+// recovery when the first replay times out concurrently.
+const HOSTED_AI_USAGE_LIMIT_RICH_LINK_REPLAY_CLAIM_STALE_MS =
+  LINQ_API_DEFAULT_TIMEOUT_MS + 5_000;
 const HOSTED_AI_USAGE_LINQ_NOTICE_DELIVERY_SOURCE =
   "hosted_webhook_side_effect";
 const HOSTED_AI_USAGE_TELEGRAM_NOTICE_DELIVERY_SOURCE =
@@ -2845,7 +2853,7 @@ async function claimExistingHostedLinqDeliveryProviderDispatchTx(input: {
   if (replayableUsageLimitRichLinkPartial) {
     const retryAt = new Date(
       input.delivery.attemptedAt.getTime()
-        + HOSTED_AI_USAGE_LIMIT_NOTICE_CLAIM_STALE_MS,
+        + HOSTED_AI_USAGE_LIMIT_RICH_LINK_REPLAY_CLAIM_STALE_MS,
     );
     if (
       input.delivery.status

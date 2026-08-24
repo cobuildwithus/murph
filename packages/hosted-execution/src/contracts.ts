@@ -37,6 +37,18 @@ export const HOSTED_EXECUTION_NONCE_HEADER = "x-hosted-execution-nonce";
 export const HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER =
   "x-hosted-execution-signing-key-id";
 
+export const HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION = "bindings-v1";
+export const HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND =
+  "hosted_temporal_worker_binding_admission";
+
+export interface HostedTemporalWorkerBindingAdmission {
+  bindingContractRevision: typeof HOSTED_TEMPORAL_WORKER_BINDING_CONTRACT_REVISION;
+  environment: "production";
+  kind: typeof HOSTED_TEMPORAL_WORKER_BINDING_ADMISSION_KIND;
+  owner: "cloudflare" | "web";
+  signingKeyId: string;
+}
+
 export const HOSTED_EXECUTION_RUNTIME_CONTROL_WAKE_KINDS = [
   "runtime.manual-requested",
   "runtime.pending-effects-reconcile-requested",
@@ -188,6 +200,8 @@ export interface HostedExecutionMemberActivatedEvent extends HostedExecutionBase
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
@@ -787,6 +801,8 @@ export interface HostedExecutionMemberActivatedWake extends HostedExecutionBaseW
   initialGroupRoomModelMarkdown?: string | null;
   kind: "member.activated";
   memberChannels: HostedExecutionMemberChannels;
+  onboardingFollowupEnrollment?: boolean;
+  onboardingFollowupRoute?: HostedExecutionAssistantNotificationRoute | null;
   signupWelcome?: HostedExecutionMemberActivationSignupWelcome | null;
   timeZone?: string | null;
 }
@@ -1102,7 +1118,7 @@ export type HostedRuntimeTimerTriggerKind =
   (typeof HOSTED_RUNTIME_TIMER_TRIGGER_KINDS)[number];
 
 export const HOSTED_EXECUTION_USER_ID_HEADER = "x-hosted-execution-user-id";
-export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 10_000;
+export const DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS = 20_000;
 export const HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS = 1_000;
 export const MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS =
   HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS + 1;
