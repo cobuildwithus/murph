@@ -202,6 +202,47 @@ test("scheduled log queries list, read, filter, and show records across schedule
   }
 });
 
+test("scheduled log queries retain records admitted at the historical 160-character slug boundary", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-scheduled-log-slug-boundary-"));
+  const slug = "s".repeat(160);
+
+  try {
+    await writeVaultFile(
+      vaultRoot,
+      `bank/scheduled-logs/${slug}.md`,
+      [
+        "---",
+        "schemaVersion: murph.frontmatter.scheduled-log.v1",
+        "docType: scheduled_log",
+        "scheduledLogId: slog_01JX8T5QY2M5ZBV64ZP4N1DRB5",
+        `slug: ${slug}`,
+        "title: Historical boundary schedule",
+        "status: active",
+        "schedule:",
+        "  kind: dailyLocal",
+        "  localTime: 07:00",
+        "action:",
+        "  kind: measurement.add",
+        "  measurements:",
+        "    -",
+        "      metric: body-weight",
+        "      value: 181.4",
+        "      unit: lb",
+        "createdAt: 2026-04-22T07:00:00.000Z",
+        "updatedAt: 2026-04-22T07:00:00.000Z",
+        "---",
+      ].join("\n"),
+    );
+
+    const listed = await listScheduledLogs(vaultRoot);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.slug, slug);
+    assert.equal((await showScheduledLog(vaultRoot, slug))?.scheduledLogId, listed[0]?.scheduledLogId);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("scheduled log queries reject malformed registry documents", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-scheduled-logs-invalid-"));
 

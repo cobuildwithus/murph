@@ -998,7 +998,7 @@ test("scheduled-log save accepts shared action fields for every action kind", as
   }
 });
 
-test("scheduled-log save validates a derived slug before any registry or audit write", async () => {
+test("scheduled-log save validates the canonical slug boundary before any registry or audit write", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-scheduled-log-derived-slug-boundary-",
   );
@@ -1006,7 +1006,7 @@ test("scheduled-log save validates a derived slug before any registry or audit w
   try {
     const cli = createScheduledLogCli();
     await initializeVault({ vaultRoot });
-    const titleAtSlugLimit = "s".repeat(120);
+    const titleAtSlugLimit = "s".repeat(160);
     const sharedArgs = [
       "--schedule-kind",
       "dailyLocal",
@@ -1034,7 +1034,7 @@ test("scheduled-log save validates a derived slug before any registry or audit w
     assert.equal(saved.envelope.ok, true);
     const savedData = requireData(saved.envelope);
     assert.equal(savedData.lookupId, titleAtSlugLimit);
-    assert.equal(savedData.lookupId.length, 120);
+    assert.equal(savedData.lookupId.length, 160);
 
     const shown = await runInProcessJsonCli<ScheduledLogShowResult>(cli, [
       "scheduled-log",
@@ -1053,13 +1053,15 @@ test("scheduled-log save validates a derived slug before any registry or audit w
       true,
     );
     const privatePrefix = "private-derived-slug-sentinel-";
-    const titleOverSlugLimit = `${privatePrefix}${"x".repeat(121 - privatePrefix.length)}`;
-    assert.equal(titleOverSlugLimit.length, 121);
+    const slugOverLimit = `${privatePrefix}${"x".repeat(161 - privatePrefix.length)}`;
+    assert.equal(slugOverLimit.length, 161);
 
     const rejected = await runInProcessJsonCli(cli, [
       "scheduled-log",
       "save",
-      titleOverSlugLimit,
+      "Rejected schedule",
+      "--slug",
+      slugOverLimit,
       ...sharedArgs,
     ]);
     assert.equal(rejected.exitCode, 1);
@@ -1070,7 +1072,7 @@ test("scheduled-log save validates a derived slug before any registry or audit w
       rejected.envelope.error.fieldErrors?.map(({ code, path }) => ({ code, path })),
       [{ code: "too_big", path: "slug" }],
     );
-    assert.equal(JSON.stringify(rejected.envelope).includes(titleOverSlugLimit), false);
+    assert.equal(JSON.stringify(rejected.envelope).includes(slugOverLimit), false);
     assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSave);
   } finally {
     await rm(parentRoot, { force: true, recursive: true });

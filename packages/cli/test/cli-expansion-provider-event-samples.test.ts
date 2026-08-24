@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { listAssistantCronJobs } from '@murphai/assistant-engine/assistant-cron'
@@ -80,6 +80,20 @@ async function runSliceCliRaw(args: string[]) {
   })
 
   return output.join('').trim()
+}
+
+async function snapshotVaultFiles(vaultRoot: string): Promise<Map<string, Buffer>> {
+  const snapshot = new Map<string, Buffer>()
+  const relativePaths = await readdir(vaultRoot, { recursive: true })
+
+  for (const relativePath of relativePaths.sort((left, right) => left.localeCompare(right))) {
+    const absolutePath = path.join(vaultRoot, relativePath)
+    if ((await stat(absolutePath)).isFile()) {
+      snapshot.set(relativePath, await readFile(absolutePath))
+    }
+  }
+
+  return snapshot
 }
 
 test('provider, food, recipe, event, and samples schemas expose the new noun entrypoints', async () => {
@@ -832,6 +846,167 @@ test.sequential(
         'utf8',
       )
       assert.doesNotMatch(foodMarkdown, /autoLogDaily:/u)
+    } finally {
+      await rm(vaultRoot, { recursive: true, force: true })
+    }
+  },
+)
+
+test.sequential(
+  'food schedule validates its derived job before writes and preserves canonical cron loading',
+  async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-food-daily-boundary-'))
+
+    try {
+      await runSliceCli(['init', '--vault', vaultRoot])
+      const slugAtLimit = 'f'.repeat(151)
+      const scheduledAtLimit = await runSliceCli<{
+        foodId: string
+        jobId: string
+      }>([
+        'food',
+        'schedule',
+        'Boundary food',
+        '--time',
+        '08:00',
+        '--slug',
+        slugAtLimit,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(scheduledAtLimit.ok, true, JSON.stringify(scheduledAtLimit))
+      const jobsAtLimit = await listAssistantCronJobs(vaultRoot)
+      assert.equal(
+        jobsAtLimit.some((job) => job.jobId === requireData(scheduledAtLimit).jobId),
+        true,
+      )
+      const scheduledLogMarkdown = await readFile(
+        path.join(vaultRoot, 'bank', 'scheduled-logs', `auto-log-${slugAtLimit}.md`),
+        'utf8',
+      )
+      assert.match(scheduledLogMarkdown, new RegExp(`slug: auto-log-${slugAtLimit}`, 'u'))
+
+      const beforeRejectedSchedule = await snapshotVaultFiles(vaultRoot)
+      const rejectedSlug = 'g'.repeat(152)
+      const rejected = await runSliceCli([
+        'food',
+        'schedule',
+        'Correctable boundary food',
+        '--time',
+        '09:00',
+        '--slug',
+        rejectedSlug,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(rejected.ok, false)
+      assert.equal(rejected.error.code, 'contract_invalid')
+      assert.equal(
+        rejected.error.message,
+        'The generated daily food schedule slug is too long. Retry food schedule with a shorter --slug.',
+      )
+      assert.equal(JSON.stringify(rejected).includes(rejectedSlug), false)
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSchedule)
+
+      const corrected = await runSliceCli<{
+        foodId: string
+        jobId: string
+      }>([
+        'food',
+        'schedule',
+        'Correctable boundary food',
+        '--time',
+        '09:00',
+        '--slug',
+        'corrected-boundary-food',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(corrected.ok, true, JSON.stringify(corrected))
+
+      const jobsAfterCorrection = await listAssistantCronJobs(vaultRoot)
+      assert.equal(jobsAfterCorrection.length, 2)
+      assert.equal(
+        jobsAfterCorrection.some((job) => job.jobId === requireData(corrected).jobId),
+        true,
+      )
+
+      const existingSlug = 'e'.repeat(152)
+      const existing = await runSliceCli<{
+        foodId: string
+      }>([
+        'food',
+        'save',
+        'Existing boundary food',
+        '--slug',
+        existingSlug,
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(existing.ok, true, JSON.stringify(existing))
+      const beforeRejectedExistingSchedule = await snapshotVaultFiles(vaultRoot)
+      const rejectedExisting = await runSliceCli([
+        'food',
+        'schedule',
+        'Existing boundary food',
+        '--time',
+        '10:00',
+        '--slug',
+        'attempted-shorter-slug',
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(rejectedExisting.ok, false)
+      assert.equal(rejectedExisting.error.code, 'contract_invalid')
+      assert.equal(
+        rejectedExisting.error.message,
+        'The existing food slug is too long for daily scheduling. Use food rename to shorten its slug, then retry food schedule.',
+      )
+      assert.equal(JSON.stringify(rejectedExisting).includes(existingSlug), false)
+      assert.deepEqual(
+        await snapshotVaultFiles(vaultRoot),
+        beforeRejectedExistingSchedule,
+      )
+
+      const renamed = await runSliceCli<{
+        foodId: string
+      }>([
+        'food',
+        'rename',
+        requireData(existing).foodId,
+        '--title',
+        'Existing boundary food',
+        '--slug',
+        'existing-boundary-food',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(renamed.ok, true, JSON.stringify(renamed))
+      assert.equal(requireData(renamed).foodId, requireData(existing).foodId)
+
+      const scheduledExisting = await runSliceCli<{
+        foodId: string
+        jobId: string
+      }>([
+        'food',
+        'schedule',
+        'Existing boundary food',
+        '--time',
+        '10:00',
+        '--vault',
+        vaultRoot,
+      ])
+      assert.equal(scheduledExisting.ok, true, JSON.stringify(scheduledExisting))
+      assert.equal(requireData(scheduledExisting).foodId, requireData(existing).foodId)
+      const finalJobs = await listAssistantCronJobs(vaultRoot)
+      assert.equal(finalJobs.length, 3)
+      assert.equal(
+        finalJobs.some((job) => job.jobId === requireData(scheduledExisting).jobId),
+        true,
+      )
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

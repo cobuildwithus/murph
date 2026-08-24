@@ -360,7 +360,7 @@ function matchesScheduledLogStatus(value: string | null | undefined, status: str
   return normalized.length === 0 ? true : Boolean(value && normalized.includes(value.toLowerCase()));
 }
 
-function buildDailyFoodScheduledLogSlug(food: Pick<FoodRecord, "slug">): string {
+export function buildDailyFoodScheduledLogSlug(food: Pick<FoodRecord, "slug">): string {
   return normalizeSlug(`auto-log-${food.slug}`, "slug");
 }
 

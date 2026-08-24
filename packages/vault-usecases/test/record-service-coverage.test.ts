@@ -1242,6 +1242,110 @@ describe("record service seams", () => {
     assert.equal(recipe.parseRecipePayload(recipe.scaffoldRecipePayload()).title, "Sheet Pan Salmon Bowls");
   });
 
+  test("daily food scheduling validates the exact eventual slug before food persistence", async () => {
+    const createInvalidSlugError = () => Object.assign(
+      new Error("slug exceeds the maximum length."),
+      {
+        code: "VAULT_INVALID_INPUT",
+        details: {},
+        name: "VaultError",
+      },
+    );
+    const missingFoodError = Object.assign(new Error("Food record was not found."), {
+      code: "VAULT_FOOD_MISSING",
+      details: {},
+      name: "VaultError",
+    });
+    const buildDailyFoodScheduledLogSlug = vi.fn((food: { slug: string }) => {
+      const derivedSlug = `auto-log-${food.slug}`;
+      if (derivedSlug.length > 160) {
+        throw createInvalidSlugError();
+      }
+      return derivedSlug;
+    });
+    const upsertFood = vi.fn();
+    const upsertDailyFoodScheduledLog = vi.fn();
+    const listFoods = vi.fn(async (): Promise<Array<{
+      foodId: string;
+      markdown: string;
+      relativePath: string;
+      slug: string;
+      status: string;
+      title: string;
+    }>> => []);
+    const core = {
+      buildDailyFoodScheduledLogSlug,
+      listFoods,
+      readFood: vi.fn(async () => {
+        throw missingFoodError;
+      }),
+      upsertDailyFoodScheduledLog,
+      upsertFood,
+    };
+    const food = await importWithMocks<typeof import("../src/usecases/food.ts")>(
+      "../src/usecases/food.ts",
+      {
+        "../src/runtime-import.ts": mockActualModule("../src/runtime-import.ts", (actual) => ({
+          ...actual,
+          loadRuntimeModule: vi.fn(async (specifier: string) => {
+            if (specifier === "@murphai/core") {
+              return core;
+            }
+            throw new Error(`Unexpected specifier: ${specifier}`);
+          }),
+        })),
+      },
+    );
+
+    await assert.rejects(
+      () => food.addDailyFoodRecord({
+        vault: "./vault",
+        title: "New boundary food",
+        slug: "n".repeat(152),
+        time: "08:00",
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "contract_invalid" &&
+        error.message ===
+          "The generated daily food schedule slug is too long. Retry food schedule with a shorter --slug.",
+    );
+    expect(buildDailyFoodScheduledLogSlug).toHaveBeenLastCalledWith({
+      slug: "n".repeat(152),
+    });
+    expect(upsertFood).not.toHaveBeenCalled();
+    expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
+
+    listFoods.mockResolvedValueOnce([{
+      foodId: "food_existing",
+      markdown: "# Existing boundary food",
+      relativePath: "bank/foods/existing-boundary-food.md",
+      slug: "e".repeat(152),
+      status: "active",
+      title: "Existing boundary food",
+    }]);
+    await assert.rejects(
+      () => food.addDailyFoodRecord({
+        vault: "./vault",
+        title: "Existing boundary food",
+        slug: "attempted-shorter-slug",
+        time: "09:00",
+      }),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "contract_invalid" &&
+        error.message ===
+          "The existing food slug is too long for daily scheduling. Use food rename to shorten its slug, then retry food schedule.",
+    );
+    expect(buildDailyFoodScheduledLogSlug).toHaveBeenLastCalledWith({
+      slug: "e".repeat(152),
+    });
+    expect(upsertFood).not.toHaveBeenCalled();
+    expect(upsertDailyFoodScheduledLog).not.toHaveBeenCalled();
+  });
+
   test("food edit clearing attached regimens does not preserve related regimen links", async () => {
     const foodCore = {
       upsertFood: vi.fn(async (_input: Record<string, unknown>) => ({

@@ -49,6 +49,9 @@ interface FoodReadModel {
 }
 
 interface FoodCoreRuntime {
+  buildDailyFoodScheduledLogSlug(food: {
+    slug: string
+  }): string
   loadVault(input: {
     vaultRoot: string
   }): Promise<{
@@ -399,6 +402,11 @@ export async function addDailyFoodRecord(input: {
       title,
       slug,
     })
+    validateDailyFoodScheduledLogSlug({
+      core,
+      existingFood: existingFood !== null,
+      foodSlug: existingFood?.slug ?? slug ?? slugifyFoodLookup(title),
+    })
     const persisted = await persistFoodRecord({
       core,
       vault: input.vault,
@@ -712,12 +720,7 @@ async function findFoodForDailyAdd(
         slug: candidateSlug,
       })
     } catch (error) {
-      const vaultErrorCode =
-        error && typeof error === 'object' && 'code' in error
-          ? String((error as { code?: unknown }).code ?? '')
-          : ''
-
-      if (vaultErrorCode !== 'VAULT_FOOD_MISSING') {
+      if (readVaultErrorCode(error) !== 'VAULT_FOOD_MISSING') {
         throw error
       }
     }
@@ -725,6 +728,33 @@ async function findFoodForDailyAdd(
 
   const foods = await core.listFoods(input.vault)
   return foods.find((food) => food.title === input.title) ?? null
+}
+
+function validateDailyFoodScheduledLogSlug(input: {
+  core: FoodCoreRuntime
+  existingFood: boolean
+  foodSlug: string
+}) {
+  try {
+    input.core.buildDailyFoodScheduledLogSlug({ slug: input.foodSlug })
+  } catch (error) {
+    if (readVaultErrorCode(error) !== 'VAULT_INVALID_INPUT') {
+      throw error
+    }
+
+    throw new VaultCliError(
+      'contract_invalid',
+      input.existingFood
+        ? 'The existing food slug is too long for daily scheduling. Use food rename to shorten its slug, then retry food schedule.'
+        : 'The generated daily food schedule slug is too long. Retry food schedule with a shorter --slug.',
+    )
+  }
+}
+
+function readVaultErrorCode(error: unknown): string {
+  return error && typeof error === 'object' && 'code' in error
+    ? String(error.code ?? '')
+    : ''
 }
 
 function mergeFoodAliases(

@@ -328,15 +328,15 @@ test("daily food scheduled logs enforce the resolved canonical slug boundary bef
   const foodAtLimit = await upsertFood({
     vaultRoot,
     title: "Boundary food",
-    slug: "f".repeat(111),
+    slug: "f".repeat(151),
   });
   const scheduledAtLimit = await upsertDailyFoodScheduledLog({
     vaultRoot,
     foodId: foodAtLimit.record.foodId,
     localTime: "09:00",
   });
-  assert.equal(scheduledAtLimit.record.slug, `auto-log-${"f".repeat(111)}`);
-  assert.equal(scheduledAtLimit.record.slug.length, 120);
+  assert.equal(scheduledAtLimit.record.slug, `auto-log-${"f".repeat(151)}`);
+  assert.equal(scheduledAtLimit.record.slug.length, 160);
   assert.equal(
     (await readScheduledLog({
       vaultRoot,
@@ -348,7 +348,7 @@ test("daily food scheduled logs enforce the resolved canonical slug boundary bef
   const foodOverLimit = await upsertFood({
     vaultRoot,
     title: "Over-boundary food",
-    slug: "g".repeat(112),
+    slug: "g".repeat(152),
   });
   const beforeRejectedSchedule = await snapshotVaultFiles(vaultRoot);
   assert.equal(
@@ -365,11 +365,7 @@ test("daily food scheduled logs enforce the resolved canonical slug boundary bef
     (error: unknown) =>
       error instanceof VaultError &&
       error.code === "VAULT_INVALID_INPUT" &&
-      error.message === "Scheduled-log data failed canonical validation." &&
-      JSON.stringify(error.details.issues) === JSON.stringify([{
-        code: "too_big",
-        path: ["slug"],
-      }]),
+      error.message === "slug exceeds the maximum length.",
   );
   assert.deepEqual(await snapshotVaultFiles(vaultRoot), beforeRejectedSchedule);
 });
