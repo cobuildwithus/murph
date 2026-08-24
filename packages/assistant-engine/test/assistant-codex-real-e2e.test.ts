@@ -571,7 +571,10 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           timezone: 'UTC',
           vaultRoot: workingDirectory,
         })
+        const commandLogPath = path.join(workingDirectory, 'workout-commands.log')
         await Promise.all([
+          materializeAssistantSkill({ skillsRoot, slug: 'behavior-followthrough' }),
+          materializeAssistantSkill({ skillsRoot, slug: 'experiment-onboarding' }),
           materializeAssistantSkill({ skillsRoot, slug: 'strength-training' }),
           materializeAssistantSkill({ skillsRoot, slug: 'tracked-table' }),
           materializeRealWorkoutVaultCli({ binDirectory }),
@@ -597,6 +600,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
               'vault-cli workout exercise add <name> --workout-id <event-id> --order <n> [--sets <n>]',
               'vault-cli workout exercise set-reps <exercise> --workout-id <event-id> --reps <n>',
               'vault-cli workout set log <exercise> --workout-id <event-id> --set-order <n> [--reps <n>] [--weight <n>] [--weight-unit <lb|kg>]',
+              'vault-cli experiment show <id> --format json',
+              'vault-cli experiment session log <id> [--date <date>] [--field <id>=<value>]',
+              'vault-cli regimen show <id> --format json',
             ].join('\n'),
             assistantContextSnapshotPrompt: null,
             assistantHostedDeviceConnectAvailable: false,
@@ -621,6 +627,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
             [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: skillsRoot,
             PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
             WORKOUT_E2E_CLI_ENTRYPOINT: HABITAT_VOICE_E2E_CLI_ENTRYPOINT,
+            WORKOUT_E2E_COMMAND_LOG: commandLogPath,
             WORKOUT_E2E_TSX_BIN: HABITAT_VOICE_E2E_TSX_BIN,
             WORKOUT_E2E_VAULT: workingDirectory,
           },
@@ -737,7 +744,7 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           ...commonInput,
           prompt: [
             `The immediately preceding durable assistant transcript is: ${followUp.transcriptMessage}`,
-            'The current member message is exactly: "Set 8 done."',
+            'The current member message is exactly: "Repeated set 8 done for today\'s routine."',
           ].join(' '),
         })
         const completed = workoutSessionSchema.parse(
@@ -758,6 +765,9 @@ describeRealCodex('real Codex live workout prescription e2e', () => {
           Array.from({ length: 8 }, () => 9),
         )
         expect(completed.endedAt).toEqual(expect.any(String))
+        const workoutCommands = await readFile(commandLogPath, 'utf8')
+        expect(workoutCommands).toContain('workout set log')
+        expect(workoutCommands).not.toMatch(/(?:experiment|regimen) /u)
 
         // This is another fresh provider turn. The older unfinished record must
         // neither block the new start nor be assigned an inferred end boundary.
@@ -9586,9 +9596,10 @@ async function materializeRealWorkoutVaultCli(input: {
     executablePath,
     [
       '#!/bin/sh',
-      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
+      'if [ -z "$WORKOUT_E2E_CLI_ENTRYPOINT" ] || [ -z "$WORKOUT_E2E_COMMAND_LOG" ] || [ -z "$WORKOUT_E2E_TSX_BIN" ] || [ -z "$WORKOUT_E2E_VAULT" ]; then',
       '  exit 70',
       'fi',
+      'printf \'%s\\n\' "$*" >> "$WORKOUT_E2E_COMMAND_LOG"',
       'exec "$WORKOUT_E2E_TSX_BIN" "$WORKOUT_E2E_CLI_ENTRYPOINT" "$@" --vault "$WORKOUT_E2E_VAULT"',
       '',
     ].join('\n'),

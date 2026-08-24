@@ -109,6 +109,9 @@ describe('assistant tracked workout table skill', () => {
     expect(strengthSkill).toContain(
       'continues one with a short follow-up',
     )
+    expect(strengthSkill).toContain(
+      'Once an exact live workout owns the exchange, use only this execution owner',
+    )
     expect(strengthSkill).toContain('instead of Markdown table syntax')
   })
 
@@ -127,6 +130,12 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('vault-cli workout set clear')
     expect(skill).toContain('vault-cli workout finish --workout-id <evt_id>')
     expect(skill).not.toContain('vault-cli workout active')
+    expect(skill).toContain(
+      'keep every terse or repeated set confirmation on this owner',
+    )
+    expect(skill).toContain(
+      'ask which workout, exercise, or set the member means without switching record types',
+    )
     expect(skill).toContain(
       'There is no global active or focused workout selector. Never choose a workout by recency.',
     )
@@ -237,7 +246,7 @@ describe('assistant tracked workout table skill', () => {
     expect(skill).toContain('Keep the last exact coordinate the member identified.')
     expect(skill).toContain('Never advance to another set from an acknowledgement.')
     expect(skill).toContain(
-      'When the exact workout id or set coordinate is genuinely unavailable, ask which workout, exercise, or set the member means.',
+      'When the exact workout id or set coordinate is genuinely unavailable, ask which workout, exercise, or set the member means without switching record types.',
     )
     expect(skill).toContain(
       'Do not block unrelated new work, demand closure metadata for another workout, or create a workout merely to make an earlier assistant claim appear true.',
