@@ -169,9 +169,7 @@ export function parseFoodPayload(value: unknown): FoodPayload {
   const result = foodUpsertPayloadSchema.safeParse(value)
 
   if (!result.success) {
-    throw new VaultCliError('contract_invalid', 'Food payload is invalid.', {
-      errors: result.error.flatten(),
-    })
+    throw new VaultCliError('contract_invalid', 'Food payload is invalid.')
   }
 
   if (statusProvided) {

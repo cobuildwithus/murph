@@ -658,7 +658,7 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
         code: 'invalid_format',
         expected: '',
         message: 'This field is invalid.',
-        path: 'unit',
+        path: 'ingredient.1.unit',
         received: 'invalid',
       })
     }
@@ -689,7 +689,7 @@ test('supplement save rejects malformed and schema-invalid ingredient objects wi
         code: 'invalid_type',
         expected: 'string',
         message: 'This field is invalid.',
-        path: 'compound',
+        path: 'ingredient.0.compound',
         received: 'invalid',
       })
     }

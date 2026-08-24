@@ -1133,13 +1133,13 @@ test("blood-test save rejects JSON objects that are not analyte records without 
     assert.equal(result.envelope.error.code, "invalid_option");
     assert.match(result.envelope.error.message ?? "", /analyte payload/u);
     assert.equal(result.envelope.error.stage, "validation");
-    assert.equal(
-      result.envelope.error.fieldErrors?.some(
-        (field) => field.path === "result" && field.code === "invalid_union",
-      ),
-      true,
-    );
-    assert.equal(result.envelope.error.hint, undefined);
+    assert.deepEqual(result.envelope.error.fieldErrors?.[0], {
+      code: "invalid_union",
+      expected: "",
+      message: "This field is invalid.",
+      path: "result.0",
+      received: "invalid",
+    });
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
     assert.equal(JSON.stringify(result.envelope).includes("private marker"), false);
     assert.equal(
@@ -1154,9 +1154,91 @@ test("blood-test save rejects JSON objects that are not analyte records without 
   }
 });
 
-test("blood-test save reports invalid link fields without echoing submitted values or writing", async () => {
+test("blood-test save identifies the exact repeated result occurrence without echoing it", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-repeated-result-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const privateAnalyte = "Private second analyte";
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Repeated result panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "repeated_result_panel",
+      "--result",
+      JSON.stringify({ analyte: "Glucose", value: 92, unit: "mg/dL" }),
+      "--result",
+      JSON.stringify({ analyte: privateAnalyte, value: 7, unit: "" }),
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "result.1.unit");
+    assert.doesNotMatch(JSON.stringify(result.envelope.error), new RegExp(privateAnalyte, "u"));
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("blood-test save identifies an invalid link field without writing an event", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-invalid-link-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Invalid link panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "invalid_link_panel",
+      "--result",
+      JSON.stringify({ analyte: "Glucose", value: 92 }),
+      "--link",
+      "supports_goal:goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "--link",
+      "supports_goal:",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "link.1.targetId");
+    assert.doesNotMatch(JSON.stringify(result.envelope.error), /Invalid link panel/u);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});
+
+test("blood-test save collapses unknown link keys without echoing submitted values or writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-private-link-",
   );
   const privateLinkValue = "private-link-marker";
 
@@ -1182,27 +1264,16 @@ test("blood-test save reports invalid link fields without echoing submitted valu
 
     assert.equal(result.exitCode, 1);
     assert.equal(result.envelope.ok, false);
-    if (!result.envelope.ok) {
-      assert.equal(result.envelope.error.code, "invalid_option");
-      assert.equal(result.envelope.error.stage, "validation");
-      assert.equal(
-        result.envelope.error.fieldErrors?.some(
-          (field) => field.path === "link" && field.code === "invalid_union",
-        ),
-        true,
-      );
-      assert.equal(result.envelope.error.hint, undefined);
-      assert.equal(JSON.stringify(result.envelope).includes(privateLinkValue), false);
-    }
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "link.0");
+    assert.equal(JSON.stringify(result.envelope).includes(privateLinkValue), false);
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
       false,
     );
   } finally {
-    await rm(parentRoot, {
-      force: true,
-      recursive: true,
-    });
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 
@@ -1214,7 +1285,7 @@ test("built CLI reports blood-test result field paths without echoing values or 
     {
       privateValue: "private-missing-result-marker",
       result: { analyte: "private-missing-result-marker" },
-      path: "result",
+      path: "result.0",
       code: "invalid_union",
     },
     {
@@ -1224,7 +1295,7 @@ test("built CLI reports blood-test result field paths without echoing values or 
         value: 45,
         referenceRange: {},
       },
-      path: "result",
+      path: "result.0",
       code: "invalid_union",
     },
     {
@@ -1234,7 +1305,7 @@ test("built CLI reports blood-test result field paths without echoing values or 
         value: 45,
         flag: "private-invalid-flag",
       },
-      path: "result",
+      path: "result.0",
       code: "invalid_union",
     },
   ];
@@ -1283,7 +1354,6 @@ test("built CLI reports blood-test result field paths without echoing values or 
     });
   }
 }, 120_000);
-
 test("blood-test save rejects JSON result arrays with repeat-result guidance", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-cli-blood-test-save-json-result-array-",

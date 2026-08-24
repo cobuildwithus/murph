@@ -9,7 +9,6 @@ import {
   type BloodTestResultRecord,
   type JsonObject,
 } from "@murphai/contracts";
-import type { ZodIssue } from "@murphai/contracts/zod-runtime";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import {
   isoTimestampSchema,
@@ -26,6 +25,7 @@ import { Cli, z } from "incur";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
 
 type BloodTestResult = BloodTestResultRecord;
 type BloodTestAppendInput = Parameters<typeof appendBloodTest>[0];
@@ -71,32 +71,19 @@ const rawVaultPathSchema = z
 
 function bloodTestOptionValidationContext(input: {
   optionName: "link" | "result";
-  path?: readonly PropertyKey[];
+  publicPath?: readonly (string | number)[];
   code: string;
-  message: string;
   expected?: string;
 }) {
   return {
     issues: [
       {
-        path: input.path ?? [input.optionName],
         code: input.code,
-        message: input.message,
+        publicPath: input.publicPath ?? [input.optionName],
         expected: input.expected,
       },
     ],
-  };
-}
-
-function prefixedValidationIssueContext(
-  issues: readonly ZodIssue[],
-  pathPrefix: readonly PropertyKey[],
-) {
-  return {
-    issues: issues.map((issue) => ({
-      ...issue,
-      path: [...pathPrefix, ...issue.path],
-    })),
+    stage: "validation",
   };
 }
 
@@ -149,6 +136,7 @@ function splitEscaped(value: string, separator: string): string[] {
 function parseKeyValueSpec(
   spec: string,
   optionName: string,
+  occurrence: number,
 ): Map<string, string> {
   const fields = new Map<string, string>();
 
@@ -165,8 +153,8 @@ function parseKeyValueSpec(
         keyValueSpecFormatMessage(optionName),
         bloodTestOptionValidationContext({
           optionName: "link",
+          publicPath: ["link", occurrence],
           code: "invalid_format",
-          message: "Use key=value fields separated by semicolons.",
         }),
       );
     }
@@ -179,8 +167,8 @@ function parseKeyValueSpec(
         `Expected --${optionName} entries to include non-empty keys and values.`,
         bloodTestOptionValidationContext({
           optionName: "link",
+          publicPath: ["link", occurrence],
           code: "invalid_format",
-          message: "Provide a non-empty key and value for each link field.",
         }),
       );
     }
@@ -191,8 +179,8 @@ function parseKeyValueSpec(
         `Duplicate --${optionName} field.`,
         bloodTestOptionValidationContext({
           optionName: "link",
+          publicPath: ["link", occurrence],
           code: "custom",
-          message: "Provide each link field once.",
         }),
       );
     }
@@ -203,7 +191,10 @@ function parseKeyValueSpec(
   return fields;
 }
 
-function parseJsonBloodTestResult(spec: string): BloodTestResult {
+function parseJsonBloodTestResult(
+  spec: string,
+  occurrence: number,
+): BloodTestResult {
   let value: unknown;
   try {
     value = JSON.parse(spec) as unknown;
@@ -213,8 +204,8 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
       "Expected --result JSON object to be valid JSON.",
       bloodTestOptionValidationContext({
         optionName: "result",
+        publicPath: ["result", occurrence],
         code: "custom",
-        message: "Use one valid JSON object for this result.",
       }),
     );
   }
@@ -229,9 +220,8 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
       "--result.valueText is not supported. Did you mean --result.textValue?",
       bloodTestOptionValidationContext({
         optionName: "result",
-        path: ["result", "valueText"],
+        publicPath: ["result", occurrence, "valueText"],
         code: "custom",
-        message: "Use textValue for a textual blood-test result.",
       }),
     );
   }
@@ -241,20 +231,24 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
     throw new VaultCliError(
       "invalid_option",
       "Invalid --result blood-test analyte payload.",
-      prefixedValidationIssueContext(
-        parsed.error.issues,
-        ["result"],
-      ),
+      {
+        issues: parsed.error.issues.map((issue) =>
+          publicValidationIssue(
+            issue,
+            bloodTestResultPublicPath(issue.path, occurrence),
+          )),
+        stage: "validation",
+      },
     );
   }
 
   return parsed.data;
 }
 
-function parseBloodTestResult(spec: string): BloodTestResult {
+function parseBloodTestResult(spec: string, occurrence: number): BloodTestResult {
   const trimmed = spec.trim();
   if (trimmed.startsWith("{")) {
-    return parseJsonBloodTestResult(trimmed);
+    return parseJsonBloodTestResult(trimmed, occurrence);
   }
 
   if (trimmed.startsWith("[")) {
@@ -263,8 +257,8 @@ function parseBloodTestResult(spec: string): BloodTestResult {
       "Expected --result JSON input to be one object per analyte, not an array. Repeat --result for each analyte or use blood-test import-json for a full payload.",
       bloodTestOptionValidationContext({
         optionName: "result",
+        publicPath: ["result", occurrence],
         code: "invalid_type",
-        message: "Use one JSON object per repeated --result option.",
         expected: "object",
       }),
     );
@@ -275,15 +269,16 @@ function parseBloodTestResult(spec: string): BloodTestResult {
     "Expected --result to be a JSON object. Example: --result '{\"analyte\":\"Glucose\",\"value\":92,\"unit\":\"mg/dL\"}'. Repeat --result for multiple analytes or use blood-test import-json for a full payload.",
     bloodTestOptionValidationContext({
       optionName: "result",
+      publicPath: ["result", occurrence],
       code: "invalid_type",
-      message: "Use one JSON object per repeated --result option.",
       expected: "object",
     }),
   );
 }
 
 function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
-  const results = specs.map((spec) => parseBloodTestResult(spec));
+  const results = specs.map((spec, occurrence) =>
+    parseBloodTestResult(spec, occurrence));
   if (results.length === 0) {
     throw new VaultCliError(
       "invalid_option",
@@ -291,7 +286,6 @@ function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
       bloodTestOptionValidationContext({
         optionName: "result",
         code: "invalid_type",
-        message: "Provide at least one blood-test result.",
         expected: "object",
       }),
     );
@@ -300,7 +294,7 @@ function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
   return results;
 }
 
-function parseBloodTestLink(spec: string): BloodTestLink {
+function parseBloodTestLink(spec: string, occurrence: number): BloodTestLink {
   const shorthandSeparator = spec.indexOf(":");
   const candidate =
     shorthandSeparator > 0 && !spec.includes("=")
@@ -308,21 +302,60 @@ function parseBloodTestLink(spec: string): BloodTestLink {
           type: spec.slice(0, shorthandSeparator).trim(),
           targetId: spec.slice(shorthandSeparator + 1).trim(),
         }
-      : Object.fromEntries(parseKeyValueSpec(spec, "link"));
+      : Object.fromEntries(parseKeyValueSpec(spec, "link", occurrence));
 
   const parsed = eventRelationLinkSchema.safeParse(candidate);
   if (!parsed.success) {
-    throw new VaultCliError(
-      "invalid_option",
-      "Invalid --link payload.",
-      prefixedValidationIssueContext(
-        parsed.error.issues,
-        ["link"],
-      ),
-    );
+    throw new VaultCliError("invalid_option", "Invalid --link payload.", {
+      issues: parsed.error.issues.map((issue) =>
+        publicValidationIssue(
+          issue,
+          bloodTestLinkPublicPath(issue.path, occurrence),
+        )),
+      stage: "validation",
+    });
   }
 
   return parsed.data;
+}
+
+function bloodTestResultPublicPath(
+  path: readonly PropertyKey[],
+  occurrence: number,
+): readonly (string | number)[] {
+  const [field, nestedField] = path;
+  if (field === "referenceRange") {
+    switch (nestedField) {
+      case "high":
+      case "low":
+      case "text":
+        return ["result", occurrence, "referenceRange", nestedField];
+    }
+  }
+  switch (field) {
+    case "analyte":
+    case "biomarkerSlug":
+    case "comparator":
+    case "flag":
+    case "note":
+    case "slug":
+    case "textValue":
+    case "unit":
+    case "value":
+      return ["result", occurrence, field];
+    default:
+      return ["result", occurrence];
+  }
+}
+
+function bloodTestLinkPublicPath(
+  path: readonly PropertyKey[],
+  occurrence: number,
+): readonly (string | number)[] {
+  const [field] = path;
+  return field === "targetId" || field === "type"
+    ? ["link", occurrence, field]
+    : ["link", occurrence];
 }
 
 function parseBloodTestLinks(specs: readonly string[] | undefined) {
@@ -330,7 +363,8 @@ function parseBloodTestLinks(specs: readonly string[] | undefined) {
     return undefined;
   }
 
-  const links = specs.map((spec) => parseBloodTestLink(spec));
+  const links = specs.map((spec, occurrence) =>
+    parseBloodTestLink(spec, occurrence));
   return links.length > 0 ? links : undefined;
 }
 

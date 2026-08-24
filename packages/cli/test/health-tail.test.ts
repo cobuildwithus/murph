@@ -774,7 +774,10 @@ test("goal import-json preserves the nutrition proposal window, sibling targets,
 test("goal import-json validates payloads through the shared goal schema", async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-cli-health-"));
   const payloadPath = path.join(vaultRoot, "goal-invalid.json");
+  const qualifierPayloadPath = path.join(vaultRoot, "goal-private-qualifier.json");
   const privateParentGoalId = "private-invalid-goal-id";
+  const privateQualifierKey = "private-qualifier-key";
+  const privateQualifierValue = "private-qualifier-value";
 
   try {
     await runCli(["init", "--vault", vaultRoot]);
@@ -783,6 +786,27 @@ test("goal import-json validates payloads through the shared goal schema", async
       JSON.stringify({
         title: "Sleep longer",
         parentGoalId: privateParentGoalId,
+      }),
+      "utf8",
+    );
+    await writeFile(
+      qualifierPayloadPath,
+      JSON.stringify({
+        title: "Sleep longer",
+        metricTargets: [{
+          targetId: "sleep-duration",
+          kind: "metric",
+          metricKey: "sleep-duration",
+          comparator: ">=",
+          value: 7,
+          unit: "h",
+          selectionPolicyOverride: {
+            kind: "qualified-latest",
+            requiredQualifiers: {
+              [privateQualifierKey]: [privateQualifierValue],
+            },
+          },
+        }],
       }),
       "utf8",
     );
@@ -795,6 +819,14 @@ test("goal import-json validates payloads through the shared goal schema", async
       "--vault",
       vaultRoot,
     ]);
+    const qualifierResult = await runCli([
+      "goal",
+      "import-json",
+      "--input",
+      `@${qualifierPayloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
 
     assert.equal(upsertResult.ok, false);
     assert.equal(upsertResult.error?.code, "invalid_payload");
@@ -803,6 +835,14 @@ test("goal import-json validates payloads through the shared goal schema", async
     assert.equal(upsertResult.error?.fieldErrors?.[0]?.path, "parentGoalId");
     assert.equal(upsertResult.error?.hint, undefined);
     assert.equal(JSON.stringify(upsertResult).includes(privateParentGoalId), false);
+    assert.equal(qualifierResult.ok, false);
+    assert.equal(qualifierResult.error?.code, "invalid_payload");
+    assert.equal(
+      qualifierResult.error?.fieldErrors?.[0]?.path,
+      "metricTargets.0.selectionPolicyOverride",
+    );
+    assert.equal(JSON.stringify(qualifierResult).includes(privateQualifierKey), false);
+    assert.equal(JSON.stringify(qualifierResult).includes(privateQualifierValue), false);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

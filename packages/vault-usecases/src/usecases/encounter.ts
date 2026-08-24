@@ -240,11 +240,14 @@ function invalidPayload(message: string) {
 
 function staticEncounterValidationPath(
   path: readonly PropertyKey[],
-): PropertyKey[] {
+): Array<string | number> {
   const qualifierIndex = path.indexOf('qualifiers')
-  return qualifierIndex < 0
+  const rawPath = qualifierIndex < 0
     ? [...path]
     : path.slice(0, qualifierIndex + 1)
+  return rawPath.flatMap((segment) =>
+    typeof segment === 'string' || typeof segment === 'number' ? [segment] : [],
+  )
 }
 
 function sanitizeEncounterValidationIssue(issue: z.ZodIssue) {
@@ -255,7 +258,7 @@ function sanitizeEncounterValidationIssue(issue: z.ZodIssue) {
 
   return {
     code: issue.code,
-    path: staticEncounterValidationPath(issue.path),
+    publicPath: staticEncounterValidationPath(issue.path),
     ...(expected === undefined ? {} : { expected }),
   }
 }
@@ -265,6 +268,7 @@ function parseEncounterPayloadInput(payload: unknown): ParsedEncounterBundlePayl
   if (!result.success) {
     throw new VaultCliError('invalid_payload', 'encounter payload failed validation.', {
       issues: result.error.issues.map(sanitizeEncounterValidationIssue),
+      stage: 'validation',
     })
   }
 

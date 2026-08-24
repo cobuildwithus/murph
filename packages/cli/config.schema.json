@@ -3575,7 +3575,14 @@
                                 "status": {
                                   "description": "Optional Health Commons page status filter: draft, field-testing, reviewed, deprecated, community. Use * for all.",
                                   "type": "string",
-                                  "minLength": 1
+                                  "enum": [
+                                    "draft",
+                                    "field-testing",
+                                    "reviewed",
+                                    "deprecated",
+                                    "community",
+                                    "*"
+                                  ]
                                 },
                                 "category": {
                                   "description": "Optional protocol category filter. Repeat --category for multiple values.",

@@ -594,7 +594,7 @@ describe("encounter usecase", () => {
       message: "encounter payload failed validation.",
       context: {
         issues: expect.arrayContaining([
-          expect.objectContaining({ path: expect.any(Array) }),
+          expect.objectContaining({ publicPath: expect.any(Array) }),
         ]),
       },
     });

@@ -9,7 +9,6 @@ import {
   scheduledLogActionSchema,
   scheduledLogScaffoldPayloadSchema,
   scheduledLogStatusValues,
-  workoutSessionSchema,
   type ExecutableScheduleIntent,
   type MeasurementEntry,
   type MealNutrition,
@@ -48,6 +47,10 @@ import {
   requireCompactInteger,
   requireCompactString,
 } from "./compact-field-spec.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
+import {
+  buildWorkoutFromParsedOptions,
+} from "./workout-typed-options.js";
 
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const scheduledLogActionKindValues = [
@@ -413,14 +416,14 @@ const workoutOptionKeys = [
   "workoutSet",
 ] as const satisfies ReadonlyArray<keyof WorkoutOptions>;
 
-const workoutMediaFieldKeys = [
+const workoutMediaFieldKeys = new Set([
   "kind",
   "relativePath",
   "mediaType",
   "caption",
-] as const;
+]);
 
-const workoutExerciseFieldKeys = [
+const workoutExerciseFieldKeys = new Set([
   "order",
   "name",
   "sourceExerciseId",
@@ -428,9 +431,9 @@ const workoutExerciseFieldKeys = [
   "mode",
   "unitOverride",
   "note",
-] as const;
+]);
 
-const workoutSetFieldKeys = [
+const workoutSetFieldKeys = new Set([
   "exercise",
   "order",
   "type",
@@ -443,7 +446,12 @@ const workoutSetFieldKeys = [
   "bodyweightKg",
   "assistanceKg",
   "addedWeightKg",
-] as const;
+]);
+const workoutPublicFields = {
+  media: workoutMediaFieldKeys,
+  exercise: workoutExerciseFieldKeys,
+  set: workoutSetFieldKeys,
+};
 
 function parseWorkoutMediaEntry(entry: string): Record<string, unknown> {
   const fields = parseCompactFields(entry, "workout-media", invalidScheduledLogOption);
@@ -554,61 +562,41 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
     return undefined;
   }
 
-  const workout: Record<string, unknown> = {
-    exercises: [],
-  };
-
-  if (options.workoutSourceApp !== undefined) workout.sourceApp = options.workoutSourceApp;
-  if (options.workoutSourceWorkoutId !== undefined) {
-    workout.sourceWorkoutId = options.workoutSourceWorkoutId;
-  }
-  if (options.workoutStartedAt !== undefined) workout.startedAt = options.workoutStartedAt;
-  if (options.workoutEndedAt !== undefined) workout.endedAt = options.workoutEndedAt;
-  if (options.workoutRoutineId !== undefined) workout.routineId = options.workoutRoutineId;
-  if (options.workoutRoutineName !== undefined) workout.routineName = options.workoutRoutineName;
-  if (options.workoutSessionNote !== undefined) workout.sessionNote = options.workoutSessionNote;
-
   const mediaEntries = normalizeRepeatableFlagOption(options.workoutMedia, "workout-media");
-  if (mediaEntries) {
-    workout.media = mediaEntries.map(parseWorkoutMediaEntry);
-  }
-
-  const exercisesByOrder = new Map<number, WorkoutExerciseDraft>();
   const exerciseEntries = normalizeRepeatableFlagOption(
     options.workoutExercise,
     "workout-exercise",
   );
-  for (const exercise of exerciseEntries?.map(parseWorkoutExerciseEntry) ?? []) {
-    if (exercisesByOrder.has(exercise.order)) {
-      invalidScheduledLogOption(
-        `Duplicate --workout-exercise order ${exercise.order}.`,
-      );
-    }
-    exercisesByOrder.set(exercise.order, exercise);
-  }
-
   const setEntries = normalizeRepeatableFlagOption(options.workoutSet, "workout-set");
-  for (const { exerciseOrder, set } of setEntries?.map(parseWorkoutSetEntry) ?? []) {
-    const exercise = exercisesByOrder.get(exerciseOrder);
-    if (!exercise) {
-      invalidScheduledLogOption(
-        `--workout-set references exercise ${exerciseOrder}, but no matching --workout-exercise was provided.`,
-      );
-    }
-    exercise.sets.push(set);
-  }
 
-  workout.exercises = [...exercisesByOrder.values()].sort(
-    (left, right) => left.order - right.order,
-  );
+  return buildWorkoutFromParsedOptions({
+    scalarOptions: options,
+    media: mediaEntries?.map(parseWorkoutMediaEntry),
+    exercises: exerciseEntries?.map(parseWorkoutExerciseEntry),
+    sets: setEntries?.map(parseWorkoutSetEntry),
+    publicFields: workoutPublicFields,
+    validationMessage: "Invalid workout template fields.",
+    invalidOption: invalidScheduledLogOption,
+  });
+}
 
-  const parsed = workoutSessionSchema.safeParse(workout);
+function parseScheduledLogAction(value: unknown): ScheduledLogAction {
+  const parsed = scheduledLogActionSchema.safeParse(value);
   if (!parsed.success) {
-    throw new VaultCliError("invalid_option", "Invalid workout template fields.", {
-      issues: parsed.error.issues,
-    });
+    const issues = parsed.error.issues.flatMap((issue) =>
+      issue.path[0] === "foodId"
+        ? [publicValidationIssue(issue, ["foodId"])]
+        : [],
+    );
+    throw new VaultCliError(
+      "invalid_option",
+      "Invalid scheduled-log action fields.",
+      {
+        issues,
+        stage: "validation",
+      },
+    );
   }
-
   return parsed.data;
 }
 
@@ -662,7 +650,7 @@ function buildScheduledLogActionFromOptions(options: {
     case "meal.add": {
       const ingredients = normalizeRepeatableFlagOption(options.ingredient, "ingredient");
       const nutrition = buildMealNutritionFromOptions(options);
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "meal.add",
         ...commonFields,
         ...(options.foodId ? { foodId: options.foodId } : {}),
@@ -672,7 +660,7 @@ function buildScheduledLogActionFromOptions(options: {
       });
     }
     case "activity_session.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "activity_session.add",
         ...commonFields,
         title: requireStringOption(options.actionTitle, "action-title"),
@@ -683,7 +671,7 @@ function buildScheduledLogActionFromOptions(options: {
         ...(workout ? { workout } : {}),
       });
     case "intervention_session.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "intervention_session.add",
         ...commonFields,
         title: requireStringOption(options.actionTitle, "action-title"),
@@ -695,7 +683,7 @@ function buildScheduledLogActionFromOptions(options: {
         ...(options.actionNote ? { note: options.actionNote } : {}),
       });
     case "measurement.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "measurement.add",
         ...commonFields,
         ...(options.actionTitle ? { title: options.actionTitle } : {}),

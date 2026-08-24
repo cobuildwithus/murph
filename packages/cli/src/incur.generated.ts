@@ -66,7 +66,7 @@ declare module 'incur' {
       'clinical-note scaffold': { args: {}; options: { requestId?: string } }
       'commons knowledge search': { args: { query: string }; options: { limit: number } }
       'commons protocol explore': { args: { lookup: string }; options: { limit: number } }
-      'commons protocol list': { args: {}; options: { query?: string; status?: string; category?: string[]; limit: number } }
+      'commons protocol list': { args: {}; options: { query?: string; status?: "draft" | "field-testing" | "reviewed" | "deprecated" | "community" | "*"; category?: string[]; limit: number } }
       'commons protocol show': { args: { key: string }; options: {} }
       'condition import-json': { args: {}; options: { requestId?: string; input: string } }
       'condition list': { args: {}; options: { requestId?: string; status?: "active" | "inactive" | "resolved"; limit: number } }

@@ -145,7 +145,7 @@ describe("clinical import usecases", () => {
       context: {
         issues: [{
           code: "invalid_union",
-          path: ["measurements", 0, "qualifiers"],
+          publicPath: ["measurements", 0, "qualifiers"],
         }],
       },
       name: "VaultCliError",
@@ -363,7 +363,7 @@ describe("clinical import usecases", () => {
       context: {
         issues: expect.arrayContaining([
           expect.objectContaining({
-            path: ["entries", 1, "externalRef"],
+            publicPath: ["entries", 1, "externalRef"],
             code: "custom",
           }),
         ]),

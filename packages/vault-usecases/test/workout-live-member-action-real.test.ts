@@ -11,6 +11,8 @@ import {
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
 } from "@murphai/operator-config/workout-action-binding";
+import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { expect, test } from "vitest";
 
 import {
@@ -21,7 +23,10 @@ import {
   setLiveWorkoutExerciseReps,
   startLiveWorkout,
 } from "../src/usecases/workout-live.js";
-import { parseShownWorkout } from "../src/usecases/workout-live-state.js";
+import {
+  parseShownWorkout,
+  updateLiveWorkoutExercises,
+} from "../src/usecases/workout-live-state.js";
 import { showWorkoutRecord } from "../src/usecases/workout-read.js";
 import { editWorkoutRecord } from "../src/usecases/workout.js";
 
@@ -29,6 +34,69 @@ const STARTED_AT = "2026-08-13T14:00:00.000Z";
 const ACCEPTED_AT = "2026-08-13T15:00:00.000Z";
 const ACTION_ID = "2f1c1fdc-c7b0-4d90-b902-8e6295959243";
 const SECOND_ACTION_ID = "8676b264-9b91-4b50-8c73-184d7a63b901";
+
+test("invalid stored workout state does not masquerade as submitted field guidance", () => {
+  const privateStoredKey = "private-stored-workout-key";
+  const privateStoredId = "private-stored-event-id";
+  let caught: unknown;
+
+  try {
+    parseShownWorkout({
+      entity: {
+        data: { workout: { [privateStoredKey]: true } },
+        id: privateStoredId,
+      },
+    } as never);
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(VaultCliError);
+  const projection = projectVaultCliError(caught);
+  expect(projection.fieldErrors).toBeUndefined();
+  expect(projection.stage).toBeUndefined();
+  expect(JSON.stringify(projection)).not.toContain(privateStoredKey);
+  expect(JSON.stringify(projection)).not.toContain(privateStoredId);
+});
+
+test("invalid post-mutation workout state remains field-neutral", async () => {
+  const privateStoredKey = "private-post-mutation-key";
+  const privateStoredId = "private-post-mutation-event-id";
+  const workout: WorkoutSession = {
+    sourceApp: "murph-live",
+    startedAt: STARTED_AT,
+    exercises: [{
+      name: "Push-up",
+      order: 1,
+      sets: [{ order: 1, reps: 8 }],
+    }],
+  };
+  const invalidExercises = [{
+    ...workout.exercises[0]!,
+    [privateStoredKey]: true,
+  }];
+  let caught: unknown;
+
+  try {
+    await updateLiveWorkoutExercises(
+      {
+        entity: { id: privateStoredId },
+      } as never,
+      workout,
+      invalidExercises,
+      { observedAt: ACCEPTED_AT },
+    );
+  } catch (error) {
+    caught = error;
+  }
+
+  expect(caught).toBeInstanceOf(VaultCliError);
+  const projection = projectVaultCliError(caught);
+  expect(projection.fieldErrors).toBeUndefined();
+  expect(projection.stage).toBeUndefined();
+  expect(JSON.stringify(projection)).not.toContain(privateStoredKey);
+  expect(JSON.stringify(projection)).not.toContain(privateStoredId);
+});
 
 function applyLiveWorkoutMemberAction(
   input: Omit<

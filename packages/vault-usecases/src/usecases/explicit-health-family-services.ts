@@ -62,6 +62,7 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
+import { toRegimenUpsertVaultCliError } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -134,6 +135,73 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "body",
 ]);
 
+const HEALTH_PUBLIC_FIELDS = new Set(`
+  active allergyId amount analyte assertedOn biomarkerKey biomarkerSlug bodySites brand certainty chunkId
+  clinicalStatus code codeSystem collectedAt comparator compound condition conditionHistory conditionId conditions
+  confidence criticality deceased deceasedCause domains dose evaluation eventId evidence excerpt externalRef facet
+  familyMemberId fastingStatus flag gene goalId group high highValue horizon inheritance ingredients kind label
+  labName labPanelId latestWindowDays links lotNumber low manufacturer metricKey metricTargets minimumPoints note
+  occurredAt onsetAge onsetText page parentGoalId preferCollectedAt preferFasting priority rawRef rawRefs reaction
+  recordedAt recordedOn referenceRange relatedConditionIds relatedExperimentIds relatedGoalIds relatedRegimenIds
+  relatedVariantIds relationship reportedAt requiredQualifiers resolvedOn resourceId resourceType resultStatus
+  results route schedule selectionPolicyOverride series servingSize severity significance site slug source
+  sourceDocumentId sourceFamilyMemberIds sourceLabel spanEnd spanStart specimenType staleAfterDays startAt startedOn
+  statistic status stoppedOn substance summary system tags targetAt targetDiseases targetId testName text textValue
+  timeZone title type unit value vaccineName variantId verificationStatus version window windowDays zygosity
+`.trim().split(/\s+/u));
+const HEALTH_INDEXED_FIELDS = new Set(`
+  bodySites conditionHistory conditions domains evidence ingredients links metricTargets rawRefs relatedConditionIds
+  relatedExperimentIds relatedGoalIds relatedRegimenIds relatedVariantIds results sourceFamilyMemberIds tags
+  targetDiseases
+`.trim().split(/\s+/u));
+
+function finiteHealthPublicPath(path: readonly PropertyKey[]): Array<string | number> {
+  const publicPath: Array<string | number> = [];
+
+  for (const segment of path) {
+    if (typeof segment === "number") {
+      const parent = publicPath.at(-1);
+      if (
+        !Number.isSafeInteger(segment) ||
+        segment < 0 ||
+        typeof parent !== "string" ||
+        !HEALTH_INDEXED_FIELDS.has(parent)
+      ) {
+        return publicPath;
+      }
+      publicPath.push(segment);
+      continue;
+    }
+
+    if (typeof segment !== "string" || !HEALTH_PUBLIC_FIELDS.has(segment)) {
+      return publicPath;
+    }
+    publicPath.push(segment);
+    if (segment === "requiredQualifiers") {
+      return publicPath;
+    }
+  }
+
+  return publicPath;
+}
+
+function publicHealthValidationIssue(
+  issue: ZodIssue,
+  publicPath?: readonly (string | number)[],
+) {
+  const normalizedPublicPath = publicPath ?? finiteHealthPublicPath(issue.path);
+  const expected =
+    "expected" in issue && typeof issue.expected === "string"
+      ? issue.expected
+      : undefined;
+
+  return {
+    code: issue.code,
+    publicPath: normalizedPublicPath,
+    ...(expected === undefined ? {} : { expected }),
+  };
+}
+
 function parseRegistryPayloadWithSharedSchema(
   kind: RegistryDocFamilyKind,
   payload: JsonObject,
@@ -150,7 +218,8 @@ function parseRegistryPayloadWithSharedSchema(
   const result = schema.safeParse(payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
-      issues: result.error.issues,
+      issues: result.error.issues.map((issue) => publicHealthValidationIssue(issue)),
+      stage: "validation",
     });
   }
 
@@ -175,11 +244,11 @@ function assertNoBloodTestValueTextAlias(payload: JsonObject): void {
         {
           issues: [
             {
-              path: ["results", index, "valueText"],
               code: "custom",
-              message: "Use textValue for a textual blood-test result.",
+              publicPath: ["results", index, "valueText"],
             },
           ],
+          stage: "validation",
         },
       );
     }
@@ -191,7 +260,8 @@ function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
   const result = bloodTestImportPayloadSchema.safeParse(payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
-      issues: result.error.issues,
+      issues: result.error.issues.map((issue) => publicHealthValidationIssue(issue)),
+      stage: "validation",
     });
   }
 
@@ -202,7 +272,8 @@ function parseImmunizationImportPayload(payload: JsonObject): JsonObject {
   const result = immunizationImportPayloadSchema.safeParse(payload);
   if (!result.success) {
     throw new VaultCliError("invalid_payload", "immunization payload failed validation.", {
-      issues: result.error.issues,
+      issues: result.error.issues.map((issue) => publicHealthValidationIssue(issue)),
+      stage: "validation",
     });
   }
 
@@ -612,7 +683,22 @@ function parseSupplementIngredient(spec: string, index: number): SupplementIngre
     throw new VaultCliError(
       "invalid_option",
       formatSupplementIngredientValidationMessage(index, result.error.issues, value),
-      { issues: result.error.issues },
+      {
+        issues: result.error.issues.map((issue) => {
+          const [field] = issue.path;
+          const publicPath =
+            field === "active" ||
+              field === "amount" ||
+              field === "compound" ||
+              field === "label" ||
+              field === "note" ||
+              field === "unit"
+              ? ["ingredient", index - 1, field]
+              : ["ingredient", index - 1];
+          return publicHealthValidationIssue(issue, publicPath);
+        }),
+        stage: "validation",
+      },
     );
   }
 
@@ -736,6 +822,17 @@ function toSupplementSaveResult(
     created: Boolean(result.created),
     entity: toSavedEntitySnapshot(toSupplementReadEntity(result.record)),
   };
+}
+
+async function upsertRegimenForCli(
+  core: CoreRuntimeModule,
+  input: Parameters<CoreRuntimeModule["upsertRegimen"]>[0],
+) {
+  try {
+    return await core.upsertRegimen(input);
+  } catch (error) {
+    throw toRegimenUpsertVaultCliError(error);
+  }
 }
 
 function toRegistryDocEntityData(record: object) {
@@ -1255,7 +1352,7 @@ export function createExplicitHealthCoreServices(
       const payload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(payload);
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen({
+      const result = await upsertRegimenForCli(core, {
         ...payload,
         vaultRoot: input.vault,
       });
@@ -1271,13 +1368,13 @@ export function createExplicitHealthCoreServices(
     },
     async saveRegimen(input: RegimenSaveInput) {
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen(buildRegimenSavePayload(input));
+      const result = await upsertRegimenForCli(core, buildRegimenSavePayload(input));
 
       return toRegimenSaveResult(input.vault, result);
     },
     async saveSupplement(input: SupplementSaveInput) {
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen(buildSupplementSavePayload(input));
+      const result = await upsertRegimenForCli(core, buildSupplementSavePayload(input));
 
       return toSupplementSaveResult(input.vault, result);
     },

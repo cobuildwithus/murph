@@ -275,12 +275,13 @@ function parsePayload<TPayload>(
   schema: z.ZodType<TPayload>,
   value: unknown,
   label: string,
-  mapIssue: (issue: z.ZodIssue) => unknown = (issue) => issue,
+  mapIssue: (issue: z.ZodIssue) => unknown = sanitizeClinicalValidationIssue,
 ): TPayload {
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
     throw new VaultCliError('invalid_payload', `${label} payload is invalid.`, {
       issues: parsed.error.issues.map(mapIssue),
+      stage: 'validation',
     })
   }
 
@@ -301,12 +302,51 @@ async function loadPayload<TPayload>(
   )
 }
 
-function sanitizeVitalsValidationIssue(issue: z.ZodIssue) {
-  const qualifierIndex = issue.path.indexOf('qualifiers')
-  const path =
-    qualifierIndex < 0
-      ? [...issue.path]
-      : issue.path.slice(0, qualifierIndex + 1)
+const CLINICAL_PUBLIC_FIELDS = new Set(`
+  analyte assertedOn assertion assertionText author authoredAt biomarkerSlug bodySite category chunkId
+  code codeSystem collectedAt comparator confidence domain encounterId endedOn entries evidence excerpt
+  externalRef facet facility fastingStatus flag frequency heading high kind labName labPanelId links low
+  measurements method metric note noteType occurredAt page polarity providerId qualifiers quantity rawRef
+  rawRefs recordedAt referenceRange reportedAt resourceId resourceType resultStatus results sections signedAt
+  source sourceDocumentId sourceLabel spanEnd spanStart specimenType startedOn statement status subject substance
+  summary system tags testCategory testName text textValue timeZone title type unit value version
+`.trim().split(/\s+/u))
+const CLINICAL_INDEXED_FIELDS = new Set(
+  'entries evidence links measurements rawRefs results sections tags'.split(' '),
+)
+
+function finiteClinicalPublicPath(path: readonly PropertyKey[]): Array<string | number> {
+  const publicPath: Array<string | number> = []
+
+  for (const segment of path) {
+    if (typeof segment === 'number') {
+      const parent = publicPath.at(-1)
+      if (
+        !Number.isSafeInteger(segment) ||
+        segment < 0 ||
+        typeof parent !== 'string' ||
+        !CLINICAL_INDEXED_FIELDS.has(parent)
+      ) {
+        return publicPath
+      }
+      publicPath.push(segment)
+      continue
+    }
+
+    if (typeof segment !== 'string' || !CLINICAL_PUBLIC_FIELDS.has(segment)) {
+      return publicPath
+    }
+    publicPath.push(segment)
+    if (segment === 'qualifiers') {
+      return publicPath
+    }
+  }
+
+  return publicPath
+}
+
+function sanitizeClinicalValidationIssue(issue: z.ZodIssue) {
+  const publicPath = finiteClinicalPublicPath(issue.path)
   const expected =
     'expected' in issue && typeof issue.expected === 'string'
       ? issue.expected
@@ -314,7 +354,7 @@ function sanitizeVitalsValidationIssue(issue: z.ZodIssue) {
 
   return {
     code: issue.code,
-    path,
+    publicPath,
     ...(expected === undefined ? {} : { expected }),
   }
 }
@@ -673,7 +713,7 @@ export async function importVitalsRecord(input: ClinicalImportInput): Promise<Cl
     input.inputFile,
     vitalsImportPayloadSchema,
     'vitals',
-    sanitizeVitalsValidationIssue,
+    sanitizeClinicalValidationIssue,
   )
   return importSingleClinicalEventPayload({
     vault: input.vault,
