@@ -312,6 +312,16 @@ interface ImportCollector extends PlannedImportColumn {
   valueIndex: number;
 }
 
+type CsvHeaderOmissionReason = "budget" | "unsafe" | "untrusted";
+
+type CsvHeaderRepairContext =
+  | { exactExpected: string }
+  | { omissionReason: CsvHeaderOmissionReason };
+
+// Match the shared model-facing expected-field ceiling so an exact token list
+// is either preserved whole or omitted before it reaches the CLI projection.
+const MAX_CSV_REPAIR_EXPECTED_LENGTH = 160;
+
 export async function prepareCsvSampleImport(
   input: unknown,
   { presetRegistry }: { presetRegistry?: Pick<SamplePresetRegistry, "get"> } = {},
@@ -338,9 +348,15 @@ export async function prepareCsvSampleImport(
   const header = headerRow.map((cell) => cell.trim());
   const timeZone = await resolveCsvImportTimeZone(vaultRoot);
   const recognizedSampleColumns = detectRecognizedSampleColumns(header);
-  const tsColumn = resolveTimestampColumnName(header, config.tsColumn);
+  const headerRepair = createCsvHeaderRepairContext({
+    header,
+    recognizedSampleColumns,
+    rows,
+    timeZone,
+  });
+  const tsColumn = resolveTimestampColumnName(header, config.tsColumn, headerRepair);
   const metadataColumns = config.metadataColumns;
-  const plannedImports = resolvePlannedImports(config, header, recognizedSampleColumns);
+  const plannedImports = resolvePlannedImports(config, header, recognizedSampleColumns, headerRepair);
   const tsIndex = requireColumn(header, tsColumn);
   for (const column of metadataColumns) {
     requireColumn(header, column);
@@ -692,6 +708,7 @@ function resolvePlannedImports(
   },
   header: readonly string[],
   recognizedSampleColumns: readonly RecognizedSampleColumn[],
+  headerRepair: CsvHeaderRepairContext,
 ): PlannedImportColumn[] {
   const explicitStream = config.stream ? resolveRequestedStream(config.stream) : undefined;
 
@@ -704,6 +721,7 @@ function resolvePlannedImports(
         config.valueColumn,
         explicitStream,
         recognizedSampleColumns,
+        headerRepair,
       ),
     }];
   }
@@ -713,7 +731,13 @@ function resolvePlannedImports(
     return [{
       stream,
       unit: normalizeRequiredString(config.unit ?? DEFAULT_SAMPLE_UNITS[stream], "unit"),
-      valueColumn: resolveValueColumnName(header, config.valueColumn, stream, recognizedSampleColumns),
+      valueColumn: resolveValueColumnName(
+        header,
+        config.valueColumn,
+        stream,
+        recognizedSampleColumns,
+        headerRepair,
+      ),
     }];
   }
 
@@ -730,8 +754,8 @@ function resolvePlannedImports(
       code: "value_column_inference_failed",
       field: "valueColumn",
       message: "No recognizable sample value column was inferred.",
-      expected: `one of the CSV headers: ${formatCsvHeaderNames(header)}`,
-      hint: "Retry with --value-column set to an exact header name and --stream set to its sample stream.",
+      headerRepair,
+      repairFlags: "--value-column and --stream",
     });
   }
 
@@ -764,7 +788,11 @@ function resolveRequestedStream(value: string): SampleStream {
   return stream;
 }
 
-function resolveTimestampColumnName(header: readonly string[], requestedColumn: string | undefined): string {
+function resolveTimestampColumnName(
+  header: readonly string[],
+  requestedColumn: string | undefined,
+  headerRepair: CsvHeaderRepairContext,
+): string {
   if (requestedColumn) {
     const exactMatch = findHeaderName(header, [requestedColumn]);
 
@@ -793,8 +821,8 @@ function resolveTimestampColumnName(header: readonly string[], requestedColumn: 
     code: "timestamp_column_inference_failed",
     field: "tsColumn",
     message: "No recognizable timestamp column was inferred.",
-    expected: `one of the CSV headers: ${formatCsvHeaderNames(header)}`,
-    hint: "Retry with --ts-column set to the exact timestamp header name.",
+    headerRepair,
+    repairFlags: "--ts-column",
   });
 }
 
@@ -803,6 +831,7 @@ function resolveValueColumnName(
   requestedColumn: string | undefined,
   stream: SampleStream,
   recognizedSampleColumns: readonly RecognizedSampleColumn[],
+  headerRepair: CsvHeaderRepairContext,
 ): string {
   if (requestedColumn) {
     const exactMatch = findHeaderName(header, [requestedColumn]);
@@ -834,7 +863,13 @@ function resolveValueColumnName(
     );
   }
 
-  throw new Error(`sample CSV is missing a recognizable value column for stream "${stream}"`);
+  throw createCsvInferenceError({
+    code: "value_column_inference_failed",
+    field: "valueColumn",
+    message: `No recognizable value column was inferred for stream "${stream}".`,
+    headerRepair,
+    repairFlags: "--value-column",
+  });
 }
 
 function resolveStreamForRequestedValueColumn(
@@ -943,10 +978,15 @@ function resolveSkipReason(recordedAt: string | undefined, value: number | undef
 function createCsvInferenceError(input: {
   code: string;
   field: "tsColumn" | "valueColumn";
+  headerRepair: CsvHeaderRepairContext;
   message: string;
-  expected: string;
-  hint: string;
+  repairFlags: string;
 }): CsvSampleImportError {
+  const expected = "exact CSV header name after checking --delimiter";
+  const hint = "exactExpected" in input.headerRepair
+    ? `Retry with ${input.repairFlags} set from the complete header list in expected.`
+    : createCsvHeaderOmissionHint(input.headerRepair.omissionReason, input.repairFlags);
+
   return new CsvSampleImportError(
     input.code,
     "Sample CSV column inference failed.",
@@ -957,23 +997,86 @@ function createCsvInferenceError(input: {
           path: input.field,
           code: input.code,
           message: input.message,
-          expected: input.expected,
+          expected: "exactExpected" in input.headerRepair
+            ? input.headerRepair.exactExpected
+            : expected,
         },
       ],
-      hint: input.hint,
+      hint,
     },
   );
 }
 
-function formatCsvHeaderNames(header: readonly string[]): string {
-  const visibleHeaders = header
-    .slice(0, 8)
-    .map((entry) => JSON.stringify(truncateDiagnosticText(entry, 48)));
-  const omittedCount = Math.max(0, header.length - visibleHeaders.length);
+function createCsvHeaderRepairContext(input: {
+  header: readonly string[];
+  recognizedSampleColumns: readonly RecognizedSampleColumn[];
+  rows: readonly (readonly string[])[];
+  timeZone: string;
+}): CsvHeaderRepairContext {
+  if (!isTrustworthyCsvHeader(input)) {
+    return { omissionReason: "untrusted" };
+  }
+  if (!input.header.every(isSchemaLikeCsvHeaderName)) {
+    return { omissionReason: "unsafe" };
+  }
 
-  return omittedCount === 0
-    ? visibleHeaders.join(", ")
-    : `${visibleHeaders.join(", ")} (+${omittedCount} more)`;
+  const exactExpected = `one of the CSV headers: ${input.header.map((name) => JSON.stringify(name)).join(", ")}`;
+  return exactExpected.length <= MAX_CSV_REPAIR_EXPECTED_LENGTH
+    ? { exactExpected }
+    : { omissionReason: "budget" };
+}
+
+function isTrustworthyCsvHeader(input: {
+  header: readonly string[];
+  recognizedSampleColumns: readonly RecognizedSampleColumn[];
+  rows: readonly (readonly string[])[];
+  timeZone: string;
+}): boolean {
+  if (input.header.length < 2) {
+    return false;
+  }
+
+  const firstDataRow = input.rows
+    .slice(1)
+    .find((row) => row.some((cell) => cell.trim().length > 0));
+  if (!firstDataRow) {
+    return false;
+  }
+
+  const timestampIndex = input.header.findIndex((columnName) =>
+    TIMESTAMP_COLUMN_ALIASES.some(
+      (alias) => normalizeComparableText(alias) === normalizeComparableText(columnName),
+    ));
+  if (
+    timestampIndex >= 0
+    && normalizeFlexibleTimestamp(firstDataRow[timestampIndex] ?? "", input.timeZone)
+  ) {
+    return true;
+  }
+
+  return input.recognizedSampleColumns.some((candidate) => {
+    const index = input.header.indexOf(candidate.columnName);
+    return index >= 0
+      && normalizeOptionalNumber(firstDataRow[index] ?? "", candidate.stream) !== undefined;
+  });
+}
+
+function isSchemaLikeCsvHeaderName(value: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9 _./%()-]*$/u.test(value);
+}
+
+function createCsvHeaderOmissionHint(
+  reason: CsvHeaderOmissionReason,
+  repairFlags: string,
+): string {
+  if (reason === "budget") {
+    return `Exact CSV headers were omitted because the complete list exceeds the repair field limit. Check --delimiter, then retry with ${repairFlags}.`;
+  }
+  if (reason === "unsafe") {
+    return `CSV headers were omitted because every name could not be safely represented as a complete schema-like token. Check --delimiter, then retry with ${repairFlags}.`;
+  }
+
+  return `The first row was not confirmed as a CSV header. Check --delimiter, then retry with ${repairFlags}.`;
 }
 
 function formatSkipReasonCounts(
@@ -987,15 +1090,6 @@ function formatSkipReasonCounts(
   return omittedCount === 0
     ? visibleReasons.join(", ")
     : `${visibleReasons.join(", ")} (+${omittedCount} more reasons)`;
-}
-
-function truncateDiagnosticText(value: string, maxLength: number): string {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  const codePoints = Array.from(normalized);
-
-  return codePoints.length <= maxLength
-    ? normalized
-    : `${codePoints.slice(0, maxLength - 1).join("")}…`;
 }
 
 function normalizeOptionalNumber(value: unknown, stream: SampleStream): number | undefined {

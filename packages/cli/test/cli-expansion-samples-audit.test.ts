@@ -102,11 +102,25 @@ test('samples csv profile and summarize schemas expose composable profiling opti
   assert.deepEqual(summarizeSchema.options.required, ['vault', 'stream'])
 })
 
+test('samples batch show help and model metadata describe the list-to-show id contract', async () => {
+  const help = await runRawSliceCli(['samples', 'batch', 'show', '--help'])
+  const llms = await runRawSliceCli(['samples', 'batch', 'show', '--llms-full'])
+
+  assert.match(help, /exact id returned by samples batch list/iu)
+  assert.match(llms, /exact id returned by samples batch list/iu)
+  assert.doesNotMatch(help, /by transform id|transform batch id|xfm_<ULID>/iu)
+  assert.doesNotMatch(llms, /by transform id|transform batch id|xfm_<ULID>/iu)
+})
+
 test.sequential('sample CSV failures expose bounded repair flags and counts without raw cell echo', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-repair-'))
   const invalidRowsPath = path.join(vaultRoot, 'invalid-rows.csv')
   const timestampInferencePath = path.join(vaultRoot, 'timestamp-inference.csv')
   const valueInferencePath = path.join(vaultRoot, 'value-inference.csv')
+  const headerlessPath = path.join(vaultRoot, 'headerless.csv')
+  const wrongDelimiterPath = path.join(vaultRoot, 'wrong-delimiter.csv')
+  const longHeaderPath = path.join(vaultRoot, 'long-header.csv')
+  const wideHeaderPath = path.join(vaultRoot, 'wide-header.csv')
 
   try {
     await initializeVault({ vaultRoot })
@@ -160,6 +174,7 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
       /"custom_time", "bpm"/u,
     )
     assert.match(timestampInference.error.hint ?? '', /--ts-column/u)
+    assert.equal((timestampInference.error.fieldErrors?.[0]?.expected ?? '').includes('…'), false)
     assert.equal(JSON.stringify(timestampInference).includes('private-cell'), false)
 
     await writeFile(
@@ -185,7 +200,101 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     )
     assert.match(valueInference.error.hint ?? '', /--value-column/u)
     assert.match(valueInference.error.hint ?? '', /--stream/u)
+    assert.equal((valueInference.error.fieldErrors?.[0]?.expected ?? '').includes('…'), false)
     assert.equal(JSON.stringify(valueInference).includes('private-cell'), false)
+
+    const headerlessTimestamp = '2042-11-19T12:34:56Z'
+    const headerlessValue = '791337'
+    await writeFile(
+      headerlessPath,
+      `${headerlessTimestamp},${headerlessValue}\n2042-11-19T12:35:56Z,791338\n`,
+      'utf8',
+    )
+    const headerless = await runSliceCli([
+      'samples',
+      'csv',
+      'profile',
+      headerlessPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(headerless.ok, false)
+    assert.equal(
+      headerless.error.fieldErrors?.[0]?.expected,
+      'exact CSV header name after checking --delimiter',
+    )
+    assert.match(headerless.error.hint ?? '', /not confirmed as a CSV header/u)
+    assert.match(headerless.error.hint ?? '', /--delimiter/u)
+    assert.match(headerless.error.hint ?? '', /--ts-column/u)
+    assert.equal(JSON.stringify(headerless).includes(headerlessTimestamp), false)
+    assert.equal(JSON.stringify(headerless).includes(headerlessValue), false)
+
+    const wrongDelimiterTimestamp = '2043-01-17T03:02:01Z'
+    const wrongDelimiterValue = '881199'
+    await writeFile(
+      wrongDelimiterPath,
+      `timestamp;bpm\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
+      'utf8',
+    )
+    const wrongDelimiter = await runSliceCli([
+      'samples',
+      'csv',
+      'profile',
+      wrongDelimiterPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(wrongDelimiter.ok, false)
+    assert.match(wrongDelimiter.error.hint ?? '', /--delimiter/u)
+    assert.equal(JSON.stringify(wrongDelimiter).includes('timestamp;bpm'), false)
+    assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterTimestamp), false)
+    assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterValue), false)
+
+    const longHeader = `metric_${'x'.repeat(200)}`
+    await writeFile(
+      longHeaderPath,
+      `timestamp,${longHeader}\n2043-02-01T00:00:00Z,72\n`,
+      'utf8',
+    )
+    const longHeaderResult = await runSliceCli([
+      'samples',
+      'csv',
+      'import',
+      longHeaderPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(longHeaderResult.ok, false)
+    assert.equal(longHeaderResult.error.fieldErrors?.[0]?.path, 'valueColumn')
+    assert.match(longHeaderResult.error.hint ?? '', /complete list exceeds/u)
+    assert.equal(JSON.stringify(longHeaderResult).includes(longHeader), false)
+    assert.equal(JSON.stringify(longHeaderResult).includes(longHeader.slice(0, 24)), false)
+    assert.equal(JSON.stringify(longHeaderResult).includes('…'), false)
+
+    const wideHeaders = Array.from({ length: 24 }, (_, index) =>
+      `metric_${String(index + 1).padStart(2, '0')}`
+    )
+    await writeFile(
+      wideHeaderPath,
+      `timestamp,${wideHeaders.join(',')}\n2043-02-01T00:00:00Z,${wideHeaders.map(() => '72').join(',')}\n`,
+      'utf8',
+    )
+    const wideHeaderResult = await runSliceCli([
+      'samples',
+      'csv',
+      'import',
+      wideHeaderPath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(wideHeaderResult.ok, false)
+    assert.match(wideHeaderResult.error.hint ?? '', /complete list exceeds/u)
+    assert.equal(JSON.stringify(wideHeaderResult).includes(wideHeaders[0] as string), false)
+    assert.ok(JSON.stringify(wideHeaderResult.error).length < 1_000)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }

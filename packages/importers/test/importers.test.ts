@@ -455,11 +455,45 @@ test("sample CSV repair errors expose bounded schema guidance without cell value
     "invalid-sample-rows.csv",
     "timestamp,bpm\nprivate-timestamp-cell,private-value-cell\n",
   );
-  const inferencePath = await createTempFile(
-    "sample-inference.csv",
-    "custom_time,custom_metric\nprivate-cell,private-cell\n",
+  const trustedInferencePath = await createTempFile(
+    "trusted-sample-inference.csv",
+    "custom_time,bpm\nprivate-cell,62\n",
+  );
+  const headerlessTimestamp = "2042-11-19T12:34:56Z";
+  const headerlessValue = "791337";
+  const headerlessPath = await createTempFile(
+    "headerless-samples.csv",
+    `${headerlessTimestamp},${headerlessValue}\n2042-11-19T12:35:56Z,791338\n`,
+  );
+  const wrongDelimiterTimestamp = "2043-01-17T03:02:01Z";
+  const wrongDelimiterValue = "881199";
+  const wrongDelimiterPath = await createTempFile(
+    "wrong-delimiter-samples.csv",
+    `timestamp;bpm\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
+  );
+  const longHeader = `metric_${"x".repeat(200)}`;
+  const longHeaderPath = await createTempFile(
+    "long-header-samples.csv",
+    `timestamp,${longHeader}\n2043-02-01T00:00:00Z,72\n`,
+  );
+  const wideHeaders = Array.from({ length: 24 }, (_, index) =>
+    `metric_${String(index + 1).padStart(2, "0")}`
+  );
+  const wideHeaderPath = await createTempFile(
+    "wide-header-samples.csv",
+    `timestamp,${wideHeaders.join(",")}\n2043-02-01T00:00:00Z,${wideHeaders.map(() => "72").join(",")}\n`,
   );
   const { corePort } = createCorePortSpy();
+
+  async function readRepairError(filePath: string): Promise<CsvSampleImportError> {
+    try {
+      await prepareCsvSampleImport({ filePath });
+      assert.fail("Expected sample CSV inference to fail.");
+    } catch (error) {
+      assert.ok(error instanceof CsvSampleImportError);
+      return error;
+    }
+  }
 
   await assert.rejects(
     () => importCsvSamples({ filePath: invalidRowsPath }, { corePort }),
@@ -478,21 +512,44 @@ test("sample CSV repair errors expose bounded schema guidance without cell value
     },
   );
 
-  await assert.rejects(
-    () => prepareCsvSampleImport({ filePath: inferencePath }),
-    (error) => {
-      assert.ok(error instanceof CsvSampleImportError);
-      assert.equal(error.code, "timestamp_column_inference_failed");
-      assert.equal(error.repair.fields[0]?.path, "tsColumn");
-      assert.match(
-        error.repair.fields[0]?.expected ?? "",
-        /"custom_time", "custom_metric"/u,
-      );
-      assert.match(error.repair.hint ?? "", /--ts-column/u);
-      assert.equal(JSON.stringify(error).includes("private-cell"), false);
-      return true;
-    },
+  const trustedInference = await readRepairError(trustedInferencePath);
+  assert.equal(trustedInference.code, "timestamp_column_inference_failed");
+  assert.equal(trustedInference.repair.fields[0]?.path, "tsColumn");
+  assert.equal(
+    trustedInference.repair.fields[0]?.expected,
+    'one of the CSV headers: "custom_time", "bpm"',
   );
+  assert.ok((trustedInference.repair.fields[0]?.expected?.length ?? 0) <= 160);
+  assert.match(trustedInference.repair.hint ?? "", /--ts-column/u);
+  assert.equal(JSON.stringify(trustedInference).includes("private-cell"), false);
+
+  const headerless = await readRepairError(headerlessPath);
+  assert.equal(headerless.repair.fields[0]?.expected, "exact CSV header name after checking --delimiter");
+  assert.match(headerless.repair.hint ?? "", /not confirmed as a CSV header/u);
+  assert.match(headerless.repair.hint ?? "", /--delimiter/u);
+  assert.match(headerless.repair.hint ?? "", /--ts-column/u);
+  assert.equal(JSON.stringify(headerless).includes(headerlessTimestamp), false);
+  assert.equal(JSON.stringify(headerless).includes(headerlessValue), false);
+
+  const wrongDelimiter = await readRepairError(wrongDelimiterPath);
+  assert.equal(wrongDelimiter.repair.fields[0]?.expected, "exact CSV header name after checking --delimiter");
+  assert.match(wrongDelimiter.repair.hint ?? "", /--delimiter/u);
+  assert.equal(JSON.stringify(wrongDelimiter).includes("timestamp;bpm"), false);
+  assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterTimestamp), false);
+  assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterValue), false);
+
+  const longHeaderError = await readRepairError(longHeaderPath);
+  assert.equal(longHeaderError.code, "value_column_inference_failed");
+  assert.match(longHeaderError.repair.hint ?? "", /complete list exceeds/u);
+  assert.equal(JSON.stringify(longHeaderError).includes(longHeader), false);
+  assert.equal(JSON.stringify(longHeaderError).includes(longHeader.slice(0, 24)), false);
+  assert.equal(JSON.stringify(longHeaderError).includes("…"), false);
+
+  const wideHeaderError = await readRepairError(wideHeaderPath);
+  assert.equal(wideHeaderError.code, "value_column_inference_failed");
+  assert.match(wideHeaderError.repair.hint ?? "", /complete list exceeds/u);
+  assert.equal(JSON.stringify(wideHeaderError).includes(wideHeaders[0] as string), false);
+  assert.ok(JSON.stringify(wideHeaderError).length < 1_000);
 });
 
 test("importDocument accepts a narrow core port with only the called export", async () => {

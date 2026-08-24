@@ -953,7 +953,7 @@ export function registerSamplesCommands(
   })
 
   batch.command('show', {
-    description: 'Show one imported sample batch by transform id.',
+    description: 'Show one imported sample batch by an exact id returned by samples batch list.',
     args: z.object({
       id: batchIdSchema.describe('Exact batch id returned by samples batch list.'),
     }),
