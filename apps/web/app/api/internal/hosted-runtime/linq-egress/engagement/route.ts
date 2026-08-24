@@ -27,6 +27,9 @@ import { getPrisma } from "@/src/lib/prisma";
 import {
   acquireHostedLinqChatOwnershipLockTx,
 } from "@/src/lib/hosted-routing/linq-chat-ownership-lock";
+import {
+  isHostedSourceDeliveryStallEpisodeCurrentTx,
+} from "@/src/lib/device-sync/source-delivery-stall-episode";
 import type {
   HostedExecutionResolvedLinqDeliveryRoute,
 } from "@murphai/hosted-execution/contracts";
@@ -134,6 +137,21 @@ export const POST = withJsonError(async (request: Request) => {
         code: "HOSTED_LINQ_EGRESS_RESOLVED_ROUTE_MISMATCH",
         httpStatus: 403,
         message: "Hosted Linq send-time route authority changed before provider entry.",
+        retryable: false,
+      });
+    }
+
+    const sourceEpisode = await isHostedSourceDeliveryStallEpisodeCurrentTx({
+      deliveryIdempotencyKey: idempotencyKey,
+      memberId: userId,
+      now: new Date().toISOString(),
+      tx,
+    });
+    if (sourceEpisode === "superseded") {
+      throw hostedOnboardingError({
+        code: "HOSTED_DEVICE_DELIVERY_STALL_EPISODE_SUPERSEDED",
+        httpStatus: 409,
+        message: "The queued wearable recovery check is no longer current.",
         retryable: false,
       });
     }

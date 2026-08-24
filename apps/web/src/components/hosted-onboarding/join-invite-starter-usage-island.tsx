@@ -8,6 +8,7 @@ import { Button } from "@/src/components/ui/button";
 import { MurphPulseLoader } from "@/src/components/ui/murph-pulse-loader";
 import { ContactSupportAction } from "@/src/components/support/contact-support-action";
 import {
+  completeHostedStarterUsageHandoff,
   consumeHostedGroupStartHandoff,
   HOSTED_GROUP_START_PATH,
 } from "@/src/lib/hosted-groups/group-start-handoff";
@@ -50,11 +51,7 @@ export function JoinInviteStarterUsageIsland({
       // router replacement can update the URL while leaving the pre-enrollment
       // Join tree committed, so force a fresh document that re-evaluates Home
       // with the newly granted access.
-      window.location.replace(
-        consumeHostedGroupStartHandoff()
-          ? HOSTED_GROUP_START_PATH
-          : enrollment.redirectPath,
-      );
+      completeHostedStarterUsageHandoff(enrollment.redirectPath);
     } catch (error) {
       startedRef.current = false;
       setErrorState(buildStarterUsageErrorState(error));

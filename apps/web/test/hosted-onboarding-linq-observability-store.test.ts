@@ -2572,7 +2572,7 @@ describe("hosted Linq observability stores", () => {
     }
   });
 
-  it("reclaims an identifiable Linq usage-limit rich-link partial with the same provider key", async () => {
+  it("reclaims an identifiable Linq usage-limit rich-link partial from later work with the same provider key", async () => {
     const fixture = createObservabilityPrismaFixture();
     const attemptedAt = new Date("2026-03-26T12:00:00.052Z");
     const previousAttemptedAt = new Date("2026-03-26T12:00:00.000Z");
@@ -2617,7 +2617,7 @@ describe("hosted Linq observability stores", () => {
       periodStart: AI_USAGE_NOTICE_PERIOD_START,
       prisma: fixture.prisma as never,
       source: "hosted_webhook_side_effect",
-      sourceRef: "linq-message:event-123",
+      sourceRef: "linq-message:event-456",
       targetKind: "thread",
       usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
@@ -2648,7 +2648,7 @@ describe("hosted Linq observability stores", () => {
     });
   });
 
-  it("keeps a fresh usage-limit rich-link replay fence in flight", async () => {
+  it("keeps a bounded usage-limit rich-link replay fence in flight for later work", async () => {
     const fixture = createObservabilityPrismaFixture();
     const previousAttemptedAt = new Date("2026-03-26T12:04:00.000Z");
     const lastReceiptAt = new Date("2026-03-26T12:03:59.000Z");
@@ -2680,7 +2680,63 @@ describe("hosted Linq observability stores", () => {
     });
 
     await expect(startHostedAiUsageLimitNoticeDispatchTx({
-      attemptedAt: new Date("2026-03-26T12:05:00.000Z"),
+      attemptedAt: new Date("2026-03-26T12:04:10.000Z"),
+      linqChatId: "chat_123",
+      memberId: "member_123",
+      periodStart: AI_USAGE_NOTICE_PERIOD_START,
+      prisma: fixture.prisma as never,
+      source: "hosted_webhook_side_effect",
+      sourceRef: "linq-message:event-456",
+      targetKind: "thread",
+      usageCreditLedgerVersion: 0n,
+    })).resolves.toEqual({
+      retryAt: new Date("2026-03-26T12:04:15.000Z"),
+      status: "in_flight",
+    });
+
+    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("reclaims a usage-limit rich-link replay after its provider window", async () => {
+    const fixture = createObservabilityPrismaFixture();
+    const attemptedAt = new Date("2026-03-26T12:04:15.001Z");
+    const previousAttemptedAt = new Date("2026-03-26T12:04:00.000Z");
+    const failedAt = new Date("2026-03-26T12:00:30.000Z");
+    const lastReceiptAt = new Date("2026-03-26T12:03:59.000Z");
+    const updatedAt = new Date("2026-03-26T12:04:01.000Z");
+    const linqChatLookupKey = createHostedLinqChatLookupKey("chat_123");
+    const messageLookupKey = createHostedLinqMessageLookupKey(
+      "linq_text_accepted",
+    );
+    const sourceRef = createHostedLinqDeliverySourceRefLookupKey(
+      "linq-message:event-123",
+    );
+    fixture.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
+      acceptedAt: null,
+      attemptedAt: previousAttemptedAt,
+      deliveredAt: null,
+      failedAt,
+      failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+      groupJoinOutreachId: null,
+      groupJoinReplyOccurredAt: null,
+      id: "hld_replaying_usage_notice",
+      lastReceiptAt,
+      linqChatLookupKey,
+      messageLookupKey,
+      phoneNumberLookupKey: null,
+      retryAfterAt: null,
+      skippedAt: null,
+      source: "hosted_webhook_side_effect",
+      sourceRef,
+      status: "provider_dispatch_started",
+      targetKind: "thread",
+      template: "ai_usage_quota",
+      updatedAt,
+    });
+    fixture.hostedLinqDeliveryUpdateMany.mockResolvedValueOnce({ count: 1 });
+
+    await expect(startHostedAiUsageLimitNoticeDispatchTx({
+      attemptedAt,
       linqChatId: "chat_123",
       memberId: "member_123",
       periodStart: AI_USAGE_NOTICE_PERIOD_START,
@@ -2690,11 +2746,31 @@ describe("hosted Linq observability stores", () => {
       targetKind: "thread",
       usageCreditLedgerVersion: 0n,
     })).resolves.toEqual({
-      retryAt: new Date("2026-03-26T12:19:00.000Z"),
-      status: "in_flight",
+      idempotencyKey: buildCurrentAiUsageNoticeKey(),
+      providerIdempotencyKey: "ai-usage-attempt:hld_replaying_usage_notice",
+      replayingRichLinkPartial: true,
+      status: "claimed",
     });
 
-    expect(fixture.hostedLinqDeliveryUpdateMany).not.toHaveBeenCalled();
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith({
+      data: {
+        attemptedAt,
+        status: "provider_dispatch_started",
+        updatedAt: attemptedAt,
+      },
+      where: expect.objectContaining({
+        attemptedAt: previousAttemptedAt,
+        failedAt,
+        failureCode: "ASSISTANT_LINQ_RICH_LINK_PARTIAL_DELIVERY",
+        id: "hld_replaying_usage_notice",
+        lastReceiptAt,
+        linqChatLookupKey,
+        messageLookupKey,
+        sourceRef,
+        status: "provider_dispatch_started",
+        updatedAt,
+      }),
+    });
   });
 
   it("keeps a fresh current AI usage notice claim in flight", async () => {

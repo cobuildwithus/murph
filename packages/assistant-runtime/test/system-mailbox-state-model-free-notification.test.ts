@@ -6,8 +6,13 @@ import {
 
 type PendingItem = Parameters<typeof isHostedSystemMailboxModelFreeExactNotificationItem>[0];
 
-function exactNotification(input: { dedupeKey?: string; laneSeq: string }): PendingItem {
-  const deliveryDedupeToken = "group-join:membership";
+function exactNotification(input: {
+  dedupeKey?: string;
+  deliveryDedupeToken?: string;
+  deliveryIdempotencyKey?: string;
+  laneSeq: string;
+}): PendingItem {
+  const deliveryDedupeToken = input.deliveryDedupeToken ?? "group-join:membership";
   const mailboxDedupeKey = input.dedupeKey
     ?? `assistant.notification.requested:${deliveryDedupeToken}`;
   return {
@@ -20,7 +25,8 @@ function exactNotification(input: { dedupeKey?: string; laneSeq: string }): Pend
       notification: {
         deliveryDedupeToken,
         deliveryDispatchMode: "queue-only",
-        deliveryIdempotencyKey: deliveryDedupeToken,
+        deliveryIdempotencyKey:
+          input.deliveryIdempotencyKey ?? deliveryDedupeToken,
         responsePolicy: { kind: "require_send_exact_text", text: "Confirmation" },
       },
     },
@@ -52,6 +58,19 @@ describe("blocked model-free exact notification frontier", () => {
     expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification)).toBe(true);
     expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later, notification] }).pending).toEqual([notification]);
     expect(projectHostedSystemMailboxModelFreeNotificationFrontier({ pending: [later] }).pending).toEqual([later]);
+  });
+
+  it("admits a canonical exact wearable delivery-stall notice", () => {
+    const notification = exactNotification({
+      deliveryDedupeToken: "device-delivery-stalled:v1:abc123",
+      laneSeq: "1",
+    });
+    expect(isHostedSystemMailboxModelFreeExactNotificationItem(notification)).toBe(true);
+    expect(isHostedSystemMailboxModelFreeExactNotificationItem(exactNotification({
+      deliveryDedupeToken: "device-delivery-stalled:v1:abc123",
+      deliveryIdempotencyKey: "device-delivery-stalled:v1:different",
+      laneSeq: "1",
+    }))).toBe(false);
   });
 
   it("does not overtake a generic notification at the durable frontier", () => {

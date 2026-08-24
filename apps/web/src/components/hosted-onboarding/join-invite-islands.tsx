@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { ArrowRightIcon } from "lucide-react";
@@ -20,11 +20,16 @@ import {
 } from "@/src/lib/hosted-onboarding/types";
 import type { HostedConsentStatus } from "@/src/lib/legal/consent";
 import {
+  completeHostedStarterUsageHandoff,
   consumeHostedGroupStartHandoff,
   HOSTED_GROUP_START_PATH,
 } from "@/src/lib/hosted-groups/group-start-handoff";
 
-import { ConsentSkeleton, HostedLegalConsentCard } from "../legal/hosted-legal-consent-card";
+import {
+  ConsentSkeleton,
+  HostedLegalConsentCard,
+  type HostedLegalConsentAcceptScope,
+} from "../legal/hosted-legal-consent-card";
 import { useHostedPhoneLinkDiagnostics } from "../settings/hosted-phone-link-diagnostics";
 import { ConnectTelegram } from "../settings/hosted-telegram-settings";
 import { HostedPhoneSettings } from "../settings/hosted-phone-settings";
@@ -32,7 +37,11 @@ import {
   HostedIdentitySessionLoading,
   HostedIdentitySessionMismatch,
 } from "../settings/hosted-settings-identity-link-dialog";
-import { requestHostedBillingCheckout } from "./client-api";
+import {
+  requestHostedBillingCheckout,
+  requestHostedOnboardingJson,
+  type HostedStarterUsageEnrollmentResponse,
+} from "./client-api";
 import { HostedAuthPanel } from "./hosted-auth-panel";
 import { HostedContactChannelChoice } from "./hosted-contact-channel-choice";
 import { HostedEmailAuthButton } from "./hosted-email-auth-button";
@@ -323,19 +332,55 @@ export function JoinInviteMessagingSetupIsland({
 }
 
 export function JoinInviteLegalConsentIsland({
+  inviteCode,
   initialStatus,
 }: {
+  inviteCode: string;
   initialStatus: HostedConsentStatus | null;
 }) {
   const router = useRouter();
+  const completionStartedRef = useRef(false);
+  const starterEnrollmentRef = useRef<HostedStarterUsageEnrollmentResponse | null>(null);
+  const acceptScope = useCallback<HostedLegalConsentAcceptScope>(
+    async (input) => {
+      const status = await requestHostedOnboardingJson<
+        HostedConsentStatus & {
+          starterEnrollment?: HostedStarterUsageEnrollmentResponse | null;
+        }
+      >({
+        method: "POST",
+        payload: {
+          acceptedDocumentVersions: input.acceptedDocumentVersions,
+          inviteCode,
+          scope: input.scope,
+          source: input.source,
+        },
+        url: "/api/legal/consent/accept",
+      });
+      starterEnrollmentRef.current = status.starterEnrollment ?? null;
+      return status;
+    },
+    [inviteCode],
+  );
 
   function refreshRoute() {
+    if (completionStartedRef.current) {
+      return;
+    }
+    completionStartedRef.current = true;
+    if (starterEnrollmentRef.current) {
+      completeHostedStarterUsageHandoff(
+        starterEnrollmentRef.current.redirectPath,
+      );
+      return;
+    }
     router.refresh();
   }
 
   return (
     <HostedLegalConsentCard
       acceptedPendingLabel="Continuing..."
+      acceptScope={acceptScope}
       initialStatus={initialStatus}
       mode="compact"
       onAccepted={refreshRoute}

@@ -257,7 +257,7 @@ export const ASSISTANT_SKILLS = [
     slug: 'group-chat',
     name: 'group-chat',
     triggerHint:
-      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when the murph.group tool is available or inbound messages carry sender handles. Owns room psychology, human-owned versus open-ensemble floor, beat-local handoff, adaptive participation, and the decision to reply, react, joke, or stay silent, plus shared challenge-data etiquette.',
+      'Read before replying in any group chat, meaning any conversation with multiple human participants, such as when group-family tools are available or inbound messages carry sender handles. Owns room psychology, human-owned versus open-ensemble floor, beat-local handoff, adaptive participation, and the decision to reply, react, joke, or stay silent, plus shared challenge-data etiquette.',
   },
   {
     slug: 'groupchat-comedy',

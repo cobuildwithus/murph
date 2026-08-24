@@ -47,7 +47,7 @@ Four facts remain separate:
    the one nullable encrypted projection snapshot on each existing
    `HostedVaultShare` row. An active grant authorizes only its exact canonical
    scope; it does not prove that data is available.
-3. `murph.group action="read_shared"` is the only hosted assistant read for
+3. `murph.group_data action="read_shared"` is the only ordinary hosted assistant read for
    shared group facts. Web captures the current roster and exact active grants,
    decrypts the bounded snapshots owned by those rows, and returns the complete
    consent/data matrix. No shared copy is landed in a member or group workspace.

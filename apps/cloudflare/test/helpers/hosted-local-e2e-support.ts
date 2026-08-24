@@ -3,6 +3,7 @@ import { createServer as createNetServer } from "node:net";
 import { expect } from "vitest";
 import {
   listMurphDynamicToolNames,
+  resolveMurphDynamicTools,
 } from "@murphai/assistant-engine/assistant-codex";
 import {
   HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV,
@@ -20,6 +21,11 @@ const temporalDevUiPortOffset = 1_000;
 const minTemporalDevFrontendPort = 10_000;
 const maxTemporalDevFrontendPort = 65_535 - temporalDevUiPortOffset;
 const maxTemporalDevPortReservationAttempts = 1_000;
+const hostedGroupFamilyToolNames = new Set(
+  resolveMurphDynamicTools({ groupAvailable: true })
+    .filter((tool) => tool.name.startsWith("group_"))
+    .map((tool) => `${tool.namespace}.${tool.name}`),
+);
 const defaultHostedRunnerEnvProfiles = [
   "assistant",
 ] as const;
@@ -237,6 +243,7 @@ export function expectAdvertisedMurphDynamicTools(
     connectedAppsAvailable?: boolean;
     computerToolsAvailable?: boolean;
     exerciseRoutineResponseCardAvailable?: boolean;
+    groupAvailable?: boolean;
     groupRoomModelAvailable?: boolean;
     imessageContactAvailable?: boolean;
     messageTargetingAvailable?: boolean;
@@ -283,6 +290,13 @@ export function expectAdvertisedMurphDynamicTools(
           name === "murph.react_to_message"
           || name === "murph.select_reply_target"
         )
+      ) {
+        return false;
+      }
+
+      if (
+        options.groupAvailable !== true
+        && hostedGroupFamilyToolNames.has(name)
       ) {
         return false;
       }
@@ -380,7 +394,10 @@ export function expectAdvertisedMurphDynamicTools(
     lastResponsesRequest!.body,
   );
   const expectedAdvertisedToolNames = advertisement.codeMode
-    ? expectedToolNames.filter((name) => name !== "automation" && name !== "group")
+    ? expectedToolNames.filter((name) =>
+        name !== "automation"
+        && !hostedGroupFamilyToolNames.has(`murph.${name}`)
+      )
     : expectedToolNames;
   expect(advertisement.toolNames.sort()).toEqual(expectedAdvertisedToolNames);
   if (advertisement.codeMode) {

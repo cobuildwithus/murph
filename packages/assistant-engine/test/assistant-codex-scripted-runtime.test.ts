@@ -55,12 +55,13 @@ import {
   MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL,
   MURPH_GROUP_ROOM_MODEL_TOOL,
   MURPH_GROUP_SHARED_READ_TOOL,
-  MURPH_GROUP_TOOL,
   MURPH_MEMBER_MEMORY_TOOL,
 } from '../src/assistant-codex/dynamic-tools.ts'
 import {
   MURPH_ATTACH_RESPONSE_CARD_TOOL,
   MURPH_FINISH_WITHOUT_REPLY_TOOL,
+  MURPH_GROUP_FAMILY_TOOLS,
+  MURPH_GROUP_DATA_TOOL,
   MURPH_SEND_PROGRESS_UPDATE_TOOL,
 } from '../src/assistant-codex/dynamic-tool-catalog.ts'
 import {
@@ -3361,89 +3362,6 @@ text(result.output);
     expect((await readFile(requestLog, 'utf8')).trim().split('\n')).toHaveLength(3)
   })
 
-  it('meters one synchronous child through the real pinned app-server', {
-    timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario({
-      multiAgentV2: true,
-    })
-    const rootPrompt = 'METER_ONE_SYNCHRONOUS_CHILD'
-    const childResult = 'SYNCHRONOUS_CHILD_COMPLETE'
-    scenario.stub.queue(
-      {
-        functionCall: {
-          arguments: {
-            fork_turns: 'none',
-            message: `Return exactly ${childResult}.`,
-            task_name: 'exact_usage_child',
-          },
-          name: 'spawn_agent',
-          namespace: 'collaboration',
-        },
-        requestIncludes: [rootPrompt],
-      },
-      {
-        completionLabel: childResult,
-        requestIncludes: [
-          'Message Type: NEW_TASK',
-          'exact_usage_child',
-        ],
-        text: childResult,
-        usageInputTokens: 37,
-      },
-      {
-        functionCall: {
-          arguments: {},
-          name: 'wait_agent',
-          namespace: 'collaboration',
-        },
-        requestExcludes: ['Message Type: NEW_TASK'],
-        requestIncludes: [rootPrompt],
-      },
-      {
-        requestExcludes: ['Message Type: NEW_TASK'],
-        requestIncludes: [rootPrompt],
-        text: 'ROOT_COMPLETED_AFTER_CHILD',
-      },
-    )
-
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      baseInstructions: 'Use the scripted collaboration tools and return the final result.',
-      prompt: rootPrompt,
-    })
-
-    expect(result.finalMessage).toBe('ROOT_COMPLETED_AFTER_CHILD')
-    expect(result.additionalUsages).toMatchObject([{
-      provider: 'codex-cli',
-      providerRequestOrdinal: 1,
-      usage: {
-        inputTokens: 37,
-        outputTokens: 7,
-        providerMetadataJson: {
-          reasoningEffort: 'low',
-          requestedServiceTier: null,
-        },
-        providerName: SCRIPTED_MODEL_PROVIDER,
-        providerRequestId: expect.stringMatching(/^resp_scripted_/u),
-        reasoningTokens: 0,
-        requestedModel: SCRIPTED_MODEL,
-        servedModel: SCRIPTED_MODEL,
-        totalTokens: 44,
-        usageExtractionSourcePath: 'subagent.rawResponse.completed.usage',
-      },
-    }])
-    expect(result.additionalUsages).toHaveLength(1)
-    expect(
-      result.jsonEvents
-        .map((event) => readString(readRecord(event)?.method))
-        .filter((method): method is string => method !== null),
-    ).not.toEqual(expect.arrayContaining([
-      'rawResponseItem/completed',
-      'rawResponse/completed',
-    ]))
-  })
-
   it.each(['direct', 'group'] as const)(
     'carries a delayed V2 child completion into a later %s root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
@@ -3455,22 +3373,6 @@ text(result.output);
       const childResult = `LATE_CHILD_RESULT_${scopeLabel}`
       const firstPrompt = `SPAWN_LATE_CHILD_${scopeLabel}`
       const laterPrompt = `USE_LATE_CHILD_${scopeLabel}`
-      const originAssistantInputId = conversationScope === 'direct'
-        ? `ain_${'9'.repeat(32)}`
-        : `ain_${'a'.repeat(32)}`
-      const usageOperationId = `turn-meter-delayed-${conversationScope}`
-      const recordDetachedUsage = vi.fn()
-      const hostedToolContext: AssistantHostedToolContext = {
-        computerToolsAvailable: false,
-        currentAssistantInputId: () => originAssistantInputId,
-        currentHostedDeliveryContext: () => null,
-        currentHostedMailboxItemIds: () => [],
-        recordDetachedUsage,
-        sendVaultFile: async () => {
-          throw new Error('Vault-file sending is unavailable for this turn.')
-        },
-        vaultFileSendAvailable: false,
-      }
       scenario.stub.queue(
         {
           functionCall: {
@@ -3492,7 +3394,6 @@ text(result.output);
             `late_child_${conversationScope}`,
           ],
           text: childResult,
-          usageInputTokens: 53,
         },
         {
           requestExcludes: ['Message Type: FINAL_ANSWER'],
@@ -3505,14 +3406,11 @@ text(result.output);
         ...scenario.turnInput,
         baseInstructions: buildScriptedHostedSystemPrompt(conversationScope),
         groupConversation: conversationScope === 'group',
-        hostedToolContext,
         prompt: firstPrompt,
-        usageOperationId,
       })
 
       expect(first.finalMessage).toBe(`ROOT_REPLIED_WITHOUT_WAIT_${scopeLabel}`)
       expect(first.sessionId).toEqual(expect.any(String))
-      expect(first.additionalUsages).toEqual([])
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).not.toContain(childResult)
@@ -3527,40 +3425,7 @@ text(result.output);
       expect(
         scenario.stub.completedResponseLabelsSinceBaseline(),
       ).toContain(childResult)
-      const usageDeadline = Date.now() + 5_000
-      while (
-        recordDetachedUsage.mock.calls.length === 0
-        && Date.now() < usageDeadline
-      ) {
-        await delay(20)
-      }
-      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
-      const recordedUsage = recordDetachedUsage.mock.calls[0]?.[0]
-      expect(recordedUsage).toMatchObject({
-        operationId: usageOperationId,
-        originAssistantInputId,
-        usageDraft: {
-          provider: 'codex-cli',
-          providerRequestOrdinal: 1,
-          usage: expect.objectContaining({
-            inputTokens: 53,
-            outputTokens: 7,
-            providerMetadataJson: {
-              reasoningEffort: 'low',
-              requestedServiceTier: null,
-            },
-            providerName: SCRIPTED_MODEL_PROVIDER,
-            providerRequestId: expect.stringMatching(/^resp_scripted_/u),
-            reasoningTokens: 0,
-            requestedModel: SCRIPTED_MODEL,
-            servedModel: SCRIPTED_MODEL,
-            totalTokens: 60,
-            usageExtractionSourcePath:
-              'subagent.rawResponse.completed.usage',
-          }),
-        },
-      })
-      expect(recordedUsage?.effectiveEnv).toEqual(expect.any(Object))
+      await delay(100)
 
       scenario.stub.queue({
         requestIncludes: [
@@ -3572,16 +3437,12 @@ text(result.output);
       const later = await executeCodexAppServerTurn({
         ...scenario.turnInput,
         groupConversation: conversationScope === 'group',
-        hostedToolContext,
         prompt: laterPrompt,
         resumeSessionId: first.sessionId,
-        usageOperationId: `turn-later-${conversationScope}`,
       })
 
       expect(later.finalMessage).toBe(`INCORPORATED_${childResult}`)
       expect(later.threadId).toBe(first.threadId)
-      expect(later.additionalUsages).toEqual([])
-      expect(recordDetachedUsage).toHaveBeenCalledTimes(1)
       expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
     },
   )
@@ -3707,7 +3568,7 @@ text(result.output);
         customToolCall: {
           input: `
 const tool = ALL_TOOLS.find(({ name }) => name === "murph__automation");
-const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group");
+const groupTool = ALL_TOOLS.find(({ name }) => name === "murph__group_chat");
 if (!tool) {
   text(JSON.stringify({ found: false, foundGroup: Boolean(groupTool) }));
 } else {
@@ -3728,7 +3589,7 @@ if (!tool) {
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3802,7 +3663,7 @@ if (!tool) {
       configOverrides: [
         'features.code_mode.direct_only_tool_namespaces=["murph"]',
       ],
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...directScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -3816,7 +3677,7 @@ if (!tool) {
     expect(directSummary).toMatchObject({
       providerRequestDiagnostics: {
         includesAutomation: true,
-        includesGroup: true,
+        includesGroup: false,
         includesGroupEmail: true,
       },
     })
@@ -4054,7 +3915,7 @@ text(JSON.stringify(result));
               action: 'offer_access',
               projectionScopes: [{ projectionKind: 'steps-days.v0' }],
             },
-            name: 'group',
+            name: 'group_data',
             namespace: 'murph',
           },
         })
@@ -7122,10 +6983,10 @@ if (!tool) {
     const invalidOutput = summaries[1]?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
     expect(invalidOutput).toContain(
-      '"field":"card.totals.proteinGrams.mealCount"',
+      '"path":["card","totals","proteinGrams","mealCount"]',
     )
     expect(invalidOutput).toContain(
-      '"expected":"zero_iff_total_null"',
+      '"murphExpectedShape":"zero_iff_total_null"',
     )
     expect(invalidOutput).not.toContain('challengeSlug')
     expect(summaries[2]?.functionCallOutputs?.join('\n')).toContain(
@@ -7136,6 +6997,54 @@ if (!tool) {
     expect(result.finalMessage).toContain('100g protein (status unavailable)')
     expect(result.finalMessage).not.toBe('CARD_REPAIRED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
+  })
+
+  it('records focused group-family schema rejections through the standard diagnostic', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    scenario.stub.queue(
+      {
+        functionCall: {
+          arguments: {
+            action: 'read_shared',
+            projectionScopes: [],
+          },
+          name: 'group_data',
+          namespace: 'murph',
+        },
+      },
+      { text: 'GROUP_DATA_REJECTED' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [MURPH_GROUP_DATA_TOOL],
+      groupConversation: true,
+      prompt: 'Try the requested synthetic group data read.',
+    })
+
+    const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
+      ?.functionCallOutputs?.join('\n') ?? ''
+    expect(invalidOutput).toContain('invalid_group_arguments')
+    expect(invalidOutput).toContain('projectionScopes')
+    expect(result.runtimeIssueInputs).toEqual([
+      expect.objectContaining({
+        component: 'assistant.tool-validation',
+        errorCode: 'TOOL_INPUT_SCHEMA_REJECTION',
+        issueKind: 'schema_rejection',
+        operation: 'murph.group_data',
+      }),
+      expect.objectContaining({
+        component: 'assistant.codex-action',
+        errorCode: 'CODEX_DYNAMIC_TOOL_CALL_FAILED',
+        issueKind: 'tool_error',
+        operation: 'dynamic.tool.call',
+      }),
+    ])
+    expect(JSON.stringify(result.runtimeIssueInputs))
+      .not.toContain('validationIssues')
+    expect(result.finalMessage).toBe('GROUP_DATA_REJECTED')
   })
 
   it('keeps malformed group-card repair feedback on the group contract', {
@@ -7163,9 +7072,9 @@ if (!tool) {
     const invalidOutput = scenario.stub.requestSummariesSinceBaseline()[1]
       ?.functionCallOutputs?.join('\n') ?? ''
     expect(invalidOutput).toContain('invalid_response_card_arguments')
-    expect(invalidOutput).toContain('"field":"challengeSlug"')
-    expect(invalidOutput).toContain('"field":"pageRevisionDigest"')
-    expect(invalidOutput).not.toContain('"field":"card"')
+    expect(invalidOutput).toContain('"path":["challengeSlug"]')
+    expect(invalidOutput).toContain('"path":["pageRevisionDigest"]')
+    expect(invalidOutput).not.toContain('"path":["card"]')
     expect(result.responseCard).toBeNull()
     expect(result.finalMessage).toBe('GROUP_CARD_REJECTED')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
@@ -9913,7 +9822,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_GROUP_TOOL],
+      dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       hostedToolContext: {
         automationTool: {
           request: async (request) => {
@@ -9960,7 +9869,7 @@ text(result.output);
       },
     })
     expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
-      '"name":"group"',
+      '"name":"group_chat"',
     )
     expect(JSON.stringify(summaries[2]?.toolSearchOutputTools)).toContain(
       '"name":"automation"',
@@ -9973,6 +9882,72 @@ text(result.output);
     }])
     expect(result.finalMessage).toBe('NATIVE_TOOL_SEARCH_OK')
     expect(scenario.stub.requestCountSinceBaseline()).toBe(4)
+  })
+
+  it('discovers a group handoff and reports accepted as queued', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const groupRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        toolSearchCall: {
+          limit: 8,
+          query: 'Murph hand off verified context to a joined group',
+        },
+      },
+      {
+        functionCall: {
+          arguments: {
+            action: 'handoff',
+            context: 'I finished the race.',
+            groupLabel: 'Running Club',
+          },
+          name: 'group_consult',
+          namespace: 'murph',
+        },
+      },
+      { text: 'I queued that for Running Club; it has not been sent yet.' },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
+      hostedToolContext: {
+        ...createScriptedGroupToolContext(async (request) => {
+          groupRequests.push(request)
+          return {
+            action: 'handoff',
+            result: { status: 'accepted', targetLabel: 'Running Club' },
+          }
+        }),
+        currentUserActionScope: () => ({
+          acceptedInputIds: [`ain_${'a'.repeat(32)}`],
+          conversationId: 'conversation-handoff',
+          conversationScope: 'direct',
+          inboundMailboxItemIds: ['mailbox-handoff'],
+          originSessionId: 'session-handoff',
+          recipientKey: 'member:current',
+        }),
+      },
+      prompt: 'Tell my running group that I finished the race.',
+    })
+
+    const summaries = scenario.stub.requestSummariesSinceBaseline()
+    expect(JSON.stringify(summaries[1]?.toolSearchOutputTools)).toContain(
+      '"name":"group_consult"',
+    )
+    expect(groupRequests).toEqual([
+      expect.objectContaining({
+        action: 'handoff',
+        context: 'I finished the race.',
+        groupLabel: 'Running Club',
+      }),
+    ])
+    expect(result.finalMessage).toBe(
+      'I queued that for Running Club; it has not been sent yet.',
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
   it('keeps physical-note recovery deferred until an explicit request discovers it', {
@@ -10027,7 +10002,10 @@ text(result.output);
     const ordinaryResult = await executeCodexAppServerTurn({
       ...ordinaryScenario.turnInput,
       authorizeAcceptedMessageTarget,
-      dynamicTools: [MURPH_GROUP_TOOL, MURPH_RESOLVE_PHYSICAL_NOTE_TOOL],
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
       env: {
         ...ordinaryScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -10051,7 +10029,7 @@ text(result.output);
     const baselineResult = await executeCodexAppServerTurn({
       ...baselineScenario.turnInput,
       authorizeAcceptedMessageTarget,
-      dynamicTools: [MURPH_GROUP_TOOL],
+      dynamicTools: [...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...baselineScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -10096,7 +10074,10 @@ if (!tool) {
     const recoveryResult = await executeCodexAppServerTurn({
       ...recoveryScenario.turnInput,
       authorizeAcceptedMessageTarget,
-      dynamicTools: [MURPH_GROUP_TOOL, MURPH_RESOLVE_PHYSICAL_NOTE_TOOL],
+      dynamicTools: [
+        ...MURPH_GROUP_FAMILY_TOOLS,
+        MURPH_RESOLVE_PHYSICAL_NOTE_TOOL,
+      ],
       env: {
         ...recoveryScenario.turnInput.env,
         [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
@@ -11157,7 +11138,7 @@ text(JSON.stringify(result));
             subject: 'Scheduled update',
             text: 'Scheduled update',
           },
-          name: 'group',
+          name: 'group_email',
           namespace: 'murph',
         },
       },
@@ -11235,7 +11216,7 @@ text(JSON.stringify(result));
         {
           functionCall: {
             arguments: { action: 'share_contact_card' },
-            name: 'group',
+            name: 'group_chat',
             namespace: 'murph',
           },
         },
@@ -11316,7 +11297,7 @@ text(JSON.stringify(result));
       {
         functionCall: {
           arguments: { action: 'read_chat_participants' },
-          name: 'group',
+          name: 'group_chat',
           namespace: 'murph',
         },
       },
@@ -11413,7 +11394,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -11443,7 +11424,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: `ain_${'f'.repeat(32)}`,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
@@ -11520,7 +11501,7 @@ text(JSON.stringify(result));
             action: 'revoke_own_email_share',
             message_ref: messageRef,
           },
-          name: 'group',
+          name: 'group_data',
           namespace: 'murph',
         },
       },
