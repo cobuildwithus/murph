@@ -1,8 +1,8 @@
 # Stabilize Garmin consent surface readiness
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-23
 
 ## Goal
 
@@ -35,14 +35,14 @@ Updated: 2026-08-24
 
 1. [x] Prove the transient consent-surface race from the protected canary.
 2. [x] Add bounded exact-surface readiness and regression coverage.
-3. [ ] Run focused verification and required PR review gates. The preliminary
+3. [x] Run focused verification and required PR review gates. The preliminary
    specialist review returned two accepted coverage findings: route departure
    must restart the outer authorization guard before any action, and the exact
    controls must be ready and revalidated at the final `Save` boundary. Both
    were remediated. Final round 2 then found the same stale-authority mechanism
    for a challenge appearing without URL departure. The recorded retrospective
    chose one outer-loop owner and deletion of the nested wait machinery.
-4. [ ] Merge and prove the latest protected `main` Garmin canary green.
+4. [x] Merge and prove the latest protected `main` Garmin canary green.
 
 ## Decisions
 
@@ -73,3 +73,14 @@ Completed local proof:
   checkbox readiness on the exact route.
 - Hosted Web typecheck and scoped ESLint: passed.
 - Docs drift and diff checks: passed.
+- Preliminary specialist ReviewGPT: two accepted coverage findings, both
+  remediated; no findings rejected and no patch artifact returned.
+- Final ReviewGPT: round 1 accepted the same stale-route mechanism, round 2
+  required the recorded single-owner retrospective, and round 3 passed the full
+  deletion-focused patch with every prior finding resolved.
+- PR #2194 exact-head required CI: passed.
+- Protected-main Garmin canary run `32686237582`: passed on merge commit
+  `9f4d0e610f02eead1ff7bf46785a43b0f02406a2`. The real-browser assertion
+  proved callback completion, connected state after callback and reload, and
+  confirmed disconnect cleanup.
+Completed: 2026-08-23
