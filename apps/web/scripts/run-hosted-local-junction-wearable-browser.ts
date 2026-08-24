@@ -550,8 +550,15 @@ async function completeExternalAuthorization(
         }
       }
 
+      const garminPartnerConsentStep = config.source === "garmin"
+        ? readGarminPartnerConsentStep(page.url())
+        : null;
+      if (garminPartnerConsentStep === "invalid") {
+        throw new Error("Garmin consent exposed an invalid progression state.");
+      }
       const completedGarminPartnerConsent = !config.manualAuthorizationAllowed
-        && await completeGarminPartnerConsent(page, config.source);
+        && garminPartnerConsentStep === "selection"
+        && await completeGarminPartnerConsent(page);
       if (completedGarminPartnerConsent) {
         automationBlockedObservedAt = null;
         blockedWindowObservedChallenge = false;
@@ -564,12 +571,14 @@ async function completeExternalAuthorization(
         continue;
       }
 
-      const garminConfirmation = config.source === "garmin"
-        && readGarminPartnerConsentStep(page.url()) === "permissions_updated";
-      let clicked: boolean;
+      const garminConfirmation =
+        garminPartnerConsentStep === "permissions_updated";
+      let clicked = false;
       if (garminConfirmation) {
         clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
-      } else {
+      } else if (garminPartnerConsentStep !== "selection") {
+        // The outer loop owns readiness and challenge revalidation, so an
+        // incomplete exact Garmin surface never enters generic actions.
         await checkRequiredConsentCheckboxes(page);
         clicked = await clickFirstVisibleAction(page, AUTH_ACTIONS, config.source);
       }
@@ -618,23 +627,17 @@ async function completeExternalAuthorization(
 
 async function completeGarminPartnerConsent(
   page: Page,
-  source: BrowserConfig["source"],
 ): Promise<boolean> {
-  if (source !== "garmin") {
-    return false;
-  }
-  const step = readGarminPartnerConsentStep(page.url());
-  if (step === null || step === "permissions_updated") return false;
-  if (step === "invalid") {
-    throw new Error("Garmin consent exposed an invalid progression state.");
-  }
-
   const checkboxes = page.getByRole("checkbox");
-  if (await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT) {
-    throw new Error(
-      `Garmin consent expected exactly ${GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT} data-sharing checkboxes.`,
-    );
-  }
+  if (
+    await checkboxes.count() !== GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT
+    || !await areGarminConsentCheckboxesReady(checkboxes)
+  ) return false;
+  let save = page.getByRole("button", { exact: true, name: "Save" });
+  if (await save.count() !== 1) return false;
+  let saveAction = save.nth(0);
+  if (await readAuthorizationActionState(saveAction) !== "enabled") return false;
+
   for (
     let index = 0;
     index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
@@ -653,15 +656,39 @@ async function completeGarminPartnerConsent(
     }
   }
 
-  const save = page.getByRole("button", { exact: true, name: "Save" });
+  const step = readGarminPartnerConsentStep(page.url());
+  if (step === "invalid") {
+    throw new Error("Garmin consent exposed an invalid progression state.");
+  }
+  if (step !== "selection") return false;
+  save = page.getByRole("button", { exact: true, name: "Save" });
   if (await save.count() !== 1) {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
-  const saveAction = save.nth(0);
+  saveAction = save.nth(0);
   if (await readAuthorizationActionState(saveAction) !== "enabled") {
     throw new Error("Garmin consent did not expose one enabled Save action.");
   }
   await clickAuthorizationControl(saveAction);
+  return true;
+}
+
+async function areGarminConsentCheckboxesReady(
+  checkboxes: Locator,
+): Promise<boolean> {
+  for (
+    let index = 0;
+    index < GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT;
+    index += 1
+  ) {
+    const checkbox = checkboxes.nth(index);
+    if (
+      !await checkbox.isVisible().catch(() => false)
+      || !await checkbox.isEnabled().catch(() => false)
+    ) {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -1053,6 +1080,7 @@ async function disconnectJunctionAccount(
   page: Page,
   config: BrowserConfig,
 ): Promise<void> {
+  await page.waitForLoadState("load", { timeout: config.timeoutMs });
   await page
     .getByRole("button", { name: new RegExp(`^Disconnect (?:${config.label}|account)$`, "i") })
     .click();
@@ -1199,6 +1227,7 @@ export {
   closeBrowserSession as closeHostedLocalJunctionBrowserSessionForTest,
   completeAuthorizationAndRequireCallback as completeHostedLocalJunctionAuthorizationForTest,
   completeExternalAuthorization as completeExternalJunctionAuthorizationForTest,
+  disconnectJunctionAccount as disconnectHostedLocalJunctionAccountForTest,
   openBrowserSession as openHostedLocalJunctionBrowserSessionForTest,
   readBrowserConfig as readHostedLocalJunctionBrowserConfigForTest,
   sanitizeFailure as sanitizeHostedLocalJunctionBrowserFailureForTest,

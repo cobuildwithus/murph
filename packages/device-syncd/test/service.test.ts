@@ -164,6 +164,7 @@ function buildJunctionWorkoutStreamServiceJob(
 function createJunctionWorkoutStreamServiceProvider(
   streamRequests: string[],
   options: {
+    streamResponse?: (workoutId: string) => Response;
     summaryResources?: readonly string[];
     timeseriesResources?: readonly string[];
     workoutSummaryRequests?: JunctionWorkoutSummaryRequestWindow[];
@@ -228,6 +229,9 @@ function createJunctionWorkoutStreamServiceProvider(
       if (url.pathname.startsWith("/v2/timeseries/workouts/")) {
         const workoutId = decodeURIComponent(url.pathname.split("/")[4] ?? "");
         streamRequests.push(workoutId);
+        if (options.streamResponse) {
+          return options.streamResponse(workoutId);
+        }
         return createJsonResponse({
           time: [1_775_131_200, 1_775_133_000],
           heartrate: [100, 160],
@@ -2738,6 +2742,105 @@ test.each(["resource"] as const)(
     }
   },
 );
+
+test("Junction workout-stream retry retains empty-day replay ownership in the stored job", async () => {
+  let now = new Date("2030-04-03T12:00:00.000Z");
+  let allowImport = false;
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-workout-stream-empty-replay");
+  const streamRequests: string[] = [];
+  const importedWorkoutIds: string[] = [];
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      publicBaseUrl: "https://sync.example.test/device-sync",
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot(input) {
+        const workoutId = readJunctionWorkoutStreamImportId(input);
+        if (!workoutId) return { ok: true };
+        if (!allowImport) {
+          throw new DeviceSyncError({
+            code: "TEST_WORKOUT_STREAM_RETRYABLE",
+            message: "Synthetic populated-workout retry.",
+            retryable: true,
+          });
+        }
+        importedWorkoutIds.push(workoutId);
+        return { events: [{ kind: "measurement" }] };
+      },
+    },
+    providers: [createJunctionWorkoutStreamServiceProvider(streamRequests, {
+      streamResponse: (workoutId) => createJsonResponse(
+        workoutId === "empty-workout"
+          ? { time: [] }
+          : { time: [1_775_131_200], heartrate: [120] },
+      ),
+      workoutsByWindowStart: {
+        [JUNCTION_WORKOUT_STREAM_SERVICE_WINDOW.windowStart]: [
+          "empty-workout",
+          "populated-workout",
+        ],
+      },
+    })],
+  });
+
+  try {
+    const account = store.upsertAccount({
+      provider: "junction",
+      externalAccountId: "junction-workout-stream-service",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2030-04-03T00:00:00.000Z",
+    });
+    const activeJob = store.enqueueJob({
+      ...buildJunctionWorkoutStreamServiceJob("resource"),
+      accountId: account.id,
+      provider: "junction",
+      availableAt: now.toISOString(),
+      maxAttempts: 3,
+    });
+
+    assert.equal((await service.runWorkerOnce())?.id, activeJob.id);
+    const retry = store.getJobById(activeJob.id);
+    assert.ok(retry);
+    assert.equal(retry.status, "queued");
+    assert.equal(retry.payload.workoutStreamEmptySeen, true);
+    assert.equal(typeof retry.payload.workoutStreamCursor, "string");
+    assert.deepEqual(
+      readJobsForAccountForTesting(store, account.id).map((job) => job.id),
+      [activeJob.id],
+    );
+
+    allowImport = true;
+    now = new Date(retry.availableAt);
+    assert.equal((await service.runWorkerOnce())?.id, activeJob.id);
+    assert.equal(store.getJobById(activeJob.id)?.status, "succeeded");
+    const replay = readJobsForAccountForTesting(store, account.id)
+      .map((job) => store.getJobById(job.id))
+      .find((job) => job?.payload.workoutStreamEmptyReplay === true);
+    assert.ok(replay);
+    assert.equal(replay.status, "queued");
+    assert.equal(replay.payload.windowStart, JUNCTION_WORKOUT_STREAM_SERVICE_WINDOW.windowStart);
+    assert.equal(replay.payload.windowEnd, JUNCTION_WORKOUT_STREAM_SERVICE_WINDOW.windowEnd);
+    assert.deepEqual(importedWorkoutIds, ["populated-workout"]);
+    assert.deepEqual(streamRequests, [
+      "empty-workout",
+      "populated-workout",
+      "populated-workout",
+    ]);
+  } finally {
+    close();
+  }
+});
 
 test.each(["resource"] as const)(
   "Junction workout-stream %s resumes day-two exact progress and recovers on attempt three",

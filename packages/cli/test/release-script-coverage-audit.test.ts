@@ -1151,6 +1151,10 @@ describe('monorepo release flow coverage audit', () => {
       path.join(repoRoot, 'scripts', 'review-gpt-context-policy.sh'),
       'utf8',
     )
+    const reviewGptPrHeadPreflight = readFileSync(
+      path.join(repoRoot, 'scripts', 'review-gpt-pr-head-preflight.sh'),
+      'utf8',
+    )
     const reviewGptDriver = readFileSync(
       path.join(
         repoRoot,
@@ -1186,6 +1190,16 @@ describe('monorepo release flow coverage audit', () => {
 
     expect(rootPackageJson.scripts?.['review:gpt']).toBe(
       'bash scripts/review-gpt-pr-head-preflight.sh --run',
+    )
+    expect(reviewGptConfig).not.toContain('minimum_marked_response_ms=300000')
+    expect(reviewGptPrHeadPreflight).toContain(
+      'review_gpt_reject_repository_policy_overrides "$@"',
+    )
+    expect(reviewGptPrHeadPreflight).toContain(
+      '--minimum-marked-response-time 5m \\\n    "$@"',
+    )
+    expect(reviewGptPrHeadPreflight).not.toContain(
+      'export ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS=',
     )
     for (const scriptName of removedScripts) {
       expect(rootPackageJson.scripts?.[scriptName]).toBeUndefined()
@@ -1929,10 +1943,16 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain('zero accepted findings')
     expect(prReviewGptLoop).toContain('## Finding Disposition Pause')
     expect(prReviewGptLoop).toMatch(
-      /Every substantive preliminary specialist result and every final `FINDINGS`\s+result pauses/u,
+      /Every substantive preliminary specialist result and every final `FINDINGS`\s+result uses this disposition boundary/u,
     )
     expect(prReviewGptLoop).toMatch(
-      /A validated final `ROUND_OUTCOME: PASS` has no findings to\s+disposition and proceeds directly/u,
+      /A validated final `ROUND_OUTCOME: PASS` has no\s+findings to disposition and proceeds directly/u,
+    )
+    expect(prReviewGptLoop).toContain(
+      'One narrow exception completes the disposition boundary',
+    )
+    expect(prReviewGptLoop).toMatch(
+      /continue the ReviewGPT loop without asking the user for\s+separate permission/u,
     )
     expect(prReviewGptLoop).toContain(
       'may reject a finding as wrong, already handled,',
@@ -2196,7 +2216,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(existsSync(path.join(repoRoot, 'scripts', 'research-init.mjs'))).toBe(false)
   })
 
-  it('applies ReviewGPT response timeout precedence from repo config to one run', () => {
+  it('applies ReviewGPT wrapper precedence while preserving direct package config', () => {
     const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'murph-review-gpt-timeout-'))
     const localConfigRoot = path.join(harnessRoot, 'config')
     const harnessBin = path.join(harnessRoot, 'bin')
@@ -2207,36 +2227,54 @@ describe('monorepo release flow coverage audit', () => {
       'cobuild-review-gpt',
     )
     writeHarnessFile(harnessRoot, 'bin/mdfind', '#!/bin/sh\nexit 0\n', true)
-    const runDry = (extraArgs: string[] = []) =>
+    const dryArgs = [
+      '--wait',
+      '--response-marker',
+      'REVIEW_COMPLETE',
+      '--dry-run',
+      '--no-zip',
+      '--browser-path',
+      process.execPath,
+      '--prompt',
+      'Validate response timeout precedence.',
+    ]
+    const spawnOptions = {
+      cwd: repoRoot,
+      encoding: 'utf8' as const,
+      env: {
+        ...withoutNodeV8Coverage(),
+        HOME: harnessRoot,
+        ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+        PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
+        REVIEW_GPT_BROWSER_LANE_COUNT: '1',
+        XDG_CONFIG_HOME: localConfigRoot,
+      },
+    }
+    const runRepositoryDry = (extraArgs: string[] = []) =>
+      spawnSync(
+        'bash',
+        [
+          'scripts/review-gpt-pr-head-preflight.sh',
+          '--run',
+          ...dryArgs,
+          ...extraArgs,
+        ],
+        spawnOptions,
+      )
+    const runDirectDry = (extraArgs: string[] = []) =>
       spawnSync(
         reviewGptBin,
         [
           '--config',
           'scripts/review-gpt.config.sh',
-          '--wait',
-          '--dry-run',
-          '--no-zip',
-          '--browser-path',
-          process.execPath,
-          '--prompt',
-          'Validate response timeout precedence.',
+          ...dryArgs,
           ...extraArgs,
         ],
-        {
-          cwd: repoRoot,
-          encoding: 'utf8',
-          env: {
-            ...withoutNodeV8Coverage(),
-            HOME: harnessRoot,
-            PATH: [harnessBin, process.env.PATH].filter(Boolean).join(path.delimiter),
-            REVIEW_GPT_BROWSER_LANE_COUNT: '1',
-            XDG_CONFIG_HOME: localConfigRoot,
-          },
-        },
+        spawnOptions,
       )
 
     try {
-      const defaultResult = runDry()
+      const defaultResult = runRepositoryDry()
       expect(defaultResult.status, defaultResult.stderr).toBe(0)
       expect(defaultResult.stdout).toContain(
         'Response capture: enabled (15000000ms timeout)',
@@ -2269,19 +2307,62 @@ describe('monorepo release flow coverage audit', () => {
       expect(defaultResult.stdout).toContain(
         'Idle draft cleanup: close hidden, inactive unsent drafts after 1800000ms',
       )
+      expect(defaultResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
 
       writeHarnessFile(
         localConfigRoot,
         'murph/review-gpt.conf',
-        'response_timeout_ms=7654321\n',
+        'minimum_marked_response_ms=1\nresponse_timeout_ms=7654321\n',
       )
-      const localResult = runDry()
+      const localResult = runRepositoryDry()
       expect(localResult.status, localResult.stderr).toBe(0)
       expect(localResult.stdout).toContain(
         'Response capture: enabled (7654321ms timeout)',
       )
+      expect(localResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
 
-      const perRunResult = runDry(['--wait-timeout', '42m', '--idle-draft-timeout', '2s'])
+      writeHarnessFile(
+        localConfigRoot,
+        'murph/review-gpt.conf',
+        [
+          'minimum_marked_response_ms=1',
+          'response_timeout_ms=7654321',
+          'review_gpt_register_preset_group() { minimum_marked_response_ms=1; }',
+          '',
+        ].join('\n'),
+      )
+      const callbackResult = runRepositoryDry()
+      expect(callbackResult.status, callbackResult.stderr).toBe(0)
+      expect(callbackResult.stdout).toContain(
+        'Minimum marked response time: 300000ms',
+      )
+
+      const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
+      writeHarnessFile(
+        harnessRoot,
+        'weak-review-gpt.sh',
+        [
+          `source ${JSON.stringify(path.join(repoRoot, 'scripts', 'review-gpt.config.sh'))}`,
+          'minimum_marked_response_ms=1',
+          '',
+        ].join('\n'),
+      )
+      const directOverrideResult = runDirectDry(['--config', weakConfigPath])
+      expect(directOverrideResult.status, directOverrideResult.stderr).toBe(0)
+      expect(directOverrideResult.stdout).toContain(
+        'Minimum marked response time: 1ms',
+      )
+
+      const perRunResult = runRepositoryDry([
+        '--wait-timeout',
+        '42m',
+        '--idle-draft-timeout',
+        '2s',
+      ])
       expect(perRunResult.status, perRunResult.stderr).toBe(0)
       expect(perRunResult.stdout).toContain(
         'Response capture: enabled (2520000ms timeout)',
@@ -2884,6 +2965,65 @@ review_gpt_require_completion_specialists_prompt_budget "$@"
     expect(mixedPresetResult.stderr).toContain(
       'completion-specialists must run as the only preset',
     )
+  })
+
+  it('rejects package ReviewGPT policy overrides at the repository boundary', () => {
+    const harnessRoot = mkdtempSync(path.join(os.tmpdir(), 'review-gpt-floor-'))
+    const binRoot = path.join(harnessRoot, 'bin')
+    const fakePnpmPath = path.join(binRoot, 'pnpm')
+    const packageInvokedMarker = path.join(harnessRoot, 'package-invoked')
+    const weakConfigPath = path.join(harnessRoot, 'weak-review-gpt.sh')
+    try {
+      mkdirSync(binRoot, { recursive: true })
+      writeHarnessFile(
+        harnessRoot,
+        'weak-review-gpt.sh',
+        'minimum_marked_response_ms=1\n',
+      )
+      writeFileSync(
+        fakePnpmPath,
+        '#!/usr/bin/env bash\n: > "$PACKAGE_INVOKED_MARKER"\n',
+        { mode: 0o755 },
+      )
+      for (const overrideArgs of [
+        ['--minimum-marked-response-time', '1s'],
+        ['--minimum-marked-response-time=1s'],
+        ['--minimumMarkedResponseTime', '1s'],
+        ['--minimumMarkedResponseTime=1s'],
+        ['--config', weakConfigPath],
+        [`--config=${weakConfigPath}`],
+      ]) {
+        rmSync(packageInvokedMarker, { force: true })
+        const result = spawnSync(
+          'bash',
+          [
+            '-c',
+            'source "$REPO_ROOT/scripts/review-gpt-pr-head-preflight.sh"; review_gpt_run "$@"',
+            'review-gpt-floor',
+            ...overrideArgs,
+            '--version',
+          ],
+          {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: {
+              ...withoutNodeV8Coverage(),
+              ORACLE_DRAFT_MINIMUM_MARKED_RESPONSE_MS: '1',
+              PACKAGE_INVOKED_MARKER: packageInvokedMarker,
+              PATH: `${binRoot}:${process.env.PATH ?? ''}`,
+              REPO_ROOT: repoRoot,
+            },
+          },
+        )
+        expect(result.status).not.toBe(0)
+        expect(result.stderr).toContain(
+          "Murph's repository ReviewGPT policy cannot be overridden",
+        )
+        expect(existsSync(packageInvokedMarker)).toBe(false)
+      }
+    } finally {
+      rmSync(harnessRoot, { force: true, recursive: true })
+    }
   })
 
   it('keeps Product UX decisions in one owner inside the unified specialist review', () => {

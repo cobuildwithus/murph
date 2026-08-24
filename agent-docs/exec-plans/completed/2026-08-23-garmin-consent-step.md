@@ -1,6 +1,6 @@
 # Complete Garmin's second OAuth consent step
 
-Status: active
+Status: completed
 Created: 2026-08-23
 Updated: 2026-08-23
 
@@ -39,6 +39,10 @@ Updated: 2026-08-23
   browser was already on Murph home, proving Garmin departed during the
   asynchronous terminal surface sample. The helper then threw from its stale
   pre-sample route state instead of honoring the current route.
+- PR #2188 fixed that race. Its protected-main run completed authorization,
+  callback, connected-state, and persisted-reload proof, then exposed a later
+  cleanup race: `DOMContentLoaded` made the server-rendered Disconnect button
+  visible before its client handler was ready, so the click opened no dialog.
 
 ## Scope
 
@@ -59,9 +63,9 @@ Updated: 2026-08-23
 4. [x] Merge PR #2175 and inspect its exact protected-main Garmin canary.
 5. [x] Submit the confirmation action once, run the follow-up completion gates,
    merge PR #2182, and inspect its exact post-merge protected Garmin canary.
-6. Capture the stalled post-click surface without provider content, use that
-   evidence for the smallest correction, and require a successful exact
-   post-merge protected Garmin canary.
+6. [x] Capture the stalled post-click surface without provider content, use
+   that evidence for the smallest correction, and require a successful exact
+   post-merge protected Garmin canary through PRs #2187, #2188, and #2190.
 
 ## Decisions
 
@@ -83,6 +87,8 @@ Updated: 2026-08-23
   A departure during that asynchronous sample continues to the existing
   callback proof; unchanged, invalid, and regressed Garmin states still fail
   closed.
+- Before disconnect cleanup, require the reloaded connect page's load boundary
+  so the visible server-rendered action has its client handler.
 
 ## Verification
 
@@ -95,7 +101,16 @@ Updated: 2026-08-23
 
 Completed local proof:
 
-- Browser-runner unit suite: 38 passed.
-- Real headed-Chromium smoke: 7 passed.
+- Browser-runner unit suite: 40 passed.
+- Real headed-Chromium smoke: 8 passed, including a held page-load boundary
+  that proves Disconnect remains untouched until its client handler is ready.
 - Hosted Web typecheck: passed.
 - Docs drift and diff checks: passed.
+- PR #2190 exact-head required CI: passed.
+- Final ReviewGPT: passed on exact head
+  `53ced433d3ea1113883df6260ada46a773ee32cb` with no findings remaining.
+- Protected-main Garmin canary run `32678929622`: passed on merge commit
+  `e0707099f477a0bb562801e2aeda39a28016513b`. The real-browser assertion
+  proved automatic callback completion, connected state after callback and
+  reload, and confirmed disconnect cleanup.
+Completed: 2026-08-23
