@@ -1,8 +1,8 @@
 # Usage-Limit Cross-Source Recovery
 
-Status: active
+Status: completed
 Created: 2026-08-24
-Updated: 2026-08-24
+Updated: 2026-08-23
 
 ## Goal
 
@@ -35,3 +35,4 @@ the original delivery provenance or allowing ordinary over-limit replies.
 - Exact-head public CI and required ReviewGPT gates.
 - Exact paired public/private hosted integration, including the delivery
   ambiguity shard and Temporal aggregate.
+Completed: 2026-08-23
