@@ -7009,11 +7009,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/New_York',
                   lookupId: 'midnight-watch-reminder',
-                  nextOccurrenceAt: '2026-07-28T04:00:00.000Z',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-07-28T04:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-07-28T03:00:00.000Z',
                 }
               },
@@ -7111,12 +7113,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'central-evening-reminder',
-                  nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-08-11T02:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: true,
-                  timingVerificationIssues: [],
                   updatedAt: '2026-08-10T00:00:00.000Z',
                 }
               },
@@ -7221,11 +7224,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: false,
                   effectiveTimeZone: 'America/Chicago',
                   lookupId: 'evening-reminder',
-                  nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                  occurrenceProjection: {
+                    nextOccurrenceAt: '2026-08-11T03:00:00.000Z',
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'preserved',
                   schedule,
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
@@ -7316,14 +7321,16 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: false,
                   effectiveTimeZone: null,
                   lookupId: 'one-time-evening-reminder',
-                  nextOccurrenceAt: null,
+                  occurrenceProjection: {
+                    nextOccurrenceAt: null,
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'preserved',
                   schedule: {
                     at: '2026-08-01T13:00:00.000Z',
                     kind: 'at',
                   },
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
               },
@@ -7371,7 +7378,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
   )
 
   it(
-    'does not inspect again or describe an unverified stale recurrence as exhausted',
+    'confirms an active stale recurrence while its occurrence projection is pending',
     async () => {
       const config = await resolveRealCodexE2eConfig()
       const workingDirectory = await mkdtemp(
@@ -7400,12 +7407,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   automationId: 'automation-daily-interval',
                   effectiveTimeZone: null,
                   lookupId: 'daily-interval-reminder',
-                  nextOccurrenceAt: null,
+                  occurrenceProjection: { status: 'pending' as const },
                   routeBinding: 'preserved' as const,
                   schedule: { everyMs: 86_400_000, kind: 'every' as const },
                   status: 'active' as const,
-                  timingVerified: false,
-                  timingVerificationIssues: ['runtime_state_pending'] as const,
                   updatedAt: '2026-08-10T00:01:00.000Z',
                 }
                 if (request.action !== 'patch') {
@@ -7445,9 +7450,10 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         expect(result.finalMessage).toMatch(
           /saved|updated|changed/iu,
         )
-        expect(result.finalMessage).toMatch(/next.*not (?:yet )?(?:confirmed|verified)|still finishing/iu)
+        expect(result.finalMessage).toMatch(/finishing|automatically/iu)
+        expect(result.finalMessage).toMatch(/no action|nothing .*need/iu)
         expect(result.finalMessage).not.toMatch(
-          /if you want|inspect|check again|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
+          /if you want|inspect|check again|unconfirmed|not confirmed|could not verify|no (?:future|later) delivery|nothing (?:else )?(?:is )?scheduled/iu,
         )
       } finally {
         await removeRealCodexTemporaryPaths([
@@ -7494,11 +7500,13 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
                   created: true,
                   effectiveTimeZone: null,
                   lookupId: 'next-workout-check-in',
-                  nextOccurrenceAt: null,
+                  occurrenceProjection: {
+                    nextOccurrenceAt: null,
+                    status: 'resolved' as const,
+                  },
                   routeBinding: 'current_conversation',
                   schedule: request.schedule,
                   status: 'active',
-                  timingVerified: true,
                   updatedAt: '2026-08-08T12:00:00.000Z',
                 }
               },
