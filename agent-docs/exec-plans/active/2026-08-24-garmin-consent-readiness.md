@@ -19,8 +19,9 @@ Updated: 2026-08-24
   continued navigating to Garmin sign-in by cleanup. This proves the exact
   shape check sampled a transient navigation state rather than a stable changed
   consent contract.
-- The runner currently validates the checkbox count immediately after observing
-  the selection URL. It has no readiness window before failing closed.
+- The first implementation validated the checkbox count immediately after
+  observing the selection URL. It had no readiness window before failing
+  closed.
 
 ## Scope
 
@@ -38,18 +39,22 @@ Updated: 2026-08-24
    specialist review returned two accepted coverage findings: route departure
    must restart the outer authorization guard before any action, and the exact
    controls must be ready and revalidated at the final `Save` boundary. Both
-   are remediated on the follow-up candidate.
+   were remediated. Final round 2 then found the same stale-authority mechanism
+   for a challenge appearing without URL departure. The recorded retrospective
+   chose one outer-loop owner and deletion of the nested wait machinery.
 4. [ ] Merge and prove the latest protected `main` Garmin canary green.
 
 ## Decisions
 
-- Reuse the existing 15-second provider progress window and 250 ms observation
-  cadence instead of adding a new timeout or retry owner.
-- Re-read the exact Garmin consent step while waiting. If the route departs,
-  return control to the existing authorization loop; invalid progression still
-  fails closed.
+- Reuse the existing outer authorization loop and its 15-second blocked window
+  as the sole readiness and admission owner. Delete the nested deadline,
+  250 ms cadence, and departure status protocol.
+- Re-evaluate trusted origin, host, provider challenge, Garmin step, and exact
+  controls on every outer-loop observation before an action is admitted.
 - Click only after the original exact three-checkbox and single enabled `Save`
-  contract is simultaneously true. A stable changed shape still fails closed.
+  contract is simultaneously true, then re-read the route and final `Save`
+  after checkbox mutation. A stable changed shape remains untouched and fails
+  through the existing content-free blocked-window path.
 
 ## Verification
 
@@ -61,8 +66,9 @@ Updated: 2026-08-24
 
 Completed local proof:
 
-- Browser-runner unit suite: 44 passed, including unexpected-host and provider-
-  challenge revalidation after route departure plus final `Save` revalidation.
+- Browser-runner unit suite: 45 passed, including unexpected-host, same-route
+  provider-challenge, and Murph-departure revalidation plus final `Save`
+  revalidation.
 - Real headed-Chromium smoke: 8 passed, including delayed Garmin consent
   checkbox readiness on the exact route.
 - Hosted Web typecheck and scoped ESLint: passed.

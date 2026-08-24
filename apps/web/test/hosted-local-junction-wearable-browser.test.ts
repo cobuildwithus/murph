@@ -1207,7 +1207,50 @@ describe("hosted-local Junction wearable browser authorization", () => {
     )).resolves.toBeUndefined();
 
     expect(signInClicks).toBe(1);
-    expect(now).toBe(1_250);
+    expect(now).toBe(1_750);
+  });
+
+  it("does not act when incomplete Garmin consent departs to Murph", async () => {
+    let now = 0;
+    let continueClicks = 0;
+    const consentFrame = authorizationFrame({});
+    const murphFrame = authorizationFrame({
+      buttons: [{
+        onClick: () => {
+          continueClicks += 1;
+        },
+        text: "Continue exploring",
+      }],
+    });
+    const currentFrame = () => now < 1_000 ? consentFrame : murphFrame;
+    const page = {
+      frames: () => [currentFrame()],
+      getByRole: (
+        ...args: Parameters<typeof consentFrame.getByRole>
+      ) => currentFrame().getByRole(...args),
+      locator: vi.fn(() => emptyLocator()),
+      mainFrame: currentFrame,
+      title: vi.fn(async () => "Garmin is connected"),
+      url: () => now < 1_000
+        ? "https://connect.garmin.com/partner/oauthConfirm"
+        : "https://app.example.test/home",
+      waitForTimeout: vi.fn(async (duration: number) => {
+        now += duration;
+      }),
+    };
+
+    await expect(completeExternalJunctionAuthorizationForTest(
+      page as never,
+      createConfig({
+        MURPH_E2E_CONNECT_URL:
+          "https://app.example.test/connect#deviceConnectIntent=opaque&connectSource=garmin",
+        MURPH_E2E_PROVIDER_SOURCE: "garmin",
+      }),
+      () => now,
+    )).resolves.toBeUndefined();
+
+    expect(continueClicks).toBe(0);
+    expect(now).toBe(1_000);
   });
 
   it("revalidates an unexpected host after incomplete Garmin consent departs", async () => {
@@ -1254,7 +1297,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     expect(unexpectedClicks).toBe(0);
   });
 
-  it("revalidates a provider challenge after incomplete Garmin consent departs", async () => {
+  it("revalidates a challenge while the Garmin consent URL remains unchanged", async () => {
     let now = 0;
     let challengeClicks = 0;
     const consentFrame = authorizationFrame({});
@@ -1277,9 +1320,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       title: vi.fn(async () => now < 500
         ? "Garmin Partner Auth"
         : "Just a moment..."),
-      url: () => now < 500
-        ? "https://connect.garmin.com/partner/oauthConfirm"
-        : "https://sso.garmin.com/portal/sso/en-US/sign-in",
+      url: () => "https://connect.garmin.com/partner/oauthConfirm",
       waitForTimeout: vi.fn(async (duration: number) => {
         now += duration;
       }),
@@ -1419,9 +1460,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
         }),
         () => now,
       )).rejects.toThrow(
-        checkboxCount === 2
-          ? "Garmin consent expected exactly 3 data-sharing checkboxes."
-          : "Garmin consent did not expose one enabled Save action.",
+        "Garmin did not expose an automated authorization action.",
       );
       expect(now).toBe(15_000);
     },
