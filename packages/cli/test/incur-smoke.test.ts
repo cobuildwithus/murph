@@ -1,14 +1,12 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Cli, z } from 'incur'
 import { initializeVault } from '@murphai/core'
-import {
-  createVaultCliRepair,
-  VaultCliError,
-} from '@murphai/operator-config/vault-cli-errors'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { localParallelCliTest as test } from './local-parallel-test.js'
 import {
   captureCommandDescriptions,
@@ -25,10 +23,14 @@ import { createUnwiredVaultServices } from '@murphai/vault-usecases'
 import { createVaultCli } from '../src/vault-cli.js'
 import { runMurphCliEntrypoint } from '../src/cli-entry.js'
 import {
+  binPath,
+  ensureCliRuntimeArtifacts,
   type CliEnvelope,
   requireData,
+  repoRoot,
   runCli,
   runRawCli,
+  withoutNodeV8Coverage,
 } from './cli-test-helpers.js'
 
 const require = createRequire(import.meta.url)
@@ -256,6 +258,43 @@ async function runJsonCli<TData>(
   }
 }
 
+async function runBuiltCliProcess(args: string[]): Promise<{
+  exitCode: number
+  stderr: string
+  stdout: string
+}> {
+  await ensureCliRuntimeArtifacts()
+
+  return await new Promise((resolve, reject) => {
+    execFile(
+      process.execPath,
+      [binPath, ...args],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        env: withoutNodeV8Coverage({
+          ...process.env,
+          MURPH_CLI_TEST_PERSISTENT_HARNESS: '0',
+        }),
+        maxBuffer: 8 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (!error) {
+          resolve({ exitCode: 0, stderr, stdout })
+          return
+        }
+
+        if (typeof error.code !== 'number') {
+          reject(error)
+          return
+        }
+
+        resolve({ exitCode: error.code, stderr, stdout })
+      },
+    )
+  })
+}
+
 test('root help exposes the Incur built-ins and simple health CRUD command groups', async () => {
   const help = await runSourceCliRaw(['--help'])
 
@@ -326,6 +365,73 @@ test('built CLI discovery surfaces remain available', async () => {
   )
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
+
+test('built duplicate-vault failures emit one safe machine document in every mode', async () => {
+  const firstVault = '/private/synthetic/first-vault'
+  const secondVault = '/private/synthetic/second-vault'
+  const modes = [
+    { args: ['--format', 'json'], envelope: false, format: 'json' },
+    { args: ['--json'], envelope: false, format: 'json' },
+    { args: ['--format', 'toon'], envelope: false, format: 'toon' },
+    {
+      args: ['--full-output', '--format', 'json'],
+      envelope: true,
+      format: 'json',
+    },
+    {
+      args: ['--full-output', '--format', 'toon'],
+      envelope: true,
+      format: 'toon',
+    },
+    {
+      args: ['--full-output', '--format', 'yaml'],
+      envelope: true,
+      format: 'yaml',
+    },
+  ] as const
+
+  for (const mode of modes) {
+    const result = await runBuiltCliProcess([
+      '--vault',
+      firstVault,
+      '--vault',
+      secondVault,
+      ...mode.args,
+    ])
+    const combinedOutput = `${result.stdout}\n${result.stderr}`
+
+    assert.equal(result.exitCode, 1, mode.args.join(' '))
+    assert.equal(combinedOutput.includes(firstVault), false, mode.args.join(' '))
+    assert.equal(combinedOutput.includes(secondVault), false, mode.args.join(' '))
+    assert.equal(result.stdout.trim().length > 0, true, mode.args.join(' '))
+
+    if (mode.format === 'json') {
+      const document = JSON.parse(result.stdout) as {
+        code?: string
+        error?: { code?: string }
+        ok?: boolean
+      }
+      assert.equal(document.ok, mode.envelope ? false : undefined)
+      assert.equal(
+        mode.envelope ? document.error?.code : document.code,
+        'invalid_option',
+      )
+      assert.equal(mode.envelope ? document.code : document.error, undefined)
+      continue
+    }
+
+    assert.equal(
+      result.stdout.split('invalid_option').length - 1,
+      1,
+      mode.args.join(' '),
+    )
+    assert.equal(
+      /^ok:\s+false$/mu.test(result.stdout),
+      mode.envelope,
+      mode.args.join(' '),
+    )
+  }
+}, INCUR_HELP_TIMEOUT_MS)
 
 test('root config file can provide command option defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
@@ -540,18 +646,18 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
           exitCode: 7,
           retryable: true,
         },
-        createVaultCliRepair({
+        {
           stage: 'validation',
           hint: 'Correct the weekly schedule and retry.',
           fields: [
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
-              message: 'Use a valid IANA time zone.',
               expected: 'IANA time zone',
+              message: 'Use a valid IANA time zone.',
             },
           ],
-        }),
+        },
       )
     },
   })
@@ -602,8 +708,8 @@ test('Cli.fetch returns rich repair fields without arbitrary error context', asy
             {
               path: ['schedule', 'timeZone'],
               code: 'invalid_value',
-              message: 'Use a valid IANA time zone.',
               expected: 'IANA time zone',
+              message: 'Use a valid IANA time zone.',
             },
           ],
         },
@@ -633,6 +739,147 @@ test('Cli.fetch returns rich repair fields without arbitrary error context', asy
     },
   ])
   assert.equal(JSON.stringify(envelope).includes('private-submitted-value'), false)
+})
+
+test('built validation owners project safe field repair details', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-validation-repair-'))
+
+  try {
+    await initializeVault({ vaultRoot })
+
+    const cases = [
+      {
+        args: [
+          'workout',
+          'add',
+          '--vault',
+          vaultRoot,
+          '--workout-exercise',
+          'order=1;name=Bench press',
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'too_small',
+        message: 'Invalid workout session fields.',
+        path: 'exercises.0.sets',
+        privateText: 'Bench press',
+      },
+      {
+        args: [
+          'scheduled-log',
+          'save',
+          'Weekly strength template',
+          '--vault',
+          vaultRoot,
+          '--schedule-kind',
+          'cron',
+          '--schedule-cron',
+          '0 7 * * 1',
+          '--action-kind',
+          'meal.add',
+        ],
+        errorCode: 'invalid_payload',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'custom',
+        message: 'Input failed validation.',
+        path: 'foodId',
+        privateText: 'Weekly strength template',
+      },
+      {
+        args: [
+          'blood-test',
+          'save',
+          'Invalid analyte panel',
+          '--vault',
+          vaultRoot,
+          '--occurred-at',
+          '2026-03-12T13:00:00.000Z',
+          '--test-name',
+          'invalid_analyte_panel',
+          '--result',
+          JSON.stringify({
+            note: 'Ferritin private marker',
+          }),
+        ],
+        errorCode: 'invalid_option',
+        fieldMessage: 'This field is invalid.',
+        issueCode: 'invalid_union',
+        message: 'Invalid --result blood-test analyte payload.',
+        path: '$',
+        privateText: 'Ferritin private marker',
+      },
+    ] as const
+
+    for (const candidate of cases) {
+      const result = await runBuiltCliProcess([
+        ...candidate.args,
+        '--full-output',
+        '--format',
+        'json',
+      ])
+      const envelope = JSON.parse(result.stdout) as CliEnvelope
+      assert.equal(result.exitCode, 1, candidate.message)
+      assert.equal(envelope.ok, false, candidate.message)
+      if (envelope.ok) {
+        assert.fail(`Expected ${candidate.message} to fail.`)
+      }
+
+      const error = envelope.error
+      const serialized = JSON.stringify(error)
+      assert.equal(error.code, candidate.errorCode)
+      assert.equal(error.message, candidate.message)
+      assert.equal(error.retryable, false)
+      assert.equal(error.stage, 'validation')
+      assert.equal(error.hint, undefined)
+      assert.deepEqual(error.fieldErrors?.[0], {
+        code: candidate.issueCode,
+        expected: '',
+        message: candidate.fieldMessage,
+        path: candidate.path,
+        received: 'invalid',
+      })
+      assert.equal(result.stderr.includes(candidate.privateText), false)
+      assert.equal(serialized.includes(candidate.privateText), false)
+      assert.equal(serialized.includes('Required'), false)
+      assert.equal(serialized.includes('Too small'), false)
+    }
+
+    const manyExerciseArgs = [
+      'workout',
+      'add',
+      '--vault',
+      vaultRoot,
+      ...Array.from({ length: 14 }, (_, index) => [
+        '--workout-exercise',
+        `order=${index + 1};name=Lift ${index + 1}`,
+      ]).flat(),
+    ]
+    const manyExercises = await runBuiltCliProcess([
+      ...manyExerciseArgs,
+      '--full-output',
+      '--format',
+      'json',
+    ])
+    const manyExerciseEnvelope = JSON.parse(manyExercises.stdout) as CliEnvelope
+    assert.equal(manyExercises.exitCode, 1)
+    assert.equal(manyExerciseEnvelope.ok, false)
+    if (manyExerciseEnvelope.ok) {
+      assert.fail('Expected many missing workout sets to fail.')
+    }
+    assert.equal(manyExerciseEnvelope.error.stage, 'validation')
+    assert.equal(manyExerciseEnvelope.error.fieldErrors?.length, 13)
+    assert.deepEqual(manyExerciseEnvelope.error.fieldErrors?.at(-1), {
+      path: '$',
+      code: 'issues_omitted',
+      expected: '',
+      received: 'invalid',
+      message: '2 additional validation issues were omitted.',
+    })
+    assert.equal(JSON.stringify(manyExerciseEnvelope.error).includes('Lift'), false)
+    assert.equal(manyExercises.stderr.includes('Lift'), false)
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
 })
 
 test('VaultCliError envelopes default retryable to false', async () => {
