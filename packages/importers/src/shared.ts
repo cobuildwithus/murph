@@ -213,14 +213,20 @@ export async function inspectFileAsset(
     const candidate = error as NodeJS.ErrnoException;
 
     if (candidate.code === "ENOENT") {
-      throw new Error(`${role}Path does not point to an existing file`);
+      throw Object.assign(
+        new Error(`${role}Path does not point to an existing file`),
+        { code: "ENOENT" },
+      );
     }
 
     throw error;
   }
 
   if (!details.isFile()) {
-    throw new Error(`${role}Path must point to a file`);
+    throw Object.assign(
+      new Error(`${role}Path must point to a file`),
+      { code: "ERR_IMPORT_PATH_NOT_FILE" },
+    );
   }
 
   const fileName = basename(sourcePath);

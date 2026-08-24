@@ -46,8 +46,11 @@ import {
   relativePathStrings,
   resolveVaultRelativePath,
   stringArray,
+  toAssessmentProjectVaultCliError,
   toEventUpsertVaultCliError,
+  toImporterInputFileVaultCliError,
   toVaultCliError,
+  toVaultCliFilesystemError,
   toVaultMetadataCliError,
   uniqueStrings,
 } from "../src/usecases/vault-usecase-helpers.ts";
@@ -428,15 +431,20 @@ describe("helper barrel exports", () => {
     const passthrough = new Error("boom");
     expect(toVaultCliError(passthrough)).toBe(passthrough);
 
-    expect(
-      toEventUpsertVaultCliError(
-        Object.assign(new Error("Bad event"), {
-          name: "VaultError",
-          code: "EVENT_CONTRACT_INVALID",
-          details: { field: "kind" },
-        }),
-      ),
-    ).toEqual(
+    const eventContractError = toEventUpsertVaultCliError(
+      Object.assign(new Error("Bad event"), {
+        name: "VaultError",
+        code: "EVENT_CONTRACT_INVALID",
+        details: {
+          field: "kind",
+          errors: [
+            "$.title: private-submitted-title is too long",
+            "$.links[2].targetId: private-submitted-id is invalid",
+          ],
+        },
+      }),
+    );
+    expect(eventContractError).toEqual(
       expect.objectContaining({
         code: "contract_invalid",
         context: expect.objectContaining({
@@ -445,6 +453,73 @@ describe("helper barrel exports", () => {
         }),
       }),
     );
+    expect(eventContractError).toBeInstanceOf(VaultCliError);
+    if (!(eventContractError instanceof VaultCliError)) {
+      throw new Error("expected event validation to map to VaultCliError");
+    }
+    expect(eventContractError.repair).toEqual({
+      stage: "validation",
+      hint: "Correct the listed event fields and retry.",
+      fields: [
+        {
+          path: "title",
+          code: "contract_invalid",
+          message: "Value does not satisfy the record contract.",
+        },
+        {
+          path: "links.2.targetId",
+          code: "contract_invalid",
+          message: "Value does not satisfy the record contract.",
+        },
+      ],
+    });
+    expect(JSON.stringify(eventContractError.repair)).not.toContain("private-submitted");
+
+    const inputFileError = toImporterInputFileVaultCliError(
+      Object.assign(new Error("missing /private/member-file.json"), { code: "ENOENT" }),
+    );
+    expect(inputFileError).toEqual(expect.objectContaining({
+      code: "not_found",
+      message: "The input file was not found.",
+      repair: expect.objectContaining({
+        stage: "input_file",
+        fields: [expect.objectContaining({ path: "file", code: "not_found" })],
+      }),
+    }));
+    expect(JSON.stringify(inputFileError)).not.toContain("/private/member-file.json");
+
+    const exportWriteError = toVaultCliFilesystemError(
+      Object.assign(new Error("ENOSPC at /private/output"), { code: "ENOSPC" }),
+      {
+        stage: "export_output",
+        message: "The export pack could not be written.",
+        hint: "Choose a writable --out directory and retry.",
+        fieldPath: "out",
+      },
+    );
+    expect(exportWriteError).toEqual(expect.objectContaining({
+      code: "storage_unavailable",
+      context: { retryable: false },
+      repair: expect.objectContaining({
+        stage: "export_output",
+        fields: [expect.objectContaining({ path: "out" })],
+      }),
+    }));
+    expect(JSON.stringify(exportWriteError)).not.toContain("/private/output");
+
+    const missingAssessmentError = toAssessmentProjectVaultCliError(
+      Object.assign(new Error('Assessment response "private-id" was not found.'), {
+        name: "VaultError",
+        code: "ASSESSMENT_RESPONSE_NOT_FOUND",
+        details: { assessmentId: "private-id" },
+      }),
+    );
+    expect(missingAssessmentError).toEqual(expect.objectContaining({
+      code: "not_found",
+      message: "The requested assessment response was not found.",
+      repair: expect.objectContaining({ stage: "lookup" }),
+    }));
+    expect((missingAssessmentError as VaultCliError).message).not.toContain("private-id");
 
     expect(
       toVaultMetadataCliError(

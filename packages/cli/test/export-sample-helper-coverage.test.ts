@@ -94,8 +94,75 @@ test('stored export pack helpers tolerate a missing exports root and enforce man
 
   await assert.rejects(
     () => showStoredExportPack(vaultRoot, 'pack-alpha'),
-    (error) =>
-      isVaultCliErrorWithCode(error, 'manifest_invalid', 'different-pack-id'),
+    (error) => {
+      if (!isVaultCliErrorWithCode(error, 'manifest_invalid', 'does not match')) {
+        return false
+      }
+
+      const serialized = JSON.stringify(error)
+      assert.equal(serialized.includes('different-pack-id'), false)
+      assert.equal(serialized.includes('pack-alpha'), false)
+      assert.deepEqual(
+        (error as { repair?: unknown }).repair,
+        {
+          stage: 'manifest_validation',
+          hint: 'Restore or recreate the mismatched export pack before retrying.',
+          fields: [{
+            path: 'packId',
+            code: 'mismatch',
+            message: 'Manifest packId must match its export pack directory.',
+          }],
+        },
+      )
+      return true
+    },
+  )
+})
+
+test('stored export pack schema errors retain bounded field repair without manifest values', async () => {
+  const vaultRoot = await createTempDir('murph-cli-export-invalid-manifest-')
+  const { showStoredExportPack } = await import(
+    '../src/commands/export-intake-read-helpers.js'
+  )
+  const privateValue = 'private-manifest-value'
+
+  await writeJsonFile(vaultRoot, 'exports/packs/pack-invalid/manifest.json', {
+    format: privateValue,
+    packId: 'pack-invalid',
+    generatedAt: '2026-04-08T00:00:00.000Z',
+    filters: {
+      from: null,
+      to: null,
+      experimentSlug: null,
+    },
+    manifest: {
+      recordCount: privateValue,
+    },
+    files: [],
+  })
+
+  await assert.rejects(
+    () => showStoredExportPack(vaultRoot, 'pack-invalid'),
+    (error) => {
+      if (!isVaultCliErrorWithCode(error, 'manifest_invalid', 'expected JSON shape')) {
+        return false
+      }
+
+      const serialized = JSON.stringify(error)
+      assert.equal(serialized.includes(privateValue), false)
+      assert.equal(serialized.includes(vaultRoot), false)
+      assert.equal(serialized.includes('pack-invalid'), false)
+      assert.deepEqual(
+        (error as { repair?: { stage?: string; fields?: Array<{ path?: string }> } }).repair?.stage,
+        'manifest_validation',
+      )
+      assert.equal(
+        (error as { repair?: { fields?: Array<{ path?: string }> } }).repair?.fields
+          ?.some((field) => field.path === 'manifest.recordCount'),
+        true,
+      )
+      return true
+    },
   )
 })
 

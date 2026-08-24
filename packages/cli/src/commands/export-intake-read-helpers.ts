@@ -13,8 +13,15 @@ import {
   readMaterializedExportPackReceipt,
   retireMaterializedExportPack,
 } from '@murphai/vault-usecases/export-packs'
-import { materializeExportPack, resolveVaultRelativePath } from '@murphai/vault-usecases/helpers'
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  materializeExportPack,
+  resolveVaultRelativePath,
+  toVaultCliFilesystemError,
+} from '@murphai/vault-usecases/helpers'
+import {
+  VaultCliError,
+  type VaultCliRepairInput,
+} from '@murphai/operator-config/vault-cli-errors'
 import { pathSchema } from '@murphai/operator-config/vault-cli-contracts'
 
 type JsonObject = Record<string, unknown>
@@ -83,6 +90,62 @@ function packDirectory(packId: string) {
   return path.posix.join(EXPORTS_ROOT, packId)
 }
 
+function readErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== 'object' || !('code' in error)) {
+    return null
+  }
+
+  return typeof error.code === 'string' ? error.code : null
+}
+
+function manifestValidationRepair(error: unknown): VaultCliRepairInput {
+  const issues =
+    error && typeof error === 'object' && 'issues' in error && Array.isArray(error.issues)
+      ? error.issues
+      : []
+
+  return {
+    stage: 'manifest_validation',
+    hint: 'Restore or recreate the malformed export pack before retrying.',
+    fields: issues.map((issue) => {
+      const issueRecord = issue && typeof issue === 'object' ? issue : null
+      const issueCode =
+        issueRecord && 'code' in issueRecord && typeof issueRecord.code === 'string'
+          ? issueRecord.code
+          : undefined
+      const issuePath =
+        issueRecord && 'path' in issueRecord && Array.isArray(issueRecord.path)
+          ? issueRecord.path.filter(
+              (segment: unknown): segment is PropertyKey =>
+                typeof segment === 'string' || typeof segment === 'number',
+            )
+          : []
+
+      return {
+        path: issuePath,
+        ...(issueCode ? { code: issueCode } : {}),
+        message: manifestValidationMessage(issueCode),
+      }
+    }),
+  }
+}
+
+function manifestValidationMessage(code: string | undefined) {
+  switch (code) {
+    case 'invalid_type':
+      return 'Manifest field has the wrong type.'
+    case 'too_big':
+      return 'Manifest field exceeds the allowed maximum.'
+    case 'too_small':
+      return 'Manifest field is below the allowed minimum.'
+    case 'invalid_value':
+    case 'invalid_enum_value':
+      return 'Manifest field is not one of the allowed values.'
+    default:
+      return 'Manifest field failed validation.'
+  }
+}
+
 async function readJsonRelativeFile<T>(
   vaultRoot: string,
   relativePath: string,
@@ -96,11 +159,21 @@ async function readJsonRelativeFile<T>(
   try {
     contents = await readFile(absolutePath, 'utf8')
   } catch (error) {
+    if (readErrorCode(error) !== 'ENOENT') {
+      throw toVaultCliFilesystemError(error, {
+        stage: 'manifest_read',
+        message: 'The stored vault manifest could not be read.',
+        hint: 'Check vault permissions and manifest path types before retrying.',
+      })
+    }
+
     throw new VaultCliError(
       missingCode,
-      `Vault file "${relativePath}" is missing.`,
+      'A required stored vault manifest is missing.',
+      { retryable: false },
       {
-        cause: error instanceof Error ? error.message : String(error),
+        stage: 'manifest_read',
+        hint: 'Restore the missing vault manifest before retrying.',
       },
     )
   }
@@ -112,9 +185,16 @@ async function readJsonRelativeFile<T>(
   } catch (error) {
     throw new VaultCliError(
       invalidCode,
-      `Vault file "${relativePath}" is not valid JSON.`,
+      'A stored vault manifest is not valid JSON.',
+      { retryable: false },
       {
-        cause: error instanceof Error ? error.message : String(error),
+        stage: 'manifest_parse',
+        hint: 'Restore or recreate the malformed export pack before retrying.',
+        fields: [{
+          path: '$',
+          code: 'invalid_json',
+          message: 'Manifest must contain valid JSON.',
+        }],
       },
     )
   }
@@ -124,10 +204,9 @@ async function readJsonRelativeFile<T>(
   } catch (error) {
     throw new VaultCliError(
       invalidCode,
-      `Vault file "${relativePath}" does not match the expected JSON shape.`,
-      {
-        cause: error instanceof Error ? error.message : String(error),
-      },
+      'A stored vault manifest does not match the expected JSON shape.',
+      { retryable: false },
+      manifestValidationRepair(error),
     )
   }
 }
@@ -282,7 +361,17 @@ async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
   if (manifest.packId !== packId) {
     throw new VaultCliError(
       'manifest_invalid',
-      `Manifest "${manifestFile}" declares pack id "${manifest.packId}" instead of "${packId}".`,
+      'The stored export pack manifest does not match its directory.',
+      { retryable: false },
+      {
+        stage: 'manifest_validation',
+        hint: 'Restore or recreate the mismatched export pack before retrying.',
+        fields: [{
+          path: 'packId',
+          code: 'mismatch',
+          message: 'Manifest packId must match its export pack directory.',
+        }],
+      },
     )
   }
 
@@ -390,7 +479,11 @@ export async function listStoredExportPacks(
     if (errorCode === 'ENOENT') {
       return []
     }
-    throw error
+    throw toVaultCliFilesystemError(error, {
+      stage: 'export_list',
+      message: 'Stored export packs could not be listed.',
+      hint: 'Check vault export-directory permissions before retrying.',
+    })
   }
 
   const items = await Promise.all(
@@ -450,7 +543,16 @@ export async function materializeStoredExportPack(input: {
   const { rebuilt, files } = await loadFilesForMaterialization(input.vault, manifest)
   const outDir = input.out ?? input.vault
 
-  await materializeExportPack(outDir, files)
+  try {
+    await materializeExportPack(outDir, files)
+  } catch (error) {
+    throw toVaultCliFilesystemError(error, {
+      stage: 'export_output',
+      message: 'The export pack could not be written to the output directory.',
+      hint: 'Choose a writable --out directory and retry.',
+      fieldPath: input.out ? 'out' : 'vault',
+    })
+  }
 
   return {
     vault: input.vault,
@@ -465,8 +567,18 @@ export async function materializeStoredExportPack(input: {
 export async function pruneStoredExportPack(vaultRoot: string, packId: string) {
   const { manifest } = await readStoredExportPackManifest(vaultRoot, packId)
   const relativePackDirectory = packDirectory(packId)
-  const receipt = await readMaterializedExportPackReceipt(vaultRoot, packId)
-  const pruned = await retireMaterializedExportPack(vaultRoot, receipt)
+  let receipt: Awaited<ReturnType<typeof readMaterializedExportPackReceipt>>
+  let pruned: boolean
+  try {
+    receipt = await readMaterializedExportPackReceipt(vaultRoot, packId)
+    pruned = await retireMaterializedExportPack(vaultRoot, receipt)
+  } catch (error) {
+    throw toVaultCliFilesystemError(error, {
+      stage: 'export_prune',
+      message: 'The stored export pack could not be pruned.',
+      hint: 'Check vault export-directory permissions before retrying.',
+    })
+  }
   if (!pruned) {
     throw new VaultCliError(
       'export_pack_changed',

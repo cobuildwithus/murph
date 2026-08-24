@@ -1,4 +1,5 @@
 import { Cli, z } from 'incur'
+import { ID_PREFIXES, SAMPLE_STREAMS, idPattern } from '@murphai/contracts'
 import {
   requestIdFromOptions,
   withBaseOptions,
@@ -39,13 +40,18 @@ const journalLinkResultSchema = z.object({
 
 const journalReferenceOptionsSchema = withBaseOptions({
   eventId: z
-    .array(z.string().min(1))
+    .array(
+      z.string().regex(
+        new RegExp(idPattern(ID_PREFIXES.event), 'u'),
+        'Expected a canonical event id in evt_<ULID> form.',
+      ),
+    )
     .optional()
     .describe(
       'Optional event ids to mutate. Repeat --event-id for multiple values. Mutually exclusive with --stream.',
     ),
   stream: z
-    .array(z.string().min(1))
+    .array(z.enum(SAMPLE_STREAMS))
     .optional()
     .describe(
       'Optional sample streams to mutate. Repeat --stream for multiple values. Mutually exclusive with --event-id.',
