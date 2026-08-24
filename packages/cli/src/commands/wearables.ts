@@ -1,6 +1,7 @@
 import { Cli, z } from 'incur'
 import { wearablePreferenceProviderValues } from '@murphai/contracts'
 import {
+  resolveWearableCanonicalMetricKey,
   wearableCanonicalMetricKeys,
 } from '@murphai/importers/device-providers/metric-catalog'
 import {
@@ -62,6 +63,10 @@ const wearableMetricArgSchema = z.object({
     .string()
     .trim()
     .min(1)
+    .refine(
+      isSupportedWearableMetricRequest,
+      'Unsupported wearable metric. Use a canonical metric key or supported alias such as hrv, resting-heart-rate, steps, sleep-score, or skin-temp.',
+    )
     .describe(
       'Wearable metric key or alias such as hrv, resting-heart-rate, steps, sleep-score, or skin-temp.',
     ),
@@ -682,6 +687,41 @@ function normalizeWearableProviders(value: readonly string[] | undefined): strin
   ) ?? []
 }
 
+function isSupportedWearableMetricRequest(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/[\s_]+/gu, '-')
+  return resolveWearableCanonicalMetricKey(value) !== null ||
+    resolveWearableCanonicalMetricKey(normalized) !== null
+}
+
+function assertWearableDateRangeOrdered(value: {
+  from?: string
+  to?: string
+}): void {
+  if (
+    value.from === undefined ||
+    value.to === undefined ||
+    value.from <= value.to
+  ) {
+    return
+  }
+
+  throw new VaultCliError(
+    'invalid_option',
+    'The wearable date range is invalid.',
+    { retryable: false },
+    {
+      stage: 'wearable-date-validation',
+      hint: 'Set --to to the same date as --from or a later date.',
+      fields: [{
+        path: 'to',
+        code: 'date_range_reversed',
+        message: '--to must be on or after --from.',
+        expected: 'A calendar date equal to or later than --from.',
+      }],
+    },
+  )
+}
+
 function withoutWearableVaultPath<TResult extends object>(
   result: TResult,
 ): Omit<TResult, 'vault'> {
@@ -718,6 +758,7 @@ export function registerWearablesCommands(
       'Use `wearables latest` for a compact cross-category snapshot, then drill into `wearables metric latest <metric>` or `wearables metric trend <metric>` for one metric.',
     output: wearablesLatestResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableLatest = requireAdditiveWearablesQueryMethod<
         WearablesLatestResult,
         WearablesLatestInput
@@ -793,6 +834,7 @@ export function registerWearablesCommands(
       'Use aliases such as `hrv`, `sleep-score`, `activity-average-heart-rate`, or `activity-lowest-heart-rate`; the shared wearable metric catalog resolves them to canonical keys.',
     output: wearablesMetricLatestResultSchema,
     async run({ args, options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableMetricLatest = requireAdditiveWearablesQueryMethod<
         WearablesMetricLatestResult,
         WearablesMetricInput
@@ -832,6 +874,7 @@ export function registerWearablesCommands(
       'Use `wearables metric trend <metric>` when you need a compact normalized window rather than a raw per-provider record dump.',
     output: wearablesMetricTrendResultSchema,
     async run({ args, options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableMetricTrend = requireAdditiveWearablesQueryMethod<
         WearablesMetricTrendResult,
         WearablesMetricInput
@@ -863,6 +906,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesSleepListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableSleep({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -894,6 +938,7 @@ export function registerWearablesCommands(
       'Use `wearables sleep pattern` for longitudinal sleep questions. Check summary.notes before interpreting missing dates, mixed providers, stale sources, naps, or clock timing.',
     output: wearablesSleepPatternResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableSleepPattern = requireAdditiveWearablesQueryMethod<
         WearablesSleepPatternResult,
         WearablesSleepPatternInput
@@ -925,6 +970,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesActivityListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableActivity({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -951,6 +997,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesBodyStateListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableBodyState({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -977,6 +1024,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesRecoveryListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableRecovery({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -1003,6 +1051,7 @@ export function registerWearablesCommands(
     options: withWearableListOptions(),
     output: wearablesSourcesListResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const result = await services.query.listWearableSources({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
@@ -1035,6 +1084,7 @@ export function registerWearablesCommands(
       'Use `wearables drift` when the question is “what changed?” across wearable surfaces rather than “what is the exact latest value?”.',
     output: wearablesDriftResultSchema,
     async run({ options }) {
+      assertWearableDateRangeOrdered(options)
       const showWearableDrift = requireAdditiveWearablesQueryMethod<
         WearablesDriftResult,
         WearablesDriftInput

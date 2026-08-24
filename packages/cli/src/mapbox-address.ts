@@ -4,6 +4,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 
 import { MAPBOX_GEOCODING_API_VERSION } from './mapbox-route-contracts.js'
 import {
+  createMapboxResponseInvalidError,
   fetchMapboxJson,
   readMapboxAccessToken,
   resolveMapboxTimeoutMs,
@@ -261,14 +262,11 @@ export async function resolveMapboxAddress(
     fetchImpl: dependencies.fetchImpl ?? fetch,
     timeoutMs: resolveMapboxTimeoutMs(env),
     url,
-    requestLabel: 'address resolution',
+    stage: 'address-resolution',
   })
   const parsedPayload = providerAddressResponseSchema.safeParse(rawPayload)
   if (!parsedPayload.success) {
-    throw new VaultCliError(
-      'route_mapbox_response_invalid',
-      'Mapbox returned an invalid address-resolution response.',
-    )
+    throw createMapboxResponseInvalidError('address-resolution')
   }
 
   const explicitMailingHints = readExplicitMailingHints(input.query)

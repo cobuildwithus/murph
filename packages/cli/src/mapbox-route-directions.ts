@@ -1,4 +1,4 @@
-import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   MAPBOX_DIRECTIONS_API_VERSION,
@@ -8,7 +8,10 @@ import {
   type MapboxRouteProfile,
   type ResolvedRoutePoint,
 } from './mapbox-route-contracts.js'
-import { fetchMapboxJson } from './mapbox-route-client.js'
+import {
+  createMapboxResponseInvalidError,
+  fetchMapboxJson,
+} from './mapbox-route-client.js'
 
 const finiteNonnegativeNumberSchema = z.number().finite().nonnegative()
 const mapboxDirectionsGeometrySchema = z
@@ -73,29 +76,38 @@ export async function requestDirections(input: {
       fetchImpl: input.fetchImpl,
       timeoutMs: input.timeoutMs,
       url,
-      requestLabel: 'directions',
+      stage: 'directions',
     }),
   )
 
   if (!parsedPayload.success) {
-    throw new Error('Mapbox returned an invalid directions response.')
+    throw createMapboxResponseInvalidError('directions')
   }
 
   const payload: MapboxDirectionsResponse = parsedPayload.data
 
   if (payload.code !== 'Ok') {
-    throw new Error(
-      normalizeNullableString(payload.message) ??
-        'Mapbox did not return a route for these points.',
-    )
+    throw createNoRouteError()
   }
 
   const route = payload.routes?.[0]
   if (!route) {
-    throw new Error('Mapbox did not return a route for these points.')
+    throw createNoRouteError()
   }
 
   return route
+}
+
+function createNoRouteError(): VaultCliError {
+  return new VaultCliError(
+    'route_no_path',
+    'Mapbox did not return a route for these points.',
+    { retryable: false },
+    {
+      stage: 'directions',
+      hint: 'Make the origin or destination more specific, use longitude,latitude coordinates, or try another routing profile.',
+    },
+  )
 }
 
 export function normalizeRouteGeometry(

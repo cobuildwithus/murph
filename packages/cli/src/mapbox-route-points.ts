@@ -1,4 +1,5 @@
 import { normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   MAPBOX_GEOCODING_API_VERSION,
   MAPBOX_SEARCH_BOX_API_VERSION,
@@ -14,7 +15,11 @@ import {
   type MapboxSearchBoxResponse,
   type ResolvedRoutePoint,
 } from './mapbox-route-contracts.js'
-import { fetchMapboxJson } from './mapbox-route-client.js'
+import {
+  createMapboxResponseInvalidError,
+  fetchMapboxJson,
+  type MapboxRequestStage,
+} from './mapbox-route-client.js'
 
 const coordinateLiteralPattern =
   /^\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*,\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*$/u
@@ -120,7 +125,19 @@ async function resolveTextRoutePoint(
     }
   }
 
-  throw firstMiss ?? new Error(`Mapbox could not resolve the ${input.role}.`)
+  if (firstMiss) {
+    throw new VaultCliError(
+      'route_point_unresolved',
+      `Mapbox could not resolve the ${input.role}.`,
+      { retryable: false },
+      {
+        stage: `${input.role}-lookup`,
+        hint: 'Make the location more specific or use longitude,latitude coordinates.',
+      },
+    )
+  }
+
+  throw createMapboxResponseInvalidError(routePointStage(input.role, 'search'))
 }
 
 function buildCoordinatePoint(
@@ -171,19 +188,20 @@ async function geocodeRoutePoint(
     url.searchParams.set('language', input.language)
   }
 
+  const stage = routePointStage(input.role, 'geocoding')
   const payload = await fetchMapboxJson<MapboxGeocodingResponse>({
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: `${input.role} geocoding`,
+    stage,
   })
-  const feature = payload.features?.[0]
+  const feature = readFirstMapboxFeature(payload, stage)
 
   if (!feature) {
     throw new MapboxRoutePointLookupMissError(`Mapbox could not geocode the ${input.role}.`)
   }
 
-  return buildResolvedFeaturePoint(feature, input, 'geocoded-query')
+  return buildResolvedFeaturePoint(feature, input, 'geocoded-query', stage)
 }
 
 async function searchBoxRoutePoint(
@@ -212,13 +230,14 @@ async function searchBoxRoutePoint(
     )
   }
 
+  const stage = routePointStage(input.role, 'search')
   const payload = await fetchMapboxJson<MapboxSearchBoxResponse>({
     fetchImpl: input.fetchImpl,
     timeoutMs: input.timeoutMs,
     url,
-    requestLabel: `${input.role} search box`,
+    stage,
   })
-  const feature = payload.features?.[0]
+  const feature = readFirstMapboxFeature(payload, stage)
 
   if (!feature) {
     throw new MapboxRoutePointLookupMissError(
@@ -226,17 +245,38 @@ async function searchBoxRoutePoint(
     )
   }
 
-  return buildResolvedFeaturePoint(feature, input, 'search-box-query')
+  return buildResolvedFeaturePoint(feature, input, 'search-box-query', stage)
+}
+
+function readFirstMapboxFeature(
+  payload: MapboxGeocodingResponse | MapboxSearchBoxResponse,
+  stage: MapboxRequestStage,
+): MapboxLocationFeature | null {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    (payload.features !== undefined && !Array.isArray(payload.features))
+  ) {
+    throw createMapboxResponseInvalidError(stage)
+  }
+
+  const feature = payload.features?.[0]
+  if (feature !== undefined && (!feature || typeof feature !== 'object')) {
+    throw createMapboxResponseInvalidError(stage)
+  }
+
+  return feature ?? null
 }
 
 function buildResolvedFeaturePoint(
   feature: MapboxLocationFeature,
   input: RoutePointLookupOptions,
   source: Extract<MapboxRoutePointSource, 'geocoded-query' | 'search-box-query'>,
+  stage: MapboxRequestStage,
 ): ResolvedRoutePoint {
   const featureCoordinates = readFeatureCoordinates(feature)
   if (!featureCoordinates) {
-    throw new Error(`Mapbox returned an unusable coordinate for the ${input.role}.`)
+    throw createMapboxResponseInvalidError(stage)
   }
 
   const routablePoint = selectRoutablePoint(feature, input.profile)
@@ -258,6 +298,13 @@ function buildResolvedFeaturePoint(
     matchType,
     routablePointName: normalizeNullableString(routablePoint?.name) ?? null,
   }
+}
+
+function routePointStage(
+  role: MapboxRoutePointRole,
+  lookup: 'geocoding' | 'search',
+): MapboxRequestStage {
+  return `${role}-${lookup}`
 }
 
 function readFeatureCoordinates(

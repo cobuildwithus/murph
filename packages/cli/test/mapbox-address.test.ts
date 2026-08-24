@@ -578,7 +578,7 @@ describe('resolveMapboxAddress', () => {
       ),
     ).rejects.toMatchObject({
       code: 'route_mapbox_response_invalid',
-      message: 'Mapbox returned an invalid address-resolution response.',
+      message: 'Mapbox returned an invalid response.',
     })
   })
 

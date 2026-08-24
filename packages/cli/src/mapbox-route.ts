@@ -85,23 +85,38 @@ export async function estimateMapboxRoute(
     ? normalizeRouteGeometry(directionsRoute.geometry)
     : null
   let elevation: MapboxRouteElevationSummary | null = null
+  let elevationLookupFailed = false
 
   if (input.includeElevation) {
     if (!geometry) {
       warnings.push('Elevation was requested but the routed geometry was unavailable.')
     } else {
-      elevation = await summarizeRouteElevation({
-        accessToken,
-        fetchImpl,
-        geometry,
-        maxSamples: input.maxElevationSamples ?? DEFAULT_MAX_ELEVATION_SAMPLES,
-        sampleSpacingMeters:
-          input.elevationSampleSpacingMeters ??
-          DEFAULT_ELEVATION_SAMPLE_SPACING_METERS,
-        timeoutMs,
-      })
+      try {
+        elevation = await summarizeRouteElevation({
+          accessToken,
+          fetchImpl,
+          geometry,
+          maxSamples: input.maxElevationSamples ?? DEFAULT_MAX_ELEVATION_SAMPLES,
+          sampleSpacingMeters:
+            input.elevationSampleSpacingMeters ??
+            DEFAULT_ELEVATION_SAMPLE_SPACING_METERS,
+          timeoutMs,
+        })
+      } catch (error) {
+        if (
+          !(error instanceof VaultCliError) ||
+          error.repair?.stage !== 'terrain-elevation'
+        ) {
+          throw error
+        }
 
-      if (!elevation) {
+        elevationLookupFailed = true
+        warnings.push(
+          'Elevation is unavailable because the optional terrain lookup failed. The route estimate remains valid; retry later or omit --elevation.',
+        )
+      }
+
+      if (!elevation && !elevationLookupFailed) {
         warnings.push(
           'Elevation is unavailable for this route. When returned, it is only an approximation based on sampled contour queries.',
         )
