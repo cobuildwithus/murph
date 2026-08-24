@@ -250,9 +250,7 @@ export function buildFoodSavePayload(input: FoodSavePayloadInput): FoodSavePaylo
 
   const parsed = foodUpsertPayloadSchema.safeParse(payload)
   if (!parsed.success) {
-    throw new VaultCliError('contract_invalid', 'Food save options are invalid.', {
-      errors: parsed.error.flatten(),
-    })
+    throw new VaultCliError('contract_invalid', 'Food save options are invalid.')
   }
 
   return payload

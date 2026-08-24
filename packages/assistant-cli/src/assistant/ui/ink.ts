@@ -11,6 +11,7 @@ import {
   resolveAssistantOperatorDefaults,
   resolveAssistantProviderDefaults,
 } from '@murphai/operator-config/operator-config'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import {
   redactAssistantSessionForDisplay,
 } from '@murphai/assistant-engine/assistant-runtime'
@@ -117,6 +118,14 @@ interface ResolveAssistantInkInputAdapterInput {
 export const ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR =
   'Murph chat requires interactive terminal input. process.stdin does not support raw mode, and Murph could not open the controlling terminal for Ink input.'
 
+function interactiveAssistantInputError(): VaultCliError {
+  return new VaultCliError(
+    'interactive_input_unavailable',
+    ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR,
+    { stage: 'configuration' },
+  )
+}
+
 export function supportsAssistantInkRawMode(
   stdin: AssistantInkInputStream | null | undefined,
 ): boolean {
@@ -198,7 +207,7 @@ export function assertAssistantInkInteractiveInputAvailable(
   const inkInput = resolveAssistantInkInputAdapter(input)
 
   if (!inkInput.stdin) {
-    throw new Error(ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR)
+    throw interactiveAssistantInputError()
   }
 
   inkInput.close()
@@ -237,7 +246,7 @@ export async function runAssistantChatWithInk(
   const inkInput = resolveAssistantInkInputAdapter()
 
   if (!inkInput.stdin) {
-    throw new Error(ASSISTANT_CHAT_INTERACTIVE_INPUT_ERROR)
+    throw interactiveAssistantInputError()
   }
   const inkStdin = inkInput.stdin
 

@@ -80,7 +80,10 @@ export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_KINDS = [
 ] as const satisfies readonly HostedMailboxKind[];
 
 export const HOSTED_SYSTEM_MAILBOX_MODEL_FREE_NOTIFICATION_DEDUPE_KEY_PREFIXES =
-  ["assistant.notification.requested:group-join:"] as const;
+  [
+    "assistant.notification.requested:device-delivery-stalled:v1:",
+    "assistant.notification.requested:group-join:",
+  ] as const;
 
 export function isHostedSystemMailboxModelFreeNotification(input: {
   dedupeKey: string | null | undefined;

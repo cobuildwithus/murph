@@ -137,33 +137,15 @@ describe('assistant food journal skill', () => {
     expect(compactCardGoals).toContain(
       "When that accepted bundle is absent or any card gate fails, return the owning food-journal skill's short truthful fallback.",
     )
-    expect(skill).toContain(
-      '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-safety.md',
-    )
+    expect(skill).not.toContain('daily-nutrition-card-safety.md')
     expect(skill).toContain(
       '$MURPH_ASSISTANT_SKILLS_ROOT/nutrition-strategy/references/daily-nutrition-card-goals.md',
     )
-    expect(skill.indexOf('daily-nutrition-card-safety.md')).toBeLessThan(
-      skill.indexOf('daily-nutrition-card-goals.md'),
-    )
-    expect(skill).toContain('even when all five goals already appear to exist')
     expect(skill).toContain(
-      'complete active-condition\nand active-regimen discovery is mandatory before numeric target derivation as\nwell as before a card',
+      'apply the concise known-context\nnumeric-suitability rule in the `murph.attach_response_card` prompt',
     )
     expect(skill).toContain(
-      'the five-record context projection is not completeness\nproof',
-    )
-    expect(skill).toContain(
-      'lifetime canonical procedure-event and encounter-diagnosis discovery,\nbounded body-measurement read, separate `pregnancy-test` measurement read, and\nbounded canonical test-event list plus required detail reads are likewise\nmandatory before deriving, saving, or surfacing a proposal and again before\nactivating one',
-    )
-    expect(skill).toContain(
-      'complete `vault-cli memory show --format json` read is also mandatory',
-    )
-    expect(skill).toContain(
-      'the snapshot does not inject the canonical Identity, Preferences,\nInstructions, and Context memory document',
-    )
-    expect(skill).toContain(
-      'a failed or unreadable memory read\nfails closed, while missing or ambiguous age alone is not a universal block',
+      'Do not run\na universal medical-history or measurement preflight.',
     )
     expect(skill).toContain(
       'target-authority and complete active-Goal discovery contract',
@@ -191,10 +173,10 @@ describe('assistant food journal skill', () => {
     )
     expect(skill).toContain('does not attach a goal-less card')
     expect(skill).toContain(
-      'An unambiguous acceptance may complete the\npending explicit card request in that next response after the complete safety',
+      'An unambiguous acceptance may complete the\npending explicit card request in that next response after the known-context',
     )
     expect(skill).toContain(
-      'recheck passes, activation and readback succeed, and a fresh same-date totals\nread completes.',
+      'suitability rule passes, activation and readback succeed, and a fresh same-date totals\nread completes.',
     )
     expect(skill).toContain('vault-cli food search-labels`')
     expect(skill).toContain('vault-cli food search-labels-batch`')

@@ -23,6 +23,7 @@ import {
   timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import { publicValidationIssue } from './public-validation-issue.js'
 
 const nullableTimestampSchema = z.string().min(1).nullable()
 const nullableTextSchema = z.string().min(1).nullable()
@@ -717,11 +718,7 @@ function assertWearableDateRangeOrdered(value: {
     'The wearable date range is invalid.',
     {
       retryable: false,
-      issues: [{
-        path: ['to'],
-        code: 'custom',
-        message: '--to must be on or after --from.',
-      }],
+      issues: [publicValidationIssue({ code: 'custom' }, ['to'])],
     },
   )
 }

@@ -159,6 +159,7 @@ export interface AssistantProviderTurn {
     deliveryContextOrdinal: number
   }) => Promise<void> | void) | null
   onEvent?: ((event: AssistantProviderProgressEvent) => void) | null
+  onAdditionalUsage?: ((usage: AssistantProviderUsageDraft) => Promise<void> | void) | null
   onProviderRequestStarted?: ((event: AssistantProviderRequestStartedEvent) => Promise<void> | void) | null
   onTraceEvent?: (event: AssistantProviderTraceEvent) => void
   providerFetch?: typeof fetch | null

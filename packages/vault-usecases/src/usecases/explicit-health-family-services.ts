@@ -61,6 +61,7 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
+import { toRegimenUpsertVaultCliError } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -148,9 +149,7 @@ function parseRegistryPayloadWithSharedSchema(
 
   const result = safeParseContract(schema, payload);
   if (!result.success) {
-    throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`, {
-      issues: result.errors,
-    });
+    throw new VaultCliError("invalid_payload", `${kind} payload failed validation.`);
   }
 
   return result.data as JsonObject;
@@ -180,9 +179,7 @@ function parseBloodTestImportPayload(payload: JsonObject): JsonObject {
   assertNoBloodTestValueTextAlias(payload);
   const result = safeParseContract(bloodTestImportPayloadSchema, payload);
   if (!result.success) {
-    throw new VaultCliError("invalid_payload", "blood-test payload failed validation.", {
-      issues: result.errors,
-    });
+    throw new VaultCliError("invalid_payload", "blood-test payload failed validation.");
   }
 
   return result.data as JsonObject;
@@ -587,9 +584,7 @@ function parseSupplementIngredient(spec: string, index: number): SupplementIngre
   value = normalizeSupplementIngredientValue(value);
   const result = safeParseContract(supplementIngredientPayloadSchema, value);
   if (!result.success) {
-    throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors), {
-      issues: result.errors,
-    });
+    throw new VaultCliError("invalid_option", formatSupplementIngredientValidationMessage(index, result.errors));
   }
 
   return result.data;
@@ -712,6 +707,17 @@ function toSupplementSaveResult(
     created: Boolean(result.created),
     entity: toSavedEntitySnapshot(toSupplementReadEntity(result.record)),
   };
+}
+
+async function upsertRegimenForCli(
+  core: CoreRuntimeModule,
+  input: Parameters<CoreRuntimeModule["upsertRegimen"]>[0],
+) {
+  try {
+    return await core.upsertRegimen(input);
+  } catch (error) {
+    throw toRegimenUpsertVaultCliError(error);
+  }
 }
 
 function toRegistryDocEntityData(record: object) {
@@ -1230,7 +1236,7 @@ export function createExplicitHealthCoreServices(
       const payload = await readJsonPayload(input.input);
       assertNoReservedPayloadKeys(payload);
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen({
+      const result = await upsertRegimenForCli(core, {
         ...payload,
         vaultRoot: input.vault,
       });
@@ -1246,13 +1252,13 @@ export function createExplicitHealthCoreServices(
     },
     async saveRegimen(input: RegimenSaveInput) {
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen(buildRegimenSavePayload(input));
+      const result = await upsertRegimenForCli(core, buildRegimenSavePayload(input));
 
       return toRegimenSaveResult(input.vault, result);
     },
     async saveSupplement(input: SupplementSaveInput) {
       const { core } = await loadRuntime();
-      const result = await core.upsertRegimen(buildSupplementSavePayload(input));
+      const result = await upsertRegimenForCli(core, buildSupplementSavePayload(input));
 
       return toSupplementSaveResult(input.vault, result);
     },
