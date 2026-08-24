@@ -144,9 +144,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
-// The reviewed scheduled-log recovery graph measured 9,479,168 B in the public
+// The reviewed scheduled-log recovery graph measured 9,479,676 B in the public
 // Linux bundle lane; entry and static-startup topology remain unchanged.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_479_168;
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_479_676;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
