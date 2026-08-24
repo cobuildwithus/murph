@@ -28,6 +28,28 @@ const baseConversationInput: AssistantSystemPromptInput = {
 }
 
 describe('assistant dynamic context prompt blocks', () => {
+  it('assembles the CLI error-recovery rule exactly once', () => {
+    const layers = buildAssistantSystemPromptLayers(baseConversationInput)
+    const prompt = [
+      layers.staticCacheableCorePrompt,
+      layers.stableRouteCapabilityPrompt,
+      layers.threadContextPrompt,
+      layers.dynamicTurnContextPrompt,
+    ].join('\n')
+
+    expect(
+      prompt.match(/When a CLI error includes `fieldErrors`/gu) ?? [],
+    ).toHaveLength(1)
+    expect(prompt).toContain('`hint` is the next safe action')
+    expect(prompt).toContain('`stage` identifies where the failure occurred')
+    expect(prompt).toContain(
+      '`false` still permits a corrected call or a call after the named prerequisite is resolved; otherwise stop',
+    )
+    expect(prompt).toContain(
+      'Never infer or echo details omitted from the error envelope',
+    )
+  })
+
   it('uses hosted direct current time without treating group time as personal', () => {
     const hostedDirectLayers = buildAssistantSystemPromptLayers({
       ...baseConversationInput,

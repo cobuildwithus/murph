@@ -4,6 +4,7 @@ import type { Cli, Formatter } from 'incur'
 
 import { installSqliteExperimentalWarningFilterWithOptions } from '@murphai/runtime-state/node/sqlite-warning-filter'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import type { VaultCliErrorProjection } from '@murphai/operator-config/vault-cli-error-projection'
 import { getVaultCliPackageVersion } from './vault-cli-package.js'
 import { VAULT_CLI_SKILL_HASH } from './vault-cli-skill-hash.generated.js'
 import {
@@ -13,7 +14,6 @@ import {
   type CliInvocationPlan,
   type VaultCliProgramName,
 } from './vault-cli-routing.js'
-import type { VaultCliErrorProjection } from './vault-cli-error-projection.js'
 
 export interface MurphCliRunOptions {
   argv0?: string
@@ -371,7 +371,9 @@ export async function renderMurphCliEntrypointError(
   argv: readonly string[],
   options: { human?: boolean | undefined } = {},
 ): Promise<RenderedMurphCliError> {
-  const { projectVaultCliError } = await import('./vault-cli-error-projection.js')
+  const { projectVaultCliError } = await import(
+    '@murphai/operator-config/vault-cli-error-projection'
+  )
   const projected = projectVaultCliError(error)
   const explicitFormat = findExplicitOutputFormat(argv)
   const human = options.human ?? process.stdout.isTTY === true
