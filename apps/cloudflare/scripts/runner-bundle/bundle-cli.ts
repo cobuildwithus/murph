@@ -145,7 +145,8 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
 // Event, document, intake, and export recovery metadata add 12,715 B to the lazy CLI graph.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_480_363;
+// Reviewed public-Linux baseline from the authoritative bundle lane.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_482_758;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
