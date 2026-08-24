@@ -12,24 +12,34 @@ import {
   VAULT_CLI_BATCH_RESULT_SCHEMA,
 } from '@murphai/operator-config/vault-cli-contracts'
 import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 const batchCommandOptionSchema = z.string().min(1)
+const batchCommandErrorStageSchema = z.string().regex(
+  /^(?:authorization|command|configuration|conflict|filesystem|integrity|persistence|read|render|response|transport|validation|write)$/u,
+)
+const batchPublicFieldPathSchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^(?:\$|(?:[A-Za-z_][A-Za-z0-9_-]*|\d+)(?:\.(?:[A-Za-z_][A-Za-z0-9_-]*|\d+))*)$/u)
 
 const batchCommandErrorSchema = z.object({
-  code: z.string().min(1).optional(),
-  message: z.string().min(1),
+  code: z.string().min(1).max(96).regex(/^[A-Za-z0-9_.:-]+$/u).optional(),
+  message: z.string().min(1).max(640),
   retryable: z.boolean().optional(),
-  hint: z.string().min(1).optional(),
-  stage: z.string().min(1).optional(),
+  exitCode: z.number().int().positive().optional(),
+  hint: z.string().min(1).max(320).optional(),
+  stage: batchCommandErrorStageSchema.optional(),
   fieldErrors: z.array(z.object({
-    code: z.string().min(1).optional(),
-    expected: z.string().optional(),
-    message: z.string().min(1),
+    code: z.string().min(1).max(96).regex(/^[A-Za-z0-9_.:-]+$/u).optional(),
+    expected: z.string().max(32).optional(),
+    message: z.string().min(1).max(240),
     missing: z.boolean().optional(),
-    path: z.string().min(1),
-    received: z.string().optional(),
-  })).optional(),
-})
+    path: batchPublicFieldPathSchema,
+    received: z.enum(['missing', 'invalid']).optional(),
+  }).strict()).max(13).optional(),
+}).strict()
 
 const batchCommandResultSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -105,7 +115,7 @@ function parseBatchCommandOption(value: string): string[] {
   try {
     parsed = JSON.parse(value)
   } catch {
-    throw new Error('Each --command value must be a JSON array of argv tokens.')
+    return invalidBatchCommand('Each --command value must be a JSON array of argv tokens.')
   }
 
   if (
@@ -113,7 +123,7 @@ function parseBatchCommandOption(value: string): string[] {
     parsed.length === 0 ||
     parsed.some((token) => typeof token !== 'string' || token.length === 0)
   ) {
-    throw new Error(
+    return invalidBatchCommand(
       'Each --command value must be a non-empty JSON array of non-empty string argv tokens.',
     )
   }
@@ -138,29 +148,37 @@ function prepareBatchCommandArgv(argv: readonly string[], vault: string): string
 
 function assertBatchCommandAllowed(argv: readonly string[]) {
   if (hasToken(argv, '--mcp')) {
-    throw new Error('Batch commands cannot run MCP server mode.')
+    return invalidBatchCommand('Batch commands cannot run MCP server mode.')
   }
 
   const commandPath = resolveVaultCliCommandPath(argv)
   const [root, subcommand] = commandPath
 
   if (root === 'batch') {
-    throw new Error('Nested batch commands are not supported.')
+    return invalidBatchCommand('Nested batch commands are not supported.')
   }
 
   if (root === 'onboard') {
-    throw new Error('Batch commands cannot run onboarding setup.')
+    return invalidBatchCommand('Batch commands cannot run onboarding setup.')
   }
 
   if (root === 'chat' || (root === 'assistant' && subcommand === 'chat')) {
-    throw new Error('Batch commands cannot run interactive assistant chat.')
+    return invalidBatchCommand('Batch commands cannot run interactive assistant chat.')
   }
 
   const isAssistantRun =
     root === 'run' || (root === 'assistant' && subcommand === 'run')
   if (isAssistantRun) {
-    throw new Error('Batch commands cannot run assistant automation.')
+    return invalidBatchCommand('Batch commands cannot run assistant automation.')
   }
+}
+
+function invalidBatchCommand(message: string): never {
+  throw new VaultCliError('invalid_option', message, {
+    retryable: false,
+    issues: [{ code: 'custom', publicPath: ['command'] }],
+    stage: 'validation',
+  })
 }
 
 async function runBatchCommand(input: {
@@ -208,7 +226,7 @@ async function runBatchCommand(input: {
     }
   } catch (error) {
     const output = stdout.join('')
-    const childError = parseChildCommandError(output) ?? projectVaultCliError(error)
+    const childError = parseChildCommandError(output) ?? projectBatchCommandError(error)
     return {
       index: input.index,
       argv,
@@ -234,6 +252,20 @@ function parseChildCommandError(stdout: string): z.output<typeof batchCommandErr
   const candidate = record.error ?? record
   const parsedError = batchCommandErrorSchema.safeParse(candidate)
   return parsedError.success ? parsedError.data : null
+}
+
+function projectBatchCommandError(
+  error: unknown,
+): z.output<typeof batchCommandErrorSchema> {
+  const projected = batchCommandErrorSchema.safeParse(projectVaultCliError(error))
+  return projected.success
+    ? projected.data
+    : {
+        code: 'UNKNOWN',
+        message: 'The command failed without a safe recoverable detail.',
+        retryable: false,
+        stage: 'command',
+      }
 }
 
 function elapsedMs(startedAt: number): number {

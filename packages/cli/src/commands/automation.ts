@@ -36,10 +36,7 @@ import {
 import {
   withBaseOptions,
 } from "@murphai/operator-config/command-helpers";
-import {
-  VaultCliError,
-  type VaultCliRepairInput,
-} from "@murphai/operator-config/vault-cli-errors";
+import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import {
   loadJsonInputObject,
   normalizeRepeatableFlagOption,
@@ -200,9 +197,15 @@ function automationListItem(
 
 function invalidAutomationOption(
   message: string,
-  repair?: VaultCliRepairInput,
+  publicPath?: readonly (string | number)[],
 ): never {
-  throw new VaultCliError("invalid_option", message, undefined, repair);
+  throw new VaultCliError("invalid_option", message, {
+    retryable: false,
+    ...(publicPath
+      ? { issues: [{ code: "custom", publicPath }] }
+      : {}),
+    stage: "validation",
+  });
 }
 
 interface AutomationValidationIssue {
@@ -222,9 +225,10 @@ function parseAutomationValue<T>(
   value: unknown,
   input: {
     code: string;
-    hint: string;
     message: string;
-    pathPrefix?: readonly PropertyKey[];
+    publicPathForIssue: (
+      issue: AutomationValidationIssue,
+    ) => readonly (string | number)[] | undefined;
   },
 ): T {
   const parsed = schema.safeParse(value);
@@ -232,20 +236,185 @@ function parseAutomationValue<T>(
     return parsed.data;
   }
 
-  throw new VaultCliError(
-    input.code,
-    input.message,
-    undefined,
-    {
-      fields: parsed.error.issues.map((issue) => ({
-        path: [...(input.pathPrefix ?? []), ...issue.path],
-        code: issue.code,
-        message: issue.message,
-      })),
-      hint: input.hint,
-      stage: "validation",
-    },
-  );
+  const issues = parsed.error.issues.flatMap((issue) => {
+    const publicPath = input.publicPathForIssue(issue);
+    return publicPath ? [{ code: issue.code, publicPath }] : [];
+  });
+
+  throw new VaultCliError(input.code, input.message, {
+    retryable: false,
+    ...(issues.length > 0 ? { issues } : {}),
+    stage: "validation",
+  });
+}
+
+function scheduleIssuePublicPath(
+  kind: AutomationScheduleKind,
+  issue: AutomationValidationIssue,
+): readonly (string | number)[] | undefined {
+  const field = issue.path[0];
+  if (field === "kind") {
+    return ["schedule", "kind"];
+  }
+
+  switch (kind) {
+    case "at":
+      return field === "at" ? ["schedule", "at"] : undefined;
+    case "every":
+      return field === "everyMs" ? ["schedule", "everyMs"] : undefined;
+    case "cron":
+      return field === "expression" || field === "timeZone"
+        ? ["schedule", field]
+        : undefined;
+    case "dailyLocal":
+      return field === "localTime" || field === "timeZone"
+        ? ["schedule", field]
+        : undefined;
+    case "deviceActivity":
+      return field === "after" || field === "source" || field === "activityKind"
+        ? ["schedule", field]
+        : undefined;
+  }
+}
+
+function routeIssuePublicPath(
+  issue: AutomationValidationIssue,
+): readonly (string | number)[] | undefined {
+  const field = issue.path[0];
+  return field === "channel" ||
+    field === "deliveryTarget" ||
+    field === "identityId" ||
+    field === "participantId" ||
+    field === "threadId"
+    ? ["route", field]
+    : undefined;
+}
+
+function assistantTargetIssuePublicPath(
+  issue: AutomationValidationIssue,
+): readonly (string | number)[] | undefined {
+  const field = issue.path[0];
+  return field === "model" || field === "modelProvider" || field === "reasoningEffort"
+    ? ["assistantTargetOverride", field]
+    : undefined;
+}
+
+function contextReferenceIssuePublicPath(
+  issue: AutomationValidationIssue,
+): readonly (string | number)[] | undefined {
+  const index = issue.path[0];
+  const field = issue.path[1];
+  if (
+    typeof index !== "number" ||
+    !Number.isSafeInteger(index) ||
+    index < 0 ||
+    (field !== "entityKind" && field !== "entityId")
+  ) {
+    return ["contextReference"];
+  }
+
+  return ["contextReference", index, field];
+}
+
+function automationPayloadIssuePublicPath(
+  issue: AutomationValidationIssue,
+  root?: "payload",
+): readonly (string | number)[] | undefined {
+  const [field, nestedField, itemField] = issue.path;
+  const prefix: readonly string[] = root ? [root] : [];
+
+  if (field === "schedule") {
+    return schedulePayloadIssuePublicPath(prefix, nestedField);
+  }
+  if (field === "route") {
+    return routePayloadIssuePublicPath(prefix, nestedField);
+  }
+  if (field === "assistantTargetOverride") {
+    return assistantTargetPayloadIssuePublicPath(prefix, nestedField);
+  }
+  if (field === "contextReferences") {
+    return contextReferencePayloadIssuePublicPath(
+      prefix,
+      nestedField,
+      itemField,
+    );
+  }
+  if (field === "tags") {
+    return typeof nestedField === "number" &&
+      Number.isSafeInteger(nestedField) &&
+      nestedField >= 0
+      ? [...prefix, "tags", nestedField]
+      : [...prefix, "tags"];
+  }
+
+  return field === "activeUntil" ||
+    field === "automationId" ||
+    field === "continuityPolicy" ||
+    field === "instructions" ||
+    field === "plannedOccurrenceOffsetMs" ||
+    field === "slug" ||
+    field === "status" ||
+    field === "summary" ||
+    field === "supportKind" ||
+    field === "title"
+    ? [...prefix, field]
+    : undefined;
+}
+
+function schedulePayloadIssuePublicPath(
+  prefix: readonly string[],
+  field: PropertyKey | undefined,
+): readonly (string | number)[] | undefined {
+  return field === "kind" ||
+    field === "at" ||
+    field === "everyMs" ||
+    field === "expression" ||
+    field === "localTime" ||
+    field === "timeZone" ||
+    field === "after" ||
+    field === "source" ||
+    field === "activityKind"
+    ? [...prefix, "schedule", field]
+    : [...prefix, "schedule"];
+}
+
+function routePayloadIssuePublicPath(
+  prefix: readonly string[],
+  field: PropertyKey | undefined,
+): readonly (string | number)[] | undefined {
+  return field === "channel" ||
+    field === "deliveryTarget" ||
+    field === "identityId" ||
+    field === "participantId" ||
+    field === "threadId"
+    ? [...prefix, "route", field]
+    : [...prefix, "route"];
+}
+
+function assistantTargetPayloadIssuePublicPath(
+  prefix: readonly string[],
+  field: PropertyKey | undefined,
+): readonly (string | number)[] | undefined {
+  return field === "model" || field === "modelProvider" || field === "reasoningEffort"
+    ? [...prefix, "assistantTargetOverride", field]
+    : [...prefix, "assistantTargetOverride"];
+}
+
+function contextReferencePayloadIssuePublicPath(
+  prefix: readonly string[],
+  index: PropertyKey | undefined,
+  field: PropertyKey | undefined,
+): readonly (string | number)[] | undefined {
+  if (
+    typeof index === "number" &&
+    Number.isSafeInteger(index) &&
+    index >= 0 &&
+    (field === "entityKind" || field === "entityId")
+  ) {
+    return [...prefix, "contextReferences", index, field];
+  }
+
+  return [...prefix, "contextReferences"];
 }
 
 function requireStringOption(
@@ -285,35 +454,15 @@ function resolveAutomationTimeZone(
   ) {
     return invalidAutomationOption(
       "--trigger-time-zone and --schedule-time-zone must match when both are provided.",
-      {
-        fields: [
-          {
-            path: ["schedule", "timeZone"],
-            code: "conflicting_options",
-            message: "Use one matching IANA timezone for the schedule.",
-          },
-        ],
-        hint: "Use --trigger-time-zone; --schedule-time-zone remains a legacy alias.",
-        stage: "validation",
-      },
+      ["schedule", "timeZone"],
     );
   }
 
   const timeZone = options.triggerTimeZone ?? options.scheduleTimeZone;
   if (timeZone !== undefined && kind !== "cron" && kind !== "dailyLocal") {
     return invalidAutomationOption(
-      "A schedule timezone can only be used with cron or dailyLocal triggers.",
-      {
-        fields: [
-          {
-            path: ["schedule", "timeZone"],
-            code: "invalid_combination",
-            message: "Remove the timezone or use a cron or dailyLocal trigger.",
-          },
-        ],
-        hint: "Recurring wall-clock schedules may set --trigger-time-zone to an IANA timezone.",
-        stage: "validation",
-      },
+      "A schedule timezone can only be used with recurring cron or dailyLocal wall-clock triggers.",
+      ["schedule", "timeZone"],
     );
   }
 
@@ -339,9 +488,8 @@ function buildAutomationScheduleFromOptions(
         at: requireStringOption(options.triggerAt ?? options.scheduleAt, "trigger-at"),
       }, {
         code: "invalid_schedule",
-        message: "Automation schedule is invalid.",
-        hint: "Correct the schedule fields and retry.",
-        pathPrefix: ["schedule"],
+        message: "Automation schedule is invalid. Correct the scheduled time and retry.",
+        publicPathForIssue: (issue) => scheduleIssuePublicPath(kind, issue),
       });
     case "every":
       return parseAutomationValue(automationScheduleSchema, {
@@ -349,9 +497,8 @@ function buildAutomationScheduleFromOptions(
         everyMs: requireNumberOption(options.triggerEveryMs ?? options.scheduleEveryMs, "trigger-every-ms"),
       }, {
         code: "invalid_schedule",
-        message: "Automation schedule is invalid.",
-        hint: "Correct the schedule fields and retry.",
-        pathPrefix: ["schedule"],
+        message: "Automation schedule is invalid. Use a finite positive interval and retry.",
+        publicPathForIssue: (issue) => scheduleIssuePublicPath(kind, issue),
       });
     case "cron":
       return parseAutomationValue(automationScheduleSchema, {
@@ -360,9 +507,8 @@ function buildAutomationScheduleFromOptions(
         ...(timeZone === undefined ? {} : { timeZone }),
       }, {
         code: "invalid_schedule",
-        message: "Automation schedule is invalid.",
-        hint: "Use a five-field cron expression and, when needed, a valid IANA timezone.",
-        pathPrefix: ["schedule"],
+        message: "Automation schedule is invalid. Use a five-field cron expression and a valid IANA timezone when one is supplied.",
+        publicPathForIssue: (issue) => scheduleIssuePublicPath(kind, issue),
       });
     case "dailyLocal":
       return parseAutomationValue(automationScheduleSchema, {
@@ -371,9 +517,8 @@ function buildAutomationScheduleFromOptions(
         ...(timeZone === undefined ? {} : { timeZone }),
       }, {
         code: "invalid_schedule",
-        message: "Automation schedule is invalid.",
-        hint: "Use a 24-hour local time and, when needed, a valid IANA timezone.",
-        pathPrefix: ["schedule"],
+        message: "Automation schedule is invalid. Use a 24-hour local time and a valid IANA timezone when one is supplied.",
+        publicPathForIssue: (issue) => scheduleIssuePublicPath(kind, issue),
       });
     case "deviceActivity":
       return parseAutomationValue(automationScheduleSchema, {
@@ -383,9 +528,8 @@ function buildAutomationScheduleFromOptions(
         ...(options.activityKind ? { activityKind: normalizeDeviceActivityKindOption(options.activityKind) } : {}),
       }, {
         code: "invalid_schedule",
-        message: "Automation schedule is invalid.",
-        hint: "Correct the device activity trigger fields and retry.",
-        pathPrefix: ["schedule"],
+        message: "Automation schedule is invalid. Correct the device activity trigger fields and retry.",
+        publicPathForIssue: (issue) => scheduleIssuePublicPath(kind, issue),
       });
   }
 }
@@ -434,9 +578,8 @@ function buildAutomationRouteFromOptions(
     resolveAssistantDeliveryRouteWithCurrentRoute(explicit, null),
     {
       code: "invalid_route",
-      message: "Automation delivery route is invalid.",
-      hint: "Correct the route fields and retry.",
-      pathPrefix: ["route"],
+      message: "Automation delivery route is invalid. Correct the route fields and retry.",
+      publicPathForIssue: routeIssuePublicPath,
     },
   );
 }
@@ -458,16 +601,14 @@ function normalizeAutomationRouteFieldsForSave(route: unknown): AutomationRoute 
     stripPrivateAssistantRoutePlaceholders(
       parseAutomationValue(automationRouteSchema, route, {
         code: "invalid_route",
-        message: "Automation delivery route is invalid.",
-        hint: "Correct the route fields and retry.",
-        pathPrefix: ["route"],
+        message: "Automation delivery route is invalid. Correct the route fields and retry.",
+        publicPathForIssue: routeIssuePublicPath,
       }),
     ),
     {
       code: "invalid_route",
-      message: "Automation delivery route is invalid.",
-      hint: "Correct the route fields and retry.",
-      pathPrefix: ["route"],
+      message: "Automation delivery route is invalid. Correct the route fields and retry.",
+      publicPathForIssue: routeIssuePublicPath,
     },
   );
 }
@@ -491,9 +632,8 @@ function buildAutomationAssistantTargetOverrideFromOptions(
     ...(reasoningEffort ? { reasoningEffort } : {}),
   }, {
     code: "invalid_assistant_target_override",
-    message: "Automation assistant target override is invalid.",
-    hint: "Correct the model, provider, or reasoning effort and retry.",
-    pathPrefix: ["assistantTargetOverride"],
+    message: "Automation assistant target override is invalid. Correct the model, provider, or reasoning effort and retry.",
+    publicPathForIssue: assistantTargetIssuePublicPath,
   });
 
   return Object.keys(target).length > 0 ? target : undefined;
@@ -523,9 +663,8 @@ function buildAutomationAssistantTargetOverridePatchFromOptions(
     ...target,
   }, {
     code: "invalid_assistant_target_override",
-    message: "Automation assistant target override is invalid.",
-    hint: "Correct the model, provider, or reasoning effort and retry.",
-    pathPrefix: ["assistantTargetOverride"],
+    message: "Automation assistant target override is invalid. Correct the model, provider, or reasoning effort and retry.",
+    publicPathForIssue: assistantTargetIssuePublicPath,
   });
 }
 
@@ -572,6 +711,7 @@ function normalizeAutomationContextReferenceOptions(
     if (separatorIndex <= 0 || separatorIndex === entry.length - 1) {
       return invalidAutomationOption(
         "Each --context-reference must use <entity-kind>=<entity-id> form.",
+        ["contextReference"],
       );
     }
 
@@ -580,14 +720,11 @@ function normalizeAutomationContextReferenceOptions(
       entityId: entry.slice(separatorIndex + 1),
     };
   });
-  const parsed = automationContextReferencesSchema.safeParse(references);
-  if (!parsed.success) {
-    return invalidAutomationOption(
-      `Invalid --context-reference: ${parsed.error.issues.map((issue) => issue.message).join(" ")}`,
-    );
-  }
-
-  return parsed.data;
+  return parseAutomationValue(automationContextReferencesSchema, references, {
+    code: "invalid_context_reference",
+    message: "Automation context references are invalid. Use <entity-kind>=<canonical-entity-id> for each reference.",
+    publicPathForIssue: contextReferenceIssuePublicPath,
+  });
 }
 
 function buildAutomationContextReferencesPatchFromOptions(input: {
@@ -979,9 +1116,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         title: context.args.title,
       }, {
         code: "invalid_automation_payload",
-        message: "Automation definition is invalid.",
-        hint: "Correct the reported automation fields and retry.",
-        pathPrefix: ["payload"],
+        message: "Automation definition is invalid. Correct the reported automation fields and retry.",
+        publicPathForIssue: (issue) => automationPayloadIssuePublicPath(issue),
       });
       const result = await upsertAutomation({
         ...input,
@@ -1292,9 +1428,8 @@ export function registerAutomationCommands(cli: Cli.Cli) {
         ),
         {
           code: "invalid_automation_payload",
-          message: "Automation import payload is invalid.",
-          hint: "Correct the reported payload fields and retry the import.",
-          pathPrefix: ["payload"],
+          message: "Automation import payload is invalid. Correct the reported payload fields and retry the import.",
+          publicPathForIssue: (issue) => automationPayloadIssuePublicPath(issue, "payload"),
         },
       );
       assertNoRawAutomationSupportSeriesTags(input.tags);

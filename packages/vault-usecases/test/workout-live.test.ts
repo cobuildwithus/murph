@@ -6,6 +6,7 @@ import {
   workoutTemplateSchema,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import {
   deriveWorkoutActionBinding,
   deriveWorkoutSetRemovalBinding,
@@ -542,13 +543,16 @@ describe('live workout model', () => {
       ],
     })
     assert.throws(
-      () =>
-        assertTargetableLiveWorkout(
-          duplicateExerciseOrders,
-          'Workout test',
-        ),
-      (error: unknown) =>
-        error instanceof VaultCliError && error.code === 'contract_invalid',
+      () => assertTargetableLiveWorkout(duplicateExerciseOrders),
+      (error: unknown) => {
+        if (!(error instanceof VaultCliError)) return false
+        const projection = projectVaultCliError(error)
+        return error.code === 'contract_invalid'
+          && error.context === undefined
+          && projection.message === 'The workout contains duplicate exercise orders. Repair the workout structure before using targeted live commands.'
+          && projection.fieldErrors === undefined
+          && projection.stage === undefined
+      },
     )
 
     const duplicateSetOrders = workoutSessionSchema.parse({
@@ -556,20 +560,24 @@ describe('live workout model', () => {
       startedAt: '2026-08-09T18:00:00.000Z',
       exercises: [
         {
-          name: 'Bench press',
+          name: 'private-stored-exercise-name',
           order: 1,
           sets: [{ order: 1 }, { order: 1 }],
         },
       ],
     })
     assert.throws(
-      () =>
-        assertTargetableLiveWorkout(
-          duplicateSetOrders,
-          'Workout test',
-        ),
-      (error: unknown) =>
-        error instanceof VaultCliError && error.code === 'contract_invalid',
+      () => assertTargetableLiveWorkout(duplicateSetOrders),
+      (error: unknown) => {
+        if (!(error instanceof VaultCliError)) return false
+        const projection = projectVaultCliError(error)
+        return error.code === 'contract_invalid'
+          && error.context === undefined
+          && projection.message === 'The workout contains duplicate set orders. Repair the workout structure before using targeted live commands.'
+          && projection.fieldErrors === undefined
+          && projection.stage === undefined
+          && !JSON.stringify(projection).includes('private-stored-exercise-name')
+      },
     )
   })
 })

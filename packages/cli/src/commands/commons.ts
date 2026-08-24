@@ -14,7 +14,6 @@ import {
 import { emptyArgsSchema } from "@murphai/operator-config/command-helpers";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
-const commonsPageStatusValues = HEALTH_COMMONS_PAGE_STATUSES;
 const protocolEntityType = "protocol_variant" as const;
 const familyEntityType = "experiment_family" as const;
 const commonsProtocolEntityTypeValues = [
@@ -210,10 +209,9 @@ export function registerCommonsCommands(cli: Cli.Cli) {
         .optional()
         .describe("Optional text filter over protocol title, summary, aliases, categories, and body."),
       status: z
-        .string()
-        .min(1)
+        .enum([...HEALTH_COMMONS_PAGE_STATUSES, "*"] as const)
         .optional()
-        .describe(`Optional Health Commons page status filter: ${commonsPageStatusValues.join(", ")}. Use * for all.`),
+        .describe(`Optional Health Commons page status filter: ${HEALTH_COMMONS_PAGE_STATUSES.join(", ")}. Use * for all.`),
       category: z
         .array(z.string().min(1))
         .optional()

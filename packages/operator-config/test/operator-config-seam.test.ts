@@ -179,7 +179,9 @@ test('malformed operator config fails model and self-target mutations without ov
     assert.ok(error instanceof VaultCliError)
     assert.equal(error.code, 'operator_config_invalid')
     assert.equal(error.context?.retryable, false)
-    assert.equal(error.repair?.stage, 'configuration')
+    assert.equal(error.context?.stage, 'configuration')
+    assert.equal(Object.hasOwn(error, 'repair'), false)
+    assert.match(error.message, /Repair or restore/u)
     assert.equal(JSON.stringify(error).includes('private-marker'), false)
     return true
   }

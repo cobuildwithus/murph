@@ -383,17 +383,16 @@ test('batch captures executed child command failures and continues by default', 
       code: 'already_exists',
       fieldErrors: [
         {
-          code: 'already_exists',
+          code: 'custom',
           expected: '',
-          message: 'Choose an uninitialized vault root.',
+          message: 'This field is invalid.',
           path: 'vault',
           received: 'invalid',
         },
       ],
-      hint: 'Use vault show for the existing vault or choose a different vault root.',
-      message: 'Vault is already initialized.',
+      message: 'Vault is already initialized. Use vault show for the existing vault or choose a different vault root.',
       retryable: false,
-      stage: 'mutation',
+      stage: 'conflict',
     })
     assert.equal(
       result.commands[0]?.error?.message.includes('exited with status'),

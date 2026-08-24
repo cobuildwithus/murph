@@ -430,6 +430,14 @@ async function executeConfinedReadOnlyAssistantAskTurn(
         hostedToolContext,
         model: input.model,
         modelProvider: input.modelProvider,
+        onAdditionalUsage: input.onProviderUsage
+          ? (usage) => {
+              input.onProviderUsage?.({
+                stage: turn.usageStage,
+                usage,
+              })
+            }
+          : null,
         outputSchema: turn.outputSchema,
         permissions: MURPH_GROUP_READ_PERMISSION_PROFILE,
         processLifetime: 'one-shot',

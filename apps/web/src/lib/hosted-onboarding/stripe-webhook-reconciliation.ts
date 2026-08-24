@@ -500,7 +500,9 @@ async function readStoredHostedStripeActivationMailboxItems(input: {
     select: { dedupeKey: true, id: true, userId: true },
     where: {
       id: { in: input.mailboxItemIds },
-      kind: "member.activated",
+      kind: {
+        in: ["member.activated", "runtime.maintenance-requested"],
+      },
     },
   });
   const rowsById = new Map(rows.map((row) => [row.id, row] as const));

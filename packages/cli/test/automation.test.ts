@@ -427,7 +427,7 @@ test("automation save persists a weekly wall-clock cron with an explicit timezon
   }
 });
 
-test("automation internal validation returns field-specific non-echoing repair envelopes", async () => {
+test("automation internal validation returns field-specific non-echoing recovery envelopes", async () => {
   const { parentRoot, vaultRoot } = await createTempVaultContext(
     "murph-automation-validation-envelope-",
   );
@@ -466,7 +466,8 @@ test("automation internal validation returns field-specific non-echoing repair e
       assert.equal(invalidSchedule.envelope.error.code, "invalid_schedule");
       assert.equal(invalidSchedule.envelope.error.retryable, false);
       assert.equal(invalidSchedule.envelope.error.stage, "validation");
-      assert.match(invalidSchedule.envelope.error.hint ?? "", /five-field cron/u);
+      assert.match(invalidSchedule.envelope.error.message ?? "", /five-field cron/u);
+      assert.equal(invalidSchedule.envelope.error.hint, undefined);
       assert.equal(
         invalidSchedule.envelope.error.fieldErrors?.[0]?.path,
         "schedule.expression",
@@ -518,6 +519,7 @@ test("automation save and edit preserve exact canonical context references", asy
       description: "automation test cli",
       version: "0.0.0-test",
     });
+    cli.use(incurErrorBridge);
     registerAutomationCommands(cli);
     const saved = await runInProcessJsonCli(cli, [
       "automation",
@@ -602,10 +604,17 @@ test("automation save and edit preserve exact canonical context references", asy
     ]);
     assert.equal(malformed.exitCode, 1);
     assert.equal(malformed.envelope.ok, false);
-    assert.match(
-      malformed.envelope.ok ? "" : malformed.envelope.error.message ?? "",
-      /entity-kind.*entity-id/u,
-    );
+    if (!malformed.envelope.ok) {
+      assert.match(malformed.envelope.error.message ?? "", /entity-kind.*entity-id/u);
+      assert.equal(
+        malformed.envelope.error.fieldErrors?.[0]?.path,
+        "contextReference",
+      );
+      assert.equal(
+        JSON.stringify(malformed.envelope).includes("missing-separator"),
+        false,
+      );
+    }
   } finally {
     await rm(parentRoot, { recursive: true, force: true });
   }

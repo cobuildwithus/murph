@@ -200,16 +200,19 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(guidance).toContain("do not run recursive assistant or delivery commands");
     expect(guidance).toContain("`assistant deliver`");
     expect(guidance).toContain(
-      "When a CLI error includes `fieldErrors`, use them as value-free field repair guidance",
+      "`stage` names the failure",
     );
     expect(guidance).toContain(
-      "`retryable` governs only repeating the unchanged call",
+      "`retryable: true` permits an unchanged retry",
     );
     expect(guidance).toContain(
-      "`false` still permits a corrected call or a call after the named prerequisite is resolved; otherwise stop",
+      "fixing a `fieldErrors` field or `hint` prerequisite is a new attempt",
     );
     expect(guidance).toContain(
-      "Never infer or echo details omitted from the error envelope",
+      "Otherwise stop",
+    );
+    expect(guidance).toContain(
+      "never guess or echo omitted details",
     );
   });
 });

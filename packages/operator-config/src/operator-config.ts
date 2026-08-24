@@ -226,11 +226,10 @@ async function readOperatorConfigForPatch(
 function invalidOperatorConfigError(): VaultCliError {
   return new VaultCliError(
     'operator_config_invalid',
-    'Operator config is malformed.',
-    { retryable: false },
+    'Operator config is malformed. Repair or restore it before retrying this mutation.',
     {
+      retryable: false,
       stage: 'configuration',
-      hint: 'Repair or restore the operator config before retrying this mutation.',
     },
   )
 }

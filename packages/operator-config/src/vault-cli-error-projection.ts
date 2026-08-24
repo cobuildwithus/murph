@@ -1,17 +1,10 @@
 import { redactSensitivePathSegments } from './text/shared.js'
-import {
-  createVaultCliRepair,
-  VaultCliError,
-  type VaultCliRepair,
-  type VaultCliRepairField,
-  type VaultCliRepairFieldInput,
-} from './vault-cli-errors.js'
+import { VaultCliError } from './vault-cli-errors.js'
 
-const ZOD_ISSUE_CODE_PATTERN =
-  /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u
-const ZOD_EXPECTED_PATTERN =
-  /^(?:array|boolean|null|number|object|string|undefined)$/u
-
+const MAX_VALIDATION_FIELDS = 12
+const MAX_VALIDATION_PATH_LENGTH = 160
+const UNKNOWN_ERROR_MESSAGE =
+  'The command failed without a safe recoverable detail.'
 export interface VaultCliProjectedFieldError {
   code?: string | undefined
   missing?: boolean | undefined
@@ -33,192 +26,180 @@ export interface VaultCliErrorProjection {
 
 /**
  * Projects domain and unexpected failures into the privacy-safe CLI envelope.
- * Explicit repair guidance wins; otherwise only established Zod issue fields
- * can become value-free repair guidance.
+ * VaultCliError context is the sole metadata source. Only an owner's explicit
+ * publicPath can become value-free field guidance.
  */
 export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
-  const inferredRepair =
-    error instanceof VaultCliError
-      ? error.repair
-        ? undefined
-        : createValidationRepair(error.context)
-      : isUnknownRecord(error) && error.name === 'ZodError'
-        ? createValidationRepair(error)
-        : undefined
-  const cliError =
-    error instanceof VaultCliError
-      ? error
-      : inferredRepair
-        ? new VaultCliError('invalid_payload', 'Input failed validation.')
-        : classifyUnhandledCliError(error)
-  const repair = cliError.repair ?? inferredRepair
+  if (error instanceof VaultCliError) {
+    return projectKnownVaultCliError(error)
+  }
+
+  if (isUnknownRecord(error) && error.name === 'ZodError') {
+    return {
+      code: 'invalid_payload',
+      message: 'Input failed validation.',
+      retryable: false,
+      stage: 'validation',
+    }
+  }
+
+  return classifyUnhandledCliError(error)
+}
+
+function projectKnownVaultCliError(
+  error: VaultCliError,
+): VaultCliErrorProjection {
   const retryable =
-    typeof cliError.context?.retryable === 'boolean'
-      ? cliError.context.retryable
+    typeof error.context?.retryable === 'boolean'
+      ? error.context.retryable
       : false
   const exitCode =
-    typeof cliError.context?.exitCode === 'number' &&
-    Number.isSafeInteger(cliError.context.exitCode) &&
-    cliError.context.exitCode > 0
-      ? cliError.context.exitCode
+    typeof error.context?.exitCode === 'number' &&
+    Number.isSafeInteger(error.context.exitCode) &&
+    error.context.exitCode > 0
+      ? error.context.exitCode
       : undefined
-  const fieldErrors = repair?.fields.map(toProjectedFieldError)
+  const fieldErrors = createValidationFieldErrors(error.context)
+  const stage = readKnownErrorStage(error.context?.stage)
 
   return {
-    code: cliError.code,
-    message: redactSensitivePathSegments(cliError.message),
+    code: error.code,
+    message: redactSensitivePathSegments(error.message),
     retryable,
     ...(exitCode === undefined ? {} : { exitCode }),
-    ...(fieldErrors && fieldErrors.length > 0 ? { fieldErrors } : {}),
-    ...(repair?.hint
-      ? { hint: redactSensitivePathSegments(repair.hint) }
-      : {}),
-    ...(repair?.stage ? { stage: repair.stage } : {}),
+    ...(fieldErrors ? { fieldErrors } : {}),
+    ...(stage === undefined ? {} : { stage }),
   }
 }
 
-function toProjectedFieldError(
-  field: VaultCliRepairField,
-): VaultCliProjectedFieldError {
-  return {
-    ...(field.code ? { code: field.code } : {}),
-    ...(field.missing === true ? { missing: true } : {}),
-    path: field.path,
-    expected: redactSensitivePathSegments(field.expected ?? ''),
-    received: field.missing === true ? 'missing' : 'invalid',
-    message: redactSensitivePathSegments(field.message),
-  }
-}
-
-function createValidationRepair(details: unknown): VaultCliRepair | undefined {
+function createValidationFieldErrors(
+  details: unknown,
+): VaultCliProjectedFieldError[] | undefined {
   if (!isUnknownRecord(details) || !Array.isArray(details.issues)) {
     return undefined
   }
 
   const fields = details.issues.flatMap(
-    (issue): VaultCliRepairFieldInput[] => {
+    (issue): VaultCliProjectedFieldError[] => {
       if (
         !isUnknownRecord(issue) ||
         typeof issue.code !== 'string' ||
-        !ZOD_ISSUE_CODE_PATTERN.test(issue.code) ||
-        !Array.isArray(issue.path) ||
-        !issue.path.every(isZodPathSegment)
+        !/^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(issue.code) ||
+        !Array.isArray(issue.publicPath) ||
+        !issue.publicPath.every(isPublicPathSegment)
       ) {
         return []
       }
 
       const expected =
         typeof issue.expected === 'string' &&
-        ZOD_EXPECTED_PATTERN.test(issue.expected)
+        /^(?:array|boolean|null|number|object|string|undefined)$/u.test(issue.expected)
           ? issue.expected
           : undefined
       return [{
-        path: issue.path,
         code: issue.code,
+        path: normalizeValidationPath(issue.publicPath),
+        expected: expected ?? '',
+        received: 'invalid',
         message: 'This field is invalid.',
-        ...(expected ? { expected } : {}),
       }]
     },
   )
 
-  return fields.length > 0
-    ? createVaultCliRepair({ fields, stage: 'validation' })
+  if (fields.length === 0) {
+    return undefined
+  }
+
+  const boundedFields = fields.slice(0, MAX_VALIDATION_FIELDS)
+  const omittedFieldCount = fields.length - boundedFields.length
+  if (omittedFieldCount > 0) {
+    boundedFields.push({
+      path: '$',
+      code: 'issues_omitted',
+      expected: '',
+      received: 'invalid',
+      message: `${omittedFieldCount} additional validation ${omittedFieldCount === 1 ? 'issue was' : 'issues were'} omitted.`,
+    })
+  }
+
+  return boundedFields
+}
+
+function isPublicPathSegment(value: unknown): value is string | number {
+  return (
+    typeof value === 'string' &&
+    /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(value)
+  ) || (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+  )
+}
+
+function normalizeValidationPath(path: readonly (string | number)[]): string {
+  const normalized = path.join('.') || '$'
+  const codePoints = Array.from(normalized)
+  return codePoints.length <= MAX_VALIDATION_PATH_LENGTH
+    ? normalized
+    : `${codePoints.slice(0, MAX_VALIDATION_PATH_LENGTH - 1).join('')}…`
+}
+
+function readKnownErrorStage(value: unknown): string | undefined {
+  return typeof value === 'string' &&
+    /^(?:authorization|configuration|conflict|filesystem|integrity|persistence|read|render|response|transport|validation|write)$/u.test(value)
+    ? value
     : undefined
 }
 
-function isZodPathSegment(value: unknown): value is PropertyKey {
-  return (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'symbol'
-  )
-}
-
-function classifyUnhandledCliError(error: unknown): VaultCliError {
+function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
   const nodeCode = readErrorCode(error)
 
   if (nodeCode === 'ENOENT') {
-    return new VaultCliError(
-      'not_found',
-      'A required file or directory was not found.',
-      undefined,
-      {
-        stage: 'filesystem',
-        hint: 'Check the input path and retry the command.',
-      },
-    )
+    return {
+      code: 'not_found',
+      message: 'A required file or directory was not found.',
+      retryable: false,
+      stage: 'filesystem',
+      hint: 'Check the input path and retry the command.',
+    }
   }
 
   if (nodeCode === 'EACCES' || nodeCode === 'EPERM') {
-    return new VaultCliError(
-      'permission_denied',
-      'The command could not access a required file or directory.',
-      undefined,
-      {
-        stage: 'filesystem',
-        hint: 'Check the file permissions before retrying.',
-      },
-    )
+    return {
+      code: 'permission_denied',
+      message: 'The command could not access a required file or directory.',
+      retryable: false,
+      stage: 'filesystem',
+      hint: 'Check the file permissions before retrying.',
+    }
   }
 
   if (nodeCode === 'EISDIR' || nodeCode === 'ENOTDIR') {
-    return new VaultCliError(
-      'invalid_path',
-      'The command received the wrong kind of filesystem path.',
-      undefined,
-      {
-        stage: 'filesystem',
-        hint: 'Check whether the option expects a file or a directory.',
-      },
-    )
+    return {
+      code: 'invalid_path',
+      message: 'The command received the wrong kind of filesystem path.',
+      retryable: false,
+      stage: 'filesystem',
+      hint: 'Check whether the option expects a file or a directory.',
+    }
   }
 
   if (nodeCode === 'ENOSPC') {
-    return new VaultCliError(
-      'storage_unavailable',
-      'The command could not write because storage is unavailable.',
-      undefined,
-      {
-        stage: 'filesystem',
-        hint: 'Free storage space before retrying.',
-      },
-    )
+    return {
+      code: 'storage_unavailable',
+      message: 'The command could not write because storage is unavailable.',
+      retryable: false,
+      stage: 'filesystem',
+      hint: 'Free storage space before retrying.',
+    }
   }
 
-  return new VaultCliError(
-    'UNKNOWN',
-    safeUnhandledErrorMessage(error),
-    undefined,
-    {
-      stage: 'command',
-      hint: 'Check the command inputs and runtime status before retrying.',
-    },
-  )
-}
-
-function safeUnhandledErrorMessage(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return 'The command failed without a safe recoverable detail.'
+  return {
+    code: 'UNKNOWN',
+    message: UNKNOWN_ERROR_MESSAGE,
+    retryable: false,
+    stage: 'command',
   }
-
-  const normalized = redactSensitivePathSegments(error.message)
-    .replace(/[\u0000-\u001F\u007F]/gu, ' ')
-    .replace(/\s+/gu, ' ')
-    .trim()
-  if (
-    normalized.length === 0 ||
-    /^[\[{]/u.test(normalized) ||
-    /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|bearer\s|token=)/iu.test(
-      normalized,
-    )
-  ) {
-    return 'The command failed without a safe recoverable detail.'
-  }
-
-  const codePoints = Array.from(normalized)
-  return codePoints.length <= 320
-    ? normalized
-    : `${codePoints.slice(0, 319).join('')}…`
 }
 
 function readErrorCode(error: unknown): string | null {

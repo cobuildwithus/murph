@@ -64,18 +64,16 @@ async function runJsonCli(args: string[]): Promise<{
         {
           exitCode: 9,
           retryable: true,
-        },
-        {
-          stage: 'validation',
-          hint: 'Correct the setup option and retry.',
-          fields: [
+          issues: [
             {
               path: ['assistant', 'provider'],
+              publicPath: ['assistant', 'provider'],
               code: 'invalid_value',
-              message: 'Use a supported assistant provider.',
-              expected: 'supported provider',
+              message: 'private raw validation message',
+              expected: 'string',
             },
           ],
+          stage: 'validation',
         },
       )
     },
@@ -103,6 +101,14 @@ async function runJsonCli(args: string[]): Promise<{
           code: 'EACCES',
           path: privatePath,
         },
+      )
+    },
+  })
+  cli.command('fail-unknown', {
+    args: z.object({}),
+    async run() {
+      throw new Error(
+        'Provider echoed private-provider-response for private-submitted-value.',
       )
     },
   })
@@ -196,17 +202,14 @@ test('VaultCliError remains a typed incur envelope through the setup bridge', as
   )
   assert.equal(result.envelope.error?.retryable, true)
   assert.equal(result.envelope.error?.stage, 'validation')
-  assert.equal(
-    result.envelope.error?.hint,
-    'Correct the setup option and retry.',
-  )
+  assert.equal(result.envelope.error?.hint, undefined)
   assert.deepEqual(result.envelope.error?.fieldErrors, [
     {
       code: 'invalid_value',
       path: 'assistant.provider',
-      expected: 'supported provider',
+      expected: 'string',
       received: 'invalid',
-      message: 'Use a supported assistant provider.',
+      message: 'This field is invalid.',
     },
   ])
   assert.equal(result.exitCode, 9)
@@ -231,6 +234,21 @@ test('setup bridge classifies filesystem failures without exposing paths', async
   assert.equal(result.envelope.error?.retryable, false)
   assert.equal(serialized.includes('/private/workspace/member-vault'), false)
   assert.equal(serialized.includes('permission denied, open'), false)
+})
+
+test('setup bridge returns a value-free unknown failure', async () => {
+  const result = await runJsonCli(['fail-unknown'])
+  const serialized = JSON.stringify(result.envelope)
+
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error?.code, 'UNKNOWN')
+  assert.equal(
+    result.envelope.error?.message,
+    'The command failed without a safe recoverable detail.',
+  )
+  assert.equal(result.envelope.error?.stage, 'command')
+  assert.equal(serialized.includes('private-submitted-value'), false)
+  assert.equal(serialized.includes('private-provider-response'), false)
 })
 
 test('onboard CLI builds setup CTAs from configured channels, updates, wearables, and missing env', async () => {

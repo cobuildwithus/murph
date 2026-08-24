@@ -528,11 +528,10 @@ async function assistantDaemonFetchJson(
   if (!config) {
     throw new VaultCliError(
       'assistant_daemon_unavailable',
-      'Assistant daemon client is not configured.',
-      { retryable: false },
+      'Assistant daemon client is not configured. Configure or start the local assistant daemon before retrying.',
       {
+        retryable: false,
         stage: 'configuration',
-        hint: 'Configure or start the local assistant daemon before retrying.',
       },
     )
   }
@@ -576,11 +575,10 @@ async function assistantDaemonFetchJson(
 function buildAssistantDaemonTransportError(routePath: string): VaultCliError {
   return new VaultCliError(
     'assistant_daemon_unavailable',
-    `Assistant daemon request did not complete for ${assistantDaemonRouteLabel(routePath)}.`,
-    { retryable: true },
+    `Assistant daemon request did not complete for ${assistantDaemonRouteLabel(routePath)}. Check that the local assistant daemon is running, then retry.`,
     {
+      retryable: true,
       stage: 'transport',
-      hint: 'Check that the local assistant daemon is running, then retry.',
     },
   )
 }
@@ -589,11 +587,10 @@ function buildAssistantDaemonHttpError(status: number): VaultCliError {
   if (status === 401 || status === 403) {
     return new VaultCliError(
       'assistant_daemon_auth_failed',
-      'Assistant daemon authentication was rejected.',
-      { retryable: false },
+      'Assistant daemon authentication was rejected. Restart the client and daemon with matching local credentials before retrying.',
       {
+        retryable: false,
         stage: 'authorization',
-        hint: 'Restart the client and daemon with matching local credentials before retrying.',
       },
     )
   }
@@ -601,13 +598,12 @@ function buildAssistantDaemonHttpError(status: number): VaultCliError {
   const retryable = status === 408 || status === 425 || status === 429 || status >= 500
   return new VaultCliError(
     'assistant_daemon_http_failed',
-    `Assistant daemon request failed with HTTP ${status}.`,
-    { retryable },
+    `Assistant daemon request failed with HTTP ${status}. ${retryable
+      ? 'Retry after checking the local assistant daemon status.'
+      : 'Check that the client and local assistant daemon versions match.'}`,
     {
+      retryable,
       stage: 'response',
-      hint: retryable
-        ? 'Retry after checking the local assistant daemon status.'
-        : 'Check that the client and local assistant daemon versions match.',
     },
   )
 }
@@ -615,11 +611,10 @@ function buildAssistantDaemonHttpError(status: number): VaultCliError {
 function buildAssistantDaemonResponseError(): VaultCliError {
   return new VaultCliError(
     'assistant_daemon_response_invalid',
-    'Assistant daemon returned an invalid response.',
-    { retryable: false },
+    'Assistant daemon returned an invalid response. Restart or update the local assistant daemon before retrying.',
     {
+      retryable: false,
       stage: 'response',
-      hint: 'Restart or update the local assistant daemon before retrying.',
     },
   )
 }

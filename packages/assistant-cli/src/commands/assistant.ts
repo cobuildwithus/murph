@@ -68,6 +68,7 @@ import {
   resolveForegroundTerminalLogOptions,
 } from '../run-terminal-logging.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 import type { VaultServices } from '@murphai/vault-usecases'
 import { requestIdSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
@@ -548,12 +549,13 @@ function buildAssistantOnboardingResumeContextErrorSurface(
   error: unknown,
 ): AssistantOnboardingResumeContextFailureSurface {
   if (error instanceof VaultCliError) {
+    const projection = projectVaultCliError(error)
     return {
       status: 'error',
-      code: error.code,
+      code: projection.code,
       message: 'This onboarding context surface could not be read.',
-      retryable: error.context?.retryable === true,
-      ...(error.repair?.hint ? { hint: error.repair.hint } : {}),
+      retryable: projection.retryable,
+      ...(projection.hint ? { hint: projection.hint } : {}),
     }
   }
 

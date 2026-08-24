@@ -925,7 +925,10 @@ test('daemon helpers surface invalid JSON, invalid payload fields, and plain-tex
         retryable: true,
         stage: 'response',
       })
-      assert.equal(error.message, 'Assistant daemon request failed with HTTP 502.')
+      assert.equal(
+        error.message,
+        'Assistant daemon request failed with HTTP 502. Retry after checking the local assistant daemon status.',
+      )
       assert.equal(JSON.stringify(error).includes('temporary daemon outage'), false)
       return true
     },
@@ -1209,6 +1212,7 @@ function assertDaemonClientError(
   assert.ok(error instanceof VaultCliError)
   assert.equal(error.code, expected.code)
   assert.equal(error.context?.retryable, expected.retryable)
-  assert.equal(error.repair?.stage, expected.stage)
-  assert.equal(typeof error.repair?.hint, 'string')
+  assert.equal(error.context?.stage, expected.stage)
+  assert.equal(Object.hasOwn(error, 'repair'), false)
+  assert.match(error.message, /(?:Check|Configure|Restart|Retry|retry)/u)
 }

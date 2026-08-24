@@ -5,6 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { healthEntityDefinitions } from "@murphai/contracts";
+import { projectVaultCliError } from "@murphai/operator-config/vault-cli-error-projection";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 
 import * as helperApi from "@murphai/vault-usecases/helpers";
@@ -47,6 +48,7 @@ import {
   resolveVaultRelativePath,
   stringArray,
   toEventUpsertVaultCliError,
+  toRegimenUpsertVaultCliError,
   toVaultCliError,
   toVaultInitializationCliError,
   toVaultMetadataCliError,
@@ -453,14 +455,13 @@ describe("helper barrel exports", () => {
         code: "VAULT_INVALID_METADATA",
       }),
     );
-    expect(invalidMetadata).toMatchObject({
+    expect(projectVaultCliError(invalidMetadata)).toEqual({
       code: "invalid_metadata",
-      message: "Vault metadata is invalid.",
-      repair: {
-        stage: "validation",
-        fields: [expect.objectContaining({ path: "vault.metadata" })],
-      },
+      message: "Vault metadata is invalid. Run vault validate, then repair or restore the metadata before retrying.",
+      retryable: false,
+      stage: "validation",
     });
+    expect(Object.hasOwn(invalidMetadata as object, "repair")).toBe(false);
     expect(JSON.stringify(invalidMetadata)).not.toContain("private metadata parser detail");
 
     const unsupportedFormat = toVaultMetadataCliError(
@@ -469,10 +470,11 @@ describe("helper barrel exports", () => {
         code: "VAULT_UNSUPPORTED_FORMAT",
       }),
     );
-    expect(unsupportedFormat).toMatchObject({
+    expect(projectVaultCliError(unsupportedFormat)).toEqual({
       code: "unsupported_format",
-      message: "Vault format is not supported by this CLI version.",
-      repair: { stage: "validation" },
+      message: "Vault format is not supported by this CLI version. Use a compatible CLI version or the supported vault migration path.",
+      retryable: false,
+      stage: "validation",
     });
     expect(JSON.stringify(unsupportedFormat)).not.toContain("private unsupported format detail");
 
@@ -482,13 +484,18 @@ describe("helper barrel exports", () => {
         code: "VAULT_ALREADY_EXISTS",
       }),
     );
-    expect(alreadyInitialized).toMatchObject({
+    expect(projectVaultCliError(alreadyInitialized)).toEqual({
       code: "already_exists",
-      message: "Vault is already initialized.",
-      repair: {
-        stage: "mutation",
-        fields: [expect.objectContaining({ path: "vault" })],
-      },
+      fieldErrors: [{
+        code: "custom",
+        expected: "",
+        message: "This field is invalid.",
+        path: "vault",
+        received: "invalid",
+      }],
+      message: "Vault is already initialized. Use vault show for the existing vault or choose a different vault root.",
+      retryable: false,
+      stage: "conflict",
     });
     expect(JSON.stringify(alreadyInitialized)).not.toContain("private existing-vault detail");
   });
@@ -740,5 +747,29 @@ describe("helper barrel exports", () => {
     } finally {
       await rm(vaultRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("regimen upsert errors", () => {
+  it.each([
+    "private duplicate-slug detail",
+    "private differing-selector detail",
+  ])("projects regimen conflicts without field or private detail guesses", (message) => {
+    const projection = projectVaultCliError(
+      toRegimenUpsertVaultCliError(
+        Object.assign(new Error(message), {
+          name: "VaultError",
+          code: "VAULT_REGIMEN_CONFLICT",
+        }),
+      ),
+    );
+
+    expect(projection).toEqual({
+      code: "conflict",
+      message: "Regimen selectors conflict. Use one regimen id or slug.",
+      retryable: false,
+      stage: "conflict",
+    });
+    expect(JSON.stringify(projection)).not.toContain(message);
   });
 });
