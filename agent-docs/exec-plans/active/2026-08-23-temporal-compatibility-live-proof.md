@@ -56,7 +56,8 @@ Updated: 2026-08-24
 - [x] Correct and verify public live run-identity validation.
 - [x] Correct and verify private cross-runner fixture transport.
 - [x] Review, merge, and immutably tag the private correction.
-- [ ] Pin and merge the public correction to that private revision.
+- [ ] Merge the public validator correction while retaining the current private
+  policy revision already advanced on `main`.
 - [ ] Run live relevant and irrelevant convergence proof.
 - [ ] Enable the strict no-bypass Temporal compatibility ruleset.
 - [ ] Run the private deployment preflight and safely advance workers.
@@ -68,6 +69,9 @@ Updated: 2026-08-24
 - Validate the bounded canonical fixture in setup and materialize the exact
   immutable workflow input in each reader job; keep ordinary same-backend
   integration caches unchanged.
+- Retain the newer private policy revision from the already-merged controller
+  advance instead of restoring the superseded bootstrap pin during the public
+  validator merge.
 
 ## Verification
 
