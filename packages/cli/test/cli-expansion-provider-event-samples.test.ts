@@ -262,11 +262,11 @@ test.sequential('samples import-json returns indexed repair fields without parti
     assert.equal(invalidField.error.stage, 'validation')
     assert.deepEqual(invalidField.error.fieldErrors, [
       {
-        code: 'invalid_number',
+        code: 'invalid_type',
         path: 'samples.1.value',
-        expected: 'non-negative integer',
+        expected: 'number',
         received: 'invalid',
-        message: 'value must be a non-negative integer.',
+        message: 'This field is invalid.',
       },
     ])
     assert.equal(JSON.stringify(invalidField).includes(invalidValueSentinel), false)

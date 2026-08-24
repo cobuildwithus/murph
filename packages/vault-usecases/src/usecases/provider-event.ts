@@ -9,7 +9,6 @@ import {
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   VaultCliError,
-  type VaultCliRepairFieldInput,
 } from '@murphai/operator-config/vault-cli-errors'
 import {
   asListEnvelope,
@@ -752,7 +751,7 @@ export async function addSampleRecords(input: {
       batchProvenance,
     })
   } catch (error) {
-    throw toSampleImportCliError(error, stream)
+    throw toSampleImportCliError(error)
   }
 
   return {
@@ -775,16 +774,12 @@ function normalizeRequiredSamplePayloadText(value: unknown, field: 'stream' | 'u
   throw new VaultCliError(
     'invalid_payload',
     'Samples payload is missing required fields.',
-    undefined,
     {
-      stage: 'validation',
-      fields: [
+      issues: [
         {
-          path: field,
-          code: 'required',
-          message: `${field} is required.`,
-          expected: 'non-empty string',
-          missing: true,
+          code: 'invalid_type',
+          expected: 'string',
+          path: [field],
         },
       ],
     },
@@ -796,23 +791,23 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
     throw new VaultCliError(
       'invalid_payload',
       'Samples payload requires a non-empty samples array.',
-      undefined,
       {
-        stage: 'validation',
-        fields: [
+        issues: [
           {
-            path: 'samples',
+            path: ['samples'],
             code: 'invalid_type',
-            message: 'samples must be a non-empty array of objects.',
-            expected: 'non-empty array of objects',
-            missing: value === undefined,
+            expected: 'array',
           },
         ],
       },
     )
   }
 
-  const invalidMembers: VaultCliRepairFieldInput[] = []
+  const invalidMembers: Array<{
+    code: 'invalid_type'
+    expected: 'object'
+    path: [string, number]
+  }> = []
   const samples: JsonObject[] = []
 
   value.forEach((sample, index) => {
@@ -824,7 +819,6 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
     invalidMembers.push({
       path: ['samples', index],
       code: 'invalid_type',
-      message: 'Each samples entry must be an object.',
       expected: 'object',
     })
   })
@@ -833,19 +827,14 @@ function requireSamplePayloadObjects(value: unknown): JsonObject[] {
     throw new VaultCliError(
       'invalid_payload',
       'Samples payload contains non-object entries.',
-      undefined,
-      {
-        stage: 'validation',
-        fields: invalidMembers,
-        hint: 'Replace each indexed entry with a sample object and retry the complete batch.',
-      },
+      { issues: invalidMembers },
     )
   }
 
   return samples
 }
 
-function toSampleImportCliError(error: unknown, stream: string): unknown {
+function toSampleImportCliError(error: unknown): unknown {
   const cliError = toVaultCliError(error)
   if (!(cliError instanceof VaultCliError)) {
     return cliError
@@ -857,15 +846,11 @@ function toSampleImportCliError(error: unknown, stream: string): unknown {
     return new VaultCliError(
       'invalid_payload',
       'Samples payload contains an unsupported stream.',
-      undefined,
       {
-        stage: 'validation',
-        fields: [
+        issues: [
           {
-            path: 'stream',
-            code: 'invalid_enum',
-            message: 'stream must be a supported sample stream.',
-            expected: 'supported sample stream',
+            path: ['stream'],
+            code: 'custom',
           },
         ],
       },
@@ -884,96 +869,42 @@ function toSampleImportCliError(error: unknown, stream: string): unknown {
     return cliError
   }
 
-  const guidance = sampleImportFieldGuidance(sampleField, stream)
+  const issue = sampleImportIssue(sampleField)
   const fieldPath = sampleField === 'unit'
-    ? 'unit'
+    ? ['unit']
     : ['samples', sampleIndex, sampleField]
 
   return new VaultCliError(
     'invalid_payload',
     'Samples payload contains an invalid sample field.',
-    undefined,
     {
-      stage: 'validation',
-      fields: [
+      issues: [
         {
           path: fieldPath,
-          code: guidance.code,
-          message: guidance.message,
-          expected: guidance.expected,
+          ...issue,
         },
       ],
-      hint: 'Correct the indexed field and retry the complete batch.',
     },
   )
 }
 
-function sampleImportFieldGuidance(
-  field: string,
-  stream: string,
-): { code: string; message: string; expected: string } {
+function sampleImportIssue(field: string): {
+  code: 'custom' | 'invalid_type'
+  expected?: 'number' | 'object' | 'string'
+} {
   if (field === 'recordedAt' || field === 'startAt' || field === 'endAt') {
-    return {
-      code: 'invalid_timestamp',
-      message: `${field} must be a valid timestamp.`,
-      expected: 'ISO 8601 timestamp',
-    }
+    return { code: 'invalid_type', expected: 'string' }
   }
-  if (field === 'value') {
-    const integerValue = stream === 'heart_rate' || stream === 'steps'
-    return {
-      code: 'invalid_number',
-      message: integerValue
-        ? 'value must be a non-negative integer.'
-        : 'value must be a finite number allowed by the stream.',
-      expected: integerValue
-        ? 'non-negative integer'
-        : stream === 'temperature' ? 'finite number' : 'non-negative finite number',
-    }
+  if (field === 'value' || field === 'durationMinutes') {
+    return { code: 'invalid_type', expected: 'number' }
   }
-
-  const guidanceByField: Record<string, {
-    code: string
-    message: string
-    expected: string
-  }> = {
-    dataOrigin: {
-      code: 'invalid_object',
-      message: 'dataOrigin must match its object contract.',
-      expected: 'valid object',
-    },
-    durationMinutes: {
-      code: 'invalid_number',
-      message: 'durationMinutes must be a positive integer.',
-      expected: 'positive integer',
-    },
-    externalRef: {
-      code: 'invalid_object',
-      message: 'externalRef must match its object contract.',
-      expected: 'valid object',
-    },
-    stage: {
-      code: 'invalid_enum',
-      message: 'stage must be a supported sleep stage.',
-      expected: 'awake, light, deep, or rem',
-    },
-    timeZone: {
-      code: 'invalid_time_zone',
-      message: 'timeZone must be a valid IANA time zone.',
-      expected: 'IANA time zone',
-    },
-    unit: {
-      code: 'invalid_unit',
-      message: 'unit is not supported for the selected stream.',
-      expected: 'unit supported by stream',
-    },
+  if (field === 'dataOrigin' || field === 'externalRef') {
+    return { code: 'invalid_type', expected: 'object' }
   }
-
-  return guidanceByField[field] ?? {
-    code: 'invalid_field',
-    message: `${field} is invalid.`,
-    expected: 'valid field value',
+  if (field === 'stage' || field === 'timeZone' || field === 'unit') {
+    return { code: 'invalid_type', expected: 'string' }
   }
+  return { code: 'custom' }
 }
 
 export async function addSampleRecordsFromInput(input: {

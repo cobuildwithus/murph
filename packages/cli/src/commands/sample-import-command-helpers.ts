@@ -4,7 +4,6 @@ import {
 } from '@murphai/vault-usecases/runtime'
 import {
   VaultCliError,
-  type VaultCliRepairFieldInput,
 } from '@murphai/operator-config/vault-cli-errors'
 
 type CsvSampleCommandName =
@@ -256,53 +255,136 @@ function toCsvSampleCliError(error: unknown): unknown {
     return error
   }
 
-  const fields = repair.fields
-    .map(toCsvSampleRepairField)
-    .filter((field): field is VaultCliRepairFieldInput => field !== null)
-  if (fields.length === 0) {
+  const issues = repair.fields.flatMap(toCsvSampleIssues)
+  const message = createCsvSampleErrorMessage(code, repair.fields)
+  if (issues.length === 0 || !message) {
     return error
   }
 
-  const hint = typeof repair.hint === 'string' ? repair.hint : undefined
   return new VaultCliError(
     'invalid_payload',
-    code === 'no_importable_rows'
-      ? 'Sample CSV did not contain any importable rows.'
-      : 'Sample CSV column inference failed.',
-    undefined,
-    {
-      stage: 'validation',
-      fields,
-      hint,
-    },
+    message,
+    { issues },
   )
 }
 
-function toCsvSampleRepairField(value: unknown): VaultCliRepairFieldInput | null {
+interface CsvSampleIssue {
+  code: 'custom'
+  expected: 'array' | 'string'
+  path: readonly PropertyKey[]
+}
+
+const CSV_SKIP_REASON_MESSAGES: Readonly<Record<string, string>> = {
+  'non-numeric value': 'had a non-numeric value',
+  'unparseable timestamp': 'had an unparseable timestamp',
+  'unparseable timestamp; non-numeric value':
+    'had an unparseable timestamp and non-numeric value',
+}
+
+function toCsvSampleIssues(value: unknown): CsvSampleIssue[] {
   if (
     !isRecord(value)
     || typeof value.code !== 'string'
     || typeof value.message !== 'string'
-    || !isRepairPath(value.path)
   ) {
+    return []
+  }
+
+  if (value.code === 'timestamp_column_inference_failed') {
+    return [{ code: 'custom', expected: 'string', path: ['tsColumn'] }]
+  }
+  if (value.code === 'value_column_inference_failed') {
+    return [{ code: 'custom', expected: 'string', path: ['valueColumn'] }]
+  }
+
+  if (value.code !== 'no_importable_rows') {
+    return []
+  }
+
+  const path = toCsvSamplesIssuePath(value.path)
+  if (!path || readCsvSkipCounts(value.message).length === 0) {
+    return []
+  }
+
+  return [{ code: 'custom', expected: 'array', path }]
+}
+
+interface CsvSkipCount {
+  count: number
+  message: string
+}
+
+function readCsvSkipCounts(message: string): CsvSkipCount[] {
+  const counts = /^[a-z_]+ skipped (.+)\.$/u.exec(message)?.[1]
+  if (!counts) {
+    return []
+  }
+
+  return counts.split(', ').flatMap((entry): CsvSkipCount[] => {
+    const match = /^(unparseable timestamp(?:; non-numeric value)?|non-numeric value)=(\d+)$/u.exec(entry)
+    if (!match) {
+      return []
+    }
+    const reasonMessage = CSV_SKIP_REASON_MESSAGES[match[1] ?? '']
+    const count = Number(match[2])
+    return reasonMessage && Number.isSafeInteger(count) && count > 0
+      ? [{ count, message: reasonMessage }]
+      : []
+  })
+}
+
+function createCsvSampleErrorMessage(
+  code: string,
+  fields: readonly unknown[],
+): string | null {
+  if (code === 'timestamp_column_inference_failed') {
+    return 'Sample CSV column inference failed. Check --delimiter, then retry with --ts-column set to the exact timestamp column name.'
+  }
+  if (code === 'value_column_inference_failed') {
+    return 'Sample CSV column inference failed. Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.'
+  }
+  if (code !== 'no_importable_rows') {
     return null
   }
 
-  return {
-    path: value.path,
-    code: value.code,
-    message: value.message,
-    ...(typeof value.expected === 'string' ? { expected: value.expected } : {}),
-    ...(value.missing === true ? { missing: true } : {}),
+  const totals = new Map<string, number>()
+  for (const field of fields) {
+    if (!isRecord(field) || typeof field.message !== 'string') {
+      continue
+    }
+    for (const entry of readCsvSkipCounts(field.message)) {
+      const nextCount = (totals.get(entry.message) ?? 0) + entry.count
+      if (!Number.isSafeInteger(nextCount)) {
+        return null
+      }
+      totals.set(entry.message, nextCount)
+    }
   }
+  if (totals.size === 0) {
+    return null
+  }
+
+  const summary = Array.from(totals, ([message, count]) =>
+    `${count} ${count === 1 ? 'row' : 'rows'} ${message}`
+  ).join('; ')
+  return `Sample CSV did not contain any importable rows. Skipped rows: ${summary}. Correct those timestamp or numeric value cells, then retry.`
 }
 
-function isRepairPath(value: unknown): value is string | readonly PropertyKey[] {
-  return typeof value === 'string'
-    || (
-      Array.isArray(value)
-      && value.every((segment) => typeof segment === 'string' || typeof segment === 'number')
-    )
+function toCsvSamplesIssuePath(
+  value: unknown,
+): readonly ['imports', number, 'samples'] | null {
+  if (
+    !Array.isArray(value)
+    || value.length !== 3
+    || value[0] !== 'imports'
+    || typeof value[1] !== 'number'
+    || !Number.isSafeInteger(value[1])
+    || value[1] < 0
+    || value[2] !== 'samples'
+  ) {
+    return null
+  }
+  return ['imports', value[1], 'samples']
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

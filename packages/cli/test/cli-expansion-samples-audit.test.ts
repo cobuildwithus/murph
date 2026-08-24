@@ -122,10 +122,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
   const wrongDelimiterPath = path.join(vaultRoot, 'wrong-delimiter.csv')
   const longHeaderPath = path.join(vaultRoot, 'long-header.csv')
   const wideHeaderPath = path.join(vaultRoot, 'wide-header.csv')
-  const timestampExpected = 'timestamp column selected with --ts-column'
-  const timestampHint = 'Check --delimiter, then retry with --ts-column set to the exact timestamp column name.'
-  const valueExpected = 'sample value column selected with --value-column'
-  const valueHint = 'Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.'
+  const timestampMessage = 'Sample CSV column inference failed. Check --delimiter, then retry with --ts-column set to the exact timestamp column name.'
+  const valueMessage = 'Sample CSV column inference failed. Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.'
 
   function assertNoEcho(value: unknown, sentinels: readonly string[]): void {
     const serialized = JSON.stringify(value) ?? ''
@@ -157,9 +155,12 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     assert.equal(invalidRows.error.code, 'invalid_payload')
     assert.equal(invalidRows.error.stage, 'validation')
     assert.equal(invalidRows.error.fieldErrors?.[0]?.path, 'imports.0.samples')
-    assert.match(
-      invalidRows.error.fieldErrors?.[0]?.message ?? '',
-      /heart_rate skipped unparseable timestamp; non-numeric value=1/u,
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.code, 'custom')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.expected, 'array')
+    assert.equal(invalidRows.error.fieldErrors?.[0]?.message, 'This field is invalid.')
+    assert.equal(
+      invalidRows.error.message,
+      'Sample CSV did not contain any importable rows. Skipped rows: 1 row had an unparseable timestamp and non-numeric value. Correct those timestamp or numeric value cells, then retry.',
     )
     assert.equal(JSON.stringify(invalidRows).includes(timestampCellSentinel), false)
     assert.equal(JSON.stringify(invalidRows).includes(valueCellSentinel), false)
@@ -179,8 +180,10 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     assert.equal(timestampInference.ok, false)
     assert.equal(timestampInference.meta.command, 'samples csv profile')
     assert.equal(timestampInference.error.fieldErrors?.[0]?.path, 'tsColumn')
-    assert.equal(timestampInference.error.fieldErrors?.[0]?.expected, timestampExpected)
-    assert.equal(timestampInference.error.hint, timestampHint)
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.message, 'This field is invalid.')
+    assert.equal(timestampInference.error.message, timestampMessage)
+    assert.equal(timestampInference.error.hint, undefined)
     assertNoEcho(timestampInference, [privateTimestampHeader, 'bpm', privateTimestampCell])
 
     const privateValueHeader = 'custom_private_metric_header'
@@ -202,8 +205,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     assert.equal(valueInference.ok, false)
     assert.equal(valueInference.meta.command, 'samples csv import')
     assert.equal(valueInference.error.fieldErrors?.[0]?.path, 'valueColumn')
-    assert.equal(valueInference.error.fieldErrors?.[0]?.expected, valueExpected)
-    assert.equal(valueInference.error.hint, valueHint)
+    assert.equal(valueInference.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(valueInference.error.message, valueMessage)
     assertNoEcho(valueInference, [privateValueHeader, privateValueCell])
 
     const headerlessTimestamp = '2042-11-19T12:34:56Z'
@@ -223,8 +226,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     ])
 
     assert.equal(headerless.ok, false)
-    assert.equal(headerless.error.fieldErrors?.[0]?.expected, timestampExpected)
-    assert.equal(headerless.error.hint, timestampHint)
+    assert.equal(headerless.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(headerless.error.message, timestampMessage)
     assertNoEcho(headerless, [headerlessTimestamp, headerlessValue])
 
     const privatePreamble = 'private-preamble-sentinel'
@@ -247,8 +250,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     assert.equal(preamble.ok, false)
     assert.equal(preamble.meta.command, 'samples import-csv')
     assert.equal(preamble.error.fieldErrors?.[0]?.path, 'tsColumn')
-    assert.equal(preamble.error.fieldErrors?.[0]?.expected, timestampExpected)
-    assert.equal(preamble.error.hint, timestampHint)
+    assert.equal(preamble.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(preamble.error.message, timestampMessage)
     assertNoEcho(preamble, [privatePreamble, preambleHeaderA, preambleHeaderB, privatePreambleCell])
 
     const wrongDelimiterTimestamp = '2043-01-17T03:02:01Z'
@@ -269,8 +272,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
     ])
 
     assert.equal(wrongDelimiter.ok, false)
-    assert.equal(wrongDelimiter.error.fieldErrors?.[0]?.expected, timestampExpected)
-    assert.equal(wrongDelimiter.error.hint, timestampHint)
+    assert.equal(wrongDelimiter.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(wrongDelimiter.error.message, timestampMessage)
     assertNoEcho(wrongDelimiter, [wrongDelimiterHeader, wrongDelimiterTimestamp, wrongDelimiterValue])
 
     const longHeader = `metric_${'x'.repeat(200)}`
@@ -290,8 +293,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
 
     assert.equal(longHeaderResult.ok, false)
     assert.equal(longHeaderResult.error.fieldErrors?.[0]?.path, 'valueColumn')
-    assert.equal(longHeaderResult.error.fieldErrors?.[0]?.expected, valueExpected)
-    assert.equal(longHeaderResult.error.hint, valueHint)
+    assert.equal(longHeaderResult.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(longHeaderResult.error.message, valueMessage)
     assertNoEcho(longHeaderResult, [longHeader, longHeader.slice(0, 24)])
 
     const wideHeaders = Array.from({ length: 24 }, (_, index) =>
@@ -312,8 +315,8 @@ test.sequential('sample CSV failures expose fixed value-free repair guidance wit
 
     assert.equal(wideHeaderResult.ok, false)
     assert.equal(wideHeaderResult.meta.command, 'samples import-csv')
-    assert.equal(wideHeaderResult.error.fieldErrors?.[0]?.expected, valueExpected)
-    assert.equal(wideHeaderResult.error.hint, valueHint)
+    assert.equal(wideHeaderResult.error.fieldErrors?.[0]?.expected, 'string')
+    assert.equal(wideHeaderResult.error.message, valueMessage)
     assertNoEcho(wideHeaderResult, wideHeaders)
     assert.ok(JSON.stringify(wideHeaderResult.error).length < 1_000)
   } finally {
