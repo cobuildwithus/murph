@@ -47,15 +47,27 @@ describe('repeated workout tally guidance', () => {
       'create exactly one canonical occurrence for each confirmed set',
     )
     expect(experiment).toContain("use the resolved exercise's exact experiment id")
-    expect(behavior).toContain(
+    expect(behavior).not.toContain(
       'unnamed repeated sets for an alternating or phased strength routine',
     )
-    expect(behavior).toContain('never substitute the most recently discussed or logged target')
-    expect(behavior).toContain(
-      'automations can govern support consent and delivery but are not schedule evidence',
+    expect(strength).toContain(
+      'Choose one canonical write path before loading an execution skill',
     )
-    expect(strength).toContain('resolve the unique exercise, owner, and per-set standard')
-    expect(strength).toContain('ask one narrow clarification and do not log a set')
+    expect(strength).toContain('Read `tracked-table` and no repeated-routine execution skill')
+    expect(strength).toContain('never redirects an established live workout')
+    expect(strength).toContain(
+      'even when that reminder also carries a `workout_format` template reference',
+    )
+    expect(strength).toContain(
+      'Only an exact standalone `workout_format` reminder context',
+    )
+    expect(strength).toContain(
+      'starts a new `activity_session` through `tracked-table`',
+    )
+    expect(strength).toContain(
+      'Resolve one exercise, one owner, and one current per-occurrence standard',
+    )
+    expect(strength).toContain('ask one narrow clarification and write nothing')
   })
 
   it('keeps ordinary habit completion and plan-repair authority separate from repeated-set attribution', async () => {
@@ -100,7 +112,7 @@ describe('repeated workout tally guidance', () => {
 
     expect(strength?.triggerHint).toContain('logging completed strength sets')
     expect(prompt).toContain(
-      'Private repeated-set logging: strength-training owns it and resolves canonical routine context before writes. In groups, hand off to a private Murph conversation without private reads or writes',
+      'Strength sets: strength-training chooses one owner. Exact activity-session stays live; exact regimen or experiment owns occurrences even with a workout-format template; only a standalone workout-format reminder starts a workout. Terse wording never switches owners. In groups, hand off privately without reads or writes',
     )
   })
 

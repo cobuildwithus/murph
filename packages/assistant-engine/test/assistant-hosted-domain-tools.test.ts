@@ -27,19 +27,31 @@ describe('hosted domain dynamic tools', () => {
       'For an active deviceActivity schedule, confirm the persisted event trigger directly',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
+      'occurrenceProjection.status=resolved with a null nextOccurrenceAt means no clock occurrence is knowable until a matching activity arrives, not that future delivery is exhausted',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For time-based schedules, verify any user-facing timing confirmation against timingVerified',
+      'For time-based schedules, confirm an exact next occurrence only when occurrenceProjection.status=resolved',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'A save or patch result already includes one host-owned read-only timing readback.',
+      'A save or patch result already includes one host-owned occurrence projection.',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'Do not inspect again, retry the write, create a fallback automation',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'confirm that the write succeeded and report the returned stored schedule and status',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'occurrenceProjection.status=pending',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'no member action is needed',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot at schedule, say the saved edit may not affect the occurrence already in progress',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
@@ -78,7 +90,7 @@ describe('hosted domain dynamic tools', () => {
       'pass expectedUpdatedAt from that readback',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
-      'For an active one-shot with that verified null result, say its requested time is no longer deliverable and offer to reschedule it',
+      'For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'a replacement recurring wall-clock schedule that omits schedule.timeZone preserves the stored explicit timezone',
@@ -521,13 +533,15 @@ describe('hosted domain dynamic tools', () => {
             created: false,
             effectiveTimeZone: 'America/New_York',
             lookupId: 'medication-reminder',
-            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            occurrenceProjection: {
+              nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+              status: 'resolved' as const,
+            },
             routeBinding: 'current_conversation',
             schedule: request.action === 'patch' && request.schedule
               ? request.schedule
               : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
             status: 'active',
-            timingVerified: true,
             updatedAt: '2026-03-08T05:01:00.000Z',
           }),
         },
@@ -590,13 +604,15 @@ describe('hosted domain dynamic tools', () => {
             created: false,
             effectiveTimeZone: 'America/New_York',
             lookupId: 'morning-meds',
-            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            occurrenceProjection: {
+              nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+              status: 'resolved' as const,
+            },
             routeBinding: 'current_conversation',
             schedule: request.action === 'patch' && request.schedule
               ? request.schedule
               : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
             status: 'active',
-            timingVerified: true,
             updatedAt: '2026-03-08T05:01:00.000Z',
           }),
         },
@@ -664,13 +680,15 @@ describe('hosted domain dynamic tools', () => {
             created: false,
             effectiveTimeZone: 'America/New_York',
             lookupId: 'medication-reminder',
-            nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+            occurrenceProjection: {
+              nextOccurrenceAt: '2026-03-08T07:30:00.000Z',
+              status: 'resolved' as const,
+            },
             routeBinding: 'current_conversation',
             schedule: request.action === 'patch' && request.schedule
               ? request.schedule
               : { at: '2026-03-08T07:30:00.000Z', kind: 'at' },
             status: 'active',
-            timingVerified: true,
             updatedAt: '2026-03-08T05:01:00.000Z',
           }),
         },
@@ -1305,7 +1323,10 @@ describe('hosted domain dynamic tools', () => {
         ],
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextOccurrenceAt: null,
+        occurrenceProjection: {
+          nextOccurrenceAt: null,
+          status: 'resolved' as const,
+        },
         path: '/internal/automations/evening-wind-down.md',
         routeBinding: 'current_conversation' as const,
         schedule: {
@@ -1314,7 +1335,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/Chicago',
         },
         status: 'paused' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
@@ -1378,7 +1398,10 @@ describe('hosted domain dynamic tools', () => {
       ],
       effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
-      nextOccurrenceAt: null,
+      occurrenceProjection: {
+        nextOccurrenceAt: null,
+        status: 'resolved' as const,
+      },
       routeBinding: 'current_conversation',
       schedule: {
         kind: 'dailyLocal',
@@ -1386,8 +1409,6 @@ describe('hosted domain dynamic tools', () => {
         timeZone: 'America/Chicago',
       },
       status: 'paused',
-      timingVerified: true,
-      timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
     const mismatchedTool = {
@@ -1397,7 +1418,10 @@ describe('hosted domain dynamic tools', () => {
         created: false,
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextOccurrenceAt: '2026-08-10T03:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-08-10T03:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
@@ -1405,7 +1429,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/Chicago',
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:01:00.000Z',
       })),
     }
@@ -1437,7 +1460,10 @@ describe('hosted domain dynamic tools', () => {
         automationId: 'automation-1',
         effectiveTimeZone: 'America/Chicago',
         lookupId: 'evening-wind-down',
-        nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+        occurrenceProjection: {
+          nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+          status: 'resolved' as const,
+        },
         routeBinding: 'preserved' as const,
         schedule: {
           kind: 'dailyLocal' as const,
@@ -1445,7 +1471,6 @@ describe('hosted domain dynamic tools', () => {
           timeZone: 'America/Chicago',
         },
         status: 'active' as const,
-        timingVerified: true,
         updatedAt: '2026-08-10T00:00:00.000Z',
       })),
     }
@@ -1475,7 +1500,10 @@ describe('hosted domain dynamic tools', () => {
       automationId: 'automation-1',
       effectiveTimeZone: 'America/Chicago',
       lookupId: 'evening-wind-down',
-      nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+      occurrenceProjection: {
+        nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
+        status: 'resolved' as const,
+      },
       routeBinding: 'preserved',
       schedule: {
         kind: 'dailyLocal',
@@ -1483,8 +1511,6 @@ describe('hosted domain dynamic tools', () => {
         timeZone: 'America/Chicago',
       },
       status: 'active',
-      timingVerified: true,
-      timingVerificationIssues: [],
       updatedAt: '2026-08-10T00:00:00.000Z',
     })
   })
