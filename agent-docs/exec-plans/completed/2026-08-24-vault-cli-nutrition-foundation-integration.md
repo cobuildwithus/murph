@@ -1,6 +1,6 @@
 # Vault CLI nutrition foundation integration
 
-Status: active
+Status: completed
 Created: 2026-08-24
 Updated: 2026-08-24
 
@@ -92,3 +92,4 @@ Updated: 2026-08-24
   (9 files, 254 tests, including 69 built-CLI smoke tests); all six affected
   package typechecks, CLI package shape, workspace boundaries, Frog inspection,
   production runner bundle/parity, and static scans passed.
+Completed: 2026-08-24
