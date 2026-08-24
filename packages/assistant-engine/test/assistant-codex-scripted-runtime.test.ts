@@ -6684,6 +6684,89 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('reports an overdue recurring reminder inspection without promising automatic recovery', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "inspect",
+  lookup: "daily-interval-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "The daily reminder remains active, but its occurrence is overdue and I couldn't confirm the next occurrence.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'inspect') {
+              throw new Error('Expected an automation inspect request.')
+            }
+            return {
+              action: 'inspect' as const,
+              automationId: 'automation-daily-interval',
+              effectiveTimeZone: null,
+              lookupId: 'daily-interval-reminder',
+              occurrenceProjection: {
+                issues: ['stale_recurring_occurrence'] as const,
+                status: 'unavailable' as const,
+              },
+              routeBinding: 'preserved' as const,
+              schedule: { everyMs: 86_400_000, kind: 'every' as const },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T00:01:00.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Is my daily interval reminder still scheduled?',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'inspect',
+        lookup: 'daily-interval-reminder',
+      },
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain(
+      '"issues":["stale_recurring_occurrence"]',
+    )
+    expect(toolOutputs).toContain('"status":"unavailable"')
+    expect(result.finalMessage).toMatch(/active/iu)
+    expect(result.finalMessage).toMatch(/overdue|could not confirm/iu)
+    expect(result.finalMessage).not.toMatch(
+      /automatically|no action|nothing .*need|current .*work/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('does not promise delivery for an in-flight one-shot edit', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {

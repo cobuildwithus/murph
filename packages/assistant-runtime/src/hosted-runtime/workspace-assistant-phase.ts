@@ -1836,10 +1836,13 @@ async function projectHostedAutomationResponseFields(input: {
       const { job } = projection;
       nextOccurrenceAt = projection.nextOccurrenceAt;
       if (!projection.occurrenceVerified) {
-        occurrenceProjectionPending =
-          projection.occurrenceUnverifiedReason === "runtime_state_pending"
-          || projection.occurrenceUnverifiedReason === "stale_recurring_occurrence";
-        if (!occurrenceProjectionPending) {
+        if (projection.occurrenceUnverifiedReason === "runtime_state_pending") {
+          occurrenceProjectionPending = true;
+        } else if (
+          projection.occurrenceUnverifiedReason === "stale_recurring_occurrence"
+        ) {
+          occurrenceProjectionIssues.add("stale_recurring_occurrence");
+        } else {
           occurrenceProjectionIssues.add("projection_unavailable");
         }
       }
