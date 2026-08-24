@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   searchSupplementLabels,
@@ -399,6 +400,34 @@ describe('searchSupplementLabels', () => {
     assert.deepEqual(result.items, [])
     const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]))
     assert.equal(requestUrl.searchParams.get('q'), '82118')
+  })
+
+  it('classifies malformed successful responses without exposing their body', async () => {
+    const providerBody = 'private-malformed-provider-body'
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+      JSON.stringify({ items: providerBody }),
+      {
+        headers: {
+          'content-type': 'application/json; charset=utf-8',
+        },
+        status: 200,
+      },
+    ))
+
+    const error = await searchSupplementLabels(
+      { q: 'private-supplement-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'supplement_labels_api_invalid_response')
+    assert.equal(error.context?.failureStage, 'response_body')
+    assert.equal(error.context?.retryable, false)
+    assert.equal(error.context?.status, 200)
+    assert.doesNotMatch(
+      error.message,
+      /private-malformed-provider-body|private-supplement-query/u,
+    )
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {

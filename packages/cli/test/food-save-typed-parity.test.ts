@@ -483,6 +483,138 @@ test('food search-labels-batch rejects oversized multibyte payloads before fetch
   assert.equal(fetchMock.mock.calls.length, 0)
 })
 
+test('food label provider classification survives the final machine envelope without echoes', async () => {
+  const restoreHostedDataApiEnv = setHostedDataApiEnv()
+  const providerBody = 'private-provider-response-body'
+  const submittedQuery = 'private-submitted-food-query'
+  const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+    JSON.stringify({ error: providerBody }),
+    { status: 429 },
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'search-labels',
+      submittedQuery,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'food_labels_api_rate_limited')
+      assert.equal(result.envelope.error.retryable, true)
+      assert.equal(result.envelope.error.stage, 'provider')
+      assert.match(result.envelope.error.hint ?? '', /short delay/u)
+    }
+    const serialized = JSON.stringify(result.envelope)
+    assert.doesNotMatch(
+      serialized,
+      /private-provider-response-body|private-submitted-food-query|signed-murph-data-api-credential/u,
+    )
+  } finally {
+    vi.unstubAllGlobals()
+    restoreHostedDataApiEnv()
+  }
+})
+
+test('food save validation exposes a repair field without echoing the submitted value', async () => {
+  const privateTitle = 'Private Food Title'
+  const privateTag = 'PrivateTagSentinel'
+  const result = await runInProcessJsonCli(createFoodCli(), [
+    'food',
+    'save',
+    privateTitle,
+    '--tag',
+    privateTag,
+    '--vault',
+    './vault',
+  ])
+
+  assert.equal(result.exitCode, 1)
+  assert.equal(result.envelope.ok, false)
+  if (!result.envelope.ok) {
+    assert.equal(result.envelope.error.code, 'contract_invalid')
+    assert.equal(result.envelope.error.retryable, false)
+    assert.equal(result.envelope.error.stage, 'validation')
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    assert.match(result.envelope.error.hint ?? '', /food options/u)
+  }
+  assert.doesNotMatch(JSON.stringify(result.envelope), /Private Food Title|PrivateTagSentinel/u)
+})
+
+test('food import-json validation preserves nested repair fields without payload echoes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-food-import-repair-',
+  )
+  const payloadPath = path.join(parentRoot, 'private-food-payload.json')
+
+  try {
+    await writeFile(payloadPath, JSON.stringify({
+      title: 'Private Imported Food',
+      tags: ['PrivateImportedTag'],
+    }))
+
+    const result = await runInProcessJsonCli(createFoodCli(), [
+      'food',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(result.exitCode, 1)
+    assert.equal(result.envelope.ok, false)
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, 'contract_invalid')
+      assert.equal(result.envelope.error.stage, 'validation')
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+      assert.match(result.envelope.error.hint ?? '', /food fields/u)
+    }
+    const serialized = JSON.stringify(result.envelope)
+    assert.doesNotMatch(serialized, /Private Imported Food|PrivateImportedTag/u)
+    assert.equal(serialized.includes(payloadPath), false)
+
+    const cli = createFoodCli()
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      'init',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(initResult.exitCode, null)
+    const saved = requireData((await runInProcessJsonCli<FoodSaveResult>(cli, [
+      'food',
+      'save',
+      'Repairable Food',
+      '--slug',
+      'repairable-food',
+      '--vault',
+      vaultRoot,
+    ])).envelope)
+    const editResult = await runInProcessJsonCli(cli, [
+      'food',
+      'edit',
+      saved.foodId,
+      '--tag',
+      'PrivateEditedFoodTag',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(editResult.exitCode, 1)
+    assert.equal(editResult.envelope.ok, false)
+    if (!editResult.envelope.ok) {
+      assert.equal(editResult.envelope.error.code, 'contract_invalid')
+      assert.equal(editResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    }
+    assert.doesNotMatch(JSON.stringify(editResult.envelope), /PrivateEditedFoodTag/u)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
+  }
+})
+
 test('food save payload builder maps every raw food import-json payload field', () => {
   const payload = buildFoodSavePayload({
     alias: ['usual acai bowl'],

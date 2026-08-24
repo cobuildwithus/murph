@@ -7,7 +7,10 @@ import {
   type JsonObject,
   type RegimenUpsertPayload,
 } from "@murphai/contracts";
-import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
+import {
+  VaultCliError,
+  type VaultCliRepairFieldInput,
+} from "@murphai/operator-config/vault-cli-errors";
 import type {
   CommandContext,
   EntityLookupInput,
@@ -61,6 +64,7 @@ import {
 import {
   normalizeRepeatableFlagOption,
 } from "../option-utils.js";
+import { toVaultCliError } from "./vault-usecase-helpers.js";
 
 type RegistryDocFamilyKind = HealthRegistryFamilyKind;
 type ExplicitHealthCoreServiceMethodName = Extract<
@@ -132,6 +136,84 @@ const REGISTRY_DOC_ENTITY_OMIT_KEYS = new Set([
   "markdown",
   "body",
 ]);
+
+interface PrivateProtocolVaultError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+}
+
+function isPrivateProtocolVaultError(error: unknown): error is PrivateProtocolVaultError {
+  return error instanceof Error
+    && error.name === "VaultError"
+    && "code" in error
+    && typeof error.code === "string";
+}
+
+function protocolRepairFields(
+  details: Record<string, unknown> | undefined,
+): VaultCliRepairFieldInput[] {
+  const issues = Array.isArray(details?.issues) ? details.issues : [];
+  const fields = issues.flatMap((issue): VaultCliRepairFieldInput[] => {
+    if (typeof issue !== "object" || issue === null || Array.isArray(issue)) {
+      return [];
+    }
+
+    const path = "path" in issue && typeof issue.path === "string"
+      ? issue.path
+      : "$";
+    return [{
+      path,
+      code: "invalid_value",
+      message: "Value failed protocol validation.",
+    }];
+  });
+
+  if (fields.length > 0) {
+    return fields;
+  }
+
+  const field = typeof details?.field === "string" ? details.field : null;
+  return field
+    ? [{
+        path: field,
+        code: "invalid_value",
+        message: "Value failed protocol validation.",
+      }]
+    : [];
+}
+
+function toPrivateProtocolVaultCliError(error: unknown): unknown {
+  if (!isPrivateProtocolVaultError(error)) {
+    return error;
+  }
+
+  if (error.code === "VAULT_INVALID_PROTOCOL") {
+    return new VaultCliError(
+      "contract_invalid",
+      "Protocol payload is invalid.",
+      { vaultCode: error.code },
+      {
+        stage: "validation",
+        hint: "Correct the listed protocol fields and retry the command.",
+        fields: protocolRepairFields(error.details),
+      },
+    );
+  }
+
+  if (error.code === "VAULT_INVALID_INPUT") {
+    return new VaultCliError(
+      "contract_invalid",
+      "Protocol payload is invalid.",
+      { vaultCode: error.code },
+      {
+        stage: "validation",
+        hint: "Correct the protocol identifiers or frontmatter and retry the command.",
+      },
+    );
+  }
+
+  return toVaultCliError(error);
+}
 
 function parseRegistryPayloadWithSharedSchema(
   kind: RegistryDocFamilyKind,
@@ -1258,15 +1340,20 @@ export function createExplicitHealthCoreServices(
     },
     async upsertPrivateProtocol(input) {
       const { core } = await loadRuntime();
-      const result = await core.upsertProtocol({
-        vaultRoot: input.vault,
-        protocolId: input.protocolId,
-        slug: input.slug,
-        allowSlugRename: input.allowSlugRename,
-        title: input.title,
-        frontmatter: input.frontmatter,
-        body: input.body,
-      });
+      let result: Awaited<ReturnType<typeof core.upsertProtocol>>;
+      try {
+        result = await core.upsertProtocol({
+          vaultRoot: input.vault,
+          protocolId: input.protocolId,
+          slug: input.slug,
+          allowSlugRename: input.allowSlugRename,
+          title: input.title,
+          frontmatter: input.frontmatter,
+          body: input.body,
+        });
+      } catch (error) {
+        throw toPrivateProtocolVaultCliError(error);
+      }
       const protocolId = String(result.record.entity.protocolId);
 
       return {

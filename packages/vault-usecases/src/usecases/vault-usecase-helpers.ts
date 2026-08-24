@@ -1,6 +1,9 @@
 import path from 'node:path'
 
-import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
+import {
+  VaultCliError,
+  type VaultCliRepairFieldInput,
+} from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
 import {
   inferEntityKind,
@@ -194,6 +197,37 @@ export function compactObject<TRecord extends Record<string, unknown>>(record: T
   return Object.fromEntries(
     Object.entries(record).filter(([, value]) => value !== undefined),
   ) as TRecord
+}
+
+export function toValidationRepairFields(
+  issues: readonly {
+    code?: unknown
+    path: readonly PropertyKey[]
+  }[],
+): VaultCliRepairFieldInput[] {
+  return issues.map((issue) => ({
+    path: issue.path,
+    code: typeof issue.code === 'string' ? issue.code : 'invalid_value',
+    message: validationRepairMessage(issue.code),
+  }))
+}
+
+function validationRepairMessage(code: unknown): string {
+  switch (code) {
+    case 'invalid_type':
+      return 'Value does not match the required type.'
+    case 'too_big':
+      return 'Value exceeds the allowed maximum.'
+    case 'too_small':
+      return 'Value is below the allowed minimum.'
+    case 'invalid_value':
+    case 'invalid_enum_value':
+      return 'Value is not one of the allowed options.'
+    case 'unrecognized_keys':
+      return 'Field is not supported.'
+    default:
+      return 'Value failed validation.'
+  }
 }
 
 export async function resolveVaultRelativePath(

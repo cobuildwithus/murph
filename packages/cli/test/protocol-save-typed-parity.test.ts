@@ -430,3 +430,64 @@ test("regimen import-json runtime output stays sparse without entity snapshots",
     });
   }
 });
+
+test("protocol import maps core validation issues into a bounded repair envelope", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-protocol-repair-",
+  );
+  const payloadPath = path.join(parentRoot, "private-protocol-payload.json");
+
+  try {
+    const cli = createRegimenSaveCli();
+    const initResult = await runInProcessJsonCli<{ created: boolean }>(cli, [
+      "init",
+      "--vault",
+      vaultRoot,
+    ]);
+    assert.equal(initResult.exitCode, null);
+
+    await writeFile(
+      payloadPath,
+      JSON.stringify({
+        slug: "private-protocol-repair",
+        title: "Private Protocol Title",
+        effectiveSpec: "PrivateProtocolSpecSentinel",
+      }),
+      "utf8",
+    );
+
+    const result = await runInProcessJsonCli(cli, [
+      "protocol",
+      "import-json",
+      "--input",
+      `@${payloadPath}`,
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "contract_invalid");
+      assert.equal(result.envelope.error.retryable, false);
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(
+        result.envelope.error.fieldErrors?.some(
+          (field) => field.path === "effectiveSpec",
+        ),
+        true,
+      );
+      assert.match(result.envelope.error.hint ?? "", /protocol fields/u);
+    }
+
+    const serialized = JSON.stringify(result.envelope);
+    assert.doesNotMatch(
+      serialized,
+      /Private Protocol Title|PrivateProtocolSpecSentinel/u,
+    );
+    assert.equal(serialized.includes(payloadPath), false);
+    assert.doesNotMatch(serialized, /bank\/protocols/u);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
+  }
+});

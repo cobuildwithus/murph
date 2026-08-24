@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readdir, readFile, rm } from 'node:fs/promises'
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { initializeVault, parseFrontmatterDocument } from '@murphai/core'
@@ -384,5 +384,74 @@ test('recipe save rejects malformed repeatable typed fields without writing a re
       force: true,
       recursive: true,
     })
+  }
+})
+
+test('recipe import and edit validation expose repair fields without payload echoes', async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    'murph-cli-recipe-repair-',
+  )
+  const payloadPath = path.join(parentRoot, 'private-recipe-payload.json')
+
+  try {
+    const cli = createRecipeCli()
+    await initializeVault({ vaultRoot })
+    await writeFile(payloadPath, JSON.stringify({
+      title: 'Private Imported Recipe',
+      tags: ['PrivateImportedRecipeTag'],
+    }))
+
+    const importResult = await runInProcessJsonCli(cli, [
+      'recipe',
+      'import-json',
+      '--input',
+      `@${payloadPath}`,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(importResult.exitCode, 1)
+    assert.equal(importResult.envelope.ok, false)
+    if (!importResult.envelope.ok) {
+      assert.equal(importResult.envelope.error.code, 'contract_invalid')
+      assert.equal(importResult.envelope.error.stage, 'validation')
+      assert.equal(importResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+      assert.match(importResult.envelope.error.hint ?? '', /recipe fields/u)
+    }
+    const serializedImport = JSON.stringify(importResult.envelope)
+    assert.doesNotMatch(
+      serializedImport,
+      /Private Imported Recipe|PrivateImportedRecipeTag/u,
+    )
+    assert.equal(serializedImport.includes(payloadPath), false)
+
+    const saved = requireData((await runInProcessJsonCli<RecipeSaveResult>(cli, [
+      'recipe',
+      'save',
+      'Repairable Recipe',
+      '--slug',
+      'repairable-recipe',
+      '--vault',
+      vaultRoot,
+    ])).envelope)
+    const editResult = await runInProcessJsonCli(cli, [
+      'recipe',
+      'edit',
+      saved.recipeId,
+      '--tag',
+      'PrivateEditedRecipeTag',
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(editResult.exitCode, 1)
+    assert.equal(editResult.envelope.ok, false)
+    if (!editResult.envelope.ok) {
+      assert.equal(editResult.envelope.error.code, 'contract_invalid')
+      assert.equal(editResult.envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    }
+    assert.doesNotMatch(JSON.stringify(editResult.envelope), /PrivateEditedRecipeTag/u)
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true })
   }
 })

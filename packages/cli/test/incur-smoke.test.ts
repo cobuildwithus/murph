@@ -327,6 +327,33 @@ test('built CLI discovery surfaces remain available', async () => {
   assert.match(completions, /_incur_complete_vault_cli/u)
 }, INCUR_ROOT_HELP_TIMEOUT_MS)
 
+test('built CLI preserves nutrition repair fields without submitted-value echoes', async () => {
+  const privateTitle = 'Private Built Food Title'
+  const privateTag = 'PrivateBuiltFoodTag'
+  const envelope = await runCli([
+    'food',
+    'save',
+    privateTitle,
+    '--tag',
+    privateTag,
+    '--vault',
+    './vault',
+  ])
+
+  assert.equal(envelope.ok, false)
+  if (!envelope.ok) {
+    assert.equal(envelope.error.code, 'contract_invalid')
+    assert.equal(envelope.error.retryable, false)
+    assert.equal(envelope.error.stage, 'validation')
+    assert.equal(envelope.error.fieldErrors?.[0]?.path, 'tags.0')
+    assert.match(envelope.error.hint ?? '', /food options/u)
+  }
+  assert.doesNotMatch(
+    JSON.stringify(envelope),
+    /Private Built Food Title|PrivateBuiltFoodTag/u,
+  )
+}, INCUR_HELP_TIMEOUT_MS)
+
 test('root config file can provide command option defaults', async () => {
   const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-config-'))
   const homeRoot = path.join(tempRoot, 'home')

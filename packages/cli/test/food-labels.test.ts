@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, expect, it, vi } from 'vitest'
+import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 
 import {
   foodLabelSearchItemSchema,
@@ -616,6 +617,69 @@ describe('searchFoodLabels', () => {
     assert.equal(requestUrl.searchParams.get('genericOnly'), 'true')
     assert.equal(requestUrl.searchParams.has('id'), false)
     assert.equal(requestUrl.searchParams.has('upc'), false)
+  })
+
+  it.each([
+    {
+      code: 'food_labels_api_auth_failed',
+      retryable: false,
+      status: 401,
+    },
+    {
+      code: 'food_labels_api_auth_failed',
+      retryable: false,
+      status: 403,
+    },
+    {
+      code: 'food_labels_api_rate_limited',
+      retryable: true,
+      status: 429,
+    },
+    {
+      code: 'food_labels_api_service_unavailable',
+      retryable: true,
+      status: 503,
+    },
+  ])(
+    'classifies HTTP $status without exposing the provider body',
+    async ({ code, retryable, status }) => {
+      const providerBody = `private-provider-body-${status}`
+      const fetchMock = vi.fn<typeof fetch>(async () => new Response(
+        JSON.stringify({ error: providerBody }),
+        { status },
+      ))
+
+      const error = await searchFoodLabels(
+        { q: 'private-food-query' },
+        { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+      ).catch((cause: unknown) => cause)
+
+      assert.ok(error instanceof VaultCliError)
+      assert.equal(error.code, code)
+      assert.equal(error.context?.retryable, retryable)
+      assert.equal(error.context?.status, status)
+      assert.doesNotMatch(error.message, /private-provider-body|private-food-query/u)
+    },
+  )
+
+  it('classifies timeouts as retryable without exposing the transport cause', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const error = new Error('private timeout cause')
+      error.name = 'TimeoutError'
+      throw error
+    })
+
+    const error = await searchFoodLabels(
+      { q: 'private-timeout-query' },
+      { env: hostedRuntimeEnv, fetchImpl: fetchMock },
+    ).catch((cause: unknown) => cause)
+
+    assert.ok(error instanceof VaultCliError)
+    assert.equal(error.code, 'food_labels_api_request_timed_out')
+    assert.equal(error.context?.retryable, true)
+    assert.equal(error.context?.timedOut, true)
+    assert.equal(error.context?.transportErrorName, 'TimeoutError')
+    assert.doesNotMatch(error.message, /private timeout cause|private-timeout-query/u)
   })
 
   it('fails explicitly outside hosted assistant runtime', async () => {

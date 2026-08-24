@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 
 import { HOSTED_RUNTIME_PROCESS_ENV } from '@murphai/hosted-execution/env'
-import { errorMessage, normalizeNullableString } from '@murphai/operator-config/text/shared'
+import { normalizeNullableString } from '@murphai/operator-config/text/shared'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import * as z from '@murphai/contracts/zod-runtime'
 
@@ -349,7 +349,7 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
     }
 
     const response = await fetchLabelsApi(config, fetchImpl, url, env)
-    const payload = await parseLabelsApiPayload(response, apiResponseSchema)
+    const payload = await parseLabelsApiPayload(config, response, apiResponseSchema)
 
     return searchResultSchema.parse({
       source: config.resultSource,
@@ -396,7 +396,11 @@ export function createHostedDataApiLabelsClient<TSource extends string>(
       },
       method: 'POST',
     })
-    const payload = await parseLabelsBatchApiPayload(response, batchApiResponseSchema)
+    const payload = await parseLabelsBatchApiPayload(
+      config,
+      response,
+      batchApiResponseSchema,
+    )
 
     return batchSearchResultSchema.parse({
       source: config.resultSource,
@@ -478,10 +482,7 @@ async function fetchLabelsApi<TSource extends string>(
       signal: AbortSignal.timeout(resolveLabelTimeoutMs(env)),
     })
   } catch (error) {
-    throw new VaultCliError(
-      `${config.errorCodePrefix}_request_failed`,
-      `${config.searchDescription} request failed: ${errorMessage(error)}.`,
-    )
+    throw createLabelsTransportError(config, error)
   }
 
   if (response.status === 404 && options.allowNotFound === true) {
@@ -489,10 +490,8 @@ async function fetchLabelsApi<TSource extends string>(
   }
 
   if (!response.ok) {
-    throw new VaultCliError(
-      `${config.errorCodePrefix}_response_failed`,
-      `${config.searchDescription} request failed (${await describeFailedLabelsResponse(response)}).`,
-    )
+    await discardLabelsResponseBody(response)
+    throw createLabelsHttpError(config, response.status)
   }
 
   return response
@@ -514,19 +513,29 @@ function readHostedDataApiProviderCredential<TSource extends string>(
 }
 
 async function parseLabelsApiPayload(
+  config: HostedDataApiLabelsClientConfig<string>,
   response: Response,
   responseSchema: z.ZodType<{ items: HostedDataApiLabelSearchItem[] }>,
 ): Promise<{ items: HostedDataApiLabelSearchItem[] }> {
-  const payload: unknown = await response.json()
-  return responseSchema.parse(payload)
+  try {
+    const payload: unknown = await response.json()
+    return responseSchema.parse(payload)
+  } catch (error) {
+    throw createLabelsInvalidResponseError(config, response.status, error)
+  }
 }
 
 async function parseLabelsBatchApiPayload(
+  config: HostedDataApiLabelsClientConfig<string>,
   response: Response,
   responseSchema: z.ZodType<{ results: HostedDataApiLabelSearchResultItem[] }>,
 ): Promise<{ results: HostedDataApiLabelSearchResultItem[] }> {
-  const payload: unknown = await response.json()
-  return responseSchema.parse(payload)
+  try {
+    const payload: unknown = await response.json()
+    return responseSchema.parse(payload)
+  } catch (error) {
+    throw createLabelsInvalidResponseError(config, response.status, error)
+  }
 }
 
 function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
@@ -543,19 +552,149 @@ function resolveLabelTimeoutMs(env: NodeJS.ProcessEnv): number {
   return Math.min(parsed, MAX_HOSTED_DATA_API_LABEL_TIMEOUT_MS)
 }
 
-async function describeFailedLabelsResponse(response: Response): Promise<string> {
-  const fallback = `HTTP ${response.status}`
-
+async function discardLabelsResponseBody(response: Response): Promise<void> {
   try {
-    const payload = (await response.json()) as {
-      error?: unknown
-    }
-    const error = typeof payload.error === 'string'
-      ? normalizeNullableString(payload.error)
-      : null
-
-    return error ? `${fallback}: ${error}` : fallback
+    await response.body?.cancel()
   } catch {
-    return fallback
+    // The status is sufficient to classify the failure; body disposal is best effort.
   }
+}
+
+function createLabelsTransportError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  error: unknown,
+): VaultCliError {
+  const transportErrorName = readSafeErrorName(error)
+  const timedOut = transportErrorName === 'TimeoutError'
+    || transportErrorName === 'AbortError'
+
+  return new VaultCliError(
+    timedOut
+      ? `${config.errorCodePrefix}_request_timed_out`
+      : `${config.errorCodePrefix}_request_failed`,
+    timedOut
+      ? `${config.searchDescription} request timed out.`
+      : `${config.searchDescription} request failed before receiving a response.`,
+    {
+      failureStage: 'request',
+      retryable: true,
+      timedOut,
+      transportErrorName,
+    },
+    {
+      stage: 'provider',
+      hint: 'Retry the label search because no successful provider response was received.',
+    },
+  )
+}
+
+function createLabelsHttpError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+): VaultCliError {
+  const failure = classifyLabelsHttpFailure(config.searchDescription, status)
+
+  return new VaultCliError(
+    `${config.errorCodePrefix}_${failure.codeSuffix}`,
+    failure.message,
+    {
+      failureStage: 'response',
+      retryable: failure.retryable,
+      status,
+      ...(failure.timedOut === true ? { timedOut: true } : {}),
+    },
+    {
+      stage: 'provider',
+      hint: failure.hint,
+    },
+  )
+}
+
+interface LabelsHttpFailure {
+  codeSuffix: string
+  hint: string
+  message: string
+  retryable: boolean
+  timedOut?: true
+}
+
+function classifyLabelsHttpFailure(
+  searchDescription: string,
+  status: number,
+): LabelsHttpFailure {
+  if (status === 401 || status === 403) {
+    return {
+      codeSuffix: 'auth_failed',
+      hint: 'Do not retry until hosted data API authorization is restored.',
+      message: `${searchDescription} authorization was rejected by the hosted data API.`,
+      retryable: false,
+    }
+  }
+
+  if (status === 429) {
+    return {
+      codeSuffix: 'rate_limited',
+      hint: 'Retry the label search after a short delay.',
+      message: `${searchDescription} was rate limited by the hosted data API.`,
+      retryable: true,
+    }
+  }
+
+  if (status === 408) {
+    return {
+      codeSuffix: 'request_timed_out',
+      hint: 'Retry the label search because the provider did not finish the request.',
+      message: `${searchDescription} request timed out at the hosted data API.`,
+      retryable: true,
+      timedOut: true,
+    }
+  }
+
+  if (status >= 500 && status <= 599) {
+    return {
+      codeSuffix: 'service_unavailable',
+      hint: 'Retry the label search after a short delay.',
+      message: `${searchDescription} is temporarily unavailable.`,
+      retryable: true,
+    }
+  }
+
+  return {
+    codeSuffix: 'response_failed',
+    hint: 'Check the label-search inputs before retrying.',
+    message: `${searchDescription} request was rejected by the hosted data API (HTTP ${status}).`,
+    retryable: false,
+  }
+}
+
+function createLabelsInvalidResponseError<TSource extends string>(
+  config: HostedDataApiLabelsClientConfig<TSource>,
+  status: number,
+  error: unknown,
+): VaultCliError {
+  return new VaultCliError(
+    `${config.errorCodePrefix}_invalid_response`,
+    `${config.searchDescription} received an invalid successful response.`,
+    {
+      failureStage: 'response_body',
+      retryable: false,
+      status,
+      transportErrorName: readSafeErrorName(error),
+    },
+    {
+      stage: 'provider',
+      hint: 'Do not retry the same request unchanged; report the provider response-contract failure.',
+    },
+  )
+}
+
+function readSafeErrorName(error: unknown): string | undefined {
+  if (!(error instanceof Error)) {
+    return undefined
+  }
+
+  const name = normalizeNullableString(error.name)
+  return name && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/u.test(name)
+    ? name
+    : undefined
 }

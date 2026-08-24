@@ -12,6 +12,7 @@ import {
 } from './shared.js'
 import {
   compactObject,
+  toValidationRepairFields,
   toVaultCliError,
 } from './vault-usecase-helpers.js'
 
@@ -140,9 +141,16 @@ export function parseRecipePayload(value: unknown) {
   const result = recipePayloadSchema.safeParse(value)
 
   if (!result.success) {
-    throw new VaultCliError('contract_invalid', 'Recipe payload is invalid.', {
-      errors: result.error.flatten(),
-    })
+    throw new VaultCliError(
+      'contract_invalid',
+      'Recipe payload is invalid.',
+      undefined,
+      {
+        stage: 'validation',
+        hint: 'Correct the listed recipe fields and retry the command.',
+        fields: toValidationRepairFields(result.error.issues),
+      },
+    )
   }
 
   return result.data
