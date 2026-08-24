@@ -35,8 +35,17 @@ async function runJsonCli(args: string[]): Promise<{
     data?: unknown
     error?: {
       code?: string
+      fieldErrors?: Array<{
+        code?: string
+        expected: string
+        message: string
+        path: string
+        received: string
+      }>
+      hint?: string
       message?: string
       retryable?: boolean
+      stage?: string
     }
   }
   exitCode: number | null
@@ -49,10 +58,26 @@ async function runJsonCli(args: string[]): Promise<{
   cli.command('fail', {
     args: z.object({}),
     async run() {
-      throw new VaultCliError('SETUP_BRIDGE', 'setup bridge preserved the error', {
-        exitCode: 9,
-        retryable: true,
-      })
+      throw new VaultCliError(
+        'SETUP_BRIDGE',
+        'setup bridge preserved the error',
+        {
+          exitCode: 9,
+          retryable: true,
+        },
+        {
+          stage: 'validation',
+          hint: 'Correct the setup option and retry.',
+          fields: [
+            {
+              path: ['assistant', 'provider'],
+              code: 'invalid_value',
+              message: 'Use a supported assistant provider.',
+              expected: 'supported provider',
+            },
+          ],
+        },
+      )
     },
   })
   cli.command('fail-invalid-context', {
@@ -64,6 +89,19 @@ async function runJsonCli(args: string[]): Promise<{
         {
           exitCode: '9',
           retryable: 'yes',
+        },
+      )
+    },
+  })
+  cli.command('fail-permission', {
+    args: z.object({}),
+    async run() {
+      const privatePath = '/private/workspace/member-vault/config.json'
+      throw Object.assign(
+        new Error(`EACCES: permission denied, open '${privatePath}'`),
+        {
+          code: 'EACCES',
+          path: privatePath,
         },
       )
     },
@@ -88,8 +126,17 @@ async function runJsonCli(args: string[]): Promise<{
       data?: unknown
       error?: {
         code?: string
+        fieldErrors?: Array<{
+          code?: string
+          expected: string
+          message: string
+          path: string
+          received: string
+        }>
+        hint?: string
         message?: string
         retryable?: boolean
+        stage?: string
       }
     },
     exitCode,
@@ -148,6 +195,20 @@ test('VaultCliError remains a typed incur envelope through the setup bridge', as
     'setup bridge preserved the error',
   )
   assert.equal(result.envelope.error?.retryable, true)
+  assert.equal(result.envelope.error?.stage, 'validation')
+  assert.equal(
+    result.envelope.error?.hint,
+    'Correct the setup option and retry.',
+  )
+  assert.deepEqual(result.envelope.error?.fieldErrors, [
+    {
+      code: 'invalid_value',
+      path: 'assistant.provider',
+      expected: 'supported provider',
+      received: 'invalid',
+      message: 'Use a supported assistant provider.',
+    },
+  ])
   assert.equal(result.exitCode, 9)
 })
 
@@ -158,6 +219,18 @@ test('setup bridge omits invalid retryable and exitCode context types', async ()
   assert.equal(result.envelope.error?.code, 'SETUP_BRIDGE_INVALID')
   assert.equal(result.envelope.error?.retryable, false)
   assert.equal(result.exitCode, 1)
+})
+
+test('setup bridge classifies filesystem failures without exposing paths', async () => {
+  const result = await runJsonCli(['fail-permission'])
+  const serialized = JSON.stringify(result.envelope)
+
+  assert.equal(result.envelope.ok, false)
+  assert.equal(result.envelope.error?.code, 'permission_denied')
+  assert.equal(result.envelope.error?.stage, 'filesystem')
+  assert.equal(result.envelope.error?.retryable, false)
+  assert.equal(serialized.includes('/private/workspace/member-vault'), false)
+  assert.equal(serialized.includes('permission denied, open'), false)
 })
 
 test('onboard CLI builds setup CTAs from configured channels, updates, wearables, and missing env', async () => {

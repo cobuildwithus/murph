@@ -199,5 +199,17 @@ describe("prepareAssistantDirectCliEnv", () => {
     expect(guidance).toContain("prefer `--format json`");
     expect(guidance).toContain("do not run recursive assistant or delivery commands");
     expect(guidance).toContain("`assistant deliver`");
+    expect(guidance).toContain(
+      "When a CLI error includes `fieldErrors`, use them as value-free field repair guidance",
+    );
+    expect(guidance).toContain(
+      "`retryable` governs only repeating the unchanged call",
+    );
+    expect(guidance).toContain(
+      "`false` still permits a corrected call or a call after the named prerequisite is resolved; otherwise stop",
+    );
+    expect(guidance).toContain(
+      "Never infer or echo details omitted from the error envelope",
+    );
   });
 });

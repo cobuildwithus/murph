@@ -11,7 +11,7 @@ import {
   VAULT_CLI_BATCH_MAX_COMMANDS,
   VAULT_CLI_BATCH_RESULT_SCHEMA,
 } from '@murphai/operator-config/vault-cli-contracts'
-import { projectVaultCliError } from '../vault-cli-error-projection.js'
+import { projectVaultCliError } from '@murphai/operator-config/vault-cli-error-projection'
 
 const batchCommandOptionSchema = z.string().min(1)
 
