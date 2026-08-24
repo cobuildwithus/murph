@@ -80,7 +80,9 @@ import {
   requireCompactString,
 } from './compact-field-spec.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
+import { publicValidationIssue } from './public-validation-issue.js'
 import { registerWorkoutLiveCommands } from './workout-live.js'
+import { workoutOptionPublicPath } from './workout-option-public-path.js'
 
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const workoutListLimitOptionSchema = z
@@ -161,7 +163,6 @@ const workoutAddSetFields = new Set([
   'assistanceKg',
   'addedWeightKg',
 ])
-
 const workoutAddMediaFieldList = [...workoutAddMediaFields].join(', ')
 const workoutAddExerciseFieldList = [...workoutAddExerciseFields].join(', ')
 const workoutAddSetFieldList = [...workoutAddSetFields].join(', ')
@@ -370,7 +371,13 @@ function buildWorkoutFromTypedOptions(options: WorkoutAddTypedOptions): WorkoutS
   const parsed = workoutSessionSchema.safeParse(workout)
   if (!parsed.success) {
     throw new VaultCliError('invalid_option', 'Invalid workout session fields.', {
-      issues: parsed.error.issues,
+      issues: parsed.error.issues.flatMap((issue) => {
+        const publicPath = workoutOptionPublicPath(issue.path)
+        return publicPath === undefined
+          ? []
+          : [publicValidationIssue(issue, publicPath)]
+      }),
+      stage: 'validation',
     })
   }
 

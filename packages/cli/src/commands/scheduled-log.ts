@@ -48,6 +48,8 @@ import {
   requireCompactInteger,
   requireCompactString,
 } from "./compact-field-spec.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
+import { workoutOptionPublicPath } from "./workout-option-public-path.js";
 
 const scheduledLogSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
 const scheduledLogActionKindValues = [
@@ -444,7 +446,6 @@ const workoutSetFieldKeys = [
   "assistanceKg",
   "addedWeightKg",
 ] as const;
-
 function parseWorkoutMediaEntry(entry: string): Record<string, unknown> {
   const fields = parseCompactFields(entry, "workout-media", invalidScheduledLogOption);
   rejectUnsupportedCompactFields(
@@ -605,10 +606,36 @@ function buildWorkoutFromOptions(options: WorkoutOptions): WorkoutSession | unde
   const parsed = workoutSessionSchema.safeParse(workout);
   if (!parsed.success) {
     throw new VaultCliError("invalid_option", "Invalid workout template fields.", {
-      issues: parsed.error.issues,
+      issues: parsed.error.issues.flatMap((issue) => {
+        const publicPath = workoutOptionPublicPath(issue.path);
+        return publicPath === undefined
+          ? []
+          : [publicValidationIssue(issue, publicPath)];
+      }),
+      stage: "validation",
     });
   }
 
+  return parsed.data;
+}
+
+function parseScheduledLogAction(value: unknown): ScheduledLogAction {
+  const parsed = scheduledLogActionSchema.safeParse(value);
+  if (!parsed.success) {
+    const issues = parsed.error.issues.flatMap((issue) =>
+      issue.path[0] === "foodId"
+        ? [publicValidationIssue(issue, ["foodId"])]
+        : [],
+    );
+    throw new VaultCliError(
+      "invalid_option",
+      "Invalid scheduled-log action fields.",
+      {
+        issues,
+        stage: "validation",
+      },
+    );
+  }
   return parsed.data;
 }
 
@@ -662,7 +689,7 @@ function buildScheduledLogActionFromOptions(options: {
     case "meal.add": {
       const ingredients = normalizeRepeatableFlagOption(options.ingredient, "ingredient");
       const nutrition = buildMealNutritionFromOptions(options);
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "meal.add",
         ...commonFields,
         ...(options.foodId ? { foodId: options.foodId } : {}),
@@ -672,7 +699,7 @@ function buildScheduledLogActionFromOptions(options: {
       });
     }
     case "activity_session.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "activity_session.add",
         ...commonFields,
         title: requireStringOption(options.actionTitle, "action-title"),
@@ -683,7 +710,7 @@ function buildScheduledLogActionFromOptions(options: {
         ...(workout ? { workout } : {}),
       });
     case "intervention_session.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "intervention_session.add",
         ...commonFields,
         title: requireStringOption(options.actionTitle, "action-title"),
@@ -695,7 +722,7 @@ function buildScheduledLogActionFromOptions(options: {
         ...(options.actionNote ? { note: options.actionNote } : {}),
       });
     case "measurement.add":
-      return scheduledLogActionSchema.parse({
+      return parseScheduledLogAction({
         kind: "measurement.add",
         ...commonFields,
         ...(options.actionTitle ? { title: options.actionTitle } : {}),

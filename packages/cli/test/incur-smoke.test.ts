@@ -648,11 +648,13 @@ test('VaultCliError remains a typed incur envelope through the CLI bridge', asyn
           issues: [
             {
               path: ['schedule', 'timeZone'],
+              publicPath: ['schedule', 'timeZone'],
               code: 'invalid_value',
               expected: 'string',
               message: 'Use a valid IANA time zone.',
             },
           ],
+          stage: 'validation',
         },
       )
     },
@@ -696,11 +698,13 @@ test('Cli.fetch returns safe validation fields without arbitrary error context',
           issues: [
             {
               path: ['schedule', 'timeZone'],
+              publicPath: ['schedule', 'timeZone'],
               code: 'invalid_value',
               expected: 'string',
               message: 'Use a valid IANA time zone.',
             },
           ],
+          stage: 'validation',
         },
       )
     },
@@ -747,7 +751,7 @@ test('built validation owners project safe field repair details', async () => {
         fieldMessage: 'This field is invalid.',
         issueCode: 'too_small',
         message: 'Invalid workout session fields.',
-        path: 'exercises.0.sets',
+        path: 'workoutSet',
         privateText: 'Bench press',
       },
       {
@@ -764,10 +768,10 @@ test('built validation owners project safe field repair details', async () => {
           '--action-kind',
           'meal.add',
         ],
-        errorCode: 'invalid_payload',
+        errorCode: 'invalid_option',
         fieldMessage: 'This field is invalid.',
         issueCode: 'custom',
-        message: 'Input failed validation.',
+        message: 'Invalid scheduled-log action fields.',
         path: 'foodId',
         privateText: 'Weekly strength template',
       },
@@ -791,7 +795,7 @@ test('built validation owners project safe field repair details', async () => {
         fieldMessage: 'This field is invalid.',
         issueCode: 'invalid_union',
         message: 'Invalid --result blood-test analyte payload.',
-        path: '$',
+        path: 'result',
         privateText: 'Ferritin private marker',
       },
     ] as const

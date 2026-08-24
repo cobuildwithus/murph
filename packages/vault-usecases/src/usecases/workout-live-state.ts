@@ -146,8 +146,7 @@ export function parseShownWorkout(shown: WorkoutShowResult): WorkoutSession {
   if (!parsed.success) {
     throw new VaultCliError(
       'contract_invalid',
-      `Workout ${shown.entity.id} does not contain a valid structured workout session.`,
-      { issues: parsed.error.issues },
+      'The stored workout does not contain a valid structured workout session.',
     )
   }
   return parsed.data
@@ -215,11 +214,10 @@ function validateLiveWorkoutExerciseUpdate(
   if (!parsed.success) {
     throw new VaultCliError(
       'contract_invalid',
-      `Workout ${shown.entity.id} would contain an invalid structured workout session.`,
-      { issues: parsed.error.issues },
+      'The workout update would produce an invalid structured workout session.',
     )
   }
-  assertTargetableLiveWorkout(parsed.data, `Workout ${shown.entity.id}`)
+  assertTargetableLiveWorkout(parsed.data)
 
   const durationBoundary = endedAt
     ?? (workout.endedAt === undefined ? observedAt : undefined)
@@ -317,7 +315,6 @@ export function compactSetPatch(input: LogLiveWorkoutSetInput): Partial<WorkoutS
 
 export function assertTargetableLiveWorkout(
   workout: WorkoutSession,
-  label: string,
 ): void {
   const exerciseOrders = new Set<number>()
 
@@ -325,8 +322,7 @@ export function assertTargetableLiveWorkout(
     if (exerciseOrders.has(exercise.order)) {
       throw new VaultCliError(
         'contract_invalid',
-        `${label} contains duplicate exercise order ${exercise.order}. Repair the workout structure before using targeted live commands.`,
-        { exerciseOrder: exercise.order },
+        'The workout contains duplicate exercise orders. Repair the workout structure before using targeted live commands.',
       )
     }
     exerciseOrders.add(exercise.order)
@@ -336,12 +332,7 @@ export function assertTargetableLiveWorkout(
       if (setOrders.has(set.order)) {
         throw new VaultCliError(
           'contract_invalid',
-          `${label} contains duplicate set order ${set.order} for exercise ${exercise.order} (${exercise.name}). Repair the workout structure before using targeted live commands.`,
-          {
-            exerciseName: exercise.name,
-            exerciseOrder: exercise.order,
-            setOrder: set.order,
-          },
+          'The workout contains duplicate set orders. Repair the workout structure before using targeted live commands.',
         )
       }
       setOrders.add(set.order)

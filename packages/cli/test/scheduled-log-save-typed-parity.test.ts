@@ -545,6 +545,43 @@ test("scheduled-log save rejects unsupported workout compact fields before writi
     const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
     assert.deepEqual(writtenFiles, []);
 
+    const missingSet = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Incomplete workout template",
+      "--slug",
+      "incomplete-workout-template",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "activity_session.add",
+      "--action-title",
+      "Strength",
+      "--activity-type",
+      "strength",
+      "--duration-minutes",
+      "30",
+      "--workout-exercise",
+      "order=1;name=Goblet Squat",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(missingSet.exitCode, 1);
+    assert.equal(missingSet.envelope.ok, false);
+    if (!missingSet.envelope.ok) {
+      assert.equal(missingSet.envelope.error.code, "invalid_option");
+      assert.equal(missingSet.envelope.error.stage, "validation");
+      assert.equal(missingSet.envelope.error.fieldErrors?.[0]?.path, "workoutSet");
+      assert.doesNotMatch(
+        JSON.stringify(missingSet.envelope.error),
+        /Goblet Squat/u,
+      );
+    }
+    assert.deepEqual(await readdir(scheduledLogDir).catch(() => []), []);
+
     const unsupportedSetField = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
       "scheduled-log",
       "save",
@@ -792,5 +829,48 @@ test("scheduled-log save rejects workout fields on non-activity actions before w
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("scheduled-log save identifies missing meal food input before writing", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-scheduled-log-save-missing-food-",
+  );
+
+  try {
+    const cli = createScheduledLogCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Private meal template",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "meal.add",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    if (!result.envelope.ok) {
+      assert.equal(result.envelope.error.code, "invalid_option");
+      assert.equal(result.envelope.error.stage, "validation");
+      assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "foodId");
+      assert.doesNotMatch(
+        JSON.stringify(result.envelope.error),
+        /Private meal template/u,
+      );
+    }
+
+    const scheduledLogDir = path.join(vaultRoot, "bank", "scheduled-logs");
+    const writtenFiles = await readdir(scheduledLogDir).catch(() => []);
+    assert.deepEqual(writtenFiles, []);
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });

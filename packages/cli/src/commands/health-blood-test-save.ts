@@ -25,6 +25,7 @@ import { Cli, z } from "incur";
 
 import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
+import { publicValidationIssue } from "./public-validation-issue.js";
 
 type BloodTestResult = BloodTestResultRecord;
 type BloodTestAppendInput = Parameters<typeof appendBloodTest>[0];
@@ -184,7 +185,9 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
       "invalid_option",
       "Invalid --result blood-test analyte payload.",
       {
-        issues: parsed.error.issues,
+        issues: parsed.error.issues.map((issue) =>
+          publicValidationIssue(issue, bloodTestResultPublicPath(issue.path))),
+        stage: "validation",
       },
     );
   }
@@ -236,11 +239,50 @@ function parseBloodTestLink(spec: string): BloodTestLink {
   const parsed = eventRelationLinkSchema.safeParse(candidate);
   if (!parsed.success) {
     throw new VaultCliError("invalid_option", "Invalid --link payload.", {
-      issues: parsed.error.issues,
+      issues: parsed.error.issues.map((issue) =>
+        publicValidationIssue(issue, bloodTestLinkPublicPath(issue.path))),
+      stage: "validation",
     });
   }
 
   return parsed.data;
+}
+
+function bloodTestResultPublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] {
+  const [field, nestedField] = path;
+  if (field === "referenceRange") {
+    switch (nestedField) {
+      case "high":
+      case "low":
+      case "text":
+        return ["result", "referenceRange", nestedField];
+    }
+  }
+  switch (field) {
+    case "analyte":
+    case "biomarkerSlug":
+    case "comparator":
+    case "flag":
+    case "note":
+    case "slug":
+    case "textValue":
+    case "unit":
+    case "value":
+      return ["result", field];
+    default:
+      return ["result"];
+  }
+}
+
+function bloodTestLinkPublicPath(
+  path: readonly PropertyKey[],
+): readonly (string | number)[] {
+  const [field] = path;
+  return field === "targetId" || field === "type"
+    ? ["link", field]
+    : ["link"];
 }
 
 function parseBloodTestLinks(specs: readonly string[] | undefined) {

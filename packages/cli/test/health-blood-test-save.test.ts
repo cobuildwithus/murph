@@ -1119,6 +1119,14 @@ test("blood-test save rejects JSON objects that are not analyte records without 
     assert.equal(result.envelope.ok, false);
     assert.equal(result.envelope.error.code, "invalid_option");
     assert.match(result.envelope.error.message ?? "", /analyte payload/u);
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.deepEqual(result.envelope.error.fieldErrors?.[0], {
+      code: "invalid_union",
+      expected: "",
+      message: "This field is invalid.",
+      path: "result",
+      received: "invalid",
+    });
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
@@ -1129,6 +1137,46 @@ test("blood-test save rejects JSON objects that are not analyte records without 
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("blood-test save identifies an invalid link field without writing an event", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-invalid-link-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Invalid link panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "invalid_link_panel",
+      "--result",
+      JSON.stringify({ analyte: "Glucose", value: 92 }),
+      "--link",
+      "supports_goal:",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.code, "invalid_option");
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "link.targetId");
+    assert.doesNotMatch(JSON.stringify(result.envelope.error), /Invalid link panel/u);
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 

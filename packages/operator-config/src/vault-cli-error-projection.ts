@@ -5,11 +5,6 @@ const MAX_VALIDATION_FIELDS = 12
 const MAX_VALIDATION_PATH_LENGTH = 160
 const UNKNOWN_ERROR_MESSAGE =
   'The command failed without a safe recoverable detail.'
-const ZOD_ISSUE_CODE_PATTERN =
-  /^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u
-const ZOD_EXPECTED_PATTERN =
-  /^(?:array|boolean|null|number|object|string|undefined)$/u
-
 export interface VaultCliProjectedFieldError {
   code?: string | undefined
   missing?: boolean | undefined
@@ -31,24 +26,19 @@ export interface VaultCliErrorProjection {
 
 /**
  * Projects domain and unexpected failures into the privacy-safe CLI envelope.
- * VaultCliError context is the sole metadata source. Only established Zod
- * issue fields can become value-free field guidance.
+ * VaultCliError context is the sole metadata source. Only an owner's explicit
+ * publicPath can become value-free field guidance.
  */
 export function projectVaultCliError(error: unknown): VaultCliErrorProjection {
   if (error instanceof VaultCliError) {
     return projectKnownVaultCliError(error)
   }
 
-  const fieldErrors =
-    isUnknownRecord(error) && error.name === 'ZodError'
-      ? createValidationFieldErrors(error)
-      : undefined
-  if (fieldErrors) {
+  if (isUnknownRecord(error) && error.name === 'ZodError') {
     return {
       code: 'invalid_payload',
       message: 'Input failed validation.',
       retryable: false,
-      fieldErrors,
       stage: 'validation',
     }
   }
@@ -70,13 +60,15 @@ function projectKnownVaultCliError(
       ? error.context.exitCode
       : undefined
   const fieldErrors = createValidationFieldErrors(error.context)
+  const stage = readKnownErrorStage(error.context?.stage)
 
   return {
     code: error.code,
     message: redactSensitivePathSegments(error.message),
     retryable,
     ...(exitCode === undefined ? {} : { exitCode }),
-    ...(fieldErrors ? { fieldErrors, stage: 'validation' } : {}),
+    ...(fieldErrors ? { fieldErrors } : {}),
+    ...(stage === undefined ? {} : { stage }),
   }
 }
 
@@ -92,21 +84,21 @@ function createValidationFieldErrors(
       if (
         !isUnknownRecord(issue) ||
         typeof issue.code !== 'string' ||
-        !ZOD_ISSUE_CODE_PATTERN.test(issue.code) ||
-        !Array.isArray(issue.path) ||
-        !issue.path.every(isZodPathSegment)
+        !/^(?:custom|invalid_(?:element|format|key|type|union|value)|not_multiple_of|too_(?:big|small)|unrecognized_keys)$/u.test(issue.code) ||
+        !Array.isArray(issue.publicPath) ||
+        !issue.publicPath.every(isPublicPathSegment)
       ) {
         return []
       }
 
       const expected =
         typeof issue.expected === 'string' &&
-        ZOD_EXPECTED_PATTERN.test(issue.expected)
+        /^(?:array|boolean|null|number|object|string|undefined)$/u.test(issue.expected)
           ? issue.expected
           : undefined
       return [{
         code: issue.code,
-        path: normalizeValidationPath(issue.path),
+        path: normalizeValidationPath(issue.publicPath),
         expected: expected ?? '',
         received: 'invalid',
         message: 'This field is invalid.',
@@ -133,39 +125,30 @@ function createValidationFieldErrors(
   return boundedFields
 }
 
-function isZodPathSegment(value: unknown): value is PropertyKey {
+function isPublicPathSegment(value: unknown): value is string | number {
   return (
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'symbol'
+    typeof value === 'string' &&
+    /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(value)
+  ) || (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= 0
   )
 }
 
-function normalizeValidationPath(path: readonly PropertyKey[]): string {
-  const normalized = path.map(normalizeValidationPathSegment).join('.') || '$'
+function normalizeValidationPath(path: readonly (string | number)[]): string {
+  const normalized = path.join('.') || '$'
   const codePoints = Array.from(normalized)
   return codePoints.length <= MAX_VALIDATION_PATH_LENGTH
     ? normalized
     : `${codePoints.slice(0, MAX_VALIDATION_PATH_LENGTH - 1).join('')}…`
 }
 
-function normalizeValidationPathSegment(segment: PropertyKey): string {
-  if (
-    typeof segment === 'number' &&
-    Number.isSafeInteger(segment) &&
-    segment >= 0
-  ) {
-    return String(segment)
-  }
-
-  if (typeof segment !== 'string') {
-    return '<field>'
-  }
-
-  const trimmed = segment.trim()
-  return /^[A-Za-z_][A-Za-z0-9_-]*$/u.test(trimmed)
-    ? trimmed
-    : '<field>'
+function readKnownErrorStage(value: unknown): string | undefined {
+  return typeof value === 'string' &&
+    /^(?:authorization|configuration|conflict|filesystem|integrity|persistence|read|render|response|transport|validation|write)$/u.test(value)
+    ? value
+    : undefined
 }
 
 function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {

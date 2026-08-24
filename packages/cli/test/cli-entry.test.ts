@@ -201,10 +201,12 @@ test("renderMurphCliEntrypointError honors explicit JSON before CLI serve", asyn
           code: "invalid_value",
           expected: "IANA time zone",
           path: ["schedule", "timeZone"],
+          publicPath: ["schedule", "timeZone"],
           message: privateValue,
         },
       ],
       retryable: false,
+      stage: "validation",
     },
   );
 

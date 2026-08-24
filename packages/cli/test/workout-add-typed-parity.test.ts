@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { writeFile } from 'node:fs/promises'
+import { readdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { initializeVault } from '@murphai/core'
@@ -579,6 +579,12 @@ test('workout add and edit reject incomplete or ambiguous typed workout input', 
   assert.equal(missingSet.exitCode, 1)
   assert.equal(missingSet.envelope.ok, false)
   assert.match(missingSet.envelope.error.message ?? '', /Invalid workout session fields/u)
+  assert.equal(missingSet.envelope.error.stage, 'validation')
+  assert.equal(missingSet.envelope.error.fieldErrors?.[0]?.path, 'workoutSet')
+  assert.deepEqual(
+    await readdir(path.join(vaultRoot, 'ledger', 'events')).catch(() => []),
+    [],
+  )
 
   const misspelledSetField = await runInProcessJsonCli(cli, [
     'workout',
