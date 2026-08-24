@@ -112,15 +112,27 @@ test('samples batch show help and model metadata describe the list-to-show id co
   assert.doesNotMatch(llms, /by transform id|transform batch id|xfm_<ULID>/iu)
 })
 
-test.sequential('sample CSV failures expose bounded repair flags and counts without raw cell echo', async () => {
+test.sequential('sample CSV failures expose fixed value-free repair guidance without raw cell echo', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-sample-csv-repair-'))
   const invalidRowsPath = path.join(vaultRoot, 'invalid-rows.csv')
   const timestampInferencePath = path.join(vaultRoot, 'timestamp-inference.csv')
   const valueInferencePath = path.join(vaultRoot, 'value-inference.csv')
   const headerlessPath = path.join(vaultRoot, 'headerless.csv')
+  const preamblePath = path.join(vaultRoot, 'preamble.csv')
   const wrongDelimiterPath = path.join(vaultRoot, 'wrong-delimiter.csv')
   const longHeaderPath = path.join(vaultRoot, 'long-header.csv')
   const wideHeaderPath = path.join(vaultRoot, 'wide-header.csv')
+  const timestampExpected = 'timestamp column selected with --ts-column'
+  const timestampHint = 'Check --delimiter, then retry with --ts-column set to the exact timestamp column name.'
+  const valueExpected = 'sample value column selected with --value-column'
+  const valueHint = 'Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.'
+
+  function assertNoEcho(value: unknown, sentinels: readonly string[]): void {
+    const serialized = JSON.stringify(value) ?? ''
+    for (const sentinel of sentinels) {
+      assert.equal(serialized.includes(sentinel), false)
+    }
+  }
 
   try {
     await initializeVault({ vaultRoot })
@@ -152,11 +164,9 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     assert.equal(JSON.stringify(invalidRows).includes(timestampCellSentinel), false)
     assert.equal(JSON.stringify(invalidRows).includes(valueCellSentinel), false)
 
-    await writeFile(
-      timestampInferencePath,
-      'custom_time,bpm\nprivate-cell,62\n',
-      'utf8',
-    )
+    const privateTimestampHeader = 'custom_private_time_header'
+    const privateTimestampCell = 'private-timestamp-inference-cell'
+    await writeFile(timestampInferencePath, `${privateTimestampHeader},bpm\n${privateTimestampCell},62\n`, 'utf8')
     const timestampInference = await runSliceCli([
       'samples',
       'csv',
@@ -169,17 +179,15 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     assert.equal(timestampInference.ok, false)
     assert.equal(timestampInference.meta.command, 'samples csv profile')
     assert.equal(timestampInference.error.fieldErrors?.[0]?.path, 'tsColumn')
-    assert.match(
-      timestampInference.error.fieldErrors?.[0]?.expected ?? '',
-      /"custom_time", "bpm"/u,
-    )
-    assert.match(timestampInference.error.hint ?? '', /--ts-column/u)
-    assert.equal((timestampInference.error.fieldErrors?.[0]?.expected ?? '').includes('…'), false)
-    assert.equal(JSON.stringify(timestampInference).includes('private-cell'), false)
+    assert.equal(timestampInference.error.fieldErrors?.[0]?.expected, timestampExpected)
+    assert.equal(timestampInference.error.hint, timestampHint)
+    assertNoEcho(timestampInference, [privateTimestampHeader, 'bpm', privateTimestampCell])
 
+    const privateValueHeader = 'custom_private_metric_header'
+    const privateValueCell = 'private-value-inference-cell'
     await writeFile(
       valueInferencePath,
-      'timestamp,mystery_metric\n2026-03-12T08:00:00Z,private-cell\n',
+      `timestamp,${privateValueHeader}\n2026-03-12T08:00:00Z,${privateValueCell}\n`,
       'utf8',
     )
     const valueInference = await runSliceCli([
@@ -194,14 +202,9 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     assert.equal(valueInference.ok, false)
     assert.equal(valueInference.meta.command, 'samples csv import')
     assert.equal(valueInference.error.fieldErrors?.[0]?.path, 'valueColumn')
-    assert.match(
-      valueInference.error.fieldErrors?.[0]?.expected ?? '',
-      /"timestamp", "mystery_metric"/u,
-    )
-    assert.match(valueInference.error.hint ?? '', /--value-column/u)
-    assert.match(valueInference.error.hint ?? '', /--stream/u)
-    assert.equal((valueInference.error.fieldErrors?.[0]?.expected ?? '').includes('…'), false)
-    assert.equal(JSON.stringify(valueInference).includes('private-cell'), false)
+    assert.equal(valueInference.error.fieldErrors?.[0]?.expected, valueExpected)
+    assert.equal(valueInference.error.hint, valueHint)
+    assertNoEcho(valueInference, [privateValueHeader, privateValueCell])
 
     const headerlessTimestamp = '2042-11-19T12:34:56Z'
     const headerlessValue = '791337'
@@ -220,21 +223,40 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     ])
 
     assert.equal(headerless.ok, false)
-    assert.equal(
-      headerless.error.fieldErrors?.[0]?.expected,
-      'exact CSV header name after checking --delimiter',
+    assert.equal(headerless.error.fieldErrors?.[0]?.expected, timestampExpected)
+    assert.equal(headerless.error.hint, timestampHint)
+    assertNoEcho(headerless, [headerlessTimestamp, headerlessValue])
+
+    const privatePreamble = 'private-preamble-sentinel'
+    const preambleHeaderA = 'custom_preamble_time_header'
+    const preambleHeaderB = 'custom_preamble_metric_header'
+    const privatePreambleCell = 'private-preamble-cell'
+    await writeFile(
+      preamblePath,
+      `${privatePreamble}\n${preambleHeaderA},${preambleHeaderB}\n${privatePreambleCell},72\n`,
+      'utf8',
     )
-    assert.match(headerless.error.hint ?? '', /not confirmed as a CSV header/u)
-    assert.match(headerless.error.hint ?? '', /--delimiter/u)
-    assert.match(headerless.error.hint ?? '', /--ts-column/u)
-    assert.equal(JSON.stringify(headerless).includes(headerlessTimestamp), false)
-    assert.equal(JSON.stringify(headerless).includes(headerlessValue), false)
+    const preamble = await runSliceCli([
+      'samples',
+      'import-csv',
+      preamblePath,
+      '--vault',
+      vaultRoot,
+    ])
+
+    assert.equal(preamble.ok, false)
+    assert.equal(preamble.meta.command, 'samples import-csv')
+    assert.equal(preamble.error.fieldErrors?.[0]?.path, 'tsColumn')
+    assert.equal(preamble.error.fieldErrors?.[0]?.expected, timestampExpected)
+    assert.equal(preamble.error.hint, timestampHint)
+    assertNoEcho(preamble, [privatePreamble, preambleHeaderA, preambleHeaderB, privatePreambleCell])
 
     const wrongDelimiterTimestamp = '2043-01-17T03:02:01Z'
     const wrongDelimiterValue = '881199'
+    const wrongDelimiterHeader = 'custom_time_flag;custom_metric_flag'
     await writeFile(
       wrongDelimiterPath,
-      `timestamp;bpm\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
+      `${wrongDelimiterHeader}\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
       'utf8',
     )
     const wrongDelimiter = await runSliceCli([
@@ -247,10 +269,9 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     ])
 
     assert.equal(wrongDelimiter.ok, false)
-    assert.match(wrongDelimiter.error.hint ?? '', /--delimiter/u)
-    assert.equal(JSON.stringify(wrongDelimiter).includes('timestamp;bpm'), false)
-    assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterTimestamp), false)
-    assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterValue), false)
+    assert.equal(wrongDelimiter.error.fieldErrors?.[0]?.expected, timestampExpected)
+    assert.equal(wrongDelimiter.error.hint, timestampHint)
+    assertNoEcho(wrongDelimiter, [wrongDelimiterHeader, wrongDelimiterTimestamp, wrongDelimiterValue])
 
     const longHeader = `metric_${'x'.repeat(200)}`
     await writeFile(
@@ -269,10 +290,9 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
 
     assert.equal(longHeaderResult.ok, false)
     assert.equal(longHeaderResult.error.fieldErrors?.[0]?.path, 'valueColumn')
-    assert.match(longHeaderResult.error.hint ?? '', /complete list exceeds/u)
-    assert.equal(JSON.stringify(longHeaderResult).includes(longHeader), false)
-    assert.equal(JSON.stringify(longHeaderResult).includes(longHeader.slice(0, 24)), false)
-    assert.equal(JSON.stringify(longHeaderResult).includes('…'), false)
+    assert.equal(longHeaderResult.error.fieldErrors?.[0]?.expected, valueExpected)
+    assert.equal(longHeaderResult.error.hint, valueHint)
+    assertNoEcho(longHeaderResult, [longHeader, longHeader.slice(0, 24)])
 
     const wideHeaders = Array.from({ length: 24 }, (_, index) =>
       `metric_${String(index + 1).padStart(2, '0')}`
@@ -284,16 +304,17 @@ test.sequential('sample CSV failures expose bounded repair flags and counts with
     )
     const wideHeaderResult = await runSliceCli([
       'samples',
-      'csv',
-      'import',
+      'import-csv',
       wideHeaderPath,
       '--vault',
       vaultRoot,
     ])
 
     assert.equal(wideHeaderResult.ok, false)
-    assert.match(wideHeaderResult.error.hint ?? '', /complete list exceeds/u)
-    assert.equal(JSON.stringify(wideHeaderResult).includes(wideHeaders[0] as string), false)
+    assert.equal(wideHeaderResult.meta.command, 'samples import-csv')
+    assert.equal(wideHeaderResult.error.fieldErrors?.[0]?.expected, valueExpected)
+    assert.equal(wideHeaderResult.error.hint, valueHint)
+    assertNoEcho(wideHeaderResult, wideHeaders)
     assert.ok(JSON.stringify(wideHeaderResult.error).length < 1_000)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })

@@ -450,14 +450,21 @@ test("importCsvSamples rejects blank sample rows and unterminated quoted fields"
   );
 });
 
-test("sample CSV repair errors expose bounded schema guidance without cell values", async () => {
+test("sample CSV repair errors expose fixed value-free guidance without cell values", async () => {
   const invalidRowsPath = await createTempFile(
     "invalid-sample-rows.csv",
     "timestamp,bpm\nprivate-timestamp-cell,private-value-cell\n",
   );
-  const trustedInferencePath = await createTempFile(
-    "trusted-sample-inference.csv",
-    "custom_time,bpm\nprivate-cell,62\n",
+  const privateTimestampHeader = "private_time_header";
+  const privateMetricHeader = "private_metric_header";
+  const privateHeaderPath = await createTempFile(
+    "private-sample-inference.csv",
+    `${privateTimestampHeader},${privateMetricHeader}\nprivate-cell,62\n`,
+  );
+  const customValueHeader = "custom_private_metric";
+  const customValuePath = await createTempFile(
+    "custom-value-inference.csv",
+    `timestamp,${customValueHeader}\n2043-02-01T00:00:00Z,72\n`,
   );
   const headerlessTimestamp = "2042-11-19T12:34:56Z";
   const headerlessValue = "791337";
@@ -465,11 +472,19 @@ test("sample CSV repair errors expose bounded schema guidance without cell value
     "headerless-samples.csv",
     `${headerlessTimestamp},${headerlessValue}\n2042-11-19T12:35:56Z,791338\n`,
   );
+  const preamble = "private-preamble-sentinel";
+  const preambleHeaderA = "preamble_time_column";
+  const preambleHeaderB = "preamble_metric_column";
+  const preamblePath = await createTempFile(
+    "preamble-samples.csv",
+    `${preamble}\n${preambleHeaderA},${preambleHeaderB}\nprivate-preamble-cell,72\n`,
+  );
   const wrongDelimiterTimestamp = "2043-01-17T03:02:01Z";
   const wrongDelimiterValue = "881199";
+  const wrongDelimiterHeader = "time_flag;bpm_flag";
   const wrongDelimiterPath = await createTempFile(
     "wrong-delimiter-samples.csv",
-    `timestamp;bpm\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
+    `${wrongDelimiterHeader}\n${wrongDelimiterTimestamp};${wrongDelimiterValue}\n`,
   );
   const longHeader = `metric_${"x".repeat(200)}`;
   const longHeaderPath = await createTempFile(
@@ -484,6 +499,10 @@ test("sample CSV repair errors expose bounded schema guidance without cell value
     `timestamp,${wideHeaders.join(",")}\n2043-02-01T00:00:00Z,${wideHeaders.map(() => "72").join(",")}\n`,
   );
   const { corePort } = createCorePortSpy();
+  const timestampExpected = "timestamp column selected with --ts-column";
+  const timestampHint = "Check --delimiter, then retry with --ts-column set to the exact timestamp column name.";
+  const valueExpected = "sample value column selected with --value-column";
+  const valueHint = "Check --delimiter, then retry with --value-column set to the exact sample value column name and --stream set to its sample stream.";
 
   async function readRepairError(filePath: string): Promise<CsvSampleImportError> {
     try {
@@ -492,6 +511,25 @@ test("sample CSV repair errors expose bounded schema guidance without cell value
     } catch (error) {
       assert.ok(error instanceof CsvSampleImportError);
       return error;
+    }
+  }
+
+  function assertValueFreeRepair(
+    error: CsvSampleImportError,
+    input: {
+      code: "timestamp_column_inference_failed" | "value_column_inference_failed";
+      field: "tsColumn" | "valueColumn";
+      sentinels: readonly string[];
+    },
+  ): void {
+    const isTimestamp = input.field === "tsColumn";
+    assert.equal(error.code, input.code);
+    assert.equal(error.repair.fields[0]?.path, input.field);
+    assert.equal(error.repair.fields[0]?.expected, isTimestamp ? timestampExpected : valueExpected);
+    assert.equal(error.repair.hint, isTimestamp ? timestampHint : valueHint);
+    const serialized = JSON.stringify(error);
+    for (const sentinel of input.sentinels) {
+      assert.equal(serialized.includes(sentinel), false);
     }
   }
 
@@ -512,43 +550,51 @@ test("sample CSV repair errors expose bounded schema guidance without cell value
     },
   );
 
-  const trustedInference = await readRepairError(trustedInferencePath);
-  assert.equal(trustedInference.code, "timestamp_column_inference_failed");
-  assert.equal(trustedInference.repair.fields[0]?.path, "tsColumn");
-  assert.equal(
-    trustedInference.repair.fields[0]?.expected,
-    'one of the CSV headers: "custom_time", "bpm"',
-  );
-  assert.ok((trustedInference.repair.fields[0]?.expected?.length ?? 0) <= 160);
-  assert.match(trustedInference.repair.hint ?? "", /--ts-column/u);
-  assert.equal(JSON.stringify(trustedInference).includes("private-cell"), false);
+  assertValueFreeRepair(await readRepairError(privateHeaderPath), {
+    code: "timestamp_column_inference_failed",
+    field: "tsColumn",
+    sentinels: [privateTimestampHeader, privateMetricHeader, "private-cell"],
+  });
+
+  assertValueFreeRepair(await readRepairError(customValuePath), {
+    code: "value_column_inference_failed",
+    field: "valueColumn",
+    sentinels: [customValueHeader],
+  });
 
   const headerless = await readRepairError(headerlessPath);
-  assert.equal(headerless.repair.fields[0]?.expected, "exact CSV header name after checking --delimiter");
-  assert.match(headerless.repair.hint ?? "", /not confirmed as a CSV header/u);
-  assert.match(headerless.repair.hint ?? "", /--delimiter/u);
-  assert.match(headerless.repair.hint ?? "", /--ts-column/u);
-  assert.equal(JSON.stringify(headerless).includes(headerlessTimestamp), false);
-  assert.equal(JSON.stringify(headerless).includes(headerlessValue), false);
+  assertValueFreeRepair(headerless, {
+    code: "timestamp_column_inference_failed",
+    field: "tsColumn",
+    sentinels: [headerlessTimestamp, headerlessValue],
+  });
+
+  assertValueFreeRepair(await readRepairError(preamblePath), {
+    code: "timestamp_column_inference_failed",
+    field: "tsColumn",
+    sentinels: [preamble, preambleHeaderA, preambleHeaderB, "private-preamble-cell"],
+  });
 
   const wrongDelimiter = await readRepairError(wrongDelimiterPath);
-  assert.equal(wrongDelimiter.repair.fields[0]?.expected, "exact CSV header name after checking --delimiter");
-  assert.match(wrongDelimiter.repair.hint ?? "", /--delimiter/u);
-  assert.equal(JSON.stringify(wrongDelimiter).includes("timestamp;bpm"), false);
-  assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterTimestamp), false);
-  assert.equal(JSON.stringify(wrongDelimiter).includes(wrongDelimiterValue), false);
+  assertValueFreeRepair(wrongDelimiter, {
+    code: "timestamp_column_inference_failed",
+    field: "tsColumn",
+    sentinels: [wrongDelimiterHeader, wrongDelimiterTimestamp, wrongDelimiterValue],
+  });
 
   const longHeaderError = await readRepairError(longHeaderPath);
-  assert.equal(longHeaderError.code, "value_column_inference_failed");
-  assert.match(longHeaderError.repair.hint ?? "", /complete list exceeds/u);
-  assert.equal(JSON.stringify(longHeaderError).includes(longHeader), false);
-  assert.equal(JSON.stringify(longHeaderError).includes(longHeader.slice(0, 24)), false);
-  assert.equal(JSON.stringify(longHeaderError).includes("…"), false);
+  assertValueFreeRepair(longHeaderError, {
+    code: "value_column_inference_failed",
+    field: "valueColumn",
+    sentinels: [longHeader, longHeader.slice(0, 24)],
+  });
 
   const wideHeaderError = await readRepairError(wideHeaderPath);
-  assert.equal(wideHeaderError.code, "value_column_inference_failed");
-  assert.match(wideHeaderError.repair.hint ?? "", /complete list exceeds/u);
-  assert.equal(JSON.stringify(wideHeaderError).includes(wideHeaders[0] as string), false);
+  assertValueFreeRepair(wideHeaderError, {
+    code: "value_column_inference_failed",
+    field: "valueColumn",
+    sentinels: wideHeaders,
+  });
   assert.ok(JSON.stringify(wideHeaderError).length < 1_000);
 });
 
