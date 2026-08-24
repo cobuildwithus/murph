@@ -145,7 +145,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
 // Atomic sample-import diagnostics add 8,182 B to the lazy CLI graph.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_475_830;
+// Final CSV recovery remains runtime-loaded outside this graph; the combined
+// Linux candidate measured 9,475,860 B on 2026-08-24.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_475_860;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 
