@@ -1,5 +1,5 @@
 import type { Dirent } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { rawImportManifestSchema } from '@murphai/contracts'
 import { z } from 'incur'
@@ -78,7 +78,7 @@ const EXPORTS_ROOT = 'exports/packs'
 const LEGACY_RAW_MANIFEST_BASENAME = 'manifest.json'
 const exportPackManifestRecovery: StoredManifestRecovery = {
   subject: 'export pack',
-  missingCode: 'not_found',
+  missingCode: 'manifest_missing',
   invalidCode: 'manifest_invalid',
   missingHint:
     'The CLI cannot reconstruct or repair this stored export pack manifest. Create a new pack with export pack create.',
@@ -119,6 +119,44 @@ function compareNullableDatesDesc(left: string | null, right: string | null) {
 
 function packDirectory(packId: string) {
   return path.posix.join(EXPORTS_ROOT, packId)
+}
+
+function exportPackNotFoundError() {
+  return new VaultCliError(
+    'not_found',
+    'The requested export pack was not found.',
+    { retryable: false },
+    {
+      stage: 'lookup',
+      hint: 'Run export pack list and retry with an existing pack id.',
+      fields: [{
+        path: 'id',
+        code: 'not_found',
+        message: 'No stored export pack matches this id.',
+      }],
+    },
+  )
+}
+
+async function storedExportPackDirectoryExists(
+  vaultRoot: string,
+  relativePackDirectory: string,
+) {
+  try {
+    return (await stat(
+      await resolveVaultRelativePath(vaultRoot, relativePackDirectory),
+    )).isDirectory()
+  } catch (error) {
+    if (readErrorCode(error) === 'ENOENT' || readErrorCode(error) === 'ENOTDIR') {
+      return false
+    }
+
+    throw toVaultCliFilesystemError(error, {
+      stage: 'manifest_lookup',
+      message: 'The stored export pack directory could not be inspected.',
+      hint: 'Check vault export-directory permissions before retrying.',
+    })
+  }
 }
 
 function readErrorCode(error: unknown): string | null {
@@ -211,7 +249,7 @@ async function readJsonRelativeFile<T>(
   try {
     contents = await readFile(absolutePath, 'utf8')
   } catch (error) {
-    if (readErrorCode(error) !== 'ENOENT') {
+    if (readErrorCode(error) !== 'ENOENT' && readErrorCode(error) !== 'ENOTDIR') {
       throw toVaultCliFilesystemError(error, {
         stage: 'manifest_read',
         message: `The stored ${recovery.subject} manifest could not be read.`,
@@ -450,13 +488,28 @@ function matchesExportPackRange(
 }
 
 async function readStoredExportPackManifest(vaultRoot: string, packId: string) {
-  const manifestFile = path.posix.join(packDirectory(packId), 'manifest.json')
-  const manifest = await readJsonRelativeFile(
-    vaultRoot,
-    manifestFile,
-    exportPackManifestSchema,
-    exportPackManifestRecovery,
-  )
+  const relativePackDirectory = packDirectory(packId)
+  const manifestFile = path.posix.join(relativePackDirectory, 'manifest.json')
+  let manifest: ExportPackManifest
+
+  try {
+    manifest = await readJsonRelativeFile(
+      vaultRoot,
+      manifestFile,
+      exportPackManifestSchema,
+      exportPackManifestRecovery,
+    )
+  } catch (error) {
+    if (
+      error instanceof VaultCliError
+      && error.code === exportPackManifestRecovery.missingCode
+      && !(await storedExportPackDirectoryExists(vaultRoot, relativePackDirectory))
+    ) {
+      throw exportPackNotFoundError()
+    }
+
+    throw error
+  }
 
   if (manifest.packId !== packId) {
     throw new VaultCliError(

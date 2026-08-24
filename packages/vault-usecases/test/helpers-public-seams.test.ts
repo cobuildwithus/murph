@@ -508,6 +508,7 @@ describe("helper barrel exports", () => {
       message: "The input file was not found.",
       repair: expect.objectContaining({
         stage: "input_file",
+        hint: "Choose an existing regular file for the file argument and retry.",
         fields: [expect.objectContaining({ path: "file", code: "not_found" })],
       }),
     }));
@@ -545,6 +546,47 @@ describe("helper barrel exports", () => {
       repair: expect.objectContaining({ stage: "lookup" }),
     }));
     expect((missingAssessmentError as VaultCliError).message).not.toContain("private-id");
+
+    for (const storedError of [
+      Object.assign(new Error("Invalid private ledger JSON."), {
+        name: "VaultError",
+        code: "VAULT_INVALID_JSONL",
+        details: {
+          assessmentId: "private-assessment-id",
+          cause: "private-ledger-contents",
+          relativePath: "ledger/assessments/private.jsonl",
+        },
+      }),
+      Object.assign(new Error("Private assessment row failed validation."), {
+        name: "VaultError",
+        code: "ASSESSMENT_RESPONSE_INVALID",
+        details: {
+          assessmentId: "private-assessment-id",
+          errors: ["private-assessment-value"],
+          rawPath: "raw/assessments/private/source.json",
+        },
+      }),
+    ]) {
+      const mapped = toAssessmentProjectVaultCliError(storedError);
+
+      expect(mapped).toEqual(expect.objectContaining({
+        code: "assessment_store_invalid",
+        context: expect.objectContaining({
+          retryable: false,
+          vaultCode: storedError.code,
+        }),
+        repair: expect.objectContaining({
+          hint: expect.stringContaining("cannot repair stored assessment data"),
+          stage:
+            storedError.code === "VAULT_INVALID_JSONL"
+              ? "assessment_read"
+              : "assessment_validation",
+        }),
+      }));
+      expect(JSON.stringify(mapped)).not.toMatch(
+        /private-assessment-id|private-ledger-contents|private\.jsonl|private-assessment-value|raw\/assessments\/private/u,
+      );
+    }
 
     expect(
       toVaultMetadataCliError(

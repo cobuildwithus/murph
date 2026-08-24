@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -137,9 +137,13 @@ test.sequential('built CLI classifies document and intake file inputs without pa
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-file-repair-'))
   const missingPath = path.join(vaultRoot, 'private-missing-input.json')
   const lockedPath = path.join(vaultRoot, 'private-locked-input.json')
+  const documentPath = path.join(vaultRoot, 'document-input.md')
+  const intakePath = path.join(vaultRoot, 'intake-input.json')
 
   try {
     await initializeVault({ vaultRoot })
+    await writeFile(documentPath, '# Recovery document\n', 'utf8')
+    await writeFile(intakePath, '{"answer":"ready"}\n', 'utf8')
 
     for (const command of ['document', 'intake'] as const) {
       const missing = await runCli([
@@ -154,7 +158,8 @@ test.sequential('built CLI classifies document and intake file inputs without pa
       assert.equal(missingError.code, 'not_found')
       assert.equal(missingError.retryable, false)
       assert.equal(missingError.stage, 'input_file')
-      assert.match(missingError.hint ?? '', /--file/u)
+      assert.match(missingError.hint ?? '', /file argument/u)
+      assert.doesNotMatch(missingError.hint ?? '', /--file/u)
       assert.equal(missingError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(missing, [missingPath, vaultRoot])
 
@@ -170,6 +175,8 @@ test.sequential('built CLI classifies document and intake file inputs without pa
       assert.equal(directoryError.code, 'invalid_path')
       assert.equal(directoryError.retryable, false)
       assert.equal(directoryError.stage, 'input_file')
+      assert.match(directoryError.hint ?? '', /file argument/u)
+      assert.doesNotMatch(directoryError.hint ?? '', /--file/u)
       assert.equal(directoryError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(directory, [vaultRoot])
     }
@@ -189,11 +196,62 @@ test.sequential('built CLI classifies document and intake file inputs without pa
       assert.equal(unreadableError.code, 'permission_denied')
       assert.equal(unreadableError.retryable, false)
       assert.equal(unreadableError.stage, 'input_file')
+      assert.match(unreadableError.hint ?? '', /file argument/u)
+      assert.doesNotMatch(unreadableError.hint ?? '', /--file/u)
       assert.equal(unreadableError.fieldErrors?.[0]?.path, 'file')
       assertDoesNotEcho(unreadable, [lockedPath, vaultRoot])
     } finally {
       await chmod(lockedPath, 0o600)
     }
+
+    for (const [command, file] of [
+      ['document', documentPath],
+      ['intake', intakePath],
+    ] as const) {
+      const imported = await runCli([
+        command,
+        'import',
+        file,
+        '--vault',
+        vaultRoot,
+      ])
+
+      assert.equal(imported.ok, true, JSON.stringify(imported))
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('built CLI returns private repair for malformed assessment JSON without writes', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-intake-json-repair-'))
+  const assessmentPath = path.join(vaultRoot, 'private-malformed-assessment.json')
+  const malformedContents = '{"private-assessment-value":'
+
+  try {
+    await initializeVault({ vaultRoot })
+    await writeFile(assessmentPath, malformedContents, 'utf8')
+    const pathsBeforeImport = (await readdir(vaultRoot, { recursive: true })).sort()
+
+    const imported = await runCli([
+      'intake',
+      'import',
+      assessmentPath,
+      '--vault',
+      vaultRoot,
+    ])
+    const importError = requireError(imported)
+
+    assert.equal(importError.code, 'invalid_payload')
+    assert.equal(importError.retryable, false)
+    assert.equal(importError.stage, 'validation')
+    assert.match(importError.hint ?? '', /valid JSON object/u)
+    assert.equal(importError.fieldErrors?.[0]?.path, '$')
+    assertDoesNotEcho(imported, [malformedContents, assessmentPath, vaultRoot])
+    assert.deepEqual(
+      (await readdir(vaultRoot, { recursive: true })).sort(),
+      pathsBeforeImport,
+    )
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -255,6 +313,77 @@ test.sequential('built CLI returns field repair for intake title and lookup fail
     assert.match(projectionError.hint ?? '', /intake list/u)
     assert.equal(projectionError.fieldErrors?.[0]?.path, 'id')
     assertDoesNotEcho(missingProjection, [privateAssessmentId, vaultRoot])
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test.sequential('built CLI keeps stored assessment ledger failures terminal and private', async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-assessment-ledger-repair-'))
+  const ledgerPath = path.join(vaultRoot, 'ledger', 'assessments', '2026', '2026-08.jsonl')
+  const requestedAssessmentId = 'private-requested-assessment-id'
+  const storedAssessmentId = 'asmt_01JNW7YJ7MNE7M9Q2QWQK4Z3F8'
+  const privateLedgerValue = 'private-assessment-ledger-value'
+
+  try {
+    await initializeVault({ vaultRoot })
+    await mkdir(path.dirname(ledgerPath), { recursive: true })
+    await writeFile(ledgerPath, `{"${privateLedgerValue}"\n`, 'utf8')
+
+    const malformedLedger = await runCli([
+      'intake',
+      'project',
+      requestedAssessmentId,
+      '--vault',
+      vaultRoot,
+    ])
+    const malformedLedgerError = requireError(malformedLedger)
+
+    assert.equal(malformedLedgerError.code, 'assessment_store_invalid')
+    assert.equal(malformedLedgerError.retryable, false)
+    assert.equal(malformedLedgerError.stage, 'assessment_read')
+    assert.match(malformedLedgerError.hint ?? '', /cannot repair stored assessment data/u)
+    assertDoesNotEcho(malformedLedger, [
+      requestedAssessmentId,
+      privateLedgerValue,
+      ledgerPath,
+      vaultRoot,
+    ])
+
+    await writeFile(
+      ledgerPath,
+      `${JSON.stringify({
+        schemaVersion: 'murph.assessment-response.v1',
+        id: storedAssessmentId,
+        assessmentType: 'intake',
+        recordedAt: '2026-08-24T12:00:00.000Z',
+        source: 'import',
+        rawPath: privateLedgerValue,
+        responses: {},
+      })}\n`,
+      'utf8',
+    )
+
+    const invalidStoredRecord = await runCli([
+      'intake',
+      'project',
+      requestedAssessmentId,
+      '--vault',
+      vaultRoot,
+    ])
+    const invalidStoredRecordError = requireError(invalidStoredRecord)
+
+    assert.equal(invalidStoredRecordError.code, 'assessment_store_invalid')
+    assert.equal(invalidStoredRecordError.retryable, false)
+    assert.equal(invalidStoredRecordError.stage, 'assessment_validation')
+    assert.match(invalidStoredRecordError.hint ?? '', /cannot repair stored assessment data/u)
+    assertDoesNotEcho(invalidStoredRecord, [
+      requestedAssessmentId,
+      storedAssessmentId,
+      privateLedgerValue,
+      ledgerPath,
+      vaultRoot,
+    ])
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -448,6 +577,8 @@ test.sequential('built CLI rejects invalid journal ids and streams before mutati
 
 test.sequential('built CLI classifies malformed manifests and export output failures', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-export-repair-'))
+  const missingPackId = 'private-missing-pack-id'
+  const missingManifestPackId = 'private-missing-manifest-pack-id'
   const privatePackId = 'private-pack-id'
   const privateManifestValue = 'private-manifest-value'
   const invalidJsonPackId = 'private-invalid-json-pack-id'
@@ -458,6 +589,56 @@ test.sequential('built CLI classifies malformed manifests and export output fail
 
   try {
     await initializeVault({ vaultRoot })
+    const created = await runCli<{ packId: string }>([
+      'export',
+      'pack',
+      'create',
+      '--from',
+      '2026-08-20',
+      '--to',
+      '2026-08-24',
+      '--vault',
+      vaultRoot,
+    ])
+    assert.equal(created.ok, true, JSON.stringify(created))
+
+    for (const action of ['show', 'materialize', 'prune'] as const) {
+      const missing = await runCli([
+        'export',
+        'pack',
+        action,
+        missingPackId,
+        '--vault',
+        vaultRoot,
+      ])
+      const missingError = requireError(missing)
+
+      assert.equal(missingError.code, 'not_found')
+      assert.equal(missingError.retryable, false)
+      assert.equal(missingError.stage, 'lookup')
+      assert.match(missingError.hint ?? '', /export pack list/u)
+      assert.equal(missingError.fieldErrors?.[0]?.path, 'id')
+      assertDoesNotEcho(missing, [missingPackId, vaultRoot])
+    }
+
+    await mkdir(path.join(vaultRoot, 'exports', 'packs', missingManifestPackId), {
+      recursive: true,
+    })
+
+    for (const args of [
+      ['export', 'pack', 'show', missingManifestPackId, '--vault', vaultRoot],
+      ['export', 'pack', 'list', '--vault', vaultRoot],
+    ]) {
+      const missingManifest = await runCli(args)
+      const missingManifestError = requireError(missingManifest)
+
+      assert.equal(missingManifestError.code, 'manifest_missing')
+      assert.equal(missingManifestError.retryable, false)
+      assert.equal(missingManifestError.stage, 'manifest_read')
+      assert.match(missingManifestError.hint ?? '', /cannot reconstruct or repair/u)
+      assertDoesNotEcho(missingManifest, [missingManifestPackId, vaultRoot])
+    }
+
     await mkdir(path.join(vaultRoot, 'exports', 'packs', invalidJsonPackId), {
       recursive: true,
     })
@@ -518,19 +699,6 @@ test.sequential('built CLI classifies malformed manifests and export output fail
     assert.doesNotMatch(malformedError.hint ?? '', /restore|recreate/iu)
     assert.equal((malformedError.fieldErrors?.length ?? 0) > 0, true)
     assertDoesNotEcho(malformed, [privatePackId, privateManifestValue, vaultRoot])
-
-    const created = await runCli<{ packId: string }>([
-      'export',
-      'pack',
-      'create',
-      '--from',
-      '2026-08-20',
-      '--to',
-      '2026-08-24',
-      '--vault',
-      vaultRoot,
-    ])
-    assert.equal(created.ok, true, JSON.stringify(created))
 
     const createdPackId = requireData(created).packId
     const createdManifestPath = path.join(

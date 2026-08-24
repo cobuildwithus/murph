@@ -449,7 +449,7 @@ export function toImporterInputFileVaultCliError(error: unknown) {
       undefined,
       {
         stage: 'input_file',
-        hint: 'Choose an existing regular file with --file and retry.',
+        hint: 'Choose an existing regular file for the file argument and retry.',
         fields: [{
           path: 'file',
           code: 'not_found',
@@ -467,7 +467,7 @@ export function toImporterInputFileVaultCliError(error: unknown) {
       undefined,
       {
         stage: 'input_file',
-        hint: 'Choose a regular file, not a directory, with --file.',
+        hint: 'Choose a regular file, not a directory, for the file argument.',
         fields: [{
           path: 'file',
           code: 'invalid_type',
@@ -485,7 +485,7 @@ export function toImporterInputFileVaultCliError(error: unknown) {
       undefined,
       {
         stage: 'input_file',
-        hint: 'Grant read access to the --file path and retry.',
+        hint: 'Grant read access to the selected file argument and retry.',
         fields: [{
           path: 'file',
           code: 'permission_denied',
@@ -602,6 +602,32 @@ export function toAssessmentImportVaultCliError(error: unknown) {
 }
 
 export function toAssessmentProjectVaultCliError(error: unknown) {
+  if (isVaultLikeError(error) && error.code === 'VAULT_INVALID_JSONL') {
+    return new VaultCliError(
+      'assessment_store_invalid',
+      'The stored assessment ledger is not valid JSONL.',
+      { retryable: false, vaultCode: error.code },
+      {
+        stage: 'assessment_read',
+        hint:
+          'The CLI cannot repair stored assessment data. Repair the assessment ledger before retrying, or re-import the original source after stored state is valid.',
+      },
+    )
+  }
+
+  if (isVaultLikeError(error) && error.code === 'ASSESSMENT_RESPONSE_INVALID') {
+    return new VaultCliError(
+      'assessment_store_invalid',
+      'Stored assessment data does not match the assessment contract.',
+      { retryable: false, vaultCode: error.code },
+      {
+        stage: 'assessment_validation',
+        hint:
+          'The CLI cannot repair stored assessment data. Repair the assessment ledger before retrying, or re-import the original source after stored state is valid.',
+      },
+    )
+  }
+
   return toVaultCliError(error, {
     ASSESSMENT_RESPONSE_NOT_FOUND: {
       code: 'not_found',
