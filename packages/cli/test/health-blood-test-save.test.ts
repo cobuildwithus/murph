@@ -1124,7 +1124,7 @@ test("blood-test save rejects JSON objects that are not analyte records without 
       code: "invalid_union",
       expected: "",
       message: "This field is invalid.",
-      path: "result",
+      path: "result.0",
       received: "invalid",
     });
     assert.doesNotMatch(result.envelope.error.message ?? "", /Ferritin|private marker/u);
@@ -1137,6 +1137,46 @@ test("blood-test save rejects JSON objects that are not analyte records without 
       force: true,
       recursive: true,
     });
+  }
+});
+
+test("blood-test save identifies the exact repeated result occurrence without echoing it", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext(
+    "murph-cli-blood-test-save-repeated-result-",
+  );
+
+  try {
+    const cli = createBloodTestCli();
+    await initializeVault({ vaultRoot });
+
+    const privateAnalyte = "Private second analyte";
+    const result = await runInProcessJsonCli<BloodTestSaveResult>(cli, [
+      "blood-test",
+      "save",
+      "Repeated result panel",
+      "--occurred-at",
+      "2026-03-12T13:00:00.000Z",
+      "--test-name",
+      "repeated_result_panel",
+      "--result",
+      JSON.stringify({ analyte: "Glucose", value: 92, unit: "mg/dL" }),
+      "--result",
+      JSON.stringify({ analyte: privateAnalyte, value: 7, unit: "" }),
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(result.exitCode, 1);
+    assert.equal(result.envelope.ok, false);
+    assert.equal(result.envelope.error.stage, "validation");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "result.1.unit");
+    assert.doesNotMatch(JSON.stringify(result.envelope.error), new RegExp(privateAnalyte, "u"));
+    assert.equal(
+      await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),
+      false,
+    );
+  } finally {
+    await rm(parentRoot, { force: true, recursive: true });
   }
 });
 
@@ -1160,6 +1200,8 @@ test("blood-test save identifies an invalid link field without writing an event"
       "--result",
       JSON.stringify({ analyte: "Glucose", value: 92 }),
       "--link",
+      "supports_goal:goal_01JNY0B2W4VG5C2A0G9S8M7R6S",
+      "--link",
       "supports_goal:",
       "--vault",
       vaultRoot,
@@ -1169,7 +1211,7 @@ test("blood-test save identifies an invalid link field without writing an event"
     assert.equal(result.envelope.ok, false);
     assert.equal(result.envelope.error.code, "invalid_option");
     assert.equal(result.envelope.error.stage, "validation");
-    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "link.targetId");
+    assert.equal(result.envelope.error.fieldErrors?.[0]?.path, "link.1.targetId");
     assert.doesNotMatch(JSON.stringify(result.envelope.error), /Invalid link panel/u);
     assert.equal(
       await pathExists(path.join(vaultRoot, "ledger/events/2026/2026-03.jsonl")),

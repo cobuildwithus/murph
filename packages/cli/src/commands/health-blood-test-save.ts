@@ -157,7 +157,10 @@ function parseKeyValueSpec(
   return fields;
 }
 
-function parseJsonBloodTestResult(spec: string): BloodTestResult {
+function parseJsonBloodTestResult(
+  spec: string,
+  occurrence: number,
+): BloodTestResult {
   let value: unknown;
   try {
     value = JSON.parse(spec) as unknown;
@@ -186,7 +189,10 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
       "Invalid --result blood-test analyte payload.",
       {
         issues: parsed.error.issues.map((issue) =>
-          publicValidationIssue(issue, bloodTestResultPublicPath(issue.path))),
+          publicValidationIssue(
+            issue,
+            bloodTestResultPublicPath(issue.path, occurrence),
+          )),
         stage: "validation",
       },
     );
@@ -195,10 +201,10 @@ function parseJsonBloodTestResult(spec: string): BloodTestResult {
   return parsed.data;
 }
 
-function parseBloodTestResult(spec: string): BloodTestResult {
+function parseBloodTestResult(spec: string, occurrence: number): BloodTestResult {
   const trimmed = spec.trim();
   if (trimmed.startsWith("{")) {
-    return parseJsonBloodTestResult(trimmed);
+    return parseJsonBloodTestResult(trimmed, occurrence);
   }
 
   if (trimmed.startsWith("[")) {
@@ -215,7 +221,8 @@ function parseBloodTestResult(spec: string): BloodTestResult {
 }
 
 function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
-  const results = specs.map((spec) => parseBloodTestResult(spec));
+  const results = specs.map((spec, occurrence) =>
+    parseBloodTestResult(spec, occurrence));
   if (results.length === 0) {
     throw new VaultCliError(
       "invalid_option",
@@ -226,7 +233,7 @@ function parseBloodTestResults(specs: readonly string[]): BloodTestResult[] {
   return results;
 }
 
-function parseBloodTestLink(spec: string): BloodTestLink {
+function parseBloodTestLink(spec: string, occurrence: number): BloodTestLink {
   const shorthandSeparator = spec.indexOf(":");
   const candidate =
     shorthandSeparator > 0 && !spec.includes("=")
@@ -240,7 +247,10 @@ function parseBloodTestLink(spec: string): BloodTestLink {
   if (!parsed.success) {
     throw new VaultCliError("invalid_option", "Invalid --link payload.", {
       issues: parsed.error.issues.map((issue) =>
-        publicValidationIssue(issue, bloodTestLinkPublicPath(issue.path))),
+        publicValidationIssue(
+          issue,
+          bloodTestLinkPublicPath(issue.path, occurrence),
+        )),
       stage: "validation",
     });
   }
@@ -250,6 +260,7 @@ function parseBloodTestLink(spec: string): BloodTestLink {
 
 function bloodTestResultPublicPath(
   path: readonly PropertyKey[],
+  occurrence: number,
 ): readonly (string | number)[] {
   const [field, nestedField] = path;
   if (field === "referenceRange") {
@@ -257,7 +268,7 @@ function bloodTestResultPublicPath(
       case "high":
       case "low":
       case "text":
-        return ["result", "referenceRange", nestedField];
+        return ["result", occurrence, "referenceRange", nestedField];
     }
   }
   switch (field) {
@@ -270,19 +281,20 @@ function bloodTestResultPublicPath(
     case "textValue":
     case "unit":
     case "value":
-      return ["result", field];
+      return ["result", occurrence, field];
     default:
-      return ["result"];
+      return ["result", occurrence];
   }
 }
 
 function bloodTestLinkPublicPath(
   path: readonly PropertyKey[],
+  occurrence: number,
 ): readonly (string | number)[] {
   const [field] = path;
   return field === "targetId" || field === "type"
-    ? ["link", field]
-    : ["link"];
+    ? ["link", occurrence, field]
+    : ["link", occurrence];
 }
 
 function parseBloodTestLinks(specs: readonly string[] | undefined) {
@@ -290,7 +302,8 @@ function parseBloodTestLinks(specs: readonly string[] | undefined) {
     return undefined;
   }
 
-  const links = specs.map((spec) => parseBloodTestLink(spec));
+  const links = specs.map((spec, occurrence) =>
+    parseBloodTestLink(spec, occurrence));
   return links.length > 0 ? links : undefined;
 }
 

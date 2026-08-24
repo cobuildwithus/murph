@@ -38,13 +38,16 @@ describe('assistant dynamic context prompt blocks', () => {
     ].join('\n')
 
     expect(
-      prompt.match(/For CLI errors, use `fieldErrors` and `hint`/gu) ?? [],
+      prompt.match(/`stage` names the CLI failure/gu) ?? [],
     ).toHaveLength(1)
-    expect(prompt).toContain('`stage` names the failure point')
     expect(prompt).toContain(
-      'Repeat an unchanged call only when `retryable` is true',
+      '`retryable: true` permits an unchanged repeat',
     )
-    expect(prompt).toContain('never infer or echo omitted details')
+    expect(prompt).toContain(
+      'fixing a named `fieldErrors` field or `hint` prerequisite is a new attempt',
+    )
+    expect(prompt).toContain('Without concrete guidance, stop')
+    expect(prompt).toContain('never guess or echo omitted details')
   })
 
   it('uses hosted direct current time without treating group time as personal', () => {

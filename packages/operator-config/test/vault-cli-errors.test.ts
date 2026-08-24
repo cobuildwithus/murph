@@ -247,15 +247,15 @@ describe('projectVaultCliError', () => {
   })
 
   test.each([
-    ['EACCES', 'permission_denied'],
-    ['EPERM', 'permission_denied'],
-    ['ENOENT', 'not_found'],
-    ['EISDIR', 'invalid_path'],
-    ['ENOTDIR', 'invalid_path'],
-    ['ENOSPC', 'storage_unavailable'],
+    ['EACCES', 'permission_denied', 'Check the file permissions before retrying.'],
+    ['EPERM', 'permission_denied', 'Check the file permissions before retrying.'],
+    ['ENOENT', 'not_found', 'Check the input path and retry the command.'],
+    ['EISDIR', 'invalid_path', 'Check whether the option expects a file or a directory.'],
+    ['ENOTDIR', 'invalid_path', 'Check whether the option expects a file or a directory.'],
+    ['ENOSPC', 'storage_unavailable', 'Free storage space before retrying.'],
   ] as const)(
-    'classifies %s without returning paths or causes',
-    (nodeCode, expectedCode) => {
+    'classifies %s with a concrete prerequisite but no unchanged retry',
+    (nodeCode, expectedCode, expectedHint) => {
       const privatePath = '/private/workspace/member-vault/config.json'
       const projection = projectVaultCliError(
         Object.assign(
@@ -269,6 +269,7 @@ describe('projectVaultCliError', () => {
 
       expect(projection).toMatchObject({
         code: expectedCode,
+        hint: expectedHint,
         stage: 'filesystem',
         retryable: false,
       })
@@ -293,6 +294,7 @@ describe('projectVaultCliError', () => {
         retryable: false,
         stage: 'command',
       })
+      expect(projection.hint).toBeUndefined()
       expect(JSON.stringify(projection)).not.toContain(submittedValue)
       expect(JSON.stringify(projection)).not.toContain(providerBody)
       expect(JSON.stringify(projection)).not.toContain('<REDACTED_TOKEN>')

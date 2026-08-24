@@ -582,6 +582,54 @@ test("scheduled-log save rejects unsupported workout compact fields before writi
     }
     assert.deepEqual(await readdir(scheduledLogDir).catch(() => []), []);
 
+    const privateWorkoutText = "Private scheduled workout option";
+    const repeatedOptionFailure = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
+      "scheduled-log",
+      "save",
+      "Repeated workout option validation",
+      "--slug",
+      "repeated-workout-option-validation",
+      "--schedule-kind",
+      "dailyLocal",
+      "--schedule-local-time",
+      "09:00",
+      "--action-kind",
+      "activity_session.add",
+      "--action-title",
+      "Strength",
+      "--activity-type",
+      "strength",
+      "--duration-minutes",
+      "30",
+      "--workout-exercise",
+      "order=2;name=First public occurrence",
+      "--workout-exercise",
+      `order=1;name=${privateWorkoutText};unitOverride=stone`,
+      "--workout-set",
+      "exercise=2;order=1;reps=10;weightUnit=kg",
+      "--workout-set",
+      "exercise=1;order=1;reps=10;weightUnit=stone",
+      "--vault",
+      vaultRoot,
+    ]);
+
+    assert.equal(repeatedOptionFailure.exitCode, 1);
+    assert.equal(repeatedOptionFailure.envelope.ok, false);
+    if (!repeatedOptionFailure.envelope.ok) {
+      assert.deepEqual(
+        repeatedOptionFailure.envelope.error.fieldErrors?.map(({ path }) => path),
+        [
+          "workoutExercise.1.unitOverride",
+          "workoutSet.1.weightUnit",
+        ],
+      );
+      assert.doesNotMatch(
+        JSON.stringify(repeatedOptionFailure.envelope.error),
+        new RegExp(privateWorkoutText, "u"),
+      );
+    }
+    assert.deepEqual(await readdir(scheduledLogDir).catch(() => []), []);
+
     const unsupportedSetField = await runInProcessJsonCli<ScheduledLogSaveResult>(cli, [
       "scheduled-log",
       "save",

@@ -199,7 +199,6 @@ function classifyUnhandledCliError(error: unknown): VaultCliErrorProjection {
     message: UNKNOWN_ERROR_MESSAGE,
     retryable: false,
     stage: 'command',
-    hint: 'Check the command inputs and runtime status before retrying.',
   }
 }
 
