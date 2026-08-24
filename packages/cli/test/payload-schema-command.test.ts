@@ -219,8 +219,9 @@ test('payload-schema commands emit import body schemas without requiring vault s
   assert.equal(immunization.command, 'immunization import-json')
   assert.equal(immunization.schemaName, 'immunization-import-payload')
   assert.equal(immunization.schema.additionalProperties, false)
+  const immunizationRequired = immunization.schema.required
   assert.equal(
-    (immunization.schema.required as unknown[] | undefined)?.includes('vaccineName'),
+    Array.isArray(immunizationRequired) && immunizationRequired.includes('vaccineName'),
     true,
   )
   assertJsonSchemaValidation(immunization.schema, {
