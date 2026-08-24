@@ -864,12 +864,14 @@ function toSampleImportCliError(error: unknown): unknown {
     || !Number.isSafeInteger(sampleIndex)
     || sampleIndex < 0
     || typeof sampleField !== 'string'
-    || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(sampleField)
   ) {
     return cliError
   }
 
   const issue = sampleImportIssue(sampleField)
+  if (!issue) {
+    return cliError
+  }
   const fieldPath = sampleField === 'unit'
     ? ['unit']
     : ['samples', sampleIndex, sampleField]
@@ -889,9 +891,9 @@ function toSampleImportCliError(error: unknown): unknown {
 }
 
 function sampleImportIssue(field: string): {
-  code: 'custom' | 'invalid_type'
-  expected?: 'number' | 'object' | 'string'
-} {
+  code: 'invalid_type'
+  expected: 'number' | 'object' | 'string'
+} | null {
   if (field === 'recordedAt' || field === 'startAt' || field === 'endAt') {
     return { code: 'invalid_type', expected: 'string' }
   }
@@ -904,7 +906,7 @@ function sampleImportIssue(field: string): {
   if (field === 'stage' || field === 'timeZone' || field === 'unit') {
     return { code: 'invalid_type', expected: 'string' }
   }
-  return { code: 'custom' }
+  return null
 }
 
 export async function addSampleRecordsFromInput(input: {
