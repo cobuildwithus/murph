@@ -48,6 +48,12 @@ describe('hosted domain dynamic tools', () => {
       'no member action is needed',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'For an active one-shot at schedule, say the saved edit may not affect the occurrence already in progress',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(

@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Clearer confirmations after reminder edits",
     "summary": "Murph now confirms saved recurring reminder changes without making ordinary scheduling work sound like a failed update.",
-    "details": "Active reminders stay active while the next occurrence is finalized automatically; genuine timing problems remain explicit.",
+    "details": "Active recurring reminders stay active while the next occurrence is finalized automatically; genuine timing problems remain explicit.",
     "relevanceTags": ["reminders", "assistant", "reliability"],
     "sourcePullRequests": [2199]
   }

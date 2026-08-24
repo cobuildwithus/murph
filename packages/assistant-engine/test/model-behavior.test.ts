@@ -3352,10 +3352,22 @@ describe('assistant conversation scope', () => {
       'For an active one-shot with that resolved null result, say its requested time is no longer deliverable and offer to reschedule it',
     )
     expect(prompt).toContain(
-      'When `occurrenceProjection.status: pending`, confirm that the write succeeded and report the returned schedule and status; when the status is active, say it remains active',
+      'When `occurrenceProjection.status: pending`, confirm that the write succeeded and report the returned schedule and status',
     )
     expect(prompt).toContain(
-      'make clear that no member action is needed; do not call pending timing unconfirmed or imply that the repair failed',
+      'For an active recurring `every`, `cron`, or `dailyLocal` schedule, say it remains active',
+    )
+    expect(prompt).toContain(
+      'make clear that no member action is needed',
+    )
+    expect(prompt).toContain(
+      'For an active one-shot `at` schedule, say the saved edit may not affect the occurrence already in progress',
+    )
+    expect(prompt).toContain(
+      'do not promise that occurrence will deliver or that another occurrence will be scheduled automatically',
+    )
+    expect(prompt).toContain(
+      'offer to reschedule if its requested time passes without delivery',
     )
     expect(prompt).toContain(
       'When `occurrenceProjection.status: unavailable`, confirm that the write succeeded',

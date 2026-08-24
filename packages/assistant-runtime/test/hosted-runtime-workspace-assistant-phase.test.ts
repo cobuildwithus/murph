@@ -31,6 +31,7 @@ import {
   HOSTED_RUNTIME_PROCESS_ENV,
 } from "@murphai/hosted-execution/env";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node";
 
 const mocks = vi.hoisted(() => ({
   applyMurphManagedAutomations: vi.fn(),
@@ -250,6 +251,7 @@ import {
   readAssistantContextSnapshotState,
   saveAssistantAutomationState,
   saveAssistantSession,
+  setAssistantCronJobEnabled,
   upsertAssistantInputEvent,
   type AssistantAutomationOperationScope,
   type AssistantExecutionContext,
@@ -327,6 +329,35 @@ function withoutAssistantTurnTimingLogs(
       request.entries[0]?.redactedJson?.schema
         !== "murph.assistant-turn-timing.v1",
   );
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function setPendingAutomationDeliveryIntentForTest(input: {
+  automationId: string;
+  intentId: string;
+  vaultRoot: string;
+}): Promise<void> {
+  const runtimeStatePath = resolveAssistantStatePaths(
+    input.vaultRoot,
+  ).cronAutomationStatePath;
+  const runtimeStore: unknown = JSON.parse(
+    await readFile(runtimeStatePath, "utf8"),
+  );
+  if (!isUnknownRecord(runtimeStore) || !Array.isArray(runtimeStore.jobs)) {
+    throw new Error("Expected canonical cron runtime store.");
+  }
+  const runtimeRecord = runtimeStore.jobs.find(
+    (candidate) =>
+      isUnknownRecord(candidate) && candidate.jobId === input.automationId,
+  );
+  if (!isUnknownRecord(runtimeRecord) || !isUnknownRecord(runtimeRecord.state)) {
+    throw new Error("Expected canonical cron runtime record.");
+  }
+  runtimeRecord.state.pendingDeliveryIntentId = input.intentId;
+  await writeFile(runtimeStatePath, `${JSON.stringify(runtimeStore, null, 2)}\n`);
 }
 
 function extractTopLevelFunctionBody(source: string, functionName: string): string {
@@ -5496,6 +5527,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     const parentRoot = await mkdtemp(path.join(tmpdir(), "hosted-automation-timing-"));
     const vaultRoot = path.join(parentRoot, "vault");
     const inputId = "ain_44444444444444444444444444444444";
+    const logRequests: HostedRuntimeLogRequest[] = [];
 
     try {
       await initializeVault({
@@ -5522,6 +5554,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       await runHostedWorkspaceAssistantPhase(createPhaseInput({
         assistantInputIds: [inputId],
         importedCount: 1,
+        logRequests,
         vaultRoot,
       }));
       const laneInput = mocks.runHostedAssistantAutomationLane.mock.calls.at(-1)?.[0];
@@ -5682,6 +5715,50 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
         },
         status: "active",
       }));
+
+      const inFlightRecurringReminder = await requestAutomation({
+        action: "save",
+        instructions: "Send the recurring in-flight reminder.",
+        schedule: {
+          everyMs: 43_200_000,
+          kind: "every",
+        },
+        slug: "in-flight-recurring-reminder",
+        title: "In-flight recurring reminder",
+      });
+      if (inFlightRecurringReminder.action !== "save") {
+        throw new Error("Expected in-flight recurring reminder save result.");
+      }
+      const initializedInFlightRecurringReminder =
+        await setAssistantCronJobEnabled(
+          vaultRoot,
+          inFlightRecurringReminder.automationId,
+          true,
+        );
+      await setPendingAutomationDeliveryIntentForTest({
+        automationId: inFlightRecurringReminder.automationId,
+        intentId: "intent_in_flight_recurring_reminder",
+        vaultRoot,
+      });
+      const inFlightProjectionCallsBefore =
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length;
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: initializedInFlightRecurringReminder.updatedAt,
+        instructions: "Send the revised recurring in-flight reminder.",
+        lookup: "in-flight-recurring-reminder",
+      })).resolves.toEqual(expect.objectContaining({
+        occurrenceProjection: { status: "pending" },
+        schedule: {
+          everyMs: 43_200_000,
+          kind: "every",
+        },
+        status: "active",
+      }));
+      expect(
+        mocks.resolveAssistantCronDefaultTimeZoneProjection.mock.calls.length
+        - inFlightProjectionCallsBefore,
+      ).toBe(1);
 
       vi.setSystemTime(new Date("2026-08-01T13:00:00.000Z"));
       await expect(requestAutomation({
@@ -5875,6 +5952,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       )).resolves.toMatchObject({
         state: { nextRunAt: "2026-08-10T02:30:00.000Z" },
       });
+      expect(
+        logRequests
+          .flatMap((request) => request.entries)
+          .filter((entry) =>
+            entry.redactedJson?.schema
+              === "murph.hosted-automation-timing-verification.v1"
+          ),
+      ).toEqual([]);
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }

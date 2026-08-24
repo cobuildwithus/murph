@@ -6824,6 +6824,95 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
   })
 
+  it('does not promise delivery for an in-flight one-shot edit', {
+    timeout: TURN_TIMEOUT_MS,
+  }, async () => {
+    const scenario = await prepareScriptedTurnScenario()
+    const automationRequests: unknown[] = []
+    scenario.stub.queue(
+      {
+        customToolCall: {
+          input: `
+const result = await tools.murph__automation({
+  action: "patch",
+  expectedUpdatedAt: "2026-08-10T14:29:00.000Z",
+  instructions: "Send the revised one-time reminder.",
+  lookup: "one-time-reminder",
+});
+text(JSON.stringify(result));
+`,
+          name: 'exec',
+        },
+      },
+      {
+        text: "The edit was saved and the reminder is still active. Because its 10:30 occurrence was already in progress, the edit may not affect that delivery. If it doesn't arrive, I can reschedule it.",
+      },
+    )
+
+    const result = await executeCodexAppServerTurn({
+      ...scenario.turnInput,
+      baseInstructions: buildScriptedHostedSystemPrompt('direct', true),
+      dynamicTools: [MURPH_AUTOMATION_TOOL],
+      hostedToolContext: {
+        automationTool: {
+          request: async (request) => {
+            automationRequests.push(request)
+            if (request.action !== 'patch') {
+              throw new Error('Expected an automation patch request.')
+            }
+            return {
+              action: 'patch' as const,
+              automationId: 'automation-one-time-reminder',
+              created: false,
+              effectiveTimeZone: 'America/New_York',
+              lookupId: 'one-time-reminder',
+              occurrenceProjection: { status: 'pending' as const },
+              routeBinding: 'preserved' as const,
+              schedule: {
+                at: '2026-08-10T14:30:00.000Z',
+                kind: 'at' as const,
+              },
+              status: 'active' as const,
+              updatedAt: '2026-08-10T14:30:01.000Z',
+            }
+          },
+        },
+        computerToolsAvailable: false,
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        sendVaultFile: async () => {
+          throw new Error('Vault file sends are unavailable in this test.')
+        },
+        vaultFileSendAvailable: false,
+      },
+      prompt: 'Update the wording of my one-time reminder now.',
+    })
+
+    expect(automationRequests).toEqual([
+      {
+        action: 'patch',
+        expectedUpdatedAt: '2026-08-10T14:29:00.000Z',
+        instructions: 'Send the revised one-time reminder.',
+        lookup: 'one-time-reminder',
+      },
+    ])
+    const toolOutputs = scenario.stub.requestSummariesSinceBaseline()
+      .flatMap((summary) => summary.customToolCallOutputs ?? [])
+      .join('\n')
+      .replace(/\\"/gu, '"')
+    expect(toolOutputs).toContain('"kind":"at"')
+    expect(toolOutputs).toContain(
+      '"occurrenceProjection":{"status":"pending"}',
+    )
+    expect(result.finalMessage).toMatch(/saved|active/iu)
+    expect(result.finalMessage).toMatch(/may not affect|already in progress/iu)
+    expect(result.finalMessage).toMatch(/reschedule/iu)
+    expect(result.finalMessage).not.toMatch(
+      /will (?:deliver|arrive)|automatically|no action|nothing .*need/iu,
+    )
+    expect(scenario.stub.requestCountSinceBaseline()).toBe(2)
+  })
+
   it('keeps active device-triggered saves distinct from exhausted clock schedules', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
