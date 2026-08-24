@@ -455,7 +455,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
 
-    expect(result.created).toBe(5)
+    expect(result.created).toBe(6)
     expect(result.experimentLifecycleFailure).toMatchObject({
       code: 'EXPERIMENT_STORAGE_INVALID',
     })
@@ -505,7 +505,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(result.experimentLifecycleFailure).toMatchObject({
       code: 'EXPERIMENT_STORAGE_INVALID',
     })
-    expect(result.created).toBe(5)
+    expect(result.created).toBe(6)
     expect(
       await showAutomation({ automationId: experimentAutomationId, vaultRoot }),
     ).toMatchObject({ status: 'active' })
@@ -524,7 +524,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })
     expect(result).toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -532,8 +532,8 @@ describe('applyMurphManagedAutomations core integration', () => {
       { stage: 'experiment_lifecycle' },
       { stage: 'onboarding_goal_checkin' },
       { stage: 'seed_composition' },
-      ...Array.from({ length: 5 }, (_value, seedIndex) => ({
-        seedCount: 5,
+      ...Array.from({ length: 6 }, (_value, seedIndex) => ({
+        seedCount: 6,
         seedPosition: seedIndex + 1,
         stage: 'managed_seed' as const,
       })),
@@ -642,7 +642,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
     expect(insightRecord?.instructions).toContain('continue with the existing bounded manual candidate search')
     expect(insightRecord?.instructions).toContain('Do not treat command failure as evidence')
-    expect(insightRecord?.instructions).toContain('stages of repeated association, not proof')
+    expect(insightRecord?.instructions).toContain('Read grades A-E as evidence strength')
     expect(insightRecord?.instructions).toContain('pattern report narrows the search')
     expect(insightRecord?.instructions).toContain('find zero or one useful')
     expect(insightRecord?.instructions).toContain('better to send nothing')
@@ -1331,7 +1331,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1400,7 +1400,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       routeValidationProfile: 'hosted',
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1440,7 +1440,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1477,7 +1477,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
 
@@ -1509,7 +1509,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
   })
@@ -1522,7 +1522,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1568,7 +1568,7 @@ describe('applyMurphManagedAutomations core integration', () => {
         now: new Date('2026-06-23T13:00:00.000Z'),
         vaultRoot,
       })).resolves.toEqual({
-        created: 5,
+        created: 6,
         skipped: 0,
         updated: 1,
       })
@@ -1630,7 +1630,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -1698,7 +1698,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -1851,7 +1851,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       },
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -1918,7 +1918,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -1968,7 +1968,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -2022,7 +2022,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -2067,7 +2067,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 6,
+      created: 7,
       skipped: 0,
       updated: 1,
     })
@@ -2143,7 +2143,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-23T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -2265,7 +2265,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2318,7 +2318,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2436,7 +2436,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2514,7 +2514,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T13:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2621,7 +2621,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 0,
+      created: 1,
       skipped: 5,
       updated: 0,
     })

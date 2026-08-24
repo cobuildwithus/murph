@@ -4,6 +4,7 @@ import Image from "next/image";
 
 import type {
   PersonalPatternCell,
+  PersonalPatternClassification,
   PersonalPatternReport,
   PersonalPatternStage,
 } from "@murphai/query/browser-overview";
@@ -38,6 +39,12 @@ const STAGE_RANK: Record<PersonalPatternStage, number> = {
   new_clue: 2,
   seen_again: 3,
   worth_testing: 4,
+};
+
+const CLASSIFICATION_LABELS: Record<PersonalPatternClassification, string> = {
+  observation: "Observation",
+  early_signal: "Early signal",
+  pattern: "Pattern",
 };
 
 export function PersonalPatternsSection({
@@ -108,9 +115,10 @@ export function PersonalPatternsSection({
             What tends to move together
           </h1>
           <p className="mt-3 max-w-[62ch] text-sm leading-relaxed text-muted-foreground">
-            Murph compares repeated action days with similar days when the
-            action did not happen. Outcomes come from the next day. These are
-            clues, not proof of cause.
+            Murph compares action days with confirmed absence or a nearby
+            personal baseline. Outcomes can come from the same day or the next
+            day. These are
+            observations, not proof of cause.
           </p>
         </div>
 
@@ -135,8 +143,8 @@ export function PersonalPatternsSection({
               />
             </div>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              A pattern appears after at least five matched action and
-              comparison days.
+              Murph can show one useful observation, then strengthen it as
+              more independent evidence arrives.
             </p>
           </div>
         )}
@@ -147,9 +155,8 @@ export function PersonalPatternsSection({
       ) : (
         <div className="border-t border-border bg-muted/20 px-6 py-8 sm:px-8">
           <p className="max-w-[68ch] text-sm leading-relaxed text-muted-foreground">
-            No clear comparison is ready yet. Murph needs repeated activity or
-            intervention days, next-day sleep or recovery data, and similar
-            comparison days across at least three weeks.
+            No comparison is ready yet. Murph needs an action or context,
+            health data, and a nearby comparison day.
           </p>
         </div>
       )}
@@ -179,13 +186,13 @@ function LeadPattern({
       />
       <div>
         <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-          {STAGE_LABELS[cell.stage]}
+          {formatEvidenceLabel(cell)}
         </p>
         <p className="mt-1 text-sm font-medium leading-relaxed text-foreground">
-          {factor.label} lined up with next-day{" "}
+          {factor.label} lined up with {formatOutcomeWindow(outcome.lagDays)}{" "}
           {sentenceCaseLabel(outcome.label)} being{" "}
           {formatPercentDifference(cell.deltaPercent)} across {cell.exposedDays}{" "}
-          matched days.
+          matched cases.
         </p>
       </div>
     </div>
@@ -201,11 +208,11 @@ function PatternMatrix({ report }: { report: PersonalPatternReport }) {
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-border bg-muted/20 px-6 py-4 text-xs text-muted-foreground sm:px-8">
           <span>Circle size shows the size of the difference.</span>
-          <LegendDot className="bg-[#c4a882]" label="New clue" />
-          <LegendDot className="bg-[#7a8c6e]" label="Seen again" />
+          <LegendDot className="bg-[#c4a882]" label="Observation / early signal" />
+          <LegendDot className="bg-[#7a8c6e]" label="Pattern" />
           <LegendDot
             className="bg-[#5a6e32] ring-2 ring-primary/25 ring-offset-1"
-            label="Worth testing"
+            label="Strong pattern"
           />
           <LegendDot
             className="border border-border bg-card"
@@ -286,6 +293,7 @@ function MobilePatternMatrix({ report }: { report: PersonalPatternReport }) {
                           cell={cell}
                           compact
                           factorLabel={factor.label}
+                          outcomeLagDays={outcome.lagDays}
                           outcomeLabel={outcome.label}
                           outcomeUnit={outcome.unit}
                         />
@@ -365,6 +373,7 @@ function DesktopPatternMatrix({ report }: { report: PersonalPatternReport }) {
                     <PatternBubble
                       cell={cell}
                       factorLabel={factor.label}
+                      outcomeLagDays={outcome.lagDays}
                       outcomeLabel={outcome.label}
                       outcomeUnit={outcome.unit}
                     />
@@ -387,12 +396,14 @@ function PatternBubble({
   cell,
   compact = false,
   factorLabel,
+  outcomeLagDays,
   outcomeLabel,
   outcomeUnit,
 }: {
   cell: PersonalPatternCell;
   compact?: boolean;
   factorLabel: string;
+  outcomeLagDays?: 0 | 1;
   outcomeLabel: string;
   outcomeUnit: string;
 }) {
@@ -423,9 +434,9 @@ function PatternBubble({
       : `${cell.deltaPercent > 0 ? "+" : ""}${formatPercent(
           cell.deltaPercent,
         )}`;
-  const accessibleLabel = `${factorLabel}, next-day ${outcomeLabel}. ${
-    STAGE_LABELS[cell.stage]
-  }. ${label}. ${cell.exposedDays} matched action days.`;
+  const accessibleLabel = `${factorLabel}, ${formatOutcomeWindow(outcomeLagDays)} ${outcomeLabel}. ${
+    formatEvidenceLabel(cell)
+  }. ${label}. ${cell.exposedDays} factor cases and ${cell.comparisonDays} comparison cases.`;
 
   return (
     <Tooltip>
@@ -457,10 +468,15 @@ function PatternBubble({
         }
       />
       <TooltipContent className="block max-w-72 px-3 py-2">
-        <p className="font-medium">{STAGE_LABELS[cell.stage]}</p>
+        <p className="font-medium">{formatEvidenceLabel(cell)}</p>
         <p className="mt-1 text-background/80">
-          {describeMeans(cell, outcomeUnit)} Based on {cell.exposedDays} matched
-          action and comparison days.
+          {describeMeans(cell, outcomeUnit)} Based on {cell.exposedDays} factor
+          cases and {cell.comparisonDays} comparison cases from {formatEvidencePeriod(cell)}.
+        </p>
+        <p className="mt-1 text-background/70">
+          {cell.comparisonBasis === "confirmed_absence"
+            ? "Comparison days explicitly confirm the factor was absent."
+            : "Comparison days use a nearby personal baseline. Missing notes remain unknown."}
         </p>
       </TooltipContent>
     </Tooltip>
@@ -533,8 +549,25 @@ function formatPercentDifference(value: number): string {
   return `${formatPercent(Math.abs(value))} ${value >= 0 ? "higher" : "lower"}`;
 }
 
+function formatOutcomeWindow(lagDays: 0 | 1 | undefined): string {
+  return lagDays === 0 ? "same-day" : "next-day";
+}
+
 function describeMeans(cell: PersonalPatternCell, unit: string): string {
   if (cell.exposedMean === null || cell.comparisonMean === null) return "";
   const suffix = unit ? ` ${unit}` : "";
-  return `Action days averaged ${cell.exposedMean}${suffix}; matched days averaged ${cell.comparisonMean}${suffix}.`;
+  return `Factor cases averaged ${cell.exposedMean}${suffix}; comparison cases averaged ${cell.comparisonMean}${suffix}.`;
+}
+
+function formatEvidenceLabel(cell: PersonalPatternCell): string {
+  const classification = cell.classification
+    ? CLASSIFICATION_LABELS[cell.classification]
+    : STAGE_LABELS[cell.stage];
+  return cell.grade ? `${classification} · ${cell.grade}` : classification;
+}
+
+function formatEvidencePeriod(cell: PersonalPatternCell): string {
+  if (!cell.firstExposedDate || !cell.lastExposedDate) return "the available period";
+  if (cell.firstExposedDate === cell.lastExposedDate) return cell.firstExposedDate;
+  return `${cell.firstExposedDate} to ${cell.lastExposedDate}`;
 }

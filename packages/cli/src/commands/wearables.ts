@@ -410,19 +410,30 @@ const personalPatternStageSchema = z.enum([
   'seen_again',
   'worth_testing',
 ])
+const personalPatternGradeSchema = z.enum(['A', 'B', 'C', 'D', 'E'])
+const personalPatternClassificationSchema = z.enum([
+  'observation',
+  'early_signal',
+  'pattern',
+])
 
 const personalPatternReportSchema = z.object({
   asOfDate: localDateSchema,
   cells: z.array(z.object({
+    classification: personalPatternClassificationSchema.nullable().optional(),
+    comparisonBasis: z.enum(['confirmed_absence', 'unobserved_baseline']).optional(),
+    comparisonDates: z.array(localDateSchema).optional(),
     comparisonDays: z.number().int().nonnegative(),
     comparisonMean: z.number().nullable(),
     delta: z.number().nullable(),
     deltaPercent: z.number().nullable(),
     direction: z.enum(['higher', 'lower', 'flat']),
     exposedDays: z.number().int().nonnegative(),
+    exposedDates: z.array(localDateSchema).optional(),
     exposedMean: z.number().nullable(),
     factorId: z.string().min(1),
     firstExposedDate: localDateSchema.nullable(),
+    grade: personalPatternGradeSchema.nullable().optional(),
     lastExposedDate: localDateSchema.nullable(),
     outcomeId: z.string().min(1),
     repeatedDirection: z.boolean(),
@@ -433,11 +444,14 @@ const personalPatternReportSchema = z.object({
     kind: z.enum(['activity', 'intervention', 'mixed']),
     label: z.string().min(1),
     observedDays: z.number().int().nonnegative(),
+    confirmedAbsentDays: z.number().int().nonnegative().optional(),
+    episodeCount: z.number().int().nonnegative().optional(),
   })),
   lagDays: z.literal(1),
   notes: z.array(z.string()),
   outcomes: z.array(z.object({
     id: z.string().min(1),
+    lagDays: z.union([z.literal(0), z.literal(1)]).optional(),
     label: z.string().min(1),
     unit: z.string(),
   })),

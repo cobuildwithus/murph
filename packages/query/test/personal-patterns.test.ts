@@ -119,7 +119,10 @@ test("Personal Patterns reuses the canonical provider activity-kind resolver", (
   });
 
   assert.equal(report.factors[0]?.id, "running");
-  assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.equal(
+    report.cells.find((cell) => cell.factorId === "running" && cell.outcomeId === "hrv")?.stage,
+    "seen_again",
+  );
 });
 
 test("Personal Patterns admits only the product-owned Oura sauna tag from neutral notes", () => {
@@ -260,7 +263,7 @@ test("Personal Patterns does not duplicate the canonical readiness metric as rec
   assert.equal(report?.cells[0]?.stage, "seen_again");
 });
 
-test("Personal Patterns qualifies factors before applying the six-row display cap", () => {
+test("Personal Patterns keeps qualified factors within the bounded display cap", () => {
   const start = "2026-01-05";
   const runningDates = Array.from({ length: 8 }, (_, index) => addDays(start, index * 14));
   const dailyFactors = ["breathwork", "journaling", "meditation", "mobility", "stretching", "walking"];
@@ -291,8 +294,19 @@ test("Personal Patterns qualifies factors before applying the six-row display ca
     asOf: "2026-04-27T12:00:00.000Z",
   });
 
-  assert.deepEqual(report.factors.map((factor) => factor.id), ["running"]);
-  assert.equal(report.cells.find((cell) => cell.outcomeId === "hrv")?.stage, "seen_again");
+  assert.deepEqual(report.factors.map((factor) => factor.id), [
+    "running",
+    "breathwork",
+    "journaling",
+    "meditation",
+    "mobility",
+    "stretching",
+    "walking",
+  ]);
+  assert.equal(
+    report.cells.find((cell) => cell.factorId === "running" && cell.outcomeId === "hrv")?.stage,
+    "seen_again",
+  );
 });
 
 test("Personal Patterns uses the nearest unused same-weekday comparisons", () => {
@@ -359,10 +373,10 @@ test("Personal Patterns rejects controls on the wrong weekday or beyond 35 days"
 
 test("Personal Patterns keeps the evidence-stage boundaries and repeated-direction guard", () => {
   const cases = [
-    { count: 5, expected: "new_clue", exposed: () => 70, name: "five over 21 days", span: 21 },
-    { count: 5, expected: undefined, exposed: () => 70, name: "five under 21 days", span: 20 },
+    { count: 5, expected: "seen_again", exposed: () => 70, name: "five over 21 days", span: 21 },
+    { count: 5, expected: "new_clue", exposed: () => 70, name: "five under 21 days", span: 20 },
     { count: 8, expected: "seen_again", exposed: () => 70, name: "eight over 42 days", span: 42 },
-    { count: 8, expected: "new_clue", exposed: () => 70, name: "eight under 42 days", span: 41 },
+    { count: 8, expected: "seen_again", exposed: () => 70, name: "eight under 42 days", span: 41 },
     { count: 12, expected: "worth_testing", exposed: () => 53.75, name: "twelve over 56 days at 1.5x", span: 56 },
     { count: 12, expected: "seen_again", exposed: () => 53.74, name: "twelve over 56 days under 1.5x", span: 56 },
     { count: 12, expected: "seen_again", exposed: () => 53.75, name: "twelve under 56 days", span: 55 },
@@ -379,6 +393,149 @@ test("Personal Patterns keeps the evidence-stage boundaries and repeated-directi
     const report = buildHrvStageFixture(entry.count, entry.span, entry.exposed);
     const stage = report.cells.find((cell) => cell.outcomeId === "hrv")?.stage;
     assert.equal(stage, entry.expected, entry.name);
+  }
+});
+
+test("Personal Patterns labels one result as an Observation and repeated results as an Early signal", () => {
+  const one = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      event("single_run", "2026-01-05", "activity_session", { activityType: "running" }),
+      observation("single_exposed", "2026-01-06", "hrv", 70, "ms"),
+      observation("single_control", "2026-01-13", "hrv", 50, "ms"),
+    ],
+    vaultRoot: "test://personal-pattern-observation",
+  }), { asOf: "2026-01-20", windowDays: 28 });
+  const observationCell = one.cells.find((cell) => cell.factorId === "running");
+  assert.equal(observationCell?.grade, "E");
+  assert.equal(observationCell?.classification, "observation");
+
+  const repeated = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      journalFactor("coffee_1", "2026-01-05", "coffee", "happened"),
+      journalFactor("coffee_2", "2026-01-19", "coffee", "happened"),
+      journalFactor("coffee_absent_1", "2026-01-12", "coffee", "did-not-happen"),
+      journalFactor("coffee_absent_2", "2026-01-26", "coffee", "did-not-happen"),
+      observation("coffee_exposed_1", "2026-01-06", "sleep-score", 55, "score"),
+      observation("coffee_exposed_2", "2026-01-20", "sleep-score", 54, "score"),
+      observation("coffee_control_1", "2026-01-13", "sleep-score", 80, "score"),
+      observation("coffee_control_2", "2026-01-27", "sleep-score", 82, "score"),
+    ],
+    vaultRoot: "test://personal-pattern-early-signal",
+  }), { asOf: "2026-02-01", windowDays: 35 });
+  const earlyCell = repeated.cells.find((cell) => cell.factorId === "coffee");
+  assert.equal(earlyCell?.grade, "D");
+  assert.equal(earlyCell?.classification, "early_signal");
+  assert.equal(earlyCell?.comparisonBasis, "confirmed_absence");
+  assert.equal(repeated.factors[0]?.confirmedAbsentDays, 2);
+});
+
+test("Personal Patterns counts a multi-day context as one episode", () => {
+  const tripDates = ["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09"];
+  const entities = tripDates.flatMap((date, index) => [
+    journalFactor(`trip_${index}`, date, "travel", "happened", ["episode-winter-trip"]),
+    observation(`trip_hrv_${index}`, addDays(date, 1), "hrv", 40, "ms"),
+    journalFactor(`home_${index}`, addDays(date, 14), "travel", "did-not-happen"),
+    observation(`home_hrv_${index}`, addDays(date, 15), "hrv", 60, "ms"),
+  ]);
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities,
+    vaultRoot: "test://personal-pattern-episode",
+  }), { asOf: "2026-02-15", windowDays: 60 });
+
+  assert.equal(report.factors.find((factor) => factor.id === "travel")?.episodeCount, 1);
+  const hrv = report.cells.find((cell) =>
+    cell.factorId === "travel" && cell.outcomeId === "hrv"
+  );
+  assert.equal(hrv?.exposedDays, 1);
+  assert.equal(hrv?.comparisonDays, 1);
+  assert.equal(hrv?.grade, "E");
+});
+
+test("Personal Patterns keeps explicit absence for a bounded factor detail", () => {
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      journalFactor("coffee_late_1", "2026-01-05", "coffee", "happened", ["timing-late", "amount-high"]),
+      journalFactor("coffee_late_2", "2026-01-19", "coffee", "happened", ["timing-late", "amount-high"]),
+      journalFactor("coffee_early_1", "2026-01-12", "coffee", "did-not-happen", ["timing-late", "amount-high"]),
+      journalFactor("coffee_early_2", "2026-01-26", "coffee", "did-not-happen", ["timing-late", "amount-high"]),
+      observation("late_sleep_1", "2026-01-06", "sleep-score", 55, "score"),
+      observation("late_sleep_2", "2026-01-20", "sleep-score", 54, "score"),
+      observation("early_sleep_1", "2026-01-13", "sleep-score", 80, "score"),
+      observation("early_sleep_2", "2026-01-27", "sleep-score", 82, "score"),
+    ],
+    vaultRoot: "test://personal-pattern-factor-detail-absence",
+  }), { asOf: "2026-02-01", windowDays: 35 });
+
+  const detailedCell = report.cells.find((cell) =>
+    cell.factorId === "coffee--timing-late"
+  );
+  assert.equal(detailedCell?.grade, "D");
+  assert.equal(detailedCell?.comparisonBasis, "confirmed_absence");
+  assert.equal(report.cells.find((cell) =>
+    cell.factorId === "coffee--amount-high"
+  )?.grade, "D");
+});
+
+test("Personal Patterns uses same-day subjective outcomes", () => {
+  const report = buildPersonalPatternReport(createVaultReadModel({
+    entities: [
+      journalFactor("tennis_1", "2026-01-05", "tennis", "happened"),
+      journalOutcome("soreness_1", "2026-01-05", "soreness", "high"),
+      journalFactor("rest_1", "2026-01-12", "tennis", "did-not-happen"),
+      journalOutcome("baseline_1", "2026-01-12", "soreness", "low"),
+      journalFactor("tennis_2", "2026-01-19", "tennis", "happened"),
+      journalOutcome("soreness_2", "2026-01-19", "soreness", "high"),
+      journalFactor("rest_2", "2026-01-26", "tennis", "did-not-happen"),
+      journalOutcome("baseline_2", "2026-01-26", "soreness", "low"),
+    ],
+    vaultRoot: "test://personal-pattern-same-day-outcome",
+  }), { asOf: "2026-02-01", windowDays: 35 });
+
+  const outcome = report.outcomes.find((entry) => entry.id === "subjective-soreness");
+  const cell = report.cells.find((entry) =>
+    entry.factorId === "tennis" && entry.outcomeId === "subjective-soreness"
+  );
+  assert.equal(outcome?.lagDays, 0);
+  assert.equal(cell?.grade, "D");
+  assert.equal(cell?.direction, "higher");
+});
+
+test("Personal Patterns keeps common synthetic health links as regression baselines", () => {
+  const scenarios = [
+    { baseline: 440, exposed: 380, factor: "late-caffeine", outcome: "total-sleep", unit: "min" },
+    { baseline: 82, exposed: 64, factor: "alcohol", outcome: "sleep-score", unit: "score" },
+    { baseline: 54, exposed: 60, factor: "late-meal", outcome: "resting-heart-rate", unit: "bpm" },
+    { baseline: 74, exposed: 84, factor: "exercise", outcome: "readiness-score", unit: "score" },
+    { baseline: 52, exposed: 40, factor: "travel", outcome: "hrv", unit: "ms" },
+    { baseline: 44, exposed: 56, factor: "sauna", outcome: "hrv", unit: "ms" },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    const start = "2026-01-05";
+    const entities = Array.from({ length: 5 }, (_, index) => {
+      const exposedDate = addDays(start, index * 14);
+      const baselineDate = addDays(exposedDate, 7);
+      return [
+        journalFactor(`${scenario.factor}_yes_${index}`, exposedDate, scenario.factor, "happened"),
+        observation(`${scenario.factor}_exposed_${index}`, addDays(exposedDate, 1), scenario.outcome, scenario.exposed, scenario.unit),
+        journalFactor(`${scenario.factor}_no_${index}`, baselineDate, scenario.factor, "did-not-happen"),
+        observation(`${scenario.factor}_baseline_${index}`, addDays(baselineDate, 1), scenario.outcome, scenario.baseline, scenario.unit),
+      ];
+    }).flat();
+    const report = buildPersonalPatternReport(createVaultReadModel({
+      entities,
+      vaultRoot: `test://personal-pattern-regression-${scenario.factor}`,
+    }), { asOf: "2026-03-15", windowDays: 84 });
+    const cell = report.cells.find((entry) =>
+      entry.factorId === scenario.factor && entry.outcomeId === scenario.outcome
+    );
+
+    assert.equal(cell?.grade, "C", scenario.factor);
+    assert.equal(
+      cell?.direction,
+      scenario.exposed > scenario.baseline ? "higher" : "lower",
+      scenario.factor,
+    );
   }
 });
 
@@ -532,7 +689,8 @@ test("Personal Patterns uses the intended local date for retroactively logged in
   assert.ok(hrv);
   assert.equal(hrv.exposedMean, 70);
   assert.equal(hrv.comparisonMean, 50);
-  assert.equal(hrv.stage, "seen_again");
+  assert.equal(hrv.stage, "new_clue");
+  assert.equal(hrv.grade, "D");
 });
 
 test("Personal Patterns excludes explicit nap-only days from sleep outcomes", () => {
@@ -789,6 +947,45 @@ function junctionWearableTagNote(
     kind: "note",
     occurredAt: `${date}T12:00:00.000Z`,
     tags,
+  });
+}
+
+function journalFactor(
+  id: string,
+  date: string,
+  key: string,
+  state: "did-not-happen" | "happened",
+  extraTags: string[] = [],
+): CanonicalEntity {
+  return entity("event", id, {
+    attributes: {
+      note: key,
+      noteType: "journal-factor",
+      source: "manual",
+    },
+    date,
+    kind: "note",
+    occurredAt: `${date}T12:00:00.000Z`,
+    tags: ["journal", `key-${key}`, state, ...extraTags],
+  });
+}
+
+function journalOutcome(
+  id: string,
+  date: string,
+  key: string,
+  value: string,
+): CanonicalEntity {
+  return entity("event", id, {
+    attributes: {
+      note: key,
+      noteType: "journal-outcome",
+      source: "manual",
+    },
+    date,
+    kind: "note",
+    occurredAt: `${date}T12:00:00.000Z`,
+    tags: ["journal", `key-${key}`, `value-${value}`],
   });
 }
 

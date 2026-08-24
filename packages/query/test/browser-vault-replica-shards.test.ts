@@ -94,6 +94,7 @@ test("browser vault replicas split into independently parseable core, metrics in
   assert.equal("labResultRows" in shards.core, false);
   assert.equal("searchRows" in shards.core, false);
   assert.equal("experimentOutcomes" in shards.core, false);
+  assert.deepEqual(shards.core.journal, replica.journal);
   assert.equal("entities" in shards.metrics, false);
   assert.equal("metricRows" in shards.metrics, false);
   assert.deepEqual(shards.metrics.experimentOutcomes, [outcome]);
@@ -292,7 +293,7 @@ test("browser vault shard parsers validate schemas, bucket placement, and genera
 test("browser vault metric bucket assignment has stable SHA-256 test vectors", async () => {
   // Changing any vector requires a generation bump so old refs are never read
   // with a new canonical-key placement rule.
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 10);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 11);
   assert.equal(await getBrowserVaultMetricBucketId("spo2"), "02");
   assert.equal(await getBrowserVaultMetricBucketId("lowest-spo2"), "19");
   assert.equal(await getBrowserVaultMetricBucketId("estimated-vo2-max"), "0d");
@@ -311,6 +312,32 @@ function createReplica(): BrowserVaultReplica {
     generatedAt: "2026-08-13T12:00:00.000Z",
     generation: BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
     hasLabBiomarkers: false,
+    journal: {
+      days: [{
+        date: "2026-08-12",
+        events: [{
+          date: "2026-08-12",
+          occurredAt: "2026-08-12T09:00:00.000Z",
+          id: "journal-event-1",
+          kind: "note",
+          records: [{
+            id: "journal-record-1",
+            kind: "note",
+            label: "Felt rested",
+            occurredAt: "2026-08-12T09:00:00.000Z",
+            source: "manual",
+            summary: null,
+            tags: ["journal"],
+            timeZone: "Europe/Warsaw",
+          }],
+          timeZone: "Europe/Warsaw",
+          title: "Felt rested",
+        }],
+      }],
+      eventCount: 1,
+      recordCount: 1,
+      windowDays: 120,
+    },
     labResultRows: [],
     metricGoalProgressRows: [],
     metricRows: [],

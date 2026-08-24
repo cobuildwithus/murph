@@ -1,0 +1,69 @@
+# Journal
+
+Last verified: 2026-08-24
+
+## Product boundary
+
+Journal is one private timeline of useful health context. It combines existing
+canonical records for display. It is not a second health-data store.
+
+A day can show sleep, workouts, device metrics, tests, and private notes as
+human events. Source records remain separate canonical truth. Journal groups
+them at read time through existing links and small deterministic rules.
+
+## Capture
+
+Murph quietly saves clear facts from a private conversation. It saves one note
+for each independent fact and keeps known time, amount, duration, temperature,
+or intensity. It saves what the member reports. It does not guess a cause.
+Exact details stay in the note. Small tags also classify timing and amount for
+bounded comparisons.
+
+The supported note types are:
+
+- `journal-factor` for an action or exposure;
+- `journal-context` for relevant context or an environment change;
+- `journal-outcome` for a reported feeling or result;
+- `journal-plan` for a future intention.
+
+Murph does not announce routine saves. It asks a private question only when an
+important fact is unclear. A clear correction from the member wins. If a plan
+did not happen, Murph removes the plan and can save an explicit absence for the
+factor.
+
+Automatic capture is private-chat only in this version. It never exposes
+private Journal or Patterns data in a group. Group capture waits for the
+separate group-to-person privacy rules and explicit group consent.
+
+## Read model
+
+The Journal projection reads canonical events and metric points from the last
+120 days. It includes notes, activities, sleep, observations, interventions,
+context, symptoms, and tests. It groups linked records and related sleep metrics
+into one human event. It does not copy records or write a daily summary.
+
+The old `journal_day` surface stays untouched. The new Journal view does not
+depend on it.
+
+The projection is built during the existing Browser Vault refresh. Opening
+`/journal` only reads the current projection. It does not call AI and does not
+start a new analysis.
+
+## Web experience
+
+`/journal` shows days, grouped events, times, sources, and the underlying source
+records. A record with a canonical time zone keeps its local event time during
+travel. The page supports loading, unavailable, empty, error, and ready states.
+
+The web does not provide edit controls. A member asks Murph to add, correct, or
+remove an entry. Voice capture can later reuse the planned web voice composer.
+Calendar follow-ups and email travel capture are later features.
+
+## Ownership
+
+Canonical event and metric stores own the data. `@murphai/query` owns the
+derived Journal view. Browser Vault carries it to the web. Murph uses existing
+event commands for note writes and corrections.
+
+Do not add a Journal table, `journal_day` writer, daily compaction job, or
+page-open analysis.

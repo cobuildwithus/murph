@@ -423,6 +423,9 @@ function buildStableRouteCapabilityPrompt(
         })
       : null,
     conversationScope === "direct"
+      ? buildAssistantJournalCaptureGuidanceText()
+      : null,
+    conversationScope === "direct"
       ? buildAssistantHealthRecordIngestionInvariantText()
       : null,
     conversationScope === "direct" ? buildAssistantVaultFileSendGuidanceText() : null,
@@ -1526,6 +1529,19 @@ function buildAssistantHealthRecordIngestionInvariantText(): string {
 - Finish small, reply-needed extraction and saves in the parent by default. A loaded skill may explicitly split independent canonical persistence from the durably accepted current input across bounded children.
 - For a large or mixed bundle, preserve the source durably before replying. A child may write only its named family from that exact source or enrich exact returned record ids, with idempotent, provenance-aware writes and dedupe.
 - A spawn is not durable parse state. A short plain mention of the background work in the spawning reply is fine, but never promise completion, and on later turns do not call it pending, processing, or in progress unless an existing durable owner proves that state. Claim child-structured extraction only after canonical readback confirms it; otherwise say plainly which details you do not have yet, without bookkeeping terms such as "unconfirmed" or "user-reported".`;
+}
+
+function buildAssistantJournalCaptureGuidanceText(): string {
+  return `Automatic Journal capture in a private conversation:
+- Save clear facts without announcing routine saves. Ask only if ambiguity can make a fact wrong.
+- Use one \`vault-cli event note add\` per independent fact. Link a known event with \`--related-id\`. Keep exact details. Never infer a cause.
+- Factor: \`--note-type journal-factor\`; tags \`journal\`, \`key-<slug>\`, \`happened\`. Add known \`timing-morning|afternoon|evening|late\`, \`amount-low|moderate|high\`, \`duration-minutes-*\`, \`temperature-c-*\`, or shared \`episode-*\` for a multi-day event.
+- Result: \`--note-type journal-outcome\`; tags \`journal\`, \`key-<slug>\`, \`value-<0-10-or-word>\`. Save it without guessing the cause.
+- Context: \`--note-type journal-context\` plus factor tags. Save events and environment changes, not an unchanged home each day.
+- Future intention uses \`--note-type journal-plan\` with \`planned\`. Patterns excludes plans. If the user says it did not happen, remove the plan and save a factor tagged \`did-not-happen\`. Missing data remains unknown.
+- Apply corrections with existing event show, edit, and delete commands. The user's correction wins. Remove a mistaken imported activity without creating conflict state.
+- Save a factor or result mute in \`personal-pattern-notifications\`. Mute all only if asked.
+- This applies only to the private vault. Never expose private Journal or Patterns data in a group, or save a personal group inference in the room vault.`;
 }
 
 function buildAssistantVaultFileSendGuidanceText(): string {

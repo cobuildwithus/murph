@@ -1,4 +1,7 @@
-import type { PersonalPatternReport } from "@murphai/query/browser-overview";
+import type {
+  PersonalPatternCell,
+  PersonalPatternReport,
+} from "@murphai/query/browser-overview";
 
 import { PersonalPatternsSection } from "@/src/components/overview/personal-patterns-section";
 
@@ -292,14 +295,25 @@ function cell(
   exposedMean: number,
   comparisonMean: number,
   exposedDays: number,
-) {
+): PersonalPatternCell {
+  const evidence = stage === "worth_testing"
+    ? { classification: "pattern" as const, grade: "A" as const }
+    : stage === "seen_again"
+      ? { classification: "pattern" as const, grade: "B" as const }
+      : stage === "new_clue"
+        ? { classification: "early_signal" as const, grade: "D" as const }
+        : { classification: null, grade: null };
   return {
+    ...evidence,
+    comparisonBasis: "unobserved_baseline" as const,
+    comparisonDates: ["2026-04-05", "2026-05-03"],
     comparisonDays: exposedDays,
     comparisonMean,
     delta: exposedMean - comparisonMean,
     deltaPercent,
     direction,
     exposedDays,
+    exposedDates: ["2026-04-12", "2026-08-02"],
     exposedMean,
     factorId,
     firstExposedDate: "2026-04-12",
@@ -307,5 +321,5 @@ function cell(
     outcomeId,
     repeatedDirection: stage !== "no_clear_pattern",
     stage,
-  } as const;
+  };
 }

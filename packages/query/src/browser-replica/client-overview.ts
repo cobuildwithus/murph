@@ -12,6 +12,7 @@ import {
   selectBrowserVaultTrackedExperiments,
 } from "./tracked-experiments.ts";
 import { emptyPersonalPatternReport } from "../personal-patterns.ts";
+import { emptyJournalView, type JournalView } from "../journal-view.ts";
 
 export function selectBrowserVaultOverview(client: BrowserVaultCoreCapableQueryClient): BrowserVaultOverviewView {
   return {
@@ -27,6 +28,12 @@ export function selectBrowserVaultOverview(client: BrowserVaultCoreCapableQueryC
 
 export function selectBrowserVaultHistory(client: BrowserVaultCoreCapableQueryClient): { timeline: BrowserVaultTimelineRow[] } {
   return { timeline: client.timeline.list().slice(0, TIMELINE_LIMIT) };
+}
+
+export function selectBrowserVaultJournal(
+  client: BrowserVaultCoreCapableQueryClient,
+): JournalView {
+  return client.replica.journal ?? emptyJournalView();
 }
 
 function buildBrowserOverviewMetrics(client: BrowserVaultCoreCapableQueryClient): OverviewMetric[] {

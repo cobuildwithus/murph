@@ -79,7 +79,7 @@ const canonicalTypedCommands = [
   {
     label: 'event note add',
     commandNames: ['event note add', 'event add note'],
-    fieldHints: ['note', 'title', 'occurredAt', 'tag'],
+    fieldHints: ['note', 'noteType', 'title', 'occurredAt', 'relatedId', 'tag'],
   },
   {
     label: 'event symptom add',

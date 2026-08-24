@@ -627,6 +627,22 @@ describe('assistant execution prompt contract', () => {
     expect(prompt).not.toContain('unrelated work/school tasks')
   })
 
+  it('captures atomic Journal facts only in private conversations', () => {
+    const directPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput())
+    const groupPrompt = buildAssistantSystemPrompt(createCommonCodexPromptInput({
+      conversationScope: 'group',
+    }))
+
+    expect(directPrompt).toContain('Automatic Journal capture in a private conversation:')
+    expect(directPrompt).toContain('--note-type journal-factor')
+    expect(directPrompt).toContain('--note-type journal-outcome')
+    expect(directPrompt).toContain('per independent fact')
+    expect(directPrompt).toContain('--related-id')
+    expect(directPrompt).toContain('Missing data remains unknown')
+    expect(directPrompt).toContain('without announcing routine saves')
+    expect(groupPrompt).not.toContain('Automatic Journal capture in a private conversation:')
+  })
+
   it('uses formal by default and applies a saved tone as a strict writing contract', () => {
     const defaultLayers = buildAssistantSystemPromptLayers(
       createCommonCodexPromptInput(),
@@ -2076,10 +2092,10 @@ describe('assistant system prompt cache stability', () => {
     // connected-app, phone-call, and Family mechanics remain excluded.
     // The local automation delivery limitation, the established Apple
     // Health/WHOOP relay, cross-route repeated-set boundary, private
-    // longitudinal recommendation policy, narrowest-relevant-safety rule,
-    // response-card dietary/burn target-authority boundary, explicit
-    // group-family tool routing, and the cross-route CLI error-recovery
-    // contract set this exact ceiling.
+    // longitudinal recommendation and Journal capture policies,
+    // narrowest-relevant-safety rule, response-card dietary/burn
+    // target-authority boundary, explicit group-family tool routing, and the
+    // cross-route CLI error-recovery contract set this exact ceiling.
     expect(layers.stableRouteCapabilityPrompt.length).toBeLessThanOrEqual(62_542)
   })
 

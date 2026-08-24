@@ -134,6 +134,7 @@ import {
   MURPH_MANAGED_AUTOMATIONS,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
+  MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID,
   MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
@@ -1366,11 +1367,26 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(5)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(6)
+    const patternsUpdateRecord = managedAutomationMocks.records.get(
+      MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+    )
+    expect(patternsUpdateRecord).toMatchObject({
+      assistantTargetOverride: {
+        model: 'gpt-5.6-luna',
+        reasoningEffort: 'medium',
+      },
+      schedule: { kind: 'cron', expression: '0 13,21 * * *' },
+      slug: 'personal-patterns-update',
+      status: 'active',
+    })
+    expect(patternsUpdateRecord?.instructions).toContain('Send at most one compact message')
+    expect(patternsUpdateRecord?.instructions).toContain('factorId + outcomeId')
+    expect(patternsUpdateRecord?.instructions).toContain('Grade changes belong in the weekly health insight')
     const digestRecord = managedAutomationMocks.records.get(
       MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     )
@@ -1430,8 +1446,10 @@ describe('applyMurphManagedAutomations', () => {
     expect(insightRecord?.instructions).toContain('vault-cli wearables patterns --date YYYY-MM-DD --format json')
     expect(insightRecord?.instructions).toContain('continue with the existing bounded manual candidate search')
     expect(insightRecord?.instructions).toContain('Do not treat command failure as evidence')
-    expect(insightRecord?.instructions).toContain('stages of repeated association, not proof')
-    expect(insightRecord?.instructions).toContain('pattern report narrows the search')
+    expect(insightRecord?.instructions).toContain('A-C are Patterns, D is an Early signal')
+    expect(insightRecord?.instructions).toContain('compare your best supported findings with the mathematical report')
+    expect(insightRecord?.instructions).toContain('Pattern engine audit:')
+    expect(insightRecord?.instructions).toContain('self-contained prompt under 1,800 characters for Codex')
     expect(insightRecord?.instructions).toContain('do not create per-week insight pages')
     expect(insightRecord?.instructions).toContain('find zero or one useful')
     expect(insightRecord?.instructions).toContain('better to send nothing')
@@ -1713,7 +1731,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 6,
+      created: 7,
       skipped: 0,
       updated: 0,
     })
@@ -1906,7 +1924,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 4,
+      skipped: 5,
       updated: 1,
     })
     expect(managedAutomationMocks.patchAutomation).toHaveBeenCalledWith({
@@ -2060,7 +2078,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 3,
+      created: 4,
       skipped: 0,
       updated: 2,
     })
@@ -2124,7 +2142,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2224,7 +2242,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-20T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2273,7 +2291,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-20T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 4,
+      created: 5,
       skipped: 1,
       updated: 0,
     })
@@ -2324,13 +2342,13 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-09T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 2,
+      created: 3,
       skipped: 3,
       stableKeyFailure: metadataError,
       stableKeyRetryNeeded: true,
       updated: 0,
     })
-    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(2)
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(3)
     expect(managedAutomationMocks.records.get(MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID)?.schedule)
       .toEqual({
         kind: 'cron',
@@ -2348,7 +2366,7 @@ describe('applyMurphManagedAutomations', () => {
       vaultRoot,
     })).resolves.toEqual({
       created: 3,
-      skipped: 2,
+      skipped: 3,
       updated: 0,
     })
 
@@ -2436,7 +2454,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 5,
       skipped: 1,
       updated: 0,
     })
@@ -2466,7 +2484,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -2496,7 +2514,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 5,
       skipped: 1,
       updated: 0,
     })
@@ -2540,7 +2558,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -2596,7 +2614,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -2642,7 +2660,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -2680,7 +2698,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 1,
     })
@@ -2724,7 +2742,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -2753,7 +2771,7 @@ describe('applyMurphManagedAutomations', () => {
       now: new Date('2026-06-23T12:00:00.000Z'),
       vaultRoot,
     })).resolves.toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -2791,7 +2809,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 4,
+      created: 5,
       skipped: 0,
       updated: 1,
     })
@@ -2819,7 +2837,7 @@ describe('applyMurphManagedAutomations', () => {
     })
 
     expect(result).toEqual({
-      created: 5,
+      created: 6,
       skipped: 0,
       updated: 0,
     })
@@ -2850,7 +2868,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
     expect(
@@ -2878,7 +2896,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -2960,6 +2978,21 @@ describe('applyMurphManagedAutomations', () => {
       tags: ['user'],
       title: 'My product updates',
     })
+    managedAutomationMocks.records.set('automation_user_personal_patterns', {
+      automationId: 'automation_user_personal_patterns',
+      continuityPolicy: 'preserve',
+      instructions: 'Keep this user Personal Patterns prompt.',
+      route: defaultRoute,
+      schedule: {
+        kind: 'cron',
+        expression: '0 12 * * *',
+      },
+      slug: 'personal-patterns-update',
+      status: 'active',
+      summary: 'User-owned Personal Patterns automation.',
+      tags: ['user'],
+      title: 'My Personal Patterns update',
+    })
 
     const result = await applyMurphManagedAutomations({
       defaultRoute,
@@ -2969,7 +3002,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
@@ -2990,7 +3023,7 @@ describe('applyMurphManagedAutomations', () => {
 
     expect(result).toEqual({
       created: 0,
-      skipped: 5,
+      skipped: 6,
       updated: 0,
     })
     expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()

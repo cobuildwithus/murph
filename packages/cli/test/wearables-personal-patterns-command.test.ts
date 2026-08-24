@@ -31,13 +31,43 @@ test('wearables patterns exposes the shared report to the assistant', async () =
     },
     report: {
       asOfDate: '2026-08-06',
-      cells: [],
-      factors: [],
+      cells: [{
+        classification: 'early_signal' as const,
+        comparisonBasis: 'confirmed_absence' as const,
+        comparisonDates: ['2026-07-20'],
+        comparisonDays: 2,
+        comparisonMean: 80,
+        delta: -20,
+        deltaPercent: -25,
+        direction: 'lower' as const,
+        exposedDates: ['2026-07-13'],
+        exposedDays: 2,
+        exposedMean: 60,
+        factorId: 'late-caffeine',
+        firstExposedDate: '2026-07-13',
+        grade: 'D' as const,
+        lastExposedDate: '2026-07-27',
+        outcomeId: 'sleep-score',
+        repeatedDirection: true,
+        stage: 'new_clue' as const,
+      }],
+      factors: [{
+        confirmedAbsentDays: 2,
+        id: 'late-caffeine',
+        kind: 'intervention' as const,
+        label: 'Late caffeine',
+        observedDays: 2,
+      }],
       lagDays: 1 as const,
       notes: [],
-      outcomes: [],
-      repeatableCellCount: 0,
-      testedCellCount: 0,
+      outcomes: [{
+        id: 'sleep-score',
+        label: 'Sleep score',
+        lagDays: 1 as const,
+        unit: 'score',
+      }],
+      repeatableCellCount: 1,
+      testedCellCount: 1,
       windowDays: 90,
     },
     vault: '/tmp/personal-patterns-vault',
@@ -71,5 +101,9 @@ test('wearables patterns exposes the shared report to the assistant', async () =
   assert.equal(
     wearablesPersonalPatternsResultSchema.parse(data).report.asOfDate,
     '2026-08-06',
+  )
+  assert.equal(
+    wearablesPersonalPatternsResultSchema.parse(data).report.cells[0]?.grade,
+    'D',
   )
 })

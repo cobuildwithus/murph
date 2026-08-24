@@ -35,6 +35,8 @@ import EnvironmentPage from "../app/(dashboard)/environment/page";
 import { EnvironmentPrintPageClient } from "../app/(dashboard)/environment/print/environment-print-page-client";
 import HistoryPageClient from "../app/(dashboard)/history/history-page-client";
 import { metadata as historyMetadata } from "../app/(dashboard)/history/layout";
+import JournalPageClient from "../app/(dashboard)/journal/journal-page-client";
+import { metadata as journalMetadata } from "../app/(dashboard)/journal/layout";
 import OverviewPageClient from "../app/(dashboard)/overview/overview-page-client";
 import { metadata as overviewMetadata } from "../app/(dashboard)/overview/layout";
 import PatternsPageClient from "../app/(dashboard)/patterns/patterns-page-client";
@@ -87,6 +89,11 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     historyMetadata.description,
     "Recent notes, events, assessments, and daily summaries.",
   );
+  assert.equal(journalMetadata.title, "Journal | Murph");
+  assert.equal(
+    journalMetadata.description,
+    "Review your health events, context, and connected data in one timeline.",
+  );
   assert.equal(experimentsMetadata.title, "Experiments — Murph");
   assert.equal(
     experimentsMetadata.description,
@@ -112,6 +119,7 @@ test("dashboard routes define page-specific metadata with the shared preview ima
     overviewMetadata,
     patternsMetadata,
     historyMetadata,
+    journalMetadata,
     experimentsMetadata,
   ]) {
     assert.deepEqual(routeMetadata.openGraph?.images, [
@@ -164,8 +172,55 @@ test("PatternsPage renders personal comparisons on their own route", () => {
 
   assert.match(markup, /Personal patterns/);
   assert.match(markup, /What tends to move together/);
-  assert.match(markup, /No clear comparison is ready yet/);
+  assert.match(markup, /No comparison is ready yet/);
   assert.doesNotMatch(markup, /Weekly changes/);
+});
+
+test("JournalPage renders the derived private health timeline", () => {
+  const journalClient = createBrowserVaultQueryClient({
+    ...clientFixture.replica,
+    journal: {
+      days: [{
+        date: "2026-08-12",
+        events: [{
+          date: "2026-08-12",
+          id: "morning-walk",
+          kind: "activity",
+          occurredAt: "2026-08-12T08:00:00.000Z",
+          records: [{
+            id: "morning-walk-record",
+            kind: "activity_session",
+            label: "Morning walk",
+            occurredAt: "2026-08-12T08:00:00.000Z",
+            source: "Apple Health",
+            summary: "30 min",
+            tags: [],
+            timeZone: "Europe/Warsaw",
+          }],
+          timeZone: "Europe/Warsaw",
+          title: "Morning walk",
+        }],
+      }],
+      eventCount: 1,
+      recordCount: 1,
+      windowDays: 120,
+    },
+  });
+  mocks.useBrowserVault.mockReturnValue({
+    client: journalClient,
+    dataVersion: journalClient.replica.source.dataVersion,
+    error: null,
+    ref: null,
+    refreshPending: false,
+    refresh: mocks.refresh,
+    status: "ready",
+  });
+  const markup = renderToStaticMarkup(createElement(JournalPageClient));
+
+  assert.match(markup, /Private health timeline/u);
+  assert.match(markup, /Journal/u);
+  assert.match(markup, /Morning walk/u);
+  assert.match(markup, /To add, correct, or remove something, tell Murph/u);
 });
 
 test("Personal Patterns comparison controls name their factor and next-day outcome", () => {
@@ -180,6 +235,8 @@ test("Personal Patterns comparison controls name their factor and next-day outco
   assert.equal((markup.match(/data-pattern-outcome-group=/gu) ?? []).length, 3);
   assert.match(markup, /Sleep efficiency/u);
   assert.match(markup, />14 days</u);
+  assert.match(markup, /Early signal · D/u);
+  assert.match(markup, /Pattern · A/u);
   assert.doesNotMatch(markup, /Scroll sideways/u);
 });
 

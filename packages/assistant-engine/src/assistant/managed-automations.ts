@@ -153,6 +153,8 @@ export const MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID =
   'automation_01JNW7YJ7MNE7M9Q2QWQK4Z3FY'
 export const MURPH_WEEKLY_HEALTH_INSIGHT_AUTOMATION_ID =
   'automation_X3GPAWV2CCHNCYHAAJ4CE2M144'
+export const MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID =
+  'automation_01M0A7T3RN5VPD8C2K4V6X9ZBQ'
 export const MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID =
   'automation_01K2WKKY3F8Q4R5S6T7V8W9XAB'
 export const MURPH_WEEKLY_HEALTH_RESEARCH_SCOUT_AUTOMATION_ID =
@@ -396,6 +398,38 @@ const MURPH_PROACTIVE_HEALTH_OUTREACH_POLICY = [
 
 export const MURPH_MANAGED_AUTOMATIONS = [
   {
+    automationId: MURPH_PERSONAL_PATTERNS_UPDATE_AUTOMATION_ID,
+    slug: 'personal-patterns-update',
+    title: 'Personal Patterns update',
+    summary: 'Checks for new personal observations and patterns twice daily.',
+    schedule: {
+      kind: 'cron',
+      expression: '0 13,21 * * *',
+    },
+    continuityPolicy: 'fresh',
+    ownerScope: 'member',
+    assistantTargetOverride: {
+      model: 'gpt-5.6-luna',
+      reasoningEffort: 'medium',
+    },
+    tags: [
+      'murph-managed:personal-patterns-update',
+    ],
+    instructions: [
+      'On this scheduled run, check whether Personal Patterns contains a factor-and-outcome result that this member has not seen before. Send at most one compact message for the run. Never send one message per result.',
+      '',
+      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date.',
+      '- Read `vault-cli knowledge show personal-pattern-notifications`. If missing, treat it as an empty private delivery ledger.',
+      '- A result identity is `factorId + outcomeId + comparisonBasis + outcome lagDays`. Direction, effect size, grade, and classification can change without creating a new result.',
+      '- Results with grades A through E can be new. Describe A-C as patterns, D as an early signal, and E as an observation. Always state the grade and evidence count. Never imply cause.',
+      '- Honor muted factors and result identities in the ledger. Record them as seen, but do not mention them.',
+      '- If several results are new, combine them into one short summary. Lead with the strongest or most useful result and say that the rest are available on `/patterns`. Do not list a large import one by one.',
+      '- Rewrite `personal-pattern-notifications` with `vault-cli knowledge upsert --slug personal-pattern-notifications --title "Personal Pattern notifications" --page-type ledger --body <markdown>`. Preserve shared and muted entries, then add all current graded identities before sending. Keep only ids, first-shared date, last-seen grade, and mute state. Do not copy health values or user text into this ledger.',
+      '- If no identity is new, return `{"kind":"skip","privateSummary":"No new Personal Pattern result appeared."}`. Grade changes belong in the weekly health insight, not a separate notification.',
+      '- If new identities exist, give their structured report to Murph and send one natural message. Do not mention the ledger, scheduled run, model, or internal calculation.',
+    ].join('\n'),
+  },
+  {
     automationId: MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
     slug: 'weekly-health-digest',
     title: 'Weekly health digest',
@@ -490,11 +524,15 @@ export const MURPH_MANAGED_AUTOMATIONS = [
       'Before choosing a finding:',
       '- Read the derived knowledge index.',
       '- Read `vault-cli knowledge show weekly-health-insights`. If the page is missing, treat that as no prior weekly health insights.',
+      '- Read `vault-cli knowledge show personal-pattern-notifications`. Compare its last-seen grades and identities with the current report. A useful strengthening, weakening, or no-longer-supported result may appear inside this weekly note. Do not send a separate change message.',
       '- Use `weekly-health-insights` as the dedupe ledger. Do not scan every wiki page and do not create per-week insight pages.',
       '- Search other knowledge pages only when the index suggests a candidate finding may already be covered elsewhere.',
-      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated activity or intervention links with next-day sleep and recovery.',
+      '- Run `vault-cli wearables patterns --date YYYY-MM-DD --format json` with the current local date. This is the first evidence pass for repeated factor links with same-day subjective outcomes and next-day sleep or recovery.',
+      '- Read grades A-E as evidence strength: A-C are Patterns, D is an Early signal, and E is one Observation. Grade changes can inform this weekly note, but they do not require a separate message.',
       '- If the patterns command is unavailable, fails, or does not return a usable report, continue with the existing bounded manual candidate search. Do not treat command failure as evidence that no pattern exists, and do not send a setup or process note to the member.',
-      '- Treat `new_clue`, `seen_again`, and `worth_testing` as stages of repeated association, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
+      '- Independently inspect the same bounded canonical evidence, then compare your best supported findings with the mathematical report. Do not assume either result is correct.',
+      '- Only when a stable, reproducible candidate exposes a material engine gap, call `murph.submit_product_feedback` once with kind `feature_request`. Start the summary with `Pattern engine audit:` and include a self-contained prompt under 1,800 characters for Codex to add or improve a deterministic test before changing the engine. Remove member ids, names, exact dates, raw messages, source paths, and identifying context. Use rounded or relative values. Do not submit an audit merely to produce one, and never mention it to the member.',
+      '- Treat legacy stages as compatibility labels, not proof. Use `no_clear_pattern` to reject a hunch, not to force an outbound note.',
       '- Inspect the underlying canonical dates and other vault context before sending. Check plausible alternatives. The pattern report narrows the search; it does not make the final judgment.',
       '- Inspect only enough recent and historical vault data to test candidate patterns.',
       '- For a candidate centered on a connected wearable recovery/readiness decline, when `murph.device` is available call it with `action: list_accounts`; always read `vault-cli wearables sources list`. Verify the contributing source is healthy, its `lastDate` covers the claimed window, and `stalenessVsNewestDays` or sync gaps do not explain the decline. If source health or freshness cannot be proved, suppress the candidate.',

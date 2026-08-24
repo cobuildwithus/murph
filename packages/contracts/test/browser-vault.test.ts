@@ -10,7 +10,7 @@ import {
 } from "../src/browser-vault.ts";
 
 test("browser vault generation rebuilds replicas for the bucketed metrics layout", () => {
-  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 10);
+  assert.equal(BROWSER_VAULT_REPLICA_CURRENT_GENERATION, 11);
 });
 
 test("browser vault owns one fixed 32-bucket lowercase hexadecimal namespace", () => {

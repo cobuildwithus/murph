@@ -1,7 +1,14 @@
 export {
   selectBrowserVaultHistory,
+  selectBrowserVaultJournal,
   selectBrowserVaultOverview,
 } from "./browser-replica/client-overview.ts";
+export type {
+  JournalDay,
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "./journal-view.ts";
 export {
   selectBrowserVaultExperimentSummary,
   selectBrowserVaultTrackedExperiments,
@@ -34,7 +41,9 @@ export type {
 } from "./overview-weekly-stats.ts";
 export type {
   PersonalPatternCell,
+  PersonalPatternClassification,
   PersonalPatternFactor,
+  PersonalPatternGrade,
   PersonalPatternOutcome,
   PersonalPatternReport,
   PersonalPatternStage,

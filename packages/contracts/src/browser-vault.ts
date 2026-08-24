@@ -6,7 +6,7 @@ export const BROWSER_VAULT_TRAINING_SESSION_SCHEMA =
  * Increment when a projection-shape or projection-interpretation change makes
  * an otherwise source-current browser replica incomplete for current readers.
  */
-export const BROWSER_VAULT_REPLICA_CURRENT_GENERATION = 10 as const;
+export const BROWSER_VAULT_REPLICA_CURRENT_GENERATION = 11 as const;
 
 export const BROWSER_VAULT_METRIC_BUCKET_IDS = [
   "00", "01", "02", "03", "04", "05", "06", "07",

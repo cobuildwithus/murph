@@ -1,6 +1,12 @@
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import type { TimelineEntry } from "../timeline.ts";
+import type {
+  JournalDay,
+  JournalEvent,
+  JournalRecord,
+  JournalView,
+} from "../journal-view.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
@@ -53,7 +59,9 @@ import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
 import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
 import {
   type PersonalPatternCell,
+  type PersonalPatternClassification,
   type PersonalPatternFactor,
+  type PersonalPatternGrade,
   type PersonalPatternOutcome,
   type PersonalPatternReport,
   type PersonalPatternStage,
@@ -95,6 +103,9 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
           && row.value !== null
         )
       : requireBoolean(record.hasLabBiomarkers, `${label}.hasLabBiomarkers`),
+    ...(record.journal === undefined
+      ? {}
+      : { journal: parseJournalView(record.journal, `${label}.journal`) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
     ),
@@ -142,6 +153,9 @@ export function parseBrowserVaultCoreShard(
       `${label}.hasLabBiomarkers`,
     ),
     identity: parseShardIdentity(record.identity, `${label}.identity`),
+    ...(record.journal === undefined
+      ? {}
+      : { journal: parseJournalView(record.journal, `${label}.journal`) }),
     ...(record.personalPatterns === undefined
       ? {}
       : {
@@ -161,6 +175,57 @@ export function parseBrowserVaultCoreShard(
     ).map((entry, index) =>
       parseWeeklySampleSummary(entry, `${label}.weeklySampleSummaries[${index}]`)
     ),
+  };
+}
+
+function parseJournalView(value: unknown, label: string): JournalView {
+  const record = requireRecord(value, label);
+  return {
+    days: requireArray(record.days, `${label}.days`).map((entry, index) =>
+      parseJournalDay(entry, `${label}.days[${index}]`)
+    ),
+    eventCount: requireNonNegativeInteger(record.eventCount, `${label}.eventCount`),
+    recordCount: requireNonNegativeInteger(record.recordCount, `${label}.recordCount`),
+    windowDays: requirePositiveSafeInteger(record.windowDays, `${label}.windowDays`),
+  };
+}
+
+function parseJournalDay(value: unknown, label: string): JournalDay {
+  const record = requireRecord(value, label);
+  return {
+    date: requireString(record.date, `${label}.date`),
+    events: requireArray(record.events, `${label}.events`).map((entry, index) =>
+      parseJournalEvent(entry, `${label}.events[${index}]`)
+    ),
+  };
+}
+
+function parseJournalEvent(value: unknown, label: string): JournalEvent {
+  const record = requireRecord(value, label);
+  return {
+    date: requireString(record.date, `${label}.date`),
+    id: requireString(record.id, `${label}.id`),
+    kind: requireString(record.kind, `${label}.kind`),
+    occurredAt: requireIsoDateTime(record.occurredAt, `${label}.occurredAt`),
+    records: requireArray(record.records, `${label}.records`).map((entry, index) =>
+      parseJournalRecord(entry, `${label}.records[${index}]`)
+    ),
+    timeZone: readNullableString(record.timeZone),
+    title: requireString(record.title, `${label}.title`),
+  };
+}
+
+function parseJournalRecord(value: unknown, label: string): JournalRecord {
+  const record = requireRecord(value, label);
+  return {
+    id: requireString(record.id, `${label}.id`),
+    kind: requireString(record.kind, `${label}.kind`),
+    label: requireString(record.label, `${label}.label`),
+    occurredAt: requireIsoDateTime(record.occurredAt, `${label}.occurredAt`),
+    source: readNullableString(record.source),
+    summary: readNullableString(record.summary),
+    tags: requireStringArray(record.tags, `${label}.tags`),
+    timeZone: readNullableString(record.timeZone),
   };
 }
 
@@ -507,6 +572,22 @@ function parsePersonalPatternFactor(value: unknown, label: string): PersonalPatt
     throw new TypeError(`${label}.kind must be activity, intervention, or mixed.`);
   }
   return {
+    ...(record.confirmedAbsentDays === undefined
+      ? {}
+      : {
+          confirmedAbsentDays: requireNonNegativeInteger(
+            record.confirmedAbsentDays,
+            `${label}.confirmedAbsentDays`,
+          ),
+        }),
+    ...(record.episodeCount === undefined
+      ? {}
+      : {
+          episodeCount: requireNonNegativeInteger(
+            record.episodeCount,
+            `${label}.episodeCount`,
+          ),
+        }),
     id: requireString(record.id, `${label}.id`),
     kind,
     label: requireString(record.label, `${label}.label`),
@@ -516,9 +597,16 @@ function parsePersonalPatternFactor(value: unknown, label: string): PersonalPatt
 
 function parsePersonalPatternOutcome(value: unknown, label: string): PersonalPatternOutcome {
   const record = requireRecord(value, label);
+  const lagDays = record.lagDays === undefined
+    ? 1
+    : requireNonNegativeInteger(record.lagDays, `${label}.lagDays`);
+  if (lagDays !== 0 && lagDays !== 1) {
+    throw new TypeError(`${label}.lagDays must be 0 or 1.`);
+  }
   return {
     id: requireString(record.id, `${label}.id`),
     label: requireString(record.label, `${label}.label`),
+    lagDays,
     unit: requireString(record.unit, `${label}.unit`),
   };
 }
@@ -529,21 +617,86 @@ function parsePersonalPatternCell(value: unknown, label: string): PersonalPatter
   if (direction !== "higher" && direction !== "lower" && direction !== "flat") {
     throw new TypeError(`${label}.direction must be higher, lower, or flat.`);
   }
+  const stage = requirePersonalPatternStage(record.stage, `${label}.stage`);
+  const grade = parsePersonalPatternGrade(record.grade, stage, `${label}.grade`);
   return {
+    classification: parsePersonalPatternClassification(
+      record.classification,
+      grade,
+      `${label}.classification`,
+    ),
+    comparisonBasis: record.comparisonBasis === undefined
+      ? "unobserved_baseline"
+      : requirePersonalPatternComparisonBasis(record.comparisonBasis, `${label}.comparisonBasis`),
+    comparisonDates: record.comparisonDates === undefined
+      ? []
+      : requireStringArray(record.comparisonDates, `${label}.comparisonDates`),
     comparisonDays: requireNonNegativeInteger(record.comparisonDays, `${label}.comparisonDays`),
     comparisonMean: readNullableFiniteNumber(record.comparisonMean),
     delta: readNullableFiniteNumber(record.delta),
     deltaPercent: readNullableFiniteNumber(record.deltaPercent),
     direction,
     exposedDays: requireNonNegativeInteger(record.exposedDays, `${label}.exposedDays`),
+    exposedDates: record.exposedDates === undefined
+      ? []
+      : requireStringArray(record.exposedDates, `${label}.exposedDates`),
     exposedMean: readNullableFiniteNumber(record.exposedMean),
     factorId: requireString(record.factorId, `${label}.factorId`),
     firstExposedDate: readNullableString(record.firstExposedDate),
+    grade,
     lastExposedDate: readNullableString(record.lastExposedDate),
     outcomeId: requireString(record.outcomeId, `${label}.outcomeId`),
     repeatedDirection: requireBoolean(record.repeatedDirection, `${label}.repeatedDirection`),
-    stage: requirePersonalPatternStage(record.stage, `${label}.stage`),
+    stage,
   };
+}
+
+function parsePersonalPatternGrade(
+  value: unknown,
+  stage: PersonalPatternStage,
+  label: string,
+): PersonalPatternGrade | null {
+  if (value === null) return null;
+  if (value === undefined) {
+    if (stage === "worth_testing") return "A";
+    if (stage === "seen_again") return "B";
+    if (stage === "new_clue") return "C";
+    return null;
+  }
+  const grade = requireString(value, label);
+  if (grade === "A" || grade === "B" || grade === "C" || grade === "D" || grade === "E") {
+    return grade;
+  }
+  throw new TypeError(`${label} must be A, B, C, D, E, or null.`);
+}
+
+function parsePersonalPatternClassification(
+  value: unknown,
+  grade: PersonalPatternGrade | null,
+  label: string,
+): PersonalPatternClassification | null {
+  if (value === null) return null;
+  if (value === undefined) {
+    if (grade === "E") return "observation";
+    if (grade === "D") return "early_signal";
+    return grade ? "pattern" : null;
+  }
+  const classification = requireString(value, label);
+  if (
+    classification === "observation"
+    || classification === "early_signal"
+    || classification === "pattern"
+  ) return classification;
+  throw new TypeError(`${label} must be observation, early_signal, pattern, or null.`);
+}
+
+function requirePersonalPatternComparisonBasis(
+  value: unknown,
+  label: string,
+): "confirmed_absence" | "unobserved_baseline" {
+  const basis = requireString(value, label);
+  if (basis === "confirmed_absence" || basis === "unobserved_baseline") return basis;
+  throw new TypeError(`${label} must be confirmed_absence or unobserved_baseline.`);
 }
 
 function requirePersonalPatternStage(value: unknown, label: string): PersonalPatternStage {
