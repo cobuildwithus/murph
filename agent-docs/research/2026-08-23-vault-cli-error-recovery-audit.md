@@ -34,29 +34,29 @@ dropped or interpreted as no data. Those are validation/correctness defects, not
 logging defects, and are listed separately because they leave the model with no
 error from which to recover.
 
-## Disposition of the reported weekly automation failure
+## Automation schedule and support-metadata contract
 
-The current automation contract accepts a five-field cron schedule with an
-explicit valid IANA time zone. Current tests cover recurring cron schedules with
-time zones, and [PR 1546](https://github.com/cobuildwithus/murph/pull/1546),
-merged on 2026-08-10, fixed preservation of explicit recurring time zones. The
-reported schedule shape—weekly cron plus `America/New_York`—is therefore valid
-on the audited head.
+The current automation contract accepts standard five-field recurring cron
+expressions with explicit valid IANA time zones. Current tests cover recurring
+cron schedules with time zones, and
+[PR 1546](https://github.com/cobuildwithus/murph/pull/1546), merged on
+2026-08-10, fixed preservation of explicit recurring time zones.
 
-The reproduced hosted-group rejection was not caused by that cron or time-zone
-shape. The submitted payload set `supportKind: "check_in"` without the required
-paired `supportSeriesId`. Those fields opt into plan-owned support and must be
-provided together; an ordinary group check-in should omit both. The hosted
-tool's field-pair refinement and description state that relationship at
+Optional plan-owned support metadata must be complete; a partial
+support-ownership pair is rejected. Ordinary check-ins should omit that
+metadata. The hosted tool's field-pair refinement and description state that
+relationship at
 `packages/assistant-engine/src/assistant-codex/dynamic-tools/automation.ts:207-225`
 and `:428-441`.
 
-That identifies the rejected field relationship but does not close the
-error-quality bug: the model received generic invalid arguments instead of the
-field-specific repair already available to the hosted validator. Internal
-automation schedule, route, override, save, and import parsers can likewise
-lose actionable detail after Incur's argument parser. The original production
-call was not replayed, so this document does not claim an operational rollout.
+Current source already carries that relationship to the model as safe,
+field-specific `validationIssues` through
+`packages/assistant-engine/src/assistant-codex/dynamic-tools.ts:2174-2221` and
+`:6729-6736`, with end-to-end proof in
+`packages/assistant-engine/test/assistant-hosted-domain-tools.test.ts:892-928`.
+Production deployment of that source behavior remains unverified. The broader
+audit issue remains: internal automation schedule, route, override, save, and
+import parsers can lose actionable detail after Incur's argument parser.
 
 ## Implementation routing and status
 
@@ -78,7 +78,7 @@ the applicable stack lands and its gates succeed.
 | [#2209](https://github.com/cobuildwithus/murph/pull/2209) | Clinical and health: clinical producers under VCE-001, VCE-004, and VCE-011; strict immunization import/payload discovery; validated health-list statuses. |
 | [#2210](https://github.com/cobuildwithus/murph/pull/2210) | Events and documents: event repair producers under VCE-001, document/intake input handling under VCE-011, journal/intake/export portions of VCE-016, and export I/O classification under VCE-018. |
 | [#2211](https://github.com/cobuildwithus/murph/pull/2211) | Devices, routes, and wearables: VCE-013 and VCE-015; wearable metric/date silent-success cases; optional route-elevation degradation. |
-| [#2212](https://github.com/cobuildwithus/murph/pull/2212) | Core and assistant runtime: automation portion of VCE-004, VCE-005 through VCE-008, core portions of VCE-009 and VCE-018, and malformed operator-config mutation cases for `model` and assistant self-target commands. It also carries a candidate regression for the valid weekly cron/time-zone shape and the paired support fields. |
+| [#2212](https://github.com/cobuildwithus/murph/pull/2212) | Core and assistant runtime: automation portion of VCE-004, VCE-005 through VCE-008, core portions of VCE-009 and VCE-018, and malformed operator-config mutation cases for `model` and assistant self-target commands. It improves Vault CLI/internal automation recovery and regression proof for recurring cron/time-zone and support-metadata contracts; it does not introduce the hosted validation envelope already present in source. |
 
 ## Scope and confidence
 
@@ -359,7 +359,8 @@ is appropriate only if descriptors are intentionally made exhaustive.
 
 ## Remaining limits
 
-- No production hosted-group automation save was executed.
+- Production deployment of hosted automation validation details was not
+  verified.
 - Provider and operating-system branches were selectively simulated rather
   than exhaustively fault-injected.
 - Candidate implementations are routed above, but every listed PR remains open
