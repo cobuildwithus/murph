@@ -1,8 +1,8 @@
 # Keep inbound hosted videos transient
 
-Status: active
+Status: completed
 Created: 2026-08-23
-Updated: 2026-08-23
+Updated: 2026-08-24
 
 ## Goal
 
@@ -160,3 +160,4 @@ timer.
   - the re-arm migration is idempotent at the data-shape level and uses the
     existing due-work index/dispatcher;
   - all checks and review gates pass with no accepted unresolved findings.
+Completed: 2026-08-24
