@@ -1846,7 +1846,8 @@ describe("hosted runtime latency dashboard store", () => {
       expect(sql.match(/UPDATE hosted_ingress_latency_trace AS trace/gu)).toHaveLength(1);
       expect(sql).toContain("statement_timestamp() AT TIME ZONE 'UTC'");
       expect(sql).not.toContain("CURRENT_TIMESTAMP");
-      expect(sql).not.toContain("FOR UPDATE");
+      expect(sql).toContain("ORDER BY trace.id");
+      expect(sql).toContain("FOR UPDATE OF trace");
     }
     expect(prisma.readTransactionCallCount()).toBe(0);
   });

@@ -456,6 +456,22 @@ export async function recordHostedIngressProviderStarted(input: {
          OR trace.runtime_attempt_id = input.runtime_attempt_id
        )
     ),
+    locked AS MATERIALIZED (
+      SELECT trace.id
+      FROM requested
+      CROSS JOIN input
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.assistant_input_id = requested.assistant_input_id
+       AND trace.user_id = input.user_id
+       AND trace.source = input.source
+       AND (
+         trace.runtime_attempt_id IS NULL
+         OR input.runtime_attempt_id IS NULL
+         OR trace.runtime_attempt_id = input.runtime_attempt_id
+       )
+      ORDER BY trace.id
+      FOR UPDATE OF trace
+    ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
       SET (
@@ -479,15 +495,8 @@ export async function recordHostedIngressProviderStarted(input: {
             ${nextPhaseBreakdown} AS phase_breakdown_json
         ) AS next
       )
-      FROM requested, input
-      WHERE trace.assistant_input_id = requested.assistant_input_id
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          trace.runtime_attempt_id IS NULL
-          OR input.runtime_attempt_id IS NULL
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
+      FROM locked, input
+      WHERE trace.id = locked.id
         AND (
           trace.provider_start_at IS DISTINCT FROM ${nextProviderStartAt}
           OR trace.provider_request_ordinal
@@ -613,6 +622,21 @@ export async function recordHostedIngressAssistantMilestone(input: {
          OR trace.runtime_attempt_id = input.runtime_attempt_id
        )
     ),
+    locked AS MATERIALIZED (
+      SELECT trace.id
+      FROM requested
+      CROSS JOIN input
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.assistant_input_id = requested.assistant_input_id
+       AND trace.user_id = input.user_id
+       AND trace.source = input.source
+       AND (
+         input.terminal_non_reply_projection
+         OR trace.runtime_attempt_id = input.runtime_attempt_id
+       )
+      ORDER BY trace.id
+      FOR UPDATE OF trace
+    ),
     updated AS (
       UPDATE hosted_ingress_latency_trace AS trace
       SET (
@@ -630,14 +654,8 @@ export async function recordHostedIngressAssistantMilestone(input: {
             ${nextPhaseBreakdown} AS phase_breakdown_json
         ) AS next
       )
-      FROM requested, input
-      WHERE trace.assistant_input_id = requested.assistant_input_id
-        AND trace.user_id = input.user_id
-        AND trace.source = input.source
-        AND (
-          input.terminal_non_reply_projection
-          OR trace.runtime_attempt_id = input.runtime_attempt_id
-        )
+      FROM locked, input
+      WHERE trace.id = locked.id
         AND (
           trace.runtime_attempt_id IS DISTINCT FROM ${nextRuntimeAttemptId}
           OR trace.phase_breakdown_json IS DISTINCT FROM ${nextPhaseBreakdown}
@@ -2114,13 +2132,10 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
         1::integer AS phase_schema_version,
         ${HOSTED_INGRESS_LATENCY_PHASE_LEAF_RULES_JSON}::jsonb AS phase_leaf_rules
     ),
-    eligible_candidates AS MATERIALIZED (
+    eligible_candidate_ids AS MATERIALIZED (
       SELECT
         trace.accepted_at,
-        trace.id,
-        trace.phase_breakdown_json,
-        trace.runtime_attempt_id,
-        ${storedLeaseGeneration} AS stored_lease_generation
+        trace.id
       FROM hosted_ingress_latency_trace AS trace
       JOIN hosted_mailbox_item AS mailbox_item
         ON mailbox_item.id = trace.mailbox_item_id
@@ -2143,6 +2158,37 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
         )
       ORDER BY trace.accepted_at DESC
       LIMIT ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT + 1}
+    ),
+    eligible_candidates AS MATERIALIZED (
+      SELECT
+        trace.accepted_at,
+        trace.id,
+        trace.phase_breakdown_json,
+        trace.runtime_attempt_id,
+        ${storedLeaseGeneration} AS stored_lease_generation
+      FROM eligible_candidate_ids AS candidate
+      JOIN hosted_ingress_latency_trace AS trace
+        ON trace.id = candidate.id
+      JOIN hosted_mailbox_item AS mailbox_item
+        ON mailbox_item.id = trace.mailbox_item_id
+       AND mailbox_item.consumed_at IS NULL
+      CROSS JOIN input
+      WHERE trace.assistant_input_id IS NOT NULL
+        AND trace.user_id = input.user_id
+        AND trace.source = input.source
+        AND (
+          ${hasTerminalNonReplyEvidence}
+          OR trace.runtime_attempt_id = input.runtime_attempt_id
+        )
+        AND (
+          ${storedLeaseGeneration} IS NULL
+          OR ${storedLeaseGeneration} < input.runtime_lease_generation::numeric
+          OR (
+            ${storedLeaseGeneration} = input.runtime_lease_generation::numeric
+            AND trace.runtime_attempt_id = input.runtime_attempt_id
+          )
+        )
+      ORDER BY trace.id
       FOR UPDATE OF trace
     ),
     eligible AS MATERIALIZED (
@@ -2183,7 +2229,7 @@ async function updateHostedIngressCheckpointPublicationExpectedBySetBased(
       (SELECT COUNT(*)::bigint FROM eligible) AS "matchedCount",
       (
         SELECT COUNT(*) > ${HOSTED_INGRESS_CHECKPOINT_PUBLICATION_WRITE_LIMIT}
-        FROM eligible_candidates
+        FROM eligible_candidate_ids
       ) AS truncated
   `);
 

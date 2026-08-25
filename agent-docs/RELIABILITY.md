@@ -2446,7 +2446,14 @@ Last verified: 2026-08-23
   serialization while the write preserves attempt and monotonic
   lease-generation authority, max-merges the publication deadline, sanitizes
   stored diagnostic JSON, and changes `updated_at` only when state changes. It
-  must not select trace ids into the application, lock an unbounded collection,
+  selects the bounded newest checkpoint candidates first, then every
+  checkpoint, provider, and assistant multi-row writer locks the selected
+  traces in deterministic trace-id order before updating. This common order
+  prevents cross-writer row-lock cycles without a broad transaction retry.
+  Persistence failures emit only event type, source, input cardinality, query
+  tag, Prisma code, and SQLSTATE; trace and attempt identifiers and query text
+  stay out of failure logs. It must not select trace ids into the application,
+  lock an unbounded collection,
   or open one transaction per trace.
 - Chat-affirmation group joins (Linq reaction, Telegram inline button) are
   at-least-once, not exactly-once. The provider-event ledger records that an

@@ -460,6 +460,49 @@ describe.skipIf(!runPostgresProof)(
           ]).toContain(assistant.checkpointPublicationExpectedByEpochMs);
         }
 
+        await expect(Promise.all([
+          recordHostedIngressRuntimeMilestone({
+            at: new Date("2026-08-09T12:08:30.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "checkpoint_publication_expected_by",
+            prisma: observer,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+          recordHostedIngressProviderStarted({
+            assistantInputIds: [...assistantInputIds].reverse(),
+            at: new Date("2026-08-09T12:00:04.000Z"),
+            authenticatedUserId: memberId,
+            prisma: challenger,
+            providerRequestOrdinal: 0,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            source: "linq",
+          }),
+        ])).resolves.toHaveLength(2);
+
+        await expect(Promise.all([
+          recordHostedIngressRuntimeMilestone({
+            at: new Date("2026-08-09T12:08:20.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "checkpoint_publication_expected_by",
+            prisma: observer,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+          recordHostedIngressAssistantMilestone({
+            assistantInputIds: [...assistantInputIds].reverse(),
+            at: new Date("2026-08-09T12:08:10.000Z"),
+            authenticatedUserId: memberId,
+            milestone: "first_codex_text_observed",
+            prisma: challenger,
+            runtimeAttemptId: concurrentNewerAttemptId,
+            runtimeLeaseGeneration: "8",
+            source: "linq",
+          }),
+        ])).resolves.toHaveLength(2);
+
         await observer.hostedMailboxItem.update({
           data: { consumedAt: new Date("2026-08-09T12:06:30.000Z") },
           where: { id: `hmi_latency_set_0_${suffix}` },
@@ -528,7 +571,7 @@ async function createLatencySetWriteFixture(
   });
   await prisma.hostedIngressLatencyTrace.createMany({
     data: tracedAssistantInputIds.map((assistantInputId, index) => ({
-      acceptedAt: input.acceptedAt,
+      acceptedAt: new Date(input.acceptedAt.getTime() + index * 1_000),
       assistantInputId,
       id: `hil_latency_set_${index}_${input.suffix}`,
       mailboxItemId: `hmi_latency_set_${index}_${input.suffix}`,
