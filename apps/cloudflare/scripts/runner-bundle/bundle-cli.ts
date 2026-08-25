@@ -154,6 +154,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_508_867;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
+// These probes verify behavior, not startup latency. Leave enough headroom for
+// constrained local and CI hosts while retaining a finite hung-process bound.
+const VAULT_CLI_PROBE_TIMEOUT_MS = 120_000;
 
 // Known divergence the parity battery cannot reach (it would need a live
 // codex session): assistant-engine resolves two assets relative to its own
@@ -714,7 +717,7 @@ function runVaultCliParityProbe(input: {
     // phantom parity divergence.
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: 60_000,
+    timeout: VAULT_CLI_PROBE_TIMEOUT_MS,
   });
 
   // A child that exited on its own has a numeric status and no signal;
@@ -722,15 +725,22 @@ function runVaultCliParityProbe(input: {
   // infrastructure breaking and must fail the assembly loudly instead of
   // posing as a parity result.
   if (result.error || result.signal !== null || typeof result.status !== "number") {
-    const failureKind = result.error
-      ? "spawn_error"
-      : result.signal !== null
-        ? "signal"
-        : "missing_status";
+    const errorCode =
+      result.error && "code" in result.error && typeof result.error.code === "string"
+        ? result.error.code
+        : undefined;
+    const failureKind =
+      errorCode === "ETIMEDOUT"
+        ? "timeout"
+        : result.error
+          ? "spawn_error"
+          : result.signal !== null
+            ? "signal"
+            : "missing_status";
     throw new Error(
       [
         `vault-cli parity probe \`${input.args.join(" ")}\` did not exit cleanly.`,
-        `outcome=${failureKind} status=${result.status ?? -1} stdoutBytes=${Buffer.byteLength(result.stdout ?? "", "utf8")} stderrBytes=${Buffer.byteLength(result.stderr ?? "", "utf8")}`,
+        `outcome=${failureKind} errorCode=${errorCode ?? "none"} status=${result.status ?? -1} signal=${result.signal ?? "none"} timeoutMs=${VAULT_CLI_PROBE_TIMEOUT_MS} stdoutBytes=${Buffer.byteLength(result.stdout ?? "", "utf8")} stderrBytes=${Buffer.byteLength(result.stderr ?? "", "utf8")}`,
       ].join("\n"),
     );
   }
@@ -804,7 +814,7 @@ async function assertVaultCliJsonImportSurfaceForEntry(input: {
       },
       maxBuffer: 64 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: 60_000,
+      timeout: VAULT_CLI_PROBE_TIMEOUT_MS,
     },
   );
 

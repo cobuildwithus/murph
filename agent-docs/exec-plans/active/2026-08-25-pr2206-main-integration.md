@@ -25,18 +25,32 @@ shared error projector and no partial writes or submitted-value echo.
   bundle tests, all six affected package typechecks, prepared runtime, CLI
   package shape, and both docs gates.
 - Canonical runner assembly passes all eight parity probes. The Vault CLI is
-  9,501,363 bytes against a 9,508,867-byte budget; the runner is 11,334,389
+  9,502,535 bytes against a 9,508,867-byte budget; the runner is 11,335,561
   bytes against an 11,393,617-byte budget.
 - Round three found that the current-main integration preserved only primitive
   types for correctly typed semantic failures. The finding is accepted: the
   existing finite sample mapper will retain fixed value-free constraints while
   the shared projector remains unchanged.
+- The round-three remediation covers negative and fractional heart rate,
+  invalid timestamps, zero and fractional sleep duration, invalid sleep stage,
+  and incompatible units. Focused use-case and command tests prove value-free
+  repair hints, zero sample or batch writes, and an unchanged audit-record
+  count; affected typechecks and the 14-test runner bundle suite pass.
+- The first post-remediation assembly exposed a 60-second probe-harness timeout:
+  the same unbundled command completed successfully in 68.37 seconds under
+  transient host contention and 57.43 seconds on a warm repeat. The existing
+  probe boundary now uses a finite 120-second behavioral timeout and reports a
+  bounded timeout/error code, signal, and configured limit instead of generic
+  `spawn_error`; the canonical rerun then passed every probe.
 
 ## Design
 
 - Current `main` owns shared projection, CLI guidance, and generic diagnostics.
 - Sample/importer owners retain only their finite public-field mappings and
   pre-write validation.
+- Runner assembly retains one probe boundary; its timeout is a behavioral-test
+  ceiling rather than a startup performance contract, and its diagnostic uses
+  only bounded process metadata.
 - Regenerate CLI artifacts and compose the measured lazy bundle allowance; add
   no registry, repair channel, retry manager, state owner, or compatibility
   layer.
