@@ -1383,6 +1383,164 @@ describe("hosted workspace runtime entrypoint", () => {
     }
   });
 
+  test.each(["pending", "retryable", "sending"] as const)(
+    "durably retires an outbox-only source-delivery intent from %s state",
+    async (initialStatus) => {
+      const vaultRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-"),
+      );
+      const restoredRoot = await mkdtemp(
+        path.join(tmpdir(), "murph-workspace-entrypoint-restored-"),
+      );
+      const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+      const checkpointBundles: Array<Awaited<
+        ReturnType<typeof createVaultSnapshotBundle>
+      >> = [];
+      const deliveryKey = `device-delivery-stalled:v1:outbox-only-${initialStatus}`;
+      const providerFetch = vi.fn<typeof fetch>(async () => {
+        throw new Error("Retired outbox reconciliation must not reach a provider.");
+      });
+
+      try {
+        mocks.prepareHostedCodexAssistantProcess.mockClear();
+        await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+        const intent = await createAssistantOutboxIntent({
+          channel: "linq",
+          createdAt: TEST_NOW,
+          dedupeToken: deliveryKey,
+          deliveryIdempotencyKey: deliveryKey,
+          deliveryTransportIdempotent: true,
+          explicitTarget: "synthetic-retired-outbox-thread",
+          identityId: "hbidx:phone:v1:retired-outbox-test",
+          message: "Synthetic retired outreach.",
+          sessionId: "session_retired_outbox_only",
+          threadId: "hbidx:thread:v1:retired-outbox-test",
+          threadIsDirect: true,
+          turnId: "turn_retired_outbox_only",
+          vault: vaultRoot,
+        });
+        if (initialStatus === "retryable") {
+          await saveAssistantOutboxIntent(vaultRoot, {
+            ...intent,
+            attemptCount: 1,
+            lastAttemptAt: TEST_NOW,
+            lastError: {
+              code: "ASSISTANT_DELIVERY_RETRYABLE",
+              message: "Synthetic due retry.",
+            },
+            nextAttemptAt: TEST_NOW,
+            status: "retryable",
+            updatedAt: TEST_NOW,
+          });
+        }
+        if (initialStatus === "sending") {
+          const prepared = await beginAssistantOutboxIntentMirrorPreparedDispatch({
+            deliveryIdempotencyKey: deliveryKey,
+            deliveryTransportIdempotent: true,
+            intentId: intent.intentId,
+            startedAt: TEST_NOW,
+            vault: vaultRoot,
+          });
+          assert.equal(prepared?.intent.status, "sending");
+        }
+        await writeMailboxImportStateFile(
+          vaultRoot,
+          createEmptyHostedMailboxImportState(),
+        );
+        const restoredWorkspace = await createVaultSnapshotBundle({
+          key:
+            "users/bundles/member-synthetic/"
+            + `retired-outbox-only-${initialStatus}-before.bundle.json`,
+          vaultRoot,
+        });
+
+        await runHostedWorkspaceRuntimeJobInProcess(
+          createWorkspaceRuntimeJobInput({
+            request: {
+              attemptId: `attempt_retired_outbox_only_${initialStatus}`,
+              idleCheckpointDelayMs: 1,
+              workspaceVersion: "0",
+            },
+          }),
+          {
+            async createCheckpointSnapshot() {
+              const checkpointBundle = await createVaultSnapshotBundle({
+                key:
+                  "users/bundles/member-synthetic/"
+                  + `retired-outbox-only-${initialStatus}-checkpoint-${
+                    checkpointBundles.length + 1
+                  }.bundle.json`,
+                vaultRoot,
+              });
+              checkpointBundles.push(checkpointBundle);
+              return { snapshotRef: checkpointBundle.snapshotRef };
+            },
+            async importItem() {
+              throw new Error("Outbox-only reconciliation has no mailbox work.");
+            },
+            platform: {
+              ...createPlatform({
+                artifactBytesByHash: new Map([
+                  [restoredWorkspace.hash, restoredWorkspace.bytes],
+                ]),
+                mailboxPort: createMailboxPort({ events: [], items: [] }),
+                workspacePort: createWorkspacePort({
+                  checkpointRequests,
+                  events: [],
+                  workspace: createWorkspaceState({
+                    nextWakeAt: TEST_NOW,
+                    nextWakeReason: HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+                    snapshotRef: restoredWorkspace.snapshotRef,
+                    version: "0",
+                  }),
+                }),
+              }),
+              providerFetch,
+            },
+            async runAssistantPhase(input) {
+              return await runHostedWorkspaceAssistantPhase(input);
+            },
+            vaultRoot,
+          },
+        );
+
+        const expectedTerminal = {
+          errorCode: initialStatus === "sending"
+            ? "ASSISTANT_DELIVERY_AMBIGUOUS"
+            : "ASSISTANT_RETIRED_SOURCE_DELIVERY_STALL_SUPPRESSED",
+          status: initialStatus === "sending" ? "failed" : "abandoned",
+        };
+        assert.deepEqual(
+          (await listAssistantOutboxIntents(vaultRoot)).map((stored) => ({
+            errorCode: stored.lastError?.code ?? null,
+            status: stored.status,
+          })),
+          [expectedTerminal],
+        );
+        const durableBundle = checkpointBundles.at(-1);
+        assert.ok(durableBundle);
+        await restoreHostedBundleRoots({
+          bytes: durableBundle.bytes,
+          expectedKind: "vault",
+          roots: { vault: restoredRoot },
+        });
+        assert.deepEqual(
+          (await listAssistantOutboxIntents(restoredRoot)).map((stored) => ({
+            errorCode: stored.lastError?.code ?? null,
+            status: stored.status,
+          })),
+          [expectedTerminal],
+        );
+        assert.equal(providerFetch.mock.calls.length, 0);
+        assert.equal(mocks.prepareHostedCodexAssistantProcess.mock.calls.length, 0);
+        assert.ok(checkpointRequests.length > 0);
+      } finally {
+        await removeTempRoot(restoredRoot);
+        await removeTempRoot(vaultRoot);
+      }
+    },
+  );
+
   test.each([
     {
       expectedCriticalPath: false,
@@ -11378,22 +11536,21 @@ describe("hosted workspace runtime entrypoint", () => {
       const result = await resultPromise;
 
       if (retiredDeliveryStall) {
+        const expectedDeferredRetirementState = initialOutboxState === "absent"
+          ? []
+          : [{
+              errorCode: initialOutboxState === "retryable"
+                ? "ASSISTANT_DELIVERY_RETRYABLE"
+                : null,
+              status: initialOutboxState,
+            }];
         assert.equal(deliveryBodies.length, 0);
         assert.deepEqual(
           (await listAssistantOutboxIntents(vaultRoot)).map((intent) => ({
             errorCode: intent.lastError?.code ?? null,
             status: intent.status,
           })),
-          initialOutboxState === "absent"
-            ? []
-            : [{
-                errorCode: initialOutboxState === "sending"
-                  ? "ASSISTANT_DELIVERY_AMBIGUOUS"
-                  : "ASSISTANT_RETIRED_SOURCE_DELIVERY_STALL_SUPPRESSED",
-                status: initialOutboxState === "sending"
-                  ? "failed"
-                  : "abandoned",
-              }],
+          expectedDeferredRetirementState,
         );
         assert.deepEqual(
           (await readHostedSystemMailboxState(vaultRoot)).pending,
@@ -11407,9 +11564,50 @@ describe("hosted workspace runtime entrypoint", () => {
             ?.hostedMailboxSystemHandledThroughSeq,
           "1",
         );
-        assert.equal(result.status, "idle", JSON.stringify(result));
-        assert.equal(result.nextWakeAt, null);
-        assert.equal(result.nextWakeReason ?? null, null);
+        if (initialOutboxState === "absent") {
+          assert.equal(result.status, "idle", JSON.stringify(result));
+          assert.equal(result.nextWakeAt, null);
+          assert.equal(result.nextWakeReason ?? null, null);
+        } else {
+          assert.equal(result.status, "scheduled", JSON.stringify(result));
+          assert.ok(result.nextWakeAt);
+          assert.equal(
+            result.nextWakeReason,
+            HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+          );
+          assert.equal(checkpointRequests.at(-1)?.nextWakeAt, result.nextWakeAt);
+          assert.equal(
+            checkpointRequests.at(-1)?.nextWakeReason,
+            HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
+          );
+        }
+        const durableRetirement = checkpointBundles.at(-1);
+        assert.ok(durableRetirement);
+        const durableRetirementRoot = await mkdtemp(
+          path.join(tmpdir(), "murph-workspace-entrypoint-retired-exact-"),
+        );
+        try {
+          await restoreHostedBundleRoots({
+            bytes: durableRetirement.bytes,
+            expectedKind: "vault",
+            roots: { vault: durableRetirementRoot },
+          });
+          assert.deepEqual(
+            (await listAssistantOutboxIntents(durableRetirementRoot)).map(
+              (intent) => ({
+                errorCode: intent.lastError?.code ?? null,
+                status: intent.status,
+              }),
+            ),
+            expectedDeferredRetirementState,
+          );
+          assert.deepEqual(
+            (await readHostedSystemMailboxState(durableRetirementRoot)).pending,
+            [],
+          );
+        } finally {
+          await removeTempRoot(durableRetirementRoot);
+        }
         return;
       }
 

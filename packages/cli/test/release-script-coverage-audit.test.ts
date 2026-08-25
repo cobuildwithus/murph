@@ -1941,24 +1941,15 @@ describe('monorepo release flow coverage audit', () => {
       'A different-lane retry must use a fresh',
     )
     expect(prReviewGptLoop).toContain('zero accepted findings')
-    expect(prReviewGptLoop).toContain('## Finding Disposition Boundary')
+    expect(prReviewGptLoop).toContain('## Finding Disposition Pause')
     expect(prReviewGptLoop).toMatch(
-      /A preliminary specialist result does not end the active task turn/u,
+      /Every substantive preliminary specialist result and every final `FINDINGS`\s+result uses this disposition boundary/u,
     )
     expect(prReviewGptLoop).toMatch(
-      /After the\s+parent reports the result and dispositions as a progress update, it may inspect\s+an attached coverage artifact and remediate accepted findings/u,
-    )
-    expect(prReviewGptLoop).toMatch(
-      /A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause/u,
+      /A validated final `ROUND_OUTCOME: PASS` has no\s+findings to disposition and proceeds directly/u,
     )
     expect(prReviewGptLoop).toContain(
-      'that stricter pause\nalso blocks pending specialist-driven mutation',
-    )
-    expect(prReviewGptLoop).toMatch(
-      /A validated final\s+`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly/u,
-    )
-    expect(prReviewGptLoop).toContain(
-      'Two narrow exceptions let a final `FINDINGS` result complete its disposition',
+      'Two narrow exceptions complete the disposition boundary',
     )
     expect(prReviewGptLoop).toContain('`Non-Production Remediation`')
     expect(prReviewGptLoop).toContain(
@@ -1973,15 +1964,13 @@ describe('monorepo release flow coverage audit', () => {
     expect(prReviewGptLoop).toContain(
       'may reject a finding as wrong, already handled,',
     )
-    expect(prReviewGptLoop).toMatch(
-      /requires neither a code change nor\s+reviewer withdrawal/u,
+    expect(prReviewGptLoop).toContain(
+      'requires neither a\ncode change nor reviewer withdrawal',
     )
     expect(prReviewGptLoop).toContain(
       'A `FINDINGS` result needs no review rerun',
     )
-    expect(prReviewGptLoop).toContain(
-      'continue with accepted remediation or artifact inspection without\na user-resume pause',
-    )
+    expect(prReviewGptLoop).toContain('End the active task turn after this handoff')
     expect(prReviewGptLoop).toMatch(/non-obvious\s+affected\s+surfaces/iu)
     expect(prReviewGptLoop).toContain('Accepted purpose drift')
     expect(prReviewGptLoop).toContain('disclosure-only finding')
@@ -2157,13 +2146,7 @@ describe('monorepo release flow coverage audit', () => {
     expect(completionWorkflow).toContain('evidenced current scale')
     expect(completionWorkflow).toContain('`ROUND_OUTCOME: PASS`')
     expect(completionWorkflow).toContain(
-      'complete `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Boundary',
-    )
-    expect(completionWorkflow).toContain(
-      'After a preliminary specialist report, continue with accepted remediation',
-    )
-    expect(completionWorkflow).toContain(
-      'A final `ROUND_OUTCOME: FINDINGS` still pauses all candidate mutation',
+      'perform `agent-docs/operations/pr-reviewgpt-loop.md` § Finding Disposition Pause',
     )
     expect(completionWorkflow).toContain(
       'A rejected finding is terminal and does not require model agreement',

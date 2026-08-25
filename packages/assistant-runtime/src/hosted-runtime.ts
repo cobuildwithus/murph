@@ -257,7 +257,6 @@ import {
   drainHostedPreparedAssistantDeliveries,
   isHostedRetiredSourceDeliveryStallDeliveryKey,
   prepareHostedAssistantDeliveryEffectsForDispatch,
-  retireHostedSourceDeliveryStallIntentById,
   resetHostedPreparedAssistantDeliveryEffects,
   resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
@@ -2855,28 +2854,18 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                 isHostedRetiredSourceDeliveryStallDeliveryKey(
                   deliveryIdempotencyKey,
                 );
-              let exactDeliveryIntentState =
+              const exactDeliveryIntentState =
                 await resolveHostedAssistantDeliveryIntentState({
                   deliveryIdempotencyKey,
                   vaultRoot: restored.vaultRoot,
                 });
-              if (
-                retiredExactDelivery
-                && exactDeliveryIntentState
-                && !exactDeliveryIntentState.terminal
-              ) {
-                await retireHostedSourceDeliveryStallIntentById({
-                  intentId: exactDeliveryIntentState.intentId,
-                  vaultRoot: restored.vaultRoot,
-                });
-                exactDeliveryIntentState =
-                  await resolveHostedAssistantDeliveryIntentState({
-                    deliveryIdempotencyKey,
-                    vaultRoot: restored.vaultRoot,
-                  });
-              }
+              // The model-free mailbox owner advances the retired item without
+              // delivery. The ordinary assistant runner owns durable outbox
+              // terminalization on the retained delivery wake.
               const preferredIntentIds =
-                exactDeliveryIntentState && !exactDeliveryIntentState.terminal
+                !retiredExactDelivery
+                  && exactDeliveryIntentState
+                  && !exactDeliveryIntentState.terminal
                   ? [exactDeliveryIntentState.intentId]
                   : [];
               const preferredIntentIdSet = new Set(preferredIntentIds);
@@ -2903,7 +2892,8 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
                   })
                 : null;
               const exactDeliveryRecordItem =
-                exactDeliveryEffects.length === 0
+                !retiredExactDelivery
+                  && exactDeliveryEffects.length === 0
                   && exactDeliveryIntentState
                   && !exactDeliveryIntentState.terminal
                   && exactDeliveryIntentState.nextWakeAt
@@ -3061,10 +3051,7 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
           };
           if (
             ownsExactModelFreeDelivery
-            && (
-              exactDeliveryIntentState?.terminal
-              || (retiredExactDelivery && exactDeliveryIntentState === null)
-            )
+            && (retiredExactDelivery || exactDeliveryIntentState?.terminal)
           ) {
             return await recordSystemMailboxItem({
               exactDeliveryCompleted: true,

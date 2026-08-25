@@ -202,10 +202,12 @@ export async function collectHostedAssistantDeliverySideEffects(
     vaultRoot: input.vaultRoot,
   };
   const now = new Date();
-  const storedIntents = await retireHostedSourceDeliveryStallIntents({
-    intents: await listAssistantOutboxIntents(request.vaultRoot),
-    vaultRoot: request.vaultRoot,
-  });
+  const storedIntents = (await listAssistantOutboxIntents(request.vaultRoot))
+    .filter((intent) =>
+      !isHostedRetiredSourceDeliveryStallDeliveryKey(
+        intent.deliveryIdempotencyKey,
+      )
+    );
   if (request.includeBackgroundDueIntents) {
     queueHostedAssistantPendingMessageVolumeReceipts({
       effectsPort: input.messageVolumeReceiptPort ?? null,
@@ -411,70 +413,53 @@ export function isHostedRetiredSourceDeliveryStallDeliveryKey(
   );
 }
 
-export async function retireHostedSourceDeliveryStallIntentById(input: {
-  intentId: string;
+export async function reconcileHostedRetiredSourceDeliveryStallOutbox(input: {
   vaultRoot: string;
-}): Promise<AssistantOutboxIntent | null> {
-  const intent = await readAssistantOutboxIntent(
-    input.vaultRoot,
-    input.intentId,
-  );
-  return intent
-    ? await retireHostedSourceDeliveryStallIntent({
-        intent,
-        vaultRoot: input.vaultRoot,
-      })
-    : null;
-}
+}): Promise<{
+  terminalizedCount: number;
+  terminalizedSendingCount: number;
+}> {
+  let terminalizedCount = 0;
+  let terminalizedSendingCount = 0;
+  for (const intent of await listAssistantOutboxIntents(input.vaultRoot)) {
+    if (
+      !isHostedRetiredSourceDeliveryStallDeliveryKey(
+        intent.deliveryIdempotencyKey,
+      )
+      || intent.status === "sent"
+      || intent.status === "failed"
+      || intent.status === "abandoned"
+    ) {
+      continue;
+    }
 
-async function retireHostedSourceDeliveryStallIntents(input: {
-  intents: readonly AssistantOutboxIntent[];
-  vaultRoot: string;
-}): Promise<AssistantOutboxIntent[]> {
-  const intents: AssistantOutboxIntent[] = [];
-  for (const intent of input.intents) {
-    intents.push(await retireHostedSourceDeliveryStallIntent({
-      intent,
-      vaultRoot: input.vaultRoot,
-    }));
-  }
-  return intents;
-}
-
-async function retireHostedSourceDeliveryStallIntent(input: {
-  intent: AssistantOutboxIntent;
-  vaultRoot: string;
-}): Promise<AssistantOutboxIntent> {
-  if (
-    !isHostedRetiredSourceDeliveryStallDeliveryKey(
-      input.intent.deliveryIdempotencyKey,
-    )
-    || input.intent.status === "sent"
-    || input.intent.status === "failed"
-    || input.intent.status === "abandoned"
-  ) {
-    return input.intent;
-  }
-
-  const providerMayHaveStarted = input.intent.status === "sending";
-  const terminal = await markAssistantOutboxIntentMirrorTerminalById({
-    error: providerMayHaveStarted
-      ? createAssistantDeliveryAmbiguousError(
-          new Error(
-            "Retired source-delivery outreach may have reached provider entry before suppression.",
+    const providerMayHaveStarted = intent.status === "sending";
+    const terminal = await markAssistantOutboxIntentMirrorTerminalById({
+      error: providerMayHaveStarted
+        ? createAssistantDeliveryAmbiguousError(
+            new Error(
+              "Retired source-delivery outreach may have reached provider entry before suppression.",
+            ),
+          )
+        : new VaultCliError(
+            "ASSISTANT_RETIRED_SOURCE_DELIVERY_STALL_SUPPRESSED",
+            "Retired source-delivery outreach was suppressed before provider entry.",
+            { retryable: false },
           ),
-        )
-      : new VaultCliError(
-          "ASSISTANT_RETIRED_SOURCE_DELIVERY_STALL_SUPPRESSED",
-          "Retired source-delivery outreach was suppressed before provider entry.",
-          { retryable: false },
-        ),
-    intentId: input.intent.intentId,
-    onlyCurrentStatuses: [input.intent.status],
-    status: providerMayHaveStarted ? "failed" : "abandoned",
-    vault: input.vaultRoot,
-  });
-  return terminal ?? input.intent;
+      intentId: intent.intentId,
+      onlyCurrentStatuses: [intent.status],
+      status: providerMayHaveStarted ? "failed" : "abandoned",
+      vault: input.vaultRoot,
+    });
+    if (!terminal) {
+      continue;
+    }
+    terminalizedCount += 1;
+    if (providerMayHaveStarted) {
+      terminalizedSendingCount += 1;
+    }
+  }
+  return { terminalizedCount, terminalizedSendingCount };
 }
 
 /**

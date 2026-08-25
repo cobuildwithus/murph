@@ -1,6 +1,6 @@
 # PR ReviewGPT Completion Loops
 
-Last verified: 2026-08-24
+Last verified: 2026-08-23
 
 This document owns two distinct managed-browser ReviewGPT stages for PR-lane
 completion:
@@ -111,42 +111,37 @@ the preliminary coverage-patch download and application boundary in
 `agent-docs/operations/completion-workflow.md` § Preliminary ReviewGPT Packet;
 do not use a generic wake handoff as authority to apply an artifact.
 
-## Finding Disposition Boundary
+## Finding Disposition Pause
 
 Every substantive preliminary specialist result and every final `FINDINGS`
-result uses this parent-owned disposition boundary. Validate the exact response
-first, then have the parent triage every finding. The user-visible report states
-the result and, for each finding, the parent's accepted or rejected disposition,
-concrete code or path evidence, current user or operational harm, and the
-smallest justified fix with its complexity cost.
-
-A preliminary specialist result does not end the active task turn. After the
-parent reports the result and dispositions as a progress update, it may inspect
-an attached coverage artifact and remediate accepted findings within the
-existing task authority without asking for separate user permission. This
-continuation does not authorize a scope expansion, destructive action, or
-external action that otherwise requires approval.
-
-A final `ROUND_OUTCOME: FINDINGS` keeps the turn-ending pause: report the result
-and dispositions, then wait for the user to resume before mutating the
-candidate, downloading or applying an artifact, launching another review, or
-merging. If a concurrent final stage returns `FINDINGS`, that stricter pause
-also blocks pending specialist-driven mutation. A validated final
-`ROUND_OUTCOME: PASS` has no findings to disposition and proceeds directly to
-the remaining parent review and merge checks without a user-resume pause.
+result uses this disposition boundary before remediation, artifact application,
+another review, or merge. A validated final `ROUND_OUTCOME: PASS` has no
+findings to disposition and proceeds directly to the remaining parent review
+and merge checks without a user-resume pause. For a result that requires the
+boundary, validate the exact response first, then have the parent triage every
+finding. The user-visible report states the result and, for each finding, the
+parent's accepted or rejected disposition, concrete code or path evidence,
+current user or operational harm, and the smallest justified fix with its
+complexity cost.
 
 The parent owns disposition and may reject a finding as wrong, already handled,
 speculative, unproven, or not worth the complexity it would add. The user may
-override that judgment. A rejected finding requires neither a code change nor
-reviewer withdrawal. A `FINDINGS` result needs no review rerun
+override that judgment after the pause. A rejected finding requires neither a
+code change nor reviewer withdrawal. A `FINDINGS` result needs no review rerun
 when the parent accepts zero findings and records evidence-backed rejection
 reasons. Accepted findings remain unresolved until fixed and verified; the
 one-pass preliminary stage then resolves under its existing parent-revalidation
 rule, while the final gate requires a later resolved result.
 
-Two narrow exceptions let a final `FINDINGS` result complete its disposition
-boundary without ending the turn after the parent reports every finding and its
-evidence-backed disposition as a progress update:
+End the active task turn after this handoff. A concurrently running ReviewGPT
+stage may finish, but its result receives its own pause. Do not mutate the
+candidate, download or apply an artifact, launch another review, or merge until
+the user resumes the task. `INVALID` and `RETROSPECTIVE_REQUIRED` retain their
+existing stop behavior rather than using this disposition path.
+
+Two narrow exceptions complete the disposition boundary without ending the
+turn after the parent reports every finding and its evidence-backed disposition
+as a progress update:
 
 - `Complexity Collapse`: the substantive result contains exactly one finding,
   ReviewGPT classifies it as `Complexity Collapse`, and the parent independently
@@ -172,9 +167,6 @@ the correction expands beyond the proven boundary, requested behavior or the
 intended outcome would change, scope or authority would expand, or a destructive
 or external action needs new approval. Neither exception bypasses an anomaly
 retrospective or the seven-round hard cap.
-
-`INVALID` and `RETROSPECTIVE_REQUIRED` retain their existing stop behavior
-rather than using this disposition path.
 
 ## Preliminary Specialist Pass
 
@@ -273,15 +265,13 @@ turn, attachment, requested model selection, completion marker, and substantive
 lens coverage, then record the elapsed time and lane/model evidence.
 An `INVALID` result is a tooling/evidence failure: correct the gap and retry the
 same preliminary pass. A `PASS` or `FINDINGS` result is the one substantive
-specialist pass; do not split or rerun it by lens. Apply the parent-owned
-finding-disposition boundary, report the result and dispositions as a progress
-update, then continue with accepted remediation or artifact inspection without
-a user-resume pause. If a concurrent final stage has returned `FINDINGS`, obey
-its turn-ending pause before any candidate mutation.
+specialist pass; do not split or rerun it by lens. Apply the Finding Disposition
+Pause before any remediation or artifact download.
 
-After the parent reports the preliminary dispositions, handle only accepted
-findings against the real code and tests. If the response attaches
-`reviewgpt-coverage.patch`,
+After the user resumes, or immediately after the parent reports dispositions
+under a qualifying `Complexity Collapse` or `Non-Production Remediation`
+exception, handle only accepted findings against the real code and tests. If the
+response attaches `reviewgpt-coverage.patch`,
 retain the exact review thread URL, artifact index, and selected lane. Download
 only that assistant-owned artifact from the same thread with the managed lane's
 CDP endpoint, for example:
@@ -665,15 +655,13 @@ the current user explicitly asks for it.
    migrations, shims, dual writes, queues, capability negotiation, or
    reconciliation for a low-incidence temporary window.
 
-   Apply the parent-owned finding-disposition boundary after completing this
-   triage. Preliminary specialist remediation may proceed after the parent
-   reports every disposition as a progress update. A final `FINDINGS` result
-   pauses steps 5–7 until the user resumes, including any pending
-   specialist-driven mutation, except that a qualifying `Complexity Collapse`
+   Apply the Finding Disposition Pause after completing this triage for every
+   substantive specialist result and final `FINDINGS` result. Steps 5–7 begin
+   only after the user resumes, except that a qualifying `Complexity Collapse`
    or `Non-Production Remediation` exception may proceed immediately after the
-   report. Remediation remains limited to accepted findings and the proven task
-   or exception boundary. A validated final `ROUND_OUTCOME: PASS` continues
-   without that pause.
+   parent reports every disposition. Remediation remains limited to accepted
+   findings and the proven exception boundary. A validated final
+   `ROUND_OUTCOME: PASS` continues without that pause.
 
 5. Before another tactical fix, run the anomaly retrospective when any of these
    is true:

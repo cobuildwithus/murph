@@ -232,6 +232,7 @@ import {
   drainHostedPreparedAssistantDeliveries,
   prepareHostedAssistantDeliveryEffectsForDispatch,
   queueHostedAssistantPendingMessageVolumeReceiptsForVault,
+  reconcileHostedRetiredSourceDeliveryStallOutbox,
   resolveHostedAssistantDeliveryIntentState,
   resolveHostedAssistantOutboxNextWakeAt,
 } from "../src/hosted-runtime/callbacks.ts";
@@ -610,7 +611,7 @@ beforeEach(() => {
 });
 
 describe("hosted runtime callbacks", () => {
-  it("terminalizes retired source-delivery intents before building effects", async () => {
+  it("suppresses retired source-delivery effects and reconciles them explicitly", async () => {
     const pending = createPendingHostedDeliveryIntent({
       deliveryIdempotencyKey: "device-delivery-stalled:v1:",
       intentId: "intent_retired_pending",
@@ -646,6 +647,14 @@ describe("hosted runtime callbacks", () => {
       preferredIntentIds: [],
       vaultRoot: "/tmp/vault",
     })).resolves.toEqual([]);
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).not.toHaveBeenCalled();
+
+    await expect(reconcileHostedRetiredSourceDeliveryStallOutbox({
+      vaultRoot: "/tmp/vault",
+    })).resolves.toEqual({
+      terminalizedCount: 2,
+      terminalizedSendingCount: 1,
+    });
 
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledTimes(2);
     expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledWith(

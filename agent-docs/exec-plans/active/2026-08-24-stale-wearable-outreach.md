@@ -21,8 +21,6 @@ Updated: 2026-08-24
   can still receive the existing verified reconnect flow.
 - Existing queued digest occurrences and retired direct-notification intents
   reconcile safely without introducing another queue, state owner, or migration.
-- Preliminary specialist findings can be dispositioned and fixed in the active
-  turn; final cross-cutting findings retain their mutation pause.
 - Focused owner tests, typechecks, diff verification, and the Product UX
   walkthrough pass.
 
@@ -30,8 +28,7 @@ Updated: 2026-08-24
 
 - In scope: the Garmin delivery-stall notification added on 2026-08-23, its
   mailbox/provider-entry support, the weekly digest reconnect policy, tests,
-  compatibility documentation, the associated changelog entry, and the
-  completion-workflow specialist continuation rule.
+  compatibility documentation, and the associated changelog entry.
 - Out of scope: provider ingestion, source-health observability, explicit
   reconnect-required handling, and historical source-data repair.
 
@@ -54,10 +51,12 @@ Updated: 2026-08-24
    Mitigation: make the negative policy explicit and assert it in both managed
    automation test suites.
 3. Risk: queued legacy notifications could survive the code change.
-   Mitigation: retain only the old namespace as model-free drain authority and
-   terminate matching mailbox and outbox state at their existing durable owners
-   before assistant or provider entry; remove the producer, source materializer,
-   copy, and provider-entry path.
+   Mitigation: keep collection as a pure suppression fence, advance an exact
+   model-free mailbox item without delivery, and let the existing workspace
+   runner be the only outbox terminalization owner on an assistant-delivery
+   wake. The runner marks the phase progressed so the ordinary checkpoint
+   persists the terminal state; the producer, materializer, copy, and
+   provider-entry path remain deleted.
 4. Risk: an already-due weekly digest could retain the retired reconnect prompt.
    Mitigation: patch only the exact retired managed seed while preserving its
    one-shot schedule and occurrence context.
@@ -72,8 +71,9 @@ Updated: 2026-08-24
    walkthrough.
 4. [x] Reconcile the branch with current `main`, independently triage the first
    ReviewGPT findings, and implement the accepted owner-boundary corrections.
-5. [x] Update the completion workflow so preliminary specialist remediation can
-   continue after the parent disposition update while final findings still pause.
+5. [x] Relocate retired-outbox cleanup to one checkpoint-owning boundary and
+   prove pending, retryable, and sending states survive checkpoint restoration
+   without provider or model entry.
 6. [ ] Commit the corrected candidate, push it, and complete final ReviewGPT and
    CI on the exact head.
 
@@ -92,10 +92,18 @@ Updated: 2026-08-24
   provider entry. No new UI, consent step, or member action was added.
 - Review findings were accepted where they exposed shipped durable state: an
   exact retired queued digest seed is now reconciled in place, and retired
-  mailbox/outbox delivery state is terminalized through existing owners.
+  mailbox/outbox delivery state is reconciled through existing owners.
   No new durable state, lifecycle, queue, or background reconciliation pass was
   added. The optional specialist coverage artifact was not applied because the
   equivalent smaller identity-mismatch proof was restored directly.
+- The final durability review exposed that collector-owned mutation could be
+  discarded when an otherwise idle phase produced no checkpoint. Collection is
+  now read-only; the workspace runner is the sole production caller of retired
+  outbox terminalization, only on an assistant-delivery wake and only after a
+  successful phase result, where it can force the existing checkpoint.
+- The independently requested specialist-continuation policy is isolated in a
+  docs-only pull request. The product candidate carries no completion-workflow
+  behavior or contract changes.
 
 ## Verification
 
@@ -116,9 +124,15 @@ Updated: 2026-08-24
   suppression while explicit auth failure retains the connect action.
 - Corrected-head focused proof: managed automations (56), retired mailbox
   notification state (62), durable callback retirement (1), restored exact
-  notification integration (13), hosted model-free admission (2), and workflow
-  documentation contracts (46) pass. Assistant Engine, Assistant Runtime,
-  hosted-execution, and CLI typechecks pass.
+  notification integration (13), and hosted model-free admission (2) pass.
+  Assistant Engine, Assistant Runtime, and hosted-execution typechecks pass.
+- Durability-retrospective proof: all 358 hosted workspace entrypoint tests
+  pass. The pending, retryable, and sending legacy-outbox cases each follow
+  restore -> ordinary assistant-delivery wake -> checkpoint -> restore, reach a
+  terminal state, and make zero provider or Codex-process calls. The callback
+  collector remains read-only and filters the retired namespace. Another 457
+  callback, runner, system-mailbox, and model-free notification tests pass, as
+  does the Assistant Runtime typecheck.
 - The production-shaped real-Codex test is committed for both stale-only silence
   and explicit reauthorization with exactly one returned connect URL. Its local
   live run is credential-blocked because neither supported provider credential

@@ -98,7 +98,11 @@ import {
   resolveHostedSystemMailboxNextWakeCandidate,
 } from "./system-mailbox.ts";
 import {
+  reconcileHostedRetiredSourceDeliveryStallOutbox,
+} from "./callbacks.ts";
+import {
   HOSTED_ASSISTANT_WAKE_REASON,
+  HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
   createHostedRuntimeWakeCandidate,
   selectHostedRuntimeWakeCandidate,
 } from "./wake-candidates.ts";
@@ -1125,6 +1129,34 @@ export async function runHostedWorkspaceUntilIdleOrBudget(
       hostedCanonicalWritePort,
       () => runAssistantPhase(assistantPhaseInput),
     );
+    const reconcilesAssistantDeliveryWake =
+      input.workspace?.nextWakeReason
+        === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
+      || assistantPhaseResult.nextWakeReason
+        === HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON;
+    const retiredSourceDeliveryStallOutbox = reconcilesAssistantDeliveryWake
+      ? await withHostedCanonicalWritePort(
+          hostedCanonicalWritePort,
+          () => reconcileHostedRetiredSourceDeliveryStallOutbox({
+            vaultRoot: input.vaultRoot,
+          }),
+        )
+      : { terminalizedCount: 0, terminalizedSendingCount: 0 };
+    if (retiredSourceDeliveryStallOutbox.terminalizedCount > 0) {
+      assistantPhaseResult = {
+        ...assistantPhaseResult,
+        checkpointReason:
+          assistantPhaseResult.checkpointReason ?? "outbox_receipt",
+        progressed: true,
+        redactedStatus: {
+          ...(assistantPhaseResult.redactedStatus ?? {}),
+          hostedOutboxRetiredSourceDeliveryStallTerminalized:
+            retiredSourceDeliveryStallOutbox.terminalizedCount,
+          hostedOutboxTerminalizedSending:
+            retiredSourceDeliveryStallOutbox.terminalizedSendingCount,
+        },
+      };
+    }
     if (
       assistantContextSnapshotDirty
       || await isAssistantContextSnapshotRefreshPendingBestEffort(input.vaultRoot)
