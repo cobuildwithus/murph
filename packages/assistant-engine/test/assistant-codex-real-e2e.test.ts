@@ -8920,6 +8920,15 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         const result = await runRealInteractiveNutritionCardMealRecovery({
           config,
         })
+        process.stdout.write(
+          `[interactive-nutrition-card-recovery-e2e] ${JSON.stringify({
+            commands: result.commands,
+            firstCardAttached: result.firstCard !== null,
+            firstMessage: result.firstMessage,
+            followupCardAttached: result.card !== null,
+            savedCalories: result.savedCalories,
+          })}\n`,
+        )
         expect(result.firstCard).toBeNull()
         expect(result.firstMessage).toMatch(/\?/u)
         expect(result.firstMessage).toMatch(/what|food|meal/iu)
