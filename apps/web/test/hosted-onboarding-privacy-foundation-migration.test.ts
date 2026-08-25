@@ -1161,6 +1161,7 @@ describe("hosted Prisma baseline migration", () => {
       "20260820190000_hosted_ops_usage_reset_receipt",
       "20260821120000_hosted_group_sponsorship_fifty_cap",
       "20260824010000_rearm_hosted_inbox_video_retention",
+      "20260824120000_hosted_runtime_issue_attempt_provenance",
       "20260825050000_device_source_no_data_outreach_preference",
       "migration_lock.toml",
     ]);
