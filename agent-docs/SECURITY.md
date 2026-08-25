@@ -1457,6 +1457,14 @@ Last verified: 2026-08-23
   production secret and make arbitrary network calls can exfiltrate it without
   Crabbox.
 - GitHub production credentials must be environment-scoped, with the production environment restricted to protected branches. Do not retain duplicate repository-scoped copies: a write-capable workflow author can explicitly reference repository secrets from another workflow/ref without using the production environment. Every production job must attach the production environment before referencing its credentials. Prefer required reviewers when a second trusted operator is available; branch policy alone does not defend against an account that can administratively bypass or change the repository rules.
+- The trusted `Pull Request Head Draft Reset` controller uses the existing Frog
+  GitHub App credential only through the protected `frog-reconciliation`
+  environment. Its workflow-provided token has no permissions; the controller
+  mints a current-repository installation token with only
+  `pull-requests: write`, uses it for the exact-target reads and sole draft
+  mutation, and requests no Contents, Issues, Actions, or other App authority.
+  The controller remains default-branch-owned and must not check out candidate
+  code or weaken its exact-head, open-state, draft-state, or one-target gates.
 - Public Temporal compatibility credentials belong only to the protected
   `temporal-compatibility` GitHub Environment. The GitHub App installation is
   limited to private `cobuildwithus/murph-cloud` and grants only Actions write
