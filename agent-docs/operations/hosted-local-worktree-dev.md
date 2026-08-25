@@ -205,11 +205,14 @@ vercel env run -- env \
   MURPH_DEV_SKIP_WORKERS_AI=1 \
   MURPH_DEV_TEMPORAL=disabled \
   MURPH_DEV_USE_REMOTE_HOSTED_CRYPTO_KEYS=1 \
+  MURPH_DEV_WEB_HOST=127.0.0.1 \
+  MURPH_DEV_WEB_PORT=<web-port> \
   pnpm hosted-local up --profile worker-only
 ```
 
-Wait for the harness to report the Worker ready on `127.0.0.1:8787`. Then
-start the Web server with one public origin:
+The Worker uses that direct Web address for signed internal callbacks. The port
+must match the Web process below. Wait for the harness to report the Worker
+ready on `127.0.0.1:8787`. Then start the Web server with one public origin:
 
 ```bash
 cd apps/web

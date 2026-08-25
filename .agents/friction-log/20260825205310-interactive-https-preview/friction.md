@@ -9,11 +9,11 @@ The documented HTTPS preview starts every service required to sign in and open B
 
 ## Current Behavior
 
-The preview starts only the Web server and HTTPS proxy. Authentication can open, but signed-in data requests fail because the local Worker is absent.
+The preview can start the Web server and Worker with different internal Web ports. Authentication can open, but signed-in data requests then fail because the Worker calls the wrong port.
 
 ## Possible Solution
 
-Document the supported worker-only profile as the third long-lived preview process and require a signed-in data-page check.
+Document the supported worker-only profile as the third long-lived preview process. Pass the Web host and port to that profile, and require a signed-in data-page check.
 
 ## Minimal Reproducible Example
 
