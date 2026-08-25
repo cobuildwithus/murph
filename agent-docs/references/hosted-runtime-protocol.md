@@ -1543,8 +1543,11 @@ claim. Once planning converges, only an exact model-approved active direct wake
 keeps that claim for Web delivery. Every completed non-instant plan marks the
 same row skipped before its fallback side effect. A caught planning failure
 also skips an attempted claim before rethrowing; provider-started or encrypted
-  ambiguous states remain final to that skip operation. An unavailable result
-  leaves the original conversation checkpoint unchanged. The eligibility request
+  ambiguous states remain final to that skip operation. Settlement reads only
+  the exact existing event row under the chat lock and does not depend on the
+  request-local generation promise, so exact replay can finish a rolled-back
+  settlement without creating a skipped row when no claim exists. An unavailable
+  result leaves the original conversation checkpoint unchanged. The eligibility request
   keeps source-part cardinality, so only one actual text part can use this path,
   and records whether the normalized source exceeded the classifier's bound so
   a partial representation cannot become a user-facing reply. A definite

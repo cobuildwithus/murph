@@ -587,10 +587,7 @@ export async function handleHostedOnboardingLinqWebhook(input: {
     let instantFirstTurnOwnsFinalPlan = false;
     let firstContactAdmissionDecision: HostedLinqFirstContactAdmissionDecision | null = null;
     const abandonInstantFirstTurn = async (reason: string): Promise<void> => {
-      if (
-        !instantFirstTurnGeneration
-        || planningEvent.event_type !== "message.received"
-      ) {
+      if (planningEvent.event_type !== "message.received") {
         return;
       }
       const context = resolveHostedOnboardingLinqMessageContext(planningEvent);
@@ -993,10 +990,10 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       && firstContactAdmissionDecision.source === "model"
       && plan.wakeHandoffs?.[0],
     );
-    if (instantFirstTurnGeneration && !instantFirstTurnOwnsFinalPlan) {
-      // The speculative claim lets generation overlap admission. Once planning
-      // chooses any other completed path, terminate that exact claim before a
-      // signup or alternate-route side effect can become the visible owner.
+    if (!instantFirstTurnOwnsFinalPlan) {
+      // Exact replay may recover a durable claim without recreating the
+      // request-local generation promise. Settle the existing event row before
+      // another path becomes visible; absence remains a no-op.
       await abandonInstantFirstTurn("planner-selected-non-instant-path");
     }
     finishHostedOnboardingTiming(planTiming, plan.response.reason ?? "completed", {

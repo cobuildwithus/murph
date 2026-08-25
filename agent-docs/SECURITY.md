@@ -1209,7 +1209,11 @@ Last verified: 2026-08-20
   other successfully planned outcome marks that same row skipped before signup
   or alternate-route egress. A caught planning failure marks an attempted row
   skipped before rethrowing because it has no persisted reply to resume; the
-  existing final-state guard preserves ambiguous encrypted obligations. The
+  existing final-state guard preserves ambiguous encrypted obligations. That
+  settlement reads only the exact existing event row under the chat lock and
+  is independent of request-local generation state, so replay cannot create a
+  synthetic skipped row or acknowledge an alternate effect while an old claim
+  remains unresolved. The
   request retains every source part type in order, so
   multiple text parts remain multipart even when their bounded classifier text
   is joined. The classifier keeps its 2,000-character bound, but instant reply

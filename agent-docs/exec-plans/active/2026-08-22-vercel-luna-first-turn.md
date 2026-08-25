@@ -124,23 +124,41 @@ Web sent.
   call or destination.
 - Public changelog fragment validation passes 7 tests, and the Web typecheck
   passes with source PR 2173 included.
-- The round-10 simplification passes 19 instant-turn, 149 delivery-store, 52
-  runtime provider-entry, and 209 composed webhook cases together (429 total).
+- The round-11 correction passes 20 instant-turn, 149 delivery-store, 52
+  runtime provider-entry, and 210 composed webhook cases together (431 total).
   These prove provider acceptance remains answered across buffered failure,
-  exact replay, runtime entry, and later webhook processing without a receipt
-  handoff owner. Web typecheck, focused ESLint, diff/privacy hygiene, and the
-  matching reliability, security, and runtime-protocol readback pass.
+  exact replay, runtime entry, later webhook processing, and a rolled-back
+  non-owner settlement without a receipt handoff or process-local cleanup
+  owner. Web typecheck, focused ESLint, diff/privacy hygiene, and the matching
+  reliability, security, and runtime-protocol readback pass.
 - Required exact-head PR CI and preliminary Product UX, prompt, and coverage
   specialist review, plus the cross-cutting final ReviewGPT gate.
 
 ## State
 
-Active. The round-10 retrospective is resolved by deleting the round-9 receipt
-coordinator and restoring provider acceptance as the one irreversible ownership
-boundary. The design reuses the existing delivery ledger as the only provider
-outbox, stores the exact pending body encrypted for ambiguous recovery, and
-represents the provider-accepted exchange as two ordinary consumed conversation
-rows. Focused proof, ReviewGPT, exact-head gates, and completion remain.
+Active. The round-11 replay correction is implemented on the simplified
+provider-acceptance design. The existing delivery ledger and chat lock now
+derive exact-event cleanup without request-local generation state; absence is a
+no-op and no synthetic skipped row is created. Focused proof, ReviewGPT,
+exact-head gates, and completion remain.
+
+## ReviewGPT round 11 disposition
+
+The finding was accepted. A transient rollback while settling a speculative
+claim could persist the admission decision but leave the delivery row attempted.
+Exact replay reused that decision without recreating the generation promise, so
+the process-local cleanup predicate skipped durable settlement and could
+acknowledge signup or another path while the orphaned row fenced later messages.
+
+Cleanup now derives only from durable exact-event identity. Under the existing
+chat lock, abandonment first reads the event-derived delivery row, returns when
+none exists, and otherwise uses the existing skip terminal plus final-state
+verification. Planner failure and every completed non-instant plan invoke that
+owner regardless of whether the current request started generation. The replay
+test injects the first settlement rollback and proves the second handler settles
+before alternate egress without rerunning admission or reply generation. This
+adds no field, enum, queue, timer, service, lease, state machine, or recovery
+process.
 
 ## ReviewGPT round 10 retrospective
 

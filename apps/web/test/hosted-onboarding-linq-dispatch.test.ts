@@ -9676,6 +9676,125 @@ describe("handleHostedOnboardingLinqWebhook", () => {
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
+  it("replays failed non-owner settlement without rerunning either model", async () => {
+    mocks.hostedOnboardingEnvironment.linqInstantStartPhonePrefixes = ["+1"];
+    mocks.classifyHostedLinqFirstContactAdmission.mockResolvedValueOnce({
+      confidence: 0.98,
+      kind: "block",
+      source: "model",
+    });
+    mocks.claimHostedLinqInstantFirstTurn.mockResolvedValueOnce({
+      kind: "generate",
+    });
+    mocks.startHostedLinqInstantFirstTurnGeneration.mockResolvedValueOnce({
+      kind: "reply",
+      message: "What would you like help with?",
+      usage: { requestedModel: "gpt-5.6-luna", response: {} },
+    });
+    mocks.abandonHostedLinqInstantFirstTurn
+      .mockRejectedValueOnce(new Error("Synthetic settlement rollback."))
+      .mockResolvedValueOnce(undefined);
+
+    const invite = {
+      channel: "linq",
+      id: "invite_model_block_replay",
+      inviteCode: "code_model_block_replay",
+      memberId: "member_model_block_replay",
+      sentAt: null,
+      status: "pending",
+    };
+    const now = new Date("2026-03-26T12:00:00.000Z");
+    let inviteCreated = false;
+    let memberCreated = false;
+    const member = {
+      accountGroupMemberships: [],
+      billingStatus: HostedBillingStatus.not_started,
+      createdAt: now,
+      id: invite.memberId,
+      invites: [invite],
+      phoneLookupKey: createHostedPhoneLookupKey("+15551234567"),
+      suspendedAt: null,
+      threadContainer: null,
+      updatedAt: now,
+    };
+    const prisma = asPrismaTransactionClient({
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      hostedWebhookReceipt: buildHostedWebhookReceiptFixture(),
+      hostedInvite: {
+        create: vi.fn().mockImplementation(async () => {
+          inviteCreated = true;
+          return invite;
+        }),
+        findFirst: vi.fn().mockImplementation(async () =>
+          inviteCreated ? invite : null),
+        findUnique: vi.fn().mockResolvedValue(invite),
+        update: vi.fn().mockResolvedValue({
+          ...invite,
+          sentAt: new Date("2026-03-26T12:00:01.000Z"),
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      hostedMember: {
+        create: vi.fn().mockImplementation(async () => {
+          memberCreated = true;
+          return member;
+        }),
+        findUnique: vi.fn().mockImplementation(async () =>
+          memberCreated ? member : null),
+        update: vi.fn(),
+      },
+    });
+    const rawBody = buildHostedLinqWebhookBody({
+      data: {
+        chat: {
+          id: "chat_123",
+          is_group: false,
+          owner_handle: {
+            handle: "+15550000000",
+            id: "handle_owner_123",
+            is_me: true,
+            service: "iMessage",
+          },
+        },
+        parts: [{ type: "text", value: "Hey Murph" }],
+      },
+      eventId: "evt_model_block_replay",
+      service: "iMessage",
+    });
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).rejects.toThrow("Synthetic settlement rollback.");
+    expect(mocks.sendHostedLinqChatMessage).not.toHaveBeenCalled();
+
+    await expect(handleHostedOnboardingLinqWebhook({
+      prisma,
+      rawBody,
+      signature: null,
+      timestamp: null,
+    })).resolves.toMatchObject({
+      inviteCode: invite.inviteCode,
+      ok: true,
+      reason: "sent-signup-link",
+    });
+
+    expect(mocks.classifyHostedLinqFirstContactAdmission).toHaveBeenCalledOnce();
+    expect(mocks.claimHostedLinqInstantFirstTurn).toHaveBeenCalledOnce();
+    expect(mocks.startHostedLinqInstantFirstTurnGeneration).toHaveBeenCalledOnce();
+    expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenCalledTimes(2);
+    expect(mocks.abandonHostedLinqInstantFirstTurn).toHaveBeenLastCalledWith({
+      eventId: "evt_model_block_replay",
+      linqChatId: "chat_123",
+      prisma,
+      reason: "planner-selected-non-instant-path",
+    });
+    expect(mocks.abandonHostedLinqInstantFirstTurn.mock.invocationCallOrder[1]!)
+      .toBeLessThan(mocks.sendHostedLinqChatMessage.mock.invocationCallOrder[0]!);
+  });
+
   it("does not create a pending signup route when the inbound Linq line is not assignable", async () => {
     const prismaMocks = {
       $queryRaw: vi.fn().mockResolvedValue([]),

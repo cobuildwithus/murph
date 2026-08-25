@@ -382,6 +382,28 @@ describe("hosted Linq instant first turn", () => {
       .toBeLessThan(mocks.markHostedLinqDeliverySkippedTx.mock.invocationCallOrder[0]!);
   });
 
+  it("does not create a skipped row when no speculative claim exists", async () => {
+    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce(null);
+
+    await abandonHostedLinqInstantFirstTurn({
+      eventId: REQUEST.eventId,
+      linqChatId: "chat_123",
+      prisma: createPrisma(),
+      reason: "planner-selected-non-instant-path",
+    });
+
+    expect(mocks.acquireHostedLinqChatOwnershipLockTx).toHaveBeenCalledOnce();
+    expect(mocks.hostedLinqDeliveryFindUnique).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        idempotencyKey: expect.stringContaining(
+          "linq-instant-first-turn-v1-",
+        ),
+      },
+    });
+    expect(mocks.markHostedLinqDeliverySkippedTx).not.toHaveBeenCalled();
+  });
+
   it("resumes the same encrypted obligation without regenerating", async () => {
     mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
       payloadCiphertext: "sealed:Exact prior reply",
@@ -690,13 +712,16 @@ describe("hosted Linq instant first turn", () => {
     mocks.readHostedMemberRoutingRecord.mockRejectedValueOnce(
       new Error("Synthetic route read failure."),
     );
-    mocks.hostedLinqDeliveryFindUnique.mockResolvedValueOnce({
-      failedAt: null,
-      payloadCiphertext: "sealed:Exact prior reply",
-      payloadSchema: "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
-      skippedAt: null,
-      status: "provider_dispatch_started",
-    });
+    mocks.hostedLinqDeliveryFindUnique
+      .mockResolvedValueOnce({ id: "delivery_123" })
+      .mockResolvedValueOnce({
+        failedAt: null,
+        payloadCiphertext: "sealed:Exact prior reply",
+        payloadSchema:
+          "murph.hosted-linq-delivery-payload.instant-first-turn.v1",
+        skippedAt: null,
+        status: "provider_dispatch_started",
+      });
 
     await expect(completeHostedLinqInstantFirstTurn({
       generation: {

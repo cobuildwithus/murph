@@ -253,10 +253,21 @@ export async function abandonHostedLinqInstantFirstTurn(input: {
       chatId: input.linqChatId,
       tx,
     });
+    const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
+      input.eventId,
+    );
+    const existing = await tx.hostedLinqDelivery.findUnique({
+      select: { id: true },
+      where: {
+        idempotencyKey:
+          requireHostedLinqInstantFirstTurnIdempotencyLookupKey(idempotencyKey),
+      },
+    });
+    if (!existing) {
+      return;
+    }
     const delivery = await markHostedLinqDeliverySkippedTx({
-      idempotencyKey: buildHostedLinqInstantFirstTurnIdempotencyKey(
-        input.eventId,
-      ),
+      idempotencyKey,
       linqChatId: input.linqChatId,
       prisma: tx,
       reason: input.reason,

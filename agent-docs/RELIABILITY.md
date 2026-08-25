@@ -819,6 +819,9 @@ Last verified: 2026-08-20
   skipped. A caught planning failure also skips an attempted row before
   rethrowing because no reply body exists to resume; the skip writer leaves
   provider-started, failed-with-payload, and completed rows untouched. The
+  exact-event settlement reads the existing row under the chat lock and is
+  never gated by request-local generation state, so replay can finish a rolled
+  back settlement without creating a synthetic skipped row. The
   active-member replan still owns route promotion, inbound accounting, and the
   canonical inbound mailbox append before any generated reply can be sent.
   A definite route-read or route-projection failure after generation confirms
