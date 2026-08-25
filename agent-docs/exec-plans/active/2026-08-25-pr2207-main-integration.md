@@ -24,6 +24,15 @@ journey policy, or validation owner.
   facts, preserve owner-written stages, and centralize Murph Age public paths.
 - The current head has focused proof but no post-remediation exact-head final
   review.
+- Current `main` was merged at `18c38c8474`; stale shared projector, prompt,
+  validation, and test copies were removed so the resulting tree differs from
+  `main` only in the domain slice, authored plans, and measured bundle allowance.
+- Focused verification passes: 171 domain tests, 70 prepared built-CLI tests,
+  14 runner bundle tests, all six affected package typechecks, prepared runtime,
+  CLI package shape, and both docs gates.
+- Canonical runner assembly passes all eight parity probes. The Vault CLI is
+  9,508,913 bytes against a 9,519,455-byte budget; the runner is 11,335,455
+  bytes against an 11,393,617-byte budget.
 
 ## Design
 
@@ -38,9 +47,9 @@ journey policy, or validation owner.
 
 ## Tasks
 
-1. Merge current `main`, resolving duplicate foundation history by ownership.
-2. Prove the resulting tree is current `main` plus only the domain slice.
-3. Run focused tests, affected typechecks, prepared/package-shape checks, docs
+1. [done] Merge current `main`, resolving duplicate foundation history by ownership.
+2. [done] Prove the resulting tree is current `main` plus only the domain slice.
+3. [done] Run focused tests, affected typechecks, prepared/package-shape checks, docs
    gates, and production runner bundle/parity proof.
 4. Push the exact candidate, update the PR contract, and run a sensitive full
    ReviewGPT round with the complete prior finding ledger and retrospective.
