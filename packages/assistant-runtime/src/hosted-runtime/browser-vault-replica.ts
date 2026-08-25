@@ -132,36 +132,25 @@ export async function createHostedBrowserVaultReplicaForSourceState(input: {
 }): Promise<BrowserVaultReplica> {
   const {
     createBrowserVaultReplica,
-    listMetricPoints,
-    readVault,
+    readBrowserVaultReplicaSource,
   } = await import("@murphai/query/browser-replica-server");
   input.signal?.throwIfAborted();
-  const vault = await readVault(input.vaultRoot, { signal: input.signal });
+  const { metricPoints, vault } = await readBrowserVaultReplicaSource(
+    input.vaultRoot,
+    { signal: input.signal },
+  );
   input.signal?.throwIfAborted();
-  const [metricPointsResult, outcomeProjectionResult] = await Promise.allSettled([
-    listMetricPoints(
-      input.vaultRoot,
-      { limit: null },
-      { signal: input.signal },
-    ),
-    readHostedBrowserVaultExperimentOutcomes(
-      input.vaultRoot,
-      vault,
-      input.signal,
-    ),
-  ]);
-  if (metricPointsResult.status === "rejected") {
-    throw metricPointsResult.reason;
-  }
-  if (outcomeProjectionResult.status === "rejected") {
-    throw outcomeProjectionResult.reason;
-  }
+  const outcomeProjection = await readHostedBrowserVaultExperimentOutcomes(
+    input.vaultRoot,
+    vault,
+    input.signal,
+  );
   input.signal?.throwIfAborted();
 
   return await createBrowserVaultReplica({
-    experimentOutcomes: outcomeProjectionResult.value.outcomes,
+    experimentOutcomes: outcomeProjection.outcomes,
     generatedAt: input.generatedAt,
-    metricPoints: metricPointsResult.value,
+    metricPoints,
     signal: input.signal,
     sourceBundleHash: input.sourceStateHash,
     vault,
@@ -268,7 +257,9 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
     );
     cancellation.throwIfCancelled();
     const content = summarizeHostedBrowserVaultReplicaContent(replica);
-    const byteLength = measureHostedBrowserVaultReplicaBytes(replica);
+    const byteLength = await cancellation.runOwned(
+      (signal) => measureHostedBrowserVaultReplicaBytes(replica, signal),
+    );
     cancellation.throwIfCancelled();
     if (byteLength > HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES) {
       return {
@@ -461,12 +452,12 @@ export async function hashHostedBrowserVaultReplicaSources(
 ): Promise<CanonicalQuerySourceHash> {
   const {
     hashCanonicalQuerySources,
-    readVault,
+    readBrowserVaultReplicaVault,
   } = await import("@murphai/query/browser-replica-server");
   signal?.throwIfAborted();
   const [canonicalSourceResult, vaultResult] = await Promise.allSettled([
     hashCanonicalQuerySources(vaultRoot, { signal }),
-    readVault(vaultRoot, { signal }),
+    readBrowserVaultReplicaVault(vaultRoot, { signal }),
   ]);
   if (canonicalSourceResult.status === "rejected") {
     throw canonicalSourceResult.reason;
@@ -629,8 +620,17 @@ function browserVaultOutcomeMatchesExperiment(
     outcome.experiment.slug === frontmatter.slug;
 }
 
-function measureHostedBrowserVaultReplicaBytes(replica: unknown): number {
-  return utf8Encoder.encode(JSON.stringify(replica)).byteLength;
+async function measureHostedBrowserVaultReplicaBytes(
+  replica: unknown,
+  signal?: AbortSignal,
+): Promise<number> {
+  const { stringifyJsonCooperatively } = await import(
+    "@murphai/query/browser-replica-server"
+  );
+  signal?.throwIfAborted();
+  const serialized = await stringifyJsonCooperatively(replica, { signal });
+  signal?.throwIfAborted();
+  return utf8Encoder.encode(serialized).byteLength;
 }
 
 function assertHostedBrowserVaultReplicaWriteMatchesRefresh(input: {

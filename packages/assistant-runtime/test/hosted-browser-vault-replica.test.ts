@@ -33,6 +33,7 @@ beforeEach(() => {
 describe("hosted browser-vault replica refresh preparation", () => {
   it("builds lab and metric rows from projection points while readVault stays sparse", async () => {
     const {
+      getQueryProjectionStatus,
       listMetricPoints,
       readVault,
     } = await import("@murphai/query");
@@ -160,12 +161,19 @@ describe("hosted browser-vault replica refresh preparation", () => {
 
       const vault = await readVault(vaultRoot);
       const points = await listMetricPoints(vaultRoot, { limit: null });
+      await writeVaultFile(
+        vaultRoot,
+        "journal/2026/2026-05-03.md",
+        "---\ndayKey: 2026-05-03\n---\n# New journal entry\n",
+      );
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
       const replica = await createHostedBrowserVaultReplicaForSourceState({
         generatedAt: "2026-05-10T00:00:00.000Z",
         sourceStateHash: "browser-vault-source-state-test",
         vaultRoot,
       });
 
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
       expect(vault.entities.some((entity) => entity.entityId === "smp_dense_glucose")).toBe(false);
       expect(vault.samples.some((sample) => sample.entityId === "smp_dense_glucose")).toBe(false);
       expect(points.some((point) => point.metricKey === "apob" && point.value === 87)).toBe(true);
@@ -174,6 +182,7 @@ describe("hosted browser-vault replica refresh preparation", () => {
       expect(points.some((point) => point.metricKey === "hba1c" && point.value === 9.9)).toBe(false);
       expect(points.some((point) => point.source.recordId === "smp_dense_glucose")).toBe(false);
       expect(replica.entities.some((entity) => entity.id === "smp_dense_glucose")).toBe(false);
+      expect(replica.entities.some((entity) => entity.id === "journal:2026-05-03")).toBe(true);
       expect(replica.generation).toBe(BROWSER_VAULT_REPLICA_CURRENT_GENERATION);
       expect(replica.metricRows.some((row) => row.metricKey === "apob" && row.value === 87)).toBe(true);
       expect(replica.metricRows.some((row) => row.metricKey === "hba1c")).toBe(false);
@@ -207,6 +216,103 @@ describe("hosted browser-vault replica refresh preparation", () => {
         hasPrivateContent: true,
         labResultRows: 2,
       });
+    } finally {
+      await rm(vaultRoot, { force: true, recursive: true });
+    }
+  });
+
+  it("joins real canonical refresh work after deadline and foreground-wake cancellation", async () => {
+    const {
+      getQueryProjectionStatus,
+      readVault,
+    } = await import("@murphai/query");
+    const {
+      createHostedBrowserVaultReplicaForSourceState,
+      hashHostedBrowserVaultReplicaSources,
+      refreshHostedBrowserVaultReplicaFromRuntime,
+    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+    const {
+      createCoalescingRuntimeWakeSignal,
+    } = await import("../src/hosted-runtime/runtime-wake.ts");
+    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
+    const workspace = createWorkspaceState();
+    const publishRef = vi.fn(async (input: { replicaRef: HostedBrowserVaultReplicaRef }) => ({
+      published: true as const,
+      workspace: {
+        ...workspace,
+        browserVaultReplicaRef: input.replicaRef,
+      },
+    }));
+    const write = vi.fn(async (input: { replica: unknown }) =>
+      createReplicaRefFromReplica(input.replica)
+    );
+
+    try {
+      await readVault(vaultRoot);
+      await writeVaultFile(
+        vaultRoot,
+        "ledger/events/2026/2026-05.jsonl",
+        createBrowserVaultCancellationLedger(2_048),
+      );
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
+
+      const timedOut = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        timeoutMs: 0,
+        vaultRoot,
+        workspace,
+      });
+
+      expect(timedOut).toMatchObject({ status: "deferred_timeout" });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      const runtimeWakeSignal = createCoalescingRuntimeWakeSignal();
+      const wakeResultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        runtimeWakeSignal,
+        timeoutMs: 60_000,
+        vaultRoot,
+        workspace,
+      });
+      setTimeout(() => runtimeWakeSignal.notify(), 0);
+      await expect(wakeResultPromise).resolves.toMatchObject({
+        status: "deferred_runtime_wake",
+      });
+      expect(write).not.toHaveBeenCalled();
+      expect(publishRef).not.toHaveBeenCalled();
+
+      const source = await hashHostedBrowserVaultReplicaSources(vaultRoot);
+      const replica = await createHostedBrowserVaultReplicaForSourceState({
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        sourceStateHash: source.hash,
+        vaultRoot,
+      });
+      expect(replica.metricRows.length).toBeGreaterThan(0);
+
+      const completed = await refreshHostedBrowserVaultReplicaFromRuntime({
+        force: true,
+        generatedAt: "2026-05-10T00:01:00.000Z",
+        platform: createPlatform({
+          browserVaultReplicaPort: { publishRef, write },
+        }),
+        timeoutMs: 60_000,
+        vaultRoot,
+        workspace,
+      });
+
+      expect(completed).toMatchObject({ status: "published" });
+      expect(write).toHaveBeenCalledOnce();
+      expect(publishRef).toHaveBeenCalledOnce();
+      expect((await getQueryProjectionStatus(vaultRoot)).fresh).toBe(false);
     } finally {
       await rm(vaultRoot, { force: true, recursive: true });
     }
@@ -871,72 +977,6 @@ describe("hosted browser-vault replica refresh preparation", () => {
     }
   });
 
-  it("cancels and joins the production metric query before returning its timeout", async () => {
-    let resolveMetricQueryStarted: (() => void) | null = null;
-    const metricQueryStarted = new Promise<void>((resolve) => {
-      resolveMetricQueryStarted = resolve;
-    });
-    let metricQueryStopped = false;
-    vi.doMock(
-      "@murphai/query/browser-replica-server",
-      async (importOriginal) => {
-        const actual = await importOriginal<
-          typeof import("@murphai/query/browser-replica-server")
-        >();
-        return {
-          ...actual,
-          async listMetricPoints(
-            ...args: Parameters<typeof actual.listMetricPoints>
-          ) {
-            const signal = args[2]?.signal;
-            resolveMetricQueryStarted?.();
-            await new Promise<void>((resolve) => {
-              if (signal?.aborted) {
-                resolve();
-                return;
-              }
-              signal?.addEventListener("abort", () => resolve(), { once: true });
-            });
-            metricQueryStopped = true;
-            signal?.throwIfAborted();
-            throw new Error("Expected the Browser Vault metric query to be cancelled.");
-          },
-        };
-      },
-    );
-    const {
-      refreshHostedBrowserVaultReplicaFromRuntime,
-    } = await import("../src/hosted-runtime/browser-vault-replica.ts");
-    const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-browser-vault-refresh-"));
-
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
-    try {
-      const resultPromise = refreshHostedBrowserVaultReplicaFromRuntime({
-        force: true,
-        platform: createPlatform({
-          browserVaultReplicaPort: {
-            publishRef: vi.fn(),
-            write: vi.fn(),
-          },
-        }),
-        timeoutMs: 1_000,
-        vaultRoot,
-        workspace: createWorkspaceState(),
-      });
-      await metricQueryStarted;
-      await vi.advanceTimersByTimeAsync(1_000);
-
-      await expect(resultPromise).resolves.toMatchObject({
-        status: "deferred_timeout",
-      });
-      expect(metricQueryStopped).toBe(true);
-    } finally {
-      vi.doUnmock("@murphai/query/browser-replica-server");
-      vi.useRealTimers();
-      await rm(vaultRoot, { force: true, recursive: true });
-    }
-  });
-
   it("caps the refresh timeout at an earlier caller deadline", async () => {
     mockImmediateBrowserVaultReplicaBuild();
     const {
@@ -1200,6 +1240,27 @@ function createExperimentDocument(input: {
     `# ${input.slug}`,
     "",
   ].join("\n");
+}
+
+function createBrowserVaultCancellationLedger(recordCount: number): string {
+  return `${Array.from({ length: recordCount }, (_entry, index) =>
+    JSON.stringify({
+      dayKey: "2026-05-02",
+      id: `evt_browser_vault_cancel_${String(index).padStart(4, "0")}`,
+      kind: "test",
+      occurredAt: "2026-05-02T08:00:00.000Z",
+      recordedAt: "2026-05-02T18:00:00.000Z",
+      results: [{
+        analyte: "Apolipoprotein B",
+        biomarkerSlug: "apob",
+        unit: "mg/dL",
+        value: 80 + (index % 20),
+      }],
+      schemaVersion: "murph.event.v1",
+      source: "manual",
+      title: "Synthetic cancellation panel",
+    })
+  ).join("\n")}\n`;
 }
 
 async function writeVaultFile(

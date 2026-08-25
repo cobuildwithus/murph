@@ -165,10 +165,12 @@ export async function walkRelativeFiles(
   vaultRoot: string,
   relativeRoot: string,
   extension: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<string[]> {
   const files: string[] = [];
 
   async function walk(currentRelativeRoot: string): Promise<void> {
+    options.signal?.throwIfAborted();
     const basePath = path.join(vaultRoot, currentRelativeRoot);
     let entries: Dirent[];
 
@@ -181,6 +183,7 @@ export async function walkRelativeFiles(
 
       throw error;
     }
+    options.signal?.throwIfAborted();
 
     const { childDirectories, matchingFiles } = collectRelativeFilePaths(
       currentRelativeRoot,
@@ -240,8 +243,9 @@ export function walkRelativeFilesSync(
 export async function readMarkdownDocument(
   vaultRoot: string,
   relativePath: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<MarkdownDocumentRecord> {
-  const outcome = await readMarkdownDocumentOutcome(vaultRoot, relativePath);
+  const outcome = await readMarkdownDocumentOutcome(vaultRoot, relativePath, options);
   if (!outcome.ok) {
     throw toStrictParseError(outcome);
   }
@@ -252,8 +256,9 @@ export async function readMarkdownDocument(
 export async function readOptionalMarkdownDocument(
   vaultRoot: string,
   relativePath: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<MarkdownDocumentRecord | null> {
-  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, relativePath);
+  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, relativePath, options);
   if (!outcome) {
     return null;
   }
@@ -280,12 +285,17 @@ export function readMarkdownDocumentSync(
 export async function readOptionalMarkdownDocumentOutcome(
   vaultRoot: string,
   relativePath: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<MarkdownDocumentOutcome | null> {
+  options.signal?.throwIfAborted();
   const absolutePath = path.join(vaultRoot, relativePath);
   let markdown: string;
 
   try {
-    markdown = await readFile(absolutePath, "utf8");
+    markdown = await readFile(absolutePath, {
+      encoding: "utf8",
+      signal: options.signal,
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return null;
@@ -293,6 +303,7 @@ export async function readOptionalMarkdownDocumentOutcome(
 
     throw error;
   }
+  options.signal?.throwIfAborted();
 
   return parseMarkdownDocumentOutcome(relativePath, markdown);
 }
@@ -313,8 +324,9 @@ export function readOptionalMarkdownDocumentOutcomeSync(
 export async function readMarkdownDocumentOutcome(
   vaultRoot: string,
   relativePath: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<MarkdownDocumentOutcome> {
-  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, relativePath);
+  const outcome = await readOptionalMarkdownDocumentOutcome(vaultRoot, relativePath, options);
   if (!outcome) {
     throw new Error(`Missing markdown document at ${relativePath}`);
   }
@@ -337,8 +349,9 @@ export function readMarkdownDocumentOutcomeSync(
 export async function readJsonlRecords(
   vaultRoot: string,
   relativeRoot: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<Array<{ relativePath: string; value: unknown }>> {
-  const outcomes = await readJsonlRecordOutcomes(vaultRoot, relativeRoot);
+  const outcomes = await readJsonlRecordOutcomes(vaultRoot, relativeRoot, options);
   const records: Array<{ relativePath: string; value: unknown }> = [];
 
   for (const outcome of outcomes) {
@@ -379,14 +392,57 @@ export function readJsonlRecordsSync(
 export async function readJsonlRecordOutcomes(
   vaultRoot: string,
   relativeRoot: string,
+  options: { signal?: AbortSignal } = {},
 ): Promise<JsonlRecordOutcome[]> {
-  const shardPaths = await walkRelativeFiles(vaultRoot, relativeRoot, ".jsonl");
+  const shardPaths = await walkRelativeFiles(vaultRoot, relativeRoot, ".jsonl", options);
   const records: JsonlRecordOutcome[] = [];
 
   for (const relativePath of shardPaths) {
+    options.signal?.throwIfAborted();
     const absolutePath = path.join(vaultRoot, relativePath);
-    const raw = await readFile(absolutePath, "utf8");
-    records.push(...parseJsonlRecordOutcomes(relativePath, raw));
+    const raw = await readFile(absolutePath, {
+      encoding: "utf8",
+      signal: options.signal,
+    });
+    records.push(...await parseJsonlRecordOutcomesCooperatively(
+      relativePath,
+      raw,
+      options.signal,
+    ));
+  }
+
+  return records;
+}
+
+async function parseJsonlRecordOutcomesCooperatively(
+  relativePath: string,
+  raw: string,
+  signal?: AbortSignal,
+): Promise<JsonlRecordOutcome[]> {
+  const records: JsonlRecordOutcome[] = [];
+  const lines = raw.split(/\r?\n/u);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (signal && index % 256 === 0) {
+      signal.throwIfAborted();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      signal.throwIfAborted();
+    }
+    const line = lines[index]?.trim();
+    if (!line) {
+      continue;
+    }
+
+    try {
+      records.push({
+        ok: true,
+        relativePath,
+        lineNumber: index + 1,
+        value: JSON.parse(line),
+      });
+    } catch (error) {
+      records.push(buildJsonParseFailure(relativePath, index + 1, error));
+    }
   }
 
   return records;

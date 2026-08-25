@@ -205,7 +205,6 @@ import {
   createHostedConversationMailboxImportItem,
 } from "./hosted-runtime/mailbox-conversation-import.ts";
 import {
-  deferHostedSystemMailboxRecordingItemForRetry,
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
@@ -3216,26 +3215,6 @@ export async function runHostedWorkspaceRuntimeJobInProcess(
               foregroundWakeObserved = true;
             }
             return { preempted: true, prepared: true };
-          }
-          if (refreshDisposition.action === "retry") {
-            const retry = await deferHostedSystemMailboxRecordingItemForRetry({
-              errorCode: refreshDisposition.errorCode,
-              errorMessage: refreshDisposition.errorMessage,
-              incrementAttemptCount: resumedBrowserVaultOnlyRecording,
-              item: recordItem,
-              vaultRoot: restored.vaultRoot,
-            });
-            if (!retry) {
-              return { preempted: true, prepared: true };
-            }
-            await checkpointSystemMailboxMode(
-              `${inputItem.stagePrefix}.checkpoint.browser_vault_retry`,
-              [createHostedRuntimeWakeCandidate(
-                retry.nextWakeAt,
-                retry.nextWakeReason,
-              )],
-            );
-            return { preempted: false, prepared: true };
           }
           if (shouldYieldSystemMailboxWork()) {
             return { preempted: true, prepared: true };
@@ -6764,47 +6743,21 @@ function classifyHostedBrowserVaultReplicaRefresh(
   refresh: HostedBrowserVaultReplicaRefreshResult,
 ):
   | { action: "complete" }
-  | { action: "preempt" }
-  | { action: "retry"; errorCode: string; errorMessage: string } {
+  | { action: "preempt" } {
   switch (refresh.status) {
     case "published":
     case "skipped_current":
     case "skipped_no_port":
     case "workspace_missing":
+    case "deferred_source_changed":
+    case "deferred_timeout":
+    case "publish_conflict":
+    case "refresh_failed":
+    case "refresh_failed_too_large":
       return { action: "complete" };
     case "deferred_aborted":
     case "deferred_runtime_wake":
       return { action: "preempt" };
-    case "deferred_source_changed":
-      return {
-        action: "retry",
-        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_SOURCE_CHANGED",
-        errorMessage: "Browser Vault sources changed during refresh.",
-      };
-    case "deferred_timeout":
-      return {
-        action: "retry",
-        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT",
-        errorMessage: "Browser Vault refresh reached its bounded deadline.",
-      };
-    case "publish_conflict":
-      return {
-        action: "retry",
-        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_PUBLISH_CONFLICT",
-        errorMessage: "Browser Vault publication conflicted with newer state.",
-      };
-    case "refresh_failed":
-      return {
-        action: "retry",
-        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_FAILED",
-        errorMessage: "Browser Vault refresh failed before publication.",
-      };
-    case "refresh_failed_too_large":
-      return {
-        action: "retry",
-        errorCode: "HOSTED_BROWSER_VAULT_REFRESH_TOO_LARGE",
-        errorMessage: "Browser Vault replica exceeded the publication limit.",
-      };
     default:
       return assertNever(refresh);
   }

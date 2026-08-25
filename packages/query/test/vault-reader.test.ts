@@ -18,17 +18,6 @@ import {
 } from "../src/projection/schema.ts";
 import { listCanonicalSourceManifest } from "../src/vault-source.ts";
 
-test("readVault rejects an already-aborted projection read", async () => {
-  const controller = new AbortController();
-  const reason = new DOMException("Projection read was cancelled.", "AbortError");
-  controller.abort(reason);
-
-  await assert.rejects(
-    readVault("unused-vault-root", { signal: controller.signal }),
-    (error: unknown) => error === reason,
-  );
-});
-
 test("readVaultTolerant builds a read model from sparse canonical layouts", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-vault-reader-"));
 

@@ -45,13 +45,9 @@ export async function rebuildQueryProjectionWithManifest(
   currentManifest: readonly QuerySourceManifestEntry[],
   location: QueryProjectionLocation = currentQueryProjectionLocation(vaultRoot),
   readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
-  options: { signal?: AbortSignal } = {},
 ): Promise<RebuildQueryProjectionResult> {
-  options.signal?.throwIfAborted();
   await resetUnsupportedQueryProjection(location);
-  options.signal?.throwIfAborted();
   const snapshot = await readSource(vaultRoot);
-  options.signal?.throwIfAborted();
   const projectedEntities = snapshot.entities.filter(isDefaultProjectedQueryEntity);
   const snapshotReadModel = createVaultReadModel({
     metadata: snapshot.metadata,
@@ -71,7 +67,6 @@ export async function rebuildQueryProjectionWithManifest(
     ...materializeSearchDocuments(searchableEntities),
     ...materializeSummaryDocuments(dailySampleSummaries),
   ];
-  options.signal?.throwIfAborted();
   const database = openQueryProjectionDatabase(location, { create: true });
 
   try {

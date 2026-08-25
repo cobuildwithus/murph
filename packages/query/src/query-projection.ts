@@ -138,10 +138,8 @@ export async function rebuildQueryProjection(
 
 export async function loadProjectedVaultSource(
   vaultRoot: string,
-  options: { signal?: AbortSignal } = {},
 ): Promise<VaultSourceSnapshot> {
-  const location = await ensureFreshQueryProjection(vaultRoot, options);
-  options.signal?.throwIfAborted();
+  const location = await ensureFreshQueryProjection(vaultRoot);
   return readStoredVaultSource(location);
 }
 
@@ -175,10 +173,8 @@ export async function searchVaultRuntime(
 export async function listMetricPointsRuntime(
   vaultRoot: string,
   filters: QueryMetricPointFilters = {},
-  options: { signal?: AbortSignal } = {},
 ): Promise<MetricPoint[]> {
-  const location = await ensureFreshQueryProjection(vaultRoot, options);
-  options.signal?.throwIfAborted();
+  const location = await ensureFreshQueryProjection(vaultRoot);
   return listStoredMetricPoints(location, normalizeMetricPointFilters(filters));
 }
 
@@ -423,37 +419,30 @@ export async function selectMetricGoalProgressRuntime(input: {
 
 async function ensureFreshQueryProjection(
   vaultRoot: string,
-  options: { signal?: AbortSignal } = {},
+  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot> = readVaultSourceStrict,
 ): Promise<QueryProjectionLocation> {
-  options.signal?.throwIfAborted();
   const location = currentQueryProjectionLocation(vaultRoot);
-  const currentManifest = await listCanonicalSourceManifest(vaultRoot, options);
-  options.signal?.throwIfAborted();
+  const currentManifest = await listCanonicalSourceManifest(vaultRoot);
   const status = await readProjectionStatus(location, currentManifest);
-  options.signal?.throwIfAborted();
 
   if (!status?.fresh) {
     await rebuildQueryProjectionWithManifestOnce({
       currentManifest,
       location,
-      signal: options.signal,
+      readSource,
       vaultRoot,
     });
-    options.signal?.throwIfAborted();
     const rebuiltStatus = await readProjectionStatus(location, currentManifest);
-    options.signal?.throwIfAborted();
 
     if (!rebuiltStatus?.fresh) {
-      const refreshedManifest = await listCanonicalSourceManifest(vaultRoot, options);
-      options.signal?.throwIfAborted();
+      const refreshedManifest = await listCanonicalSourceManifest(vaultRoot);
       const refreshedStatus = await readProjectionStatus(location, refreshedManifest);
-      options.signal?.throwIfAborted();
 
       if (!refreshedStatus?.fresh) {
         await rebuildQueryProjectionWithManifestOnce({
           currentManifest: refreshedManifest,
           location,
-          signal: options.signal,
+          readSource,
           vaultRoot,
         });
       }
@@ -466,16 +455,14 @@ async function ensureFreshQueryProjection(
 async function rebuildQueryProjectionWithManifestOnce(input: {
   currentManifest: readonly QuerySourceManifestEntry[];
   location: QueryProjectionLocation;
-  signal?: AbortSignal;
+  readSource: (vaultRoot: string) => Promise<VaultSourceSnapshot>;
   vaultRoot: string;
 }): Promise<void> {
-  input.signal?.throwIfAborted();
   const key = input.location.absolutePath;
   const pending = pendingQueryProjectionRebuilds.get(key);
 
   if (pending) {
     await pending;
-    input.signal?.throwIfAborted();
     return;
   }
 
@@ -483,8 +470,7 @@ async function rebuildQueryProjectionWithManifestOnce(input: {
     input.vaultRoot,
     input.currentManifest,
     input.location,
-    (vaultRoot) => readVaultSourceStrict(vaultRoot, { signal: input.signal }),
-    { signal: input.signal },
+    input.readSource,
   ).then(() => undefined);
 
   pendingQueryProjectionRebuilds.set(key, rebuild);

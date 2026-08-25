@@ -55,6 +55,7 @@ import { toBrowserVaultLabResultRows } from "./lab-results.ts";
 import { projectBrowserTrainingSession } from "./training.ts";
 import { buildBrowserVaultExperimentRunCards } from "./experiment-run-cards.ts";
 import { createBrowserVaultProjectionQueryClient } from "./query.ts";
+import { stringifyJsonCooperatively } from "./json.ts";
 
 export async function createBrowserVaultReplica(
   input: CreateBrowserVaultReplicaInput,
@@ -149,7 +150,10 @@ export async function createBrowserVaultReplica(
     ),
   };
   input.signal?.throwIfAborted();
-  const dataVersion = await hashBrowserVaultReplicaData(replicaWithDerivedCards);
+  const dataVersion = await hashBrowserVaultReplicaData(
+    replicaWithDerivedCards,
+    input.signal,
+  );
   input.signal?.throwIfAborted();
 
   return {
@@ -172,7 +176,10 @@ async function yieldToBrowserVaultReplicaCancellation(
   signal.throwIfAborted();
 }
 
-export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica): Promise<string> {
+export async function hashBrowserVaultReplicaData(
+  replica: BrowserVaultReplica,
+  signal?: AbortSignal,
+): Promise<string> {
   const stableReplica = {
     ...replica,
     generatedAt: "",
@@ -191,7 +198,10 @@ export async function hashBrowserVaultReplicaData(replica: BrowserVaultReplica):
   };
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(stableStringify(stableReplica)),
+    new TextEncoder().encode(await stringifyJsonCooperatively(stableReplica, {
+      signal,
+      sortKeys: true,
+    })),
   );
 
   return [...new Uint8Array(digest)]
@@ -732,19 +742,4 @@ function subtractDaysFromIsoDate(value: string, days: number): string {
 
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-
-  return `{${Object.entries(value as Record<string, unknown>)
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-    .join(",")}}`;
 }

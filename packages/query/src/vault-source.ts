@@ -109,17 +109,32 @@ export async function readVaultSourceStrict(
   options: { signal?: AbortSignal } = {},
 ): Promise<VaultSourceSnapshot> {
   options.signal?.throwIfAborted();
-  const metadata = await readOptionalVaultMetadata(path.join(vaultRoot, VAULT_LAYOUT.metadata));
+  const metadata = await readOptionalVaultMetadata(
+    path.join(vaultRoot, VAULT_LAYOUT.metadata),
+    options,
+  );
   options.signal?.throwIfAborted();
-  const [baseEntities, healthEntities] = await Promise.all([
-    readBaseEntities(vaultRoot, metadata),
-    collectCanonicalEntities(vaultRoot, { mode: "strict-async" }),
+  const [baseEntitiesResult, healthEntitiesResult] = await Promise.allSettled([
+    readBaseEntities(vaultRoot, metadata, options.signal),
+    collectCanonicalEntities(vaultRoot, {
+      mode: "strict-async",
+      signal: options.signal,
+    }),
   ]);
+  if (baseEntitiesResult.status === "rejected") {
+    throw baseEntitiesResult.reason;
+  }
+  if (healthEntitiesResult.status === "rejected") {
+    throw healthEntitiesResult.reason;
+  }
   options.signal?.throwIfAborted();
 
   return {
     metadata,
-    entities: [...baseEntities, ...healthEntities.entities].sort(compareCanonicalEntities),
+    entities: [
+      ...baseEntitiesResult.value,
+      ...healthEntitiesResult.value.entities,
+    ].sort(compareCanonicalEntities),
   };
 }
 
@@ -229,8 +244,8 @@ export async function listCanonicalSourceManifest(
 
   for (const root of CANONICAL_MARKDOWN_ROOTS) {
     const paths = root === VAULT_LAYOUT.experimentsDirectory
-      ? await listCanonicalExperimentMarkdownPaths(vaultRoot)
-      : await walkRelativeFiles(vaultRoot, root, ".md");
+      ? await listCanonicalExperimentMarkdownPaths(vaultRoot, options.signal)
+      : await walkRelativeFiles(vaultRoot, root, ".md", options);
     options.signal?.throwIfAborted();
     for (const relativePath of paths) {
       relativePaths.add(relativePath);
@@ -238,14 +253,20 @@ export async function listCanonicalSourceManifest(
   }
 
   for (const root of CANONICAL_JSONL_ROOTS) {
-    for (const relativePath of await walkRelativeFiles(vaultRoot, root, ".jsonl")) {
+    for (const relativePath of await walkRelativeFiles(
+      vaultRoot,
+      root,
+      ".jsonl",
+      options,
+    )) {
       relativePaths.add(relativePath);
     }
     options.signal?.throwIfAborted();
   }
 
-  const manifest = await Promise.all(
+  const manifestResults = await Promise.allSettled(
     [...relativePaths].sort().map(async (relativePath) => {
+      options.signal?.throwIfAborted();
       const fileStats = await stat(path.join(vaultRoot, relativePath));
       return {
         relativePath,
@@ -254,9 +275,20 @@ export async function listCanonicalSourceManifest(
       } satisfies QuerySourceManifestEntry;
     }),
   );
+  const failedManifestEntry = manifestResults.find(
+    (result) => result.status === "rejected",
+  );
+  if (failedManifestEntry) {
+    throw failedManifestEntry.reason;
+  }
   options.signal?.throwIfAborted();
 
-  return manifest;
+  return manifestResults.map((result) => {
+    if (result.status === "rejected") {
+      throw result.reason;
+    }
+    return result.value;
+  });
 }
 
 export function isCanonicalQuerySourcePath(relativePath: string): boolean {
@@ -392,9 +424,16 @@ function isCanonicalPathUnderRoot(
     && relativePath.endsWith(extension);
 }
 
-async function readOptionalVaultMetadata(filePath: string): Promise<QueryRecordData | null> {
+async function readOptionalVaultMetadata(
+  filePath: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<QueryRecordData | null> {
   try {
-    const contents = await readFile(filePath, "utf8");
+    const contents = await readFile(filePath, {
+      encoding: "utf8",
+      signal: options.signal,
+    });
+    options.signal?.throwIfAborted();
     return validateVaultMetadataForQuery(JSON.parse(contents));
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -424,14 +463,33 @@ function validateVaultMetadataForQuery(value: unknown): QueryRecordData {
 async function readBaseEntities(
   vaultRoot: string,
   metadata: QueryRecordData | null,
+  signal?: AbortSignal,
 ): Promise<CanonicalEntity[]> {
-  const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata);
-  const experiments = await readExperimentEntities(vaultRoot);
-  const protocols = await readProtocolEntities(vaultRoot);
-  const journalEntries = await readJournalEntities(vaultRoot);
-  const events = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.eventLedgerDirectory, "event");
-  const metricSamples = await readMetricSampleEntities(vaultRoot);
-  const audits = await readJsonlRecordFamily(vaultRoot, VAULT_LAYOUT.auditDirectory, "audit");
+  signal?.throwIfAborted();
+  const coreDocument = await readOptionalCoreEntity(vaultRoot, metadata, signal);
+  signal?.throwIfAborted();
+  const experiments = await readExperimentEntities(vaultRoot, signal);
+  signal?.throwIfAborted();
+  const protocols = await readProtocolEntities(vaultRoot, signal);
+  signal?.throwIfAborted();
+  const journalEntries = await readJournalEntities(vaultRoot, signal);
+  signal?.throwIfAborted();
+  const events = await readJsonlRecordFamily(
+    vaultRoot,
+    VAULT_LAYOUT.eventLedgerDirectory,
+    "event",
+    signal,
+  );
+  signal?.throwIfAborted();
+  const metricSamples = await readMetricSampleEntities(vaultRoot, signal);
+  signal?.throwIfAborted();
+  const audits = await readJsonlRecordFamily(
+    vaultRoot,
+    VAULT_LAYOUT.auditDirectory,
+    "audit",
+    signal,
+  );
+  signal?.throwIfAborted();
 
   return [
     ...(coreDocument ? [coreDocument] : []),
@@ -447,11 +505,13 @@ async function readBaseEntities(
 async function readOptionalCoreEntity(
   vaultRoot: string,
   metadata: QueryRecordData | null,
+  signal?: AbortSignal,
 ): Promise<CanonicalEntity | null> {
   const filePath = path.join(vaultRoot, VAULT_LAYOUT.coreDocument);
 
   try {
-    const source = await readFile(filePath, "utf8");
+    const source = await readFile(filePath, { encoding: "utf8", signal });
+    signal?.throwIfAborted();
     const document = parseMarkdownDocument(source);
     const attributes = normalizeFrontmatterAttributes("core", document.attributes);
     const title = pickString(attributes, ["title"]) ?? extractMarkdownHeading(document.body);
@@ -490,13 +550,17 @@ async function readOptionalCoreEntity(
   }
 }
 
-async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const relativePaths = await listCanonicalExperimentMarkdownPaths(vaultRoot);
-
-  const pages = await Promise.all(
+async function readExperimentEntities(
+  vaultRoot: string,
+  signal?: AbortSignal,
+): Promise<CanonicalEntity[]> {
+  const relativePaths = await listCanonicalExperimentMarkdownPaths(vaultRoot, signal);
+  const pageResults = await Promise.allSettled(
     relativePaths.map(async (relativePath) => {
+      signal?.throwIfAborted();
       const filePath = path.join(vaultRoot, relativePath);
-      const source = await readFile(filePath, "utf8");
+      const source = await readFile(filePath, { encoding: "utf8", signal });
+      signal?.throwIfAborted();
       const document = parseMarkdownDocument(source);
       const attributes = readExperimentProtocolAttributesForQuery(
         normalizeFrontmatterAttributes(
@@ -562,17 +626,31 @@ async function readExperimentEntities(vaultRoot: string): Promise<CanonicalEntit
       } satisfies CanonicalEntity;
     }),
   );
+  const failedPage = pageResults.find((result) => result.status === "rejected");
+  if (failedPage) {
+    throw failedPage.reason;
+  }
 
-  return pages.sort(compareCanonicalEntities);
+  return pageResults
+    .map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    })
+    .sort(compareCanonicalEntities);
 }
 
 async function listCanonicalExperimentMarkdownPaths(
   vaultRoot: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
+  signal?.throwIfAborted();
   const directoryPath = path.join(vaultRoot, VAULT_LAYOUT.experimentsDirectory);
 
   try {
     const entries = await readdir(directoryPath, { withFileTypes: true });
+    signal?.throwIfAborted();
     return entries
       .filter((entry) => entry.isFile())
       .map((entry) => path.posix.join(VAULT_LAYOUT.experimentsDirectory, entry.name))
@@ -587,13 +665,22 @@ async function listCanonicalExperimentMarkdownPaths(
   }
 }
 
-async function readProtocolEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, PROTOCOL_DIRECTORY, ".md");
-
-  const pages = await Promise.all(
+async function readProtocolEntities(
+  vaultRoot: string,
+  signal?: AbortSignal,
+): Promise<CanonicalEntity[]> {
+  const relativePaths = await walkRelativeFiles(
+    vaultRoot,
+    PROTOCOL_DIRECTORY,
+    ".md",
+    { signal },
+  );
+  const pageResults = await Promise.allSettled(
     relativePaths.map(async (relativePath) => {
+      signal?.throwIfAborted();
       const filePath = path.join(vaultRoot, relativePath);
-      const source = await readFile(filePath, "utf8");
+      const source = await readFile(filePath, { encoding: "utf8", signal });
+      signal?.throwIfAborted();
       const document = parseMarkdownDocument(source);
       const attributes = readProtocolAttributesForQuery(
         normalizeFrontmatterAttributes(
@@ -634,17 +721,38 @@ async function readProtocolEntities(vaultRoot: string): Promise<CanonicalEntity[
       } satisfies CanonicalEntity;
     }),
   );
+  const failedPage = pageResults.find((result) => result.status === "rejected");
+  if (failedPage) {
+    throw failedPage.reason;
+  }
 
-  return pages.sort(compareCanonicalEntities);
+  return pageResults
+    .map((result) => {
+      if (result.status === "rejected") {
+        throw result.reason;
+      }
+      return result.value;
+    })
+    .sort(compareCanonicalEntities);
 }
 
-async function readJournalEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
-  const relativePaths = await walkRelativeFiles(vaultRoot, VAULT_LAYOUT.journalDirectory, ".md");
+async function readJournalEntities(
+  vaultRoot: string,
+  signal?: AbortSignal,
+): Promise<CanonicalEntity[]> {
+  const relativePaths = await walkRelativeFiles(
+    vaultRoot,
+    VAULT_LAYOUT.journalDirectory,
+    ".md",
+    { signal },
+  );
   const pages: CanonicalEntity[] = [];
 
   for (const relativePath of relativePaths) {
+    signal?.throwIfAborted();
     const filePath = path.join(vaultRoot, relativePath);
-    const source = await readFile(filePath, "utf8");
+    const source = await readFile(filePath, { encoding: "utf8", signal });
+    signal?.throwIfAborted();
     const document = parseMarkdownDocument(source);
     const attributes = normalizeFrontmatterAttributes("journal", document.attributes);
     const date = pickString(attributes, ["dayKey"]) ?? path.basename(relativePath, ".md");
@@ -687,6 +795,7 @@ async function readJsonlRecordFamily(
   vaultRoot: string,
   relativeDir: string,
   recordType: Exclude<JsonRecordType, "metric_sample" | "sample">,
+  signal?: AbortSignal,
 ): Promise<CanonicalEntity[]> {
   const entities = await readSortedJsonlRecords(
     vaultRoot,
@@ -748,12 +857,16 @@ async function readJsonlRecordFamily(
         tags: normalizeTags(payload.tags),
       };
     },
+    signal,
   );
 
   return recordType === "event" ? collapseEventLedgerEntities(entities) : entities;
 }
 
-async function readMetricSampleEntities(vaultRoot: string): Promise<CanonicalEntity[]> {
+async function readMetricSampleEntities(
+  vaultRoot: string,
+  signal?: AbortSignal,
+): Promise<CanonicalEntity[]> {
   return readSortedJsonlRecords(
     vaultRoot,
     VAULT_LAYOUT.metricSampleLedgerDirectory,
@@ -798,6 +911,7 @@ async function readMetricSampleEntities(vaultRoot: string): Promise<CanonicalEnt
         tags: normalizeTags(payload.tags),
       };
     },
+    signal,
   );
 }
 
@@ -809,15 +923,21 @@ async function readSortedJsonlRecords(
     lineNumber: number,
     payload: QueryRecordData,
   ) => CanonicalEntity | null,
+  signal?: AbortSignal,
 ): Promise<CanonicalEntity[]> {
   const entities: CanonicalEntity[] = [];
 
-  await forEachJsonlPayload(vaultRoot, relativeDir, (sourcePath, lineNumber, payload) => {
-    const entity = buildEntity(sourcePath, lineNumber, payload);
-    if (entity) {
-      entities.push(entity);
-    }
-  });
+  await forEachJsonlPayload(
+    vaultRoot,
+    relativeDir,
+    (sourcePath, lineNumber, payload) => {
+      const entity = buildEntity(sourcePath, lineNumber, payload);
+      if (entity) {
+        entities.push(entity);
+      }
+    },
+    signal,
+  );
 
   return entities.sort(compareCanonicalEntities);
 }
@@ -830,12 +950,14 @@ async function forEachJsonlPayload(
     lineNumber: number,
     payload: QueryRecordData,
   ) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const targetDir = path.join(vaultRoot, relativeDir);
 
-  for (const filePath of await listFilesByExtension(targetDir, ".jsonl")) {
+  for (const filePath of await listFilesByExtension(targetDir, ".jsonl", signal)) {
+    signal?.throwIfAborted();
     const sourcePath = toPosixRelative(vaultRoot, filePath);
-    await readJsonlFile(filePath, sourcePath, visit);
+    await readJsonlFile(filePath, sourcePath, visit, signal);
   }
 }
 
@@ -847,14 +969,16 @@ async function readJsonlFile(
     lineNumber: number,
     payload: QueryRecordData,
   ) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
   const lines = createInterface({
     crlfDelay: Infinity,
-    input: createReadStream(filePath, { encoding: "utf8" }),
+    input: createReadStream(filePath, { encoding: "utf8", signal }),
   });
   let lineNumber = 0;
 
   for await (const rawLine of lines) {
+    signal?.throwIfAborted();
     lineNumber += 1;
     const line = rawLine.trim();
     if (!line) {
@@ -872,20 +996,28 @@ async function readJsonlFile(
 async function listFilesByExtension(
   directoryPath: string,
   extension: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
-  return (await walkFiles(directoryPath)).filter((entry) => entry.endsWith(extension));
+  return (await walkFiles(directoryPath, signal)).filter((entry) =>
+    entry.endsWith(extension)
+  );
 }
 
-async function walkFiles(directoryPath: string): Promise<string[]> {
+async function walkFiles(
+  directoryPath: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  signal?.throwIfAborted();
   try {
     const entries = await readdir(directoryPath, { withFileTypes: true });
+    signal?.throwIfAborted();
     const files: string[] = [];
 
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       const entryPath = path.join(directoryPath, entry.name);
 
       if (entry.isDirectory()) {
-        files.push(...(await walkFiles(entryPath)));
+        files.push(...(await walkFiles(entryPath, signal)));
         continue;
       }
 

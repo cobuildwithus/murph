@@ -522,61 +522,6 @@ function shouldResumeHostedBrowserVaultRecordingItemReadOnly(
     );
 }
 
-export async function deferHostedSystemMailboxRecordingItemForRetry(input: {
-  errorCode: string;
-  errorMessage: string;
-  incrementAttemptCount: boolean;
-  item: HostedSystemMailboxPendingItem;
-  now?: () => string;
-  vaultRoot: string;
-}): Promise<{
-  item: HostedSystemMailboxPendingItem;
-  nextWakeAt: string;
-  nextWakeReason: string | null;
-} | null> {
-  const attemptedAt = (input.now ?? (() => new Date().toISOString()))();
-  const nextWakeAt = new Date(
-    Date.parse(attemptedAt) + HOSTED_SYSTEM_MAILBOX_RETRY_DELAY_MS,
-  ).toISOString();
-  return await updateHostedSystemMailboxState(input.vaultRoot, (state) => {
-    const current = state.pending.find((item) =>
-      item.itemId === input.item.itemId
-    ) ?? null;
-    if (
-      !current
-      || !hostedSystemMailboxPendingItemsMatchForClaim(current, input.item)
-    ) {
-      return {
-        result: null,
-        write: false,
-      };
-    }
-    const retainedItem: HostedSystemMailboxPendingItem = {
-      ...current,
-      attemptCount: current.attemptCount + (input.incrementAttemptCount ? 1 : 0),
-      lastAttemptAt: attemptedAt,
-      lastErrorCode: input.errorCode,
-      lastErrorMessage: input.errorMessage,
-      nextAttemptAt: nextWakeAt,
-      status: "recording",
-    };
-    return {
-      result: {
-        item: retainedItem,
-        nextWakeAt,
-        nextWakeReason: resolveHostedSystemMailboxPreparedItemRetryWakeReason(
-          retainedItem,
-        ),
-      },
-      state: {
-        pending: state.pending.map((item) =>
-          item.itemId === retainedItem.itemId ? retainedItem : item
-        ),
-      },
-    };
-  });
-}
-
 function resolveHostedSystemMailboxPreparedItemRetryWakeReason(
   item: HostedSystemMailboxPendingItem,
 ): string | null {
