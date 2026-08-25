@@ -166,7 +166,7 @@ function GradeDialog({
                       grade.redFlags === 1
                         ? "An urgent issue caps"
                         : `${grade.redFlags} urgent issues cap`
-                    } this grade at E. ${grade.met} of ${
+                    } this grade at F. ${grade.met} of ${
                       grade.graded
                     } known conditions are within target.${
                       grade.capabilityBonus && grade.basePct !== undefined

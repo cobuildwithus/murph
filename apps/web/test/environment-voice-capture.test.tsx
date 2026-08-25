@@ -75,6 +75,7 @@ vi.mock("@/src/components/ui/dialog", () => ({
 import {
   addDeclinedAnswersForSkippedTopic,
   buildTopicInstructions,
+  keepUnreflectedWrites,
   EnvironmentVoiceCapture,
   microphoneAccessNotice,
   summarizeEnvironmentInterviewCompletion,
@@ -762,6 +763,7 @@ test("does not ask again for a field this session already saved", () => {
     new Map([["sleep-environment.night_temp_c", 19]]),
   );
 
+  assert.ok(resumed);
   assert.deepEqual(
     resumed.topics.map((topic) => topic.id),
     ["workspace:0"],
@@ -813,6 +815,7 @@ test("keeps the checklist aligned when one field of a topic is already saved", (
     new Map([["workspace.work_mode", "remote"]]),
   );
 
+  assert.ok(resumed);
   assert.deepEqual(resumed.topics[0]?.focus, [
     "How many hours you spend at a desk each day",
   ]);
@@ -827,6 +830,97 @@ test("tells the extractor how to read a checklist topic, a range, and imperial u
 
   assert.doesNotMatch(instructions, /undefined/);
   assert.match(instructions, /the field labels below as the visible checklist/);
-  assert.match(instructions, /rounded midpoint of the range/);
+  assert.match(instructions, /saves the rounded midpoint/);
+  assert.match(instructions, /an approximate single number/i);
+  assert.match(instructions, /leaves the field unresolved and writes nothing/);
   assert.match(instructions, /Fahrenheit to Celsius/);
+});
+
+test("reports nothing left to ask when this session answered every field", () => {
+  assert.equal(
+    withoutSavedFields(
+      SCRIPT,
+      new Map<string, string | number | boolean>([
+        ["sleep-environment.night_temp_c", 19],
+        ["workspace.work_mode", "remote"],
+      ]),
+    ),
+    null,
+  );
+});
+
+test("drops accepted keys once the canonical script stops asking for them", () => {
+  const kept = keepUnreflectedWrites(
+    { ...SCRIPT, topics: [SCRIPT.topics[1]] },
+    new Map<string, string | number | boolean>([
+      ["sleep-environment.night_temp_c", 19],
+      ["workspace.work_mode", "remote"],
+    ]),
+  );
+
+  assert.deepEqual([...kept.keys()], ["workspace.work_mode"]);
+});
+
+test("reopening after a close does not ask again for an accepted detail", async () => {
+  const onAccepted = vi.fn();
+  const harness = await startRealtimeInterview(SCRIPT, onAccepted);
+
+  try {
+    await act(async () => {
+      harness.dataChannel.emit(
+        "message",
+        JSON.stringify({
+          arguments: JSON.stringify({
+            languageCode: "en",
+            topics: [
+              {
+                answers: [
+                  {
+                    aspectId: "sleep-environment",
+                    indicatorId: "night_temp_c",
+                    value: 19,
+                  },
+                ],
+                topicId: "sleep:0",
+              },
+            ],
+          }),
+          call_id: "call_resume",
+          name: "update_environment_interview",
+          type: "response.function_call_arguments.done",
+        }),
+      );
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      assert.equal(onAccepted.mock.calls.length, 1);
+    });
+
+    await clickButton(harness.rendered.window, "Dismiss dialog");
+    await clickButton(harness.rendered.window, "Start report");
+    await clickButton(harness.rendered.window, "Start recording");
+    await act(async () => {
+      harness.dataChannel.emit("open");
+      await Promise.resolve();
+    });
+
+    const bodyText = harness.rendered.window.document.body.textContent ?? "";
+    assert.doesNotMatch(bodyText, /Your bedroom temperature at night/);
+    assert.match(bodyText, /Whether you work at home/);
+
+    const sessionUpdates = harness.dataChannel.sent
+      .map((value): unknown => JSON.parse(value))
+      .filter(
+        (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          "type" in value &&
+          value.type === "session.update",
+      );
+    const latest = JSON.stringify(sessionUpdates.at(-1));
+    assert.doesNotMatch(latest, /night_temp_c/);
+    assert.match(latest, /work_mode/);
+  } finally {
+    await harness.cleanup();
+  }
 });

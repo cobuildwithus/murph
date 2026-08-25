@@ -287,6 +287,7 @@ export function EnvironmentVoiceCapture({
   const savedFieldValuesRef = useRef(
     new Map<string, string | number | boolean>(),
   );
+  const canonicalScriptRef = useRef(script);
   const hasAcceptedWriteRef = useRef(
     (preview?.completionSummary?.savedDetails ?? 0) > 0,
   );
@@ -510,7 +511,6 @@ export function EnvironmentVoiceCapture({
     setAudioNeedsAttention(false);
     setCapturedFieldKeys(new Set());
     setPendingFieldKeys(new Set());
-    savedFieldValuesRef.current = new Map();
     savedFieldNotesRef.current = new Map();
     hasAcceptedWriteRef.current = false;
     setCompletionHasAcceptedWrite(false);
@@ -1280,11 +1280,23 @@ export function EnvironmentVoiceCapture({
     void startRealtime(true);
   }, [script, sessionScript, startRealtime]);
 
+  const resumeScript = () => {
+    if (canonicalScriptRef.current !== script) {
+      canonicalScriptRef.current = script;
+      savedFieldValuesRef.current = keepUnreflectedWrites(
+        script,
+        savedFieldValuesRef.current,
+      );
+    }
+    return withoutSavedFields(script, savedFieldValuesRef.current);
+  };
+
   const openInterview = () => {
-    const selectedScript = withoutSavedFields(
-      script,
-      savedFieldValuesRef.current,
-    );
+    const selectedScript = resumeScript();
+    if (selectedScript === null) {
+      openAlreadyAnswered();
+      return;
+    }
     const selectedIndex = initialTopicId
       ? selectedScript.topics.findIndex(
           (candidate) => candidate.id === initialTopicId,
@@ -1299,10 +1311,11 @@ export function EnvironmentVoiceCapture({
   };
 
   const startInlineInterview = () => {
-    const selectedScript = withoutSavedFields(
-      script,
-      savedFieldValuesRef.current,
-    );
+    const selectedScript = resumeScript();
+    if (selectedScript === null) {
+      openAlreadyAnswered();
+      return;
+    }
     setSessionScript(selectedScript);
     savedFieldNotesRef.current = readScriptIndicatorNotes(selectedScript);
     setTopicIndex(0);
@@ -1310,6 +1323,20 @@ export function EnvironmentVoiceCapture({
     updateTranscript("");
     setOpen(true);
     void startRealtime();
+  };
+
+  const openAlreadyAnswered = () => {
+    setSessionScript(script);
+    setCompletionSummary(
+      summarizeEnvironmentInterviewCompletion(
+        script,
+        savedFieldValuesRef.current,
+      ),
+    );
+    setCompletionHasAcceptedWrite(hasAcceptedWriteRef.current);
+    updateTranscript("");
+    setState("complete");
+    setOpen(true);
   };
 
   const onOpenChange = (nextOpen: boolean) => {
@@ -2257,7 +2284,7 @@ export function buildTopicInstructions(
     "When several current fields remain, bind a concise answer only when its meaning identifies the field clearly.",
     "For enum fields, normalize synonyms, natural descriptions, and more specific equivalent terms to the matching canonical value. Semantic normalization is not an unsupported inference.",
     "Save every allowed fact directly entailed by the member's words, even when they do not repeat a field label. A specific measurement, setting, device use, or result can directly establish a related field. Do not save facts that still require a guess.",
-    "For a number field, a spoken range or approximation is an answer, not uncertainty. Save the rounded midpoint of the range and keep the member's exact words in the note for that field.",
+    "For a number field, apply these rules in order. An explicit bounded range such as \"twelve to fourteen hours\" saves the rounded midpoint. An approximate single number such as \"about twelve\" saves that number. A one-sided bound, a vague quantifier, or a number the member states with explicit doubt leaves the field unresolved and writes nothing. Whenever a normalized number is saved, keep the member's own wording in the note for that field.",
     "Members speak in their own units. Convert an imperial measurement to the canonical unit before saving: Fahrenheit to Celsius, feet to metres, pounds to kilograms. Keep the spoken measurement in the note.",
     "Preserve useful details beyond the canonical value in the optional note for that field. Keep measurements, brands, models, setup, location within the home, limits, and exceptions. Use one factual sentence in the member's spoken language. Do not add advice or inference.",
     "If the field has an existing note, return the full updated note whenever the answer changes or adds context. Preserve details that remain true, remove contradicted details, and use null when no useful extra context remains.",
@@ -2313,10 +2340,26 @@ function describeFields(fields: readonly EnvironmentVoiceField[]): string {
         .join("\n");
 }
 
+export function keepUnreflectedWrites(
+  script: EnvironmentVoiceScript,
+  savedValues: ReadonlyMap<string, string | number | boolean>,
+): Map<string, string | number | boolean> {
+  const stillAsked = new Set(
+    script.topics.flatMap((topic) =>
+      (topic.fields ?? []).map((field) =>
+        environmentFieldKey(field.aspectId, field.indicatorId),
+      ),
+    ),
+  );
+  return new Map(
+    [...savedValues].filter(([key]) => stillAsked.has(key)),
+  );
+}
+
 export function withoutSavedFields(
   script: EnvironmentVoiceScript,
   savedValues: ReadonlyMap<string, string | number | boolean>,
-): EnvironmentVoiceScript {
+): EnvironmentVoiceScript | null {
   if (savedValues.size === 0) {
     return script;
   }
@@ -2344,7 +2387,10 @@ export function withoutSavedFields(
     ];
   });
   const firstTopic = topics[0];
-  if (removedDetails === 0 || !firstTopic) {
+  if (!firstTopic) {
+    return null;
+  }
+  if (removedDetails === 0) {
     return script;
   }
   return {
