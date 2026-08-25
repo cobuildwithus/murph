@@ -100,6 +100,18 @@ describe('assistant automatic meal capture skill', () => {
       'Suggest resending only after later evidence shows the upload failed.',
     )
     expect(skill).toContain('vault-cli meal edit <meal-id>')
+    expect(compact(skill)).toContain(
+      'Treat a recent device meal as unresolved even after its attachment has become a privacy tombstone',
+    )
+    expect(compact(skill)).toContain(
+      'Never add a replacement meal or restore the photo.',
+    )
+    expect(compact(skill)).toContain(
+      'ask one narrow clarification question instead of refusing the request or inventing totals.',
+    )
+    expect(compact(skill)).toContain(
+      'edit that existing meal, read it back, and then follow the food-journal workflow with a fresh canonical totals read and any eligible response card.',
+    )
     expect(skill).toContain('## Run the automatic 9pm closeout')
     expect(skill).toContain(
       'engine-supplied `Occurrence local date` from the `Scheduled\n   occurrence context` as the action and latest-capture boundary',
@@ -261,6 +273,21 @@ describe('assistant automatic meal capture skill', () => {
     )
     expect(skill.indexOf('vault-cli meal remove-photo <meal-id>')).toBeLessThan(
       skill.indexOf('vault-cli meal totals --from <date> --to'),
+    )
+    const compactClarification = compactSkill.indexOf(
+      'Before step 6, stop the numeric closeout',
+    )
+    expect(compactClarification).toBeGreaterThan(
+      compactSkill.indexOf('vault-cli meal remove-photo <meal-id>'),
+    )
+    expect(compactClarification).toBeLessThan(
+      compactSkill.indexOf('vault-cli goal list --status active'),
+    )
+    expect(compactSkill).toContain(
+      'This is the sole scheduled-question exception.',
+    )
+    expect(compactSkill).toContain(
+      'Run no Goal reads, totals, or response-card work on this path, do not expose meal ids, and do not substitute the ordinary closeout or a dashboard refusal.',
     )
     const attachCardIndex = compactSkill.indexOf(
       'call `murph.attach_response_card` with this exact mapping',
