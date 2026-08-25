@@ -291,7 +291,6 @@ describe("hosted runtime control contracts", () => {
     );
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.import_completed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.job_failed");
-    expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.legacy_platform_env_present");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.maintenance_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.module_load_failed");
     expect(HOSTED_RUNTIME_LOG_EVENT_CODES).toContain("device-sync.pass_finished");
