@@ -21459,6 +21459,7 @@ describe('steered final segments', () => {
       onTraceEvent?: CodexAppServerTurnInput['onTraceEvent']
       progressDelivery?: CodexAppServerTurnInput['progressDelivery']
       responseCardsAvailable?: boolean
+      trustedContextReferences?: CodexAppServerTurnInput['trustedContextReferences']
       turnStatus?: 'completed' | 'failed'
       voiceMemoRuntime?: CodexAppServerTurnInput['voiceMemoRuntime']
     } = {},
@@ -21812,6 +21813,7 @@ describe('steered final segments', () => {
       onProgress: input.onProgress,
       onTraceEvent: input.onTraceEvent,
       progressDelivery: input.progressDelivery,
+      trustedContextReferences: input.trustedContextReferences,
       voiceMemoRuntime: input.voiceMemoRuntime,
       prompt: 'First question',
       sandbox: 'workspace-write',
@@ -21842,6 +21844,40 @@ describe('steered final segments', () => {
       params: {
         item: canonicalItem,
       },
+    }
+  }
+
+  function scriptedWorkoutStartResult(eventId: string) {
+    return {
+      activityType: 'strength-training',
+      created: true,
+      distanceKm: null,
+      durationMinutes: 60,
+      eventId,
+      kind: 'activity_session',
+      ledgerFile: '/vault/bank/ledger.md',
+      lookupId: eventId,
+      note: 'Current workout',
+      occurredAt: '2026-08-24T14:00:00.000Z',
+      title: 'Current workout',
+      vault: '/vault',
+      workout: null,
+    }
+  }
+
+  function scriptedWorkoutShowResult(eventId: string) {
+    return {
+      entity: {
+        data: {},
+        id: eventId,
+        kind: 'activity_session',
+        links: [],
+        markdown: null,
+        occurredAt: '2026-08-24T14:00:00.000Z',
+        path: '/vault/bank/ledger.md',
+        title: 'Current workout',
+      },
+      vault: '/vault',
     }
   }
 
@@ -22125,45 +22161,118 @@ describe('steered final segments', () => {
     )
   })
 
-  it('keeps a visible workout follow-up id identical across delivery and transcript', async () => {
+  it('attaches a validated live-workout start to the exact response delivery', async () => {
+    const workoutId = 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ'
+    const command = 'vault-cli workout start Current --format json'
     const result = await runScriptedSteeredFinalSegmentsTurn([
+      {
+        method: 'item/started',
+        params: {
+          item: {
+            command,
+            id: 'workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: JSON.stringify(
+              scriptedWorkoutStartResult(workoutId),
+            ),
+            command,
+            exitCode: 0,
+            id: 'workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
       completedItemEvent({
         id: 'assistant-workout-follow-up',
         type: 'assistant_message',
-        message:
-          'How many reps did you get on set 2?\n\n' +
-          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+        message: 'How many reps did you get on set 2?',
       }),
     ])
 
     expect(result.responseCard).toBeNull()
-    const message =
-      'How many reps did you get on set 2?\n\n' +
-      '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]'
-    expect(result.finalMessage).toBe(message)
-    expect(result.transcriptMessage).toBe(message)
-    expect(result.providerAuthoredFinalMessage).toBe(message)
+    expect(result.finalMessage).toBe('How many reps did you get on set 2?')
+    expect(result.responseContextReferences).toEqual([{
+      entityId: workoutId,
+      entityKind: 'activity_session',
+    }])
   })
 
-  it('keeps a steered workout follow-up id identical across delivery and transcript', async () => {
+  it('keeps validated workout identity on its own steered response segment', async () => {
+    const workoutId = 'evt_01K1ABCDEFGHJKMNPQRSTVWXYZ'
+    const startCommand = 'vault-cli workout start Current --format json'
+    const setCommand =
+      `vault-cli workout set log --workout-id ${workoutId} --set-order 2`
     const result = await runScriptedSteeredFinalSegmentsTurn([
       completedItemEvent({
         id: 'user-workout-follow-up-1',
         type: 'user_message',
         message: 'Ask me about my next set.',
       }),
+      {
+        method: 'item/started',
+        params: {
+          item: {
+            command: startCommand,
+            id: 'steered-workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: JSON.stringify(
+              scriptedWorkoutStartResult(workoutId),
+            ),
+            command: startCommand,
+            exitCode: 0,
+            id: 'steered-workout-start',
+            type: 'commandExecution',
+          },
+        },
+      },
       completedItemEvent({
         id: 'assistant-workout-follow-up-1',
         type: 'assistant_message',
-        message:
-          'What did you get on the next set?\n\n' +
-          '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+        message: 'What did you get on the next set?',
       }),
       completedItemEvent({
         id: 'user-workout-follow-up-2',
         type: 'user_message',
         message: 'One more thought.',
       }),
+      {
+        method: 'item/started',
+        params: {
+          item: {
+            command: setCommand,
+            id: 'steered-workout-set',
+            type: 'commandExecution',
+          },
+        },
+      },
+      {
+        method: 'item/completed',
+        params: {
+          item: {
+            aggregatedOutput: JSON.stringify(
+              scriptedWorkoutShowResult(workoutId),
+            ),
+            command: setCommand,
+            exitCode: 0,
+            id: 'steered-workout-set',
+            type: 'commandExecution',
+          },
+        },
+      },
       completedItemEvent({
         id: 'assistant-workout-follow-up-2',
         type: 'assistant_message',
@@ -22172,11 +22281,17 @@ describe('steered final segments', () => {
     ])
 
     expect(result.precedingAgentMessageSegments).toEqual([{
+      contextReferences: [{
+        entityId: workoutId,
+        entityKind: 'activity_session',
+      }],
       deliveryContextOrdinal: 0,
       media: [],
-      response:
-        'What did you get on the next set?\n\n' +
-        '[Murph workout follow-up: evt_01K1ABCDEFGHJKMNPQRSTVWXYZ]',
+      response: 'What did you get on the next set?',
+    }])
+    expect(result.responseContextReferences).toEqual([{
+      entityId: workoutId,
+      entityKind: 'activity_session',
     }])
   })
 

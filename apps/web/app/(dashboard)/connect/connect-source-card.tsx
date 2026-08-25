@@ -92,7 +92,10 @@ export function SourceCard({
     || Boolean(errorMessage);
 
   return (
-    <div className="relative box-border flex min-w-0 w-full max-w-full flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 sm:p-5">
+    <div
+      id={source.id}
+      className="relative box-border flex min-w-0 w-full max-w-full scroll-mt-24 flex-col justify-between overflow-hidden rounded-xl border border-border/50 bg-[rgba(255,252,246,0.9)] p-4 target:border-primary/80 target:ring-2 target:ring-primary target:ring-offset-2 target:ring-offset-background sm:p-5"
+    >
       {!setupOnly ? (
         <div className="absolute top-3 right-3 sm:top-4 sm:right-4">
           <SourceStatusDot

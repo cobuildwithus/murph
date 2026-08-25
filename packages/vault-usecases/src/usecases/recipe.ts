@@ -140,9 +140,7 @@ export function parseRecipePayload(value: unknown) {
   const result = recipePayloadSchema.safeParse(value)
 
   if (!result.success) {
-    throw new VaultCliError('contract_invalid', 'Recipe payload is invalid.', {
-      errors: result.error.flatten(),
-    })
+    throw new VaultCliError('contract_invalid', 'Recipe payload is invalid.')
   }
 
   return result.data

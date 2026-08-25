@@ -2201,6 +2201,13 @@ export async function sendAssistantMessageLocal(
               continue
             }
             precedingResponseSegments.push({
+              ...(segment.contextReferences === undefined
+                ? {}
+                : {
+                    contextReferences: segment.contextReferences?.map(
+                      (reference) => ({ ...reference }),
+                    ) ?? null,
+                  }),
               deliveryContext: resolvedDeliveryContext.context,
               response: segment.response,
               ...(segment.transcriptResponse === undefined
@@ -2419,6 +2426,15 @@ export async function sendAssistantMessageLocal(
               })
           } catch (error) {
             finalTargetResolutionError = normalizeAssistantDeliveryError(error)
+          }
+        }
+        if (providerResult.responseContextReferences !== undefined) {
+          finalDeliveryInput = {
+            ...finalDeliveryInput,
+            outboxAutomationContextReferences:
+              providerResult.responseContextReferences?.map(
+                (reference) => ({ ...reference }),
+              ) ?? null,
           }
         }
         const deliveryOutcome =
@@ -3282,6 +3298,7 @@ function buildActiveTurnInput(input: {
       input: input.input,
       overrides: input.acceptedInput,
     }),
+    outboxAutomationContextReferences: null,
     prompt: input.acceptedInput.prompt,
     receiptMetadata:
       input.acceptedInput.receiptMetadata === undefined

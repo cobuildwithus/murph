@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-08-24",
+  "order": 100,
+  "item": {
+    "id": "automatic-meal-clarification",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Meal photos can ask for missing details",
+    "summary": "When an automatic meal photo is too unclear to estimate, Murph now asks one focused question instead of leaving daily nutrition stuck.",
+    "details": "The retained image still follows its privacy cleanup schedule. A reply updates the existing meal instead of creating a duplicate, then Murph refreshes the nutrition totals and eligible card.",
+    "relevanceTags": ["assistant", "meals", "nutrition"],
+    "sourcePullRequests": [2241]
+  }
+}

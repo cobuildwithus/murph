@@ -443,6 +443,9 @@ import {
   readHostedPendingAssistantInputIds,
 } from "../src/hosted-runtime/pending-input-index.ts";
 import {
+  drainHostedRuntimeLogWritesBestEffort,
+} from "../src/hosted-runtime/runtime-logs.ts";
+import {
   markHostedWorkspaceLiveRuntimeStateDirtyForSnapshotRefBestEffort,
   restoreHostedWorkspaceRuntimeJobWorkspace,
   writeHostedWorkspaceCleanCheckpointMarkerBestEffort,
@@ -603,15 +606,91 @@ function readCapturedRuntimePhaseLogs(input: {
 }
 
 describe("hosted workspace runtime entrypoint", () => {
+  test("records one terminal event after an empty system-mailbox invocation", async () => {
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const attemptId = "attempt_synthetic_empty_system_mailbox_finished";
+
+    try {
+      await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+      await writeMailboxImportStateFile(
+        vaultRoot,
+        createEmptyHostedMailboxImportState(),
+      );
+      const result = await runHostedWorkspaceRuntimeJobInProcess(
+        createWorkspaceRuntimeJobInput({
+          request: {
+            attemptId,
+            leaseGeneration: "7",
+            processingMode: "system_mailbox",
+            userId: TEST_USER_ID,
+            workspaceVersion: "0",
+          },
+        }),
+        {
+          async createCheckpointSnapshot() {
+            return {
+              snapshotRef: createBundleRef({
+                hash: "e".repeat(64),
+                key: "users/bundles/member-synthetic/empty-system-mailbox.bundle.json",
+                size: 128,
+              }),
+            };
+          },
+          async importItem() {
+            throw new Error("An empty system-mailbox invocation must not import an item.");
+          },
+          platform: createPlatform({
+            logRequests,
+            mailboxPort: createMailboxPort({ events: [], items: [] }),
+            workspacePort: createWorkspacePort({
+              checkpointRequests: [],
+              events: [],
+              workspace: createWorkspaceState({ version: "0" }),
+            }),
+          }),
+          async runAssistantPhase() {
+            throw new Error("An empty system-mailbox invocation must not run the assistant.");
+          },
+          vaultRoot,
+        },
+      );
+      await drainHostedRuntimeLogWritesBestEffort();
+
+      assert.equal(result.status, "idle");
+      const entries = logRequests.flatMap((request) => request.entries);
+      const imported = entries.filter((entry) =>
+        entry.attemptId === attemptId
+        && entry.eventCode === "mailbox.imported"
+      );
+      assert.equal(imported.length, 1);
+      assert.equal(imported[0]?.redactedJson?.fetchedCount, 0);
+      assert.equal(imported[0]?.redactedJson?.importedCount, 0);
+      assert.equal(imported[0]?.redactedJson?.stateChanged, false);
+      assert.deepEqual(
+        entries.filter((entry) =>
+          entry.attemptId === attemptId
+          && entry.eventCode === "runtime.invocation_finished"
+        ).map((entry) => entry.redactedJson),
+        [{ processingMode: "system_mailbox" }],
+      );
+    } finally {
+      await drainHostedRuntimeLogWritesBestEffort();
+      await removeTempRoot(vaultRoot);
+    }
+  });
+
   test("rejects a blocked runtime when the host signal aborts", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const hostAbortController = new AbortController();
     const hostAbortReason = new Error("host request aborted");
     const workspaceReadStarted = createDeferred<void>();
     const workspaceReadRelease = createDeferred<HostedWorkspaceReadResponse>();
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const attemptId = "attempt_synthetic_host_abort";
     const resultPromise = runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({
       request: {
-        attemptId: "attempt_synthetic_host_abort",
+        attemptId,
         leaseGeneration: "7",
         userId: TEST_USER_ID,
         workspaceVersion: "0",
@@ -624,6 +703,7 @@ describe("hosted workspace runtime entrypoint", () => {
         throw new Error("Host abort test should not import mailbox items.");
       },
       platform: createPlatform({
+        logRequests,
         mailboxPort: createMailboxPort({ events: [], items: [] }),
         workspacePort: {
           async read() {
@@ -649,12 +729,21 @@ describe("hosted workspace runtime entrypoint", () => {
         new Promise<unknown>((resolve) => setTimeout(() => resolve(timeout), 250)),
       ]);
       assert.equal(outcome, hostAbortReason);
+      await drainHostedRuntimeLogWritesBestEffort();
+      assert.equal(
+        logRequests.flatMap((request) => request.entries).some((entry) =>
+          entry.attemptId === attemptId
+          && entry.eventCode === "runtime.invocation_finished"
+        ),
+        false,
+      );
     } finally {
       workspaceReadRelease.resolve({
         fetchedAt: TEST_NOW,
         workspace: createWorkspaceState({ version: "0" }),
       });
       await resultPromise.catch(() => undefined);
+      await drainHostedRuntimeLogWritesBestEffort();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -1792,7 +1881,7 @@ describe("hosted workspace runtime entrypoint", () => {
             usageRecordPort: {
               async recordUsage(record) {
                 events.push("usage.record");
-                return { recorded: true, usageId: record.usageId };
+                return { platformAiUsageAllowedAfter: true, recorded: true, usageId: record.usageId };
               },
             },
           },
@@ -3014,12 +3103,14 @@ describe("hosted workspace runtime entrypoint", () => {
   test("uses invocation workspace state without a startup workspace-port read", async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-workspace-entrypoint-"));
     const suppliedWorkspace = createWorkspaceState({ version: "0" });
+    const logRequests: HostedRuntimeLogRequest[] = [];
+    const attemptId = "attempt_synthetic_invocation_workspace";
 
     try {
       const result = await runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_synthetic_invocation_workspace",
+            attemptId,
             leaseGeneration: "7",
             userId: TEST_USER_ID,
             workspace: suppliedWorkspace,
@@ -3034,6 +3125,7 @@ describe("hosted workspace runtime entrypoint", () => {
             throw new Error("Invocation workspace state test should not import mailbox items.");
           },
           platform: createPlatform({
+            logRequests,
             mailboxPort: createMailboxPort({ events: [], items: [] }),
             workspacePort: {
               async read() {
@@ -3047,9 +3139,18 @@ describe("hosted workspace runtime entrypoint", () => {
           vaultRoot,
         },
       );
+      await drainHostedRuntimeLogWritesBestEffort();
 
       assert.equal(result.status, "idle");
+      assert.deepEqual(
+        logRequests.flatMap((request) => request.entries).filter((entry) =>
+          entry.attemptId === attemptId
+          && entry.eventCode === "runtime.invocation_finished"
+        ).map((entry) => entry.redactedJson),
+        [{ processingMode: "default" }],
+      );
     } finally {
+      await drainHostedRuntimeLogWritesBestEffort();
       await removeTempRoot(vaultRoot);
     }
   });
@@ -9828,6 +9929,7 @@ describe("hosted workspace runtime entrypoint", () => {
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
     const exportedIssueIds: string[] = [];
+    const exportedIssues: unknown[] = [];
     const issueRecord = {
       component: "assistant.codex-action",
       details: {
@@ -9844,6 +9946,10 @@ describe("hosted workspace runtime entrypoint", () => {
       occurredAt: "2026-04-27T00:00:00.000Z",
       operation: "command.execution",
       phase: "provider_turn" as const,
+      releaseSha: "0123456789abcdef0123456789abcdef01234567",
+      runtimeAttemptId:
+        "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda",
+      runtimeName: "cloudflare-hosted-runner",
       schema: "murph.assistant-runtime-issue.v1" as const,
       severity: "warning" as const,
       summary: "Codex command execution failed during provider turn.",
@@ -9895,6 +10001,7 @@ describe("hosted workspace runtime entrypoint", () => {
             issueExportPort: {
               async recordIssues(issues) {
                 events.push("issue.export");
+                exportedIssues.push(...issues);
                 const issueIds = issues.map((issue) => {
                   const issueId = (issue as { issueId?: unknown }).issueId;
                   if (typeof issueId !== "string") {
@@ -9932,6 +10039,7 @@ describe("hosted workspace runtime entrypoint", () => {
         "idle_shutdown",
       ]);
       assert.deepEqual(exportedIssueIds, [issueRecord.issueId]);
+      assert.deepEqual(exportedIssues, [issueRecord]);
       assert.ok(
         events.indexOf("snapshot") < events.indexOf("workspace.checkpoint"),
         "workspace checkpoint should commit the dirty workspace snapshot before telemetry",
@@ -21814,6 +21922,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("usage.record:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -21959,6 +22068,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("first.usage:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22124,6 +22234,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 await releaseUsageRecord.promise;
                 events.push("usage.record:done");
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22255,6 +22366,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 await releaseUsageRecord.promise;
                 events.push("usage.record:done");
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22373,6 +22485,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("usage.record:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22487,6 +22600,7 @@ describe("hosted workspace runtime entrypoint", () => {
                   assert.fail(`Unexpected usage record ${record.usageId}`);
                 }
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -22638,6 +22752,7 @@ describe("hosted workspace runtime entrypoint", () => {
                 events.push("usage.record:done");
                 usageRecordFinished.resolve();
                 return {
+                  platformAiUsageAllowedAfter: true,
                   recorded: true,
                   usageId: record.usageId,
                 };
@@ -26915,6 +27030,11 @@ describe("hosted workspace runtime entrypoint", () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-image-completion-preemption-"));
     const events: string[] = [];
     const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+    const exportedIssues: unknown[] = [];
+    const releaseSha = "0123456789abcdef0123456789abcdef01234567";
+    const runtimeAttemptId =
+      "runtime-write-e2cfcf20-f792-4133-b40b-3f381b371dda";
+    const runtimeName = "cloudflare-hosted-runner";
     const mailboxItems = [createMailboxItem({
       id: "mailbox_item_image_completion_preemption_origin",
       laneSeq: "1",
@@ -27032,9 +27152,29 @@ describe("hosted workspace runtime entrypoint", () => {
                   async run() {
                     await imageReady.promise;
                     return {
-                      media,
-                      runtimeIssue: null,
-                      savedImageRef: media.ref,
+                      ...(index === 0
+                        ? {
+                            failureDiagnostic:
+                              "synthetic generated image private delivery failure",
+                            media: null,
+                            runtimeIssue: {
+                              component: "assistant.generated-image",
+                              errorCode:
+                                "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
+                              issueKind: "tool_error" as const,
+                              operation: "generated_image_private_delivery",
+                              phase: "tool_call" as const,
+                              severity: "warning" as const,
+                              summary:
+                                "Generated image private delivery failed.",
+                            },
+                            savedImageRef: null,
+                          }
+                        : {
+                            media,
+                            runtimeIssue: null,
+                            savedImageRef: media.ref,
+                          }),
                     };
                   },
                 }),
@@ -27117,7 +27257,7 @@ describe("hosted workspace runtime entrypoint", () => {
       resultPromise = runHostedWorkspaceRuntimeJobInProcess(
         createWorkspaceRuntimeJobInput({
           request: {
-            attemptId: "attempt_image_completion_preemption",
+            attemptId: runtimeAttemptId,
             budget: { maxMailboxItems: 10 },
             idleCheckpointDelayMs: 180_000,
             leaseGeneration: "7",
@@ -27151,6 +27291,22 @@ describe("hosted workspace runtime entrypoint", () => {
             };
           },
           platform: createPlatform({
+            issueExportPort: {
+              async recordIssues(issues) {
+                exportedIssues.push(...issues);
+                const issueIds = issues.map((issue) => {
+                  const issueId = (issue as { issueId?: unknown }).issueId;
+                  if (typeof issueId !== "string") {
+                    throw new Error("expected exported image runtime issue id");
+                  }
+                  return issueId;
+                });
+                return {
+                  issueIds,
+                  recorded: issues.length,
+                };
+              },
+            },
             mailboxPort: createMailboxPort({
               events,
               items: mailboxItems,
@@ -27161,6 +27317,10 @@ describe("hosted workspace runtime entrypoint", () => {
               workspace: createWorkspaceState({ version: "0" }),
             }),
           }),
+          runtimeIssueProvenance: {
+            releaseSha,
+            runtimeName,
+          },
           runtimeWakeSignal,
           shutdownSignal: runtimeAbortController.signal,
           vaultRoot,
@@ -27175,6 +27335,15 @@ describe("hosted workspace runtime entrypoint", () => {
       await withRealTimeout(resultPromise, 15_000, () => events.join(","));
       assert.equal(assistantPhaseCalls, 2);
       assert.equal(completionInputIds.length, 2);
+      expect(exportedIssues).toEqual([
+        expect.objectContaining({
+          environment: "hosted",
+          errorCode: "GENERATED_IMAGE_PRIVATE_DELIVERY_FAILED",
+          releaseSha,
+          runtimeAttemptId,
+          runtimeName,
+        }),
+      ]);
     } finally {
       runtimeAbortController.abort(
         new DOMException("Synthetic test cleanup.", "AbortError"),

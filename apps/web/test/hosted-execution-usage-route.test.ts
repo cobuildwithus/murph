@@ -38,6 +38,7 @@ describe("hosted execution usage record route", () => {
       }),
     );
     mocks.recordHostedAiUsageRecordsAndSendLimitNotices.mockResolvedValue({
+      platformAiUsageAllowedAfter: false,
       recordedIds: ["turn_123.attempt-1"],
     });
   });
@@ -95,6 +96,7 @@ describe("hosted execution usage record route", () => {
       ],
     });
     await expect(response.json()).resolves.toEqual({
+      platformAiUsageAllowedAfter: false,
       recorded: true,
       usageId: "turn_123.attempt-1",
     });

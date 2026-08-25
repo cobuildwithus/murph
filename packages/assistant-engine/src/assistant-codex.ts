@@ -71,6 +71,9 @@ import {
   createCodexActionDiagnosticsReducer,
   createCodexActionRuntimeIssueTracker,
 } from './assistant-codex/action-diagnostics.js'
+import {
+  createCodexWorkoutDeliveryContextTracker,
+} from './assistant-codex/workout-delivery-context.js'
 import type {
   MurphDynamicToolFinalActionPatch,
   MurphDynamicToolReactionPatch,
@@ -169,7 +172,10 @@ import type {
   AssistantProviderFinishWithoutReplyAcceptedEvent,
   AssistantProviderRequestStartedEvent,
   AssistantProviderRequestStartTiming,
+  AssistantProviderResponseSegment,
   AssistantProviderServiceTier,
+  AssistantProviderTurn,
+  AssistantProviderTurnExecutionResult,
   AssistantProviderUsageDraft,
 } from './assistant/providers/types.js'
 import type {
@@ -531,6 +537,7 @@ export interface CodexAppServerTurnInput {
   environments?: readonly Readonly<Record<string, unknown>>[] | null
   runtimeWorkspaceRoots?: readonly string[] | null
   threadConfig?: Readonly<Record<string, unknown>> | null
+  trustedContextReferences?: AssistantProviderTurn['trustedContextReferences']
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
@@ -631,6 +638,7 @@ export interface CodexAppServerTurnResult {
   precedingAgentMessageSegments: readonly CodexAppServerResponseSegment[]
   /** Accepted-input ordinal whose delivery context owns the selected final reply. */
   responseDeliveryContextOrdinal: number
+  responseContextReferences?: AssistantProviderTurnExecutionResult['responseContextReferences']
   /** Accepted input selected as the native target for the final reply, if any. */
   targetInputId: string | null
   additionalUsages: AssistantProviderUsageDraft[]
@@ -648,6 +656,7 @@ export interface CodexAppServerTurnResult {
 }
 
 export interface CodexAppServerResponseSegment {
+  contextReferences?: AssistantProviderResponseSegment['contextReferences']
   deliveryContextOrdinal: number
   media: AssistantResponseMedia[]
   response: string
@@ -3298,6 +3307,9 @@ async function runCodexAppServerTurnOnProcess(
   let firstAssistantResponseCompleted = false
   let trailingSteerCandidate: CodexAppServerTrailingResponseCandidate | null = null
   let completedUserMessageOrdinal = -1
+  const workoutDeliveryContext = createCodexWorkoutDeliveryContextTracker({
+    contextReferences: input.trustedContextReferences,
+  })
   let lastEventError: string | null = null
   let lastEventErrorInfo: CodexStructuredErrorInfo | null = null
   let responseMedia: AssistantResponseMedia[] = []
@@ -3873,6 +3885,11 @@ async function runCodexAppServerTurnOnProcess(
           )
         : response
     precedingAgentMessageSegments.push({
+      ...(trailingSteerCandidate.contextReferences === undefined
+        ? {}
+        : {
+            contextReferences: trailingSteerCandidate.contextReferences,
+          }),
       deliveryContextOrdinal: trailingSteerCandidate.deliveryContextOrdinal,
       media: [...trailingSteerCandidate.media],
       response,
@@ -5193,6 +5210,10 @@ async function runCodexAppServerTurnOnProcess(
     }
 
     const deliveryContextOrdinal = currentDeliveryContextOrdinal()
+    workoutDeliveryContext.observe({
+      deliveryContextOrdinal,
+      event: normalizedEvent,
+    })
     const suppressDeliveryContext =
       shouldSuppressDeliveryContext(deliveryContextOrdinal)
     const isCommentaryAssistantMessage =
@@ -5252,6 +5273,7 @@ async function runCodexAppServerTurnOnProcess(
         responseMedia.length > 0
       )
     if (completedFinalAgentResponse && !suppressDeliveryContext) {
+      workoutDeliveryContext.recordCompletedResponse(deliveryContextOrdinal)
       promoteTrailingSteerCandidate()
       completedFinalAgentMessage = completedFinalAgentMessageText ?? ''
       if (!firstAssistantResponseCompleted) {
@@ -5267,7 +5289,11 @@ async function runCodexAppServerTurnOnProcess(
         const completedResponseTargetInputId = resolveReplyTargetPatch(
           completedResponseDeliveryContextOrdinal,
         )?.targetInputId ?? null
+        const contextReferences = workoutDeliveryContext.readReferences(
+          completedResponseDeliveryContextOrdinal,
+        )
         trailingSteerCandidate = {
+          ...(contextReferences === undefined ? {} : { contextReferences }),
           deliveryContextOrdinal: completedResponseDeliveryContextOrdinal,
           response: completedFinalAgentMessage,
           media: [...responseMedia],
@@ -6128,6 +6154,8 @@ async function runCodexAppServerTurnOnProcess(
       deliveredFinalResponseCard !== null ||
       finalResponseCardTextFallback !== null
     ))
+  const finalResponseContextReferences =
+    workoutDeliveryContext.readReferences(finalDeliveryContextOrdinal)
 
   return {
     acceptedNoReplyDeliveryContextOrdinals:
@@ -6144,6 +6172,9 @@ async function runCodexAppServerTurnOnProcess(
       targetInputId: entry.patch.targetInputId,
     })),
     precedingAgentMessageSegments: filteredPrecedingAgentMessageSegments.map((segment) => ({
+      ...(segment.contextReferences === undefined
+        ? {}
+        : { contextReferences: segment.contextReferences }),
       deliveryContextOrdinal: segment.deliveryContextOrdinal,
       response: segment.response,
       ...(segment.transcriptResponse === undefined
@@ -6155,6 +6186,9 @@ async function runCodexAppServerTurnOnProcess(
         : {}),
     })),
     responseDeliveryContextOrdinal: finalDeliveryContextOrdinal,
+    ...(finalResponseContextReferences === undefined
+      ? {}
+      : { responseContextReferences: finalResponseContextReferences }),
     targetInputId:
       resolveReplyTargetPatch(finalDeliveryContextOrdinal)?.targetInputId ?? null,
     additionalUsages: [...additionalUsages, ...buildSubagentUsageDrafts()],

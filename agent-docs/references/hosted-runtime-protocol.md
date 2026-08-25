@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-08-23
+Last verified: 2026-08-24
 
 ## Decision
 
@@ -2430,6 +2430,13 @@ retention remains model-free, and custom inference keeps its selected route.
 This keeps a racing payloadless direct wake from manufacturing `runtime_error`
 state or mutating restored assistant recovery while Web and Temporal remain the
 usage-policy and durable-reconciliation owners.
+The existing signed usage-record response carries Web's decision from the same
+locked allowance settlement. A false, malformed, or unavailable settlement
+monotonically revokes managed-AI admission on the exact active attempt and
+generation; it never changes write authority or re-enables admission. The
+first paid request adds no new admission round trip, while every later provider
+request continues through the existing active-fence check and is denied after
+the crossing settlement completes.
 Cloudflare treats that value as an operational hint only: the foreground
 pre-accept budget is clamped by Cloudflare's configured web-control timeout, and
 workspace read/readiness steps are capped by the remaining budget. Fresh starts
@@ -3136,7 +3143,9 @@ Without the fingerprint secret, checkpoint diagnostics omit relative-name hashes
 - hosted member identity/routing/billing/email authorization
 - hosted device-sync authority
 - hosted AI usage ledger, pricing/accounting projection, and monthly allowance aggregate
-- anonymized assistant-runtime issue sink
+- anonymized assistant-runtime issue sink, including nullable public release,
+  stable runtime-name, and occurrence-attempt columns used to correlate failures
+  with deploy and runner evidence without adding member identity
 - Assistant Ask target resolution, membership-generation and origin binding,
   deterministic request/completion identity, expiry checks, and private return
   route authority; immutable consented-disclosure permissions, per-membership
@@ -3157,6 +3166,9 @@ routing.
 - staged assistant input events and accepted-input journal state
 - auto-reply channel state, including channel enablement, `eligibleAfter`, and terminal handling evidence
 - assistant sessions, transcripts, receipts, diagnostics, and outbox intents
+- pending assistant-runtime issue records stamped at occurrence with the current
+  authenticated invocation attempt; a later invocation that retries export does
+  not become the issue's attempt
 - same-conversation turn revision
 - provider delivery and receipt/reconciliation policy
 - runtime timers, assistant next wake projection, and the shared inbound
@@ -3173,12 +3185,18 @@ routing.
 
 - per-user Durable Object routing
 - lease/fencing generation
+- the stable `cloudflare-hosted-runner` runtime identity and runner-bundle
+  manifest public release SHA injected into hosted assistant issue capture; a
+  Cloudflare version UUID and private deployment-workflow SHA are not substitutes
 - alarm/fence coordination
 - container invocation
 - no signed usage-allow decision or live Web usage-gate callback in runner-start
   authority; Temporal consumes the web-owned member-access decision, and
   Cloudflare/runner #587 or newer is the permanent rollback floor while Web
   omits the retired callback route
+- exact-attempt revocation of the active fence's managed-AI admission bit from
+  the existing signed post-settlement usage response; this does not grant
+  allowance, change write authority, or create durable spend truth
 - direct-R2 snapshot upload-session plumbing plus legacy encrypted
   bundle/artifact/env/journal object plumbing
 - worker-to-web callback signing

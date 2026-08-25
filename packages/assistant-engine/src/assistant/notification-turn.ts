@@ -643,9 +643,17 @@ export async function sendAssistantNotificationLocal(
                 kind: 'skip',
                 privateSummary: 'Group email effect completed.',
               }
-            : parseAssistantNotificationDecision(
-                providerAuthoredResponse,
-              )
+            : input.notificationPromptProfile === 'context-handoff'
+              ? {
+                  kind: 'send_message',
+                  privateSummary: 'Required context handoff message.',
+                  text: normalizeRequiredContextHandoffText(
+                    providerAuthoredResponse,
+                  ),
+                }
+              : parseAssistantNotificationDecision(
+                  providerAuthoredResponse,
+                )
           if (runtimeOwnsFinalPresentation && decision.kind !== 'send_message') {
             throw new VaultCliError(
               'ASSISTANT_NOTIFICATION_INVALID_RESPONSE',
@@ -2004,6 +2012,20 @@ export function parseAssistantNotificationDecision(
         'Assistant notification turn returned an invalid decision object.',
       )
     }
+  }
+}
+
+function normalizeRequiredContextHandoffText(value: string): string {
+  try {
+    return normalizeRequiredText(value, 'notification response')
+  } catch (error) {
+    if (error instanceof VaultCliError) {
+      throw new VaultCliError(error.code, error.message, {
+        ...(error.context ?? {}),
+        retryable: false,
+      })
+    }
+    throw error
   }
 }
 

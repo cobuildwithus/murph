@@ -792,6 +792,8 @@ async function executeAssistantCodexAttempt(input: {
         showThinkingTraces: executionPlan.input.showThinkingTraces ?? false,
         systemPrompt: attemptPlan.routePlan.systemPrompt,
         turnContextPrompt: attemptPlan.routePlan.turnContextPrompt,
+        trustedContextReferences:
+          executionPlan.input.trustedContextReferences ?? null,
         usageAttribution,
         vaultRoot: executionPlan.input.vault,
         userMessageContent: resolveCodexRouteUserMessageContent({
