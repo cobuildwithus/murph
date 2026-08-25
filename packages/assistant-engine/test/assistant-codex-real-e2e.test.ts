@@ -8940,17 +8940,22 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
         expect(result.firstMessage).toMatch(
           /amount|how much|portion|roughly|about/iu,
         )
-        expect(result.firstCommands).toEqual(
-          expect.arrayContaining([
-            expect.stringMatching(/^meal list\b/u),
-            `meal show ${result.mealId} --format json`,
-          ]),
-        )
-        expect(result.firstCommands).not.toEqual(
-          expect.arrayContaining([
-            expect.stringMatching(/^meal (?:add|edit)\b/u),
-          ]),
-        )
+        expect(recordedVaultCommandStartsWith(
+          result.firstCommands,
+          ['meal', 'list'],
+        )).toBe(true)
+        expect(recordedVaultCommandStartsWith(
+          result.firstCommands,
+          ['meal', 'show', result.mealId],
+        )).toBe(true)
+        expect(recordedVaultCommandStartsWith(
+          result.firstCommands,
+          ['meal', 'add'],
+        )).toBe(false)
+        expect(recordedVaultCommandStartsWith(
+          result.firstCommands,
+          ['meal', 'edit'],
+        )).toBe(false)
 
         const editIndex = result.followupCommands.findIndex((command) =>
           command.startsWith(`meal edit ${result.mealId} `)
@@ -8975,16 +8980,16 @@ describeRealCodex('real Codex interactive nutrition-card meal recovery e2e', () 
             expect.stringMatching(/^meal add\b/u),
           ]),
         )
-        expect(result.savedCalories).toBe(500)
         expect(result.card).toMatchObject({
           kind: 'daily_nutrition',
           localDate: '2026-08-25',
+          mealCount: 1,
           totals: {
-            calories: 500,
-            carbsGrams: 50,
-            fatGrams: 20,
-            fiberGrams: 5,
-            proteinGrams: 25,
+            calories: { mealCount: 1, total: 500 },
+            carbsGrams: { mealCount: 1, total: 50 },
+            fatGrams: { mealCount: 1, total: 20 },
+            fiberGrams: { mealCount: 1, total: 5 },
+            proteinGrams: { mealCount: 1, total: 25 },
           },
           version: 2,
         })
@@ -9247,6 +9252,7 @@ async function runRealInteractiveNutritionCardMealRecovery(input: {
           : binDirectory,
       },
       excludeResumeTurns: true,
+      groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
       reasoningEffort: 'medium' as const,
@@ -9315,6 +9321,19 @@ function summarizeMealRecoveryActions(events: readonly unknown[]): Array<{
           action: action.tool,
           argumentsValue: action.argumentsValue,
         }
+  )
+}
+
+function recordedVaultCommandStartsWith(
+  commands: readonly string[],
+  prefix: readonly string[],
+): boolean {
+  const directPrefix = prefix.join(' ')
+  const batchPrefix = `[${prefix.map((part) => JSON.stringify(part)).join(',')}`
+  return commands.some((command) =>
+    command === directPrefix
+    || command.startsWith(`${directPrefix} `)
+    || command.includes(`--command ${batchPrefix}`)
   )
 }
 
@@ -9387,6 +9406,7 @@ async function runRealAutomaticMealClarificationScenario(input: {
           : binDirectory,
       },
       excludeResumeTurns: true,
+      groupConversation: false,
       model: input.config.model,
       modelProvider: input.config.modelProvider,
       reasoningEffort: 'medium' as const,
