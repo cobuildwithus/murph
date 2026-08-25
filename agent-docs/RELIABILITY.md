@@ -835,12 +835,14 @@ Last verified: 2026-08-20
   it never regenerates the reply. A skipped claim or definitive pre-acceptance
   rejection with no retained payload is terminal for this template and cannot
   be reopened by an exact webhook replay; the ordinary runtime remains the
-  reply owner. If acceptance replays an already-buffered failed receipt, Web
-  clears the payload and records that fallback cession on the same delivery
-  row before returning to the runtime. Both exact replay and runtime dispatch
-  derive ownership from one ordering: delivered evidence wins, then explicit
-  fallback cession, then remaining provider correlation. Other delivery
-  templates retain their existing retry behavior.
+  reply owner. Provider acceptance is the irreversible sender boundary even
+  when it observes an already-buffered failed receipt: Web records the accepted
+  outbound and never transfers the same inbound to the runtime. Exact replay
+  and runtime dispatch derive ownership from one ordering: any provider
+  correlation is answered; only a definitive uncorrelated pre-provider
+  terminal row is fallback. Later receipts remain delivery evidence and cannot
+  authorize another response. Other delivery templates retain their existing
+  retry behavior.
   After provider acceptance,
   one short transaction records the delivery milestone, appends the ordinary
   self-authored Linq conversation envelope, stamps both that row and the exact

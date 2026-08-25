@@ -7,7 +7,6 @@ import {
   containsHttpUrlText,
   MURPH_ASSISTANT_SIGNUP_WELCOME_MESSAGE,
 } from "@murphai/contracts";
-import * as z from "@murphai/contracts/zod-runtime";
 import {
   buildHostedExecutionLinqConversationMessageWake,
 } from "@murphai/hosted-execution";
@@ -52,9 +51,6 @@ import type { HostedLinqParticipantContact } from "./linq-participant-contact";
 import {
   createHostedLinqDeliveryIdempotencyLookupKey,
 } from "./linq-observability-identifiers";
-import {
-  createHostedLinqMessageLookupKeyReadCandidates,
-} from "./contact-privacy-core";
 import {
   deriveHostedOnboardingTimingErrorName,
   logHostedOnboardingDiagnostic,
@@ -133,42 +129,8 @@ export type HostedLinqInstantFirstTurnCompletion =
       wakeHandoff: HostedWebhookWakeHandoff;
     }
   | {
-      kind: "pending";
-    }
-  | {
       kind: "fallback";
     };
-
-const hostedLinqInstantFirstTurnPayloadSchema = z.strictObject({
-  accepted: z.strictObject({
-    acceptedAt: z.string(),
-    chatId: z.string(),
-    messageId: z.string(),
-  }).nullable(),
-  inboundMessageId: z.string(),
-  message: z.string(),
-  participantContact: z.strictObject({
-    kind: z.literal("phone"),
-    lookupKey: z.string(),
-  }),
-  recipientPhoneNumber: z.string(),
-  service: z.string().nullable(),
-  wakeHandoff: z.strictObject({
-    eventId: z.string(),
-    linqChatId: z.string(),
-    mailboxItemId: z.string(),
-    source: z.literal("linq"),
-    userId: z.string(),
-    wakeMailboxCheckpoint: z.strictObject({
-      lane: z.literal("conversation"),
-      laneSeq: z.string(),
-    }).optional(),
-  }),
-});
-
-type HostedLinqInstantFirstTurnPayload = z.infer<
-  typeof hostedLinqInstantFirstTurnPayloadSchema
->;
 
 export function isHostedLinqInstantFirstTurnRequestEligible(
   request: HostedLinqFirstContactAdmissionRequest,
@@ -336,7 +298,7 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     "Hosted Linq instant first-turn chat id",
   );
   if (input.generation.kind === "completed") {
-    return reconcileHostedLinqInstantFirstTurn({
+    return readCompletedHostedLinqInstantFirstTurn({
       prisma,
       wakeHandoff: input.wakeHandoff,
     });
@@ -393,38 +355,12 @@ export async function completeHostedLinqInstantFirstTurn(input: {
   const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
     input.wakeHandoff.eventId,
   );
-  const pendingPayload: HostedLinqInstantFirstTurnPayload = {
-    accepted: null,
-    inboundMessageId: input.inboundMessageId,
-    message,
-    participantContact: {
-      kind: "phone",
-      lookupKey: input.participantContact.lookupKey,
-    },
-    recipientPhoneNumber: input.recipientPhoneNumber,
-    service: input.service,
-    wakeHandoff: {
-      eventId: input.wakeHandoff.eventId,
-      linqChatId: chatId,
-      mailboxItemId: input.wakeHandoff.mailboxItemId,
-      source: "linq",
-      userId: input.wakeHandoff.userId,
-      ...(input.wakeHandoff.wakeMailboxCheckpoint
-        ? {
-            wakeMailboxCheckpoint: {
-              lane: "conversation",
-              laneSeq: input.wakeHandoff.wakeMailboxCheckpoint.laneSeq,
-            },
-          }
-        : {}),
-    },
-  };
   let payloadCiphertext: string | null = null;
   if (!resumed) {
     try {
       payloadCiphertext = await sealHostedLinqInstantFirstTurnPayload({
         idempotencyKey,
-        payload: pendingPayload,
+        message,
         prisma,
         userId: input.wakeHandoff.userId,
       });
@@ -640,41 +576,27 @@ export async function completeHostedLinqInstantFirstTurn(input: {
     );
   }
 
-  const acceptedAt = parseOptionalDate(sendResult.messageCreatedAt) ?? new Date();
-  const acceptedPayload: HostedLinqInstantFirstTurnPayload = {
-    ...pendingPayload,
-    accepted: {
-      acceptedAt: acceptedAt.toISOString(),
-      chatId: sendResult.chatId ?? chatId,
-      messageId: sendResult.messageId,
-    },
-  };
-  let acceptedPayloadCiphertext: string;
   try {
-    acceptedPayloadCiphertext = await sealHostedLinqInstantFirstTurnPayload({
-      idempotencyKey,
-      payload: acceptedPayload,
+    return await finalizeHostedLinqInstantFirstTurn({
+      acceptedAt: parseOptionalDate(sendResult.messageCreatedAt) ?? new Date(),
+      inboundMessageId: input.inboundMessageId,
+      message,
+      participantContact: input.participantContact,
       prisma,
-      userId: input.wakeHandoff.userId,
-    });
-  } catch (error) {
-    throw buildHostedLinqInstantFirstTurnRetryError(
-      "accepted-payload-seal-unconfirmed",
-      error,
-    );
-  }
-
-  try {
-    return await recordHostedLinqInstantFirstTurnAcceptance({
-      acceptedAt,
-      acceptedPayloadCiphertext,
-      idempotencyKey,
-      prisma,
-      payload: acceptedPayload,
-      providerChatId: sendResult.chatId ?? chatId,
+      providerChatId:
+        sendResult.chatId ?? input.wakeHandoff.linqChatId ?? null,
       providerMessageId: sendResult.messageId,
+      recipientPhoneNumber: input.recipientPhoneNumber,
+      service: input.service,
+      wakeHandoff: input.wakeHandoff,
     });
   } catch (error) {
+    await markHostedLinqDeliverySendFailedTx({
+      failureCode: "accepted-finalization-failed",
+      idempotencyKey,
+      linqChatId: sendResult.chatId ?? input.wakeHandoff.linqChatId,
+      prisma,
+    }).catch(() => undefined);
     throw buildHostedLinqInstantFirstTurnRetryError(
       "accepted-finalization-failed",
       error,
@@ -793,23 +715,64 @@ export function buildHostedLinqInstantFirstTurnOpenAiBody(input: {
   };
 }
 
-async function recordHostedLinqInstantFirstTurnAcceptance(input: {
+async function finalizeHostedLinqInstantFirstTurn(input: {
   acceptedAt: Date;
-  acceptedPayloadCiphertext: string;
-  idempotencyKey: string;
-  payload: HostedLinqInstantFirstTurnPayload;
+  inboundMessageId: string;
+  message: string;
+  participantContact: HostedLinqParticipantContact;
   prisma: PrismaClient;
-  providerChatId: string;
+  providerChatId: string | null;
   providerMessageId: string;
+  recipientPhoneNumber: string;
+  service: string | null;
+  wakeHandoff: HostedWebhookWakeHandoff;
 }): Promise<HostedLinqInstantFirstTurnCompletion> {
-  const deliveryStatus = await input.prisma.$transaction(async (tx) => {
+  const envelope = buildHostedExecutionLinqConversationMessageWake({
+    contactKind: input.participantContact.kind,
+    contactLookupKey: input.participantContact.lookupKey,
+    eventId: buildHostedLinqInstantFirstTurnMailboxDedupeKey(
+      input.wakeHandoff.eventId,
+    ),
+    linqMessage: {
+      chatId: requireNonEmptyString(
+        input.providerChatId,
+        "Hosted Linq instant first-turn provider chat id",
+      ),
+      from: requireNonEmptyString(
+        input.recipientPhoneNumber,
+        "Hosted Linq instant first-turn recipient phone number",
+      ),
+      isFromMe: true,
+      messageId: input.providerMessageId,
+      parts: [{ type: "text", value: input.message }],
+      replyToMessageId: input.inboundMessageId,
+      service: input.service,
+      threadIsDirect: true,
+    },
+    occurredAt: input.acceptedAt.toISOString(),
+    ...(input.participantContact.kind === "phone"
+      ? { phoneLookupKey: input.participantContact.lookupKey }
+      : {}),
+    userId: input.wakeHandoff.userId,
+  });
+  const prepared = await prepareHostedMailboxEnvelopeAppend({
+    envelope,
+    prisma: input.prisma,
+  });
+  const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
+    input.wakeHandoff.eventId,
+  );
+
+  await input.prisma.$transaction(async (tx) => {
     const milestone = await markHostedLinqDeliveryAcceptedTx({
       acceptedAt: input.acceptedAt,
-      idempotencyKey: input.idempotencyKey,
+      idempotencyKey,
       linqChatId: input.providerChatId,
       messageId: input.providerMessageId,
       prisma: tx,
     });
+    // A buffered failure receipt does not undo the provider's acceptance or
+    // authorize a second sender for the same inbound.
     if (
       milestone.deliveryStatus !== "accepted"
       && milestone.deliveryStatus !== "delivered"
@@ -819,135 +782,23 @@ async function recordHostedLinqInstantFirstTurnAcceptance(input: {
         "Hosted Linq instant first-turn acceptance was not persisted.",
       );
     }
-    const retained = await tx.hostedLinqDelivery.updateMany({
-      data: { payloadCiphertext: input.acceptedPayloadCiphertext },
-      where: {
-        idempotencyKey: requireHostedLinqInstantFirstTurnIdempotencyLookupKey(
-          input.idempotencyKey,
-        ),
-        payloadOwnerMemberId: input.payload.wakeHandoff.userId,
-        payloadSchema: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
-      },
-    });
-    if (retained.count !== 1) {
-      throw new Error(
-        "Hosted Linq instant first-turn accepted payload was not retained.",
-      );
-    }
-    return milestone.deliveryStatus;
-  });
-
-  return deliveryStatus === "accepted"
-    ? { kind: "pending" }
-    : reconcileHostedLinqInstantFirstTurn({
-        prisma: input.prisma,
-        wakeHandoff: input.payload.wakeHandoff,
-      });
-}
-
-async function settleHostedLinqInstantFirstTurnTerminal(input: {
-  deliveryStatus: "delivered" | "failed";
-  idempotencyLookupKey: string;
-  payload: HostedLinqInstantFirstTurnPayload;
-  prisma: PrismaClient;
-}): Promise<HostedLinqInstantFirstTurnCompletion> {
-  if (!input.payload.accepted) {
-    throw new Error(
-      "Hosted Linq instant first-turn terminal payload lacks provider acceptance.",
-    );
-  }
-  if (input.deliveryStatus === "failed") {
-    const cleared = await input.prisma.hostedLinqDelivery.updateMany({
-      data: {
-        payloadCiphertext: null,
-        payloadOwnerMemberId: null,
-        payloadSchema: null,
-      },
-      where: {
-        idempotencyKey: input.idempotencyLookupKey,
-        messageLookupKey: {
-          in: createHostedLinqMessageLookupKeyReadCandidates(
-            input.payload.accepted.messageId,
-          ),
-        },
-        payloadOwnerMemberId: input.payload.wakeHandoff.userId,
-        payloadSchema: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
-        status: "failed",
-      },
-    });
-    if (cleared.count !== 1) {
-      throw new Error(
-        "Hosted Linq instant first-turn failed payload was not released.",
-      );
-    }
-    return { kind: "fallback" };
-  }
-
-  return finalizeHostedLinqInstantFirstTurnContinuity({
-    ...input,
-    deliveryStatus: "delivered",
-  });
-}
-
-async function finalizeHostedLinqInstantFirstTurnContinuity(input: {
-  deliveryStatus: "delivered";
-  idempotencyLookupKey: string;
-  payload: HostedLinqInstantFirstTurnPayload;
-  prisma: PrismaClient;
-}): Promise<HostedLinqInstantFirstTurnCompletion> {
-  const accepted = input.payload.accepted;
-  if (!accepted) {
-    throw new Error(
-      "Hosted Linq instant first-turn delivered payload lacks provider acceptance.",
-    );
-  }
-  const acceptedAt = requireValidDate(
-    accepted.acceptedAt,
-    "Hosted Linq instant first-turn accepted at",
-  );
-  const envelope = buildHostedExecutionLinqConversationMessageWake({
-    contactKind: input.payload.participantContact.kind,
-    contactLookupKey: input.payload.participantContact.lookupKey,
-    eventId: buildHostedLinqInstantFirstTurnMailboxDedupeKey(
-      input.payload.wakeHandoff.eventId,
-    ),
-    linqMessage: {
-      chatId: accepted.chatId,
-      from: input.payload.recipientPhoneNumber,
-      isFromMe: true,
-      messageId: accepted.messageId,
-      parts: [{ type: "text", value: input.payload.message }],
-      replyToMessageId: input.payload.inboundMessageId,
-      service: input.payload.service,
-      threadIsDirect: true,
-    },
-    occurredAt: acceptedAt.toISOString(),
-    phoneLookupKey: input.payload.participantContact.lookupKey,
-    userId: input.payload.wakeHandoff.userId,
-  });
-  const prepared = await prepareHostedMailboxEnvelopeAppend({
-    envelope,
-    prisma: input.prisma,
-  });
-
-  await input.prisma.$transaction(async (tx) => {
     const appended = await appendPreparedHostedMailboxEnvelopeTx({
       prepared,
       tx,
     });
     const consumed = await tx.hostedMailboxItem.updateMany({
-      data: { consumedAt: acceptedAt },
+      data: { consumedAt: input.acceptedAt },
       where: {
         consumedAt: null,
         id: {
           in: [
-            input.payload.wakeHandoff.mailboxItemId,
+            input.wakeHandoff.mailboxItemId,
             appended.mailboxItemId,
           ],
         },
         kind: "conversation.message",
         lane: "conversation",
-        userId: input.payload.wakeHandoff.userId,
+        userId: input.wakeHandoff.userId,
       },
     });
     if (consumed.count !== 2) {
@@ -962,15 +813,11 @@ async function finalizeHostedLinqInstantFirstTurnContinuity(input: {
         payloadSchema: null,
       },
       where: {
-        idempotencyKey: input.idempotencyLookupKey,
-        messageLookupKey: {
-          in: createHostedLinqMessageLookupKeyReadCandidates(
-            accepted.messageId,
-          ),
-        },
-        payloadOwnerMemberId: input.payload.wakeHandoff.userId,
+        idempotencyKey: requireHostedLinqInstantFirstTurnIdempotencyLookupKey(
+          idempotencyKey,
+        ),
+        payloadOwnerMemberId: input.wakeHandoff.userId,
         payloadSchema: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA,
-        status: "delivered",
       },
     });
     if (cleared.count !== 1) {
@@ -981,114 +828,7 @@ async function finalizeHostedLinqInstantFirstTurnContinuity(input: {
   });
   return readCompletedHostedLinqInstantFirstTurn({
     prisma: input.prisma,
-    wakeHandoff: input.payload.wakeHandoff,
-  });
-}
-
-export async function finalizeHostedLinqInstantFirstTurnReceipt(input: {
-  deliveryStatus: "delivered" | "failed";
-  messageId: string;
-  prisma?: PrismaClient;
-}): Promise<HostedWebhookWakeHandoff | null> {
-  const prisma = input.prisma ?? getPrisma();
-  const delivery = await prisma.hostedLinqDelivery.findFirst({
-    select: {
-      deliveredAt: true,
-      failedAt: true,
-      idempotencyKey: true,
-      payloadCiphertext: true,
-      payloadOwnerMemberId: true,
-      payloadSchema: true,
-      status: true,
-    },
-    where: {
-      messageLookupKey: {
-        in: createHostedLinqMessageLookupKeyReadCandidates(input.messageId),
-      },
-      template: HOSTED_LINQ_INSTANT_FIRST_TURN_TEMPLATE,
-    },
-  });
-  if (!delivery?.payloadCiphertext) {
-    return null;
-  }
-  if (
-    input.deliveryStatus === "delivered"
-      ? delivery.status !== "delivered" || !delivery.deliveredAt
-      : delivery.status !== "failed" || !delivery.failedAt
-  ) {
-    return null;
-  }
-  const payload = await openHostedLinqInstantFirstTurnPayload({
-    delivery,
-    prisma,
-  });
-  const completion = await settleHostedLinqInstantFirstTurnTerminal({
-    deliveryStatus: input.deliveryStatus,
-    idempotencyLookupKey: requireNonEmptyString(
-      delivery.idempotencyKey,
-      "Hosted Linq instant first-turn delivery idempotency key",
-    ),
-    payload,
-    prisma,
-  });
-  return completion.kind === "accepted"
-    ? completion.wakeHandoff
-    : payload.wakeHandoff;
-}
-
-async function reconcileHostedLinqInstantFirstTurn(input: {
-  prisma: PrismaClient;
-  wakeHandoff: HostedWebhookWakeHandoff;
-}): Promise<HostedLinqInstantFirstTurnCompletion> {
-  const idempotencyKey = buildHostedLinqInstantFirstTurnIdempotencyKey(
-    input.wakeHandoff.eventId,
-  );
-  const delivery = await input.prisma.hostedLinqDelivery.findUnique({
-    select: {
-      deliveredAt: true,
-      failedAt: true,
-      idempotencyKey: true,
-      payloadCiphertext: true,
-      payloadOwnerMemberId: true,
-      payloadSchema: true,
-      status: true,
-    },
-    where: {
-      idempotencyKey:
-        requireHostedLinqInstantFirstTurnIdempotencyLookupKey(idempotencyKey),
-    },
-  });
-  if (!delivery) {
-    throw buildHostedLinqInstantFirstTurnRetryError(
-      "accepted-context-unavailable",
-    );
-  }
-  if (!delivery.payloadCiphertext) {
-    return delivery.status === "failed"
-      ? { kind: "fallback" }
-      : readCompletedHostedLinqInstantFirstTurn({
-          prisma: input.prisma,
-          wakeHandoff: input.wakeHandoff,
-        });
-  }
-  const payload = await openHostedLinqInstantFirstTurnPayload({
-    delivery,
-    prisma: input.prisma,
-  });
-  if (delivery.status === "accepted") {
-    return { kind: "pending" };
-  }
-  if (delivery.status !== "delivered" && delivery.status !== "failed") {
-    throw buildHostedLinqInstantFirstTurnRetryError(
-      "accepted-context-unavailable",
-    );
-  }
-  return settleHostedLinqInstantFirstTurnTerminal({
-    deliveryStatus: delivery.status,
-    idempotencyLookupKey:
-      requireHostedLinqInstantFirstTurnIdempotencyLookupKey(idempotencyKey),
-    payload,
-    prisma: input.prisma,
+    wakeHandoff: input.wakeHandoff,
   });
 }
 
@@ -1146,7 +886,6 @@ async function readHostedLinqInstantFirstTurnPayload(input: {
     select: {
       acceptedAt: true,
       deliveredAt: true,
-      idempotencyKey: true,
       payloadCiphertext: true,
       payloadOwnerMemberId: true,
       payloadSchema: true,
@@ -1166,6 +905,9 @@ async function readHostedLinqInstantFirstTurnPayload(input: {
       "delivery-intent-incompatible",
     );
   }
+  if (delivery.acceptedAt || delivery.deliveredAt) {
+    return { kind: "completed" };
+  }
   if (
     delivery.payloadOwnerMemberId === null
     && delivery.payloadCiphertext === null
@@ -1183,75 +925,42 @@ async function readHostedLinqInstantFirstTurnPayload(input: {
       "delivery-payload-incomplete",
     );
   }
-  if (delivery.acceptedAt || delivery.deliveredAt) {
-    return { kind: "completed" };
+  const message = normalizeHostedLinqInstantFirstTurnMessage(
+    await openHostedUserSecureBoxString({
+      aad: buildHostedLinqInstantFirstTurnPayloadAad(idempotencyKey),
+      lane: "hosted-member-private-field",
+      prisma: input.prisma,
+      scope: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCOPE,
+      userId: input.memberId,
+      value: delivery.payloadCiphertext,
+    }) ?? "",
+  );
+  if (!message) {
+    throw buildHostedLinqInstantFirstTurnRetryError(
+      "delivery-payload-invalid",
+    );
   }
-  const payload = await openHostedLinqInstantFirstTurnPayload({
-    delivery,
-    prisma: input.prisma,
-  });
-  return { kind: "reply", message: payload.message };
+  return { kind: "reply", message };
 }
 
 async function sealHostedLinqInstantFirstTurnPayload(input: {
   idempotencyKey: string;
-  payload: HostedLinqInstantFirstTurnPayload;
+  message: string;
   prisma: PrismaClient;
   userId: string;
 }): Promise<string> {
-  const idempotencyLookupKey =
-    requireHostedLinqInstantFirstTurnIdempotencyLookupKey(input.idempotencyKey);
   const ciphertext = await sealHostedUserSecureBoxString({
-    aad: buildHostedLinqInstantFirstTurnPayloadAad(idempotencyLookupKey),
+    aad: buildHostedLinqInstantFirstTurnPayloadAad(input.idempotencyKey),
     lane: "hosted-member-private-field",
     prisma: input.prisma,
     scope: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCOPE,
     userId: input.userId,
-    value: JSON.stringify(input.payload),
+    value: input.message,
   });
   return requireNonEmptyString(
     ciphertext,
     "Hosted Linq instant first-turn encrypted payload",
   );
-}
-
-async function openHostedLinqInstantFirstTurnPayload(input: {
-  delivery: {
-    idempotencyKey: string | null;
-    payloadCiphertext: string | null;
-    payloadOwnerMemberId: string | null;
-    payloadSchema: string | null;
-  };
-  prisma: PrismaClient;
-}): Promise<HostedLinqInstantFirstTurnPayload> {
-  if (
-    !input.delivery.idempotencyKey
-    || !input.delivery.payloadCiphertext
-    || !input.delivery.payloadOwnerMemberId
-    || input.delivery.payloadSchema
-      !== HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCHEMA
-  ) {
-    throw buildHostedLinqInstantFirstTurnRetryError(
-      "delivery-payload-incomplete",
-    );
-  }
-  const value = await openHostedUserSecureBoxString({
-    aad: buildHostedLinqInstantFirstTurnPayloadAad(
-      input.delivery.idempotencyKey,
-    ),
-    lane: "hosted-member-private-field",
-    prisma: input.prisma,
-    scope: HOSTED_LINQ_INSTANT_FIRST_TURN_PAYLOAD_SCOPE,
-    userId: input.delivery.payloadOwnerMemberId,
-    value: input.delivery.payloadCiphertext,
-  });
-  const payload = parseHostedLinqInstantFirstTurnPayload(value);
-  if (!payload) {
-    throw buildHostedLinqInstantFirstTurnRetryError(
-      "delivery-payload-invalid",
-    );
-  }
-  return payload;
 }
 
 async function clearHostedLinqInstantFirstTurnPayload(input: {
@@ -1408,28 +1117,6 @@ function normalizeHostedLinqInstantFirstTurnMessage(value: string): string | nul
   return normalized;
 }
 
-function parseHostedLinqInstantFirstTurnPayload(
-  value: string | null,
-): HostedLinqInstantFirstTurnPayload | null {
-  if (!value) {
-    return null;
-  }
-  try {
-    const parsed = hostedLinqInstantFirstTurnPayloadSchema.safeParse(
-      JSON.parse(value),
-    );
-    if (!parsed.success) {
-      return null;
-    }
-    const message = normalizeHostedLinqInstantFirstTurnMessage(
-      parsed.data.message,
-    );
-    return message ? { ...parsed.data, message } : null;
-  } catch {
-    return null;
-  }
-}
-
 function isDefinitiveHostedLinqInstantFirstTurnSendFailure(
   error: unknown,
 ): boolean {
@@ -1531,12 +1218,4 @@ function requireNonEmptyString(
     throw new TypeError(`${label} is required.`);
   }
   return normalized;
-}
-
-function requireValidDate(value: string, label: string): Date {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be a valid date.`);
-  }
-  return date;
 }

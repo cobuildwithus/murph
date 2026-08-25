@@ -124,43 +124,59 @@ Web sent.
   call or destination.
 - Public changelog fragment validation passes 7 tests, and the Web typecheck
   passes with source PR 2173 included.
-- The round-9 receipt-boundary correction passes 21 instant-turn, 151
-  delivery-store, 53 runtime provider-entry, and 210 composed webhook cases.
-  The Web typecheck and focused ESLint pass.
+- The round-10 simplification passes 19 instant-turn, 149 delivery-store, 52
+  runtime provider-entry, and 209 composed webhook cases together (429 total).
+  These prove provider acceptance remains answered across buffered failure,
+  exact replay, runtime entry, and later webhook processing without a receipt
+  handoff owner. Web typecheck, focused ESLint, diff/privacy hygiene, and the
+  matching reliability, security, and runtime-protocol readback pass.
 - Required exact-head PR CI and preliminary Product UX, prompt, and coverage
   specialist review, plus the cross-cutting final ReviewGPT gate.
 
 ## State
 
-Active. Round 9 retrospective remediation and focused verification are
-complete. The design reuses the existing delivery ledger as the only provider
-outbox, stores the exact pending handoff encrypted for ambiguous recovery, and
-represents a delivered exchange as two ordinary consumed conversation rows.
-ReviewGPT, exact-head gates, and completion remain.
+Active. The round-10 retrospective is resolved by deleting the round-9 receipt
+coordinator and restoring provider acceptance as the one irreversible ownership
+boundary. The design reuses the existing delivery ledger as the only provider
+outbox, stores the exact pending body encrypted for ambiguous recovery, and
+represents the provider-accepted exchange as two ordinary consumed conversation
+rows. Focused proof, ReviewGPT, exact-head gates, and completion remain.
+
+## ReviewGPT round 10 retrospective
+
+The findings were accepted. A terminal delivery receipt is not a total or
+monotonic ownership boundary: it may never arrive, a failed receipt may later be
+superseded by delivery evidence, and clearing the encrypted handoff before a
+runtime wake makes that transfer non-replayable when signaling fails. The
+round-9 correction therefore introduced indefinite silence, a duplicate-reply
+race, and destructive handoff settlement.
+
+The requirement decision is to preserve the requested Web fast path without
+adding a timer, queue, scheduler, lease, receipt state machine, or reconciliation
+owner. Linq provider acceptance is the one total irreversible boundary. Before
+acceptance, a definitive failure may release the existing runtime fallback.
+After acceptance, Web remains the sole sender, the accepted outbound is
+canonical attempt history, and later receipts are delivery evidence only; they
+never authorize a second answer. A rare downstream provider failure may end in
+an explicit delivery failure rather than a competing runtime reply. This is the
+smallest architecture that preserves immediate Web sending and exactly one
+provider-visible response.
+
+The implementation deletes the complete round-9 receipt-finalization delta and
+returns to the round-8 shared-ledger rule. It adds no new state or owner.
 
 ## ReviewGPT round 9 retrospective
 
-The finding was accepted. Linq's HTTP acceptance is asynchronous provider
-admission, not handset delivery. Treating that response as conversational
-completion could append an outbound the member never received, consume the
-inbound, and suppress the runtime after a terminal failure receipt.
+Round 9 correctly found that Linq HTTP acceptance is not handset-delivery proof:
+recording it as a response the member certainly saw could produce false history
+when a later failure arrives. The receipt-boundary remediation was accepted and
+implemented, but round 10 disproved its key premise that terminal receipts are
+complete and irreversible.
 
-Provider acceptance is now pending. The runtime shell still prewarms beside
-Web generation, but the conversation wake waits while the same delivery-ledger
-row retains the encrypted Web handoff. A delivered receipt atomically appends
-and consumes the ordinary inbound/outbound mailbox pair; a failed receipt
-clears the undelivered payload and wakes the runtime with the unchanged
-inbound. The runtime provider-entry check remains a final independent fence
-against races from another wake. The first terminal receipt is final for this
-template, matching Linq's delivered-or-failed contract and preventing a later
-contradictory receipt from transferring ownership again. This supersedes round
-8's choice to equate provider acceptance with a completed answer.
-
-The correction broadens the existing encrypted payload only enough for the
-receipt handler to finish the already-owned handoff after a restart. It adds no
-field, enum, table, queue, service, scheduler, timeout, dependency, lease, or
-reconciliation owner. The existing ledger, provider webhook, mailbox, runtime
-outbox retry, chat lock, and route-authority check remain the only owners.
+The round-10 requirement decision supersedes that tactical correction. The
+system now treats provider acceptance as durable send ownership, not guaranteed
+handset observation, and records later delivery outcomes without transferring
+the inbound to another sender.
 
 ## ReviewGPT round 8 retrospective
 
