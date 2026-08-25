@@ -6431,6 +6431,14 @@ test('sendAssistantMessageLocal commits only the selected held-group result', as
     })
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
+    ).toContain('no response text from this group beat has been delivered')
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
+    ).toContain(
+      'requests answered only in earlier undelivered response text as unanswered',
+    )
+    expect(
+      mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.input.turnContext,
     ).not.toContain('previous response was held')
     expect(
       mocks.executeCodexTurnWithRecovery.mock.calls[1]?.[0]?.resolvedSession

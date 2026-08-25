@@ -113,6 +113,15 @@ Updated: 2026-08-25
   `configOverrides` on that leaf and uses the resolved model for execution and
   usage attribution. The exact subscription-backed child leaf passed with a
   Sol parent and Luna child, without depending on ambient profile settings.
+- ReviewGPT's next exact-head round found that the group reconsideration live
+  leaf still hard-coded Sol. It now uses the runner-selected model, and both
+  initial and resumed provider usage records must identify that model.
+- The required non-Sol proof then exposed a real production ambiguity: Terra
+  consistently treated answer text visible in the resumed provider thread as
+  delivered even though the group draft was held. The reconsideration context
+  now states that requests answered only in earlier undelivered response text
+  remain unanswered. The exact Terra journey subsequently passed with both
+  answers in one reply and no review mechanics in user-visible text.
 
 ## ReviewGPT round-3 retrospective
 
@@ -161,6 +170,21 @@ Updated: 2026-08-25
   isolated provider mode, and repository workflow system. The only new
   executable owner is the focused runner, and its process seam exists solely
   to prove invalid cardinality stops before login or paid execution.
+
+## Round-4 direction addendum
+
+- The live-model correction remains inside the chosen harness and adds no new
+  owner, state, dependency, registry, or runtime branch. Usage assertions sit
+  on the existing provider-usage extractor.
+- The original tooling-only scope changed only where the required live proof
+  demonstrated an existing user-visible failure. The production correction is
+  two declarative instruction clauses on the existing reconsideration seam,
+  with one focused local-service regression; weakening the journey or keeping
+  a hidden Sol override would conceal the demonstrated failure.
+- This is one indivisible correction: the runner model must reach the leaf, the
+  usage evidence must prove both turns, and the production instruction must
+  make the already-promised rapid-group behavior hold on the default model.
+  There is no separate feature or framework to split out.
 
 ## Verification
 

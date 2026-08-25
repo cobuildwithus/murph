@@ -1081,20 +1081,36 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
             buildGroupPointOfViewDeveloperInstructions(),
           env: config.env,
           excludeResumeTurns: true,
-          model: 'gpt-5.6-sol',
+          model: config.model,
           modelProvider: config.modelProvider,
           reasoningEffort: 'low' as const,
           sandbox: 'workspace-write' as const,
           workingDirectory,
         }
+        const providerConfig = normalizeAssistantProviderConfig({
+          provider: 'codex-cli',
+          model: config.model,
+          modelProvider: config.modelProvider,
+          oss: false,
+        })
         const first = await executeRealCodexAppServerTurn({
           ...commonInput,
           prompt: 'Murph, what is 13 plus 8?',
         })
         expect(first.finalMessage).toMatch(/\b21\b/u)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: first.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
 
         const reconsiderationInstruction = [
-          'New messages arrived before delivery.',
+          'New messages arrived before delivery; no response text from this group beat has been delivered.',
+          'Treat requests answered only in earlier undelivered response text as unanswered.',
           'Re-evaluate all accepted messages under the group turn rules and return one final result.',
           'Do not mention this review or repeat completed effects.',
         ].join(' ')
@@ -1105,6 +1121,15 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         })
 
         expect(second.sessionId).toBe(first.sessionId)
+        expect(
+          extractCodexAssistantProviderUsage({
+            providerConfig,
+            rawEvents: second.jsonEvents,
+          }),
+        ).toMatchObject({
+          requestedModel: config.model,
+          servedModel: config.model,
+        })
         expect(second.finalMessage).toMatch(/\b21\b/u)
         expect(second.finalMessage).toMatch(/\b42\b/u)
         expect(second.finalMessage).not.toMatch(
