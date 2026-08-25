@@ -138,52 +138,29 @@ describe('assistant execution prompt contract', () => {
     expect(directPrompt).toContain(sharedIdentity)
     expect(groupPrompt).toContain(sharedStyleOwner)
     expect(directPrompt).toContain(sharedStyleOwner)
+    const completeGroupReplyRule =
+      'Answer all still-relevant, unanswered requests that these rules assign to Murph across the accepted messages in one reply.'
+    expect(groupPrompt.split(completeGroupReplyRule)).toHaveLength(2)
+    expect(groupPrompt).toContain(
+      'A clear correction or replacement supersedes only what it changes',
+    )
+    expect(groupPrompt).toContain('do not repeat completed effects')
     expect(groupPrompt).toContain(scopedSafety)
     expect(directPrompt).toContain(scopedSafety)
-    expect(groupPrompt).toContain(
-      'It does not withdraw an answer already completed in that turn; that answer still sends.',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted before the first completed assistant response may join this turn.',
-    )
-    expect(groupPrompt).toContain(
-      'never replace, retract, or suppress completed text or media',
-    )
-    expect(groupPrompt).toContain(
-      'Messages accepted after the first completed response stay pending for the next ordinary turn.',
-    )
     expect(groupPrompt).not.toContain('replaces the earlier answer')
     expect(groupPrompt).not.toContain('carry forward anything still worth saying')
+    expect(groupPrompt).not.toContain('answer only that new ask')
     expect(groupPrompt).not.toContain('Use light humor when it fits')
     expect(groupPrompt).not.toContain('plainspoken, and casual')
     expect(groupPrompt).toContain(
-      'Group reply cadence applies before the first text reply in an ordinary interactive Linq/iMessage or Telegram group turn.',
+      'Take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
     )
-    expect(groupPrompt).toContain(
-      'Unless urgent safety or genuinely time-sensitive coordination requires an immediate answer, run shell `sleep 8`.',
-    )
-    expect(groupPrompt).toContain(
-      'If new human input arrives during that pause, re-evaluate safety, time sensitivity, and floor ownership as soon as the sleep finishes',
-    )
-    expect(groupPrompt).toContain(
-      'answer newly urgent or time-sensitive input without another sleep',
-    )
-    expect(groupPrompt).toContain(
-      'Only when the refreshed beat still warrants an ordinary text reply, run one final `sleep 6`',
-    )
-    expect(groupPrompt).toContain(
-      'take one terminal action for the room\'s current beat: one text reply, one reaction, or silence.',
-    )
-    expect(groupPrompt).toContain(
-      'Never sleep more than 14 seconds total.',
-    )
-    expect(groupPrompt).toContain(
-      'Do not answer each accepted message separately, recap the burst point by point, or mention waiting, sleeping, or commands.',
-    )
-    expect(directPrompt).not.toContain('run shell `sleep 8`')
+    expect(groupPrompt).not.toContain('Do not answer each accepted message separately')
+    expect(groupPrompt).not.toContain('sleep 8')
+    expect(groupPrompt).not.toContain('sleep 6')
     expect(directPrompt).not.toContain('Group texting rhythm:')
     expect(groupPrompt).toContain(
-      'use the CLI only for public reference reads, group-owned state other than the `group-room-model` page, and the bounded shell `sleep` required by group reply cadence',
+      'use the CLI only for public reference reads and group-owned state other than the `group-room-model` page',
     )
     expect(groupPrompt).toContain(
       'Send an ordinary group reply as one text bubble.',
@@ -202,10 +179,13 @@ describe('assistant execution prompt contract', () => {
     )
 
     expect(prompt).toContain(
-      'use the room-scoped `murph.assistant_configuration` tool to read or select Luna, Terra, or Sol for the room',
+      'The room-scoped `murph.assistant_configuration` tool reads or changes the future room model only',
     )
     expect(prompt).toContain(
-      'a saved model starts on the next turn',
+      'A saved Luna, Terra, or Sol model starts next turn',
+    )
+    expect(prompt).toContain(
+      'one-task child models use `spawn_agent.model` and are never saved',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -269,13 +249,13 @@ describe('assistant execution prompt contract', () => {
       'Read immediate same-purpose same-sender elaborations as one beat.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'A later bubble that introduces a new factual or task request or directly addresses Murph is a new decision unit even inside the same accepted provider turn',
+      'A later factual or task request or direct Murph address reopens the floor under the ordinary rule, even inside the same accepted provider turn.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Floor follows authority, not punctuation.',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Apply this gate before any group reply-cadence pause',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'reply-cadence pause',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       "private relationships, personal conduct, shared social history, recognition, or recollection",
@@ -284,10 +264,7 @@ describe('assistant execution prompt contract', () => {
       'answer an unaddressed room-wide question briefly when its exact answer is established by public or general knowledge, the visible conversation, server-approved group evidence, or an available task tool',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without text or reaction immediately. Do not sleep on that terminal human-private branch.',
-    )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'The cadence pause applies only after this gate says a text reply is warranted; a human-owned or otherwise silent beat still finishes immediately without sleeping.',
+      'finish without text or reaction.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'Never use a joke, ruling, or mock refusal to imply knowledge of an unverified private fact about a person.',
@@ -296,10 +273,10 @@ describe('assistant execution prompt contract', () => {
       'say plainly that you do not know; do not speculate or turn the limit into a bit.',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'finish without a reply or reaction immediately',
+      'finish without a reply or reaction',
     )
-    expect(groupLayers.staticCacheableCorePrompt).toContain(
-      'Do not sleep or watch for a follow-up',
+    expect(groupLayers.staticCacheableCorePrompt).not.toContain(
+      'sleep',
     )
     expect(groupLayers.staticCacheableCorePrompt).toContain(
       'A complaint that Murph inserted itself into a human-owned beat is a participation boundary, not a new comedic premise.',
@@ -1038,10 +1015,13 @@ describe('assistant execution prompt contract', () => {
       'Voice memos keep the running-turn voice unless this user names another',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'explicit user-requested model, core-reply provider, or reasoning changes',
+      'changes future conversation model, provider, or reasoning only',
     )
     expect(layers.stableRouteCapabilityPrompt).toContain(
-      'a saved change starts on the next turn',
+      'one-task child models use `spawn_agent.model` and are never saved',
+    )
+    expect(layers.stableRouteCapabilityPrompt).toContain(
+      'Never switch them automatically',
     )
     expect(layers.threadContextPrompt).not.toContain('/settings?voice=true')
     expect(layers.dynamicTurnContextPrompt).not.toContain('/settings?voice=true')
@@ -3143,7 +3123,7 @@ describe('assistant conversation scope', () => {
       'Casual is a persistent user-facing writing invariant',
     )
     expect(prompt).toContain(
-      'select Luna, Terra, or Sol for the room',
+      'A saved Luna, Terra, or Sol model starts next turn',
     )
     expect(prompt).toContain(
       'Provider and reasoning controls remain unavailable in a group',
@@ -3373,6 +3353,12 @@ describe('assistant conversation scope', () => {
     )
     expect(prompt).toContain(
       'When `occurrenceProjection.status: unavailable`, confirm that the write succeeded',
+    )
+    expect(prompt).toContain(
+      'When an unavailable projection includes `stale_recurring_occurrence`, say that the recurring occurrence is overdue and its next occurrence could not be confirmed',
+    )
+    expect(prompt).toContain(
+      'Do not describe it as current scheduler work, promise automatic recovery, or say that no member action is needed',
     )
     expect(prompt).toContain(
       'A save or patch result already includes its host-owned readback',

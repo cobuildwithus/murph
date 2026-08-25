@@ -137,6 +137,10 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // static-startup topology. The combined cap composes its reviewed 41,089 B
 // lazy-graph delta with the current public Linux baseline and retains the same
 // 32 KiB graph allowance plus 8 KiB production-overlay reserve.
+// Exact workout delivery context extends the existing lazy Assistant Engine
+// graph without adding a package or changing the entry or static-startup
+// topology. The merged public Linux graph measured 9,456,843 B on 2026-08-25;
+// ratchet from that exact baseline while retaining the same allowances.
 // Keep total output inside a narrow 32 KiB allowance and static startup inside
 // an 8 KiB allowance. If a violation fires, investigate the listed largest
 // inputs first; only raise the budget deliberately for understood, intended
@@ -144,7 +148,9 @@ const VAULT_CLI_IMPORT_SURFACE_HOOK_SOURCE = [
 // Bounded model-recovery envelopes add 2,852 B to the lazy CLI graph after
 // shared Incur serialization removed duplicate transport branches. The entry
 // and static-startup budgets remain unchanged because error projection is lazy.
-const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_467_648;
+// Compose that measured delta with the current exact-workout graph and retain
+// the existing allowances; the two changes do not alter startup topology.
+const VAULT_CLI_BUNDLE_TOTAL_BYTES_BUDGET = 9_500_655;
 const VAULT_CLI_BUNDLE_ENTRY_BYTES_BUDGET = 20_000;
 const VAULT_CLI_BUNDLE_STATIC_CLOSURE_BYTES_BUDGET = 33_200;
 

@@ -57,6 +57,12 @@ describe('hosted domain dynamic tools', () => {
       'treat the returned schedule and status as current instead of claiming the requested mutation still holds',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'stale_recurring_occurrence as an overdue recurrence whose scheduler projection has not advanced',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
+      'do not describe the occurrence as current scheduler work, promise automatic recovery, or say that no member action is needed',
+    )
+    expect(MURPH_AUTOMATION_TOOL.description).toContain(
       'pass schedule.kind=at with schedule.localAt.time, schedule.localAt.timeZone, and exactly one of schedule.localAt.date or schedule.localAt.relativeDay',
     )
     expect(MURPH_AUTOMATION_TOOL.description).toContain(
@@ -1285,6 +1291,15 @@ describe('hosted domain dynamic tools', () => {
   })
 
   it('uses accountId for bounded device actions and rejects credentials', () => {
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /current private member message/u,
+    )
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /Never call it from a group or scheduled turn or for another provider/u,
+    )
+    expect(MURPH_DEVICE_TOOL.description).toMatch(
+      /at most once for that message; after any result, do not retry/u,
+    )
     expect(readToolRequest('device', {
       accountId: 'device-account-1',
       action: 'reconcile',
@@ -1306,6 +1321,33 @@ describe('hosted domain dynamic tools', () => {
       provider: 'whoop',
       token: 'not-allowed',
     })).toMatchObject({ kind: 'invalid-device-arguments' })
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach',
+      afterDays: 10,
+      mode: 'after_days',
+      sourceProvider: 'garmin',
+    })).toEqual({
+      kind: 'device',
+      request: {
+        action: 'configure_no_data_outreach',
+        afterDays: 10,
+        mode: 'after_days',
+        sourceProvider: 'garmin',
+      },
+    })
+    expect(readToolRequest('device', {
+      action: 'configure_no_data_outreach',
+      mode: 'off',
+      sourceProvider: 'garmin',
+    })).toMatchObject({ kind: 'device' })
+    for (const afterDays of [4, 31]) {
+      expect(readToolRequest('device', {
+        action: 'configure_no_data_outreach',
+        afterDays,
+        mode: 'after_days',
+        sourceProvider: 'garmin',
+      })).toMatchObject({ kind: 'invalid-device-arguments' })
+    }
   })
 
   it('executes automation through the injected port and returns verified timing fields', async () => {
@@ -1798,6 +1840,82 @@ describe('hosted domain dynamic tools', () => {
     })
     expect(unavailable.rpcResult).toMatchObject({ success: false })
   })
+
+  it('binds no-data outreach changes to accepted private member input', async () => {
+    const deviceTool = {
+      request: vi.fn(async () => ({
+        action: 'configure_no_data_outreach' as const,
+        effectiveAfterDays: 10,
+        setting: 'custom' as const,
+        sourceProvider: 'garmin',
+        status: 'saved' as const,
+      })),
+    }
+    const request = readToolRequest('device', {
+      action: 'configure_no_data_outreach',
+      afterDays: 10,
+      mode: 'after_days',
+      sourceProvider: 'garmin',
+    })
+    if (!request) {
+      throw new Error('Expected a device no-data outreach request.')
+    }
+    const acceptedInputId = 'ain_00000000000000000000000000000001'
+    const directResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: 'direct',
+          origin: {
+            assistantInputId: acceptedInputId,
+            kind: 'accepted_input',
+            sessionId: 'session-synthetic',
+          },
+        }),
+        deviceTool,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+
+    expect(deviceTool.request).toHaveBeenCalledWith({
+      action: 'configure_no_data_outreach',
+      afterDays: 10,
+      mode: 'after_days',
+      sourceProvider: 'garmin',
+    }, {
+      acceptedInputAuthority: { assistantInputId: acceptedInputId },
+      signal: null,
+    })
+    expect(readResultPayload(directResult)).toMatchObject({
+      effectiveAfterDays: 10,
+      setting: 'custom',
+    })
+
+    deviceTool.request.mockClear()
+    const groupResult = await executeMurphDynamicToolRequest({
+      env: {},
+      fetchImpl: fetch,
+      hostedToolContext: createHostedToolContext({
+        currentInvocationScope: () => ({
+          conversationScope: 'group',
+          origin: {
+            assistantInputId: acceptedInputId,
+            kind: 'accepted_input',
+            sessionId: 'session-synthetic',
+          },
+        }),
+        deviceTool,
+      }),
+      nextUsageOrdinal: () => 0,
+      progressDelivery: null,
+      request,
+    })
+    expect(groupResult.rpcResult.success).toBe(false)
+    expect(deviceTool.request).not.toHaveBeenCalled()
+  })
 })
 
 function readToolRequest(
@@ -1834,6 +1952,7 @@ function referenceWindow(at: string): {
 
 function createHostedToolContext(input: {
   automationTool?: AssistantHostedToolContext['automationTool']
+  currentInvocationScope?: AssistantHostedToolContext['currentInvocationScope']
   deviceTool?: AssistantHostedToolContext['deviceTool']
 }): AssistantHostedToolContext {
   return {
@@ -1841,6 +1960,7 @@ function createHostedToolContext(input: {
     computerToolsAvailable: false,
     currentHostedDeliveryContext: () => null,
     currentHostedMailboxItemIds: () => [],
+    currentInvocationScope: input.currentInvocationScope,
     deviceTool: input.deviceTool ?? null,
     sendVaultFile: vi.fn(async () => {
       throw new Error('Vault-file sending is unavailable for this turn.')
